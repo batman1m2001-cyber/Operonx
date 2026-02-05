@@ -39,7 +39,7 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ matrix.package }}
-        run: uv run pytest --tb=short -q
+        run: uv run pytest --tb=short -q -m "not integration"
 
   coverage:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
 
       - name: Run coverage
         working-directory: hush-core
-        run: uv run pytest --cov=hush --cov-report=xml
+        run: uv run pytest --cov=hush --cov-report=xml -m "not integration"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

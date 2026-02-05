@@ -76,27 +76,37 @@ def pytest_configure(config):
     # Set terminal width for Rich console output
     os.environ["COLUMNS"] = "200"
 
-    # Check if HUSH_CONFIG is set
+    # Check if HUSH_CONFIG is set - skip tests if not configured (for CI)
     if not os.environ.get("HUSH_CONFIG"):
-        print(SETUP_TUTORIAL, file=sys.stderr)
-        pytest.exit(
-            "HUSH_CONFIG environment variable not set. Please follow the setup tutorial above.",
-            returncode=1,
+        print(
+            "HUSH_CONFIG not set - skipping observability tests. "
+            "Set HUSH_CONFIG to run these tests locally.",
+            file=sys.stderr,
         )
+        return
 
     # Check if config file exists
     if not CONFIGS_PATH.exists():
-        print(SETUP_TUTORIAL, file=sys.stderr)
-        pytest.exit(
-            f"Config file not found: {CONFIGS_PATH}\n"
-            "Please create resources.yaml or update HUSH_CONFIG path.",
-            returncode=1,
+        print(
+            f"Config file not found: {CONFIGS_PATH} - skipping observability tests.",
+            file=sys.stderr,
         )
+        return
 
     # Register custom markers
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (requires credentials)"
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip all tests if HUSH_CONFIG is not set."""
+    if not os.environ.get("HUSH_CONFIG") or not CONFIGS_PATH.exists():
+        skip_marker = pytest.mark.skip(
+            reason="HUSH_CONFIG not set or config file not found"
+        )
+        for item in items:
+            item.add_marker(skip_marker)
 
 
 # ============================================================================
