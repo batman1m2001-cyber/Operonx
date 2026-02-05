@@ -102,9 +102,7 @@ def pytest_configure(config):
 def pytest_collection_modifyitems(config, items):
     """Skip all tests if HUSH_CONFIG is not set."""
     if not os.environ.get("HUSH_CONFIG") or not CONFIGS_PATH.exists():
-        skip_marker = pytest.mark.skip(
-            reason="HUSH_CONFIG not set or config file not found"
-        )
+        skip_marker = pytest.mark.skip(reason="HUSH_CONFIG not set or config file not found")
         for item in items:
             item.add_marker(skip_marker)
 
