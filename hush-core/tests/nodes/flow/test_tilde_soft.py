@@ -4,9 +4,10 @@ Uses the actual implementation from hush.core.nodes.base
 """
 
 import pytest
+
+from hush.core.nodes.base import END, START
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.nodes.transform.code_node import CodeNode
-from hush.core.nodes.base import START, END
 
 
 class TestTildeSoftEdge:

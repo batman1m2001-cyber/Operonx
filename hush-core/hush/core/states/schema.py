@@ -1,6 +1,6 @@
 """StateSchema - định nghĩa cấu trúc state của workflow."""
 
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
 
 from hush.core.states.ref import Ref
 
@@ -73,7 +73,9 @@ class StateSchema:
                 # Push ref: node.var -> target.var (push value to target khi ghi)
                 ref = param.value
                 if ref.has_ops:
-                    raise ValueError(f"Push ref {node_name}.{var_name} -> {ref.node}.{ref.var} không được có operation")
+                    raise ValueError(
+                        f"Push ref {node_name}.{var_name} -> {ref.node}.{ref.var} không được có operation"
+                    )
                 self._register_push_ref(node_name, var_name, Ref(ref.node, ref.var, is_output=True))
             elif (node_name, var_name) not in self._var_to_idx:
                 # Không phải push ref, đăng ký với default
@@ -85,7 +87,7 @@ class StateSchema:
 
         # Load đệ quy các node con
         # Iteration nodes giờ kế thừa từ GraphNode nên được handle bởi _nodes recursion
-        if hasattr(node, '_nodes') and node._nodes:
+        if hasattr(node, "_nodes") and node._nodes:
             for child in node._nodes.values():
                 self._load_from(child)
 
@@ -180,20 +182,17 @@ class StateSchema:
             self._register(node, var, value)
         return self
 
-
     # =========================================================================
     # Tạo State
     # =========================================================================
 
     def create_state(
-        self,
-        inputs: Dict[str, Any] = None,
-        state_class: Type["MemoryState"] = None,
-        **kwargs
+        self, inputs: Dict[str, Any] = None, state_class: Type["MemoryState"] = None, **kwargs
     ) -> "MemoryState":
         """Tạo state mới từ schema này."""
         if state_class is None:
             from hush.core.states.state import MemoryState
+
             state_class = MemoryState
         return state_class(schema=self, inputs=inputs, **kwargs)
 
@@ -235,32 +234,52 @@ class StateSchema:
         for op, args in ops:
             a = args[0] if args else None
             match op:
-                case 'getitem': result += f"[{a!r}]"
-                case 'getattr': result += f".{a}"
-                case 'call':
+                case "getitem":
+                    result += f"[{a!r}]"
+                case "getattr":
+                    result += f".{a}"
+                case "call":
                     ca, kw = args
-                    args_str = ", ".join([repr(x) for x in ca] + [f"{k}={v!r}" for k, v in kw.items()])
+                    args_str = ", ".join(
+                        [repr(x) for x in ca] + [f"{k}={v!r}" for k, v in kw.items()]
+                    )
                     result += f"({args_str})"
-                case 'add': result = f"({result} + {a!r})"
-                case 'radd': result = f"({a!r} + {result})"
-                case 'sub': result = f"({result} - {a!r})"
-                case 'rsub': result = f"({a!r} - {result})"
-                case 'mul': result = f"({result} * {a!r})"
-                case 'rmul': result = f"({a!r} * {result})"
-                case 'truediv': result = f"({result} / {a!r})"
-                case 'rtruediv': result = f"({a!r} / {result})"
-                case 'floordiv': result = f"({result} // {a!r})"
-                case 'rfloordiv': result = f"({a!r} // {result})"
-                case 'mod': result = f"({result} % {a!r})"
-                case 'rmod': result = f"({a!r} % {result})"
-                case 'pow': result = f"({result} ** {a!r})"
-                case 'rpow': result = f"({a!r} ** {result})"
-                case 'neg': result = f"(-{result})"
-                case 'apply':
+                case "add":
+                    result = f"({result} + {a!r})"
+                case "radd":
+                    result = f"({a!r} + {result})"
+                case "sub":
+                    result = f"({result} - {a!r})"
+                case "rsub":
+                    result = f"({a!r} - {result})"
+                case "mul":
+                    result = f"({result} * {a!r})"
+                case "rmul":
+                    result = f"({a!r} * {result})"
+                case "truediv":
+                    result = f"({result} / {a!r})"
+                case "rtruediv":
+                    result = f"({a!r} / {result})"
+                case "floordiv":
+                    result = f"({result} // {a!r})"
+                case "rfloordiv":
+                    result = f"({a!r} // {result})"
+                case "mod":
+                    result = f"({result} % {a!r})"
+                case "rmod":
+                    result = f"({a!r} % {result})"
+                case "pow":
+                    result = f"({result} ** {a!r})"
+                case "rpow":
+                    result = f"({a!r} ** {result})"
+                case "neg":
+                    result = f"(-{result})"
+                case "apply":
                     func, _, _ = args
-                    func_name = getattr(func, '__name__', repr(func))
+                    func_name = getattr(func, "__name__", repr(func))
                     result = f"{func_name}({result})"
-                case _: result += f".{op}(...)"
+                case _:
+                    result += f".{op}(...)"
         return result
 
     def show(self) -> None:

@@ -1,8 +1,8 @@
 """Các backend storage cho config resource."""
 
 from .base import ConfigStorage
-from .yaml import YamlConfigStorage
 from .json import JsonConfigStorage
+from .yaml import YamlConfigStorage
 
 __all__ = [
     "ConfigStorage",

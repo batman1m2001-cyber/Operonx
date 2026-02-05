@@ -7,7 +7,7 @@ _edge_context = threading.local()
 
 
 def _get_last_edge():
-    return getattr(_edge_context, 'last_edge', None)
+    return getattr(_edge_context, "last_edge", None)
 
 
 def _set_last_edge(source, target, op_type):
@@ -20,6 +20,7 @@ def _clear_last_edge():
 
 class MixedOperatorError(Exception):
     """Raised when >> and > are mixed in a single chain."""
+
     pass
 
 

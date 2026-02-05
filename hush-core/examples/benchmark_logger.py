@@ -7,21 +7,25 @@ Compares:
 3. Rich logging with simple/collapsed format
 """
 
-import time
-import logging
-import io
 import sys
-from contextlib import redirect_stdout, redirect_stderr
+import time
 
-from hush.core.loggings import LogConfig, setup_logger, format_log_data
+from hush.core.loggings import LogConfig, format_log_data, setup_logger
 
 
 # Suppress output during benchmark
 class NullWriter:
-    def write(self, _): pass
-    def flush(self): pass
-    def buffer(self): return self
-    def reconfigure(self, **_): pass
+    def write(self, _):
+        pass
+
+    def flush(self):
+        pass
+
+    def buffer(self):
+        return self
+
+    def reconfigure(self, **_):
+        pass
 
 
 def format_log_data_simple(data, max_items=3):
@@ -44,11 +48,11 @@ def format_log_data_simple(data, max_items=3):
 def benchmark_plain_text(iterations: int, test_data: dict):
     """Benchmark plain text logging (with markup stripping)."""
     config = LogConfig(
-        name='bench.plain',
-        level='INFO',
+        name="bench.plain",
+        level="INFO",
         handlers=[
-            {'type': 'console', 'level': 'INFO', 'use_rich': False},
-        ]
+            {"type": "console", "level": "INFO", "use_rich": False},
+        ],
     )
     logger = setup_logger(config)
 
@@ -60,7 +64,9 @@ def benchmark_plain_text(iterations: int, test_data: dict):
         start = time.perf_counter()
         for i in range(iterations):
             # Include markup tags - will be stripped by PlainTextFormatter
-            logger.info("[title]\\[req-%s][/title] Processing with data %s", i, format_log_data(test_data))
+            logger.info(
+                "[title]\\[req-%s][/title] Processing with data %s", i, format_log_data(test_data)
+            )
         elapsed = time.perf_counter() - start
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
@@ -71,11 +77,11 @@ def benchmark_plain_text(iterations: int, test_data: dict):
 def benchmark_rich_full(iterations: int, test_data: dict):
     """Benchmark Rich logging with full format_log_data."""
     config = LogConfig(
-        name='bench.rich_full',
-        level='INFO',
+        name="bench.rich_full",
+        level="INFO",
         handlers=[
-            {'type': 'console', 'level': 'INFO', 'use_rich': True},
-        ]
+            {"type": "console", "level": "INFO", "use_rich": True},
+        ],
     )
     logger = setup_logger(config)
 
@@ -85,7 +91,9 @@ def benchmark_rich_full(iterations: int, test_data: dict):
     try:
         start = time.perf_counter()
         for i in range(iterations):
-            logger.info("[title]\\[req-%s][/title] Processing with data %s", i, format_log_data(test_data))
+            logger.info(
+                "[title]\\[req-%s][/title] Processing with data %s", i, format_log_data(test_data)
+            )
         elapsed = time.perf_counter() - start
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
@@ -96,11 +104,11 @@ def benchmark_rich_full(iterations: int, test_data: dict):
 def benchmark_rich_simple(iterations: int, test_data: dict):
     """Benchmark Rich logging with simple collapsed format."""
     config = LogConfig(
-        name='bench.rich_simple',
-        level='INFO',
+        name="bench.rich_simple",
+        level="INFO",
         handlers=[
-            {'type': 'console', 'level': 'INFO', 'use_rich': True},
-        ]
+            {"type": "console", "level": "INFO", "use_rich": True},
+        ],
     )
     logger = setup_logger(config)
 
@@ -110,7 +118,11 @@ def benchmark_rich_simple(iterations: int, test_data: dict):
     try:
         start = time.perf_counter()
         for i in range(iterations):
-            logger.info("[title]\\[req-%s][/title] Processing with data %s", i, format_log_data_simple(test_data))
+            logger.info(
+                "[title]\\[req-%s][/title] Processing with data %s",
+                i,
+                format_log_data_simple(test_data),
+            )
         elapsed = time.perf_counter() - start
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
@@ -151,10 +163,7 @@ def run_benchmarks():
             "score": 95.5,
             "tags": ["admin", "user"],
         },
-        "large_dict": {
-            f"key_{i}": f"value_{i}" if i % 3 == 0 else i
-            for i in range(20)
-        },
+        "large_dict": {f"key_{i}": f"value_{i}" if i % 3 == 0 else i for i in range(20)},
         "nested_dict": {
             "user": {"id": 1, "name": "test", "roles": ["admin"]},
             "config": {"timeout": 30, "retries": 3},
@@ -177,9 +186,13 @@ def run_benchmarks():
         t_format_full = benchmark_format_only(iterations, test_data)
         t_format_simple = benchmark_format_simple_only(iterations, test_data)
 
-        print(f"  format_log_data (full):     {t_format_full*1000:8.2f}ms  ({iterations/t_format_full:,.0f} ops/s)")
-        print(f"  format_log_data (simple):   {t_format_simple*1000:8.2f}ms  ({iterations/t_format_simple:,.0f} ops/s)")
-        print(f"  Format speedup:             {t_format_full/t_format_simple:.2f}x")
+        print(
+            f"  format_log_data (full):     {t_format_full * 1000:8.2f}ms  ({iterations / t_format_full:,.0f} ops/s)"
+        )
+        print(
+            f"  format_log_data (simple):   {t_format_simple * 1000:8.2f}ms  ({iterations / t_format_simple:,.0f} ops/s)"
+        )
+        print(f"  Format speedup:             {t_format_full / t_format_simple:.2f}x")
         print()
 
         # Full logging
@@ -187,12 +200,18 @@ def run_benchmarks():
         t_rich_full = benchmark_rich_full(iterations, test_data)
         t_rich_simple = benchmark_rich_simple(iterations, test_data)
 
-        print(f"  Plain text logging:         {t_plain*1000:8.2f}ms  ({iterations/t_plain:,.0f} ops/s)")
-        print(f"  Rich + full format:         {t_rich_full*1000:8.2f}ms  ({iterations/t_rich_full:,.0f} ops/s)")
-        print(f"  Rich + simple format:       {t_rich_simple*1000:8.2f}ms  ({iterations/t_rich_simple:,.0f} ops/s)")
+        print(
+            f"  Plain text logging:         {t_plain * 1000:8.2f}ms  ({iterations / t_plain:,.0f} ops/s)"
+        )
+        print(
+            f"  Rich + full format:         {t_rich_full * 1000:8.2f}ms  ({iterations / t_rich_full:,.0f} ops/s)"
+        )
+        print(
+            f"  Rich + simple format:       {t_rich_simple * 1000:8.2f}ms  ({iterations / t_rich_simple:,.0f} ops/s)"
+        )
         print()
-        print(f"  Plain vs Rich+full:         {t_rich_full/t_plain:.2f}x slower")
-        print(f"  Rich+simple vs Rich+full:   {t_rich_full/t_rich_simple:.2f}x faster")
+        print(f"  Plain vs Rich+full:         {t_rich_full / t_plain:.2f}x slower")
+        print(f"  Rich+simple vs Rich+full:   {t_rich_full / t_rich_simple:.2f}x faster")
 
     print("\n" + "=" * 70)
     print("SUMMARY")

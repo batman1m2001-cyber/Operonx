@@ -1,12 +1,11 @@
 """Tests for Cell - multi-context value storage."""
 
-import pytest
-from hush.core.states.cell import Cell, DEFAULT_CONTEXT
-
+from hush.core.states.cell import DEFAULT_CONTEXT, Cell
 
 # ============================================================
 # Test 1: Basic Cell Operations
 # ============================================================
+
 
 class TestBasicCellOperations:
     """Test basic Cell set/get operations."""
@@ -41,6 +40,7 @@ class TestBasicCellOperations:
 # Test 2: Context Storage
 # ============================================================
 
+
 class TestContextStorage:
     """Test Cell context storage."""
 
@@ -73,6 +73,7 @@ class TestContextStorage:
 # Test 3: Pop Context
 # ============================================================
 
+
 class TestPopContext:
     """Test pop_context() method."""
 
@@ -102,6 +103,7 @@ class TestPopContext:
 # Test 4: Delete Item
 # ============================================================
 
+
 class TestDeleteItem:
     """Test __delitem__ method."""
 
@@ -121,6 +123,7 @@ class TestDeleteItem:
 # ============================================================
 # Test 5: Contains
 # ============================================================
+
 
 class TestContains:
     """Test __contains__ method."""
@@ -142,6 +145,7 @@ class TestContains:
 # ============================================================
 # Test 6: Repr
 # ============================================================
+
 
 class TestRepr:
     """Test __repr__ method."""

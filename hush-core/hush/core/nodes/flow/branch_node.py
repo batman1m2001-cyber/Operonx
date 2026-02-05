@@ -1,13 +1,13 @@
 """Node branch cho định tuyến có điều kiện trong workflow."""
 
-from typing import Dict, Any, Optional, List, Union, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from hush.core.configs.node_config import NodeType
+from hush.core.exceptions import BranchError
+from hush.core.loggings import LOGGER
 from hush.core.nodes.base import BaseNode
 from hush.core.states.ref import Ref
 from hush.core.utils.common import Param
-from hush.core.loggings import LOGGER
-from hush.core.exceptions import BranchError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -22,9 +22,9 @@ class BranchNode(BaseNode):
     type: NodeType = "branch"
 
     __slots__ = [
-        'given_candidates',
-        'default',
-        'cases',
+        "given_candidates",
+        "default",
+        "cases",
     ]
 
     def __init__(
@@ -34,7 +34,7 @@ class BranchNode(BaseNode):
         default: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs
+        **kwargs,
     ):
         # Parse inputs/outputs từ cases
         parsed_inputs, parsed_outputs = self._parse_cases(cases or [])
@@ -46,16 +46,13 @@ class BranchNode(BaseNode):
         self.inputs = self._merge_params(parsed_inputs, inputs)
         self.outputs = self._merge_params(parsed_outputs, outputs)
 
-        self.default = default.name if hasattr(default, 'is_base_node') else default
+        self.default = default.name if hasattr(default, "is_base_node") else default
         self.given_candidates = candidates
         self.cases = cases or []
 
         self.core = self._create_core_function()
 
-    def _parse_cases(
-        self,
-        cases: List[Tuple[Ref, str]]
-    ) -> tuple:
+    def _parse_cases(self, cases: List[Tuple[Ref, str]]) -> tuple:
         """Parse inputs/outputs từ cases.
 
         Args:
@@ -77,10 +74,7 @@ class BranchNode(BaseNode):
                     inputs[var_name] = Param(required=True, value=base_ref)
 
         # Outputs
-        outputs = {
-            "target": Param(type=str, required=True),
-            "matched": Param(type=str)
-        }
+        outputs = {"target": Param(type=str, required=True), "matched": Param(type=str)}
 
         return inputs, outputs
 
@@ -99,8 +93,9 @@ class BranchNode(BaseNode):
 
     def _create_core_function(self):
         """Tạo function đánh giá core đã tối ưu."""
+
         def core(**inputs) -> Dict[str, str]:
-            anchor = inputs.get('anchor')
+            anchor = inputs.get("anchor")
             if anchor:
                 return {"target": anchor, "matched": "anchor"}
 
@@ -121,7 +116,11 @@ class BranchNode(BaseNode):
 
                 if result:
                     condition_desc = f"ref:{ref.var}"
-                    LOGGER.debug("Điều kiện [str]'%s'[/str] khớp, định tuyến đến [highlight]%s[/highlight]", condition_desc, target)
+                    LOGGER.debug(
+                        "Điều kiện [str]'%s'[/str] khớp, định tuyến đến [highlight]%s[/highlight]",
+                        condition_desc,
+                        target,
+                    )
                     return target, condition_desc
 
             except Exception as e:
@@ -130,23 +129,22 @@ class BranchNode(BaseNode):
                     condition=str(ref),
                     inputs=safe_inputs,
                     candidates=self.candidates,
-                    original_error=e
+                    original_error=e,
                 )
                 LOGGER.warning(str(error))
                 continue
 
         if self.default:
-            LOGGER.debug("Không có điều kiện khớp, sử dụng target mặc định [highlight]%s[/highlight]", self.default)
+            LOGGER.debug(
+                "Không có điều kiện khớp, sử dụng target mặc định [highlight]%s[/highlight]",
+                self.default,
+            )
             return self.default, "default"
         else:
             LOGGER.warning("Không có điều kiện khớp và không có target mặc định")
             return None, None
 
-    def get_target(
-        self,
-        state: 'MemoryState',
-        context_id: Optional[str] = None
-    ) -> Optional[str]:
+    def get_target(self, state: "MemoryState", context_id: Optional[str] = None) -> Optional[str]:
         """Lấy target đã định tuyến từ state."""
         return state[self.full_name, "target", context_id]
 
@@ -156,7 +154,7 @@ class BranchNode(BaseNode):
             "cases": [(str(ref), target) for ref, target in self.cases],
             "default_target": self.default,
             "candidates": self.candidates,
-            "num_conditions": len(self.cases)
+            "num_conditions": len(self.cases),
         }
 
 
@@ -174,7 +172,7 @@ class Branch:
         router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
     """
 
-    __slots__ = ('_name', '_cases', '_default', '_inputs', '_kwargs')
+    __slots__ = ("_name", "_cases", "_default", "_inputs", "_kwargs")
     _is_hush_builder = True
 
     def __init__(self, name: Optional[str] = None, **kwargs):
@@ -190,7 +188,7 @@ class Branch:
         self._inputs: Dict[str, Any] = {}
         self._kwargs = kwargs
 
-    def if_(self, condition: Ref, target: Union[str, BaseNode]) -> 'Branch':
+    def if_(self, condition: Ref, target: Union[str, BaseNode]) -> "Branch":
         """Thêm một case với điều kiện từ Ref.
 
         Args:
@@ -204,11 +202,11 @@ class Branch:
             .if_(PARENT["score"] >= 90, "excellent")
             .if_(PARENT["score"] >= 70, good_node)
         """
-        target_name = target.name if hasattr(target, 'name') else target
+        target_name = target.name if hasattr(target, "name") else target
         self._cases.append((condition, target_name))
         return self
 
-    def else_(self, target: Union[str, BaseNode]) -> 'BranchNode':
+    def else_(self, target: Union[str, BaseNode]) -> "BranchNode":
         """Đặt default target và build BranchNode.
 
         Args:
@@ -218,10 +216,10 @@ class Branch:
             BranchNode đã được tạo
         """
         _skip_auto_name = True  # noqa: F841
-        self._default = target.name if hasattr(target, 'name') else target
+        self._default = target.name if hasattr(target, "name") else target
         return self._build()
 
-    def build(self) -> 'BranchNode':
+    def build(self) -> "BranchNode":
         """Build BranchNode (dùng khi không có default).
 
         Returns:
@@ -230,7 +228,7 @@ class Branch:
         _skip_auto_name = True  # noqa: F841
         return self._build()
 
-    def _build(self) -> 'BranchNode':
+    def _build(self) -> "BranchNode":
         """Internal build method."""
         _skip_auto_name = True  # noqa: F841
 
@@ -247,7 +245,7 @@ class Branch:
             cases=self._cases,
             default=self._default,
             inputs=all_inputs,
-            **self._kwargs
+            **self._kwargs,
         )
 
 

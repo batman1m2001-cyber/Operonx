@@ -26,23 +26,24 @@ Example:
     )
     ```
 """
+
 from hush.core.tracers.base import (
     BaseTracer,
-    register_tracer,
     get_registered_tracers,
+    register_tracer,
 )
+from hush.core.tracers.local import LocalTracer
 from hush.core.tracers.media import (
-    MEDIA_KEY,
     MAX_INLINE_SIZE,
+    MEDIA_KEY,
     MediaAttachment,
     serialize_media_attachments,
 )
 from hush.core.tracers.store import (
+    DEFAULT_DB_PATH,
     TraceStore,
     get_store,
-    DEFAULT_DB_PATH,
 )
-from hush.core.tracers.local import LocalTracer
 
 __all__ = [
     # Base tracer

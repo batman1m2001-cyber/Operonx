@@ -36,7 +36,7 @@ class NodeError(Exception):
         message: str,
         node_type: str,
         original_error: Optional[Exception] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ):
         self.node_type = node_type
         self.original_error = original_error
@@ -82,7 +82,7 @@ class ParserError(NodeError):
         message: str,
         input_text: str,
         format_type: str,
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.input_text = input_text
         self.format_type = format_type
@@ -91,10 +91,7 @@ class ParserError(NodeError):
             message=message,
             node_type="parser",
             original_error=original_error,
-            context={
-                "format": format_type,
-                "input": input_text
-            }
+            context={"format": format_type, "input": input_text},
         )
 
 
@@ -122,7 +119,7 @@ class CodeError(NodeError):
         function_name: str,
         source: str,
         inputs: Dict[str, Any],
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.function_name = function_name
         self.source = source
@@ -135,8 +132,8 @@ class CodeError(NodeError):
             context={
                 "function_name": function_name,
                 "source": _truncate(source, 300),
-                "inputs": {k: _truncate(repr(v), 100) for k, v in inputs.items()}
-            }
+                "inputs": {k: _truncate(repr(v), 100) for k, v in inputs.items()},
+            },
         )
 
 
@@ -164,7 +161,7 @@ class BranchError(NodeError):
         condition: str,
         inputs: Dict[str, Any],
         candidates: List[str],
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.condition = condition
         self.inputs = inputs
@@ -177,8 +174,8 @@ class BranchError(NodeError):
             context={
                 "condition": condition,
                 "inputs": {k: _truncate(repr(v), 100) for k, v in inputs.items()},
-                "candidates": candidates
-            }
+                "candidates": candidates,
+            },
         )
 
 
@@ -209,27 +206,21 @@ class ConditionError(NodeError):
         inputs: Optional[Dict[str, Any]] = None,
         iteration: Optional[int] = None,
         phase: str = "eval",
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.condition = condition
         self.inputs = inputs or {}
         self.iteration = iteration
         self.phase = phase
 
-        context = {
-            "condition": condition,
-            "phase": phase
-        }
+        context = {"condition": condition, "phase": phase}
         if inputs:
             context["inputs"] = {k: _truncate(repr(v), 100) for k, v in inputs.items()}
         if iteration is not None:
             context["iteration"] = iteration
 
         super().__init__(
-            message=message,
-            node_type="while",
-            original_error=original_error,
-            context=context
+            message=message, node_type="while", original_error=original_error, context=context
         )
 
 
@@ -259,7 +250,7 @@ class IterationError(NodeError):
         loop_data: Dict[str, Any],
         total_iterations: int,
         node_type: str = "for",
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.iteration_index = iteration_index
         self.loop_data = loop_data
@@ -271,14 +262,15 @@ class IterationError(NodeError):
             original_error=original_error,
             context={
                 "iteration_index": f"{iteration_index}/{total_iterations}",
-                "loop_data": {k: _truncate(repr(v), 100) for k, v in loop_data.items()}
-            }
+                "loop_data": {k: _truncate(repr(v), 100) for k, v in loop_data.items()},
+            },
         )
 
 
 # =============================================================================
 # Provider Node Errors (hush-providers)
 # =============================================================================
+
 
 class PromptError(NodeError):
     """Exception khi PromptNode format template thất bại.
@@ -302,7 +294,7 @@ class PromptError(NodeError):
         message: str,
         template: Any,
         missing_vars: Optional[List[str]] = None,
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.template = template
         self.missing_vars = missing_vars or []
@@ -315,10 +307,7 @@ class PromptError(NodeError):
             context["missing_vars"] = missing_vars
 
         super().__init__(
-            message=message,
-            node_type="prompt",
-            original_error=original_error,
-            context=context
+            message=message, node_type="prompt", original_error=original_error, context=context
         )
 
 
@@ -343,7 +332,7 @@ class EmbeddingError(NodeError):
         message: str,
         resource_key: str,
         text_count: int,
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.resource_key = resource_key
         self.text_count = text_count
@@ -352,10 +341,7 @@ class EmbeddingError(NodeError):
             message=message,
             node_type="embedding",
             original_error=original_error,
-            context={
-                "resource_key": resource_key,
-                "text_count": text_count
-            }
+            context={"resource_key": resource_key, "text_count": text_count},
         )
 
 
@@ -383,7 +369,7 @@ class RerankError(NodeError):
         resource_key: str,
         query: str,
         document_count: int,
-        original_error: Optional[Exception] = None
+        original_error: Optional[Exception] = None,
     ):
         self.resource_key = resource_key
         self.query = query
@@ -396,6 +382,6 @@ class RerankError(NodeError):
             context={
                 "resource_key": resource_key,
                 "query": _truncate(query, 100),
-                "document_count": document_count
-            }
+                "document_count": document_count,
+            },
         )

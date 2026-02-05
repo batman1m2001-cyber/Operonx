@@ -1,14 +1,14 @@
 """Node thực thi code Python trong workflow."""
 
-from typing import Dict, Callable, Any, Optional, List, TYPE_CHECKING
-import inspect
 import ast
+import inspect
 from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from hush.core.nodes.base import BaseNode, split_shorthand_kwargs
 from hush.core.configs.node_config import NodeType
-from hush.core.utils.common import Param, ensure_async
 from hush.core.exceptions import CodeError
+from hush.core.nodes.base import BaseNode, split_shorthand_kwargs
+from hush.core.utils.common import Param, ensure_async
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -24,10 +24,11 @@ def code_node(func):
 
         node = my_function(inputs={"arg1": PARENT, "arg2": "value"})
     """
+
     @wraps(func)
     def wrapper(**kwargs):
         _skip_auto_name = True  # noqa: F841 - marker for _auto_name
-        mappings, init_kwargs = split_shorthand_kwargs(kwargs, {'return_keys'})
+        mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
         return CodeNode(code_fn=func, _mappings=mappings or None, **init_kwargs)
 
     wrapper.__wrapped__ = func
@@ -35,13 +36,19 @@ def code_node(func):
 
 
 TYPE_MAP = {
-    "str": str, "string": str,
-    "int": int, "integer": int,
+    "str": str,
+    "string": str,
+    "int": int,
+    "integer": int,
     "float": float,
-    "bool": bool, "boolean": bool,
-    "list": list, "List": list,
-    "dict": dict, "Dict": dict,
-    "any": Any, "Any": Any,
+    "bool": bool,
+    "boolean": bool,
+    "list": list,
+    "List": list,
+    "dict": dict,
+    "Dict": dict,
+    "any": Any,
+    "Any": Any,
 }
 
 
@@ -109,7 +116,7 @@ def parse_comment(comment: str) -> tuple:
         # Chỉ coi là type nếu thuộc danh sách type đã biết
         if type_str in TYPE_MAP:
             param_type = TYPE_MAP[type_str]
-            description = comment[close_idx + 1:].strip()
+            description = comment[close_idx + 1 :].strip()
 
             # Parse giá trị mặc định nếu có
             if default_str is not None:
@@ -139,11 +146,7 @@ def _extract_dict_keys(dict_node: ast.Dict, source_lines: List[str]) -> Dict[str
                     param_type, default, description = parse_comment(comment)
                     break
 
-            schema[key_name] = Param(
-                type=param_type,
-                default=default,
-                description=description
-            )
+            schema[key_name] = Param(type=param_type, default=default, description=description)
     return schema
 
 
@@ -163,8 +166,38 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
     try:
         source = inspect.getsource(func)
         source_lines = source.splitlines()
-        source = inspect.cleandoc(source)
-        tree = ast.parse(source)
+        cleaned_source = inspect.cleandoc(source)
+
+        # Try to parse the source directly
+        tree = None
+        try:
+            tree = ast.parse(cleaned_source)
+        except SyntaxError:
+            # If direct parsing fails (e.g., lambda in function call on single line),
+            # try to extract just the lambda expression with proper brace matching
+            lambda_idx = cleaned_source.find("lambda")
+            if lambda_idx != -1:
+                # Find the opening brace after lambda
+                brace_start = cleaned_source.find("{", lambda_idx)
+                if brace_start != -1:
+                    # Count braces to find matching close
+                    depth = 1
+                    pos = brace_start + 1
+                    while pos < len(cleaned_source) and depth > 0:
+                        if cleaned_source[pos] == "{":
+                            depth += 1
+                        elif cleaned_source[pos] == "}":
+                            depth -= 1
+                        pos += 1
+                    if depth == 0:
+                        lambda_source = cleaned_source[lambda_idx:pos]
+                        try:
+                            tree = ast.parse(lambda_source)
+                        except SyntaxError:
+                            pass
+
+        if tree is None:
+            return {}
 
         schema = {}
         for node in ast.walk(tree):
@@ -201,7 +234,7 @@ class CodeNode(BaseNode):
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         _mappings: Dict[str, Any] = None,
-        **kwargs
+        **kwargs,
     ):
         # Parse inputs/outputs từ function signature/AST
         parsed_inputs, parsed_outputs = self._parse_function(code_fn, return_keys)
@@ -245,12 +278,10 @@ class CodeNode(BaseNode):
 
         # Set description từ docstring nếu chưa có
         if not self.description and code_fn and code_fn.__doc__:
-            self.description = code_fn.__doc__.strip().split('\n')[0]
+            self.description = code_fn.__doc__.strip().split("\n")[0]
 
     def _parse_function(
-        self,
-        code_fn: Optional[Callable],
-        return_keys: Optional[List[str]]
+        self, code_fn: Optional[Callable], return_keys: Optional[List[str]]
     ) -> tuple:
         """Parse inputs/outputs từ function signature và source.
 
@@ -270,9 +301,7 @@ class CodeNode(BaseNode):
             default_val = param.default if has_default else None
 
             inputs[param_name] = Param(
-                type=param_type,
-                required=not has_default,
-                default=default_val
+                type=param_type, required=not has_default, default=default_val
             )
 
         # Parse outputs: return_keys explicit > AST parsing
@@ -286,9 +315,9 @@ class CodeNode(BaseNode):
 
     async def run(
         self,
-        state: 'MemoryState',
+        state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None
+        parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Thực thi CodeNode với error wrapping.
 
@@ -306,12 +335,12 @@ class CodeNode(BaseNode):
                 function_name=self.code_fn.__name__ if self.code_fn else "unknown",
                 source=self.source,
                 inputs=_inputs,
-                original_error=e
+                original_error=e,
             ) from e
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass."""
         return {
             "code_fn": self.source[:200] + "..." if len(self.source) > 200 else self.source,
-            "function_name": self.code_fn.__name__ if self.code_fn else "unknown"
+            "function_name": self.code_fn.__name__ if self.code_fn else "unknown",
         }

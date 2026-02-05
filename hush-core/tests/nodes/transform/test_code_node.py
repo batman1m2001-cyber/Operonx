@@ -1,26 +1,30 @@
 """Tests for CodeNode - Python code execution node."""
 
 import pytest
-from hush.core.nodes.transform.code_node import CodeNode, code_node
 
+from hush.core.nodes.transform.code_node import CodeNode, code_node
 
 # ============================================================
 # Test Fixtures
 # ============================================================
 
+
 @pytest.fixture
 def add_numbers_node():
     """Create an add_numbers node for testing."""
+
     @code_node
     def add_numbers(a: int, b: int = 10):
         """Add two numbers."""
         return {"result": a + b}
+
     return add_numbers()
 
 
 @pytest.fixture
 def process_data_node():
     """Create a process_data node for testing."""
+
     @code_node
     def process_data(name: str, count: int):
         """Process data with type hints and descriptions."""
@@ -29,21 +33,25 @@ def process_data_node():
             "total": count * 2,
             "status": "success",
         }
+
     return process_data()
 
 
 @pytest.fixture
 def increment_node():
     """Create an increment node for testing."""
+
     @code_node
     def increment(x: int):
         return {"x": x + 1}
+
     return increment()
 
 
 # ============================================================
 # Test 1: Basic __call__ Usage
 # ============================================================
+
 
 class TestBasicCallUsage:
     """Test direct __call__ invocation of CodeNode."""
@@ -68,6 +76,7 @@ class TestBasicCallUsage:
 # Test 2: Increment Function
 # ============================================================
 
+
 class TestIncrementFunction:
     """Test increment function behavior."""
 
@@ -91,6 +100,7 @@ class TestIncrementFunction:
 # Test 3: Multiple Outputs
 # ============================================================
 
+
 class TestMultipleOutputs:
     """Test nodes with multiple output values."""
 
@@ -111,6 +121,7 @@ class TestMultipleOutputs:
 # ============================================================
 # Test 4: Schema Extraction
 # ============================================================
+
 
 class TestSchemaExtraction:
     """Test automatic schema extraction from function signature."""
@@ -143,12 +154,14 @@ class TestSchemaExtraction:
 # Test 5: Async Functions
 # ============================================================
 
+
 class TestAsyncFunctions:
     """Test async function handling."""
 
     @pytest.mark.asyncio
     async def test_async_code_node(self):
         """Test that async functions work correctly."""
+
         @code_node
         async def async_double(x: int):
             return {"result": x * 2}
@@ -163,11 +176,13 @@ class TestAsyncFunctions:
 # Test 6: Code Node Decorator
 # ============================================================
 
+
 class TestCodeNodeDecorator:
     """Test @code_node decorator behavior."""
 
     def test_decorator_creates_factory(self):
         """Test that decorator creates a factory function."""
+
         @code_node
         def my_func(x: int):
             return {"y": x}
@@ -178,6 +193,7 @@ class TestCodeNodeDecorator:
 
     def test_decorator_uses_variable_name(self):
         """Test that node name comes from variable assignment, not function name."""
+
         @code_node
         def some_function(x: int):
             return {"y": x}
@@ -187,6 +203,7 @@ class TestCodeNodeDecorator:
 
     def test_decorator_custom_name(self):
         """Test that custom name can be provided."""
+
         @code_node
         def original_name(x: int):
             return {"y": x}
@@ -199,11 +216,13 @@ class TestCodeNodeDecorator:
 # Test 7: Flat Kwargs Syntax via @code_node
 # ============================================================
 
+
 class TestFlatKwargsSyntax:
     """Test flat kwargs syntax: my_func(x=value, y=value)."""
 
     def test_flat_input_mapping(self):
         """Test that flat kwargs map to inputs."""
+
         @code_node
         def add(a: int, b: int):
             return {"result": a + b}
@@ -214,6 +233,7 @@ class TestFlatKwargsSyntax:
 
     def test_flat_output_mapping(self):
         """Test that flat kwargs map to outputs."""
+
         @code_node
         def compute(x: int):
             return {"result": x * 2}
@@ -223,6 +243,7 @@ class TestFlatKwargsSyntax:
 
     def test_flat_mixed_input_output(self):
         """Test mixing input and output keys in flat kwargs."""
+
         @code_node
         def transform(x: int):
             return {"y": x + 1}
@@ -233,6 +254,7 @@ class TestFlatKwargsSyntax:
 
     def test_flat_unknown_key_raises(self):
         """Test that unknown keys raise TypeError."""
+
         @code_node
         def simple(x: int):
             return {"y": x}
@@ -242,6 +264,7 @@ class TestFlatKwargsSyntax:
 
     def test_flat_kwargs_with_name(self):
         """Test flat kwargs combined with name kwarg."""
+
         @code_node
         def my_func(x: int):
             return {"y": x}

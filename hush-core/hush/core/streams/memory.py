@@ -1,8 +1,10 @@
 import asyncio
 import time
-from typing import AsyncGenerator, Dict, Set, Optional, Any
 from collections import defaultdict
+from typing import Any, AsyncGenerator, Dict, Optional
+
 from hush.core.loggings import LOGGER
+
 from .base import BaseStreamingService
 
 
@@ -19,17 +21,15 @@ class InMemoryStreamService(BaseStreamingService):
 
     def __init__(self):
         # Cấu trúc: {session_id: {request_id: {channel_name: asyncio.Queue}}}
-        self._queues: Dict[str, Dict[str, Dict[str, asyncio.Queue]]] = defaultdict(lambda: defaultdict(dict))
+        self._queues: Dict[str, Dict[str, Dict[str, asyncio.Queue]]] = defaultdict(
+            lambda: defaultdict(dict)
+        )
         # Lock để đảm bảo thread-safe
         self._lock = asyncio.Lock()
         LOGGER.debug("[highlight]InMemoryStreamService[/highlight] initialized")
 
     async def push(
-        self,
-        request_id: str,
-        channel_name: str,
-        data: Any,
-        session_id: Optional[str] = None
+        self, request_id: str, channel_name: str, data: Any, session_id: Optional[str] = None
     ) -> None:
         """Push data vào queue của channel được chỉ định.
 
@@ -54,10 +54,18 @@ class InMemoryStreamService(BaseStreamingService):
             await self._queues[session_id][request_id][channel_name].put(data)
 
         except Exception as e:
-            LOGGER.error("[title]\\[%s][/title] Error pushing data to [muted]%s/%s[/muted]: %s", request_id, session_id, channel_name, e)
+            LOGGER.error(
+                "[title]\\[%s][/title] Error pushing data to [muted]%s/%s[/muted]: %s",
+                request_id,
+                session_id,
+                channel_name,
+                e,
+            )
             raise
 
-    async def end(self, request_id: str, channel_name: str, session_id: Optional[str] = None) -> None:
+    async def end(
+        self, request_id: str, channel_name: str, session_id: Optional[str] = None
+    ) -> None:
         """Báo hiệu kết thúc stream cho channel được chỉ định.
 
         Args:
@@ -77,10 +85,21 @@ class InMemoryStreamService(BaseStreamingService):
 
             # Push END sentinel để báo hiệu kết thúc
             await self._queues[session_id][request_id][channel_name].put("__END__")
-            LOGGER.debug("[title]\\[%s][/title] Pushed END signal to [muted]%s/%s[/muted]", request_id, session_id, channel_name)
+            LOGGER.debug(
+                "[title]\\[%s][/title] Pushed END signal to [muted]%s/%s[/muted]",
+                request_id,
+                session_id,
+                channel_name,
+            )
 
         except Exception as e:
-            LOGGER.error("[title]\\[%s][/title] Error pushing END signal to [muted]%s/%s[/muted]: %s", request_id, session_id, channel_name, e)
+            LOGGER.error(
+                "[title]\\[%s][/title] Error pushing END signal to [muted]%s/%s[/muted]: %s",
+                request_id,
+                session_id,
+                channel_name,
+                e,
+            )
             raise
 
     async def get(
@@ -89,7 +108,7 @@ class InMemoryStreamService(BaseStreamingService):
         channel_name: str,
         session_id: Optional[str] = None,
         timeout: float = 0.01,
-        max_idle_time: Optional[float] = None
+        max_idle_time: Optional[float] = None,
     ) -> AsyncGenerator[Any, None]:
         """Lấy AsyncGenerator để consume data từ channel được chỉ định.
 
@@ -138,31 +157,44 @@ class InMemoryStreamService(BaseStreamingService):
                         if idle_time >= max_idle_time:
                             LOGGER.debug(
                                 "[title]\\[%s][/title] Max idle time [muted](%ss)[/muted] exceeded for [muted]%s/%s[/muted], stopping",
-                                request_id, max_idle_time, session_id, channel_name
+                                request_id,
+                                max_idle_time,
+                                session_id,
+                                channel_name,
                             )
                             break
                     continue
 
                 except Exception as e:
-                    LOGGER.warning("[title]\\[%s][/title] Failed to process data from [muted]%s/%s[/muted]: %s", request_id, session_id, channel_name, e)
+                    LOGGER.warning(
+                        "[title]\\[%s][/title] Failed to process data from [muted]%s/%s[/muted]: %s",
+                        request_id,
+                        session_id,
+                        channel_name,
+                        e,
+                    )
                     continue
 
         except Exception as e:
-            LOGGER.error("[title]\\[%s][/title] Error consuming from [muted]%s/%s[/muted]: %s", request_id, session_id, channel_name, e)
+            LOGGER.error(
+                "[title]\\[%s][/title] Error consuming from [muted]%s/%s[/muted]: %s",
+                request_id,
+                session_id,
+                channel_name,
+                e,
+            )
             raise
         finally:
             # Dọn dẹp queue sau khi consume xong
             async with self._lock:
-                if (session_id in self._queues and
-                    request_id in self._queues[session_id] and
-                    channel_name in self._queues[session_id][request_id]):
+                if (
+                    session_id in self._queues
+                    and request_id in self._queues[session_id]
+                    and channel_name in self._queues[session_id][request_id]
+                ):
                     del self._queues[session_id][request_id][channel_name]
 
-    async def end_request(
-        self,
-        request_id: str,
-        session_id: Optional[str] = None
-    ) -> None:
+    async def end_request(self, request_id: str, session_id: Optional[str] = None) -> None:
         """Signal that all channels for this request are complete.
 
         Sends END signal to all active channels for the given request.
@@ -184,16 +216,23 @@ class InMemoryStreamService(BaseStreamingService):
                     for channel_name in channels:
                         queue = self._queues[session_id][request_id][channel_name]
                         await queue.put("__END__")
-                    LOGGER.debug("[title]\\[%s][/title] Sent END signal to all channels for session [muted]%s[/muted]", request_id, session_id)
+                    LOGGER.debug(
+                        "[title]\\[%s][/title] Sent END signal to all channels for session [muted]%s[/muted]",
+                        request_id,
+                        session_id,
+                    )
 
         except Exception as e:
-            LOGGER.error("[title]\\[%s][/title] Error ending request for session [muted]%s[/muted]: %s", request_id, session_id, e)
+            LOGGER.error(
+                "[title]\\[%s][/title] Error ending request for session [muted]%s[/muted]: %s",
+                request_id,
+                session_id,
+                e,
+            )
             raise
 
     async def get_channels(
-        self,
-        request_id: str,
-        session_id: Optional[str] = None
+        self, request_id: str, session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """Get all channel names for a request.
 

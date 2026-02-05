@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Any, Optional
+from typing import Any, AsyncGenerator, Optional
 
 
 class BaseStreamingService(ABC):
@@ -13,11 +13,7 @@ class BaseStreamingService(ABC):
 
     @abstractmethod
     async def push(
-        self,
-        request_id: str,
-        channel_name: str,
-        data: Any,
-        session_id: Optional[str] = None
+        self, request_id: str, channel_name: str, data: Any, session_id: Optional[str] = None
     ) -> None:
         """Push data vào channel được chỉ định.
 
@@ -31,10 +27,7 @@ class BaseStreamingService(ABC):
 
     @abstractmethod
     async def end(
-        self,
-        request_id: str,
-        channel_name: str,
-        session_id: Optional[str] = None
+        self, request_id: str, channel_name: str, session_id: Optional[str] = None
     ) -> None:
         """Báo hiệu kết thúc stream cho channel được chỉ định.
 
@@ -55,7 +48,7 @@ class BaseStreamingService(ABC):
         channel_name: str,
         session_id: Optional[str] = None,
         timeout: float = 0.01,
-        max_idle_time: Optional[float] = None
+        max_idle_time: Optional[float] = None,
     ) -> AsyncGenerator[Any, None]:
         """Lấy AsyncGenerator để consume data từ channel được chỉ định.
 

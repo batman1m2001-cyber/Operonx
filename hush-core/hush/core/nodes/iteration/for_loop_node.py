@@ -1,11 +1,11 @@
 """ForLoopNode - sequential iteration node for processing items one at a time."""
 
-from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from hush.core.configs.node_config import NodeType
-from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
-from hush.core.loggings import LOGGER
 from hush.core.exceptions import IterationError
+from hush.core.loggings import LOGGER
+from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -33,14 +33,9 @@ class ForLoopNode(BaseIterationNode):
 
     type: NodeType = "for"
 
-    __slots__ = ['_fail_fast']
+    __slots__ = ["_fail_fast"]
 
-    def __init__(
-        self,
-        inputs: Optional[Dict[str, Any]] = None,
-        fail_fast: bool = False,
-        **kwargs
-    ):
+    def __init__(self, inputs: Optional[Dict[str, Any]] = None, fail_fast: bool = False, **kwargs):
         """Initialize ForLoopNode.
 
         Args:
@@ -56,10 +51,10 @@ class ForLoopNode(BaseIterationNode):
 
     async def _execute(
         self,
-        state: 'MemoryState',
+        state: "MemoryState",
         context_id: Optional[str],
         parent_context: Optional[str],
-        request_id: str
+        request_id: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Execute for loop through iteration data sequentially."""
         # Resolve each and broadcast values using parent_context
@@ -73,7 +68,8 @@ class ForLoopNode(BaseIterationNode):
         if not iteration_data:
             LOGGER.warning(
                 "[title]\\[%s][/title] ForLoopNode [highlight]%s[/highlight]: no iteration data.",
-                request_id, self.full_name
+                request_id,
+                self.full_name,
             )
 
         # Execute iterations sequentially
@@ -98,7 +94,7 @@ class ForLoopNode(BaseIterationNode):
                     loop_data=loop_data,
                     total_iterations=len(iteration_data),
                     node_type="for",
-                    original_error=e
+                    original_error=e,
                 )
                 if self._fail_fast:
                     raise error from e
@@ -117,7 +113,9 @@ class ForLoopNode(BaseIterationNode):
         if iteration_data and error_count / len(iteration_data) > 0.1:
             LOGGER.warning(
                 "[title]\\[%s][/title] ForLoopNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted].",
-                request_id, self.full_name, f"{error_count / len(iteration_data):.1%}"
+                request_id,
+                self.full_name,
+                f"{error_count / len(iteration_data):.1%}",
             )
 
         # Transpose results to column-oriented format
@@ -129,10 +127,7 @@ class ForLoopNode(BaseIterationNode):
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
-        return {
-            "each": list(self._each.keys()),
-            "inputs": list(self._broadcast_inputs.keys())
-        }
+        return {"each": list(self._each.keys()), "inputs": list(self._broadcast_inputs.keys())}
 
 
 def for_(**kwargs) -> ForLoopNode:

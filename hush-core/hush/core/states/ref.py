@@ -1,6 +1,6 @@
 """Kiểu Ref cho liên kết biến zero-copy với khả năng chain operation."""
 
-from typing import Union, Tuple, List, Any, Optional, Callable, Set, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
     from hush.core.nodes.base import BaseNode
@@ -32,11 +32,27 @@ class Ref:
 
     __slots__ = ("_node", "var", "_ops", "_fn", "idx", "is_output")
 
-    _RESERVED_ATTRS = frozenset({
-        '_node', 'var', '_ops', '_fn', 'idx', 'is_output', 'node', 'raw_node', 'ops',
-        'as_tuple', 'apply', 'execute', 'has_ops', '_with_op', '_clone', '_resolve',
-        'get_all_vars'
-    })
+    _RESERVED_ATTRS = frozenset(
+        {
+            "_node",
+            "var",
+            "_ops",
+            "_fn",
+            "idx",
+            "is_output",
+            "node",
+            "raw_node",
+            "ops",
+            "as_tuple",
+            "apply",
+            "execute",
+            "has_ops",
+            "_with_op",
+            "_clone",
+            "_resolve",
+            "get_all_vars",
+        }
+    )
 
     def __init__(
         self,
@@ -44,7 +60,7 @@ class Ref:
         var: str,
         _ops: Optional[List[Tuple[str, Any]]] = None,
         _fn: Optional[Callable] = None,
-        is_output: bool = False
+        is_output: bool = False,
     ) -> None:
         """Khởi tạo Ref.
 
@@ -55,22 +71,22 @@ class Ref:
             _fn: Function đã compile (dùng cho clone)
             is_output: True nếu là output ref
         """
-        object.__setattr__(self, '_node', node)
-        object.__setattr__(self, 'var', var)
-        object.__setattr__(self, '_ops', _ops or [])
-        object.__setattr__(self, 'idx', -1)  # Được set bởi StateSchema._build()
-        object.__setattr__(self, 'is_output', is_output)  # True cho output ref
+        object.__setattr__(self, "_node", node)
+        object.__setattr__(self, "var", var)
+        object.__setattr__(self, "_ops", _ops or [])
+        object.__setattr__(self, "idx", -1)  # Được set bởi StateSchema._build()
+        object.__setattr__(self, "is_output", is_output)  # True cho output ref
         # Nếu có ops nhưng không có fn, rebuild từ ops (trường hợp deserialization)
         if _fn is None and _ops:
             _fn = lambda x, ctx={}: x
             for op, args in _ops:
                 _fn = self._wrap(_fn, op, args)
-        object.__setattr__(self, '_fn', _fn or (lambda x, ctx={}: x))
+        object.__setattr__(self, "_fn", _fn or (lambda x, ctx={}: x))
 
     @property
     def node(self) -> str:
         """Tên đầy đủ của node nguồn."""
-        return self._node.full_name if hasattr(self._node, 'full_name') else self._node
+        return self._node.full_name if hasattr(self._node, "full_name") else self._node
 
     @property
     def raw_node(self) -> Union["BaseNode", str]:
@@ -114,62 +130,90 @@ class Ref:
 
         match op:
             # Truy cập
-            case 'getitem': return lambda x, ctx={}, f=fn, k=a: f(x, ctx)[k]
-            case 'getattr': return lambda x, ctx={}, f=fn, k=a: getattr(f(x, ctx), k)
-            case 'call':
+            case "getitem":
+                return lambda x, ctx={}, f=fn, k=a: f(x, ctx)[k]
+            case "getattr":
+                return lambda x, ctx={}, f=fn, k=a: getattr(f(x, ctx), k)
+            case "call":
                 ca, kw = args
                 return lambda x, ctx={}, f=fn, a=ca, k=kw: f(x, ctx)(*a, **k)
             # Số học
-            case 'add': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) + v
-            case 'radd': return lambda x, ctx={}, f=fn, v=a: v + f(x, ctx)
-            case 'sub': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) - v
-            case 'rsub': return lambda x, ctx={}, f=fn, v=a: v - f(x, ctx)
-            case 'mul': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) * v
-            case 'rmul': return lambda x, ctx={}, f=fn, v=a: v * f(x, ctx)
-            case 'truediv': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) / v
-            case 'rtruediv': return lambda x, ctx={}, f=fn, v=a: v / f(x, ctx)
-            case 'floordiv': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) // v
-            case 'rfloordiv': return lambda x, ctx={}, f=fn, v=a: v // f(x, ctx)
-            case 'mod': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) % v
-            case 'rmod': return lambda x, ctx={}, f=fn, v=a: v % f(x, ctx)
-            case 'pow': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) ** v
-            case 'rpow': return lambda x, ctx={}, f=fn, v=a: v ** f(x, ctx)
-            case 'matmul': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) @ v
-            case 'rmatmul': return lambda x, ctx={}, f=fn, v=a: v @ f(x, ctx)
+            case "add":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) + v
+            case "radd":
+                return lambda x, ctx={}, f=fn, v=a: v + f(x, ctx)
+            case "sub":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) - v
+            case "rsub":
+                return lambda x, ctx={}, f=fn, v=a: v - f(x, ctx)
+            case "mul":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) * v
+            case "rmul":
+                return lambda x, ctx={}, f=fn, v=a: v * f(x, ctx)
+            case "truediv":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) / v
+            case "rtruediv":
+                return lambda x, ctx={}, f=fn, v=a: v / f(x, ctx)
+            case "floordiv":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) // v
+            case "rfloordiv":
+                return lambda x, ctx={}, f=fn, v=a: v // f(x, ctx)
+            case "mod":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) % v
+            case "rmod":
+                return lambda x, ctx={}, f=fn, v=a: v % f(x, ctx)
+            case "pow":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) ** v
+            case "rpow":
+                return lambda x, ctx={}, f=fn, v=a: v ** f(x, ctx)
+            case "matmul":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) @ v
+            case "rmatmul":
+                return lambda x, ctx={}, f=fn, v=a: v @ f(x, ctx)
             # Một ngôi
-            case 'neg': return lambda x, ctx={}, f=fn: -f(x, ctx)
-            case 'pos': return lambda x, ctx={}, f=fn: +f(x, ctx)
-            case 'abs': return lambda x, ctx={}, f=fn: abs(f(x, ctx))
+            case "neg":
+                return lambda x, ctx={}, f=fn: -f(x, ctx)
+            case "pos":
+                return lambda x, ctx={}, f=fn: +f(x, ctx)
+            case "abs":
+                return lambda x, ctx={}, f=fn: abs(f(x, ctx))
             # So sánh
-            case 'eq': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) == v
-            case 'ne': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) != v
-            case 'lt': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) < v
-            case 'le': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) <= v
-            case 'gt': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) > v
-            case 'ge': return lambda x, ctx={}, f=fn, v=a: f(x, ctx) >= v
-            case 'contains': return lambda x, ctx={}, f=fn, v=a: v in f(x, ctx)
+            case "eq":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) == v
+            case "ne":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) != v
+            case "lt":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) < v
+            case "le":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) <= v
+            case "gt":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) > v
+            case "ge":
+                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) >= v
+            case "contains":
+                return lambda x, ctx={}, f=fn, v=a: v in f(x, ctx)
             # Áp dụng function
-            case 'apply':
+            case "apply":
                 func, fa, kw = args
                 return lambda x, ctx={}, f=fn, func=func, a=fa, k=kw: func(f(x, ctx), *a, **k)
             # Boolean operations - resolve Ref operands from context
-            case 'and_':
+            case "and_":
                 if isinstance(a, Ref):
                     return lambda x, ctx={}, f=fn, ref=a: f(x, ctx) and ref._resolve(ctx)
                 return lambda x, ctx={}, f=fn, v=a: f(x, ctx) and v
-            case 'rand_':
+            case "rand_":
                 if isinstance(a, Ref):
                     return lambda x, ctx={}, f=fn, ref=a: ref._resolve(ctx) and f(x, ctx)
                 return lambda x, ctx={}, f=fn, v=a: v and f(x, ctx)
-            case 'or_':
+            case "or_":
                 if isinstance(a, Ref):
                     return lambda x, ctx={}, f=fn, ref=a: f(x, ctx) or ref._resolve(ctx)
                 return lambda x, ctx={}, f=fn, v=a: f(x, ctx) or v
-            case 'ror_':
+            case "ror_":
                 if isinstance(a, Ref):
                     return lambda x, ctx={}, f=fn, ref=a: ref._resolve(ctx) or f(x, ctx)
                 return lambda x, ctx={}, f=fn, v=a: v or f(x, ctx)
-            case 'not_':
+            case "not_":
                 return lambda x, ctx={}, f=fn: not f(x, ctx)
             case _:
                 raise ValueError(f"Operation không xác định: {op}")
@@ -218,7 +262,7 @@ class Ref:
         """
         vars_set = {self.var}
         for op, args in self._ops:
-            if op in ('and_', 'or_', 'rand_', 'ror_') and args:
+            if op in ("and_", "or_", "rand_", "ror_") and args:
                 other = args[0]
                 if isinstance(other, Ref):
                     vars_set.update(other.get_all_vars())
@@ -235,44 +279,84 @@ class Ref:
         Returns:
             Ref mới với operation apply
         """
-        return self._with_op('apply', func, args, kwargs)
+        return self._with_op("apply", func, args, kwargs)
 
     # =========================================================================
     # Truy cập
     # =========================================================================
-    def __getitem__(self, key: Any) -> "Ref": return self._with_op('getitem', key)
+    def __getitem__(self, key: Any) -> "Ref":
+        return self._with_op("getitem", key)
+
     def __getattr__(self, name: str) -> "Ref":
-        if name.startswith('_'):
+        if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' không có attribute '{name}'")
-        return self._with_op('getattr', name)
-    def __call__(self, *args: Any, **kwargs: Any) -> "Ref": return self._with_op('call', args, kwargs)
+        return self._with_op("getattr", name)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> "Ref":
+        return self._with_op("call", args, kwargs)
 
     # =========================================================================
     # Số học
     # =========================================================================
-    def __add__(self, other): return self._with_op('add', other)
-    def __radd__(self, other): return self._with_op('radd', other)
-    def __sub__(self, other): return self._with_op('sub', other)
-    def __rsub__(self, other): return self._with_op('rsub', other)
-    def __mul__(self, other): return self._with_op('mul', other)
-    def __rmul__(self, other): return self._with_op('rmul', other)
-    def __truediv__(self, other): return self._with_op('truediv', other)
-    def __rtruediv__(self, other): return self._with_op('rtruediv', other)
-    def __floordiv__(self, other): return self._with_op('floordiv', other)
-    def __rfloordiv__(self, other): return self._with_op('rfloordiv', other)
-    def __mod__(self, other): return self._with_op('mod', other)
-    def __rmod__(self, other): return self._with_op('rmod', other)
-    def __pow__(self, other): return self._with_op('pow', other)
-    def __rpow__(self, other): return self._with_op('rpow', other)
-    def __matmul__(self, other): return self._with_op('matmul', other)
-    def __rmatmul__(self, other): return self._with_op('rmatmul', other)
+    def __add__(self, other):
+        return self._with_op("add", other)
+
+    def __radd__(self, other):
+        return self._with_op("radd", other)
+
+    def __sub__(self, other):
+        return self._with_op("sub", other)
+
+    def __rsub__(self, other):
+        return self._with_op("rsub", other)
+
+    def __mul__(self, other):
+        return self._with_op("mul", other)
+
+    def __rmul__(self, other):
+        return self._with_op("rmul", other)
+
+    def __truediv__(self, other):
+        return self._with_op("truediv", other)
+
+    def __rtruediv__(self, other):
+        return self._with_op("rtruediv", other)
+
+    def __floordiv__(self, other):
+        return self._with_op("floordiv", other)
+
+    def __rfloordiv__(self, other):
+        return self._with_op("rfloordiv", other)
+
+    def __mod__(self, other):
+        return self._with_op("mod", other)
+
+    def __rmod__(self, other):
+        return self._with_op("rmod", other)
+
+    def __pow__(self, other):
+        return self._with_op("pow", other)
+
+    def __rpow__(self, other):
+        return self._with_op("rpow", other)
+
+    def __matmul__(self, other):
+        return self._with_op("matmul", other)
+
+    def __rmatmul__(self, other):
+        return self._with_op("rmatmul", other)
 
     # =========================================================================
     # Một ngôi
     # =========================================================================
-    def __neg__(self): return self._with_op('neg')
-    def __pos__(self): return self._with_op('pos')
-    def __abs__(self): return self._with_op('abs')
+    def __neg__(self):
+        return self._with_op("neg")
+
+    def __pos__(self):
+        return self._with_op("pos")
+
+    def __abs__(self):
+        return self._with_op("abs")
 
     # =========================================================================
     # Output Mapping (>>)
@@ -297,11 +381,12 @@ class Ref:
         target_node = other.raw_node  # consumer node hoặc PARENT
 
         # Kiểm tra nếu target là PARENT["key"]
-        if hasattr(target_node, 'name') and target_node.name == "__PARENT__":
+        if hasattr(target_node, "name") and target_node.name == "__PARENT__":
             # self là node["src_key"], other là PARENT["dest_key"]
             # Set node.outputs[src_key].value = Ref(father, dest_key)
-            if hasattr(source_node, 'outputs') and hasattr(source_node, 'father'):
+            if hasattr(source_node, "outputs") and hasattr(source_node, "father"):
                 from hush.core.utils.common import Param
+
                 if source_node.outputs is None:
                     source_node.outputs = {}
                 # Tạo Ref đến father (graph cha) với key đích
@@ -314,8 +399,9 @@ class Ref:
 
         # producer["output"] >> consumer["input"]
         # Set producer.outputs[output].value = Ref(consumer, input)
-        if hasattr(source_node, 'outputs'):
+        if hasattr(source_node, "outputs"):
             from hush.core.utils.common import Param
+
             if source_node.outputs is None:
                 source_node.outputs = {}
             # Tạo Ref đến consumer node với key đích
@@ -329,22 +415,44 @@ class Ref:
     # =========================================================================
     # So sánh
     # =========================================================================
-    def __lt__(self, other): return self._with_op('lt', other)
-    def __le__(self, other): return self._with_op('le', other)
-    def __gt__(self, other): return self._with_op('gt', other)
-    def __ge__(self, other): return self._with_op('ge', other)
-    def __eq__(self, other): return self._with_op('eq', other)
-    def __ne__(self, other): return self._with_op('ne', other)
-    def __contains__(self, item): return self._with_op('contains', item)
+    def __lt__(self, other):
+        return self._with_op("lt", other)
+
+    def __le__(self, other):
+        return self._with_op("le", other)
+
+    def __gt__(self, other):
+        return self._with_op("gt", other)
+
+    def __ge__(self, other):
+        return self._with_op("ge", other)
+
+    def __eq__(self, other):
+        return self._with_op("eq", other)
+
+    def __ne__(self, other):
+        return self._with_op("ne", other)
+
+    def __contains__(self, item):
+        return self._with_op("contains", item)
 
     # =========================================================================
     # Boolean (compound conditions với & và |)
     # =========================================================================
-    def __and__(self, other): return self._with_op('and_', other)
-    def __rand__(self, other): return self._with_op('rand_', other)
-    def __or__(self, other): return self._with_op('or_', other)
-    def __ror__(self, other): return self._with_op('ror_', other)
-    def __invert__(self): return self._with_op('not_')
+    def __and__(self, other):
+        return self._with_op("and_", other)
+
+    def __rand__(self, other):
+        return self._with_op("rand_", other)
+
+    def __or__(self, other):
+        return self._with_op("or_", other)
+
+    def __ror__(self, other):
+        return self._with_op("ror_", other)
+
+    def __invert__(self):
+        return self._with_op("not_")
 
     # =========================================================================
     # Tiện ích

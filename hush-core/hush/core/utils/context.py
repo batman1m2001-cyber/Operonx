@@ -1,7 +1,6 @@
 """Quản lý context cho graph hiện tại."""
 
 import contextvars
-from typing import Optional
 
 # Context variable lưu trữ graph đang thực thi
 _current_graph = contextvars.ContextVar("current_graph")

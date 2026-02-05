@@ -1,15 +1,17 @@
 """Tests for Ref - variable reference with chainable operations."""
 
 import pytest
-from hush.core.states.ref import Ref
 
+from hush.core.states.ref import Ref
 
 # ============================================================
 # Helper Classes
 # ============================================================
 
+
 class MockNode:
     """Mock node for testing."""
+
     def __init__(self, name: str):
         self.full_name = name
 
@@ -17,6 +19,7 @@ class MockNode:
 # ============================================================
 # Test 1: Basic Creation
 # ============================================================
+
 
 class TestBasicCreation:
     """Test basic Ref creation."""
@@ -48,6 +51,7 @@ class TestBasicCreation:
 # Test 2: Getitem Operations
 # ============================================================
 
+
 class TestGetitemOperations:
     """Test getitem operations."""
 
@@ -55,7 +59,7 @@ class TestGetitemOperations:
         """Test dict key access."""
         ref = Ref("n", "data")
 
-        assert ref['key'].execute({"key": "value"}) == "value"
+        assert ref["key"].execute({"key": "value"}) == "value"
 
     def test_list_access(self):
         """Test list index access."""
@@ -68,7 +72,7 @@ class TestGetitemOperations:
         """Test nested dict access."""
         ref = Ref("n", "data")
 
-        assert ref['a']['b'].execute({"a": {"b": 42}}) == 42
+        assert ref["a"]["b"].execute({"a": {"b": 42}}) == 42
 
     def test_slice_access(self):
         """Test slice access."""
@@ -81,11 +85,13 @@ class TestGetitemOperations:
 # Test 3: Getattr Operations
 # ============================================================
 
+
 class TestGetattrOperations:
     """Test getattr operations."""
 
     def test_simple_attribute(self):
         """Test simple attribute access."""
+
         class Obj:
             name = "test"
             value = 100
@@ -100,6 +106,7 @@ class TestGetattrOperations:
 # Test 4: Method Call Operations
 # ============================================================
 
+
 class TestMethodCallOperations:
     """Test method call operations."""
 
@@ -113,13 +120,13 @@ class TestMethodCallOperations:
         """Test string split() method."""
         ref = Ref("n", "data")
 
-        assert ref.split(',').execute("a,b,c") == ["a", "b", "c"]
+        assert ref.split(",").execute("a,b,c") == ["a", "b", "c"]
 
     def test_replace(self):
         """Test string replace() method."""
         ref = Ref("n", "data")
 
-        assert ref.replace('a', 'x').execute("banana") == "bxnxnx"
+        assert ref.replace("a", "x").execute("banana") == "bxnxnx"
 
     def test_chained_methods(self):
         """Test chained method calls."""
@@ -131,6 +138,7 @@ class TestMethodCallOperations:
 # ============================================================
 # Test 5: Arithmetic Operations
 # ============================================================
+
 
 class TestArithmeticOperations:
     """Test arithmetic operations."""
@@ -174,13 +182,14 @@ class TestArithmeticOperations:
     def test_pow(self):
         """Test power."""
         ref = Ref("n", "num")
-        assert (ref ** 2).execute(5) == 25
-        assert (2 ** ref).execute(3) == 8
+        assert (ref**2).execute(5) == 25
+        assert (2**ref).execute(3) == 8
 
 
 # ============================================================
 # Test 6: Unary Operations
 # ============================================================
+
 
 class TestUnaryOperations:
     """Test unary operations."""
@@ -204,6 +213,7 @@ class TestUnaryOperations:
 # ============================================================
 # Test 7: Comparison Operations
 # ============================================================
+
 
 class TestComparisonOperations:
     """Test comparison operations."""
@@ -246,6 +256,7 @@ class TestComparisonOperations:
 # Test 8: Contains Operation
 # ============================================================
 
+
 class TestContainsOperation:
     """Test contains operation."""
 
@@ -268,6 +279,7 @@ class TestContainsOperation:
 # ============================================================
 # Test 9: Apply Operation
 # ============================================================
+
 
 class TestApplyOperation:
     """Test apply operation."""
@@ -300,12 +312,13 @@ class TestApplyOperation:
     def test_apply_chained(self):
         """Test chained getitem then apply."""
         ref = Ref("n", "data")
-        assert ref['items'].apply(len).execute({"items": [1, 2, 3]}) == 3
+        assert ref["items"].apply(len).execute({"items": [1, 2, 3]}) == 3
 
 
 # ============================================================
 # Test 10: Complex Chains
 # ============================================================
+
 
 class TestComplexChains:
     """Test complex operation chains."""
@@ -313,25 +326,26 @@ class TestComplexChains:
     def test_nested_access_and_arithmetic(self):
         """Test nested access followed by arithmetic."""
         ref = Ref("n", "data")
-        result = (ref['users'][0]['score'] * 2 + 10).execute({"users": [{"score": 15}]})
+        result = (ref["users"][0]["score"] * 2 + 10).execute({"users": [{"score": 15}]})
         assert result == 40
 
     def test_division_chain(self):
         """Test chain with division."""
         ref = Ref("n", "data")
-        result = ((ref['value'] + 100) / 2).execute({"value": 50})
+        result = ((ref["value"] + 100) / 2).execute({"value": 50})
         assert result == 75.0
 
     def test_string_concat(self):
         """Test string concatenation."""
         ref = Ref("n", "data")
-        result = ("Hello, " + ref['name'] + "!").execute({"name": "World"})
+        result = ("Hello, " + ref["name"] + "!").execute({"name": "World"})
         assert result == "Hello, World!"
 
 
 # ============================================================
 # Test 11: Immutability
 # ============================================================
+
 
 class TestImmutability:
     """Test that operations return new Refs."""
@@ -351,19 +365,20 @@ class TestImmutability:
 # Test 12: Clone
 # ============================================================
 
+
 class TestClone:
     """Test _clone method."""
 
     def test_clone_is_new_object(self):
         """Test clone creates new object."""
-        ref = Ref("n", "x")['key'] + 5
+        ref = Ref("n", "x")["key"] + 5
         ref_clone = ref._clone()
 
         assert ref_clone is not ref
 
     def test_clone_preserves_properties(self):
         """Test clone preserves node, ops."""
-        ref = Ref("n", "x")['key'] + 5
+        ref = Ref("n", "x")["key"] + 5
         ref_clone = ref._clone()
 
         assert ref_clone.node == ref.node
@@ -371,7 +386,7 @@ class TestClone:
 
     def test_clone_executes_same(self):
         """Test clone produces same result."""
-        ref = Ref("n", "x")['key'] + 5
+        ref = Ref("n", "x")["key"] + 5
         ref_clone = ref._clone()
 
         assert ref_clone.execute({"key": 10}) == ref.execute({"key": 10})
@@ -381,12 +396,13 @@ class TestClone:
 # Test 14: Deserialization
 # ============================================================
 
+
 class TestDeserialization:
     """Test rebuilding Ref from ops."""
 
     def test_rebuild_from_ops(self):
         """Test Ref can be rebuilt from serialized ops."""
-        ops = [('getitem', ('key',)), ('add', (5,))]
+        ops = [("getitem", ("key",)), ("add", (5,))]
         ref = Ref("n", "x", _ops=ops)
 
         assert ref.execute({"key": 10}) == 15
@@ -395,6 +411,7 @@ class TestDeserialization:
 # ============================================================
 # Test 15: Error Handling
 # ============================================================
+
 
 class TestErrorHandling:
     """Test error handling."""
@@ -411,6 +428,7 @@ class TestErrorHandling:
 # Test 16: Repr
 # ============================================================
 
+
 class TestRepr:
     """Test __repr__ method."""
 
@@ -421,13 +439,14 @@ class TestRepr:
 
     def test_repr_with_ops(self):
         """Test repr shows ops count."""
-        ref = Ref("graph.node", "out")['key'] + 5
+        ref = Ref("graph.node", "out")["key"] + 5
         assert "ops=2" in repr(ref)
 
 
 # ============================================================
 # Test 17: Boolean Operations with & and |
 # ============================================================
+
 
 class TestBooleanOperations:
     """Test boolean operations with & and |."""
@@ -607,6 +626,7 @@ class TestBooleanOperations:
 # Test 18: get_all_vars Method
 # ============================================================
 
+
 class TestGetAllVars:
     """Test get_all_vars method."""
 
@@ -618,7 +638,7 @@ class TestGetAllVars:
     def test_ref_with_ops(self):
         """Test get_all_vars for ref with ops (no compound)."""
         ref = Ref("n", "a")
-        ref_with_ops = ref['key'] + 5 > 10
+        ref_with_ops = ref["key"] + 5 > 10
         assert ref_with_ops.get_all_vars() == {"a"}
 
     def test_and_two_refs(self):
@@ -669,6 +689,7 @@ class TestGetAllVars:
 # Test 19: Backward Compatibility
 # ============================================================
 
+
 class TestBackwardCompatibility:
     """Test backward compatibility - execute without context."""
 
@@ -687,7 +708,7 @@ class TestBackwardCompatibility:
     def test_getitem_without_context(self):
         """Test getitem without context."""
         ref = Ref("n", "data")
-        assert ref['key'].execute({"key": "value"}) == "value"
+        assert ref["key"].execute({"key": "value"}) == "value"
 
     def test_apply_without_context(self):
         """Test apply without context."""
@@ -697,5 +718,5 @@ class TestBackwardCompatibility:
     def test_chained_ops_without_context(self):
         """Test chained operations without context."""
         ref = Ref("n", "data")
-        result = (ref['users'][0]['score'] * 2).execute({"users": [{"score": 15}]})
+        result = (ref["users"][0]["score"] * 2).execute({"users": [{"score": 15}]})
         assert result == 30

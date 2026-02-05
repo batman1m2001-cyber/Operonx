@@ -1,16 +1,16 @@
 """Cấu trúc dữ liệu ánh xạ hai chiều (Bidirectional Map)."""
 
-from typing import TypeVar, Generic, Dict, DefaultDict, Set
 from collections import defaultdict
+from typing import DefaultDict, Dict, Generic, Set, TypeVar
 
-K = TypeVar('K')
-V = TypeVar('V')
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 class BiMapReverse(Generic[V, K]):
     """View ngược cho BiMap, cho phép tra cứu V -> Set[K]."""
 
-    def __init__(self, parent: 'BiMap[K, V]'):
+    def __init__(self, parent: "BiMap[K, V]"):
         self._parent = parent
 
     def __getitem__(self, value: V) -> Set[K]:

@@ -1,17 +1,17 @@
 """Các logging handler cho console."""
 
-import os
-import sys
-import re
-import copy
 import codecs
+import copy
 import logging
+import os
+import re
+import sys
 from typing import Literal, Union
 
 from pydantic import Field
-from rich.logging import RichHandler
 from rich.console import Console
 from rich.highlighter import NullHighlighter
+from rich.logging import RichHandler
 
 from ..config import HandlerConfig
 
@@ -24,15 +24,17 @@ def _parse_use_rich(value: str) -> Union[bool, str]:
     if v in ("false", "0", "no"):
         return False
     return "auto"
+
+
 from ..theme import LOGGING_THEME
 
 # Regex để strip Rich markup tags
-_MARKUP_PATTERN = re.compile(r'\[/?[^\]]+\]')
+_MARKUP_PATTERN = re.compile(r"\[/?[^\]]+\]")
 
 
 def strip_markup(text: str) -> str:
     """Strip Rich markup tags từ text."""
-    return _MARKUP_PATTERN.sub('', text)
+    return _MARKUP_PATTERN.sub("", text)
 
 
 class ConsoleHandlerConfig(HandlerConfig):
@@ -67,13 +69,19 @@ class ColoredRichHandler(RichHandler):
         """Emit log record với message được tô màu theo level."""
         # Map log level sang style (name_style, msg_style, strip_markup)
         level_styles = {
-            "DEBUG": ("dim #8b949e", "dim #8b949e", True),         # Xám mờ, strip markup
-            "INFO": ("#a8c7fa", "log.message", False),             # Xanh dương nhạt, giữ markup
-            "WARNING": ("#f0a875", "#f0a875", True),               # Nâu cam, strip markup
-            "ERROR": ("#ff7b72", "#ff7b72", True),                 # Đỏ sáng, strip markup
-            "CRITICAL": ("bold reverse #b81c1c", "bold reverse #b81c1c", True),  # Đỏ đậm, strip markup
+            "DEBUG": ("dim #8b949e", "dim #8b949e", True),  # Xám mờ, strip markup
+            "INFO": ("#a8c7fa", "log.message", False),  # Xanh dương nhạt, giữ markup
+            "WARNING": ("#f0a875", "#f0a875", True),  # Nâu cam, strip markup
+            "ERROR": ("#ff7b72", "#ff7b72", True),  # Đỏ sáng, strip markup
+            "CRITICAL": (
+                "bold reverse #b81c1c",
+                "bold reverse #b81c1c",
+                True,
+            ),  # Đỏ đậm, strip markup
         }
-        name_style, msg_style, strip_markup = level_styles.get(record.levelname, ("muted", "log.message", False))
+        name_style, msg_style, strip_markup = level_styles.get(
+            record.levelname, ("muted", "log.message", False)
+        )
 
         # Làm việc trên bản sao để không ảnh hưởng đến các handler khác
         record = copy.copy(record)
@@ -91,12 +99,14 @@ class ColoredRichHandler(RichHandler):
             else:
                 formatted_msg = record.msg
             # Strip markup sau khi format
-            msg = _MARKUP_PATTERN.sub('', formatted_msg)
+            msg = _MARKUP_PATTERN.sub("", formatted_msg)
         else:
             msg = record.msg
 
         if self.show_name:
-            record.msg = f"[{name_style}]\\[{record.name}][/{name_style}] [{msg_style}]{msg}[/{msg_style}]"
+            record.msg = (
+                f"[{name_style}]\\[{record.name}][/{name_style}] [{msg_style}]{msg}[/{msg_style}]"
+            )
         else:
             record.msg = f"[{msg_style}]{msg}[/{msg_style}]"
 
@@ -156,10 +166,8 @@ def create_console_handler(config: ConsoleHandlerConfig) -> logging.Handler:
         return handler
     else:
         # Plain text mode - strip markup tags
-        format_str = config.format_str or '[%(asctime)s] %(levelname)-8s [%(name)s] %(message)s'
-        handler = logging.StreamHandler(
-            stream=codecs.getwriter('utf-8')(sys.stdout.buffer)
-        )
+        format_str = config.format_str or "[%(asctime)s] %(levelname)-8s [%(name)s] %(message)s"
+        handler = logging.StreamHandler(stream=codecs.getwriter("utf-8")(sys.stdout.buffer))
         handler.setLevel(getattr(logging, config.level.upper()))
-        handler.setFormatter(PlainTextFormatter(format_str, datefmt='%H:%M:%S'))
+        handler.setFormatter(PlainTextFormatter(format_str, datefmt="%H:%M:%S"))
         return handler

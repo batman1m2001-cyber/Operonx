@@ -26,7 +26,7 @@ jobs:
         run: uv python install 3.10
 
       - name: Check formatting
-        run: uvx ruff format --check --exclude hush-core .
+        run: uvx ruff format --check .
 
       - name: Check linting
-        run: uvx ruff check --exclude hush-core .
+        run: uvx ruff check .

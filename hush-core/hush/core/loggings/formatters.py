@@ -101,7 +101,9 @@ def format_log_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
                 parts.append(f"[value]{v}[/value]")
             else:
                 s = str(v)
-                parts.append(f"[value]{s[:30]}...[/value]" if len(s) > 30 else f"[value]{s}[/value]")
+                parts.append(
+                    f"[value]{s[:30]}...[/value]" if len(s) > 30 else f"[value]{s}[/value]"
+                )
         bracket = "[]" if isinstance(data, list) else "()"
         return bracket[0] + ", ".join(parts) + bracket[1]
 

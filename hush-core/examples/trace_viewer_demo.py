@@ -14,22 +14,23 @@ import asyncio
 from time import sleep
 
 from hush.core import (
-    Hush,
+    END,
+    PARENT,
+    START,
     GraphNode,
-    CodeNode,
-    START, END, PARENT,
+    Hush,
 )
+from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.iteration.for_loop_node import ForLoopNode
 from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.tracers import LocalTracer
-
 
 # ============================================================================
 # Code Nodes with Dynamic Tags
 # ============================================================================
+
 
 @code_node
 def preprocess(text: str):
@@ -97,7 +98,7 @@ def format_output(category: str, confidence: float, total: int):
     sleep(0.01)
     return {
         "result": f"{category} (confidence: {confidence:.0%})",
-        "details": {"category": category, "confidence": confidence, "total_score": total}
+        "details": {"category": category, "confidence": confidence, "total_score": total},
     }
 
 
@@ -117,6 +118,7 @@ def halve_value(value: int):
 # Build Workflows
 # ============================================================================
 
+
 def build_text_analysis_workflow():
     """Build text analysis workflow with MapNode."""
     with GraphNode(name="text-analysis-pipeline") as graph:
@@ -135,7 +137,7 @@ def build_text_analysis_workflow():
             inputs={
                 "token": Each(tokenize_node["tokens"]),
                 "multiplier": PARENT["multiplier"],
-            }
+            },
         ) as map_node:
             analyze = analyze_token(
                 name="analyze",
@@ -167,7 +169,16 @@ def build_text_analysis_workflow():
             outputs={"*": PARENT},
         )
 
-        START >> preprocess_node >> tokenize_node >> map_node >> aggregate_node >> classify_node >> format_node >> END
+        (
+            START
+            >> preprocess_node
+            >> tokenize_node
+            >> map_node
+            >> aggregate_node
+            >> classify_node
+            >> format_node
+            >> END
+        )
 
     return graph
 
@@ -196,10 +207,7 @@ def build_nested_loop_workflow():
         return {"total": total}
 
     with GraphNode(name="nested-loop-demo") as graph:
-        with ForLoopNode(
-            name="outer_loop",
-            inputs={"x": Each([2, 3])}
-        ) as outer:
+        with ForLoopNode(name="outer_loop", inputs={"x": Each([2, 3])}) as outer:
             validate_node = validate(
                 name="validate",
                 inputs={"x": PARENT["x"]},
@@ -210,7 +218,7 @@ def build_nested_loop_workflow():
                 inputs={
                     "y": Each([10, 20]),
                     "x": validate_node["validated_x"],
-                }
+                },
             ) as inner:
                 mult_node = multiply(
                     name="multiply",
@@ -258,6 +266,7 @@ def build_while_loop_workflow():
 # ============================================================================
 # Run Demo
 # ============================================================================
+
 
 async def run_demo():
     """Run demo workflows with different tag configurations."""
@@ -316,7 +325,7 @@ async def run_demo():
     result = await text_engine.run(
         inputs={
             "input_text": "The quick brown fox jumps over the lazy dog and runs away",
-            "multiplier": 4
+            "multiplier": 4,
         },
         request_id="text-dev-001",
         user_id="user-charlie",
@@ -378,7 +387,7 @@ async def run_demo():
     result = await text_engine.run(
         inputs={
             "input_text": "Artificial intelligence deep learning neural networks powerful",
-            "multiplier": 5
+            "multiplier": 5,
         },
         request_id="text-mixed-001",
         user_id="user-alice",
@@ -413,6 +422,7 @@ async def run_demo():
 
     print()
     from hush.core.background import DEFAULT_DB_PATH
+
     print(f"Traces saved to {DEFAULT_DB_PATH}")
 
 
@@ -423,6 +433,7 @@ def main():
 
     # Remove old traces database for a clean demo
     from hush.core.background import DEFAULT_DB_PATH
+
     db_path = Path(os.environ.get("HUSH_TRACES_DB", DEFAULT_DB_PATH))
     if db_path.exists():
         db_path.unlink()

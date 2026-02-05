@@ -39,9 +39,10 @@ Example:
 """
 
 import logging
-from typing import Callable, Dict, Optional, Tuple, Type, Any, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
-from .config import LogConfig, HandlerConfig
+from .config import HandlerConfig, LogConfig
+from .formatters import LOG_INDENT, format_log_data, log_break
 from .handlers import (
     ConsoleHandlerConfig,
     FileHandlerConfig,
@@ -50,12 +51,12 @@ from .handlers import (
     create_file_handler,
     create_timed_file_handler,
 )
-from .formatters import format_log_data, log_break, LOG_INDENT
 from .theme import LOGGING_THEME
 
-
 # Registry handler: type -> (ConfigClass, FactoryFunction)
-_HANDLER_REGISTRY: Dict[str, Tuple[Type[HandlerConfig], Callable[[HandlerConfig], logging.Handler]]] = {}
+_HANDLER_REGISTRY: Dict[
+    str, Tuple[Type[HandlerConfig], Callable[[HandlerConfig], logging.Handler]]
+] = {}
 
 
 def register_handler(
@@ -121,7 +122,9 @@ def _create_handler_from_config(config: HandlerConfig) -> Optional[logging.Handl
         _, factory = _HANDLER_REGISTRY[handler_type]
         return factory(config)
 
-    raise ValueError(f"Loại handler không xác định: {handler_type}. Bạn có quên import package handler không?")
+    raise ValueError(
+        f"Loại handler không xác định: {handler_type}. Bạn có quên import package handler không?"
+    )
 
 
 def add_handler(logger: logging.Logger, handler: logging.Handler) -> logging.Logger:
