@@ -725,8 +725,10 @@ class BaseNode(ABC):
 
         except Exception as e:
             error_msg = traceback.format_exc()
-            LOGGER.error("[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s", request_id, self.name, str(e))
-            LOGGER.error(error_msg)
+            LOGGER.error(
+                "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]:\n%s",
+                request_id, self.name, error_msg.rstrip()
+            )
             state[self.full_name, "error", context_id] = error_msg
 
         finally:
