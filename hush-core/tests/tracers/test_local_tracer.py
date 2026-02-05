@@ -288,6 +288,7 @@ class TestTracerWithWorkflow:
         shutdown_background()
 
 
+@pytest.mark.integration
 class TestWorkflowTracesWrittenToDb:
     """Test that workflow execution with tracer writes traces to database."""
 
