@@ -1,0 +1,119 @@
+# Hush Resources Configuration
+# Format: category:name — category is inferred from key prefix
+
+# =============================================================================
+# Keycloak Token Providers
+# =============================================================================
+
+# Keycloak Token Provider (for dynamic token refresh)
+keycloak:myapp:
+  url: ${KEYCLOAK_URL}
+  name: ${KEYCLOAK_CLIENT_NAME}
+  secret: ${KEYCLOAK_CLIENT_SECRET}
+  token_path: accessToken
+  expires_in_path: expiresIn
+  refresh_interval: ${KEYCLOAK_REFRESH_INTERVAL}  # Background refresh interval in seconds
+
+# =============================================================================
+# LLM Configurations
+# =============================================================================
+
+# Claude 4 Sonnet (via Keycloak auth)
+llm:claude-4-sonnet:
+  api_type: openai
+  api_key: keycloak:myapp
+  base_url: ${LLM_BASE_URL}
+  model: ${LLM_MODEL}
+
+# OpenRouter - Claude Sonnet
+llm:or-claude-4-sonnet:
+  api_type: openai
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+  model: anthropic/claude-sonnet-4
+
+# OpenAI GPT-4o
+llm:gpt-4o:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
+
+# OpenAI GPT-4o-mini (cheaper for testing)
+llm:gpt-4o-mini:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+# OpenAI GPT-4o Audio (for audio input tests)
+llm:gpt-4o-audio:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-audio-preview
+
+# =============================================================================
+# Embedding Configurations
+# =============================================================================
+
+# DeepInfra BGE-M3
+embedding:bge-m3:
+  api_type: vllm
+  api_key: ${DEEPINFRA_API_KEY}
+  base_url: https://api.deepinfra.com/v1/openai/embeddings
+  model: BAAI/bge-m3
+  dimensions: 1024
+
+# OpenAI Embeddings
+embedding:openai:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1/embeddings
+  model: text-embedding-3-small
+  dimensions: 1536
+
+# Local ONNX Embedding
+embedding:bge-m3-onnx:
+  api_type: onnx
+  model: ${BGE_M3_EMBEDDING_PATH}
+  dimensions: 1024
+
+# =============================================================================
+# Reranking Configurations
+# =============================================================================
+
+# Pinecone Reranker
+reranking:bge-m3:
+  api_type: pinecone
+  api_key: ${PINECONE_API_KEY}
+  api_version: "2025-04"
+  model: bge-reranker-v2-m3
+  base_url: https://api.pinecone.io/rerank
+
+# Local ONNX Reranker
+reranking:bge-m3-onnx:
+  api_type: onnx
+  model: ${BGE_M3_RERANKER_PATH}
+  dimensions: 1024
+
+# =============================================================================
+# Observability Configurations
+# =============================================================================
+
+# Langfuse
+langfuse:default:
+  public_key: ${LANGFUSE_PUBLIC_KEY}
+  secret_key: ${LANGFUSE_SECRET_KEY}
+  host: ${LANGFUSE_HOST}
+  enabled: true
+  sample_rate: 1.0
+
+# OpenTelemetry - Langfuse (default)
+otel:default:
+  endpoint: ${LANGFUSE_HOST}/api/public/otel/v1/traces
+  protocol: http
+  service_name: hush-workflow
+  auth_type: basic
+  public_key: ${LANGFUSE_PUBLIC_KEY}
+  secret_key: ${LANGFUSE_SECRET_KEY}

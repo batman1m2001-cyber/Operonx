@@ -1,0 +1,62 @@
+# =============================================================================
+# Hush - Cấu hình Resources (Starter)
+# =============================================================================
+# File này định nghĩa các providers mà Hush sử dụng.
+#
+# Format:  category:tên_resource
+# Cú pháp: ${TÊN_BIẾN} sẽ được thay bằng giá trị từ file .env
+#
+# Copy file này vào thư mục gốc project:
+#   cp docs_v2/resources.starter.yaml resources.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# LLM — Các model ngôn ngữ
+# -----------------------------------------------------------------------------
+
+# OpenRouter — truy cập Claude, Llama, Mistral... qua 1 API
+# Chi phí thấp, phù hợp để test và phát triển
+llm:or-claude-4-sonnet:
+  api_type: openai
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+  model: anthropic/claude-sonnet-4
+
+# OpenAI GPT-4o-mini — model nhỏ, nhanh, rẻ
+# Phù hợp cho testing và các task đơn giản
+llm:gpt-4o-mini:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+# OpenAI GPT-4o — model mạnh hơn
+llm:gpt-4o:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
+
+# -----------------------------------------------------------------------------
+# Embedding — Chuyển text thành vector
+# -----------------------------------------------------------------------------
+
+# OpenAI text-embedding-3-small — embedding phổ biến, dễ dùng
+embedding:openai:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1/embeddings
+  model: text-embedding-3-small
+  dimensions: 1536
+
+# -----------------------------------------------------------------------------
+# Observability — Theo dõi và debug workflow
+# -----------------------------------------------------------------------------
+
+# Langfuse — dashboard theo dõi traces, cost, latency
+langfuse:default:
+  public_key: ${LANGFUSE_PUBLIC_KEY}
+  secret_key: ${LANGFUSE_SECRET_KEY}
+  host: ${LANGFUSE_HOST}
+  enabled: true
+  sample_rate: 1.0

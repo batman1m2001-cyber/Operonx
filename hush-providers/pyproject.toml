@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hush-providers"
+version = "0.1.0"
+description = "Hush workflow LLM, embedding, and reranking providers"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Hush Team" }
+]
+keywords = ["llm", "embedding", "reranking", "openai", "azure", "gemini", "workflow"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "hush-core>=0.1.0",
+    "pydantic>=2.0",
+    "openai>=1.0",
+    "aiohttp>=3.8",
+    "pyyaml>=6.0",
+    "numpy>=2.2.6",
+    "requests>=2.32.5",
+    "python-dotenv>=1.0",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=0.21",
+]
+
+[project.optional-dependencies]
+# ============================================================
+# LLM PROVIDERS
+# ============================================================
+openai = []  # Already in base dependencies
+azure = []   # Uses openai package (already in base)
+gemini = [
+    "google-cloud-aiplatform>=1.38",
+]
+bedrock = [
+    "boto3>=1.28",
+]
+
+# ============================================================
+# LOCAL INFERENCE
+# ============================================================
+onnx = [
+    "onnxruntime>=1.15",
+    "tokenizers>=0.13",
+]
+huggingface = [
+    "transformers>=4.30",
+    "torch>=2.0",
+]
+
+# ============================================================
+# EMBEDDING & RERANKING (lightweight by default)
+# ============================================================
+embeddings = [
+    "onnxruntime>=1.15",
+    "tokenizers>=0.13",
+]
+rerankers = [
+    "onnxruntime>=1.15",
+    "tokenizers>=0.13",
+]
+
+# ============================================================
+# BUNDLES
+# ============================================================
+all-light = [
+    "google-cloud-aiplatform>=1.38",
+    "boto3>=1.28",
+    "onnxruntime>=1.15",
+    "tokenizers>=0.13",
+]
+all = [
+    "google-cloud-aiplatform>=1.38",
+    "boto3>=1.28",
+    "onnxruntime>=1.15",
+    "tokenizers>=0.13",
+    "transformers>=4.30",
+    "torch>=2.0",
+]
+
+# ============================================================
+# DEVELOPMENT
+# ============================================================
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "python-dotenv>=1.0",
+    "black>=23.0",
+    "ruff>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/batman1m2001-cyber/Hush-ai"
+Documentation = "https://github.com/batman1m2001-cyber/Hush-ai#readme"
+Repository = "https://github.com/batman1m2001-cyber/Hush-ai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hush"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/hush",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv.sources]
+hush-core = { path = "../hush-core", editable = true }

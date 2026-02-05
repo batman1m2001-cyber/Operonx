@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src {{cspSource}} 'unsafe-inline'; img-src {{cspSource}};">
+    <title>Hush Traces</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{cssUri}}">
+</head>
+<body>
+    <script>
+        window.hushIcons = {
+            icon16: '{{hushIcon16Uri}}',
+            icon20: '{{hushIcon20Uri}}'
+        };
+    </script>
+    <div id="app">
+        <div id="header">
+            <h1>Hush Traces</h1>
+            <div id="actions">
+                <button onclick="refresh()">Refresh</button>
+                <button onclick="clearTraces()">Clear</button>
+            </div>
+        </div>
+        <div id="db-info">Loading...</div>
+        <div id="content">
+            <div id="trace-list">
+                <div class="empty-state">Loading traces...</div>
+            </div>
+            <div id="trace-detail" style="display: none;"></div>
+        </div>
+    </div>
+    <script src="{{jsUri}}"></script>
+</body>
+</html>

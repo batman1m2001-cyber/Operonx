@@ -1,0 +1,45 @@
+[project]
+name = "hush-tutorial"
+version = "0.1.0"
+description = "Tutorials and examples for the Hush workflow engine"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Hush Team" }
+]
+dependencies = [
+    "hush-core>=0.1.0",
+    "hush-providers>=0.1.0",
+    "hush-observability>=0.1.0",
+    "langfuse>=2.0,<3.0",
+    "python-dotenv>=1.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+]
+
+[project.optional-dependencies]
+# Include all provider extras for testing
+all = [
+    "hush-providers[all-light]",
+]
+# Include heavy ML frameworks for testing
+full = [
+    "hush-providers[all]",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ipython>=8.0",
+    "jupyter>=1.0",
+]
+
+[tool.uv.sources]
+# Use local packages for development
+hush-core = { path = "../hush-core", editable = true }
+hush-providers = { path = "../hush-providers", editable = true }
+hush-observability = { path = "../hush-observability", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
