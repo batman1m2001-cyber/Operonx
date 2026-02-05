@@ -11,7 +11,6 @@ Hush-ai/
 ├── hush-observability/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
 ├── hush-vscode-traceview/ # VS Code extension for trace visualization
-├── hush-ai/            # Meta-package for installation bundles
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
