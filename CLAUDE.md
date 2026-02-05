@@ -205,6 +205,24 @@ Workflows run automatically on every PR:
 | Tests | `.github/workflows/tests.yaml` | Pytest for all packages |
 | Python Compatibility | `.github/workflows/python-compatibility.yaml` | Python 3.10-3.12 matrix |
 
+### Git Commits
+
+**IMPORTANT:** Before making any commit, always verify and set the correct git identity:
+
+```bash
+# Check current identity
+git config user.name && git config user.email
+
+# Must be set to:
+git config user.name "Bruce Win"
+git config user.email "batman1m2001@gmail.com"
+```
+
+**Commit rules:**
+- **Always** commit as "Bruce Win <batman1m2001@gmail.com>"
+- **Never** add "Co-Authored-By: Claude" or any AI co-author lines
+- **Never** commit as any other identity
+
 ### Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full contributor guide, including:
