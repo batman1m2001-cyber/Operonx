@@ -7,7 +7,7 @@ _edge_context = threading.local()
 
 
 def _get_last_edge():
-    return getattr(_edge_context, "last_edge", None)
+    return getattr(_edge_context, 'last_edge', None)
 
 
 def _set_last_edge(source, target, op_type):
@@ -20,7 +20,6 @@ def _clear_last_edge():
 
 class MixedOperatorError(Exception):
     """Raised when >> and > are mixed in a single chain."""
-
     pass
 
 
@@ -92,7 +91,7 @@ def test_mixing_detected():
     print("\n=== Testing: a > b >> c (should raise error) ===\n")
 
     try:
-        a > b >> c
+        result = a > b >> c
         print("ERROR: Should have raised MixedOperatorError!")
     except MixedOperatorError as e:
         print(f"Caught expected error:\n{e}")
@@ -109,7 +108,7 @@ def test_same_operator_ok():
     _clear_last_edge()
 
     print("\n=== Testing: a >> b >> c (should work) ===\n")
-    a >> b >> c
+    result = a >> b >> c
     print(f"Edges: {graph.edges}")
     assert ("a", "b", "hard") in graph.edges
     assert ("b", "c", "hard") in graph.edges

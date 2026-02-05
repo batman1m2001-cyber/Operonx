@@ -1,12 +1,12 @@
 """While loop node to iterate while condition is true."""
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 
 from hush.core.configs.node_config import NodeType
-from hush.core.exceptions import ConditionError
-from hush.core.loggings import LOGGER
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.utils.common import Param, extract_condition_variables
+from hush.core.loggings import LOGGER
+from hush.core.exceptions import ConditionError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -33,9 +33,14 @@ class WhileLoopNode(BaseIterationNode):
 
     type: NodeType = "while"
 
-    __slots__ = ["_max_iterations", "_stop_condition", "_compiled_condition"]
+    __slots__ = ['_max_iterations', '_stop_condition', '_compiled_condition']
 
-    def __init__(self, stop_condition: Optional[str] = None, max_iterations: int = 100, **kwargs):
+    def __init__(
+        self,
+        stop_condition: Optional[str] = None,
+        max_iterations: int = 100,
+        **kwargs
+    ):
         """Initialize WhileLoopNode.
 
         Args:
@@ -47,25 +52,21 @@ class WhileLoopNode(BaseIterationNode):
 
         self._max_iterations = max_iterations
         self._stop_condition = stop_condition
-        self._compiled_condition = (
-            self._compile_condition(stop_condition) if stop_condition else None
-        )
+        self._compiled_condition = self._compile_condition(stop_condition) if stop_condition else None
 
     def _compile_condition(self, condition: str):
         """Compile stop condition for performance."""
         try:
-            return compile(condition, f"<stop_condition: {condition}>", "eval")
+            return compile(condition, f'<stop_condition: {condition}>', 'eval')
         except SyntaxError as e:
             raise ConditionError(
                 message="Invalid stop_condition syntax",
                 condition=condition,
                 phase="compile",
-                original_error=e,
+                original_error=e
             ) from e
 
-    def _evaluate_stop_condition(
-        self, inputs: Dict[str, Any], iteration: Optional[int] = None
-    ) -> bool:
+    def _evaluate_stop_condition(self, inputs: Dict[str, Any], iteration: Optional[int] = None) -> bool:
         """Evaluate stop condition with current inputs.
 
         Args:
@@ -88,7 +89,7 @@ class WhileLoopNode(BaseIterationNode):
                 inputs=inputs,
                 iteration=iteration,
                 phase="eval",
-                original_error=e,
+                original_error=e
             )
             LOGGER.warning(str(error))
             return False
@@ -103,23 +104,13 @@ class WhileLoopNode(BaseIterationNode):
 
         # Start with graph's inputs/outputs
         parsed_inputs = {
-            k: Param(
-                type=v.type,
-                required=v.required,
-                default=v.default,
-                description=v.description,
-                value=v.value,
-            )
+            k: Param(type=v.type, required=v.required, default=v.default,
+                     description=v.description, value=v.value)
             for k, v in (self.inputs or {}).items()
         }
         parsed_outputs = {
-            k: Param(
-                type=v.type,
-                required=v.required,
-                default=v.default,
-                description=v.description,
-                value=v.value,
-            )
+            k: Param(type=v.type, required=v.required, default=v.default,
+                     description=v.description, value=v.value)
             for k, v in (self.outputs or {}).items()
         }
 
@@ -141,10 +132,10 @@ class WhileLoopNode(BaseIterationNode):
 
     async def _execute(
         self,
-        state: "MemoryState",
+        state: 'MemoryState',
         context_id: Optional[str],
         parent_context: Optional[str],
-        request_id: str,
+        request_id: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Execute while loop until stop_condition is True or max_iterations reached."""
         _inputs = self.get_inputs(state, context_id, parent_context)
@@ -170,9 +161,7 @@ class WhileLoopNode(BaseIterationNode):
         if step_count >= self._max_iterations and not should_stop:
             LOGGER.warning(
                 "[title]\\[%s][/title] WhileLoopNode [highlight]%s[/highlight]: max_iterations [muted](%s)[/muted] reached.",
-                request_id,
-                self.full_name,
-                self._max_iterations,
+                request_id, self.full_name, self._max_iterations
             )
 
         iteration_metrics = {
@@ -189,7 +178,10 @@ class WhileLoopNode(BaseIterationNode):
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
-        return {"max_iterations": self._max_iterations, "stop_condition": self._stop_condition}
+        return {
+            "max_iterations": self._max_iterations,
+            "stop_condition": self._stop_condition
+        }
 
 
 def while_(**kwargs) -> WhileLoopNode:

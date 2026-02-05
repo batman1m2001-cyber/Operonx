@@ -9,7 +9,7 @@ Traces are written incrementally during workflow execution, not batched at the e
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hush.core.background import DEFAULT_DB_PATH, get_background
+from hush.core.background import get_background, DEFAULT_DB_PATH
 
 __all__ = ["TraceStore", "get_store", "DEFAULT_DB_PATH"]
 
@@ -42,7 +42,7 @@ class TraceStore:
         store.mark_request_complete("req-123", tracer_type, tracer_config)
     """
 
-    __slots__ = ["_db_path"]
+    __slots__ = ['_db_path']
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize TraceStore.

@@ -15,22 +15,20 @@ Key difference:
 import asyncio
 
 from hush.core import (
-    END,
-    PARENT,
-    START,
     GraphNode,
-    StateSchema,
     code_node,
+    START, END, PARENT,
+    StateSchema,
 )
-from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.iteration.for_loop_node import ForLoopNode
 from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
+from hush.core.nodes.iteration.base import Each
+
 
 # ============================================================================
 # Example 1: MapNode with WhileLoop Inside (Parallel Outer Loop)
 # ============================================================================
-
 
 @code_node
 def halve(value: int):
@@ -57,13 +55,16 @@ async def run_mapnode_whileloop_example():
     # Build the graph
     with GraphNode(name="mapnode_whileloop_graph") as graph:
         # Outer MapNode: iterate over [10, 20, 30] in PARALLEL
-        with MapNode(name="outer_map", inputs={"item": Each([10, 20, 30])}) as map_node:
+        with MapNode(
+            name="outer_map",
+            inputs={"item": Each([10, 20, 30])}
+        ) as map_node:
             # Inner WhileLoop: divide by 2 until value < 5
             with WhileLoopNode(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
                 stop_condition="value < 5",
-                max_iterations=5,
+                max_iterations=5
             ) as while_loop:
                 halve_node = halve(inputs={"value": PARENT["value"]})
                 halve_node["new_value"] >> PARENT["value"]
@@ -92,7 +93,7 @@ async def run_mapnode_whileloop_example():
     print("  30 -> 15 -> 7 -> 3 (stops at 3)")
     print()
     print(f"Results: {result.get('results', 'N/A')}")
-    print("Expected: [2, 2, 3]")
+    print(f"Expected: [2, 2, 3]")
     print()
 
     return result
@@ -101,7 +102,6 @@ async def run_mapnode_whileloop_example():
 # ============================================================================
 # Example 2: Nested ForLoopNode (Sequential Nested Loops)
 # ============================================================================
-
 
 @code_node
 def multiply(x: int, y: int):
@@ -123,15 +123,21 @@ async def run_nested_forloop_example():
     print("=" * 60)
     print()
 
-    with ForLoopNode(name="outer_loop", inputs={"x": Each([1, 2, 3])}) as outer:
+    with ForLoopNode(
+        name="outer_loop",
+        inputs={"x": Each([1, 2, 3])}
+    ) as outer:
         with ForLoopNode(
             name="inner_loop",
             inputs={
                 "y": Each([10, 20]),
-                "x": PARENT["x"],  # Pass outer variable to inner loop
-            },
+                "x": PARENT["x"]  # Pass outer variable to inner loop
+            }
         ) as inner:
-            node = multiply(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
+            node = multiply(
+                inputs={"x": PARENT["x"], "y": PARENT["y"]},
+                outputs={"*": PARENT}
+            )
             START >> node >> END
 
         inner["result"] >> PARENT["results"]
@@ -154,7 +160,7 @@ async def run_nested_forloop_example():
     print("  x=3: [3*10, 3*20] = [30, 60]")
     print()
     print(f"Results: {result.get('results', 'N/A')}")
-    print("Expected: [[10, 20], [20, 40], [30, 60]]")
+    print(f"Expected: [[10, 20], [20, 40], [30, 60]]")
     print()
 
     return result
@@ -163,7 +169,6 @@ async def run_nested_forloop_example():
 # ============================================================================
 # Main
 # ============================================================================
-
 
 async def main():
     """Run all examples."""

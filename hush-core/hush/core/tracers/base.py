@@ -22,9 +22,8 @@ Example:
             pass
     ```
 """
-
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -76,7 +75,6 @@ class BaseTracer(ABC):
             timeout: Maximum time to wait for shutdown
         """
         from hush.core.background import shutdown_background
-
         shutdown_background()
 
     # Keep old name for backwards compatibility
@@ -93,7 +91,7 @@ class BaseTracer(ABC):
         """
         pass
 
-    def _merge_tags(self, state: "MemoryState") -> List[str]:
+    def _merge_tags(self, state: 'MemoryState') -> List[str]:
         """Merge static tracer tags with dynamic state tags.
 
         Args:
@@ -108,7 +106,7 @@ class BaseTracer(ABC):
                 merged.append(tag)
         return merged
 
-    def flush_in_background(self, workflow_name: str, state: "MemoryState") -> None:
+    def flush_in_background(self, workflow_name: str, state: 'MemoryState') -> None:
         """Mark trace as complete and trigger background flushing.
 
         With incremental writes, trace data is already in SQLite (written during
@@ -158,14 +156,14 @@ class BaseTracer(ABC):
                 "[title]\\[%s][/title] Failed to prepare trace for [highlight]%s[/highlight]: %s",
                 state.request_id,
                 workflow_name,
-                str(e),
+                str(e)
             )
 
     def _insert_legacy_traces(
         self,
-        store: "TraceStore",
+        store: 'TraceStore',
         workflow_name: str,
-        state: "MemoryState",
+        state: 'MemoryState',
         tags: Optional[List[str]] = None,
     ) -> None:
         """Insert traces from legacy in-memory storage.

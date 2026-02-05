@@ -41,7 +41,7 @@ def test_soft_then_hard():
     print("Expected edges: a->b soft, b->c hard")
     print()
 
-    a >> b > c
+    result = a >> b > c
 
     print()
     print(f"Edges: {graph.edges}")
@@ -64,7 +64,7 @@ def test_hard_then_soft():
     print("Expected edges: b->c soft, a->c hard")
     print()
 
-    a > b >> c
+    result = a > b >> c
 
     print()
     print(f"Edges: {graph.edges}")
@@ -124,13 +124,15 @@ def test_branch_pattern():
 def test_all_hard():
     """Test: a > b > c > d (all hard edges)"""
     graph = FakeGraph()
-    FakeNode("a", graph)
-    FakeNode("b", graph)
-    FakeNode("c", graph)
-    FakeNode("d", graph)
+    a = FakeNode("a", graph)
+    b = FakeNode("b", graph)
+    c = FakeNode("c", graph)
+    d = FakeNode("d", graph)
 
     print("\n=== Testing: a > b > c > d (all hard) ===")
     print()
+
+    result = a > b > c > d
 
     print()
     print(f"Edges: {graph.edges}")
@@ -152,7 +154,7 @@ def test_all_soft():
     print("\n=== Testing: a >> b >> c >> d (all soft) ===")
     print()
 
-    a >> b >> c >> d
+    result = a >> b >> c >> d
 
     print()
     print(f"Edges: {graph.edges}")

@@ -27,10 +27,10 @@ Usage in CodeNode or custom nodes:
         }
     ```
 """
-
-import base64
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
+import base64
+
 
 # Reserved key for media attachments in node outputs
 MEDIA_KEY = "__media__"
@@ -50,7 +50,6 @@ class MediaAttachment:
         base64: Base64-encoded content for small files
         path: File path for large files (resolved during flush)
     """
-
     content_type: str
     attach_to: Literal["input", "output", "metadata"] = "metadata"
     base64: Optional[str] = None
@@ -83,7 +82,7 @@ class MediaAttachment:
         cls,
         content: bytes,
         content_type: str,
-        attach_to: Literal["input", "output", "metadata"] = "metadata",
+        attach_to: Literal["input", "output", "metadata"] = "metadata"
     ) -> "MediaAttachment":
         """Create MediaAttachment from bytes.
 
@@ -109,7 +108,7 @@ class MediaAttachment:
         cls,
         path: str,
         content_type: str,
-        attach_to: Literal["input", "output", "metadata"] = "metadata",
+        attach_to: Literal["input", "output", "metadata"] = "metadata"
     ) -> "MediaAttachment":
         """Create MediaAttachment from file path.
 

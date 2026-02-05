@@ -1,16 +1,15 @@
 """Node parser để trích xuất dữ liệu có cấu trúc từ text."""
 
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, List, Literal
 import json
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
-
 import yaml
-
-from hush.core.configs.node_config import NodeType
-from hush.core.exceptions import ParserError
 from hush.core.nodes.base import BaseNode
+from hush.core.configs.node_config import NodeType
 from hush.core.utils.common import Param
+from hush.core.exceptions import ParserError
+
 
 ParserType = Literal["json", "xml", "yaml"]
 
@@ -18,13 +17,12 @@ ParserType = Literal["json", "xml", "yaml"]
 @dataclass
 class ExtractField:
     """Biểu diễn một field cần trích xuất với path và thông tin type."""
-
     output_key: str
     chain_path: List[str]
     type_hint: str
 
     @classmethod
-    def from_string(cls, schema_str: str) -> "ExtractField":
+    def from_string(cls, schema_str: str) -> 'ExtractField':
         """Parse chuỗi schema như 'company.user.address: dict' thành ExtractField."""
         if ":" not in schema_str:
             schema_str += ": Any"
@@ -33,7 +31,11 @@ class ExtractField:
         chain_path = chain_text.strip().split(".")
         output_key = chain_path[-1]
 
-        return cls(output_key=output_key, chain_path=chain_path, type_hint=type_hint.strip())
+        return cls(
+            output_key=output_key,
+            chain_path=chain_path,
+            type_hint=type_hint.strip()
+        )
 
 
 def parse_json(text: str) -> Dict[str, Any]:
@@ -51,7 +53,6 @@ def parse_xml(text: str) -> Dict[str, Any]:
     Handles both single-root and multiple top-level elements.
     For multiple elements like <a>1</a><b>2</b>, wraps in <root> and flattens.
     """
-
     def xml_to_dict(element):
         result = {}
         for child in element:
@@ -112,7 +113,12 @@ class ParserNode(BaseNode):
 
     type: NodeType = "parser"
 
-    __slots__ = ["backend", "format", "extract", "extract_fields"]
+    __slots__ = [
+        'backend',
+        'format',
+        'extract',
+        'extract_fields'
+    ]
 
     def __init__(
         self,
@@ -120,13 +126,16 @@ class ParserNode(BaseNode):
         extract: Optional[List[str]] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs,
+        **kwargs
     ):
         if not extract:
             raise TypeError("extract là bắt buộc")
 
         # Parse schema thành format có cấu trúc
-        extract_fields = [ExtractField.from_string(schema_str) for schema_str in extract]
+        extract_fields = [
+            ExtractField.from_string(schema_str)
+            for schema_str in extract
+        ]
 
         # Parse inputs/outputs từ extract
         parsed_inputs = {"text": Param(type=str, required=True)}
@@ -180,7 +189,7 @@ class ParserNode(BaseNode):
                 message="Failed to parse input text",
                 input_text=text,
                 format_type=self.format,
-                original_error=e,
+                original_error=e
             ) from e
 
         result = {}
@@ -191,4 +200,6 @@ class ParserNode(BaseNode):
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass."""
-        return {"format": self.format}
+        return {
+            "format": self.format
+        }

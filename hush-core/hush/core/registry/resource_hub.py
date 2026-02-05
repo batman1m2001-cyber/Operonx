@@ -4,27 +4,26 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional, TYPE_CHECKING
 
 from hush.core.loggings import LOGGER
 from hush.core.utils.yaml_model import YamlModel
 
 from .config_registry import REGISTRY
-from .shortcuts.health import HealthCheckResult
 from .storage import ConfigStorage, YamlConfigStorage
+from .shortcuts.health import HealthCheckResult
 
 # Type hints for IDE support
 if TYPE_CHECKING:
-    from hush.providers.auth.keycloak import KeycloakTokenProvider
-    from hush.providers.embeddings.base import BaseEmbedding
     from hush.providers.llms.base import BaseLLM
+    from hush.providers.embeddings.base import BaseEmbedding
     from hush.providers.rerankers.base import BaseReranker
+    from hush.providers.auth.keycloak import KeycloakTokenProvider
 
 
 @dataclass
 class CacheEntry:
     """Cache entry with config and instance (lazy loaded)."""
-
     config: YamlModel
     instance: Any = None
 
@@ -48,7 +47,7 @@ class ResourceHub:
         llm = get_hub().llm("gpt-4")
     """
 
-    _instance: ClassVar[Optional["ResourceHub"]] = None
+    _instance: ClassVar[Optional['ResourceHub']] = None
 
     def __init__(self, storage: ConfigStorage):
         """Initialize hub with storage backend.
@@ -64,7 +63,7 @@ class ResourceHub:
     # ========================================================================
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "ResourceHub":
+    def from_yaml(cls, path: str | Path) -> 'ResourceHub':
         """Create hub with YAML file storage.
 
         Args:
@@ -77,7 +76,7 @@ class ResourceHub:
         return cls(storage)
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "ResourceHub":
+    def from_json(cls, path: str | Path) -> 'ResourceHub':
         """Create hub with JSON file storage.
 
         Args:
@@ -87,12 +86,11 @@ class ResourceHub:
             ResourceHub instance
         """
         from .storage import JsonConfigStorage
-
         storage = JsonConfigStorage(Path(path))
         return cls(storage)
 
     @classmethod
-    def instance(cls) -> "ResourceHub":
+    def instance(cls) -> 'ResourceHub':
         """Get singleton instance.
 
         Returns:
@@ -103,12 +101,13 @@ class ResourceHub:
         """
         if cls._instance is None:
             raise RuntimeError(
-                "ResourceHub singleton not initialized. Call ResourceHub.set_instance() first."
+                "ResourceHub singleton not initialized. "
+                "Call ResourceHub.set_instance() first."
             )
         return cls._instance
 
     @classmethod
-    def set_instance(cls, hub: "ResourceHub"):
+    def set_instance(cls, hub: 'ResourceHub'):
         """Set global singleton instance.
 
         Args:
@@ -140,7 +139,7 @@ class ResourceHub:
 
         # Backward compat: fall back to 'type' or '_class' field
         if not config_class:
-            config_type = config_data.get("type") or config_data.get("_class")
+            config_type = config_data.get('type') or config_data.get('_class')
             if config_type:
                 config_class = REGISTRY.get_class(config_type)
             if not config_class:
@@ -149,10 +148,10 @@ class ResourceHub:
 
         try:
             # Parse config (exclude type and _class fields)
-            data = {k: v for k, v in config_data.items() if k not in ("type", "_class")}
+            data = {k: v for k, v in config_data.items() if k not in ('type', '_class')}
 
             # If config class has create_config, use it to dispatch to subclass
-            if hasattr(config_class, "create_config"):
+            if hasattr(config_class, 'create_config'):
                 config = config_class.create_config(data)
             else:
                 config = config_class.model_validate(data)
@@ -172,17 +171,17 @@ class ResourceHub:
         config_type = type(config)
 
         # Use _category if available, otherwise derive from class name
-        if hasattr(config_type, "_category"):
-            category = getattr(config_type, "_category")
+        if hasattr(config_type, '_category'):
+            category = getattr(config_type, '_category')
         else:
-            category = config_type.__name__.replace("Config", "").lower()
+            category = config_type.__name__.replace('Config', '').lower()
 
         # Resource based on model uses model name
-        if hasattr(config, "model") and config.model:
+        if hasattr(config, 'model') and config.model:
             return f"{category}:{config.model}"
 
         # Resource based on name
-        if hasattr(config, "name") and config.name:
+        if hasattr(config, 'name') and config.name:
             return f"{category}:{config.name}"
 
         # Fallback to hash
@@ -258,7 +257,11 @@ class ResourceHub:
             raise KeyError(f"Config '{key}' not found in registry")
         return config
 
-    def register(self, config: YamlModel, registry_key: Optional[str] = None) -> str:
+    def register(
+        self,
+        config: YamlModel,
+        registry_key: Optional[str] = None
+    ) -> str:
         """Register new resource config.
 
         Args:
@@ -347,11 +350,11 @@ class ResourceHub:
         """
         # Build full key with llm: prefix
         full_key = key
-        for prefix in ["azure:", "openai:", "gemini:"]:
+        for prefix in ['azure:', 'openai:', 'gemini:']:
             if key.startswith(prefix):
                 full_key = f"llm:{key}"
                 break
-        if not full_key.startswith("llm:"):
+        if not full_key.startswith('llm:'):
             full_key = f"llm:{key}"
 
         # Check cache first
@@ -359,10 +362,10 @@ class ResourceHub:
             instance = self._cache[full_key].instance
 
             # Refresh token for keycloak-authenticated LLMs
-            if hasattr(instance, "_keycloak_provider"):
+            if hasattr(instance, '_keycloak_provider'):
                 fresh_token = instance._keycloak_provider.get_token()
                 # Update the OpenAI client's api_key
-                if hasattr(instance, "client"):
+                if hasattr(instance, 'client'):
                     instance.client.api_key = fresh_token
                 # Also update config for consistency
                 instance.config.api_key = fresh_token
@@ -376,14 +379,14 @@ class ResourceHub:
             raise KeyError(f"Resource '{full_key}' not found in registry")
 
         # Check for keycloak reference in api_key
-        if hasattr(config, "api_key") and isinstance(config.api_key, str):
+        if hasattr(config, 'api_key') and isinstance(config.api_key, str):
             if config.api_key.startswith("keycloak:"):
                 # Resolve token from keycloak provider
                 resolved_token = self._resolve_api_key(config.api_key)
 
                 # Create modified config with resolved token
                 config_dict = config.model_dump()
-                config_dict["api_key"] = resolved_token
+                config_dict['api_key'] = resolved_token
                 resolved_config = type(config).model_validate(config_dict)
 
                 # Create instance (don't cache - token may refresh)
@@ -416,7 +419,7 @@ class ResourceHub:
         Returns:
             BaseEmbedding instance with embed(), embed_batch() methods
         """
-        return self._get_with_prefix(key, "embedding")
+        return self._get_with_prefix(key, 'embedding')
 
     def reranker(self, key: str) -> "BaseReranker":
         """Get reranker instance by key.
@@ -424,31 +427,31 @@ class ResourceHub:
         Returns:
             BaseReranker instance with rerank() method
         """
-        return self._get_with_prefix(key, "reranking")
+        return self._get_with_prefix(key, 'reranking')
 
     def redis(self, key: str) -> Any:
         """Get Redis client by key."""
-        return self._get_with_prefix(key, "redis")
+        return self._get_with_prefix(key, 'redis')
 
     def mongo(self, key: str) -> Any:
         """Get async MongoDB client by key."""
-        return self._get_with_prefix(key, "mongo")
+        return self._get_with_prefix(key, 'mongo')
 
     def milvus(self, key: str) -> Any:
         """Get Milvus client by key."""
-        return self._get_with_prefix(key, "milvus")
+        return self._get_with_prefix(key, 'milvus')
 
     def s3(self, key: str) -> Any:
         """Get S3 client by key."""
-        return self._get_with_prefix(key, "s3")
+        return self._get_with_prefix(key, 's3')
 
     def langfuse(self, key: str) -> Any:
         """Get Langfuse client by key."""
-        return self._get_with_prefix(key, "langfuse")
+        return self._get_with_prefix(key, 'langfuse')
 
     def mcp(self, key: str) -> Any:
         """Get MCP server by key."""
-        return self._get_with_prefix(key, "mcp")
+        return self._get_with_prefix(key, 'mcp')
 
     def keycloak(self, key: str) -> "KeycloakTokenProvider":
         """Get KeycloakTokenProvider by key.
@@ -459,7 +462,7 @@ class ResourceHub:
         Returns:
             KeycloakTokenProvider instance with get_token() method
         """
-        return self._get_with_prefix(key, "keycloak")
+        return self._get_with_prefix(key, 'keycloak')
 
     # ========================================================================
     # API Key Resolution (for keycloak references)

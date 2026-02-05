@@ -8,12 +8,13 @@ This example shows:
 5. Singleton pattern
 """
 
+import asyncio
 from pathlib import Path
+
 
 # ============================================================================
 # Example 1: Basic Usage
 # ============================================================================
-
 
 def example_basic():
     """Basic usage: Load from YAML and register plugins."""
@@ -30,7 +31,7 @@ def example_basic():
 
     # Register plugins from hush-providers
     try:
-        from hush.providers.registry import EmbeddingPlugin, LLMPlugin, RerankPlugin
+        from hush.providers.registry import LLMPlugin, EmbeddingPlugin, RerankPlugin
 
         print("🔌 Registering plugins...")
         hub.register_plugins(LLMPlugin, EmbeddingPlugin, RerankPlugin)
@@ -68,7 +69,6 @@ def example_basic():
 # Example 2: Dynamic Registration
 # ============================================================================
 
-
 def example_dynamic_registration():
     """Demonstrate dynamically adding resources at runtime."""
     from hush.core.registry import ResourceHub
@@ -77,8 +77,8 @@ def example_dynamic_registration():
     hub = ResourceHub.from_memory()
 
     try:
-        from hush.providers.llms.config import OpenAIConfig
         from hush.providers.registry import LLMPlugin
+        from hush.providers.llms.config import OpenAIConfig
 
         # Register plugin
         hub.register_plugin(LLMPlugin)
@@ -89,7 +89,7 @@ def example_dynamic_registration():
             model="gpt-4-turbo",
             api_type="openai",
             api_key="sk-test-key",
-            base_url="https://api.openai.com/v1",
+            base_url="https://api.openai.com/v1"
         )
 
         # Register (won't persist since using in-memory storage)
@@ -108,7 +108,6 @@ def example_dynamic_registration():
 # Example 3: Singleton Pattern
 # ============================================================================
 
-
 def example_singleton():
     """Demonstrate singleton pattern for global registry."""
     from hush.core.registry import ResourceHub
@@ -119,7 +118,6 @@ def example_singleton():
 
     try:
         from hush.providers.registry import LLMPlugin
-
         hub.register_plugin(LLMPlugin)
     except ImportError:
         pass
@@ -140,17 +138,14 @@ def example_singleton():
 # Example 4: Custom Plugin
 # ============================================================================
 
-
 def example_custom_plugin():
     """Create and use a custom plugin."""
     from typing import Any, Type
-
-    from hush.core.registry import ResourceConfig, ResourceHub, ResourcePlugin
+    from hush.core.registry import ResourceHub, ResourcePlugin, ResourceConfig
 
     # Define a custom config
     class CacheConfig(ResourceConfig):
         """Configuration for a simple cache."""
-
         host: str = "localhost"
         port: int = 6379
         name: str = "default"
@@ -192,7 +187,11 @@ def example_custom_plugin():
     print()
 
     # Add a cache resource
-    cache_config = CacheConfig(host="localhost", port=6379, name="session-cache")
+    cache_config = CacheConfig(
+        host="localhost",
+        port=6379,
+        name="session-cache"
+    )
     key = hub.register(cache_config)
     print(f"   ✓ Registered: {key}")
 
@@ -209,7 +208,6 @@ def example_custom_plugin():
 # Example 5: Testing Pattern
 # ============================================================================
 
-
 def example_testing_pattern():
     """Show how to use in-memory storage for testing."""
     from hush.core.registry import ResourceHub
@@ -221,20 +219,18 @@ def example_testing_pattern():
     print("   ✓ In-memory hub created")
 
     try:
-        from hush.providers.llms.config import OpenAIConfig
         from hush.providers.registry import LLMPlugin
+        from hush.providers.llms.config import OpenAIConfig
 
         test_hub.register_plugin(LLMPlugin)
 
         # Add test resources
-        test_hub.register(
-            OpenAIConfig(
-                model="gpt-4",
-                api_type="openai",
-                api_key="test-key-123",
-                base_url="https://api.openai.com/v1",
-            )
-        )
+        test_hub.register(OpenAIConfig(
+            model="gpt-4",
+            api_type="openai",
+            api_key="test-key-123",
+            base_url="https://api.openai.com/v1"
+        ))
 
         print(f"   ✓ Test resources: {test_hub.keys()}")
 
@@ -249,7 +245,6 @@ def example_testing_pattern():
 # ============================================================================
 # Main
 # ============================================================================
-
 
 def main():
     """Run all examples."""
@@ -270,7 +265,6 @@ def main():
         except Exception as e:
             print(f"❌ Error: {e}")
             import traceback
-
             traceback.print_exc()
         print()
 

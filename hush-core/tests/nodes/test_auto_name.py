@@ -1,12 +1,13 @@
 """Tests for auto-naming nodes from variable assignment."""
 
+import pytest
 from hush.core.nodes.base import BaseNode
-from hush.core.nodes.flow.branch_node import BranchNode
 from hush.core.nodes.graph.graph_node import GraphNode
-from hush.core.nodes.iteration.for_loop_node import ForLoopNode
-from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.transform.code_node import CodeNode
 from hush.core.nodes.transform.parser_node import ParserNode
+from hush.core.nodes.iteration.map_node import MapNode
+from hush.core.nodes.iteration.for_loop_node import ForLoopNode
+from hush.core.nodes.flow.branch_node import BranchNode
 
 
 class TestAutoName:

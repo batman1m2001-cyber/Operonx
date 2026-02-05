@@ -10,7 +10,6 @@ from hush.core.utils.yaml_model import YamlModel
 @dataclass
 class ConfigEntry:
     """Entry containing config class and its factory."""
-
     config_class: Type[YamlModel]
     factory: Callable[[YamlModel], Any]
 
@@ -32,7 +31,7 @@ class ConfigRegistry:
         instance = REGISTRY.create(config)
     """
 
-    _instance: Optional["ConfigRegistry"] = None
+    _instance: Optional['ConfigRegistry'] = None
 
     def __init__(self):
         # category -> ConfigEntry (one per category)
@@ -41,7 +40,7 @@ class ConfigRegistry:
         self._class_entries: Dict[str, ConfigEntry] = {}
 
     @classmethod
-    def instance(cls) -> "ConfigRegistry":
+    def instance(cls) -> 'ConfigRegistry':
         """Get global singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
@@ -52,14 +51,18 @@ class ConfigRegistry:
         """Reset singleton (for testing)."""
         cls._instance = None
 
-    def register(self, config_class: Type[YamlModel], factory: Callable[[YamlModel], Any]) -> None:
+    def register(
+        self,
+        config_class: Type[YamlModel],
+        factory: Callable[[YamlModel], Any]
+    ) -> None:
         """Register config class with factory.
 
         Args:
             config_class: Config class with _category attribute
             factory: Callable to create resource instance from config
         """
-        category = getattr(config_class, "_category", "_default")
+        category = getattr(config_class, '_category', '_default')
         entry = ConfigEntry(config_class=config_class, factory=factory)
 
         # Check duplicate category
@@ -98,7 +101,10 @@ class ConfigRegistry:
         entry = self.get_entry(category)
         return entry.config_class if entry else None
 
-    def get_factory(self, config_class: Type[YamlModel]) -> Optional[Callable]:
+    def get_factory(
+        self,
+        config_class: Type[YamlModel]
+    ) -> Optional[Callable]:
         """Get factory for a config class."""
         entry = self._class_entries.get(config_class.__name__)
         return entry.factory if entry else None

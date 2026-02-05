@@ -1,18 +1,18 @@
 """Base class cho tất cả các node trong workflow."""
 
-import asyncio
-import traceback
-import uuid
 from abc import ABC
+from typing import Dict, Any, Callable, Optional, List, TYPE_CHECKING
 from datetime import datetime
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+import traceback
+import asyncio
+import uuid
 
 from hush.core.configs.node_config import NodeType
+from hush.core.utils.context import get_current, _current_graph
+from hush.core.utils.common import unique_name, Param, _auto_name
 from hush.core.loggings import LOGGER, format_log_data
 from hush.core.states.ref import Ref
-from hush.core.utils.common import Param, _auto_name, unique_name
-from hush.core.utils.context import get_current
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -30,10 +30,9 @@ class SoftEdge:
     Soft edge không tính vào ready_count, dùng cho branch outputs
     khi chỉ một nhánh được thực thi.
     """
+    __slots__ = ['node']
 
-    __slots__ = ["node"]
-
-    def __init__(self, node: "BaseNode"):
+    def __init__(self, node: 'BaseNode'):
         self.node = node
 
     @property
@@ -47,12 +46,12 @@ class SoftEdge:
         if isinstance(other, list):
             if add_edge is not None:
                 for node in other:
-                    edge_type = "condition" if getattr(node, "type", None) == "branch" else "normal"
+                    edge_type = "condition" if getattr(node, 'type', None) == "branch" else "normal"
                     add_edge(node.name, self.node.name, edge_type, soft=True)
             return self.node  # Return unwrapped for chaining
-        elif getattr(other, "name", None) is not None:
+        elif getattr(other, 'name', None) is not None:
             # single_node >> ~self
-            edge_type = "condition" if getattr(other, "type", None) == "branch" else "normal"
+            edge_type = "condition" if getattr(other, 'type', None) == "branch" else "normal"
             if add_edge is not None:
                 add_edge(other.name, self.node.name, edge_type, soft=True)
             return self.node
@@ -68,19 +67,10 @@ class SoftEdge:
 
 
 # Base init keys shared by ALL nodes (from BaseNode.__init__)
-_BASE_INIT_KEYS = frozenset(
-    {
-        "name",
-        "id",
-        "description",
-        "inputs",
-        "outputs",
-        "sources",
-        "targets",
-        "stream",
-        "start",
-    }
-)
+_BASE_INIT_KEYS = frozenset({
+    'name', 'id', 'description', 'inputs', 'outputs',
+    'sources', 'targets', 'stream', 'start',
+})
 
 
 def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
@@ -158,22 +148,22 @@ class BaseNode(ABC):
     INNER_PROCESS = "__inner__"
 
     __slots__ = [
-        "id",
-        "name",
-        "description",
-        "type",
-        "stream",
-        "start",
-        "end",
-        "verbose",
-        "sources",
-        "targets",
-        "inputs",
-        "outputs",
-        "core",
-        "father",
-        "contain_generation",
-        "enabled",
+        'id',
+        'name',
+        'description',
+        'type',
+        'stream',
+        'start',
+        'end',
+        'verbose',
+        'sources',
+        'targets',
+        'inputs',
+        'outputs',
+        'core',
+        'father',
+        'contain_generation',
+        'enabled',
     ]
 
     def __init__(
@@ -190,7 +180,7 @@ class BaseNode(ABC):
         end: bool = False,
         contain_generation: bool = False,
         verbose: bool = True,
-        enabled: bool = True,
+        enabled: bool = True
     ):
         self.id = id or uuid.uuid4().hex
         if name is None:
@@ -217,10 +207,8 @@ class BaseNode(ABC):
             add_node(self)
 
         # Validate tên node
-        if self.name and not self.name.replace("_", "").replace("-", "").isalnum():
-            raise ValueError(
-                f"Tên node '{self.name}' chỉ được chứa ký tự alphanumeric, underscore và hyphen"
-            )
+        if self.name and not self.name.replace('_', '').replace('-', '').isalnum():
+            raise ValueError(f"Tên node '{self.name}' chỉ được chứa ký tự alphanumeric, underscore và hyphen")
 
         # Chuẩn hóa inputs/outputs thành Dict[str, Param]
         self.inputs: Dict[str, Param] = self._normalize_params(inputs)
@@ -234,7 +222,7 @@ class BaseNode(ABC):
                     f"Node '{self.name}' có key trùng giữa input/output: {overlapping_keys}. "
                     "Tên biến input và output phải khác nhau."
                 )
-
+    
     def _resolve_value(self, key: str, value: Any) -> Any:
         """Chuyển đổi value thành Ref hoặc giữ nguyên literal.
 
@@ -245,10 +233,9 @@ class BaseNode(ABC):
             - PARENT["x"] → Ref(father, "x")
             - literal → giữ nguyên
         """
-
         def resolve_node(node):
             """Resolve PARENT thành father node."""
-            if hasattr(node, "name") and node.name == "__PARENT__":
+            if hasattr(node, 'name') and node.name == "__PARENT__":
                 return self.father if self.father else node
             return node
 
@@ -265,7 +252,10 @@ class BaseNode(ABC):
         # Giá trị literal
         return value
 
-    def _normalize_params(self, params: Any) -> Dict[str, Param]:
+    def _normalize_params(
+        self,
+        params: Any
+    ) -> Dict[str, Param]:
         """Chuẩn hóa inputs/outputs thành Dict[str, Param].
 
         Các format được hỗ trợ:
@@ -288,7 +278,7 @@ class BaseNode(ABC):
                 # Xử lý wildcard "*" key - store for later processing in _merge_params
                 if key == "*":
                     # Validate that value is a node reference (PARENT or another node)
-                    if hasattr(value, "name"):
+                    if hasattr(value, 'name'):
                         result["__FORWARD_WILDCARD__"] = value
                     else:
                         raise ValueError(
@@ -316,7 +306,9 @@ class BaseNode(ABC):
         return result
 
     def _merge_params(
-        self, schema: Dict[str, Param], user_provided: Dict[str, Any]
+        self,
+        schema: Dict[str, Param],
+        user_provided: Dict[str, Any]
     ) -> Dict[str, Param]:
         """Merge schema (từ parsing) với user-provided inputs/outputs.
 
@@ -334,13 +326,8 @@ class BaseNode(ABC):
         """
         # Copy schema để không mutate original
         result = {
-            k: Param(
-                type=v.type,
-                required=v.required,
-                default=v.default,
-                description=v.description,
-                value=v.value,
-            )
+            k: Param(type=v.type, required=v.required, default=v.default,
+                     description=v.description, value=v.value)
             for k, v in schema.items()
         }
 
@@ -373,7 +360,7 @@ class BaseNode(ABC):
         # Then, apply wildcard forwarding for remaining keys
         if wildcard_node is not None:
             # Resolve PARENT thành father
-            if hasattr(wildcard_node, "name") and wildcard_node.name == "__PARENT__":
+            if hasattr(wildcard_node, 'name') and wildcard_node.name == "__PARENT__":
                 resolved_node = self.father if self.father else wildcard_node
             else:
                 resolved_node = wildcard_node
@@ -385,14 +372,17 @@ class BaseNode(ABC):
 
         return result
 
-    def _merge_single_param(self, result: Dict[str, Param], key: str, value: Any) -> None:
+    def _merge_single_param(
+        self,
+        result: Dict[str, Param],
+        key: str,
+        value: Any
+    ) -> None:
         """Merge một param vào result dict."""
         if key in result:
             # Key đã tồn tại → chỉ gán value
             if isinstance(value, Param):
-                result[key].value = (
-                    self._resolve_value(key, value.value) if value.value is not None else None
-                )
+                result[key].value = self._resolve_value(key, value.value) if value.value is not None else None
             else:
                 result[key].value = self._resolve_value(key, value)
         else:
@@ -416,14 +406,14 @@ class BaseNode(ABC):
         """Đường dẫn đầy đủ kèm context_id."""
         return f"{self.full_name}[{context_id or 'main'}]"
 
-    def __getitem__(self, item) -> "Ref":
+    def __getitem__(self, item) -> 'Ref':
         """Cho phép cú pháp node["var"] để tham chiếu output.
 
         - node["var"] → Ref đến output cụ thể
         """
         return Ref(self, item)
 
-    def __invert__(self) -> "SoftEdge":
+    def __invert__(self) -> 'SoftEdge':
         """~node: Đánh dấu node này cho soft edge connection.
 
         Sử dụng:
@@ -461,7 +451,7 @@ class BaseNode(ABC):
                     else:
                         add_edge(self.name, node.name, edge_type)
             return other
-        elif getattr(other, "name", None) is not None:
+        elif getattr(other, 'name', None) is not None:
             if add_edge is not None:
                 add_edge(self.name, other.name, edge_type)
             return other
@@ -499,7 +489,7 @@ class BaseNode(ABC):
                 for node in other:
                     add_edge(self.name, node.name, edge_type, soft=True)
             return other
-        elif getattr(other, "name", None) is not None:
+        elif getattr(other, 'name', None) is not None:
             if add_edge is not None:
                 add_edge(self.name, other.name, edge_type, soft=True)
             return other
@@ -522,7 +512,7 @@ class BaseNode(ABC):
                 for node in other:
                     add_edge(node.name, self.name, edge_type, soft=True)
             return self  # Return self để chain tiếp: [a, b] > self > next
-        elif getattr(other, "name", None) is not None:
+        elif getattr(other, 'name', None) is not None:
             if add_edge is not None:
                 add_edge(other.name, self.name, edge_type, soft=True)
             return self
@@ -544,7 +534,7 @@ class BaseNode(ABC):
             If this node is a GraphNode that hasn't been built yet,
             it will be automatically built before execution.
         """
-        from hush.core.states import MemoryState, StateSchema
+        from hush.core.states import StateSchema, MemoryState
 
         # Auto-build if this is an unbuilt GraphNode
         self._auto_build_if_needed()
@@ -556,10 +546,9 @@ class BaseNode(ABC):
 
         # Chạy đồng bộ
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
             # Nếu đã trong async context, chạy trong thread pool
             import concurrent.futures
-
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = pool.submit(asyncio.run, self.run(state)).result()
         except RuntimeError:
@@ -574,8 +563,8 @@ class BaseNode(ABC):
         This enables convenient testing: graph() will auto-build before execution.
         """
         # Check if this is a GraphNode (has _is_building attribute)
-        if hasattr(self, "_is_building") and self._is_building:
-            if hasattr(self, "build"):
+        if hasattr(self, '_is_building') and self._is_building:
+            if hasattr(self, 'build'):
                 LOGGER.debug("Auto-building graph '%s' before execution", self.name)
                 self.build()
 
@@ -583,7 +572,10 @@ class BaseNode(ABC):
         return True
 
     def get_inputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+        self,
+        state: 'MemoryState',
+        context_id: str,
+        parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Lấy giá trị input từ state dựa trên ánh xạ kết nối.
 
@@ -629,7 +621,10 @@ class BaseNode(ABC):
         return result
 
     def get_outputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+        self,
+        state: 'MemoryState',
+        context_id: str,
+        parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Lấy giá trị output từ state.
 
@@ -647,7 +642,12 @@ class BaseNode(ABC):
             result[var_name] = state[self.full_name, var_name, context_id]
         return result
 
-    def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
+    def store_result(
+        self,
+        state: 'MemoryState',
+        result: Dict[str, Any],
+        context_id: str
+    ) -> None:
         """Lưu dict kết quả vào state.
 
         Sử dụng state[node, var, ctx] = value cho lưu trữ O(1) dựa trên index.
@@ -670,7 +670,7 @@ class BaseNode(ABC):
         context_id: Optional[str],
         inputs: Dict[str, Any],
         outputs: Dict[str, Any],
-        duration_ms: float,
+        duration_ms: float
     ) -> None:
         """Log tóm tắt thực thi node với inputs, outputs và duration."""
         # Check both verbose flag and logger level before formatting
@@ -683,14 +683,14 @@ class BaseNode(ABC):
                 context_id or "main",
                 duration_ms,
                 format_log_data(inputs),
-                format_log_data(outputs),
+                format_log_data(outputs)
             )
 
     async def run(
         self,
-        state: "MemoryState",
+        state: 'MemoryState',
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
+        parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Thực thi node.
 
@@ -723,13 +723,11 @@ class BaseNode(ABC):
 
             self.store_result(state, _outputs, context_id)
 
-        except Exception:
+        except Exception as e:
             error_msg = traceback.format_exc()
             LOGGER.error(
                 "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]:\n%s",
-                request_id,
-                self.name,
-                error_msg.rstrip(),
+                request_id, self.name, error_msg.rstrip()
             )
             state[self.full_name, "error", context_id] = error_msg
 
@@ -770,7 +768,6 @@ class BaseNode(ABC):
 
     def metadata(self) -> Dict[str, Any]:
         """Tạo dictionary metadata cho node."""
-
         def get_connect_key(param: Param):
             if isinstance(param.value, Ref):
                 return {param.value.node: param.value.var}
@@ -779,7 +776,7 @@ class BaseNode(ABC):
         result = {
             "id": self.id,
             "name": self.full_name,
-            "type": self.type,  # Already a lowercase string (Literal type)
+            "type": self.type  # Already a lowercase string (Literal type)
         }
 
         if self.description:
@@ -826,12 +823,12 @@ class DummyNode(BaseNode):
 
         if self == START:
             current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
+            if current_graph and hasattr(current_graph, 'add_edge'):
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(self.name, node.name)
                     return other
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(self.name, other.name)
                     return other
         return super().__rshift__(other)
@@ -839,12 +836,12 @@ class DummyNode(BaseNode):
     def __rrshift__(self, other):
         """[nodes] >> START or [nodes] >> END"""
         current_graph = get_current()
-        if current_graph and hasattr(current_graph, "add_edge"):
+        if current_graph and hasattr(current_graph, 'add_edge'):
             if self == START:
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(self.name, node.name)
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(self.name, other.name)
                 return self
 
@@ -852,7 +849,7 @@ class DummyNode(BaseNode):
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(node.name, self.name)
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(other.name, self.name)
                 return self
 
@@ -862,12 +859,12 @@ class DummyNode(BaseNode):
         """node >> END"""
         if self == END:
             current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
+            if current_graph and hasattr(current_graph, 'add_edge'):
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(node.name, self.name)
                     return self
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(other.name, self.name)
                     return self
         return self
@@ -876,12 +873,12 @@ class DummyNode(BaseNode):
         """START > node or node > END (soft edge)"""
         if self == START:
             current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
+            if current_graph and hasattr(current_graph, 'add_edge'):
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(self.name, node.name, soft=True)
                     return other
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(self.name, other.name, soft=True)
                     return other
         return super().__gt__(other)
@@ -889,12 +886,12 @@ class DummyNode(BaseNode):
     def __rgt__(self, other):
         """[nodes] > END (soft edge)"""
         current_graph = get_current()
-        if current_graph and hasattr(current_graph, "add_edge"):
+        if current_graph and hasattr(current_graph, 'add_edge'):
             if self == END:
                 if isinstance(other, list):
                     for node in other:
                         current_graph.add_edge(node.name, self.name, soft=True)
-                elif hasattr(other, "name"):
+                elif hasattr(other, 'name'):
                     current_graph.add_edge(other.name, self.name, soft=True)
                 return self
         return self

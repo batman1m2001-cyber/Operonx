@@ -6,7 +6,7 @@ Bao gồm:
 - if_: Shorthand để bắt đầu branch declaration
 """
 
-from .branch_node import Branch, BranchNode, if_
+from .branch_node import BranchNode, Branch, if_
 
 __all__ = [
     "BranchNode",

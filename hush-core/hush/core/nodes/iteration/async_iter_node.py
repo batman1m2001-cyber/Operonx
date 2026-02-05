@@ -1,24 +1,14 @@
 """Async iteration node for processing async streaming data."""
 
+from typing import Dict, Any, Optional, AsyncIterable, Callable, Awaitable, TYPE_CHECKING, List, Tuple
 import asyncio
 import os
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncIterable,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-)
 
 from hush.core.configs.node_config import NodeType
-from hush.core.loggings import LOGGER
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.states.ref import Ref
 from hush.core.utils.common import Param
+from hush.core.loggings import LOGGER
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -56,7 +46,7 @@ class AsyncIterNode(BaseIterationNode):
 
     type: NodeType = "stream"
 
-    __slots__ = ["_max_concurrency", "_callback", "_batch_fn"]
+    __slots__ = ['_max_concurrency', '_callback', '_batch_fn']
 
     def __init__(
         self,
@@ -64,7 +54,7 @@ class AsyncIterNode(BaseIterationNode):
         callback: Optional[Callable[[Any], Awaitable[None]]] = None,
         batch_fn: Optional[Callable[[List, Any], bool]] = None,
         max_concurrency: Optional[int] = None,
-        **kwargs,
+        **kwargs
     ):
         """Initialize AsyncIterNode.
 
@@ -106,18 +96,17 @@ class AsyncIterNode(BaseIterationNode):
             parsed_inputs["batch"] = Param(type=List, required=False)
             parsed_inputs["batch_size"] = Param(type=int, required=False)
 
-        parsed_inputs.update(
-            {
-                var_name: Param(type=Any, required=isinstance(value, Ref), value=value)
-                for var_name, value in self._broadcast_inputs.items()
-            }
-        )
+        parsed_inputs.update({
+            var_name: Param(type=Any, required=isinstance(value, Ref), value=value)
+            for var_name, value in self._broadcast_inputs.items()
+        })
 
         # Build outputs
         existing_outputs = self.outputs or {}
         graph_outputs = self.outputs or {}
         parsed_outputs = {
-            key: Param(type=List, required=param.required) for key, param in graph_outputs.items()
+            key: Param(type=List, required=param.required)
+            for key, param in graph_outputs.items()
         }
         parsed_outputs["iteration_metrics"] = Param(type=Dict, required=False)
 
@@ -132,7 +121,7 @@ class AsyncIterNode(BaseIterationNode):
 
         self.inputs = parsed_inputs
 
-    def _get_source(self, state: "MemoryState", parent_context: Optional[str]) -> AsyncIterable:
+    def _get_source(self, state: 'MemoryState', parent_context: Optional[str]) -> AsyncIterable:
         """Get async iterable source, resolving Ref if needed."""
         iter_var_name = list(self._each.keys())[0]
         source = self._each[iter_var_name]
@@ -146,9 +135,9 @@ class AsyncIterNode(BaseIterationNode):
         self,
         chunk_data: Dict[str, Any],
         chunk_id: int,
-        state: "MemoryState",
+        state: 'MemoryState',
         request_id: str,
-        base_context: Optional[str],
+        base_context: Optional[str]
     ) -> Dict[str, Any]:
         """Process single chunk through graph."""
         chunk_context = get_iter_context((base_context + ".") if base_context else "", chunk_id)
@@ -164,12 +153,7 @@ class AsyncIterNode(BaseIterationNode):
                 "success": True,
             }
         except Exception as e:
-            LOGGER.error(
-                "[title]\\[%s][/title] Error processing chunk [value]%s[/value]: %s",
-                request_id,
-                chunk_id,
-                e,
-            )
+            LOGGER.error("[title]\\[%s][/title] Error processing chunk [value]%s[/value]: %s", request_id, chunk_id, e)
             return {
                 "chunk_id": chunk_id,
                 "result": None,
@@ -179,10 +163,10 @@ class AsyncIterNode(BaseIterationNode):
 
     async def _execute(
         self,
-        state: "MemoryState",
+        state: 'MemoryState',
         context_id: Optional[str],
         parent_context: Optional[str],
-        request_id: str,
+        request_id: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Process streaming data with concurrent processing but ordered output."""
         source = self._get_source(state, parent_context)
@@ -192,11 +176,7 @@ class AsyncIterNode(BaseIterationNode):
         _inputs = {iter_var_name: "<AsyncIterable>", **broadcast_values}
 
         if source is None:
-            LOGGER.warning(
-                "[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: source is None.",
-                request_id,
-                self.full_name,
-            )
+            LOGGER.warning("[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: source is None.", request_id, self.full_name)
 
         semaphore = asyncio.Semaphore(self._max_concurrency)
         result_queue: asyncio.Queue = asyncio.Queue()
@@ -223,18 +203,14 @@ class AsyncIterNode(BaseIterationNode):
                         batch_data = broadcast_values.copy()
                         batch_data["batch"] = current_batch
                         batch_data["batch_size"] = len(current_batch)
-                        tasks.append(
-                            asyncio.create_task(process_with_semaphore(batch_data, total_chunks))
-                        )
+                        tasks.append(asyncio.create_task(process_with_semaphore(batch_data, total_chunks)))
                         total_chunks += 1
                         current_batch = []
                     current_batch.append(item)
                 else:
                     chunk_data = broadcast_values.copy()
                     chunk_data[iter_var_name] = item
-                    tasks.append(
-                        asyncio.create_task(process_with_semaphore(chunk_data, total_chunks))
-                    )
+                    tasks.append(asyncio.create_task(process_with_semaphore(chunk_data, total_chunks)))
                     total_chunks += 1
 
             if self._batch_fn and current_batch:
@@ -292,9 +268,7 @@ class AsyncIterNode(BaseIterationNode):
         if total_chunks > 0 and error_count / total_chunks > 0.1:
             LOGGER.warning(
                 "[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted].",
-                request_id,
-                self.full_name,
-                f"{error_count / total_chunks:.1%}",
+                request_id, self.full_name, f"{error_count / total_chunks:.1%}"
             )
 
         if self._callback:

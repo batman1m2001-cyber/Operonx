@@ -1,6 +1,6 @@
 """Cell lưu trữ giá trị đa context cho workflow state."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional, Dict
 
 DEFAULT_CONTEXT = "main"
 
@@ -16,7 +16,7 @@ class Cell:
         default_value: Giá trị mặc định khi context không tồn tại
     """
 
-    __slots__ = ("contexts", "default_value")
+    __slots__ = ('contexts', 'default_value')
 
     def __init__(self, default_value: Any = None):
         """Khởi tạo Cell với giá trị mặc định.

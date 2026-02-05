@@ -1,9 +1,9 @@
 """Các model config cho logging."""
 
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Optional, List, Union, Dict, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class HandlerConfig(BaseModel):

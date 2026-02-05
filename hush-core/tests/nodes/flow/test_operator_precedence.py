@@ -58,7 +58,7 @@ def test_matmul_operator():
     print("Expected: (a @ b) >> c -> a->b soft, b->c hard")
     print()
 
-    a @ b >> c
+    result = a @ b >> c
 
     print()
     print(f"Edges: {graph.edges}")
@@ -79,7 +79,7 @@ def test_or_operator():
     print("Expected to FAIL: a | (b >> c) -> b->c hard, a->c soft")
     print()
 
-    a | b >> c
+    result = a | b >> c
 
     print()
     print(f"Edges: {graph.edges}")
@@ -102,7 +102,7 @@ def test_mul_operator():
     print("Expected: (a * b) >> c -> a->b soft, b->c hard")
     print()
 
-    a * b >> c
+    result = a * b >> c
 
     print()
     print(f"Edges: {graph.edges}")

@@ -1,26 +1,24 @@
 """Tests for the ResourceHub and ConfigRegistry system."""
 
-from typing import ClassVar
-
 import pytest
+from typing import Any, ClassVar
 
+from hush.core.utils.yaml_model import YamlModel
 from hush.core.registry import (
+    ResourceHub,
+    ConfigRegistry,
     REGISTRY,
     CacheEntry,
-    ConfigRegistry,
     HealthCheckResult,
-    ResourceHub,
 )
-from hush.core.utils.yaml_model import YamlModel
+
 
 # ============================================================================
 # Test Fixtures: Mock Config and Service
 # ============================================================================
 
-
 class MockServiceConfig(YamlModel):
     """Mock config for testing."""
-
     _category: ClassVar[str] = "service"
 
     name: str = "default"
@@ -30,7 +28,6 @@ class MockServiceConfig(YamlModel):
 
 class MockService:
     """Mock service for testing."""
-
     def __init__(self, config: MockServiceConfig):
         self.config = config
         self.name = config.name
@@ -49,7 +46,6 @@ def mock_service_factory(config: MockServiceConfig) -> MockService:
 # ============================================================================
 # Fixtures
 # ============================================================================
-
 
 @pytest.fixture(autouse=True)
 def cleanup_registries():
@@ -84,13 +80,16 @@ def hub(tmp_path, registry):
 @pytest.fixture
 def mock_config():
     """Create a mock config for testing."""
-    return MockServiceConfig(name="test-service", host="example.com", port=9000)
+    return MockServiceConfig(
+        name="test-service",
+        host="example.com",
+        port=9000
+    )
 
 
 # ============================================================================
 # Tests: ConfigRegistry
 # ============================================================================
-
 
 class TestConfigRegistry:
     """Test ConfigRegistry functionality."""
@@ -126,7 +125,6 @@ class TestConfigRegistry:
 
     def test_create_no_factory_raises(self, registry):
         """Test create raises error when no factory registered."""
-
         class UnregisteredConfig(YamlModel):
             value: str = "test"
 
@@ -136,7 +134,6 @@ class TestConfigRegistry:
 
     def test_duplicate_category_raises(self, registry):
         """Test that registering duplicate category raises error."""
-
         class ConfigA(YamlModel):
             _category: ClassVar[str] = "test"
 
@@ -150,7 +147,6 @@ class TestConfigRegistry:
 
     def test_different_categories(self, registry):
         """Test that different categories resolve to different classes."""
-
         class ConfigA(YamlModel):
             _category: ClassVar[str] = "llm"
             value: str = "a"
@@ -185,7 +181,6 @@ class TestConfigRegistry:
 # Tests: ResourceHub Creation
 # ============================================================================
 
-
 class TestHubCreation:
     """Test creating ResourceHub instances."""
 
@@ -205,7 +200,6 @@ class TestHubCreation:
 # ============================================================================
 # Tests: Resource Registration
 # ============================================================================
-
 
 class TestResourceRegistration:
     """Test registering and retrieving resources."""
@@ -244,7 +238,6 @@ class TestResourceRegistration:
 # Tests: Resource Removal
 # ============================================================================
 
-
 class TestResourceRemoval:
     """Test removing resources."""
 
@@ -278,7 +271,6 @@ class TestResourceRemoval:
 # Tests: Key Operations
 # ============================================================================
 
-
 class TestKeyOperations:
     """Test key listing and checking operations."""
 
@@ -308,7 +300,6 @@ class TestKeyOperations:
 # Tests: Error Handling
 # ============================================================================
 
-
 class TestErrorHandling:
     """Test error handling."""
 
@@ -326,7 +317,6 @@ class TestErrorHandling:
 # ============================================================================
 # Tests: Singleton Pattern
 # ============================================================================
-
 
 class TestSingletonPattern:
     """Test singleton instance management."""
@@ -357,7 +347,6 @@ class TestSingletonPattern:
 # ============================================================================
 # Tests: File Persistence
 # ============================================================================
-
 
 class TestFilePersistence:
     """Test file-based persistence."""
@@ -413,10 +402,8 @@ class TestFilePersistence:
 # Tests: Type-based Registration
 # ============================================================================
 
-
 class MockLLMConfig(YamlModel):
     """Mock LLM config for testing category-based registration."""
-
     _category: ClassVar[str] = "llm"
 
     name: str = "default"
@@ -425,7 +412,6 @@ class MockLLMConfig(YamlModel):
 
 class MockEmbeddingConfig(YamlModel):
     """Mock embedding config for testing."""
-
     _category: ClassVar[str] = "embedding"
 
     name: str = "default"
@@ -434,7 +420,6 @@ class MockEmbeddingConfig(YamlModel):
 
 class MockLLMService:
     """Mock LLM service."""
-
     def __init__(self, config: MockLLMConfig):
         self.config = config
         self.model = config.model
@@ -442,7 +427,6 @@ class MockLLMService:
 
 class MockEmbeddingService:
     """Mock embedding service."""
-
     def __init__(self, config: MockEmbeddingConfig):
         self.config = config
         self.dimensions = config.dimensions
@@ -552,7 +536,6 @@ embedding:my-embedding:
 # Tests: Health Check
 # ============================================================================
 
-
 class TestHealthCheck:
     """Test health check functionality."""
 
@@ -581,7 +564,6 @@ class TestHealthCheck:
 # ============================================================================
 # Tests: CacheEntry
 # ============================================================================
-
 
 class TestCacheEntry:
     """Test CacheEntry dataclass."""

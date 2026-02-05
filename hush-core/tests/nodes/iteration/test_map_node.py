@@ -1,20 +1,18 @@
 """Tests for MapNode - parallel iteration node."""
 
-import asyncio
-
 import pytest
-
-from hush.core.nodes.base import END, PARENT, START
-from hush.core.nodes.graph.graph_node import GraphNode
-from hush.core.nodes.iteration.base import Each
+import asyncio
 from hush.core.nodes.iteration.map_node import MapNode, map_
+from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
-from hush.core.states import MemoryState, StateSchema
+from hush.core.nodes.graph.graph_node import GraphNode
+from hush.core.nodes.base import START, END, PARENT
+from hush.core.states import StateSchema, MemoryState
+
 
 # ============================================================
 # Test 1: Simple Iteration with Each()
 # ============================================================
-
 
 class TestSimpleIteration:
     """Test basic iteration with Each() wrapper."""
@@ -22,12 +20,14 @@ class TestSimpleIteration:
     @pytest.mark.asyncio
     async def test_double_values(self):
         """Test simple doubling of values."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with MapNode(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
+        with MapNode(
+            name="double_loop",
+            inputs={"value": Each([1, 2, 3, 4, 5])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -36,13 +36,12 @@ class TestSimpleIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [2, 4, 6, 8, 10]
+        assert result['result'] == [2, 4, 6, 8, 10]
 
 
 # ============================================================
 # Test 2: Iteration with Broadcast
 # ============================================================
-
 
 class TestBroadcastIteration:
     """Test iteration with broadcast values."""
@@ -50,7 +49,6 @@ class TestBroadcastIteration:
     @pytest.mark.asyncio
     async def test_multiply_with_broadcast(self):
         """Test multiplication with broadcast multiplier."""
-
         @code_node
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
@@ -59,12 +57,12 @@ class TestBroadcastIteration:
             name="multiply_loop",
             inputs={
                 "value": Each([1, 2, 3]),
-                "multiplier": 10,  # broadcast
-            },
+                "multiplier": 10  # broadcast
+            }
         ) as loop:
             node = multiply(
                 inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -73,13 +71,12 @@ class TestBroadcastIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [10, 20, 30]
+        assert result['result'] == [10, 20, 30]
 
 
 # ============================================================
 # Test 3: Multiple Each() Variables (Zip)
 # ============================================================
-
 
 class TestMultipleEachVariables:
     """Test iteration with multiple Each() variables (zipped)."""
@@ -87,13 +84,16 @@ class TestMultipleEachVariables:
     @pytest.mark.asyncio
     async def test_zip_two_lists(self):
         """Test zipping two lists together."""
-
         @code_node
         def add(x: int, y: int):
             return {"sum": x + y}
 
         with MapNode(
-            name="add_loop", inputs={"x": Each([1, 2, 3]), "y": Each([10, 20, 30])}
+            name="add_loop",
+            inputs={
+                "x": Each([1, 2, 3]),
+                "y": Each([10, 20, 30])
+            }
         ) as loop:
             node = add(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
             START >> node >> END
@@ -103,12 +103,11 @@ class TestMultipleEachVariables:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["sum"] == [11, 22, 33]
+        assert result['sum'] == [11, 22, 33]
 
     @pytest.mark.asyncio
     async def test_multiple_each_with_broadcast(self):
         """Test multiple Each() variables plus broadcast."""
-
         @code_node
         def compute(x: int, y: int, factor: int):
             return {"result": (x + y) * factor}
@@ -118,12 +117,12 @@ class TestMultipleEachVariables:
             inputs={
                 "x": Each([1, 2, 3]),
                 "y": Each([10, 20, 30]),
-                "factor": 2,  # broadcast
-            },
+                "factor": 2  # broadcast
+            }
         ) as loop:
             node = compute(
                 inputs={"x": PARENT["x"], "y": PARENT["y"], "factor": PARENT["factor"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -132,13 +131,12 @@ class TestMultipleEachVariables:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [22, 44, 66]  # (1+10)*2, (2+20)*2, (3+30)*2
+        assert result['result'] == [22, 44, 66]  # (1+10)*2, (2+20)*2, (3+30)*2
 
 
 # ============================================================
 # Test 4: String Processing
 # ============================================================
-
 
 class TestStringProcessing:
     """Test iteration with string data."""
@@ -146,7 +144,6 @@ class TestStringProcessing:
     @pytest.mark.asyncio
     async def test_format_greetings(self):
         """Test formatting greeting strings."""
-
         @code_node
         def format_greeting(name: str, greeting: str):
             return {"message": f"{greeting}, {name}!"}
@@ -155,12 +152,12 @@ class TestStringProcessing:
             name="greeting_loop",
             inputs={
                 "name": Each(["Alice", "Bob", "Charlie"]),
-                "greeting": "Hello",  # broadcast
-            },
+                "greeting": "Hello"  # broadcast
+            }
         ) as loop:
             node = format_greeting(
                 inputs={"name": PARENT["name"], "greeting": PARENT["greeting"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -170,13 +167,12 @@ class TestStringProcessing:
 
         result = await loop.run(state)
         expected = ["Hello, Alice!", "Hello, Bob!", "Hello, Charlie!"]
-        assert result["message"] == expected
+        assert result['message'] == expected
 
 
 # ============================================================
 # Test 5: Chain of Nodes in Loop
 # ============================================================
-
 
 class TestChainOfNodes:
     """Test multiple nodes chained inside a loop."""
@@ -184,7 +180,6 @@ class TestChainOfNodes:
     @pytest.mark.asyncio
     async def test_add_then_multiply(self):
         """Test chain: add_one -> multiply_two."""
-
         @code_node
         def add_one(x: int):
             return {"y": x + 1}
@@ -193,7 +188,10 @@ class TestChainOfNodes:
         def multiply_two(y: int):
             return {"z": y * 2}
 
-        with MapNode(name="chain_loop", inputs={"x": Each([1, 2, 3])}) as loop:
+        with MapNode(
+            name="chain_loop",
+            inputs={"x": Each([1, 2, 3])}
+        ) as loop:
             n1 = add_one(inputs={"x": PARENT["x"]})
             n2 = multiply_two(inputs={"y": n1["y"]}, outputs={"*": PARENT})
             START >> n1 >> n2 >> END
@@ -203,13 +201,12 @@ class TestChainOfNodes:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["z"] == [4, 6, 8]  # (1+1)*2, (2+1)*2, (3+1)*2
+        assert result['z'] == [4, 6, 8]  # (1+1)*2, (2+1)*2, (3+1)*2
 
 
 # ============================================================
 # Test 6: Concurrency Limit
 # ============================================================
-
 
 class TestConcurrencyLimit:
     """Test max_concurrency parameter."""
@@ -217,14 +214,15 @@ class TestConcurrencyLimit:
     @pytest.mark.asyncio
     async def test_limited_concurrency(self):
         """Test with max_concurrency=2."""
-
         @code_node
         async def slow_process(value: int):
             await asyncio.sleep(0.01)
             return {"result": value * 10}
 
         with MapNode(
-            name="concurrent_loop", inputs={"value": Each([1, 2, 3, 4, 5])}, max_concurrency=2
+            name="concurrent_loop",
+            inputs={"value": Each([1, 2, 3, 4, 5])},
+            max_concurrency=2
         ) as loop:
             node = slow_process(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
@@ -234,13 +232,12 @@ class TestConcurrencyLimit:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [10, 20, 30, 40, 50]
+        assert result['result'] == [10, 20, 30, 40, 50]
 
 
 # ============================================================
 # Test 7: Ref from Previous Node
 # ============================================================
-
 
 class TestRefFromPreviousNode:
     """Test iteration using Ref to data from previous node."""
@@ -248,7 +245,6 @@ class TestRefFromPreviousNode:
     @pytest.mark.asyncio
     async def test_each_from_ref(self):
         """Test Each() with Ref to another node's output."""
-
         @code_node
         def generate_data():
             return {"numbers": [10, 20, 30], "factor": 5}
@@ -264,13 +260,13 @@ class TestRefFromPreviousNode:
                 name="ref_loop",
                 inputs={
                     "item": Each(gen_node["numbers"]),
-                    "factor": gen_node["factor"],  # broadcast Ref
+                    "factor": gen_node["factor"]  # broadcast Ref
                 },
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             ) as loop:
                 proc_node = process_item(
                     inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
+                    outputs={"*": PARENT}
                 )
                 START >> proc_node >> END
 
@@ -288,19 +284,20 @@ class TestRefFromPreviousNode:
 # Test 8: Empty Iteration
 # ============================================================
 
-
 class TestEmptyIteration:
     """Test behavior with empty iteration data."""
 
     @pytest.mark.asyncio
     async def test_empty_list(self):
         """Test iteration over empty list."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with MapNode(name="empty_loop", inputs={"value": Each([])}) as loop:
+        with MapNode(
+            name="empty_loop",
+            inputs={"value": Each([])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -309,14 +306,13 @@ class TestEmptyIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == []
-        assert result["iteration_metrics"]["total_iterations"] == 0
+        assert result['result'] == []
+        assert result['iteration_metrics']['total_iterations'] == 0
 
 
 # ============================================================
 # Test 9: Mismatched Lengths
 # ============================================================
-
 
 class TestMismatchedLengths:
     """Test error handling for mismatched list lengths."""
@@ -324,7 +320,6 @@ class TestMismatchedLengths:
     @pytest.mark.asyncio
     async def test_raises_on_length_mismatch(self):
         """Test that mismatched Each() lengths are captured as error."""
-
         @code_node
         def dummy(x: int, y: int):
             return {"result": x + y}
@@ -333,8 +328,8 @@ class TestMismatchedLengths:
             name="mismatch_loop",
             inputs={
                 "x": Each([1, 2, 3]),
-                "y": Each([10, 20]),  # Different length!
-            },
+                "y": Each([10, 20])  # Different length!
+            }
         ) as loop:
             node = dummy(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
             START >> node >> END
@@ -354,17 +349,20 @@ class TestMismatchedLengths:
 # Test 10: Ref with Nested Operations
 # ============================================================
 
-
 class TestRefWithNestedOperations:
     """Test Ref with nested key access."""
 
     @pytest.mark.asyncio
     async def test_nested_ref_access(self):
         """Test Each() with nested Ref like node['a']['b']."""
-
         @code_node
         def get_complex_data():
-            return {"dataset": {"items": [10, 20, 30], "multiplier": 2}}
+            return {
+                "dataset": {
+                    "items": [10, 20, 30],
+                    "multiplier": 2
+                }
+            }
 
         @code_node
         def process_with_factor(item: int, factor: int):
@@ -377,13 +375,13 @@ class TestRefWithNestedOperations:
                 name="ref_ops_loop",
                 inputs={
                     "item": Each(data_node["dataset"]["items"]),
-                    "factor": data_node["dataset"]["multiplier"],
+                    "factor": data_node["dataset"]["multiplier"]
                 },
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             ) as loop:
                 proc = process_with_factor(
                     inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
+                    outputs={"*": PARENT}
                 )
                 START >> proc >> END
 
@@ -401,14 +399,12 @@ class TestRefWithNestedOperations:
 # Test 11: PARENT Broadcast Inside GraphNode
 # ============================================================
 
-
 class TestParentBroadcast:
     """Test PARENT reference as broadcast inside GraphNode."""
 
     @pytest.mark.asyncio
     async def test_parent_broadcast(self):
         """Test MapNode with PARENT broadcast inside GraphNode."""
-
         @code_node
         def get_items():
             return {"items": [1, 2, 3, 4, 5]}
@@ -424,13 +420,13 @@ class TestParentBroadcast:
                 name="multiply_loop",
                 inputs={
                     "item": Each(items_node["items"]),
-                    "multiplier": PARENT["multiplier"],  # PARENT = graph
+                    "multiplier": PARENT["multiplier"]  # PARENT = graph
                 },
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             ) as loop:
                 proc = multiply_item(
                     inputs={"item": PARENT["item"], "multiplier": PARENT["multiplier"]},
-                    outputs={"*": PARENT},
+                    outputs={"*": PARENT}
                 )
                 START >> proc >> END
 
@@ -448,19 +444,20 @@ class TestParentBroadcast:
 # Test 12: Iteration Metrics
 # ============================================================
 
-
 class TestIterationMetrics:
     """Test iteration metrics are collected."""
 
     @pytest.mark.asyncio
     async def test_metrics_collected(self):
         """Test that iteration metrics are returned."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with MapNode(name="metrics_loop", inputs={"value": Each([1, 2, 3])}) as loop:
+        with MapNode(
+            name="metrics_loop",
+            inputs={"value": Each([1, 2, 3])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -480,7 +477,6 @@ class TestIterationMetrics:
 # ============================================================
 # Test 13: Nested Iteration (MapNode + WhileLoop)
 # ============================================================
-
 
 class TestNestedIteration:
     """Test nested iteration patterns.
@@ -502,12 +498,15 @@ class TestNestedIteration:
         def halve(value: int):
             return {"new_value": value // 2}
 
-        with MapNode(name="outer_map", inputs={"item": Each([10, 20, 30])}) as map_node:
+        with MapNode(
+            name="outer_map",
+            inputs={"item": Each([10, 20, 30])}
+        ) as map_node:
             with WhileLoopNode(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
                 stop_condition="value < 5",
-                max_iterations=10,
+                max_iterations=10
             ) as while_loop:
                 node = halve(inputs={"value": PARENT["value"]})
                 node["new_value"] >> PARENT["value"]
@@ -530,15 +529,19 @@ class TestNestedIteration:
     @pytest.mark.asyncio
     async def test_mapnode_independent_inner_loop(self):
         """Test MapNode with inner MapNode that doesn't depend on outer vars."""
-
         @code_node
         def sum_list(items: list):
             return {"total": sum(items)}
 
-        with MapNode(name="outer_map", inputs={"multiplier": Each([1, 2, 3])}) as outer:
+        with MapNode(
+            name="outer_map",
+            inputs={"multiplier": Each([1, 2, 3])}
+        ) as outer:
             # Inner map iterates over a fixed list, not dependent on outer
-            with MapNode(name="inner_map", inputs={"value": Each([10, 20, 30])}) as inner:
-
+            with MapNode(
+                name="inner_map",
+                inputs={"value": Each([10, 20, 30])}
+            ) as inner:
                 @code_node
                 def double(value: int):
                     return {"result": value * 2}
@@ -567,14 +570,12 @@ class TestNestedIteration:
 # Test: map_() Shorthand
 # ============================================================
 
-
 class TestMapShorthand:
     """Test map_() shorthand function."""
 
     @pytest.mark.asyncio
     async def test_map_shorthand_basic(self):
         """Test basic map_() with Each()."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
@@ -593,7 +594,6 @@ class TestMapShorthand:
     @pytest.mark.asyncio
     async def test_map_shorthand_concurrency(self):
         """Test map_() with max_concurrency."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}

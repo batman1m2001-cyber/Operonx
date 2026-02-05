@@ -1,24 +1,23 @@
 """Tests for unified exception classes in hush.core.exceptions."""
 
 import pytest
-
 from hush.core.exceptions import (
-    BranchError,
-    CodeError,
-    ConditionError,
-    EmbeddingError,
-    IterationError,
     NodeError,
     ParserError,
+    CodeError,
+    BranchError,
+    ConditionError,
+    IterationError,
     PromptError,
+    EmbeddingError,
     RerankError,
     _truncate,
 )
 
+
 # ============================================================
 # Test _truncate helper
 # ============================================================
-
 
 class TestTruncateHelper:
     """Test the _truncate utility function."""
@@ -54,19 +53,25 @@ class TestTruncateHelper:
 # Test NodeError (base class)
 # ============================================================
 
-
 class TestNodeError:
     """Test base NodeError class."""
 
     def test_basic_error(self):
         """Test basic error creation."""
-        error = NodeError(message="Something went wrong", node_type="test")
+        error = NodeError(
+            message="Something went wrong",
+            node_type="test"
+        )
         assert "[TEST] Something went wrong" in str(error)
 
     def test_with_original_error(self):
         """Test error with original exception."""
         original = ValueError("Original error")
-        error = NodeError(message="Wrapped error", node_type="test", original_error=original)
+        error = NodeError(
+            message="Wrapped error",
+            node_type="test",
+            original_error=original
+        )
         msg = str(error)
         assert "[TEST] Wrapped error" in msg
         assert "Error: Original error" in msg
@@ -74,7 +79,9 @@ class TestNodeError:
     def test_with_context(self):
         """Test error with context dictionary."""
         error = NodeError(
-            message="Error with context", node_type="test", context={"key1": "value1", "key2": 42}
+            message="Error with context",
+            node_type="test",
+            context={"key1": "value1", "key2": 42}
         )
         msg = str(error)
         assert "key1: 'value1'" in msg
@@ -84,7 +91,10 @@ class TestNodeError:
         """Test that attributes are stored correctly."""
         original = ValueError("test")
         error = NodeError(
-            message="Test", node_type="custom", original_error=original, context={"foo": "bar"}
+            message="Test",
+            node_type="custom",
+            original_error=original,
+            context={"foo": "bar"}
         )
         assert error.node_type == "custom"
         assert error.original_error is original
@@ -95,14 +105,15 @@ class TestNodeError:
 # Test ParserError
 # ============================================================
 
-
 class TestParserError:
     """Test ParserError for parsing failures."""
 
     def test_basic_parser_error(self):
         """Test basic parser error creation."""
         error = ParserError(
-            message="Invalid JSON syntax", input_text='{"broken": ', format_type="json"
+            message="Invalid JSON syntax",
+            input_text='{"broken": ',
+            format_type="json"
         )
         msg = str(error)
         assert "[PARSER]" in msg
@@ -112,7 +123,6 @@ class TestParserError:
     def test_with_original_error(self):
         """Test parser error with original exception."""
         import json
-
         try:
             json.loads('{"broken": ')
         except json.JSONDecodeError as e:
@@ -120,7 +130,7 @@ class TestParserError:
                 message="Failed to parse JSON",
                 input_text='{"broken": ',
                 format_type="json",
-                original_error=e,
+                original_error=e
             )
         msg = str(error)
         assert "JSONDecodeError" in msg or "Expecting" in msg
@@ -128,14 +138,22 @@ class TestParserError:
     def test_long_input_truncated(self):
         """Test that long input text is truncated in error message."""
         long_text = "x" * 500
-        error = ParserError(message="Parse failed", input_text=long_text, format_type="json")
+        error = ParserError(
+            message="Parse failed",
+            input_text=long_text,
+            format_type="json"
+        )
         msg = str(error)
         # Input should be truncated (default 200 chars in repr)
         assert "..." in msg
 
     def test_attributes_stored(self):
         """Test that attributes are stored."""
-        error = ParserError(message="Test", input_text="input", format_type="xml")
+        error = ParserError(
+            message="Test",
+            input_text="input",
+            format_type="xml"
+        )
         assert error.input_text == "input"
         assert error.format_type == "xml"
 
@@ -143,7 +161,6 @@ class TestParserError:
 # ============================================================
 # Test CodeError
 # ============================================================
-
 
 class TestCodeError:
     """Test CodeError for user function failures."""
@@ -154,7 +171,7 @@ class TestCodeError:
             message="Function 'calc' raised an exception",
             function_name="calc",
             source="def calc(x): return x / 0",
-            inputs={"x": 10},
+            inputs={"x": 10}
         )
         msg = str(error)
         assert "[CODE]" in msg
@@ -171,7 +188,7 @@ class TestCodeError:
                 function_name="divide",
                 source="def divide(a, b): return a / b",
                 inputs={"a": 1, "b": 0},
-                original_error=e,
+                original_error=e
             )
         msg = str(error)
         assert "ZeroDivisionError" in msg or "division by zero" in msg
@@ -179,7 +196,12 @@ class TestCodeError:
     def test_long_source_truncated(self):
         """Test that long source code is truncated."""
         long_source = "def func():\n" + "    x = 1\n" * 100
-        error = CodeError(message="Error", function_name="func", source=long_source, inputs={})
+        error = CodeError(
+            message="Error",
+            function_name="func",
+            source=long_source,
+            inputs={}
+        )
         msg = str(error)
         # Source should be truncated at 300 chars
         assert "..." in msg
@@ -190,7 +212,7 @@ class TestCodeError:
             message="Error",
             function_name="func",
             source="def func(x): pass",
-            inputs={"long_value": "x" * 200},
+            inputs={"long_value": "x" * 200}
         )
         msg = str(error)
         # Each input value truncated at 100 chars
@@ -202,7 +224,7 @@ class TestCodeError:
             message="Test",
             function_name="my_func",
             source="def my_func(): pass",
-            inputs={"a": 1, "b": 2},
+            inputs={"a": 1, "b": 2}
         )
         assert error.function_name == "my_func"
         assert error.source == "def my_func(): pass"
@@ -213,7 +235,6 @@ class TestCodeError:
 # Test BranchError
 # ============================================================
 
-
 class TestBranchError:
     """Test BranchError for branch condition failures."""
 
@@ -223,7 +244,7 @@ class TestBranchError:
             message="Condition evaluation failed",
             condition="score >= 90",
             inputs={"score": "invalid"},
-            candidates=["excellent", "good", "fail"],
+            candidates=["excellent", "good", "fail"]
         )
         msg = str(error)
         assert "[BRANCH]" in msg
@@ -240,7 +261,7 @@ class TestBranchError:
                 condition="score >= 90",
                 inputs={"score": "invalid"},
                 candidates=["pass", "fail"],
-                original_error=e,
+                original_error=e
             )
         msg = str(error)
         assert "TypeError" in msg or "not supported" in msg
@@ -248,7 +269,10 @@ class TestBranchError:
     def test_attributes_stored(self):
         """Test that attributes are stored."""
         error = BranchError(
-            message="Test", condition="x > 0", inputs={"x": -1}, candidates=["positive", "negative"]
+            message="Test",
+            condition="x > 0",
+            inputs={"x": -1},
+            candidates=["positive", "negative"]
         )
         assert error.condition == "x > 0"
         assert error.inputs == {"x": -1}
@@ -259,7 +283,6 @@ class TestBranchError:
 # Test ConditionError
 # ============================================================
 
-
 class TestConditionError:
     """Test ConditionError for WhileLoopNode condition failures."""
 
@@ -268,7 +291,7 @@ class TestConditionError:
         error = ConditionError(
             message="Invalid stop_condition syntax",
             condition="x >= = 5",  # Invalid syntax
-            phase="compile",
+            phase="compile"
         )
         msg = str(error)
         assert "[WHILE]" in msg
@@ -282,7 +305,7 @@ class TestConditionError:
             condition="counter >= 5",
             inputs={"count": 3},  # Note: counter vs count mismatch
             iteration=3,
-            phase="eval",
+            phase="eval"
         )
         msg = str(error)
         assert "[WHILE]" in msg
@@ -301,14 +324,18 @@ class TestConditionError:
                 inputs={},
                 iteration=0,
                 phase="eval",
-                original_error=e,
+                original_error=e
             )
         msg = str(error)
         assert "NameError" in msg or "not defined" in msg
 
     def test_optional_fields(self):
         """Test that inputs and iteration are optional."""
-        error = ConditionError(message="Syntax error", condition="x >>>", phase="compile")
+        error = ConditionError(
+            message="Syntax error",
+            condition="x >>>",
+            phase="compile"
+        )
         msg = str(error)
         assert "inputs:" not in msg
         assert "iteration:" not in msg
@@ -316,7 +343,11 @@ class TestConditionError:
     def test_attributes_stored(self):
         """Test that attributes are stored."""
         error = ConditionError(
-            message="Test", condition="x >= 5", inputs={"x": 3}, iteration=2, phase="eval"
+            message="Test",
+            condition="x >= 5",
+            inputs={"x": 3},
+            iteration=2,
+            phase="eval"
         )
         assert error.condition == "x >= 5"
         assert error.inputs == {"x": 3}
@@ -328,7 +359,6 @@ class TestConditionError:
 # Test IterationError
 # ============================================================
 
-
 class TestIterationError:
     """Test IterationError for ForLoop/MapNode iteration failures."""
 
@@ -339,7 +369,7 @@ class TestIterationError:
             iteration_index=2,
             loop_data={"item": {"id": 3, "name": "test"}},
             total_iterations=10,
-            node_type="for",
+            node_type="for"
         )
         msg = str(error)
         assert "[FOR]" in msg
@@ -353,7 +383,7 @@ class TestIterationError:
             iteration_index=5,
             loop_data={"x": 100},
             total_iterations=20,
-            node_type="map",
+            node_type="map"
         )
         msg = str(error)
         assert "[MAP]" in msg
@@ -371,7 +401,7 @@ class TestIterationError:
                 loop_data={"data": {"a": 1}},
                 total_iterations=5,
                 node_type="for",
-                original_error=e,
+                original_error=e
             )
         msg = str(error)
         assert "KeyError" in msg or "missing_key" in msg
@@ -383,7 +413,7 @@ class TestIterationError:
             iteration_index=0,
             loop_data={"big_value": "x" * 200},
             total_iterations=1,
-            node_type="for",
+            node_type="for"
         )
         msg = str(error)
         assert "..." in msg
@@ -395,7 +425,7 @@ class TestIterationError:
             iteration_index=5,
             loop_data={"x": 1},
             total_iterations=10,
-            node_type="map",
+            node_type="map"
         )
         assert error.iteration_index == 5
         assert error.loop_data == {"x": 1}
@@ -406,7 +436,6 @@ class TestIterationError:
 # Test PromptError
 # ============================================================
 
-
 class TestPromptError:
     """Test PromptError for PromptNode template failures."""
 
@@ -415,7 +444,7 @@ class TestPromptError:
         error = PromptError(
             message="Missing template variable(s)",
             template="Hello {name}, your order {order_id} is ready",
-            missing_vars=["order_id"],
+            missing_vars=["order_id"]
         )
         msg = str(error)
         assert "[PROMPT]" in msg
@@ -428,7 +457,7 @@ class TestPromptError:
         error = PromptError(
             message="Missing template variable(s)",
             template="Hello {name}, order {order_id} at {location}",
-            missing_vars=["order_id", "location"],
+            missing_vars=["order_id", "location"]
         )
         msg = str(error)
         assert "order_id" in msg
@@ -439,7 +468,7 @@ class TestPromptError:
         error = PromptError(
             message="Invalid template type",
             template=12345,  # Should be str/dict/list
-            original_error=TypeError("Expected str, dict, or list"),
+            original_error=TypeError("Expected str, dict, or list")
         )
         msg = str(error)
         assert "[PROMPT]" in msg
@@ -450,7 +479,7 @@ class TestPromptError:
         error = PromptError(
             message="Missing variable in system prompt",
             template={"system": "You are {role}", "user": "{query}"},
-            missing_vars=["role"],
+            missing_vars=["role"]
         )
         msg = str(error)
         assert "template_type:" in msg and "dict" in msg
@@ -460,7 +489,7 @@ class TestPromptError:
         error = PromptError(
             message="Missing variable",
             template=[{"role": "user", "content": "Hello {name}"}],
-            missing_vars=["name"],
+            missing_vars=["name"]
         )
         msg = str(error)
         assert "template_type:" in msg and "list" in msg
@@ -468,19 +497,30 @@ class TestPromptError:
     def test_long_template_truncated(self):
         """Test that long template is truncated."""
         long_template = "Hello {name}, " + "x" * 500
-        error = PromptError(message="Error", template=long_template, missing_vars=["name"])
+        error = PromptError(
+            message="Error",
+            template=long_template,
+            missing_vars=["name"]
+        )
         msg = str(error)
         assert "..." in msg
 
     def test_no_missing_vars(self):
         """Test that missing_vars is optional."""
-        error = PromptError(message="Invalid template", template=None)
+        error = PromptError(
+            message="Invalid template",
+            template=None
+        )
         msg = str(error)
         assert "missing_vars:" not in msg
 
     def test_attributes_stored(self):
         """Test that attributes are stored."""
-        error = PromptError(message="Test", template="Hello {name}", missing_vars=["name"])
+        error = PromptError(
+            message="Test",
+            template="Hello {name}",
+            missing_vars=["name"]
+        )
         assert error.template == "Hello {name}"
         assert error.missing_vars == ["name"]
 
@@ -489,14 +529,15 @@ class TestPromptError:
 # Test EmbeddingError
 # ============================================================
 
-
 class TestEmbeddingError:
     """Test EmbeddingError for EmbeddingNode failures."""
 
     def test_basic_embedding_error(self):
         """Test basic embedding error creation."""
         error = EmbeddingError(
-            message="Embedding backend failed", resource_key="bge-m3", text_count=100
+            message="Embedding backend failed",
+            resource_key="bge-m3",
+            text_count=100
         )
         msg = str(error)
         assert "[EMBEDDING]" in msg
@@ -509,14 +550,18 @@ class TestEmbeddingError:
             message="Failed to connect to embedding service",
             resource_key="text-embedding-ada-002",
             text_count=50,
-            original_error=ConnectionError("Connection refused"),
+            original_error=ConnectionError("Connection refused")
         )
         msg = str(error)
         assert "Connection" in msg
 
     def test_attributes_stored(self):
         """Test that attributes are stored."""
-        error = EmbeddingError(message="Test", resource_key="model-key", text_count=25)
+        error = EmbeddingError(
+            message="Test",
+            resource_key="model-key",
+            text_count=25
+        )
         assert error.resource_key == "model-key"
         assert error.text_count == 25
 
@@ -524,7 +569,6 @@ class TestEmbeddingError:
 # ============================================================
 # Test RerankError
 # ============================================================
-
 
 class TestRerankError:
     """Test RerankError for RerankNode failures."""
@@ -535,7 +579,7 @@ class TestRerankError:
             message="Invalid document type",
             resource_key="bge-m3",
             query="search query",
-            document_count=50,
+            document_count=50
         )
         msg = str(error)
         assert "[RERANK]" in msg
@@ -550,7 +594,7 @@ class TestRerankError:
             resource_key="bge-m3",
             query="test query",
             document_count=10,
-            original_error=TypeError("Expected List[str] or List[Dict]"),
+            original_error=TypeError("Expected List[str] or List[Dict]")
         )
         msg = str(error)
         assert "TypeError" in msg or "List[str]" in msg
@@ -559,7 +603,10 @@ class TestRerankError:
         """Test that long query is truncated."""
         long_query = "search " * 100
         error = RerankError(
-            message="Error", resource_key="model", query=long_query, document_count=10
+            message="Error",
+            resource_key="model",
+            query=long_query,
+            document_count=10
         )
         msg = str(error)
         # Query truncated at 100 chars
@@ -568,7 +615,10 @@ class TestRerankError:
     def test_attributes_stored(self):
         """Test that attributes are stored."""
         error = RerankError(
-            message="Test", resource_key="rerank-model", query="my query", document_count=30
+            message="Test",
+            resource_key="rerank-model",
+            query="my query",
+            document_count=30
         )
         assert error.resource_key == "rerank-model"
         assert error.query == "my query"
@@ -579,54 +629,35 @@ class TestRerankError:
 # Test Error Inheritance
 # ============================================================
 
-
 class TestErrorInheritance:
     """Test that all errors properly inherit from NodeError and Exception."""
 
-    @pytest.mark.parametrize(
-        "error_class,args",
-        [
-            (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
-            (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
-            (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (ConditionError, {"message": "test", "condition": "x"}),
-            (
-                IterationError,
-                {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
-            ),
-            (PromptError, {"message": "test", "template": "x"}),
-            (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
-            (
-                RerankError,
-                {"message": "test", "resource_key": "k", "query": "q", "document_count": 1},
-            ),
-        ],
-    )
+    @pytest.mark.parametrize("error_class,args", [
+        (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
+        (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
+        (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
+        (ConditionError, {"message": "test", "condition": "x"}),
+        (IterationError, {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1}),
+        (PromptError, {"message": "test", "template": "x"}),
+        (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
+        (RerankError, {"message": "test", "resource_key": "k", "query": "q", "document_count": 1}),
+    ])
     def test_inherits_from_node_error(self, error_class, args):
         """Test that all error classes inherit from NodeError."""
         error = error_class(**args)
         assert isinstance(error, NodeError)
         assert isinstance(error, Exception)
 
-    @pytest.mark.parametrize(
-        "error_class,args",
-        [
-            (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
-            (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
-            (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (ConditionError, {"message": "test", "condition": "x"}),
-            (
-                IterationError,
-                {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
-            ),
-            (PromptError, {"message": "test", "template": "x"}),
-            (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
-            (
-                RerankError,
-                {"message": "test", "resource_key": "k", "query": "q", "document_count": 1},
-            ),
-        ],
-    )
+    @pytest.mark.parametrize("error_class,args", [
+        (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
+        (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
+        (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
+        (ConditionError, {"message": "test", "condition": "x"}),
+        (IterationError, {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1}),
+        (PromptError, {"message": "test", "template": "x"}),
+        (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
+        (RerankError, {"message": "test", "resource_key": "k", "query": "q", "document_count": 1}),
+    ])
     def test_can_be_raised_and_caught(self, error_class, args):
         """Test that errors can be raised and caught properly."""
         with pytest.raises(error_class):
@@ -641,7 +672,6 @@ class TestErrorInheritance:
 # Test Error Message Format
 # ============================================================
 
-
 class TestErrorMessageFormat:
     """Test that error messages follow consistent format."""
 
@@ -652,7 +682,7 @@ class TestErrorMessageFormat:
             function_name="my_func",
             source="def my_func(): pass",
             inputs={"x": 1},
-            original_error=ValueError("test"),
+            original_error=ValueError("test")
         )
         lines = str(error).split("\n")
 
@@ -681,5 +711,5 @@ class TestErrorMessageFormat:
         for error in errors:
             msg = str(error)
             # Extract the bracket content
-            bracket_content = msg[msg.index("[") + 1 : msg.index("]")]
+            bracket_content = msg[msg.index("[")+1:msg.index("]")]
             assert bracket_content.isupper(), f"Node type should be uppercase: {bracket_content}"

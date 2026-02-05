@@ -1,9 +1,9 @@
 """Các logging handler ghi ra file."""
 
 import logging
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from pathlib import Path
-from typing import Literal, Union
+from typing import Union, Literal
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
 from ..config import HandlerConfig
 

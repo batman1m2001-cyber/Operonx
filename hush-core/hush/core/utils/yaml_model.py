@@ -1,7 +1,7 @@
 """Base class cho model đọc/ghi YAML."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional, Any
 
 import yaml
 from pydantic import BaseModel
@@ -16,7 +16,11 @@ class YamlModel(BaseModel):
     extra_fields: Optional[Dict[str, Any]] = None
 
     @classmethod
-    def read_yaml(cls, file_path: Path, encoding: str = "utf-8") -> Dict:
+    def read_yaml(
+        cls,
+        file_path: Path,
+        encoding: str = "utf-8"
+    ) -> Dict:
         """Đọc file YAML và trả về dict.
 
         Raises:
@@ -37,7 +41,10 @@ class YamlModel(BaseModel):
             raise IOError(f"Lỗi đọc file {file_path}: {e}")
 
     @classmethod
-    def from_yaml_file(cls, file_path: Path) -> "YamlModel":
+    def from_yaml_file(
+        cls,
+        file_path: Path
+    ) -> "YamlModel":
         """Đọc file YAML và trả về instance YamlModel.
 
         Raises:
@@ -52,7 +59,11 @@ class YamlModel(BaseModel):
         except Exception as e:
             raise ValueError(f"Lỗi tạo {cls.__name__} từ {file_path}: {e}")
 
-    def to_yaml_file(self, file_path: Path, encoding: str = "utf-8") -> None:
+    def to_yaml_file(
+        self,
+        file_path: Path,
+        encoding: str = "utf-8"
+    ) -> None:
         """Ghi instance YamlModel ra file YAML.
 
         Raises:

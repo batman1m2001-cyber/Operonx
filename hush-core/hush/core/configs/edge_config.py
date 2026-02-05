@@ -1,8 +1,8 @@
 """Các kiểu config edge cho hush-core."""
 
 from typing import Literal
-
 from pydantic import BaseModel
+
 
 EdgeType = Literal["normal", "lookback", "condition"]
 

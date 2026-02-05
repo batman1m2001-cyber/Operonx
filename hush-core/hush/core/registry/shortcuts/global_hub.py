@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, TYPE_CHECKING
 
 from hush.core.loggings import LOGGER
 
@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 
 
 # Global hub instance
-_GLOBAL_HUB: Optional["ResourceHub"] = None
+_GLOBAL_HUB: Optional['ResourceHub'] = None
 
 
-def _get_global_hub() -> Optional["ResourceHub"]:
+def _get_global_hub() -> Optional['ResourceHub']:
     """Get or create global ResourceHub instance.
 
     Tries to load config from:
@@ -35,24 +35,26 @@ def _get_global_hub() -> Optional["ResourceHub"]:
             config_path = None
 
             # 1. Check environment variable
-            env_config = os.getenv("HUSH_CONFIG")
+            env_config = os.getenv('HUSH_CONFIG')
             if env_config and Path(env_config).exists():
                 config_path = Path(env_config)
 
             # 2. Check current directory
-            elif Path("resources.yaml").exists():
-                config_path = Path("resources.yaml")
+            elif Path('resources.yaml').exists():
+                config_path = Path('resources.yaml')
 
             # 3. Check home directory
-            elif (Path.home() / ".hush" / "resources.yaml").exists():
-                config_path = Path.home() / ".hush" / "resources.yaml"
+            elif (Path.home() / '.hush' / 'resources.yaml').exists():
+                config_path = Path.home() / '.hush' / 'resources.yaml'
 
             # Create hub
             if config_path:
                 _GLOBAL_HUB = ResourceHub.from_yaml(config_path)
             else:
                 # No config file found, create with default path
-                _GLOBAL_HUB = ResourceHub.from_yaml(Path.home() / ".hush" / "resources.yaml")
+                _GLOBAL_HUB = ResourceHub.from_yaml(
+                    Path.home() / '.hush' / 'resources.yaml'
+                )
 
         except Exception as e:
             LOGGER.error("Cannot initialize global hub: %s", e)
@@ -61,7 +63,7 @@ def _get_global_hub() -> Optional["ResourceHub"]:
     return _GLOBAL_HUB
 
 
-def get_hub() -> "ResourceHub":
+def get_hub() -> 'ResourceHub':
     """Get global ResourceHub instance.
 
     This is the primary way to access the global hub.
@@ -84,7 +86,7 @@ def get_hub() -> "ResourceHub":
     return hub
 
 
-def set_global_hub(hub: "ResourceHub"):
+def set_global_hub(hub: 'ResourceHub'):
     """Set custom global ResourceHub instance.
 
     Use to override the default global hub.

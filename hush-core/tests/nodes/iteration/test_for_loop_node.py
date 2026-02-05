@@ -1,19 +1,19 @@
 """Tests for ForLoopNode - sequential iteration node."""
 
 import pytest
-
-from hush.core.nodes.base import END, PARENT, START
-from hush.core.nodes.graph.graph_node import GraphNode
-from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.iteration.for_loop_node import ForLoopNode, for_
+from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
+from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
-from hush.core.states import MemoryState, StateSchema
+from hush.core.nodes.graph.graph_node import GraphNode
+from hush.core.nodes.base import START, END, PARENT
+from hush.core.states import StateSchema, MemoryState
+
 
 # ============================================================
 # Test 1: Simple Sequential Iteration
 # ============================================================
-
 
 class TestSimpleIteration:
     """Test basic sequential iteration with Each() wrapper."""
@@ -21,12 +21,14 @@ class TestSimpleIteration:
     @pytest.mark.asyncio
     async def test_double_values(self):
         """Test simple doubling of values sequentially."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with ForLoopNode(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
+        with ForLoopNode(
+            name="double_loop",
+            inputs={"value": Each([1, 2, 3, 4, 5])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -35,13 +37,12 @@ class TestSimpleIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [2, 4, 6, 8, 10]
+        assert result['result'] == [2, 4, 6, 8, 10]
 
 
 # ============================================================
 # Test 2: Sequential Iteration with Broadcast
 # ============================================================
-
 
 class TestBroadcastIteration:
     """Test sequential iteration with broadcast values."""
@@ -49,7 +50,6 @@ class TestBroadcastIteration:
     @pytest.mark.asyncio
     async def test_multiply_with_broadcast(self):
         """Test multiplication with broadcast multiplier."""
-
         @code_node
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
@@ -58,12 +58,12 @@ class TestBroadcastIteration:
             name="multiply_loop",
             inputs={
                 "value": Each([1, 2, 3]),
-                "multiplier": 10,  # broadcast
-            },
+                "multiplier": 10  # broadcast
+            }
         ) as loop:
             node = multiply(
                 inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -72,13 +72,12 @@ class TestBroadcastIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == [10, 20, 30]
+        assert result['result'] == [10, 20, 30]
 
 
 # ============================================================
 # Test 3: Multiple Each() Variables (Zip)
 # ============================================================
-
 
 class TestMultipleEachVariables:
     """Test sequential iteration with multiple Each() variables (zipped)."""
@@ -86,13 +85,16 @@ class TestMultipleEachVariables:
     @pytest.mark.asyncio
     async def test_zip_two_lists(self):
         """Test zipping two lists together sequentially."""
-
         @code_node
         def add(x: int, y: int):
             return {"sum": x + y}
 
         with ForLoopNode(
-            name="add_loop", inputs={"x": Each([1, 2, 3]), "y": Each([10, 20, 30])}
+            name="add_loop",
+            inputs={
+                "x": Each([1, 2, 3]),
+                "y": Each([10, 20, 30])
+            }
         ) as loop:
             node = add(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
             START >> node >> END
@@ -102,13 +104,12 @@ class TestMultipleEachVariables:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["sum"] == [11, 22, 33]
+        assert result['sum'] == [11, 22, 33]
 
 
 # ============================================================
 # Test 4: Nested ForLoopNode (Sequential Nested Loops)
 # ============================================================
-
 
 class TestNestedForLoop:
     """Test nested ForLoopNode - sequential iteration supports nested loops."""
@@ -119,20 +120,25 @@ class TestNestedForLoop:
 
         This is the key advantage of sequential ForLoopNode over parallel MapNode.
         """
-
         @code_node
         def multiply(x: int, y: int):
             return {"result": x * y}
 
-        with ForLoopNode(name="outer_loop", inputs={"x": Each([1, 2, 3])}) as outer:
+        with ForLoopNode(
+            name="outer_loop",
+            inputs={"x": Each([1, 2, 3])}
+        ) as outer:
             with ForLoopNode(
                 name="inner_loop",
                 inputs={
                     "y": Each([10, 20]),
-                    "x": PARENT["x"],  # Pass outer variable to inner loop
-                },
+                    "x": PARENT["x"]  # Pass outer variable to inner loop
+                }
             ) as inner:
-                node = multiply(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
+                node = multiply(
+                    inputs={"x": PARENT["x"], "y": PARENT["y"]},
+                    outputs={"*": PARENT}
+                )
                 START >> node >> END
 
             inner["result"] >> PARENT["results"]
@@ -152,19 +158,32 @@ class TestNestedForLoop:
     @pytest.mark.asyncio
     async def test_three_level_nested_forloop(self):
         """Test 3-level nested ForLoopNode."""
-
         @code_node
         def combine(a: int, b: int, c: int):
             return {"value": a * 100 + b * 10 + c}
 
-        with ForLoopNode(name="level1", inputs={"a": Each([1, 2])}) as l1:
-            with ForLoopNode(name="level2", inputs={"b": Each([3, 4]), "a": PARENT["a"]}) as l2:
+        with ForLoopNode(
+            name="level1",
+            inputs={"a": Each([1, 2])}
+        ) as l1:
+            with ForLoopNode(
+                name="level2",
+                inputs={
+                    "b": Each([3, 4]),
+                    "a": PARENT["a"]
+                }
+            ) as l2:
                 with ForLoopNode(
-                    name="level3", inputs={"c": Each([5, 6]), "a": PARENT["a"], "b": PARENT["b"]}
+                    name="level3",
+                    inputs={
+                        "c": Each([5, 6]),
+                        "a": PARENT["a"],
+                        "b": PARENT["b"]
+                    }
                 ) as l3:
                     node = combine(
                         inputs={"a": PARENT["a"], "b": PARENT["b"], "c": PARENT["c"]},
-                        outputs={"*": PARENT},
+                        outputs={"*": PARENT}
                     )
                     START >> node >> END
 
@@ -182,7 +201,10 @@ class TestNestedForLoop:
 
         # a=1: b=3: [135, 136], b=4: [145, 146]
         # a=2: b=3: [235, 236], b=4: [245, 246]
-        expected = [[[135, 136], [145, 146]], [[235, 236], [245, 246]]]
+        expected = [
+            [[135, 136], [145, 146]],
+            [[235, 236], [245, 246]]
+        ]
         assert result["level2_results"] == expected
 
 
@@ -190,24 +212,25 @@ class TestNestedForLoop:
 # Test 5: ForLoopNode with WhileLoopNode Inside
 # ============================================================
 
-
 class TestForLoopWithWhileLoop:
     """Test ForLoopNode containing WhileLoopNode."""
 
     @pytest.mark.asyncio
     async def test_forloop_with_whileloop_inside(self):
         """Test sequential ForLoop containing WhileLoop."""
-
         @code_node
         def halve(value: int):
             return {"new_value": value // 2}
 
-        with ForLoopNode(name="outer_for", inputs={"item": Each([10, 20, 30])}) as for_loop:
+        with ForLoopNode(
+            name="outer_for",
+            inputs={"item": Each([10, 20, 30])}
+        ) as for_loop:
             with WhileLoopNode(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
                 stop_condition="value < 5",
-                max_iterations=10,
+                max_iterations=10
             ) as while_loop:
                 node = halve(inputs={"value": PARENT["value"]})
                 node["new_value"] >> PARENT["value"]
@@ -232,19 +255,20 @@ class TestForLoopWithWhileLoop:
 # Test 6: Empty Iteration
 # ============================================================
 
-
 class TestEmptyIteration:
     """Test behavior with empty iteration data."""
 
     @pytest.mark.asyncio
     async def test_empty_list(self):
         """Test sequential iteration over empty list."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with ForLoopNode(name="empty_loop", inputs={"value": Each([])}) as loop:
+        with ForLoopNode(
+            name="empty_loop",
+            inputs={"value": Each([])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -253,14 +277,13 @@ class TestEmptyIteration:
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result["result"] == []
-        assert result["iteration_metrics"]["total_iterations"] == 0
+        assert result['result'] == []
+        assert result['iteration_metrics']['total_iterations'] == 0
 
 
 # ============================================================
 # Test 7: Ref from Previous Node
 # ============================================================
-
 
 class TestRefFromPreviousNode:
     """Test iteration using Ref to data from previous node."""
@@ -268,7 +291,6 @@ class TestRefFromPreviousNode:
     @pytest.mark.asyncio
     async def test_each_from_ref(self):
         """Test Each() with Ref to another node's output."""
-
         @code_node
         def generate_data():
             return {"numbers": [10, 20, 30], "factor": 5}
@@ -284,13 +306,13 @@ class TestRefFromPreviousNode:
                 name="ref_loop",
                 inputs={
                     "item": Each(gen_node["numbers"]),
-                    "factor": gen_node["factor"],  # broadcast Ref
+                    "factor": gen_node["factor"]  # broadcast Ref
                 },
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             ) as loop:
                 proc_node = process_item(
                     inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
+                    outputs={"*": PARENT}
                 )
                 START >> proc_node >> END
 
@@ -308,19 +330,20 @@ class TestRefFromPreviousNode:
 # Test 8: Iteration Metrics
 # ============================================================
 
-
 class TestIterationMetrics:
     """Test iteration metrics are collected."""
 
     @pytest.mark.asyncio
     async def test_metrics_collected(self):
         """Test that iteration metrics are returned."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with ForLoopNode(name="metrics_loop", inputs={"value": Each([1, 2, 3])}) as loop:
+        with ForLoopNode(
+            name="metrics_loop",
+            inputs={"value": Each([1, 2, 3])}
+        ) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -341,14 +364,12 @@ class TestIterationMetrics:
 # Test 9: Mismatched Lengths
 # ============================================================
 
-
 class TestMismatchedLengths:
     """Test error handling for mismatched list lengths."""
 
     @pytest.mark.asyncio
     async def test_raises_on_length_mismatch(self):
         """Test that mismatched Each() lengths are captured as error."""
-
         @code_node
         def dummy(x: int, y: int):
             return {"result": x + y}
@@ -357,8 +378,8 @@ class TestMismatchedLengths:
             name="mismatch_loop",
             inputs={
                 "x": Each([1, 2, 3]),
-                "y": Each([10, 20]),  # Different length!
-            },
+                "y": Each([10, 20])  # Different length!
+            }
         ) as loop:
             node = dummy(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
             START >> node >> END
@@ -377,7 +398,6 @@ class TestMismatchedLengths:
 # ============================================================
 # Test 10: Accumulation Pattern (Sequential Dependency)
 # ============================================================
-
 
 class TestAccumulationPattern:
     """Test patterns that require sequential execution."""
@@ -400,7 +420,10 @@ class TestAccumulationPattern:
             totals.append(new_total)
             return {"running_total": new_total}
 
-        with ForLoopNode(name="accumulate_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
+        with ForLoopNode(
+            name="accumulate_loop",
+            inputs={"value": Each([1, 2, 3, 4, 5])}
+        ) as loop:
             node = accumulate(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -418,14 +441,12 @@ class TestAccumulationPattern:
 # Test: for_() Shorthand
 # ============================================================
 
-
 class TestForShorthand:
     """Test for_() shorthand function."""
 
     @pytest.mark.asyncio
     async def test_for_shorthand_basic(self):
         """Test basic for_() with Each()."""
-
         @code_node
         def double(value: int):
             return {"result": value * 2}
@@ -444,7 +465,6 @@ class TestForShorthand:
     @pytest.mark.asyncio
     async def test_for_shorthand_broadcast(self):
         """Test for_() with Each() and broadcast values."""
-
         @code_node
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
@@ -452,7 +472,7 @@ class TestForShorthand:
         with for_(value=Each([1, 2, 3]), multiplier=10) as loop:
             node = multiply(
                 inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 

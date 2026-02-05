@@ -46,7 +46,6 @@ class Param:
             "limit": Param(default=10, description="Max results"),  # type inferred as int
         }
     """
-
     type: Type = None
     required: bool = False
     default: Any = None
@@ -92,10 +91,10 @@ def extract_condition_variables(condition: str) -> Dict[str, str]:
     """
     # Pattern để match tên biến (identifier không theo sau bởi dấu ngoặc mở)
     # Loại trừ Python keyword và built-in name
-    keywords = {"and", "or", "not", "in", "is", "True", "False", "None", "if", "else"}
+    keywords = {'and', 'or', 'not', 'in', 'is', 'True', 'False', 'None', 'if', 'else'}
 
     # Tìm tất cả identifier
-    identifiers = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", condition)
+    identifiers = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', condition)
 
     variables = {}
     for var in identifiers:
@@ -108,7 +107,14 @@ def extract_condition_variables(condition: str) -> Dict[str, str]:
 
 def fake_chunk_from(content: str, model: str = "default") -> Dict[str, Any]:
     """Tạo fake chunk response cho xử lý lỗi."""
-    return {"choices": [{"delta": {"content": content}}], "model": model}
+    return {
+        "choices": [{
+            "delta": {
+                "content": content
+            }
+        }],
+        "model": model
+    }
 
 
 def ensure_async(func: Callable) -> Callable:
@@ -153,11 +159,9 @@ def _auto_name() -> Optional[str]:
     frame = inspect.currentframe()
     try:
         frame = frame.f_back  # skip this function
-        while frame and (
-            frame.f_code.co_name == "__init__"
-            or getattr(frame.f_code, "_skip_auto_name", False)
-            or frame.f_locals.get("_skip_auto_name")
-        ):
+        while frame and (frame.f_code.co_name == '__init__'
+                         or getattr(frame.f_code, '_skip_auto_name', False)
+                         or frame.f_locals.get('_skip_auto_name')):
             frame = frame.f_back
         if frame is None:
             return None
@@ -165,10 +169,12 @@ def _auto_name() -> Optional[str]:
         lineno = frame.f_lineno
         for offset in range(21):
             line = linecache.getline(filename, lineno - offset).strip()
-            if "=" in line:
-                candidate = line.split("=")[0].strip()
+            if '=' in line:
+                candidate = line.split('=')[0].strip()
                 if candidate.isidentifier():
                     return candidate
         return None
     finally:
         del frame
+
+

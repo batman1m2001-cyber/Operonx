@@ -1,16 +1,16 @@
 """Base class for iteration nodes with common infrastructure."""
 
-import asyncio
-import traceback
+from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+import asyncio
+import traceback
 
-from hush.core.loggings import LOGGER
-from hush.core.nodes.base import split_shorthand_kwargs
 from hush.core.nodes.graph.graph_node import GraphNode
+from hush.core.nodes.base import split_shorthand_kwargs
 from hush.core.states.ref import Ref
 from hush.core.utils.common import Param
+from hush.core.loggings import LOGGER
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -43,7 +43,7 @@ class Each:
             ...
     """
 
-    __slots__ = ["source"]
+    __slots__ = ['source']
 
     def __init__(self, source: Any):
         self.source = source
@@ -53,14 +53,7 @@ class Each:
 
 
 # Iteration-specific init keys (beyond base keys)
-_ITER_EXTRA_KEYS = {
-    "max_concurrency",
-    "stop_condition",
-    "max_iterations",
-    "callback",
-    "batch_fn",
-    "fail_fast",
-}
+_ITER_EXTRA_KEYS = {'max_concurrency', 'stop_condition', 'max_iterations', 'callback', 'batch_fn', 'fail_fast'}
 
 
 def split_iter_kwargs(kwargs: dict) -> tuple:
@@ -99,15 +92,19 @@ class BaseIterationNode(GraphNode):
       repeated schema.get_index() calls in hot loops
     """
 
-    __slots__ = ["_each", "_broadcast_inputs", "_raw_inputs", "_raw_outputs", "_var_indices"]
+    __slots__ = ['_each', '_broadcast_inputs', '_raw_inputs', '_raw_outputs', '_var_indices']
 
-    def __init__(self, inputs: Optional[Dict[str, Any]] = None, **kwargs):
+    def __init__(
+        self,
+        inputs: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ):
         """Initialize BaseIterationNode.
 
         Args:
             inputs: Dict mapping variable names to values or Each(source).
         """
-        self._raw_outputs = kwargs.get("outputs")
+        self._raw_outputs = kwargs.get('outputs')
         self._raw_inputs = inputs or {}
 
         super().__init__(**kwargs)
@@ -127,7 +124,10 @@ class BaseIterationNode(GraphNode):
         pass
 
     async def _run_graph(
-        self, state: "MemoryState", context_id: str, parent_context: str
+        self,
+        state: 'MemoryState',
+        context_id: str,
+        parent_context: str
     ) -> Dict[str, Any]:
         """Run child nodes with parent_context."""
         active_tasks: Dict[str, asyncio.Task] = {}
@@ -136,13 +136,15 @@ class BaseIterationNode(GraphNode):
 
         for entry in self.entries:
             task = asyncio.create_task(
-                name=entry, coro=self._nodes[entry].run(state, context_id, parent_context)
+                name=entry,
+                coro=self._nodes[entry].run(state, context_id, parent_context)
             )
             active_tasks[entry] = task
 
         while active_tasks:
             done_tasks, _ = await asyncio.wait(
-                active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
+                active_tasks.values(),
+                return_when=asyncio.FIRST_COMPLETED
             )
 
             nodes = self._nodes
@@ -157,7 +159,6 @@ class BaseIterationNode(GraphNode):
                 if node.type == "branch":
                     branch_target = node.get_target(state, context_id)
                     from hush.core.nodes.base import END
-
                     if branch_target != END.name:
                         next_nodes = [branch_target]
                     else:
@@ -179,14 +180,17 @@ class BaseIterationNode(GraphNode):
                     if ready_count[next_node] == 0:
                         task = asyncio.create_task(
                             name=next_node,
-                            coro=nodes[next_node].run(state, context_id, parent_context),
+                            coro=nodes[next_node].run(state, context_id, parent_context)
                         )
                         active_tasks[next_node] = task
 
         return self.get_outputs(state, context_id, parent_context)
 
     def _resolve_values(
-        self, values: Dict[str, Any], state: "MemoryState", context_id: Optional[str]
+        self,
+        values: Dict[str, Any],
+        state: 'MemoryState',
+        context_id: Optional[str]
     ) -> Dict[str, Any]:
         """Resolve values, dereference Ref objects."""
         result = {}
@@ -199,7 +203,9 @@ class BaseIterationNode(GraphNode):
         return result
 
     def _build_iteration_data(
-        self, each_values: Dict[str, List], broadcast_values: Dict[str, Any]
+        self,
+        each_values: Dict[str, List],
+        broadcast_values: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Build iteration data by zipping `each` values and adding broadcast."""
         if not each_values:
@@ -209,9 +215,7 @@ class BaseIterationNode(GraphNode):
         if len(set(lengths.values())) > 1:
             LOGGER.error(
                 "%s [highlight]%s[/highlight]: 'each' variables have different lengths: %s",
-                self.__class__.__name__,
-                self.full_name,
-                lengths,
+                self.__class__.__name__, self.full_name, lengths
             )
             raise ValueError(f"All 'each' variables must have the same length. Got: {lengths}")
 
@@ -245,17 +249,16 @@ class BaseIterationNode(GraphNode):
             var_name: Param(type=List, required=isinstance(value, Ref), value=value)
             for var_name, value in self._each.items()
         }
-        parsed_inputs.update(
-            {
-                var_name: Param(type=Any, required=isinstance(value, Ref), value=value)
-                for var_name, value in self._broadcast_inputs.items()
-            }
-        )
+        parsed_inputs.update({
+            var_name: Param(type=Any, required=isinstance(value, Ref), value=value)
+            for var_name, value in self._broadcast_inputs.items()
+        })
 
         # Build outputs from graph outputs
         graph_outputs = self.outputs or {}
         parsed_outputs = {
-            key: Param(type=List, required=param.required) for key, param in graph_outputs.items()
+            key: Param(type=List, required=param.required)
+            for key, param in graph_outputs.items()
         }
         parsed_outputs["iteration_metrics"] = Param(type=Dict, required=False)
 
@@ -275,9 +278,9 @@ class BaseIterationNode(GraphNode):
 
     async def run(
         self,
-        state: "MemoryState",
+        state: 'MemoryState',
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
+        parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Template method for iteration node execution.
 
@@ -305,9 +308,7 @@ class BaseIterationNode(GraphNode):
             error_msg = traceback.format_exc()
             LOGGER.error(
                 "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
-                request_id,
-                self.full_name,
-                str(e),
+                request_id, self.full_name, str(e)
             )
             LOGGER.error(error_msg)
             state[self.full_name, "error", context_id] = error_msg
@@ -337,10 +338,10 @@ class BaseIterationNode(GraphNode):
 
     async def _execute(
         self,
-        state: "MemoryState",
+        state: 'MemoryState',
         context_id: Optional[str],
         parent_context: Optional[str],
-        request_id: str,
+        request_id: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Execute iteration logic. Must be implemented by subclasses.
 

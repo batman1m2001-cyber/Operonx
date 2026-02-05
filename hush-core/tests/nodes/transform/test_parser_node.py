@@ -1,16 +1,15 @@
 """Tests for ParserNode - text parsing and extraction node."""
 
 import pytest
-
-from hush.core.nodes.base import END, PARENT, START
-from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.nodes.transform.parser_node import ParserNode
-from hush.core.states import MemoryState, StateSchema
+from hush.core.nodes.graph.graph_node import GraphNode
+from hush.core.nodes.base import START, END, PARENT
+from hush.core.states import StateSchema, MemoryState
+
 
 # ============================================================
 # Test 1: JSON Parser
 # ============================================================
-
 
 class TestJSONParser:
     """Test JSON format parsing."""
@@ -27,7 +26,7 @@ class TestJSONParser:
                     "user.age",
                     "status",
                 ],
-                inputs={"text": PARENT["text"]},
+                inputs={"text": PARENT["text"]}
             )
             START >> json_parser >> END
 
@@ -50,7 +49,7 @@ class TestJSONParser:
                 name="json_parser",
                 format="json",
                 extract=["user.name"],
-                inputs={"text": PARENT["text"]},
+                inputs={"text": PARENT["text"]}
             )
             START >> json_parser >> END
 
@@ -65,7 +64,11 @@ class TestJSONParser:
 
     def test_json_parser_quick_call(self):
         """Test JSON parser with direct __call__."""
-        parser = ParserNode(name="quick_json", format="json", extract=["name", "age"])
+        parser = ParserNode(
+            name="quick_json",
+            format="json",
+            extract=["name", "age"]
+        )
         result = parser(text='{"name": "Bob", "age": 25}')
         assert result["name"] == "Bob"
         assert result["age"] == 25
@@ -74,7 +77,6 @@ class TestJSONParser:
 # ============================================================
 # Test 2: XML Parser
 # ============================================================
-
 
 class TestXMLParser:
     """Test XML format parsing."""
@@ -101,7 +103,7 @@ class TestXMLParser:
                     "response.user.email",
                     "response.code",
                 ],
-                inputs={"text": PARENT["text"]},
+                inputs={"text": PARENT["text"]}
             )
             START >> xml_parser >> END
 
@@ -119,25 +121,36 @@ class TestXMLParser:
 # Test 5: Schema Extraction
 # ============================================================
 
-
 class TestParserSchemaExtraction:
     """Test automatic schema extraction."""
 
     def test_parser_has_text_input(self):
         """Test that parser always has 'text' input."""
-        parser = ParserNode(name="test_parser", format="json", extract=["name"])
+        parser = ParserNode(
+            name="test_parser",
+            format="json",
+            extract=["name"]
+        )
         assert "text" in parser.inputs
 
     def test_parser_outputs_match_schema(self):
         """Test that outputs match extract."""
-        parser = ParserNode(name="test_parser", format="json", extract=["name", "age", "status"])
+        parser = ParserNode(
+            name="test_parser",
+            format="json",
+            extract=["name", "age", "status"]
+        )
         assert "name" in parser.outputs
         assert "age" in parser.outputs
         assert "status" in parser.outputs
 
     def test_parser_nested_schema_outputs(self):
         """Test outputs with nested schema (dot notation)."""
-        parser = ParserNode(name="test_parser", format="json", extract=["user.name", "user.email"])
+        parser = ParserNode(
+            name="test_parser",
+            format="json",
+            extract=["user.name", "user.email"]
+        )
         # Output keys should be the last part of the path
         assert "name" in parser.outputs
         assert "email" in parser.outputs
@@ -147,21 +160,26 @@ class TestParserSchemaExtraction:
 # Test 6: Error Handling
 # ============================================================
 
-
 class TestParserErrors:
     """Test parser error handling."""
 
     def test_missing_extract_raises(self):
         """Test that missing extract raises error."""
         with pytest.raises(TypeError):
-            ParserNode(name="bad_parser", format="json")
+            ParserNode(
+                name="bad_parser",
+                format="json"
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_json_returns_none(self):
         """Test that invalid JSON returns empty dict and captures error."""
         with GraphNode(name="invalid_json_graph") as graph:
             parser = ParserNode(
-                name="test_parser", format="json", extract=["name"], inputs={"text": PARENT["text"]}
+                name="test_parser",
+                format="json",
+                extract=["name"],
+                inputs={"text": PARENT["text"]}
             )
             START >> parser >> END
 
@@ -174,3 +192,4 @@ class TestParserErrors:
         error = state["invalid_json_graph.test_parser", "error", None]
         assert error is not None
         assert "JSON" in error or "json" in error.lower()
+

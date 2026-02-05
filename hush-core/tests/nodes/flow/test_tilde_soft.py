@@ -4,10 +4,9 @@ Uses the actual implementation from hush.core.nodes.base
 """
 
 import pytest
-
-from hush.core.nodes.base import END, START
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.nodes.transform.code_node import CodeNode
+from hush.core.nodes.base import START, END
 
 
 class TestTildeSoftEdge:
@@ -26,7 +25,7 @@ class TestTildeSoftEdge:
         # Check edges
         a_to_b = next((e for e in graph._edges if e.from_node == "a" and e.to_node == "b"), None)
         assert a_to_b is not None, "Edge a->b should exist"
-        assert a_to_b.soft, "Edge a->b should be soft"
+        assert a_to_b.soft == True, "Edge a->b should be soft"
 
     def test_basic_hard_edge(self):
         """Test: a >> b creates hard edge"""
@@ -41,7 +40,7 @@ class TestTildeSoftEdge:
         # Check edges
         a_to_b = next((e for e in graph._edges if e.from_node == "a" and e.to_node == "b"), None)
         assert a_to_b is not None, "Edge a->b should exist"
-        assert not a_to_b.soft, "Edge a->b should be hard"
+        assert a_to_b.soft == False, "Edge a->b should be hard"
 
     def test_mixed_chain(self):
         """Test: a >> ~b >> c >> ~d >> e creates mixed edges"""
@@ -59,10 +58,10 @@ class TestTildeSoftEdge:
         # Check each edge
         edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
 
-        assert edges.get(("a", "b")), "a->b should be soft"
-        assert not edges.get(("b", "c")), "b->c should be hard"
-        assert edges.get(("c", "d")), "c->d should be soft"
-        assert not edges.get(("d", "e")), "d->e should be hard"
+        assert edges.get(("a", "b")) == True, "a->b should be soft"
+        assert edges.get(("b", "c")) == False, "b->c should be hard"
+        assert edges.get(("c", "d")) == True, "c->d should be soft"
+        assert edges.get(("d", "e")) == False, "d->e should be hard"
 
     def test_branch_pattern(self):
         """Test branch pattern: branch >> ~case1 >> merge"""
@@ -81,15 +80,15 @@ class TestTildeSoftEdge:
 
         edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
 
-        assert edges.get(("branch", "case1")), "branch->case1 should be soft"
-        assert edges.get(("branch", "case2")), "branch->case2 should be soft"
-        assert not edges.get(("case1", "merge")), "case1->merge should be hard"
-        assert not edges.get(("case2", "merge")), "case2->merge should be hard"
+        assert edges.get(("branch", "case1")) == True, "branch->case1 should be soft"
+        assert edges.get(("branch", "case2")) == True, "branch->case2 should be soft"
+        assert edges.get(("case1", "merge")) == False, "case1->merge should be hard"
+        assert edges.get(("case2", "merge")) == False, "case2->merge should be hard"
 
     def test_start_soft_edge_raises_error(self):
         """Test that START >> ~node raises error"""
         with pytest.raises(TypeError, match="Không thể dùng soft edge"):
-            with GraphNode(name="test"):
+            with GraphNode(name="test") as graph:
                 a = CodeNode(name="a", code_fn=lambda: {"x": 1}, inputs={})
                 START >> ~a  # Should raise
 
@@ -107,9 +106,9 @@ class TestTildeSoftEdge:
 
         edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
 
-        assert edges.get(("a", "b")), "a->b should be soft"
-        assert edges.get(("b", "c")), "b->c should be soft"
-        assert edges.get(("c", "d")), "c->d should be soft"
+        assert edges.get(("a", "b")) == True, "a->b should be soft"
+        assert edges.get(("b", "c")) == True, "b->c should be soft"
+        assert edges.get(("c", "d")) == True, "c->d should be soft"
 
 
 if __name__ == "__main__":

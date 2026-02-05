@@ -1,8 +1,7 @@
 """Tests for the Hush workflow engine."""
 
 import pytest
-
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import Hush, GraphNode, START, END, CodeNode, PARENT
 
 
 class TestHushBasic:
@@ -52,7 +51,9 @@ class TestHushRun:
         """Test running a simple workflow that returns constant."""
         with GraphNode(name="test") as graph:
             node = CodeNode(
-                name="constant", code_fn=lambda: {"result": 42}, outputs={"result": PARENT}
+                name="constant",
+                code_fn=lambda: {"result": 42},
+                outputs={"result": PARENT}
             )
             START >> node >> END
 
@@ -66,7 +67,10 @@ class TestHushRun:
     async def test_run_generates_ids(self):
         """Test run generates IDs if not provided."""
         with GraphNode(name="test") as graph:
-            passthrough = CodeNode(name="passthrough", code_fn=lambda: {})
+            passthrough = CodeNode(
+                name="passthrough",
+                code_fn=lambda: {}
+            )
             START >> passthrough >> END
 
         engine = Hush(graph)
@@ -79,13 +83,19 @@ class TestHushRun:
     async def test_run_with_custom_ids(self):
         """Test run with custom IDs."""
         with GraphNode(name="test") as graph:
-            passthrough = CodeNode(name="passthrough", code_fn=lambda: {})
+            passthrough = CodeNode(
+                name="passthrough",
+                code_fn=lambda: {}
+            )
             START >> passthrough >> END
 
         engine = Hush(graph)
 
         result = await engine.run(
-            inputs={}, user_id="user-123", session_id="session-456", request_id="request-789"
+            inputs={},
+            user_id="user-123",
+            session_id="session-456",
+            request_id="request-789"
         )
 
         state = result["$state"]
@@ -97,8 +107,15 @@ class TestHushRun:
     async def test_run_multi_node_pipeline(self):
         """Test running a multi-node pipeline with constant outputs."""
         with GraphNode(name="pipeline") as graph:
-            step1 = CodeNode(name="step1", code_fn=lambda: {"value": 10})
-            step2 = CodeNode(name="step2", code_fn=lambda: {"final": 20}, outputs={"final": PARENT})
+            step1 = CodeNode(
+                name="step1",
+                code_fn=lambda: {"value": 10}
+            )
+            step2 = CodeNode(
+                name="step2",
+                code_fn=lambda: {"final": 20},
+                outputs={"final": PARENT}
+            )
             START >> step1 >> step2 >> END
 
         engine = Hush(graph)
@@ -114,7 +131,7 @@ class TestHushRun:
                 name="doubler",
                 code_fn=lambda x: {"result": x * 2},
                 inputs={"x": PARENT["x"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -131,7 +148,7 @@ class TestHushRun:
                 name="adder",
                 code_fn=lambda a, b: {"sum": a + b},
                 inputs={"a": PARENT["a"], "b": PARENT["b"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -148,7 +165,10 @@ class TestHushWithTracer:
     async def test_run_with_none_tracer(self):
         """Test run with tracer=None works."""
         with GraphNode(name="test") as graph:
-            node = CodeNode(name="node", code_fn=lambda: {"ok": True})
+            node = CodeNode(
+                name="node",
+                code_fn=lambda: {"ok": True}
+            )
             START >> node >> END
 
         engine = Hush(graph)
@@ -178,7 +198,7 @@ class TestHushWithTracer:
             step1 = CodeNode(
                 name="process_input",
                 code_fn=lambda: {"processed": "Hello from Hush!"},
-                outputs={"processed": PARENT},
+                outputs={"processed": PARENT}
             )
             step2 = CodeNode(
                 name="transform",
@@ -187,14 +207,17 @@ class TestHushWithTracer:
             step3 = CodeNode(
                 name="finalize",
                 code_fn=lambda: {"result": "Workflow complete!"},
-                outputs={"result": PARENT},
+                outputs={"result": PARENT}
             )
             START >> step1 >> step2 >> step3 >> END
 
         engine = Hush(graph)
 
         result = await engine.run(
-            inputs={}, tracer=tracer, user_id="test-user", session_id="test-session"
+            inputs={},
+            tracer=tracer,
+            user_id="test-user",
+            session_id="test-session"
         )
 
         # Wait for background flush to complete
@@ -202,7 +225,7 @@ class TestHushWithTracer:
 
         assert result["processed"] == "Hello from Hush!"
         assert result["result"] == "Workflow complete!"
-        print("\nTrace pushed to Langfuse: https://cloud.langfuse.com")
+        print(f"\nTrace pushed to Langfuse: https://cloud.langfuse.com")
 
 
 class TestHushShow:
@@ -249,7 +272,7 @@ class TestHushStateAccess:
                 name="processor",
                 code_fn=lambda x: {"y": x * 2},
                 inputs={"x": PARENT["x"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 
@@ -271,7 +294,12 @@ class TestHushStateAccess:
             START >> node >> END
 
         engine = Hush(graph)
-        result = await engine.run(inputs={}, user_id="uid", session_id="sid", request_id="rid")
+        result = await engine.run(
+            inputs={},
+            user_id="uid",
+            session_id="sid",
+            request_id="rid"
+        )
 
         state = result["$state"]
         assert state.user_id == "uid"
@@ -290,7 +318,7 @@ class TestHushMultipleRuns:
                 name="echo",
                 code_fn=lambda n: {"value": n},
                 inputs={"n": PARENT["n"]},
-                outputs={"*": PARENT},
+                outputs={"*": PARENT}
             )
             START >> node >> END
 

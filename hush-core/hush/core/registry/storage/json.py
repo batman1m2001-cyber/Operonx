@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from hush.core.loggings import LOGGER
-
 from .base import ConfigStorage
 
 
@@ -42,12 +41,12 @@ class JsonConfigStorage(ConfigStorage):
         if not self._file_path.exists():
             return {}
 
-        with open(self._file_path, "r") as f:
+        with open(self._file_path, 'r') as f:
             return json.load(f)
 
     def _save_file(self, data: Dict[str, Any]):
         """Ghi dữ liệu vào file JSON."""
-        with open(self._file_path, "w") as f:
+        with open(self._file_path, 'w') as f:
             json.dump(data, f, indent=2)
 
     def load_one(self, key: str) -> Optional[Dict[str, Any]]:
