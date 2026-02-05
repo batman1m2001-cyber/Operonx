@@ -44,7 +44,7 @@ jobs:
           if [ "${{ matrix.package }}" = "hush-core" ]; then
             uv run python -c "from hush.core import GraphNode, CodeNode, START, END"
           elif [ "${{ matrix.package }}" = "hush-providers" ]; then
-            uv run python -c "from hush.providers import LLMProvider"
+            uv run python -c "from hush.providers import LLMFactory, EmbeddingFactory"
           elif [ "${{ matrix.package }}" = "hush-observability" ]; then
             uv run python -c "from hush.observability import LangfuseTracer"
           fi
