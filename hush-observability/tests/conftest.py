@@ -80,9 +80,8 @@ def pytest_configure(config):
     if not os.environ.get("HUSH_CONFIG"):
         print(SETUP_TUTORIAL, file=sys.stderr)
         pytest.exit(
-            "HUSH_CONFIG environment variable not set. "
-            "Please follow the setup tutorial above.",
-            returncode=1
+            "HUSH_CONFIG environment variable not set. Please follow the setup tutorial above.",
+            returncode=1,
         )
 
     # Check if config file exists
@@ -91,13 +90,12 @@ def pytest_configure(config):
         pytest.exit(
             f"Config file not found: {CONFIGS_PATH}\n"
             "Please create resources.yaml or update HUSH_CONFIG path.",
-            returncode=1
+            returncode=1,
         )
 
     # Register custom markers
     config.addinivalue_line(
-        "markers",
-        "integration: mark test as integration test (requires credentials)"
+        "markers", "integration: mark test as integration test (requires credentials)"
     )
 
 
@@ -192,10 +190,30 @@ def sample_iteration_flush_data(sample_request_id):
         "execution_order": [
             {"node": "root", "parent": None, "context_id": None, "contain_generation": False},
             {"node": "map_node", "parent": "root", "context_id": None, "contain_generation": False},
-            {"node": "process", "parent": "map_node", "context_id": "[0]", "contain_generation": False},
-            {"node": "process", "parent": "map_node", "context_id": "[1]", "contain_generation": False},
-            {"node": "process", "parent": "map_node", "context_id": "[2]", "contain_generation": False},
-            {"node": "aggregate", "parent": "root", "context_id": None, "contain_generation": False},
+            {
+                "node": "process",
+                "parent": "map_node",
+                "context_id": "[0]",
+                "contain_generation": False,
+            },
+            {
+                "node": "process",
+                "parent": "map_node",
+                "context_id": "[1]",
+                "contain_generation": False,
+            },
+            {
+                "node": "process",
+                "parent": "map_node",
+                "context_id": "[2]",
+                "contain_generation": False,
+            },
+            {
+                "node": "aggregate",
+                "parent": "root",
+                "context_id": None,
+                "contain_generation": False,
+            },
         ],
         "nodes_trace_data": {
             "root": {"name": "root", "input": {"items": [1, 2, 3]}, "output": {"result": 6}},
@@ -203,7 +221,11 @@ def sample_iteration_flush_data(sample_request_id):
             "process:[0]": {"name": "process", "input": {"item": 1}, "output": {"doubled": 2}},
             "process:[1]": {"name": "process", "input": {"item": 2}, "output": {"doubled": 4}},
             "process:[2]": {"name": "process", "input": {"item": 3}, "output": {"doubled": 6}},
-            "aggregate": {"name": "aggregate", "input": {"values": [2, 4, 6]}, "output": {"sum": 12}},
+            "aggregate": {
+                "name": "aggregate",
+                "input": {"values": [2, 4, 6]},
+                "output": {"sum": 12},
+            },
         },
     }
 
@@ -256,9 +278,7 @@ class MockMemoryState:
         self.has_trace_store = False
         self._trace_store = None
 
-    def add_execution(
-        self, node_id: str, parent_id: str = None, context_id: str = None
-    ):
+    def add_execution(self, node_id: str, parent_id: str = None, context_id: str = None):
         """Add an execution to the order."""
         node = MockNode(node_id)
         self._indexer.add_node(node)
@@ -292,6 +312,7 @@ def mock_state():
 def langfuse_tracer():
     """Create LangfuseTracer with test resource key."""
     from hush.observability import LangfuseTracer
+
     return LangfuseTracer(resource_key="langfuse:default")
 
 
@@ -299,6 +320,7 @@ def langfuse_tracer():
 def langfuse_tracer_with_tags():
     """Create LangfuseTracer with static tags."""
     from hush.observability import LangfuseTracer
+
     return LangfuseTracer(resource_key="langfuse:default", tags=["test", "unit"])
 
 
@@ -306,6 +328,7 @@ def langfuse_tracer_with_tags():
 def otel_tracer():
     """Create OTELTracer with test resource key."""
     from hush.observability import OTELTracer
+
     return OTELTracer(resource_key="otel:jaeger")
 
 
@@ -313,6 +336,7 @@ def otel_tracer():
 def otel_tracer_with_config():
     """Create OTELTracer with direct config."""
     from hush.observability import OTELConfig, OTELTracer
+
     config = OTELConfig.jaeger()
     return OTELTracer(config=config)
 
@@ -321,6 +345,7 @@ def otel_tracer_with_config():
 def local_tracer():
     """Create LocalTracer for testing."""
     from hush.core.tracers import LocalTracer
+
     return LocalTracer(name="test", tags=["local", "test"])
 
 
@@ -335,11 +360,10 @@ def setup_resource_hub():
     from hush.core.registry import ResourceHub, set_global_hub
 
     # Import observability plugin to register Langfuse/OTEL configs
-    from hush.observability.plugin import ObservabilityPlugin
 
     # Optionally import providers plugin if available (for full integration tests)
     try:
-        from hush.providers.registry import LLMPlugin, EmbeddingPlugin, RerankPlugin
+        from hush.providers.registry import EmbeddingPlugin, LLMPlugin, RerankPlugin  # noqa: F401
     except ImportError:
         pass  # hush-providers not installed, skip
 
@@ -367,6 +391,7 @@ def cleanup_after_tests():
     # Shutdown background worker gracefully
     try:
         from hush.core.tracers import BaseTracer
+
         BaseTracer.shutdown_executor()
     except Exception:
         pass

@@ -7,7 +7,7 @@ Mỗi module handler định nghĩa:
 Các handler được tự động đăng ký khi package này được import.
 """
 
-from .console import ConsoleHandlerConfig, ColoredRichHandler, create_console_handler
+from .console import ColoredRichHandler, ConsoleHandlerConfig, create_console_handler
 from .file import (
     FileHandlerConfig,
     TimedFileHandlerConfig,

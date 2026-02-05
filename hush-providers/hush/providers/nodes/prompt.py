@@ -4,21 +4,22 @@ This module provides PromptNode for building chat messages from templates.
 Unified design: single `template` input that accepts multiple formats.
 """
 
-from typing import Dict, Any, List, Union
 import re
+from typing import Any, Dict, List, Union
 
-from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
-from hush.core.utils.common import Param
 from hush.core.exceptions import PromptError
-
+from hush.core.nodes import BaseNode
+from hush.core.utils.common import Param
 
 # Reserved keys that are not template variables
-RESERVED_KEYS = frozenset([
-    'template',
-    'conversation_history',
-    'tool_results',
-])
+RESERVED_KEYS = frozenset(
+    [
+        "template",
+        "conversation_history",
+        "tool_results",
+    ]
+)
 
 
 class PromptNode(BaseNode):
@@ -102,22 +103,17 @@ class PromptNode(BaseNode):
 
     # Fixed input schema - only reserved keys
     INPUT_SCHEMA = {
-        'template': Param(type=(str, dict, list), required=False, default=None),
-        'conversation_history': Param(type=list, required=False, default=[]),
-        'tool_results': Param(type=list, required=False, default=[]),
+        "template": Param(type=(str, dict, list), required=False, default=None),
+        "conversation_history": Param(type=list, required=False, default=[]),
+        "tool_results": Param(type=list, required=False, default=[]),
     }
 
     # Fixed output schema
     OUTPUT_SCHEMA = {
-        'messages': Param(type=list, required=True),
+        "messages": Param(type=list, required=True),
     }
 
-    def __init__(
-        self,
-        inputs: Dict[str, Any] = None,
-        outputs: Dict[str, Any] = None,
-        **kwargs
-    ):
+    def __init__(self, inputs: Dict[str, Any] = None, outputs: Dict[str, Any] = None, **kwargs):
         """Initialize PromptNode.
 
         Args:
@@ -177,7 +173,7 @@ class PromptNode(BaseNode):
         from hush.core.states.ref import Ref
 
         # Resolve PARENT sentinel to actual father node
-        if hasattr(wildcard_node, 'name') and wildcard_node.name == "__PARENT__":
+        if hasattr(wildcard_node, "name") and wildcard_node.name == "__PARENT__":
             actual_node = self.father
         else:
             actual_node = wildcard_node
@@ -187,10 +183,10 @@ class PromptNode(BaseNode):
             return None
 
         # If actual_node has inputs attribute, try to get template from it
-        if hasattr(actual_node, 'inputs') and 'template' in actual_node.inputs:
-            template_param = actual_node.inputs['template']
+        if hasattr(actual_node, "inputs") and "template" in actual_node.inputs:
+            template_param = actual_node.inputs["template"]
             # If it's a Param with a value
-            if hasattr(template_param, 'value'):
+            if hasattr(template_param, "value"):
                 value = template_param.value
                 # If it's a Ref, we can't resolve it yet (circular), return None
                 if isinstance(value, Ref):
@@ -219,7 +215,7 @@ class PromptNode(BaseNode):
             if not isinstance(s, str):
                 return
             # Match {variable_name} patterns
-            for match in re.finditer(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', s):
+            for match in re.finditer(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", s):
                 vars_found.add(match.group(1))
 
         def traverse(obj):
@@ -246,16 +242,16 @@ class PromptNode(BaseNode):
         """
         if isinstance(value, str):
             try:
-                return value.format_map(vars) if '{' in value else value
+                return value.format_map(vars) if "{" in value else value
             except KeyError as e:
                 # Find all missing variables
-                required = set(re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', value))
+                required = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))
                 missing = [v for v in required if v not in vars]
                 raise PromptError(
                     message="Missing template variable(s)",
                     template=template or value,
                     missing_vars=missing,
-                    original_error=e
+                    original_error=e,
                 ) from e
         elif isinstance(value, dict):
             return {k: self._format_value(v, vars, template) for k, v in value.items()}
@@ -264,9 +260,7 @@ class PromptNode(BaseNode):
         return value
 
     def _template_to_messages(
-        self,
-        template: Union[str, Dict, List],
-        vars: Dict[str, Any]
+        self, template: Union[str, Dict, List], vars: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Convert template to messages array.
 
@@ -309,7 +303,7 @@ class PromptNode(BaseNode):
         raise PromptError(
             message="Invalid template type",
             template=template,
-            original_error=TypeError(f"Expected str, dict, or list, got {type(template).__name__}")
+            original_error=TypeError(f"Expected str, dict, or list, got {type(template).__name__}"),
         )
 
     async def _format(self, **kwargs) -> Dict[str, Any]:
@@ -317,9 +311,9 @@ class PromptNode(BaseNode):
 
         Pops reserved keys, uses remaining kwargs as template variables.
         """
-        template = kwargs.pop('template', None)
-        conversation_history = kwargs.pop('conversation_history', None) or []
-        tool_results = kwargs.pop('tool_results', None) or []
+        template = kwargs.pop("template", None)
+        conversation_history = kwargs.pop("conversation_history", None) or []
+        tool_results = kwargs.pop("tool_results", None) or []
 
         # Remaining kwargs are template variables
         vars = kwargs
@@ -331,7 +325,7 @@ class PromptNode(BaseNode):
         if conversation_history:
             last_user_idx = None
             for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get('role') == 'user':
+                if messages[i].get("role") == "user":
                     last_user_idx = i
                     break
 
@@ -350,8 +344,8 @@ class PromptNode(BaseNode):
         """Return prompt-specific metadata."""
         metadata = {}
 
-        if 'template' in self.inputs:
-            val = self.inputs['template'].value
+        if "template" in self.inputs:
+            val = self.inputs["template"].value
             if val is not None:
                 metadata["template"] = val
 
@@ -365,8 +359,9 @@ def prompt_(template=None, **kwargs) -> PromptNode:
         p = prompt_({"system": "You are {role}.", "user": "{query}"}, role="helpful", query=PARENT["q"])
     """
     from hush.core.nodes import split_shorthand_kwargs
+
     _skip_auto_name = True  # noqa: F841
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     if template is not None:
-        input_mappings['template'] = template
+        input_mappings["template"] = template
     return PromptNode(inputs=input_mappings or None, **init_kwargs)

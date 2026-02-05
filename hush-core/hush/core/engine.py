@@ -21,14 +21,14 @@ Example:
     ```
 """
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
 import uuid
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from hush.core.background import get_background
+from hush.core.loggings import LOGGER
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.states import StateSchema
 from hush.core.streams import STREAM_SERVICE
-from hush.core.loggings import LOGGER
-from hush.core.background import get_background
 
 if TYPE_CHECKING:
     from hush.core.tracers import BaseTracer, TraceStore
@@ -125,12 +125,17 @@ class Hush:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        LOGGER.info("[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]", request_id, self.name)
+        LOGGER.info(
+            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]",
+            request_id,
+            self.name,
+        )
 
         # Create trace store for incremental writes if tracer is provided
         trace_store: Optional["TraceStore"] = None
         if tracer is not None:
             from hush.core.tracers import get_store
+
             trace_store = get_store()
 
         # Create fresh state for this run
@@ -152,18 +157,18 @@ class Hush:
         if tracer is not None:
             tracer.flush_in_background(self.name, state)
 
-        LOGGER.info("[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed", request_id, self.name)
+        LOGGER.info(
+            "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed",
+            request_id,
+            self.name,
+        )
 
         # Include state in result for debugging/tracing access
         result["$state"] = state
 
         return result
 
-    async def __call__(
-        self,
-        inputs: Dict[str, Any],
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.
 
         Equivalent to calling run() with the same arguments.

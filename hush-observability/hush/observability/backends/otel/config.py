@@ -1,6 +1,6 @@
 """OpenTelemetry configuration for ResourceHub."""
 
-from typing import ClassVar, Dict, List, Literal, Optional
+from typing import ClassVar, Dict, Literal, Optional
 
 from hush.core.utils.yaml_model import YamlModel
 

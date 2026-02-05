@@ -13,7 +13,8 @@ Chạy: cd hush-tutorial && uv run python examples/01_hello_world.py
 """
 
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 
 
 async def main():
@@ -28,8 +29,8 @@ async def main():
         greet = CodeNode(
             name="greet",
             code_fn=lambda name: {"greeting": f"Xin chào, {name}!"},
-            inputs={"name": PARENT["name"]},   # Lấy 'name' từ input
-            outputs={"greeting": PARENT},       # Ghi 'greeting' lên parent state
+            inputs={"name": PARENT["name"]},  # Lấy 'name' từ input
+            outputs={"greeting": PARENT},  # Ghi 'greeting' lên parent state
         )
         START >> greet >> END
 

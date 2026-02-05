@@ -4,8 +4,8 @@ This module provides Keycloak token-based authentication with background refresh
 """
 
 from .config import KeycloakTokenConfig
-from .keycloak import KeycloakTokenProvider
 from .factory import AuthFactory
+from .keycloak import KeycloakTokenProvider
 
 __all__ = [
     "KeycloakTokenConfig",

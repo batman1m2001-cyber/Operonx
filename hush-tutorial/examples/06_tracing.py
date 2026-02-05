@@ -17,16 +17,17 @@ import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.tracers import LocalTracer
+from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes.transform.code_node import code_node
-
+from hush.core.tracers import LocalTracer
 
 # =============================================================================
 # Code nodes với dynamic tags
 # =============================================================================
+
 
 @code_node
 def analyze_text(text: str):
@@ -127,7 +128,11 @@ async def example_2_multiple_traces():
     # Chạy với nhiều users
     test_cases = [
         {"text": "Hello world", "user_id": "alice", "session_id": "s1"},
-        {"text": "Đây là một văn bản dài hơn để test dynamic tags và phân loại", "user_id": "bob", "session_id": "s2"},
+        {
+            "text": "Đây là một văn bản dài hơn để test dynamic tags và phân loại",
+            "user_id": "bob",
+            "session_id": "s2",
+        },
     ]
 
     for tc in test_cases:
@@ -156,6 +161,7 @@ async def example_3_langfuse_tracer():
         return
 
     import os
+
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
@@ -182,7 +188,7 @@ async def example_3_langfuse_tracer():
     )
 
     print(f"  Word count: {result['word_count']}")
-    print(f"  Trace sent to Langfuse! Check dashboard.")
+    print("  Trace sent to Langfuse! Check dashboard.")
 
 
 async def main():

@@ -14,18 +14,19 @@ Chạy: cd hush-tutorial && uv run python examples/05_loops_and_branches.py
 """
 
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 from hush.core.nodes.flow.branch_node import if_
+from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.iteration.for_loop_node import ForLoopNode
 from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
-
 
 # =============================================================================
 # Code nodes dùng @code_node decorator (gọn hơn CodeNode class)
 # =============================================================================
+
 
 @code_node
 def process_item(item: str, prefix: str):
@@ -49,6 +50,7 @@ def halve_value(value: int):
 # Examples
 # =============================================================================
 
+
 async def example_1_for_loop():
     """ForLoopNode — Xử lý tuần tự từng item."""
     print("=" * 50)
@@ -59,8 +61,8 @@ async def example_1_for_loop():
         with ForLoopNode(
             name="process_items",
             inputs={
-                "item": Each(PARENT["items"]),   # Iterate qua mỗi item
-                "prefix": PARENT["prefix"],       # Broadcast cho tất cả iterations
+                "item": Each(PARENT["items"]),  # Iterate qua mỗi item
+                "prefix": PARENT["prefix"],  # Broadcast cho tất cả iterations
             },
         ) as loop:
             step = process_item(
@@ -74,10 +76,12 @@ async def example_1_for_loop():
         START >> loop >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "items": ["apple", "banana", "cherry"],
-        "prefix": "Fruit",
-    })
+    result = await engine.run(
+        inputs={
+            "items": ["apple", "banana", "cherry"],
+            "prefix": "Fruit",
+        }
+    )
 
     print(f"  Results: {result['results']}")
     # ['Fruit: apple', 'Fruit: banana', 'Fruit: cherry']
@@ -109,7 +113,7 @@ async def example_2_map_node():
     engine = Hush(graph)
     result = await engine.run(inputs={"numbers": [1, 2, 3, 4, 5]})
 
-    print(f"  Input:   [1, 2, 3, 4, 5]")
+    print("  Input:   [1, 2, 3, 4, 5]")
     print(f"  Squared: {result['results']}")
     # [1, 4, 9, 16, 25]
 
@@ -141,7 +145,7 @@ async def example_3_while_loop():
     engine = Hush(graph)
     result = await engine.run(inputs={"start_value": 256})
 
-    print(f"  Start: 256")
+    print("  Start: 256")
     print(f"  Final: {result['final_value']}")
     # 256 → 128 → 64 → 32 → 16 → 8 → 4 (dừng vì < 5)
 
@@ -154,10 +158,12 @@ async def example_4_branch_node():
     print("=" * 50)
 
     with GraphNode(name="grade-workflow") as graph:
-        grade_router = (if_(PARENT["score"] >= 90, "excellent")
-                        .if_(PARENT["score"] >= 70, "good")
-                        .if_(PARENT["score"] >= 50, "average")
-                        .else_("fail"))
+        grade_router = (
+            if_(PARENT["score"] >= 90, "excellent")
+            .if_(PARENT["score"] >= 70, "good")
+            .if_(PARENT["score"] >= 50, "average")
+            .else_("fail")
+        )
 
         excellent = CodeNode(
             name="excellent",
@@ -239,7 +245,7 @@ async def example_5_nested_loops():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"  Outer [2,3,4] x Inner [10,20,30]:")
+    print("  Outer [2,3,4] x Inner [10,20,30]:")
     print(f"  Totals per outer: {result['results']}")
     # [120, 180, 240] = [2*(10+20+30), 3*(10+20+30), 4*(10+20+30)]
 

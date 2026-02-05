@@ -1,10 +1,10 @@
 """Workflow state với Cell-based storage và độ phân giải O(1) dựa trên index."""
 
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import uuid
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from hush.core.states.cell import DEFAULT_CONTEXT, Cell
 from hush.core.states.schema import StateSchema
-from hush.core.states.cell import Cell, DEFAULT_CONTEXT
 
 if TYPE_CHECKING:
     from hush.core.tracers.store import TraceStore
@@ -33,9 +33,16 @@ class MemoryState:
     """
 
     __slots__ = (
-        "schema", "_cells", "_execution_order", "_trace_metadata",
-        "_user_id", "_session_id", "_request_id",
-        "_trace_store", "_execution_count", "_tags"
+        "schema",
+        "_cells",
+        "_execution_order",
+        "_trace_metadata",
+        "_user_id",
+        "_session_id",
+        "_request_id",
+        "_trace_store",
+        "_execution_count",
+        "_tags",
     )
 
     def __init__(
@@ -191,11 +198,9 @@ class MemoryState:
         With trace_store, this is a no-op as tracing happens in record_trace_metadata.
         """
         if self._execution_order is not None:
-            self._execution_order.append({
-                "node": node_name,
-                "parent": parent,
-                "context_id": context_id
-            })
+            self._execution_order.append(
+                {"node": node_name, "parent": parent, "context_id": context_id}
+            )
 
     def record_trace_metadata(
         self,

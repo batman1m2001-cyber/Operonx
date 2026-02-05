@@ -1,10 +1,10 @@
 from hush.providers.rerankers.base import BaseReranker
 from hush.providers.rerankers.config import RerankingConfig, RerankingType
-from hush.providers.rerankers.tei import TEIReranker
-from hush.providers.rerankers.vllm import VLLMReranker
-from hush.providers.rerankers.pinecone import PineconeReranker
 from hush.providers.rerankers.huggingface import HFReranker
 from hush.providers.rerankers.onnx import ONNXReranker
+from hush.providers.rerankers.pinecone import PineconeReranker
+from hush.providers.rerankers.tei import TEIReranker
+from hush.providers.rerankers.vllm import VLLMReranker
 
 
 class RerankingFactory:
@@ -15,9 +15,7 @@ class RerankingFactory:
     """
 
     @staticmethod
-    def create(
-        config: RerankingConfig
-    ) -> BaseReranker:
+    def create(config: RerankingConfig) -> BaseReranker:
         if config.api_type == RerankingType.TEXT_EMBEDDING_INFERENCE:
             model_class = TEIReranker
         elif config.api_type == RerankingType.VLLM:

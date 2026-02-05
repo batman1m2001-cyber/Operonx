@@ -15,17 +15,19 @@ Chạy: cd hush-tutorial && uv run python examples/11_agent_workflow.py
 import asyncio
 import json
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
 from hush.providers import LLMNode
-
 
 # =============================================================================
 # Tool definitions (OpenAI function calling format)
 # =============================================================================
+
 
 def calculator(expression: str) -> dict:
     """Evaluate math expressions."""
@@ -62,7 +64,10 @@ TOOL_DESCRIPTIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "expression": {"type": "string", "description": "Math expression to evaluate"}
+                    "expression": {
+                        "type": "string",
+                        "description": "Math expression to evaluate",
+                    }
                 },
                 "required": ["expression"],
             },
@@ -75,9 +80,7 @@ TOOL_DESCRIPTIONS = [
             "description": "Search for factual information about a topic.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"}
-                },
+                "properties": {"query": {"type": "string", "description": "Search query"}},
                 "required": ["query"],
             },
         },
@@ -89,11 +92,15 @@ TOOL_DESCRIPTIONS = [
 # Agent logic
 # =============================================================================
 
+
 def init_agent(query: str):
     """Khởi tạo agent state."""
     return {
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant with access to tools. Use them when needed."},
+            {
+                "role": "system",
+                "content": "You are a helpful assistant with access to tools. Use them when needed.",
+            },
             {"role": "user", "content": query},
         ],
         "iteration": 0,
@@ -123,11 +130,13 @@ def process_llm_response(content, tool_calls, messages, iteration):
             else:
                 result = {"error": f"Unknown tool: {func_name}"}
 
-            new_messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": json.dumps(result),
-            })
+            new_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": json.dumps(result),
+                }
+            )
 
         return {
             "new_messages": new_messages,
@@ -149,6 +158,7 @@ def process_llm_response(content, tool_calls, messages, iteration):
 # Ví dụ 1: Simple tool-calling agent
 # =============================================================================
 
+
 async def example_1_simple_agent():
     """Agent loop: LLM gọi tools → execute → feed back → repeat."""
     print("=" * 50)
@@ -156,6 +166,7 @@ async def example_1_simple_agent():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("OPENAI_API_KEY"):
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
@@ -165,7 +176,12 @@ async def example_1_simple_agent():
             name="init",
             code_fn=init_agent,
             inputs={"query": PARENT["query"]},
-            outputs={"messages": PARENT, "iteration": PARENT, "done": PARENT, "final_answer": PARENT},
+            outputs={
+                "messages": PARENT,
+                "iteration": PARENT,
+                "done": PARENT,
+                "final_answer": PARENT,
+            },
         )
 
         with WhileLoopNode(
@@ -231,6 +247,7 @@ async def example_1_simple_agent():
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main():
     await example_1_simple_agent()

@@ -1,21 +1,21 @@
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-from openai.types.chat.chat_completion import ChatCompletion
-from typing import List, AsyncGenerator, Union, Sequence, Optional
-
-from hush.providers.llms.config import GeminiConfig
-from .openai import OpenAISDKModel
-import httpx
 import asyncio
 import os
-import threading
 import time
 from datetime import datetime, timedelta
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request
+from typing import AsyncGenerator, List, Optional, Sequence, Union
+
+import httpx
 import requests
-from hush.core.loggings import LOGGER
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+
+from hush.providers.llms.config import GeminiConfig
+
+from .openai import OpenAISDKModel
 
 
 class GeminiOpenAISDKModel(OpenAISDKModel):
@@ -63,29 +63,25 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
 
         # Setup credentials
         self.credentials = service_account.Credentials.from_service_account_info(
-            self.config.__dict__,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            self.config.__dict__, scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
 
         # HTTP client with basic settings
         self.http_client = httpx.AsyncClient(
             verify=False,
             timeout=30.0,
-            limits=httpx.Limits(
-                max_connections=50,
-                max_keepalive_connections=10
-            )
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
         )
 
         # OpenAI client
-        base_url = (f"https://{config.location}-aiplatform.googleapis.com"
-                   f"/v1/projects/{config.project_id}"
-                   f"/locations/{config.location}/endpoints/openapi")
+        base_url = (
+            f"https://{config.location}-aiplatform.googleapis.com"
+            f"/v1/projects/{config.project_id}"
+            f"/locations/{config.location}/endpoints/openapi"
+        )
 
         self.client = AsyncOpenAI(
-            base_url=base_url,
-            api_key="placeholder",
-            http_client=self.http_client
+            base_url=base_url, api_key="placeholder", http_client=self.http_client
         )
 
     def _refresh_token(self) -> str:
@@ -118,12 +114,11 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
                 self.credentials.refresh(Request(session=session))
                 return self.credentials.token
 
-            except (requests.exceptions.ConnectionError,
-                    requests.exceptions.Timeout) as e:
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                 if attempt == 2:  # Last attempt
                     raise Exception(f"Token refresh failed after 3 attempts: {e}")
 
-                wait_time = 2 ** attempt  # 1s, 2s, 4s
+                wait_time = 2**attempt  # 1s, 2s, 4s
                 print(f"Token refresh attempt {attempt + 1} failed, retrying in {wait_time}s...")
                 time.sleep(wait_time)
 
@@ -149,9 +144,9 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
         """
         # Refresh if no token or expires within 5 minutes
         needs_refresh = (
-            not self.credentials.token or
-            not self.credentials.expiry or
-            self.credentials.expiry < datetime.now() + timedelta(minutes=5)
+            not self.credentials.token
+            or not self.credentials.expiry
+            or self.credentials.expiry < datetime.now() + timedelta(minutes=5)
         )
 
         if needs_refresh:
@@ -169,7 +164,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """
         Stream chat completion responses from Gemini via Vertex AI OpenAI endpoint.
@@ -229,7 +224,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             presence_penalty=presence_penalty,
             response_format=response_format,
             tools=tools,
-            **kwargs
+            **kwargs,
         ):
             yield chunk
 
@@ -245,7 +240,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletion:
         """
         Generate a complete chat completion response from Gemini via Vertex AI.
@@ -306,39 +301,35 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             presence_penalty=presence_penalty,
             response_format=response_format,
             tools=tools,
-            **kwargs
+            **kwargs,
         )
 
 
 async def main():
     """Test the Gemini OpenAI SDK Model"""
-    import os
 
     config = GeminiConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
         model="gemini-2.0-flash",
-        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json")
+        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json"),
     )
 
     model = GeminiOpenAISDKModel(config=config)
 
     async for chunk in model.stream(
-        messages=[{"role": "user", "content": "say hi"}],
-        status_code=200
+        messages=[{"role": "user", "content": "say hi"}], status_code=200
     ):
         print(chunk)
 
 
 async def test_tool_calling():
-    import os
-    import json
 
     config = GeminiConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
         model="gemini-2.0-flash",
-        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json")
+        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json"),
     )
     model = GeminiOpenAISDKModel(config)
     # Define some example tools
@@ -352,12 +343,12 @@ async def test_tool_calling():
                 "properties": {
                     "location": {
                         "type": "string",
-                        "description": "The city and state, e.g. San Francisco, CA"
+                        "description": "The city and state, e.g. San Francisco, CA",
                     }
                 },
-                "required": ["location"]
-            }
-        }
+                "required": ["location"],
+            },
+        },
     }
 
     calculator_tool = {
@@ -370,12 +361,12 @@ async def test_tool_calling():
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "The mathematical expression to evaluate"
+                        "description": "The mathematical expression to evaluate",
                     }
                 },
-                "required": ["expression"]
-            }
-        }
+                "required": ["expression"],
+            },
+        },
     }
 
     tools = [weather_tool, calculator_tool]
@@ -384,7 +375,7 @@ async def test_tool_calling():
     print("Text-only example with tools:")
     completion = await model.generate(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     )
     print(completion)
 
@@ -392,7 +383,7 @@ async def test_tool_calling():
     print("Text-only example with tools (streaming):")
     async for chunk in model.stream(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     ):
         if chunk.choices:
             content = chunk.choices[0].delta.content
@@ -405,38 +396,47 @@ async def test_tool_calling():
 
 
 async def test_multimodal_image():
-    import os
 
     config = GeminiConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
         model="gemini-2.0-flash",
-        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json")
+        service_account_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json"),
     )
     model = GeminiOpenAISDKModel(config)
 
     # Multimodal example
     print("\nMultimodal example:")
     completion = await model.generate(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What can you see in this image?"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/sample-image.png"}}
-            ]
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What can you see in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/sample-image.png"},
+                    },
+                ],
+            }
+        ],
     )
     print(completion)
 
     print("\nMultimodal example (stream):")
     stream_response = model.stream(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What can you see in this image?"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/sample-image.png"}}
-            ]
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What can you see in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/sample-image.png"},
+                    },
+                ],
+            }
+        ],
     )
     async for chunk in stream_response:
         print(chunk)
@@ -444,4 +444,5 @@ async def test_multimodal_image():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(test_tool_calling())

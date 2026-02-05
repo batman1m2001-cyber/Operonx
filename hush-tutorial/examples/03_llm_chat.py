@@ -16,10 +16,11 @@ import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode, LLMChainNode
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.providers import LLMChainNode, LLMNode, PromptNode
 
 
 async def example_1_basic_chat():
@@ -117,15 +118,17 @@ async def example_3_text_summarization():
         START >> preprocess >> prompt >> summarize >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "text": """
+    result = await engine.run(
+        inputs={
+            "text": """
         Trí tuệ nhân tạo (AI) đang thay đổi cách chúng ta sống và làm việc.
         Từ xe tự lái đến trợ lý ảo, AI đã trở thành một phần không thể thiếu
         trong cuộc sống hàng ngày. Các công ty công nghệ lớn đang đầu tư
         hàng tỷ đô la vào nghiên cứu AI, với hy vọng tạo ra những đột phá
         mới trong lĩnh vực này.
         """
-    })
+        }
+    )
 
     print(f"Text gốc (đã clean): {result['cleaned_text'][:80]}...")
     print(f"Tóm tắt: {result['summary']}")

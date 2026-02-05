@@ -1,9 +1,12 @@
-from openai import AsyncAzureOpenAI
-from hush.providers.llms.config import AzureConfig, LLMConfig
-from .openai import OpenAISDKModel
-from openai.types.chat import ChatCompletionMessageParam
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 import httpx
+from openai import AsyncAzureOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+
+from hush.providers.llms.config import AzureConfig
+
+from .openai import OpenAISDKModel
 
 
 class AzureSDKModel(OpenAISDKModel):
@@ -16,23 +19,15 @@ class AzureSDKModel(OpenAISDKModel):
         self.http_client = httpx.AsyncClient(
             proxy=config.proxy,
             verify=False,
-            timeout=httpx.Timeout(
-                connect=10.0,
-                read=120.0,
-                write=10.0,
-                pool=5.0
-            ),
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=10
-            )
+            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=10),
         )
         # Initialize OpenAI client
         self.client = AsyncAzureOpenAI(
             azure_endpoint=config.azure_endpoint,
             api_key=config.api_key,
             api_version=config.api_version,
-            http_client=self.http_client
+            http_client=self.http_client,
         )
 
     def _prepare_params(
@@ -42,62 +37,62 @@ class AzureSDKModel(OpenAISDKModel):
         stream: bool,
         temperature: float,
         top_p: float,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Prepare API parameters for Azure OpenAI, filtering unsupported parameters."""
 
         # Azure OpenAI supported parameters
         AZURE_SUPPORTED_PARAMS = {
-            'max_tokens',
-            'frequency_penalty',
-            'presence_penalty',
-            'stop',
-            'seed',
-            'response_format',
-            'tools',
-            'tool_choice'
+            "max_tokens",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "seed",
+            "response_format",
+            "tools",
+            "tool_choice",
         }
 
         # Start with base parameters
         params = {
-            'model': model,
-            'messages': [self.resolve_image_paths(msg) for msg in messages],
-            'stream': stream,
-            'temperature': temperature,
-            'top_p': top_p,
+            "model": model,
+            "messages": [self.resolve_image_paths(msg) for msg in messages],
+            "stream": stream,
+            "temperature": temperature,
+            "top_p": top_p,
         }
 
         # Handle special parameter mappings
-        processed_messages = list(params['messages'])
+        processed_messages = list(params["messages"])
 
         # Handle system_prompt - inject as system message at the beginning
-        if kwargs.get('system_prompt'):
-            system_msg = {"role": "system", "content": kwargs['system_prompt']}
+        if kwargs.get("system_prompt"):
+            system_msg = {"role": "system", "content": kwargs["system_prompt"]}
             # Check if first message is already system, if so replace it
-            if processed_messages and processed_messages[0].get('role') == 'system':
+            if processed_messages and processed_messages[0].get("role") == "system":
                 processed_messages[0] = system_msg
             else:
                 processed_messages.insert(0, system_msg)
-            params['messages'] = processed_messages
+            params["messages"] = processed_messages
 
         # Handle stop_sequences -> stop
-        if kwargs.get('stop_sequences'):
-            params['stop'] = kwargs['stop_sequences']
+        if kwargs.get("stop_sequences"):
+            params["stop"] = kwargs["stop_sequences"]
 
         # Handle json_schema in response_format
-        if kwargs.get('json_schema'):
-            params['response_format'] = {
+        if kwargs.get("json_schema"):
+            params["response_format"] = {
                 "type": "json_schema",
-                "json_schema": kwargs['json_schema']
+                "json_schema": kwargs["json_schema"],
             }
-        elif kwargs.get('response_format') == 'json':
-            params['response_format'] = {"type": "json_object"}
-        elif kwargs.get('response_format'):
+        elif kwargs.get("response_format") == "json":
+            params["response_format"] = {"type": "json_object"}
+        elif kwargs.get("response_format"):
             # For other response formats, pass as is
-            if isinstance(kwargs['response_format'], str):
-                params['response_format'] = {"type": kwargs['response_format']}
+            if isinstance(kwargs["response_format"], str):
+                params["response_format"] = {"type": kwargs["response_format"]}
             else:
-                params['response_format'] = kwargs['response_format']
+                params["response_format"] = kwargs["response_format"]
 
         # Add only supported parameters, filtering None values
         for key, value in kwargs.items():
@@ -114,7 +109,7 @@ async def main():
         api_key=os.getenv("AZURE_OPENAI_API_KEY", "your-api-key"),
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "https://your-resource.openai.azure.com"),
         api_version="2024-02-15-preview",
-        model="gpt-4o"
+        model="gpt-4o",
     )
     model = AzureSDKModel(config)
 
@@ -123,14 +118,14 @@ async def main():
 
 
 async def test_tools_calling():
-    import os
     import json
+    import os
 
     config = AzureConfig(
         api_key=os.getenv("AZURE_OPENAI_API_KEY", "your-api-key"),
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "https://your-resource.openai.azure.com"),
         api_version="2024-02-15-preview",
-        model="gpt-4o"
+        model="gpt-4o",
     )
     model = AzureSDKModel(config)
 
@@ -145,12 +140,12 @@ async def test_tools_calling():
                 "properties": {
                     "location": {
                         "type": "string",
-                        "description": "The city and state, e.g. San Francisco, CA"
+                        "description": "The city and state, e.g. San Francisco, CA",
                     }
                 },
-                "required": ["location"]
-            }
-        }
+                "required": ["location"],
+            },
+        },
     }
 
     calculator_tool = {
@@ -163,12 +158,12 @@ async def test_tools_calling():
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "The mathematical expression to evaluate"
+                        "description": "The mathematical expression to evaluate",
                     }
                 },
-                "required": ["expression"]
-            }
-        }
+                "required": ["expression"],
+            },
+        },
     }
 
     tools = [weather_tool, calculator_tool]
@@ -177,7 +172,7 @@ async def test_tools_calling():
     print("Text-only example with tools:")
     completion = await model.generate(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     )
     print(json.dumps(completion.model_dump(), indent=2))
 
@@ -185,7 +180,7 @@ async def test_tools_calling():
     print("Text-only (stream) example with tools:")
     stream_response = model.stream(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     )
     async for chunk in stream_response:
         print(chunk)
@@ -198,32 +193,42 @@ async def test_multimodal_image():
         api_key=os.getenv("AZURE_OPENAI_API_KEY", "your-api-key"),
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "https://your-resource.openai.azure.com"),
         api_version="2024-02-15-preview",
-        model="gpt-4o"
+        model="gpt-4o",
     )
     model = AzureSDKModel(config)
 
     # Multimodal example
     print("\nMultimodal example:")
     completion = await model.generate(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What can you see in this image?"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/sample-image.png"}}
-            ]
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What can you see in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/sample-image.png"},
+                    },
+                ],
+            }
+        ],
     )
     print(completion)
 
     print("\nMultimodal example (stream):")
     stream_response = model.stream(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What can you see in this image?"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/sample-image.png"}}
-            ]
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What can you see in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/sample-image.png"},
+                    },
+                ],
+            }
+        ],
     )
     async for chunk in stream_response:
         print(chunk)
@@ -231,4 +236,5 @@ async def test_multimodal_image():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

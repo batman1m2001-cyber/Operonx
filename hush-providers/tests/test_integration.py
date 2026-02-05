@@ -1,8 +1,8 @@
 """Integration tests for hush-providers nodes working together."""
 
 import pytest
-from hush.core.nodes import GraphNode, START, END, PARENT
-from hush.core.states import StateSchema, MemoryState
+from hush.core.nodes import END, PARENT, START, GraphNode
+from hush.core.states import MemoryState, StateSchema
 
 
 class TestNodeIntegration:
@@ -11,11 +11,11 @@ class TestNodeIntegration:
     def test_all_nodes_importable(self):
         """Test all nodes can be imported from hush.providers."""
         from hush.providers import (
-            LLMNode,
             EmbeddingNode,
-            RerankNode,
-            PromptNode,
             LLMChainNode,
+            LLMNode,
+            PromptNode,
+            RerankNode,
         )
 
         assert LLMNode is not None
@@ -34,7 +34,7 @@ class TestNodeIntegration:
                 inputs={
                     "template": "Hello world",
                 },
-                outputs={"*": PARENT}
+                outputs={"*": PARENT},
             )
             START >> prompt >> END
 
@@ -52,8 +52,8 @@ class TestNodeIntegration:
             name="prompt",
             inputs={
                 "template": {"system": "You are helpful.", "user": "Task: {task}"},
-                "task": "write code"
-            }
+                "task": "write code",
+            },
         )
 
         schema = StateSchema(node=prompt)
@@ -71,7 +71,7 @@ class TestPluginAutoRegistration:
 
     def test_plugins_are_registered(self):
         """Test that plugins auto-register on import."""
-        from hush.providers.registry import LLMPlugin, EmbeddingPlugin, RerankPlugin
+        from hush.providers.registry import EmbeddingPlugin, LLMPlugin, RerankPlugin
 
         assert LLMPlugin.is_registered()
         assert EmbeddingPlugin.is_registered()
@@ -82,7 +82,6 @@ class TestPluginAutoRegistration:
         from hush.core.registry import REGISTRY
 
         # Import plugins to trigger registration
-        from hush.providers.registry import LLMPlugin, EmbeddingPlugin, RerankPlugin
 
         # Check configs are registered by category
         assert REGISTRY.get_class("llm") is not None
@@ -127,7 +126,7 @@ class TestEndToEndPipeline:
     @pytest.mark.asyncio
     async def test_prompt_to_llm_pipeline(self, hub):
         """Test a pipeline from PromptNode to LLMNode."""
-        from hush.providers.nodes import PromptNode, LLMNode
+        from hush.providers.nodes import LLMNode, PromptNode
 
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured")
@@ -137,17 +136,20 @@ class TestEndToEndPipeline:
             prompt = PromptNode(
                 name="prompt",
                 inputs={
-                    "template": {"system": "You are a helpful assistant.", "user": "Answer briefly: {question}"},
-                    "*": PARENT
+                    "template": {
+                        "system": "You are a helpful assistant.",
+                        "user": "Answer briefly: {question}",
+                    },
+                    "*": PARENT,
                 },
-                outputs={"messages": PARENT["messages"]}
+                outputs={"messages": PARENT["messages"]},
             )
 
             llm = LLMNode(
                 name="llm",
                 resource_key="or-claude-4-sonnet",
                 inputs={"messages": prompt["messages"]},
-                outputs={"*": PARENT}
+                outputs={"*": PARENT},
             )
 
             START >> prompt >> llm >> END

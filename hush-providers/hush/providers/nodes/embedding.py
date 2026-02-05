@@ -4,13 +4,13 @@ This module provides EmbeddingNode that uses ResourceHub to access embedding res
 Follows hush-core design patterns with Param-based schema.
 """
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
 
-from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
-from hush.core.utils.common import Param
-from hush.core.registry import ResourceHub, get_hub
 from hush.core.exceptions import EmbeddingError
+from hush.core.nodes import BaseNode
+from hush.core.registry import ResourceHub, get_hub
+from hush.core.utils.common import Param
 
 
 class EmbeddingNode(BaseNode):
@@ -36,7 +36,7 @@ class EmbeddingNode(BaseNode):
         ```
     """
 
-    __slots__ = ['resource_key', 'backend']
+    __slots__ = ["resource_key", "backend"]
 
     type: NodeType = "embedding"
 
@@ -45,7 +45,7 @@ class EmbeddingNode(BaseNode):
         resource_key: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs
+        **kwargs,
     ):
         """Initialize EmbeddingNode.
 
@@ -95,14 +95,12 @@ class EmbeddingNode(BaseNode):
                 message="Embedding backend failed",
                 resource_key=self.resource_key or "unknown",
                 text_count=len(text_list),
-                original_error=e
+                original_error=e,
             ) from e
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Return embedding-specific metadata dictionary."""
-        return {
-            "model": self.resource_key
-        }
+        return {"model": self.resource_key}
 
 
 def embedding_(resource_key=None, **kwargs) -> EmbeddingNode:
@@ -112,6 +110,7 @@ def embedding_(resource_key=None, **kwargs) -> EmbeddingNode:
         embed = embedding_("bge-m3", texts=PARENT["texts"], outputs={"*": PARENT})
     """
     from hush.core.nodes import split_shorthand_kwargs
+
     _skip_auto_name = True  # noqa: F841
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     return EmbeddingNode(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)

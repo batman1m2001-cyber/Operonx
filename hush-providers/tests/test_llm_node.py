@@ -1,7 +1,6 @@
 """Tests for LLMNode functionality."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
 
 
 class TestLLMNode:
@@ -10,6 +9,7 @@ class TestLLMNode:
     def test_import(self):
         """Test LLMNode can be imported."""
         from hush.providers.nodes import LLMNode
+
         assert LLMNode is not None
 
     def test_node_type(self, hub):
@@ -19,10 +19,7 @@ class TestLLMNode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="test_llm",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="test_llm", resource_key="gpt-4o")
 
         assert node.type == "llm"
         assert node.resource_key == "gpt-4o"
@@ -34,10 +31,7 @@ class TestLLMNode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="schema_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="schema_test", resource_key="gpt-4o")
 
         assert "messages" in node.inputs
 
@@ -48,10 +42,7 @@ class TestLLMNode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="output_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="output_test", resource_key="gpt-4o")
 
         assert "content" in node.outputs
         assert "role" in node.outputs
@@ -64,11 +55,7 @@ class TestLLMNode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="stream_test",
-            resource_key="gpt-4o",
-            stream=True
-        )
+        node = LLMNode(name="stream_test", resource_key="gpt-4o", stream=True)
 
         assert node.stream is True
 
@@ -79,10 +66,7 @@ class TestLLMNode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="metadata_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="metadata_test", resource_key="gpt-4o")
 
         metadata = node.specific_metadata()
         assert metadata["model"] == "gpt-4o"
@@ -94,22 +78,21 @@ class TestLLMNodeIntegration:
     @pytest.mark.asyncio
     async def test_llm_node_with_hub(self, hub):
         """Test LLMNode works with ResourceHub."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         # Check if or-claude-4-sonnet is available
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured in resources.yaml")
 
-        node = LLMNode(
-            name="chat",
-            resource_key="or-claude-4-sonnet"
-        )
+        node = LLMNode(name="chat", resource_key="or-claude-4-sonnet")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'Hello' in exactly one word."}]
-        })
+        state = MemoryState(
+            schema,
+            inputs={"messages": [{"role": "user", "content": "Say 'Hello' in exactly one word."}]},
+        )
 
         result = await node.run(state)
 
@@ -121,26 +104,26 @@ class TestLLMNodeIntegration:
     async def test_llm_node_streaming_with_tokens(self, hub):
         """Test LLMNode streaming mode with token verification via STREAM_SERVICE."""
         import asyncio
-        from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
+
         from hush.core import STREAM_SERVICE
+        from hush.core.states import MemoryState, StateSchema
+
+        from hush.providers.nodes import LLMNode
 
         # Check if or-claude-4-sonnet is available
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured in resources.yaml")
 
-        node = LLMNode(
-            name="stream_chat",
-            resource_key="or-claude-4-sonnet",
-            stream=True
-        )
+        node = LLMNode(name="stream_chat", resource_key="or-claude-4-sonnet", stream=True)
 
         schema = StateSchema(node=node)
         request_id = "test-stream-request-001"
         state = MemoryState(
             schema,
-            inputs={"messages": [{"role": "user", "content": "Count from 1 to 5, one number per line."}]},
-            request_id=request_id
+            inputs={
+                "messages": [{"role": "user", "content": "Count from 1 to 5, one number per line."}]
+            },
+            request_id=request_id,
         )
 
         # Collect streamed chunks
@@ -199,9 +182,7 @@ class TestLLMNodeLoadBalancing:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMNode(
-            name="lb_test",
-            resource_key=["gpt-4o", "or-claude-4-sonnet"],
-            ratios=[0.7, 0.3]
+            name="lb_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.7, 0.3]
         )
 
         assert isinstance(node.resource_key, list)
@@ -216,10 +197,7 @@ class TestLLMNodeLoadBalancing:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMNode(
-            name="lb_default_test",
-            resource_key=["gpt-4o", "or-claude-4-sonnet"]
-        )
+        node = LLMNode(name="lb_default_test", resource_key=["gpt-4o", "or-claude-4-sonnet"])
 
         assert node.ratios == [0.5, 0.5]
 
@@ -234,7 +212,7 @@ class TestLLMNodeLoadBalancing:
             LLMNode(
                 name="lb_error_test",
                 resource_key=["gpt-4o", "or-claude-4-sonnet"],
-                ratios=[0.5]  # Wrong length
+                ratios=[0.5],  # Wrong length
             )
 
         assert "ratios length" in str(exc_info.value)
@@ -250,23 +228,22 @@ class TestLLMNodeLoadBalancing:
             LLMNode(
                 name="lb_sum_test",
                 resource_key=["gpt-4o", "or-claude-4-sonnet"],
-                ratios=[0.3, 0.3]  # Sums to 0.6, not 1.0
+                ratios=[0.3, 0.3],  # Sums to 0.6, not 1.0
             )
 
         assert "sum to 1.0" in str(exc_info.value)
 
     def test_select_llm_distribution(self, hub):
         """Test _select_llm follows weighted distribution."""
-        from hush.providers.nodes import LLMNode
         from collections import Counter
+
+        from hush.providers.nodes import LLMNode
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
         node = LLMNode(
-            name="dist_test",
-            resource_key=["gpt-4o", "or-claude-4-sonnet"],
-            ratios=[0.8, 0.2]
+            name="dist_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.8, 0.2]
         )
 
         # Run selection 1000 times
@@ -291,9 +268,7 @@ class TestLLMNodeLoadBalancing:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMNode(
-            name="meta_test",
-            resource_key=["gpt-4o", "or-claude-4-sonnet"],
-            ratios=[0.6, 0.4]
+            name="meta_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.6, 0.4]
         )
 
         metadata = node.specific_metadata()
@@ -303,22 +278,21 @@ class TestLLMNodeLoadBalancing:
     @pytest.mark.asyncio
     async def test_load_balancing_execution(self, hub):
         """Test LLMNode execution with load balancing."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
         node = LLMNode(
-            name="lb_exec_test",
-            resource_key=["gpt-4o", "or-claude-4-sonnet"],
-            ratios=[0.5, 0.5]
+            name="lb_exec_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.5, 0.5]
         )
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'Hi' in one word."}]
-        })
+        state = MemoryState(
+            schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
+        )
 
         result = await node.run(state)
 
@@ -339,11 +313,7 @@ class TestLLMNodeBatchMode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="batch_test",
-            resource_key="gpt-4o",
-            batch_mode=True
-        )
+        node = LLMNode(name="batch_test", resource_key="gpt-4o", batch_mode=True)
 
         assert node.batch_mode is True
         assert node._batch_coordinator is not None
@@ -355,11 +325,7 @@ class TestLLMNodeBatchMode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="batch_meta_test",
-            resource_key="gpt-4o",
-            batch_mode=True
-        )
+        node = LLMNode(name="batch_meta_test", resource_key="gpt-4o", batch_mode=True)
 
         metadata = node.specific_metadata()
         assert metadata["batch_mode"] is True
@@ -371,17 +337,9 @@ class TestLLMNodeBatchMode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node1 = LLMNode(
-            name="batch_node_1",
-            resource_key="gpt-4o",
-            batch_mode=True
-        )
+        node1 = LLMNode(name="batch_node_1", resource_key="gpt-4o", batch_mode=True)
 
-        node2 = LLMNode(
-            name="batch_node_2",
-            resource_key="gpt-4o",
-            batch_mode=True
-        )
+        node2 = LLMNode(name="batch_node_2", resource_key="gpt-4o", batch_mode=True)
 
         # Should share the same coordinator
         assert node1._batch_coordinator is node2._batch_coordinator
@@ -394,6 +352,7 @@ class TestBatchCoordinator:
     def test_coordinator_import(self):
         """Test BatchCoordinator can be imported."""
         from hush.providers.llms.batch_coordinator import BatchCoordinator
+
         assert BatchCoordinator is not None
 
     def test_coordinator_pending_count(self, hub):
@@ -420,10 +379,7 @@ class TestLLMNodeAdvancedParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="advanced_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="advanced_test", resource_key="gpt-4o")
 
         # Check all advanced parameters are in the input schema
         assert "tools" in node.inputs
@@ -446,10 +402,7 @@ class TestLLMNodeAdvancedParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="output_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="output_test", resource_key="gpt-4o")
 
         assert "refusal" in node.outputs
         assert "logprobs" in node.outputs
@@ -465,11 +418,7 @@ class TestLLMNodeFallback:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMNode(
-            name="fallback_test",
-            resource_key="gpt-4o",
-            fallback=["or-claude-4-sonnet"]
-        )
+        node = LLMNode(name="fallback_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"])
 
         assert node.fallback == ["or-claude-4-sonnet"]
         assert len(node._fallback_llms) == 1
@@ -484,7 +433,7 @@ class TestLLMNodeFallback:
         node = LLMNode(
             name="multi_fallback_test",
             resource_key="gpt-4o",
-            fallback=["or-claude-4-sonnet", "gpt-4o"]
+            fallback=["or-claude-4-sonnet", "gpt-4o"],
         )
 
         assert len(node.fallback) == 2
@@ -498,9 +447,7 @@ class TestLLMNodeFallback:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMNode(
-            name="meta_fallback_test",
-            resource_key="gpt-4o",
-            fallback=["or-claude-4-sonnet"]
+            name="meta_fallback_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"]
         )
 
         metadata = node.specific_metadata()
@@ -514,10 +461,7 @@ class TestLLMNodeFallback:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="no_fallback_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="no_fallback_test", resource_key="gpt-4o")
 
         metadata = node.specific_metadata()
         assert "fallback" not in metadata
@@ -525,23 +469,22 @@ class TestLLMNodeFallback:
     @pytest.mark.asyncio
     async def test_fallback_with_valid_primary(self, hub):
         """Test normal execution with fallback configured (no fallback triggered)."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
         # Primary should work, fallback should not be needed
         node = LLMNode(
-            name="fallback_exec_test",
-            resource_key="gpt-4o",
-            fallback=["or-claude-4-sonnet"]
+            name="fallback_exec_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"]
         )
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'Hi' in one word."}]
-        })
+        state = MemoryState(
+            schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
+        )
 
         result = await node.run(state)
 
@@ -557,8 +500,9 @@ class TestLLMNodeTools:
     @pytest.mark.asyncio
     async def test_tools_function_calling(self, hub):
         """Test LLMNode with tools for function calling."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -575,36 +519,35 @@ class TestLLMNodeTools:
                         "properties": {
                             "location": {
                                 "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA"
+                                "description": "The city and state, e.g. San Francisco, CA",
                             },
                             "unit": {
                                 "type": "string",
                                 "enum": ["celsius", "fahrenheit"],
-                                "description": "Temperature unit"
-                            }
+                                "description": "Temperature unit",
+                            },
                         },
-                        "required": ["location"]
-                    }
-                }
+                        "required": ["location"],
+                    },
+                },
             }
         ]
 
         node = LLMNode(
             name="tool_test",
             resource_key="gpt-4o",
-            inputs={
-                "messages": None,
-                "tools": None,
-                "tool_choice": None
-            }
+            inputs={"messages": None, "tools": None, "tool_choice": None},
         )
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "What's the weather in Tokyo?"}],
-            "tools": tools,
-            "tool_choice": "auto"
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "What's the weather in Tokyo?"}],
+                "tools": tools,
+                "tool_choice": "auto",
+            },
+        )
 
         result = await node.run(state)
 
@@ -619,8 +562,9 @@ class TestLLMNodeTools:
     @pytest.mark.asyncio
     async def test_tools_force_function_call(self, hub):
         """Test LLMNode forcing a specific function call."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -636,23 +580,23 @@ class TestLLMNodeTools:
                         "properties": {
                             "expression": {"type": "string", "description": "Math expression"}
                         },
-                        "required": ["expression"]
-                    }
-                }
+                        "required": ["expression"],
+                    },
+                },
             }
         ]
 
-        node = LLMNode(
-            name="force_tool_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="force_tool_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "What is 2 + 2?"}],
-            "tools": tools,
-            "tool_choice": {"type": "function", "function": {"name": "calculate"}}
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "What is 2 + 2?"}],
+                "tools": tools,
+                "tool_choice": {"type": "function", "function": {"name": "calculate"}},
+            },
+        )
 
         result = await node.run(state)
 
@@ -668,26 +612,34 @@ class TestLLMNodeResponseFormat:
     @pytest.mark.asyncio
     async def test_json_mode(self, hub):
         """Test LLMNode with JSON response format."""
-        from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
         import json
+
+        from hush.core.states import MemoryState, StateSchema
+
+        from hush.providers.nodes import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="json_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="json_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant that responds in JSON format."},
-                {"role": "user", "content": "List 3 colors with their hex codes. Return as JSON array."}
-            ],
-            "response_format": {"type": "json_object"}
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that responds in JSON format.",
+                    },
+                    {
+                        "role": "user",
+                        "content": "List 3 colors with their hex codes. Return as JSON array.",
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+            },
+        )
 
         result = await node.run(state)
 
@@ -703,41 +655,43 @@ class TestLLMNodeResponseFormat:
     @pytest.mark.asyncio
     async def test_json_schema_structured_output(self, hub):
         """Test LLMNode with JSON schema for structured output."""
-        from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
         import json
+
+        from hush.core.states import MemoryState, StateSchema
+
+        from hush.providers.nodes import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="structured_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="structured_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {"role": "user", "content": "Give me info about Python programming language."}
-            ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "language_info",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "year_created": {"type": "integer"},
-                            "creator": {"type": "string"}
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "user", "content": "Give me info about Python programming language."}
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "language_info",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "year_created": {"type": "integer"},
+                                "creator": {"type": "string"},
+                            },
+                            "required": ["name", "year_created", "creator"],
+                            "additionalProperties": False,
                         },
-                        "required": ["name", "year_created", "creator"],
-                        "additionalProperties": False
-                    }
-                }
-            }
-        })
+                    },
+                },
+            },
+        )
 
         result = await node.run(state)
 
@@ -755,32 +709,38 @@ class TestLLMNodeVision:
     @pytest.mark.asyncio
     async def test_image_url_input(self, hub):
         """Test LLMNode with image URL input."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="vision_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="vision_test", resource_key="gpt-4o")
 
         # Use a reliable test image URL (raw image, not wiki page)
-        image_url = "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png"
+        image_url = (
+            "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png"
+        )
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "What do you see in this image? Describe briefly."},
-                        {"type": "image_url", "image_url": {"url": image_url}}
-                    ]
-                }
-            ]
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "What do you see in this image? Describe briefly.",
+                            },
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                        ],
+                    }
+                ]
+            },
+        )
 
         result = await node.run(state)
 
@@ -791,9 +751,11 @@ class TestLLMNodeVision:
     @pytest.mark.asyncio
     async def test_image_base64_input(self, hub):
         """Test LLMNode with base64 encoded image input."""
-        from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
         import base64
+
+        from hush.core.states import MemoryState, StateSchema
+
+        from hush.providers.nodes import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -803,28 +765,31 @@ class TestLLMNodeVision:
         png_bytes = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
         )
-        base64_image = base64.b64encode(png_bytes).decode('utf-8')
+        base64_image = base64.b64encode(png_bytes).decode("utf-8")
 
-        node = LLMNode(
-            name="vision_base64_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="vision_base64_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "What color is this image? Answer in one word."},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ]
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "What color is this image? Answer in one word.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
 
         result = await node.run(state)
 
@@ -838,23 +803,24 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_temperature(self, hub):
         """Test LLMNode with different temperature settings."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="temp_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="temp_test", resource_key="gpt-4o")
 
         # Low temperature (deterministic)
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
-            "temperature": 0.0
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
+                "temperature": 0.0,
+            },
+        )
 
         result = await node.run(state)
         assert "content" in result
@@ -863,22 +829,25 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_max_tokens(self, hub):
         """Test LLMNode with max_tokens limit."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="max_tokens_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="max_tokens_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Write a very long story about a dragon."}],
-            "max_tokens": 20
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "user", "content": "Write a very long story about a dragon."}
+                ],
+                "max_tokens": 20,
+            },
+        )
 
         result = await node.run(state)
 
@@ -893,22 +862,25 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_stop_sequences(self, hub):
         """Test LLMNode with stop sequences."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="stop_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="stop_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Count from 1 to 10, one number per line."}],
-            "stop": ["5"]
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "user", "content": "Count from 1 to 10, one number per line."}
+                ],
+                "stop": ["5"],
+            },
+        )
 
         result = await node.run(state)
 
@@ -920,22 +892,23 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_top_p(self, hub):
         """Test LLMNode with top_p (nucleus sampling)."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="top_p_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="top_p_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
-            "top_p": 0.1  # Very focused sampling
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
+                "top_p": 0.1,  # Very focused sampling
+            },
+        )
 
         result = await node.run(state)
 
@@ -945,23 +918,24 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_frequency_and_presence_penalty(self, hub):
         """Test LLMNode with frequency and presence penalties."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="penalty_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="penalty_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Write a short sentence about cats."}],
-            "frequency_penalty": 0.5,
-            "presence_penalty": 0.5
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Write a short sentence about cats."}],
+                "frequency_penalty": 0.5,
+                "presence_penalty": 0.5,
+            },
+        )
 
         result = await node.run(state)
 
@@ -971,30 +945,33 @@ class TestLLMNodeGenerationParams:
     @pytest.mark.asyncio
     async def test_seed_reproducibility(self, hub):
         """Test LLMNode with seed for reproducible outputs."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="seed_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="seed_test", resource_key="gpt-4o")
 
         # Run twice with same seed
         results = []
         for i in range(2):
             schema = StateSchema(node=node)
-            state = MemoryState(schema, inputs={
-                "messages": [{"role": "user", "content": "Pick a random number between 1 and 100."}],
-                "seed": 12345,
-                "temperature": 0.0
-            })
+            state = MemoryState(
+                schema,
+                inputs={
+                    "messages": [
+                        {"role": "user", "content": "Pick a random number between 1 and 100."}
+                    ],
+                    "seed": 12345,
+                    "temperature": 0.0,
+                },
+            )
 
             result = await node.run(state)
             results.append(result["content"])
-            print(f"Seed run {i+1}: {result['content']}")
+            print(f"Seed run {i + 1}: {result['content']}")
 
         # With same seed and temperature=0, results should be identical (or very similar)
         # Note: OpenAI doesn't guarantee exact reproducibility
@@ -1007,23 +984,24 @@ class TestLLMNodeLogprobs:
     @pytest.mark.asyncio
     async def test_logprobs_enabled(self, hub):
         """Test LLMNode with logprobs enabled."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="logprobs_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="logprobs_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say 'yes' or 'no'."}],
-            "logprobs": True,
-            "top_logprobs": 3
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Say 'yes' or 'no'."}],
+                "logprobs": True,
+                "top_logprobs": 3,
+            },
+        )
 
         result = await node.run(state)
 
@@ -1042,8 +1020,9 @@ class TestLLMNodeMultipleCompletions:
     @pytest.mark.asyncio
     async def test_multiple_completions(self, hub):
         """Test LLMNode generating multiple completions."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -1051,17 +1030,17 @@ class TestLLMNodeMultipleCompletions:
         # Note: n > 1 typically returns multiple choices, but our LLMNode
         # currently only extracts the first choice. This test verifies
         # the parameter is passed correctly.
-        node = LLMNode(
-            name="multi_completion_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="multi_completion_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say a random word."}],
-            "n": 1,  # Keep at 1 for now since we only extract first choice
-            "temperature": 1.0
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Say a random word."}],
+                "n": 1,  # Keep at 1 for now since we only extract first choice
+                "temperature": 1.0,
+            },
+        )
 
         result = await node.run(state)
 
@@ -1075,22 +1054,23 @@ class TestLLMNodeUserTracking:
     @pytest.mark.asyncio
     async def test_user_parameter(self, hub):
         """Test LLMNode with user parameter for tracking."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="user_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="user_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": "Say hello."}],
-            "user": "test-user-12345"
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [{"role": "user", "content": "Say hello."}],
+                "user": "test-user-12345",
+            },
+        )
 
         result = await node.run(state)
 
@@ -1104,55 +1084,90 @@ class TestLLMNodeAudio:
     @pytest.mark.asyncio
     async def test_audio_input(self, hub):
         """Test LLMNode with audio input using gpt-4o-audio model."""
-        from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
         import base64
+
+        from hush.core.states import MemoryState, StateSchema
+
+        from hush.providers.nodes import LLMNode
 
         if not hub.has("llm:gpt-4o-audio"):
             pytest.skip("llm:gpt-4o-audio not configured")
 
         # Create a minimal valid WAV file (silent, 0.1 second, 8kHz mono)
-        wav_header = bytes([
-            0x52, 0x49, 0x46, 0x46,  # "RIFF"
-            0x64, 0x06, 0x00, 0x00,  # file size - 8
-            0x57, 0x41, 0x56, 0x45,  # "WAVE"
-            0x66, 0x6D, 0x74, 0x20,  # "fmt "
-            0x10, 0x00, 0x00, 0x00,  # chunk size (16)
-            0x01, 0x00,              # audio format (PCM)
-            0x01, 0x00,              # num channels (1)
-            0x40, 0x1F, 0x00, 0x00,  # sample rate (8000)
-            0x40, 0x1F, 0x00, 0x00,  # byte rate (8000)
-            0x01, 0x00,              # block align (1)
-            0x08, 0x00,              # bits per sample (8)
-            0x64, 0x61, 0x74, 0x61,  # "data"
-            0x40, 0x06, 0x00, 0x00,  # data size (1600 bytes)
-        ])
-        wav_data = wav_header + bytes([0x80] * 1600)  # silence
-        base64_audio = base64.b64encode(wav_data).decode('utf-8')
-
-        node = LLMNode(
-            name="audio_test",
-            resource_key="gpt-4o-audio"
+        wav_header = bytes(
+            [
+                0x52,
+                0x49,
+                0x46,
+                0x46,  # "RIFF"
+                0x64,
+                0x06,
+                0x00,
+                0x00,  # file size - 8
+                0x57,
+                0x41,
+                0x56,
+                0x45,  # "WAVE"
+                0x66,
+                0x6D,
+                0x74,
+                0x20,  # "fmt "
+                0x10,
+                0x00,
+                0x00,
+                0x00,  # chunk size (16)
+                0x01,
+                0x00,  # audio format (PCM)
+                0x01,
+                0x00,  # num channels (1)
+                0x40,
+                0x1F,
+                0x00,
+                0x00,  # sample rate (8000)
+                0x40,
+                0x1F,
+                0x00,
+                0x00,  # byte rate (8000)
+                0x01,
+                0x00,  # block align (1)
+                0x08,
+                0x00,  # bits per sample (8)
+                0x64,
+                0x61,
+                0x74,
+                0x61,  # "data"
+                0x40,
+                0x06,
+                0x00,
+                0x00,  # data size (1600 bytes)
+            ]
         )
+        wav_data = wav_header + bytes([0x80] * 1600)  # silence
+        base64_audio = base64.b64encode(wav_data).decode("utf-8")
+
+        node = LLMNode(name="audio_test", resource_key="gpt-4o-audio")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "This is a silent audio file. Just respond with 'Audio received'."},
-                        {
-                            "type": "input_audio",
-                            "input_audio": {
-                                "data": base64_audio,
-                                "format": "wav"
-                            }
-                        }
-                    ]
-                }
-            ]
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "This is a silent audio file. Just respond with 'Audio received'.",
+                            },
+                            {
+                                "type": "input_audio",
+                                "input_audio": {"data": base64_audio, "format": "wav"},
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
 
         result = await node.run(state)
 
@@ -1169,37 +1184,41 @@ class TestLLMNodeComplexWorkflow:
     @pytest.mark.asyncio
     async def test_multi_turn_conversation(self, hub):
         """Test LLMNode with multi-turn conversation."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="multi_turn_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="multi_turn_test", resource_key="gpt-4o")
 
         # First turn
         schema = StateSchema(node=node)
-        state1 = MemoryState(schema, inputs={
-            "messages": [
-                {"role": "system", "content": "You are a helpful math tutor."},
-                {"role": "user", "content": "What is 2+2?"}
-            ]
-        })
+        state1 = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "system", "content": "You are a helpful math tutor."},
+                    {"role": "user", "content": "What is 2+2?"},
+                ]
+            },
+        )
         result1 = await node.run(state1)
         print(f"Turn 1: {result1['content']}")
 
         # Second turn (continue conversation)
-        state2 = MemoryState(schema, inputs={
-            "messages": [
-                {"role": "system", "content": "You are a helpful math tutor."},
-                {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": result1["content"]},
-                {"role": "user", "content": "Now multiply that by 3."}
-            ]
-        })
+        state2 = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "system", "content": "You are a helpful math tutor."},
+                    {"role": "user", "content": "What is 2+2?"},
+                    {"role": "assistant", "content": result1["content"]},
+                    {"role": "user", "content": "Now multiply that by 3."},
+                ]
+            },
+        )
         result2 = await node.run(state2)
         print(f"Turn 2: {result2['content']}")
 
@@ -1208,24 +1227,25 @@ class TestLLMNodeComplexWorkflow:
     @pytest.mark.asyncio
     async def test_system_prompt_behavior(self, hub):
         """Test LLMNode follows system prompt instructions."""
+        from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.nodes import LLMNode
-        from hush.core.states import StateSchema, MemoryState
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMNode(
-            name="system_test",
-            resource_key="gpt-4o"
-        )
+        node = LLMNode(name="system_test", resource_key="gpt-4o")
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "messages": [
-                {"role": "system", "content": "You must respond in ALL CAPS only."},
-                {"role": "user", "content": "Say hello"}
-            ]
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "messages": [
+                    {"role": "system", "content": "You must respond in ALL CAPS only."},
+                    {"role": "user", "content": "Say hello"},
+                ]
+            },
+        )
 
         result = await node.run(state)
 

@@ -113,9 +113,7 @@ class LangfuseTracer(BaseTracer):
                 continue
 
             # Create LangfuseMedia object
-            media_obj = LangfuseMedia(
-                content_bytes=content_bytes, content_type=content_type
-            )
+            media_obj = LangfuseMedia(content_bytes=content_bytes, content_type=content_type)
             by_location[attach_to][key] = media_obj
 
         # Inject into trace_data
@@ -167,10 +165,12 @@ class LangfuseTracer(BaseTracer):
             # Get client: direct config or ResourceHub
             if "config" in tracer_config:
                 from hush.observability.backends.langfuse import LangfuseClient, LangfuseConfig
+
                 config = LangfuseConfig(**tracer_config["config"])
                 client = LangfuseClient(config)
             else:
                 from hush.core.registry import get_hub
+
                 client = get_hub().langfuse(tracer_config["resource_key"])
 
             workflow_name = flush_data["workflow_name"]

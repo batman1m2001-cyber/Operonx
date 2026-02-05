@@ -1,17 +1,21 @@
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-from openai.types.chat.chat_completion import ChatCompletion
-from typing import List, AsyncGenerator, Optional, Sequence, Union
-from hush.providers.llms.config import LLMConfig, OpenAIConfig
-from hush.core import LOGGER
-from .base import BaseLLM
-import httpx
 import asyncio
 import os
+from typing import AsyncGenerator, List, Optional, Sequence, Union
+
+import httpx
 
 # Before importing OpenAI, add this:
 import openai._base_client
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+
+from hush.core import LOGGER
+from hush.providers.llms.config import OpenAIConfig
+
+from .base import BaseLLM
+
 openai._base_client.get_platform = lambda: "Windows"
 
 
@@ -24,24 +28,14 @@ class OpenAISDKModel(BaseLLM):
         # Configure HTTP client with timeout and no SSL verification
         self.http_client = httpx.AsyncClient(
             # verify=False,
-            timeout=httpx.Timeout(
-                connect=10.0,
-                read=120.0,
-                write=10.0,
-                pool=5.0
-            ),
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=10
-            )
+            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=10),
         )
 
         # Initialize OpenAI client
-        if hasattr(config, 'base_url'):
+        if hasattr(config, "base_url"):
             self.client = AsyncOpenAI(
-                base_url=config.base_url,
-                api_key=config.api_key,
-                http_client=self.http_client
+                base_url=config.base_url, api_key=config.api_key, http_client=self.http_client
             )
 
     async def stream(
@@ -56,7 +50,7 @@ class OpenAISDKModel(BaseLLM):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """
         Stream chat completion responses with Chinese character filtering.
@@ -111,7 +105,7 @@ class OpenAISDKModel(BaseLLM):
             presence_penalty=presence_penalty,
             response_format=response_format,
             tools=tools,
-            extra_body=kwargs
+            extra_body=kwargs,
         )
 
         sleep = kwargs.pop("sleep", 0.0)
@@ -137,7 +131,7 @@ class OpenAISDKModel(BaseLLM):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletion:
         """
         Generate a complete chat completion response with Chinese character filtering.
@@ -190,7 +184,7 @@ class OpenAISDKModel(BaseLLM):
             presence_penalty=presence_penalty,
             response_format=response_format,
             tools=tools,
-            extra_body=kwargs
+            extra_body=kwargs,
         )
 
         completion = await self.client.chat.completions.create(**params)
@@ -210,7 +204,7 @@ class OpenAISDKModel(BaseLLM):
         prompt: Optional[str] = None,
         response_format: str = "text",
         temperature: Optional[float] = None,
-        **kwargs
+        **kwargs,
     ) -> Union[str, dict]:
         """
         Transcribe audio file using OpenAI Whisper API.
@@ -242,7 +236,7 @@ class OpenAISDKModel(BaseLLM):
                 prompt=prompt,
                 response_format=response_format,
                 temperature=temperature,
-                **kwargs
+                **kwargs,
             )
 
         return transcript
@@ -257,10 +251,7 @@ class OpenAISDKModel(BaseLLM):
     # =========================================================================
 
     async def batch_create(
-        self,
-        requests: List[dict],
-        metadata: Optional[dict] = None,
-        completion_window: str = "24h"
+        self, requests: List[dict], metadata: Optional[dict] = None, completion_window: str = "24h"
     ) -> dict:
         """Create a batch job with multiple requests.
 
@@ -283,23 +274,20 @@ class OpenAISDKModel(BaseLLM):
         jsonl_content = "\n".join(json.dumps(req) for req in requests)
 
         # Upload file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
             f.write(jsonl_content)
             temp_path = f.name
 
         try:
-            with open(temp_path, 'rb') as f:
-                file_response = await self.client.files.create(
-                    file=f,
-                    purpose="batch"
-                )
+            with open(temp_path, "rb") as f:
+                file_response = await self.client.files.create(file=f, purpose="batch")
 
             # Create batch job
             batch = await self.client.batches.create(
                 input_file_id=file_response.id,
                 endpoint="/v1/chat/completions",
                 completion_window=completion_window,
-                metadata=metadata
+                metadata=metadata,
             )
 
             return batch.model_dump()
@@ -307,6 +295,7 @@ class OpenAISDKModel(BaseLLM):
         finally:
             # Cleanup temp file
             import os as _os
+
             _os.unlink(temp_path)
 
     async def batch_status(self, batch_id: str) -> dict:
@@ -377,7 +366,7 @@ class OpenAISDKModel(BaseLLM):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> dict:
         """Submit batch job and return immediately (non-blocking).
 
@@ -421,12 +410,14 @@ class OpenAISDKModel(BaseLLM):
             if tools is not None:
                 body["tools"] = tools
 
-            requests.append({
-                "custom_id": custom_id,
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": body
-            })
+            requests.append(
+                {
+                    "custom_id": custom_id,
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": body,
+                }
+            )
 
         # Create and return batch job info immediately
         batch_info = await self.batch_create(requests)
@@ -434,10 +425,7 @@ class OpenAISDKModel(BaseLLM):
         return batch_info
 
     async def wait_for_batch(
-        self,
-        batch_id: str,
-        poll_interval: float = 10.0,
-        timeout: float = 86400.0
+        self, batch_id: str, poll_interval: float = 10.0, timeout: float = 86400.0
     ) -> List[ChatCompletion]:
         """Wait for a batch job to complete and retrieve results.
 
@@ -510,7 +498,7 @@ class OpenAISDKModel(BaseLLM):
         tools: Optional[dict] = None,
         poll_interval: float = 10.0,
         timeout: float = 86400.0,
-        **kwargs
+        **kwargs,
     ) -> List[ChatCompletion]:
         """Generate completions for multiple message lists using Batch API.
 
@@ -539,22 +527,23 @@ class OpenAISDKModel(BaseLLM):
             presence_penalty=presence_penalty,
             response_format=response_format,
             tools=tools,
-            **kwargs
+            **kwargs,
         )
         return await self.wait_for_batch(
-            batch_id=batch_info["id"],
-            poll_interval=poll_interval,
-            timeout=timeout
+            batch_id=batch_info["id"], poll_interval=poll_interval, timeout=timeout
         )
 
 
 async def main():
     import os
-    model = OpenAISDKModel(OpenAIConfig(
-        api_key=os.getenv("OPENAI_API_KEY", "your-api-key-here"),
-        base_url="https://api.openai.com/v1",
-        model="gpt-4o"
-    ))
+
+    model = OpenAISDKModel(
+        OpenAIConfig(
+            api_key=os.getenv("OPENAI_API_KEY", "your-api-key-here"),
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o",
+        )
+    )
 
     # response = await model.generate(messages=[{"role": "user", "content": "xin chào"}])
     # print(response)
@@ -570,11 +559,13 @@ async def test_tool_callings():
     import json
     import os
 
-    model = OpenAISDKModel(OpenAIConfig(
-        api_key=os.getenv("OPENROUTER_API_KEY", "your-api-key-here"),
-        base_url="https://openrouter.ai/api/v1",
-        model="qwen/qwen3-30b-a3b-instruct-2507"
-    ))
+    model = OpenAISDKModel(
+        OpenAIConfig(
+            api_key=os.getenv("OPENROUTER_API_KEY", "your-api-key-here"),
+            base_url="https://openrouter.ai/api/v1",
+            model="qwen/qwen3-30b-a3b-instruct-2507",
+        )
+    )
     # Define some example tools
     weather_tool = {
         "type": "function",
@@ -586,12 +577,12 @@ async def test_tool_callings():
                 "properties": {
                     "location": {
                         "type": "string",
-                        "description": "The city and state, e.g. San Francisco, CA"
+                        "description": "The city and state, e.g. San Francisco, CA",
                     }
                 },
-                "required": ["location"]
-            }
-        }
+                "required": ["location"],
+            },
+        },
     }
 
     calculator_tool = {
@@ -604,12 +595,12 @@ async def test_tool_callings():
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "The mathematical expression to evaluate"
+                        "description": "The mathematical expression to evaluate",
                     }
                 },
-                "required": ["expression"]
-            }
-        }
+                "required": ["expression"],
+            },
+        },
     }
 
     tools = [weather_tool, calculator_tool]
@@ -618,7 +609,7 @@ async def test_tool_callings():
     print("Text-only example with tools:")
     completion = await model.generate(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     )
     print(json.dumps(completion.model_dump(), indent=2))
 
@@ -626,7 +617,7 @@ async def test_tool_callings():
     print("Text-only example with tools (streaming):")
     async for chunk in model.stream(
         messages=[{"role": "user", "content": "What's the weather like in San Francisco?"}],
-        tools=tools
+        tools=tools,
     ):
         if chunk.choices:
             content = chunk.choices[0].delta.content
@@ -649,7 +640,7 @@ async def test_time_to_first_token():
     config = OpenAIConfig(
         api_key=os.getenv("OPENAI_API_KEY", "your-api-key-here"),
         base_url="https://api.openai.com/v1",
-        model="gpt-4o"
+        model="gpt-4o",
     )
     model = OpenAISDKModel(config=config)
     model_init_time = time.perf_counter() - model_init_start
@@ -685,4 +676,5 @@ async def test_time_to_first_token():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

@@ -1,7 +1,9 @@
 from enum import Enum
-from typing import ClassVar, Optional, Sequence, Union, Dict
-from hush.core.utils import YamlModel
 from pathlib import Path
+from typing import ClassVar, Dict, Optional, Sequence, Union
+
+from hush.core.utils import YamlModel
+
 
 class LLMType(Enum):
     OPENAI = "openai"
@@ -24,6 +26,7 @@ class CompletionConfig(YamlModel):
         presence_penalty: Penalty for token repetition
         response_format: Format specification for the response
     """
+
     temperature: float = 0.0
     top_p: float = 0.1
     n: Optional[int] = None
@@ -45,6 +48,7 @@ class LLMConfig(YamlModel):
         cost_per_input_token: Cost in USD per input token (for manual cost tracking)
         cost_per_output_token: Cost in USD per output token (for manual cost tracking)
     """
+
     _category: ClassVar[str] = "llm"
 
     api_type: LLMType
@@ -52,7 +56,6 @@ class LLMConfig(YamlModel):
     # Cost per token in USD (for gateways/models without automatic pricing)
     cost_per_input_token: float | None = None
     cost_per_output_token: float | None = None
-
 
     @classmethod
     def create_config(cls, config_data: Dict) -> "LLMConfig":
@@ -80,7 +83,9 @@ class LLMConfig(YamlModel):
         elif isinstance(api_type_value, LLMType):
             api_type = api_type_value
         else:
-            raise ValueError(f"api_type must be a string or LLMType enum, got {type(api_type_value)}")
+            raise ValueError(
+                f"api_type must be a string or LLMType enum, got {type(api_type_value)}"
+            )
 
         # Create the appropriate config based on api_type
         if api_type == LLMType.OPENAI:
@@ -123,6 +128,7 @@ class OpenAIConfig(LLMConfig):
         batch_poll_interval: Seconds between batch status checks (default: 30.0)
         batch_timeout: Maximum wait time for batch completion in seconds (default: 86400 = 24h)
     """
+
     api_type: LLMType = LLMType.OPENAI  # Auto-assigned
     api_key: str
     base_url: str
@@ -143,6 +149,7 @@ class AzureConfig(LLMConfig):
         azure_endpoint: Base URL for Azure API requests
         model: Name of the deployment to use
     """
+
     api_type: LLMType = LLMType.AZURE  # Auto-assigned
     api_key: str
     api_version: str
@@ -167,6 +174,7 @@ class GeminiConfig(LLMConfig):
         location: Google Cloud region for Gemini API
         model_name: Gemini model version to use
     """
+
     api_type: LLMType = LLMType.GEMINI  # Auto-assigned
     project_id: str
     private_key_id: str

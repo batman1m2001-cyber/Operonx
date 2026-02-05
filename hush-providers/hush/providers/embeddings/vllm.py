@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union, Dict
+import asyncio
+import json
 import time
 import uuid
-import json
-import aiohttp
-import asyncio
 from functools import lru_cache
+from typing import Any, Dict, List, Union
+
+import aiohttp
 from aiohttp.client_exceptions import ClientError
-from hush.providers.embeddings.base import BaseEmbedder
-
-
-from pydantic import BaseModel, Field
-from typing import List, Optional, Union
 from numpy import array, ndarray
+from pydantic import BaseModel, Field
 
+from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
 
 class EmbeddingData(BaseModel):
     """Single embedding result"""
+
     index: int
     object: str = Field(default="embedding")
     embedding: List[float]
@@ -31,12 +30,14 @@ class EmbeddingData(BaseModel):
 
 class UsageInfo(BaseModel):
     """Token usage information"""
+
     prompt_tokens: int
     total_tokens: int
 
 
 class EmbeddingResponse(BaseModel):
     """Response from embedding API"""
+
     id: str = str(uuid.uuid4())
     object: str = Field(default="list")
     created: int = time.time()
@@ -59,8 +60,7 @@ class EmbeddingResponse(BaseModel):
 
 
 class VLLMEmbedding(BaseEmbedder):
-
-    __slots__ = ['config', 'default_headers']
+    __slots__ = ["config", "default_headers"]
 
     def __init__(self, config: EmbeddingConfig) -> None:
         """Initialize the VLLM embedding client with the provided configuration."""
@@ -72,17 +72,11 @@ class VLLMEmbedding(BaseEmbedder):
         self.config = config
 
         # Set up default headers
-        self.default_headers = {
-            'Content-Type': 'application/json'
-        }
+        self.default_headers = {"Content-Type": "application/json"}
         if self.config.api_key:
-            self.default_headers['Authorization'] = f'Bearer {self.config.api_key}'
+            self.default_headers["Authorization"] = f"Bearer {self.config.api_key}"
 
-    async def run(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    async def run(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """Generate embeddings for the given texts.
 
         Args:
@@ -107,7 +101,7 @@ class VLLMEmbedding(BaseEmbedder):
                     headers=self.default_headers,
                     data=payload,
                     timeout=aiohttp.ClientTimeout(total=30),  # Add reasonable timeout
-                    **kwargs
+                    **kwargs,
                 ) as response:
                     response.raise_for_status()
                     result = await response.json()
@@ -117,7 +111,6 @@ class VLLMEmbedding(BaseEmbedder):
             raise ConnectionError(f"Failed to connect to VLLM server: {str(e)}") from e
         except asyncio.TimeoutError as e:
             raise ConnectionError("Request timed out") from e
-
 
     @lru_cache(maxsize=1)
     def get_output_dim(self) -> int:
@@ -129,10 +122,14 @@ class VLLMEmbedding(BaseEmbedder):
         return self.output_dim
 
 
-import numpy as np
-from typing import List, Tuple
+from typing import Tuple
 
-def cosine_similarity_search(query_emb: List[float], embs: List[List[float]]) -> List[Tuple[int, float]]:
+import numpy as np
+
+
+def cosine_similarity_search(
+    query_emb: List[float], embs: List[List[float]]
+) -> List[Tuple[int, float]]:
     """
     Calculate cosine similarity between a query embedding and a list of embeddings.
 
@@ -158,7 +155,7 @@ def cosine_similarity_search(query_emb: List[float], embs: List[List[float]]) ->
     # Create list of (index, similarity) tuples
     results = [(idx, float(score)) for idx, score in enumerate(similarities)]
 
-# Sort by similarity score in descending order
+    # Sort by similarity score in descending order
     results.sort(key=lambda x: x[1], reverse=True)
 
     return results

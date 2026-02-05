@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import ClassVar, Optional
+
 from hush.core.utils import YamlModel
 
 
@@ -48,6 +49,7 @@ class RerankingConfig(YamlModel):
         The api_key must be set to a valid key. If it's not set or set to the default value,
         an error will be raised with instructions on how to properly set it in the configuration file.
     """
+
     _category: ClassVar[str] = "reranking"
 
     api_type: RerankingType = RerankingType.VLLM
@@ -57,11 +59,11 @@ class RerankingConfig(YamlModel):
     model: Optional[str] = None
 
     @classmethod
-    def default(cls) -> 'RerankingConfig':
+    def default(cls) -> "RerankingConfig":
         """Load default config"""
         return RerankingConfig(
             api_type=RerankingType.PINECONE,
             model="bge-reranker-v2-m3",
             base_url="https://api.pinecone.io/rerank",
-            api_key="your-api-key"
+            api_key="your-api-key",
         )

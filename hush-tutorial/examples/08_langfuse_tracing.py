@@ -15,19 +15,21 @@ Chạy: cd hush-tutorial && uv run python examples/08_langfuse_tracing.py
 
 import asyncio
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.core.nodes.iteration.map_node import MapNode
+from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes.iteration.base import Each
+from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.tracers import BaseTracer
-
 
 # =============================================================================
 # Code nodes với dynamic tags
 # =============================================================================
+
 
 @code_node
 def preprocess(text: str):
@@ -82,6 +84,7 @@ def classify(score: float):
 # Workflow builder
 # =============================================================================
 
+
 def build_text_analysis():
     """Pipeline: preprocess → tokenize → map(score) → aggregate → classify."""
     with GraphNode(name="text-analysis") as graph:
@@ -98,7 +101,7 @@ def build_text_analysis():
             inputs={
                 "token": Each(tok["tokens"]),
                 "multiplier": PARENT["multiplier"],
-            }
+            },
         ) as map_node:
             sc = score_token(
                 name="score",
@@ -127,6 +130,7 @@ def build_text_analysis():
 # Ví dụ 1: LangfuseTracer qua ResourceHub
 # =============================================================================
 
+
 async def example_1_resource_hub():
     """Dùng resource_key để load config từ resources.yaml."""
     print("=" * 50)
@@ -134,6 +138,7 @@ async def example_1_resource_hub():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
@@ -168,6 +173,7 @@ async def example_1_resource_hub():
 # Ví dụ 2: LangfuseTracer qua direct config
 # =============================================================================
 
+
 async def example_2_direct_config():
     """Dùng LangfuseConfig trực tiếp, không cần ResourceHub."""
     print()
@@ -176,11 +182,12 @@ async def example_2_direct_config():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.observability import LangfuseTracer, LangfuseConfig
+    from hush.observability import LangfuseConfig, LangfuseTracer
 
     # Load config từ env vars (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST)
     config = LangfuseConfig.from_env()
@@ -211,6 +218,7 @@ async def example_2_direct_config():
 # Ví dụ 3: So sánh traces từ nhiều users
 # =============================================================================
 
+
 async def example_3_multi_user():
     """Chạy cùng workflow cho nhiều users — dùng user_id/session_id để phân biệt."""
     print()
@@ -219,6 +227,7 @@ async def example_3_multi_user():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
@@ -251,6 +260,7 @@ async def example_3_multi_user():
 # =============================================================================
 # Cleanup & main
 # =============================================================================
+
 
 async def main():
     await example_1_resource_hub()

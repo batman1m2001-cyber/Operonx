@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # Langfuse cloud credentials (for integration tests) - loaded from environment
 LANGFUSE_CONFIG = {
     "public_key": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
@@ -60,9 +59,7 @@ class MockMemoryState:
         self.execution_order = []
         self._indexer = MockIndexer()
 
-    def add_execution(
-        self, node_id: str, parent_id: str = None, context_id: str = None
-    ):
+    def add_execution(self, node_id: str, parent_id: str = None, context_id: str = None):
         """Add an execution to the order."""
         node = MockNode(node_id)
         self._indexer.add_node(node)
@@ -119,6 +116,7 @@ def test_tracer_config_serialization():
 def test_langfuse_tracer_registered():
     """Test LangfuseTracer is registered in tracer registry."""
     from hush.core.tracers import get_registered_tracers
+
     from hush.observability import LangfuseTracer  # noqa: F401
 
     tracers = get_registered_tracers()
@@ -135,7 +133,7 @@ def test_langfuse_cloud_connection():
     from hush.observability import LangfuseClient, LangfuseConfig
 
     try:
-        from langfuse import Langfuse
+        from langfuse import Langfuse  # noqa: F401
     except ImportError:
         pytest.skip("langfuse package not installed")
 
@@ -153,7 +151,7 @@ def test_langfuse_cloud_connection():
     )
 
     # Create a span
-    span = trace.span(
+    trace.span(
         name="test-span",
         input={"operation": "test"},
         output={"result": "ok"},

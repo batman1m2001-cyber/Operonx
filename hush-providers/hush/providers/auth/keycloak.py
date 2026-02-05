@@ -5,13 +5,14 @@ from Keycloak endpoints with automatic background refresh.
 """
 
 import atexit
-import time
 import threading
+import time
 from typing import Optional
 
 import httpx
 
 from hush.core.loggings import LOGGER
+
 from .config import KeycloakTokenConfig
 
 
@@ -91,9 +92,7 @@ class KeycloakTokenProvider:
                 # Extract token
                 token = data.get(self.config.token_path)
                 if not token:
-                    raise ValueError(
-                        f"Token not found at '{self.config.token_path}' in response"
-                    )
+                    raise ValueError(f"Token not found at '{self.config.token_path}' in response")
 
                 # Extract expiry
                 expires_in = None
@@ -102,9 +101,7 @@ class KeycloakTokenProvider:
 
                 # Set expiry with buffer
                 if expires_in:
-                    self._expires_at = (
-                        time.time() + expires_in - self.config.refresh_buffer
-                    )
+                    self._expires_at = time.time() + expires_in - self.config.refresh_buffer
                 else:
                     # Default 59 minutes if not provided
                     self._expires_at = time.time() + 3540

@@ -16,15 +16,16 @@ from pathlib import Path
 
 import numpy as np
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.providers import EmbeddingNode, PromptNode, LLMNode
-
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.providers import EmbeddingNode, LLMNode, PromptNode
 
 # =============================================================================
 # Helper: Cosine similarity search
 # =============================================================================
+
 
 def cosine_search(query_vector, doc_vectors, documents, top_k=3):
     """Tìm documents gần nhất bằng cosine similarity."""
@@ -70,9 +71,11 @@ async def example_1_basic_embedding():
         START >> embed >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "texts": ["Xin chào!", "Hush workflow engine"],
-    })
+    result = await engine.run(
+        inputs={
+            "texts": ["Xin chào!", "Hush workflow engine"],
+        }
+    )
 
     vectors = result["vectors"]
     print(f"  Số vectors: {len(vectors)}")
@@ -163,11 +166,13 @@ async def example_2_simple_rag():
     ]
 
     for query in queries:
-        result = await engine.run(inputs={
-            "query": query,
-            "documents": DOCUMENTS,
-            "doc_vectors": doc_vectors,
-        })
+        result = await engine.run(
+            inputs={
+                "query": query,
+                "documents": DOCUMENTS,
+                "doc_vectors": doc_vectors,
+            }
+        )
         print(f"\n  Q: {query}")
         print(f"  A: {result['answer']}")
         print(f"  Sources: {result['context_docs'][:2]}")  # Top 2 sources
@@ -187,6 +192,7 @@ async def example_3_rag_with_rerank():
         return
 
     import os
+
     if not os.environ.get("PINECONE_API_KEY"):
         print("  Skipped — PINECONE_API_KEY chưa set (cần cho reranking)")
         print("  Thêm reranking:bge-m3 vào resources.yaml để dùng")
@@ -227,10 +233,12 @@ async def example_3_rag_with_rerank():
         START >> rerank >> prompt >> llm >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "query": "Thành phố biển đẹp nhất Việt Nam?",
-        "documents": DOCUMENTS,
-    })
+    result = await engine.run(
+        inputs={
+            "query": "Thành phố biển đẹp nhất Việt Nam?",
+            "documents": DOCUMENTS,
+        }
+    )
 
     print(f"  Answer: {result['answer']}")
     print(f"  Top sources: {result['sources'][:2]}")

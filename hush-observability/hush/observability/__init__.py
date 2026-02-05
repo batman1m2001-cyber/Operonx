@@ -38,30 +38,29 @@ Example:
 """
 
 # Auto-register backends to ResourceHub on import
-from hush.observability.plugin import ObservabilityPlugin  # noqa: F401
+# Re-export core utilities for convenience
+from hush.core.tracers import (
+    MEDIA_KEY,
+    BaseTracer,
+    MediaAttachment,
+    get_registered_tracers,
+    register_tracer,
+    serialize_media_attachments,
+)
 
 # Backends (configs + clients)
 from hush.observability.backends import (
-    LangfuseConfig,
     LangfuseClient,
-    OTELConfig,
+    LangfuseConfig,
     OTELClient,
+    OTELConfig,
 )
+from hush.observability.plugin import ObservabilityPlugin  # noqa: F401
 
 # Tracers
 from hush.observability.tracers import (
     LangfuseTracer,
     OTELTracer,
-)
-
-# Re-export core utilities for convenience
-from hush.core.tracers import (
-    BaseTracer,
-    register_tracer,
-    get_registered_tracers,
-    MEDIA_KEY,
-    MediaAttachment,
-    serialize_media_attachments,
 )
 
 __version__ = "0.1.0"

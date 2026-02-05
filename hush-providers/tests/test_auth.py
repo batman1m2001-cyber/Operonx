@@ -7,22 +7,23 @@ This module tests:
 4. ResourceHub integration - keycloak reference resolution in LLM configs
 """
 
-import time
 import threading
-from unittest.mock import Mock, patch, MagicMock
+import time
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 
 from hush.providers.auth import (
+    AuthFactory,
     KeycloakTokenConfig,
     KeycloakTokenProvider,
-    AuthFactory,
 )
 from hush.providers.registry import AuthPlugin
-
 
 # =============================================================================
 # KeycloakTokenConfig Tests
 # =============================================================================
+
 
 class TestKeycloakTokenConfig:
     """Tests for KeycloakTokenConfig."""
@@ -80,6 +81,7 @@ class TestKeycloakTokenConfig:
 # =============================================================================
 # KeycloakTokenProvider Tests
 # =============================================================================
+
 
 class TestKeycloakTokenProvider:
     """Tests for KeycloakTokenProvider."""
@@ -223,14 +225,14 @@ class TestKeycloakTokenProvider:
 
     def test_shutdown_all_clears_instances(self, config):
         """Test that shutdown_all clears all provider instances."""
-        provider1 = KeycloakTokenProvider(
+        KeycloakTokenProvider(
             KeycloakTokenConfig(
                 url="https://example.com/1",
                 name="app1",
                 secret="secret1",
             )
         )
-        provider2 = KeycloakTokenProvider(
+        KeycloakTokenProvider(
             KeycloakTokenConfig(
                 url="https://example.com/2",
                 name="app2",
@@ -250,6 +252,7 @@ class TestKeycloakTokenProvider:
 # =============================================================================
 # AuthFactory Tests
 # =============================================================================
+
 
 class TestAuthFactory:
     """Tests for AuthFactory."""
@@ -272,6 +275,7 @@ class TestAuthFactory:
 # AuthPlugin Tests
 # =============================================================================
 
+
 class TestAuthPlugin:
     """Tests for AuthPlugin."""
 
@@ -292,6 +296,7 @@ class TestAuthPlugin:
 # =============================================================================
 # ResourceHub Integration Tests
 # =============================================================================
+
 
 class TestResourceHubIntegration:
     """Tests for ResourceHub keycloak integration."""
@@ -415,14 +420,14 @@ llm:static-llm:
 # Real Integration Tests (with actual Keycloak endpoint)
 # =============================================================================
 
+
 def _can_reach_keycloak():
     """Check if keycloak server is reachable."""
     import socket
+
     try:
         socket.setdefaulttimeout(3)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(
-            ("identity.example.com", 443)
-        )
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("identity.example.com", 443))
         return True
     except (socket.timeout, socket.error, OSError):
         return False
@@ -430,8 +435,7 @@ def _can_reach_keycloak():
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not _can_reach_keycloak(),
-    reason="Cannot reach keycloak server (keycloak server not reachable)"
+    not _can_reach_keycloak(), reason="Cannot reach keycloak server (keycloak server not reachable)"
 )
 class TestRealKeycloakIntegration:
     """Integration tests using real keycloak:myapp config from resources.yaml.
@@ -446,10 +450,12 @@ class TestRealKeycloakIntegration:
     def real_hub(self):
         """Get real ResourceHub from HUSH_CONFIG."""
         from dotenv import load_dotenv
+
         load_dotenv()
 
-        import hush.providers  # noqa: F401 - Register plugins
         from hush.core.registry import get_hub
+
+        import hush.providers  # noqa: F401 - Register plugins
 
         return get_hub()
 
@@ -506,7 +512,7 @@ class TestRealKeycloakIntegration:
         provider = real_hub.keycloak("myapp")
 
         # First fetch
-        token1 = provider.get_token()
+        provider.get_token()
 
         # Invalidate
         provider.invalidate()
@@ -528,7 +534,7 @@ class TestRealKeycloakIntegration:
 
         assert llm_config.api_key == "keycloak:myapp"
         assert "myapp" in llm_config.base_url
-        print(f"✓ LLM config loaded with keycloak reference")
+        print("✓ LLM config loaded with keycloak reference")
         print(f"  api_key: {llm_config.api_key}")
         print(f"  base_url: {llm_config.base_url}")
 
@@ -556,9 +562,9 @@ class TestRealKeycloakIntegration:
         llm = real_hub.llm("claude-4-sonnet")
 
         assert isinstance(llm, BaseLLM)
-        assert hasattr(llm, '_keycloak_provider')  # Should have keycloak reference
-        assert hasattr(llm, '_original_config')
-        print(f"✓ LLM created with keycloak auth")
+        assert hasattr(llm, "_keycloak_provider")  # Should have keycloak reference
+        assert hasattr(llm, "_original_config")
+        print("✓ LLM created with keycloak auth")
         print(f"  model: {llm.config.model}")
         print(f"  base_url: {llm.config.base_url}")
 
@@ -578,7 +584,7 @@ class TestRealKeycloakIntegration:
         assert len(response.choices) > 0
         content = response.choices[0].message.content
         assert content is not None
-        print(f"✓ LLM generate successful")
+        print("✓ LLM generate successful")
         print(f"  response: {content}")
 
     def test_cached_llm_token_refresh(self, real_hub):
@@ -592,11 +598,11 @@ class TestRealKeycloakIntegration:
         # First call - creates and caches LLM
         llm1 = real_hub.llm("claude-4-sonnet")
         initial_token = llm1.client.api_key
-        print(f"✓ Initial LLM created")
+        print("✓ Initial LLM created")
         print(f"  token: {initial_token[:20]}...")
 
         # Verify LLM has keycloak provider
-        assert hasattr(llm1, '_keycloak_provider')
+        assert hasattr(llm1, "_keycloak_provider")
         provider = llm1._keycloak_provider
 
         # Invalidate the token (simulates expiry)
@@ -617,7 +623,7 @@ class TestRealKeycloakIntegration:
         assert len(refreshed_token) > 0
         # Token might be same if fetched quickly, but should be valid
         assert not refreshed_token.startswith("keycloak:")
-        print(f"✓ Token refreshed on cached LLM")
+        print("✓ Token refreshed on cached LLM")
         print(f"  token: {refreshed_token[:20]}...")
 
         # Config should also be updated
@@ -657,6 +663,7 @@ class TestRealKeycloakIntegration:
 # Background Refresh Tests (Unit)
 # =============================================================================
 
+
 class TestBackgroundRefresh:
     """Unit tests for background token refresh behavior."""
 
@@ -692,12 +699,14 @@ class TestBackgroundRefresh:
 # Thread Safety Tests
 # =============================================================================
 
+
 class TestThreadSafety:
     """Tests for thread safety of KeycloakTokenProvider."""
 
     @patch("hush.providers.auth.keycloak.httpx.Client")
     def test_concurrent_get_token_calls(self, mock_client_class):
         """Test that concurrent get_token calls are thread-safe."""
+
         # Setup mock with delay to simulate network latency
         def slow_post(*args, **kwargs):
             time.sleep(0.05)  # 50ms delay

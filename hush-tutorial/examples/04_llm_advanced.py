@@ -16,10 +16,11 @@ import json
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.providers import LLMNode, PromptNode
 
 
 async def example_1_structured_output():
@@ -140,9 +141,7 @@ async def example_2_tool_calling():
             code_fn=lambda content, tool_calls: {
                 "has_tool_call": bool(tool_calls),
                 "tool_result": (
-                    execute_tool(
-                        json.loads(tool_calls[0]["function"]["arguments"])["expression"]
-                    )
+                    execute_tool(json.loads(tool_calls[0]["function"]["arguments"])["expression"])
                     if tool_calls
                     else None
                 ),
@@ -152,7 +151,11 @@ async def example_2_tool_calling():
                 "content": llm["content"],
                 "tool_calls": llm["tool_calls"],
             },
-            outputs={"has_tool_call": PARENT, "tool_result": PARENT, "llm_response": PARENT},
+            outputs={
+                "has_tool_call": PARENT,
+                "tool_result": PARENT,
+                "llm_response": PARENT,
+            },
         )
         START >> prompt >> llm >> process >> END
 

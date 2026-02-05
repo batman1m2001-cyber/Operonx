@@ -10,11 +10,12 @@ This example demonstrates:
 
 import asyncio
 
+from hush.core.registry import get_hub
+from hush.observability.models import MessageTraceInfo
+
 # IMPORTANT: Import hush.observability FIRST to register TracerPlugin
 # before get_hub() creates the global hub
 import hush.observability  # noqa: F401
-from hush.core.registry import get_hub
-from hush.observability.models import MessageTraceInfo
 
 
 async def main():
@@ -98,18 +99,18 @@ async def main():
     print(f"  - Event: {event_id}")
 
     # Flush traces to Langfuse
-    print(f"\nFlushing traces to Langfuse...")
+    print("\nFlushing traces to Langfuse...")
     success = await tracer.flush(request_id)
 
     if success:
-        print(f"✓ Successfully flushed traces to Langfuse")
+        print("✓ Successfully flushed traces to Langfuse")
     else:
-        print(f"✗ Failed to flush traces")
+        print("✗ Failed to flush traces")
 
     # Flush all remaining traces
-    print(f"\nFlushing all remaining traces...")
+    print("\nFlushing all remaining traces...")
     await tracer.flush_all()
-    print(f"✓ All traces flushed")
+    print("✓ All traces flushed")
 
 
 if __name__ == "__main__":

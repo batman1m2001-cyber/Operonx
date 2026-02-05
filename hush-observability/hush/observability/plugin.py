@@ -41,16 +41,18 @@ class ObservabilityPlugin:
 
             # Register Langfuse
             from hush.observability.backends.langfuse import (
-                LangfuseConfig,
                 LangfuseClient,
+                LangfuseConfig,
             )
+
             REGISTRY.register(LangfuseConfig, lambda c: LangfuseClient(c))
 
             # Register OpenTelemetry
             from hush.observability.backends.otel import (
-                OTELConfig,
                 OTELClient,
+                OTELConfig,
             )
+
             REGISTRY.register(OTELConfig, lambda c: OTELClient(c))
 
             cls._registered = True

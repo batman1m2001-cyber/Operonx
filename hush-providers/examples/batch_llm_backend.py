@@ -9,15 +9,15 @@ Usage:
 """
 
 import asyncio
-import time
-from pathlib import Path
 
 # Setup path
 import sys
+import time
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hush.core.registry import ResourceHub, set_global_hub
-from hush.providers.registry import LLMPlugin
 
 
 async def test_batch_backend():
@@ -49,7 +49,7 @@ async def test_batch_backend():
             batch_messages=batch_messages,
             temperature=0.0,
             poll_interval=5.0,  # Check every 5 seconds
-            timeout=600.0  # 10 minute timeout
+            timeout=600.0,  # 10 minute timeout
         )
 
         elapsed = time.time() - start_time
@@ -59,8 +59,10 @@ async def test_batch_backend():
         for i, result in enumerate(results):
             print(f"[{i}] Content: {result.choices[0].message.content}")
             if result.usage:
-                print(f"    Tokens: prompt={result.usage.prompt_tokens}, "
-                      f"completion={result.usage.completion_tokens}")
+                print(
+                    f"    Tokens: prompt={result.usage.prompt_tokens}, "
+                    f"completion={result.usage.completion_tokens}"
+                )
             print()
 
     except Exception as e:
@@ -91,10 +93,9 @@ async def test_concurrent_comparison():
     print("=" * 60)
 
     start = time.time()
-    results = await asyncio.gather(*[
-        llm.generate(messages=msgs, temperature=0.0)
-        for msgs in messages_list
-    ])
+    results = await asyncio.gather(
+        *[llm.generate(messages=msgs, temperature=0.0) for msgs in messages_list]
+    )
     elapsed = time.time() - start
 
     print(f"Completed in {elapsed:.2f} seconds")

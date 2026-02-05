@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ============================================================================
 # Config and Client Tests
 # ============================================================================
@@ -226,6 +225,7 @@ class TestOTELTracer:
     def test_tracer_registered(self):
         """Test OTELTracer is registered in tracer registry."""
         from hush.core.tracers import get_registered_tracers
+
         from hush.observability import OTELTracer  # noqa: F401
 
         tracers = get_registered_tracers()
@@ -509,8 +509,18 @@ class TestOTELTracerFlush:
             "execution_order": [
                 {"node": "root", "parent": None, "context_id": None, "contain_generation": False},
                 {"node": "loop", "parent": "root", "context_id": None, "contain_generation": False},
-                {"node": "process", "parent": "loop", "context_id": "[0]", "contain_generation": False},
-                {"node": "process", "parent": "loop", "context_id": "[1]", "contain_generation": False},
+                {
+                    "node": "process",
+                    "parent": "loop",
+                    "context_id": "[0]",
+                    "contain_generation": False,
+                },
+                {
+                    "node": "process",
+                    "parent": "loop",
+                    "context_id": "[1]",
+                    "contain_generation": False,
+                },
             ],
             "nodes_trace_data": {
                 "root": {"name": "root", "input": {}, "output": {}},

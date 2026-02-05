@@ -1,13 +1,13 @@
 """MapNode - parallel iteration node applying function to each item in a collection."""
 
-from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 import asyncio
 import os
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from hush.core.configs.node_config import NodeType
-from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
-from hush.core.loggings import LOGGER
 from hush.core.exceptions import IterationError
+from hush.core.loggings import LOGGER
+from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -36,14 +36,14 @@ class MapNode(BaseIterationNode):
 
     type: NodeType = "map"
 
-    __slots__ = ['_max_concurrency', '_fail_fast']
+    __slots__ = ["_max_concurrency", "_fail_fast"]
 
     def __init__(
         self,
         inputs: Optional[Dict[str, Any]] = None,
         max_concurrency: Optional[int] = None,
         fail_fast: bool = False,
-        **kwargs
+        **kwargs,
     ):
         """Initialize MapNode.
 
@@ -62,10 +62,10 @@ class MapNode(BaseIterationNode):
 
     async def _execute(
         self,
-        state: 'MemoryState',
+        state: "MemoryState",
         context_id: Optional[str],
         parent_context: Optional[str],
-        request_id: str
+        request_id: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Execute map loop through iteration data in parallel."""
         each_values = self._resolve_values(self._each, state, parent_context)
@@ -77,13 +77,16 @@ class MapNode(BaseIterationNode):
         if not iteration_data:
             LOGGER.warning(
                 "[title]\\[%s][/title] MapNode [highlight]%s[/highlight]: no iteration data.",
-                request_id, self.full_name
+                request_id,
+                self.full_name,
             )
 
         semaphore = asyncio.Semaphore(self._max_concurrency)
         total_iterations = len(iteration_data)
 
-        async def execute_iteration(i: int, iter_context: str, loop_data: Dict[str, Any]) -> Dict[str, Any]:
+        async def execute_iteration(
+            i: int, iter_context: str, loop_data: Dict[str, Any]
+        ) -> Dict[str, Any]:
             try:
                 async with semaphore:
                     for var_name, value in loop_data.items():
@@ -97,18 +100,24 @@ class MapNode(BaseIterationNode):
                     loop_data=loop_data,
                     total_iterations=total_iterations,
                     node_type="map",
-                    original_error=e
+                    original_error=e,
                 )
                 if self._fail_fast:
                     raise error from e
                 LOGGER.warning(str(error))
-                return {"result": {"error": str(e), "error_type": type(e).__name__}, "success": False, "index": i}
+                return {
+                    "result": {"error": str(e), "error_type": type(e).__name__},
+                    "success": False,
+                    "index": i,
+                }
 
         ctx_prefix = (context_id + ".") if context_id else ""
-        raw_results = await asyncio.gather(*[
-            execute_iteration(i, get_iter_context(ctx_prefix, i), data)
-            for i, data in enumerate(iteration_data)
-        ])
+        raw_results = await asyncio.gather(
+            *[
+                execute_iteration(i, get_iter_context(ctx_prefix, i), data)
+                for i, data in enumerate(iteration_data)
+            ]
+        )
 
         # Extract metrics and results
         final_results = []
@@ -127,7 +136,9 @@ class MapNode(BaseIterationNode):
         if iteration_data and error_count / len(iteration_data) > 0.1:
             LOGGER.warning(
                 "[title]\\[%s][/title] MapNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted].",
-                request_id, self.full_name, f"{error_count / len(iteration_data):.1%}"
+                request_id,
+                self.full_name,
+                f"{error_count / len(iteration_data):.1%}",
             )
 
         output_keys = [k for k in self.outputs.keys() if k != "iteration_metrics"]
@@ -141,7 +152,7 @@ class MapNode(BaseIterationNode):
         return {
             "max_concurrency": self._max_concurrency,
             "each": list(self._each.keys()),
-            "inputs": list(self._broadcast_inputs.keys())
+            "inputs": list(self._broadcast_inputs.keys()),
         }
 
 

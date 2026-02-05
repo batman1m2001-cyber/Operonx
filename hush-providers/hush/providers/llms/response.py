@@ -1,12 +1,11 @@
-from typing import Optional, AsyncIterator, Union, Dict
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-import json
-import aiohttp
 import asyncio
+import json
 import uuid
-import time
 from datetime import datetime
-from openai import AsyncStream
+from typing import AsyncIterator, Dict, Optional, Union
+
+import aiohttp
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 
 class LLMGenerator:
@@ -25,15 +24,15 @@ class LLMGenerator:
         line = line.strip()
 
         try:
-            if line.startswith('data: '):
+            if line.startswith("data: "):
                 line = line[6:]
-            if line == '[DONE]':
+            if line == "[DONE]":
                 return None
 
             data = json.loads(line)
             data.update(**kwargs)
 
-            if not data.get('choices'):
+            if not data.get("choices"):
                 return None
 
             return ChatCompletionChunk(**data)
@@ -42,10 +41,7 @@ class LLMGenerator:
 
     @staticmethod
     def make_chunk(
-        content: str,
-        model: str,
-        chat_id: str = None,
-        last=False
+        content: str, model: str, chat_id: str = None, last=False
     ) -> ChatCompletionChunk:
         """Create a response chunk with given content."""
         if not chat_id:
@@ -60,23 +56,20 @@ class LLMGenerator:
                 {
                     "index": 0,
                     "delta": {"content": "" if last else content},
-                    "finish_reason": "stop" if last else None
+                    "finish_reason": "stop" if last else None,
                 }
-            ]
+            ],
         }
         return ChatCompletionChunk(**params)
 
     @staticmethod
     def should_filter(content: str) -> bool:
         """Check if content should be filtered."""
-        return any('\u4e00' <= char <= '\u9fff' for char in content) if content else False
+        return any("\u4e00" <= char <= "\u9fff" for char in content) if content else False
 
     @staticmethod
     async def process(
-        streamline: AsyncIterator,
-        model: str,
-        delay: float = 0.0,
-        **kwargs
+        streamline: AsyncIterator, model: str, delay: float = 0.0, **kwargs
     ) -> AsyncIterator[ChatCompletionChunk]:
         """Process text stream into ChatCompletionChunks."""
         first_line = True
@@ -87,8 +80,10 @@ class LLMGenerator:
                 first_line = False
                 try:
                     data = json.loads(line)
-                    if data.get('object') == 'error':
-                        error_msg = data.get('message', 'Sorry, service unavailable. Try again later.')
+                    if data.get("object") == "error":
+                        error_msg = data.get(
+                            "message", "Sorry, service unavailable. Try again later."
+                        )
 
                         # Stream error response
                         for word in error_msg.split():
@@ -104,7 +99,7 @@ class LLMGenerator:
             chunk = LLMGenerator.parse(line, **kwargs)
             if chunk:
                 if len(chunk.choices) > 0:
-                    if hasattr(chunk.choices[0].delta, 'content'):
+                    if hasattr(chunk.choices[0].delta, "content"):
                         content = chunk.choices[0].delta.content
                         if not LLMGenerator.should_filter(content):
                             yield chunk
@@ -115,10 +110,7 @@ class LLMGenerator:
 
     @staticmethod
     async def simulate(
-        message: str,
-        model: str = "default",
-        word_by_word: bool = True,
-        delay: float = 0.01
+        message: str, model: str = "default", word_by_word: bool = True, delay: float = 0.01
     ) -> AsyncIterator[ChatCompletionChunk]:
         """Simulate an LLM response stream for testing."""
         chat_id = f"chat-{str(uuid.uuid4())}"
@@ -136,7 +128,7 @@ class LLMGenerator:
 async def response_to_text(response: aiohttp.ClientResponse) -> AsyncIterator[str]:
     """Convert HTTP response to text stream."""
     async for line in response.content:
-        yield line.decode('utf-8')
+        yield line.decode("utf-8")
 
 
 # Usage example
@@ -145,21 +137,18 @@ async def main():
 
     url = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
 
-    payload = json.dumps({
-        "model": "gpt-4o",
-        "messages": [
-            {
-            "role": "user",
-            "content": "Hello!"
-            }
-        ],
-        "temperature": 0.7,
-        "max_tokens": 500,
-        "stream": True
-    })
+    payload = json.dumps(
+        {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hello!"}],
+            "temperature": 0.7,
+            "max_tokens": 500,
+            "stream": True,
+        }
+    )
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {os.getenv("OPENAI_API_KEY", "your-api-key")}'
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', 'your-api-key')}",
     }
 
     # Configure timeouts
@@ -167,19 +156,14 @@ async def main():
         total=None,  # No total timeout
         connect=5.0,  # Connection timeout
         sock_connect=5.0,  # Socket connect timeout
-        sock_read=30.0  # Socket read timeout
+        sock_read=30.0,  # Socket read timeout
     )
 
     # Example with API response
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=False),
-        timeout=timeout
+        connector=aiohttp.TCPConnector(ssl=False), timeout=timeout
     ) as session:
-        async with session.post(
-            url=url,
-            json=payload,
-            headers=headers
-        ) as response:
+        async with session.post(url=url, json=payload, headers=headers) as response:
             async for chunk in response.content:
                 print(chunk)
 
@@ -190,15 +174,15 @@ async def simple_test():
     # API configuration
     url = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {os.getenv("OPENAI_API_KEY", "your-api-key")}'
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', 'your-api-key')}",
     }
     payload = {
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": "Hello!"}],
         "temperature": 0.7,
         "max_tokens": 500,
-        "stream": True
+        "stream": True,
     }
     # Get streaming response
     async with aiohttp.ClientSession() as session:
@@ -206,11 +190,11 @@ async def simple_test():
             # Convert bytes to text
             async def text_stream():
                 async for line in response.content:
-                    yield line.decode('utf-8')
+                    yield line.decode("utf-8")
 
             # Process with LLMGenerator
             async for chunk in LLMGenerator.process(text_stream(), "gpt-4o"):
-                if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content:
+                if hasattr(chunk.choices[0].delta, "content") and chunk.choices[0].delta.content:
                     print(chunk.choices[0].delta.content, end="", flush=True)
     print()  # Final newline
 

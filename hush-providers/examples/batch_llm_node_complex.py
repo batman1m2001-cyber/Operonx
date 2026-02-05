@@ -12,18 +12,18 @@ Usage:
 """
 
 import asyncio
-import logging
-import time
-from pathlib import Path
 
 # Setup path
 import sys
+import time
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hush.core import GraphNode, START, END, PARENT
+from hush.core import END, PARENT, START, GraphNode
 from hush.core.registry import ResourceHub, set_global_hub
-from hush.core.states import StateSchema, MemoryState
-from hush.providers.registry import LLMPlugin
+from hush.core.states import MemoryState, StateSchema
+
 from hush.providers.nodes import LLMNode, PromptNode
 
 
@@ -53,9 +53,9 @@ async def test_mixed_batch_async():
             inputs={
                 "system_prompt": "You are a helpful assistant.",
                 "user_prompt": "Answer this question: {question}",
-                "question": PARENT["question"]
+                "question": PARENT["question"],
             },
-            outputs={"messages": PARENT["messages"]}
+            outputs={"messages": PARENT["messages"]},
         )
 
         # Fast async LLM (normal mode)
@@ -64,10 +64,7 @@ async def test_mixed_batch_async():
             resource_key="gpt-4o",
             batch_mode=False,
             inputs={"messages": PARENT["messages"]},
-            outputs={
-                "content": PARENT["fast_response"],
-                "tokens_used": PARENT["fast_tokens"]
-            }
+            outputs={"content": PARENT["fast_response"], "tokens_used": PARENT["fast_tokens"]},
         )
 
         # Batch LLM (uses Batch API - slow but 50% cheaper)
@@ -77,10 +74,7 @@ async def test_mixed_batch_async():
             resource_key="gpt-4o",
             batch_mode=True,
             inputs={"messages": PARENT["messages"]},
-            outputs={
-                "content": PARENT["batch_response"],
-                "tokens_used": PARENT["batch_tokens"]
-            }
+            outputs={"content": PARENT["batch_response"], "tokens_used": PARENT["batch_tokens"]},
         )
 
         # Connect nodes
@@ -93,14 +87,14 @@ async def test_mixed_batch_async():
 
     # Create state
     schema = StateSchema(node=workflow)
-    state = MemoryState(schema, inputs={
-        "question": "What is the capital of France? Answer in one word."
-    })
+    state = MemoryState(
+        schema, inputs={"question": "What is the capital of France? Answer in one word."}
+    )
 
-    print(f"\nRunning workflow with fast async LLM...\n")
+    print("\nRunning workflow with fast async LLM...\n")
 
     start = time.time()
-    result = await workflow.run(state)
+    await workflow.run(state)
     elapsed = time.time() - start
 
     print(f"Completed in {elapsed:.2f} seconds")
@@ -128,7 +122,7 @@ async def test_load_balancing_with_fallback():
             # Fallback to the other model if primary fails
             fallback=["or-claude-4-sonnet", "gpt-4o"],
             inputs={"messages": PARENT["messages"]},
-            outputs={"*": PARENT}
+            outputs={"*": PARENT},
         )
         START >> llm >> END
 
@@ -139,9 +133,10 @@ async def test_load_balancing_with_fallback():
 
     for i in range(5):
         schema = StateSchema(node=workflow)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": f"Say 'test {i}' in one word"}]
-        })
+        state = MemoryState(
+            schema,
+            inputs={"messages": [{"role": "user", "content": f"Say 'test {i}' in one word"}]},
+        )
 
         start = time.time()
         await workflow.run(state)
@@ -184,15 +179,13 @@ async def test_parallel_async_execution():
                 resource_key="gpt-4o",
                 batch_mode=False,  # Fast async mode
                 inputs={"messages": PARENT["messages"]},
-                outputs={"*": PARENT}
+                outputs={"*": PARENT},
             )
             START >> llm >> END
         workflow.build()
 
         schema = StateSchema(node=workflow)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": question}]
-        })
+        state = MemoryState(schema, inputs={"messages": [{"role": "user", "content": question}]})
 
         workflows.append(workflow)
         states.append(state)
@@ -202,10 +195,7 @@ async def test_parallel_async_execution():
     start = time.time()
 
     # Run all workflows concurrently
-    await asyncio.gather(*[
-        workflow.run(state)
-        for workflow, state in zip(workflows, states)
-    ])
+    await asyncio.gather(*[workflow.run(state) for workflow, state in zip(workflows, states)])
 
     elapsed = time.time() - start
 

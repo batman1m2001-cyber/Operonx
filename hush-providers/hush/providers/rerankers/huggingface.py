@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
-from typing import Any, List, Dict
+
+from typing import Any, Dict, List
 
 from hush.providers.rerankers.config import RerankingConfig
+
 from .base import BaseReranker
 
 
@@ -27,8 +29,8 @@ class HFReranker(BaseReranker):
             ValueError: If model name is not provided
         """
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
             import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
         except ImportError as e:
             raise ImportError(
                 "transformers and torch are required for HFReranker. "
@@ -55,21 +57,20 @@ class HFReranker(BaseReranker):
 
             # Load tokenizer and model
             self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
-                local_files_only=is_local_path
+                model_path, local_files_only=is_local_path
             )
             self.model = AutoModelForSequenceClassification.from_pretrained(
-                model_path,
-                local_files_only=is_local_path
+                model_path, local_files_only=is_local_path
             )
 
             # Move model to GPU if available
             import torch
+
             if torch.cuda.is_available():
                 self.model = self.model.cuda()
-                print(f"Reranker model loaded on GPU")
+                print("Reranker model loaded on GPU")
             else:
-                print(f"Reranker model loaded on CPU")
+                print("Reranker model loaded on CPU")
 
             # Set model to evaluation mode
             self.model.eval()
@@ -78,12 +79,7 @@ class HFReranker(BaseReranker):
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 
     async def run(
-        self,
-        query: str,
-        texts: List[str],
-        top_k: int = 3,
-        threshold: float = 0.0,
-        **kwargs: Any
+        self, query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs: Any
     ) -> List[Dict]:
         """Rerank texts based on relevance to query.
 
@@ -107,13 +103,9 @@ class HFReranker(BaseReranker):
             pairs = [[query, text] for text in texts]
 
             # Tokenize pairs
-            max_length = kwargs.get('max_length', 512)
+            max_length = kwargs.get("max_length", 512)
             inputs = self.tokenizer(
-                pairs,
-                padding=True,
-                truncation=True,
-                return_tensors='pt',
-                max_length=max_length
+                pairs, padding=True, truncation=True, return_tensors="pt", max_length=max_length
             )
 
             # Move to same device as model
@@ -122,7 +114,13 @@ class HFReranker(BaseReranker):
 
             # Get scores
             with torch.no_grad():
-                logits = self.model(**inputs, return_dict=True).logits.view(-1, ).float()
+                logits = (
+                    self.model(**inputs, return_dict=True)
+                    .logits.view(
+                        -1,
+                    )
+                    .float()
+                )
                 # Apply sigmoid to normalize scores to [0, 1]
                 scores = torch.sigmoid(logits)
 
@@ -130,10 +128,7 @@ class HFReranker(BaseReranker):
             scores = scores.cpu().numpy()
 
             # Create results with original indices
-            results = [
-                {"index": idx, "score": float(score)}
-                for idx, score in enumerate(scores)
-            ]
+            results = [{"index": idx, "score": float(score)} for idx, score in enumerate(scores)]
 
             # Sort by score in descending order
             results.sort(key=lambda x: x["score"], reverse=True)
@@ -152,12 +147,7 @@ class HFReranker(BaseReranker):
             raise RuntimeError(f"Failed to rerank texts: {str(e)}") from e
 
     def run_sync(
-        self,
-        query: str,
-        texts: List[str],
-        top_k: int = 3,
-        threshold: float = 0.0,
-        **kwargs: Any
+        self, query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs: Any
     ) -> List[Dict]:
         """Synchronous wrapper for the run method.
 
@@ -179,17 +169,15 @@ class HFReranker(BaseReranker):
             if loop.is_running():
                 # If loop is already running, we need to create a new thread
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(
-                        asyncio.run,
-                        self.run(query, texts, top_k, threshold, **kwargs)
+                        asyncio.run, self.run(query, texts, top_k, threshold, **kwargs)
                     )
                     return future.result()
             else:
                 # Loop exists but not running, use it
-                return loop.run_until_complete(
-                    self.run(query, texts, top_k, threshold, **kwargs)
-                )
+                return loop.run_until_complete(self.run(query, texts, top_k, threshold, **kwargs))
         except RuntimeError:
             # No event loop exists, create one
             return asyncio.run(self.run(query, texts, top_k, threshold, **kwargs))
@@ -197,7 +185,6 @@ class HFReranker(BaseReranker):
 
 async def main() -> None:
     """Main function for testing and demonstration."""
-    import asyncio
     import time
 
     print("Starting local reranking...")
@@ -216,26 +203,19 @@ async def main() -> None:
         """File tài liệu: Quy định về giao dịch chuyển tiền nhanh 247
 Câu hỏi: Thời gian xử lý tra soát giao dịch chuyển tiền nhanh 247 qua Napas là bao lâu?
 Câu trả lời: Tối đa 04 ngày làm việc (không tính thứ 7, chủ nhật và ngày nghỉ lễ)""",
-
         """File tài liệu: Hướng dẫn giao dịch ngân hàng điện tử
 Câu hỏi: Phí giao dịch chuyển tiền nhanh 247 là bao nhiêu?
 Câu trả lời: Miễn phí cho giao dịch dưới 500.000 VND, 11.000 VND cho giao dịch trên 500.000 VND""",
-
         """File tài liệu: Quy định về bằng chứng giao dịch
 Câu hỏi: Giấy báo có được cung cấp như thế nào?
-Câu trả lời: Được cung cấp qua email trong vòng 04 ngày làm việc sau khi nhận yêu cầu"""
+Câu trả lời: Được cung cấp qua email trong vòng 04 ngày làm việc sau khi nhận yêu cầu""",
     ]
 
     query = "what is panda?"
 
     start_time = time.time()
 
-    results = await hf_reranker.run(
-        query=query,
-        texts=texts,
-        top_k=3,
-        threshold=0.0
-    )
+    results = await hf_reranker.run(query=query, texts=texts, top_k=3, threshold=0.0)
 
     print(f"\nQuery: {query}\n")
     print("Top reranked results:")
@@ -248,4 +228,5 @@ Câu trả lời: Được cung cấp qua email trong vòng 04 ngày làm việc
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

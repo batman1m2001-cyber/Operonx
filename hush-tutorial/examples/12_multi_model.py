@@ -14,18 +14,21 @@ Chạy: cd hush-tutorial && uv run python examples/12_multi_model.py
 
 import asyncio
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import os
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.nodes.flow.branch_node import if_
-from hush.providers import PromptNode, LLMNode
 
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core.nodes.flow.branch_node import if_
+from hush.providers import LLMNode, PromptNode
 
 # =============================================================================
 # Ví dụ 1: Parallel multi-model comparison
 # =============================================================================
+
 
 async def example_1_parallel_models():
     """Gọi 2 models song song và so sánh kết quả."""
@@ -89,6 +92,7 @@ async def example_1_parallel_models():
 # Ví dụ 2: Cost-optimized routing
 # =============================================================================
 
+
 async def example_2_cost_routing():
     """Route simple queries → cheap model, complex → powerful model."""
     print()
@@ -120,8 +124,10 @@ async def example_2_cost_routing():
         )
 
         # Step 2: Route
-        router = (if_(PARENT["classification"].apply(lambda c: 'SIMPLE' in c.upper()), "simple_prompt")
-                  .else_("complex_prompt"))
+        router = if_(
+            PARENT["classification"].apply(lambda c: "SIMPLE" in c.upper()),
+            "simple_prompt",
+        ).else_("complex_prompt")
 
         # Simple path — cheap model
         simple_prompt = PromptNode(
@@ -178,6 +184,7 @@ async def example_2_cost_routing():
 # Ví dụ 3: Load balancing với ratios
 # =============================================================================
 
+
 async def example_3_load_balancing():
     """Phân tải requests giữa models bằng weighted random selection."""
     print()
@@ -214,7 +221,7 @@ async def example_3_load_balancing():
     # Run multiple times to see load balancing
     model_counts = {}
     for i in range(6):
-        result = await engine.run(inputs={"query": f"Say hello #{i+1}"})
+        result = await engine.run(inputs={"query": f"Say hello #{i + 1}"})
         model = result.get("model", "unknown")
         model_counts[model] = model_counts.get(model, 0) + 1
 
@@ -227,6 +234,7 @@ async def example_3_load_balancing():
 # =============================================================================
 # Ví dụ 4: Fallback chain
 # =============================================================================
+
 
 async def example_4_fallback():
     """LLMNode fallback — tự động thử model tiếp theo khi primary fails."""
@@ -269,6 +277,7 @@ async def example_4_fallback():
 # =============================================================================
 # Ví dụ 5: Ensemble — judge model chọn best answer
 # =============================================================================
+
 
 async def example_5_ensemble():
     """Gọi 2 models, dùng judge model chọn câu trả lời tốt nhất."""
@@ -351,6 +360,7 @@ async def example_5_ensemble():
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main():
     await example_1_parallel_models()

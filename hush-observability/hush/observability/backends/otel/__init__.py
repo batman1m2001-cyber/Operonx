@@ -20,8 +20,8 @@ References:
     - GitHub: https://github.com/open-telemetry/opentelemetry-python
 """
 
-from hush.observability.backends.otel.config import OTELConfig
 from hush.observability.backends.otel.client import OTELClient
+from hush.observability.backends.otel.config import OTELConfig
 
 __all__ = [
     "OTELConfig",

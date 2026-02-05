@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
-from typing import Any, List, Dict
+
+from typing import Any, Dict, List
+
 import numpy as np
 
 from hush.providers.rerankers.config import RerankingConfig
+
 from .base import BaseReranker
 
 
@@ -43,7 +46,6 @@ class ONNXReranker(BaseReranker):
 
         # Load model and tokenizer
         try:
-            import os
             from pathlib import Path
 
             # Check if model path is a local directory
@@ -54,14 +56,14 @@ class ONNXReranker(BaseReranker):
             print(f"Loading ONNX reranker model from local path: {model_path}")
 
             # Check for CUDA availability
-            providers = ['CPUExecutionProvider']
-            if 'CUDAExecutionProvider' in ort.get_available_providers():
-                providers.insert(0, 'CUDAExecutionProvider')
-                self._device = 'cuda'
-                print(f"ONNX Runtime will use GPU (CUDA)")
+            providers = ["CPUExecutionProvider"]
+            if "CUDAExecutionProvider" in ort.get_available_providers():
+                providers.insert(0, "CUDAExecutionProvider")
+                self._device = "cuda"
+                print("ONNX Runtime will use GPU (CUDA)")
             else:
-                self._device = 'cpu'
-                print(f"ONNX Runtime will use CPU")
+                self._device = "cpu"
+                print("ONNX Runtime will use CPU")
 
             # Load ONNX model
             onnx_model_path = model_path / "model.onnx"
@@ -72,9 +74,7 @@ class ONNXReranker(BaseReranker):
             session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
             self.session = ort.InferenceSession(
-                str(onnx_model_path),
-                sess_options=session_options,
-                providers=providers
+                str(onnx_model_path), sess_options=session_options, providers=providers
             )
 
             # Load tokenizer
@@ -92,12 +92,7 @@ class ONNXReranker(BaseReranker):
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 
     async def run(
-        self,
-        query: str,
-        texts: List[str],
-        top_k: int = 3,
-        threshold: float = 0.0,
-        **kwargs: Any
+        self, query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs: Any
     ) -> List[Dict]:
         """Rerank texts based on relevance to query.
 
@@ -116,14 +111,14 @@ class ONNXReranker(BaseReranker):
 
         try:
             # Create query-text pairs
-            pairs = [[query, text] for text in texts]
+            [[query, text] for text in texts]
 
             # Flatten pairs for tokenization
             flat_pairs = [f"{query} {text}" for text in texts]
 
             # Get parameters
-            max_length = kwargs.get('max_length', 512)
-            truncation = kwargs.get('truncation', True)
+            max_length = kwargs.get("max_length", 512)
+            truncation = kwargs.get("truncation", True)
 
             # Update tokenizer settings
             if truncation:
@@ -139,10 +134,7 @@ class ONNXReranker(BaseReranker):
             attention_mask = np.array([enc.attention_mask for enc in encodings], dtype=np.int64)
 
             # Prepare ONNX inputs
-            onnx_inputs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask
-            }
+            onnx_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
             # Add token_type_ids if the model expects it
             input_names = [inp.name for inp in self.session.get_inputs()]
@@ -169,10 +161,7 @@ class ONNXReranker(BaseReranker):
             scores = 1 / (1 + np.exp(-logits))
 
             # Create results with original indices
-            results = [
-                {"index": idx, "score": float(score)}
-                for idx, score in enumerate(scores)
-            ]
+            results = [{"index": idx, "score": float(score)} for idx, score in enumerate(scores)]
 
             # Sort by score in descending order
             results.sort(key=lambda x: x["score"], reverse=True)
@@ -191,12 +180,7 @@ class ONNXReranker(BaseReranker):
             raise RuntimeError(f"Failed to rerank texts: {str(e)}") from e
 
     def run_sync(
-        self,
-        query: str,
-        texts: List[str],
-        top_k: int = 3,
-        threshold: float = 0.0,
-        **kwargs: Any
+        self, query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs: Any
     ) -> List[Dict]:
         """Synchronous wrapper for the run method.
 
@@ -218,17 +202,15 @@ class ONNXReranker(BaseReranker):
             if loop.is_running():
                 # If loop is already running, we need to create a new thread
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(
-                        asyncio.run,
-                        self.run(query, texts, top_k, threshold, **kwargs)
+                        asyncio.run, self.run(query, texts, top_k, threshold, **kwargs)
                     )
                     return future.result()
             else:
                 # Loop exists but not running, use it
-                return loop.run_until_complete(
-                    self.run(query, texts, top_k, threshold, **kwargs)
-                )
+                return loop.run_until_complete(self.run(query, texts, top_k, threshold, **kwargs))
         except RuntimeError:
             # No event loop exists, create one
             return asyncio.run(self.run(query, texts, top_k, threshold, **kwargs))
@@ -236,7 +218,6 @@ class ONNXReranker(BaseReranker):
 
 async def main() -> None:
     """Main function for testing and demonstration."""
-    import asyncio
     import time
 
     print("Starting ONNX reranking...")
@@ -252,14 +233,11 @@ async def main() -> None:
     texts = [
         # Topic 1: Technology and AI
         "AI và machine learning đang cách mạng hóa nhiều ngành công nghiệp.",
-
         # Topic 2: Food and cuisine
         "Bún chả Hà Nội là một trong những đặc sản được yêu thích nhất.",
-
         # Topic 3: Weather
         "Hôm nay trời nắng đẹp, nhiệt độ khoảng 28 độ C.",
         "Thời tiết hôm nay rất tốt cho việc đi chơi.",
-
         # Topic 4: Unrelated
         "Tôi thích đọc sách vào buổi tối trước khi ngủ.",
     ]
@@ -267,15 +245,9 @@ async def main() -> None:
     # query = "Trí tuệ nhân tạo đang thay đổi cách chúng ta làm việc và sinh hoạt."
     query = "Phở là món ăn truyền thống nổi tiếng của Việt Nam."
 
-
     start_time = time.time()
 
-    results = await onnx_reranker.run(
-        query=query,
-        texts=texts,
-        top_k=3,
-        threshold=0.0
-    )
+    results = await onnx_reranker.run(query=query, texts=texts, top_k=3, threshold=0.0)
 
     print(f"\nQuery: {query}\n")
     print("Top reranked results:")
@@ -288,4 +260,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

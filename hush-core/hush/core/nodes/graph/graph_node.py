@@ -1,24 +1,22 @@
 """Graph node để quản lý subgraph các node trong workflow."""
 
+import asyncio
+import traceback
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from time import perf_counter
-from typing import Dict, Literal, Any, Optional, List, Set
-
-from hush.core.utils.common import Param
-from collections import defaultdict
-import asyncio
-import traceback
+from typing import Any, Dict, List, Literal, Optional, Set
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.node_config import NodeType
-from hush.core.nodes.base import BaseNode, START, END, PARENT
-from hush.core.states import MemoryState, Ref
-from hush.core.utils.context import _current_graph
-from hush.core.utils.bimap import BiMap
 from hush.core.loggings import LOGGER
-
+from hush.core.nodes.base import END, PARENT, START, BaseNode
+from hush.core.states import MemoryState, Ref
+from hush.core.utils.bimap import BiMap
+from hush.core.utils.common import Param
+from hush.core.utils.context import _current_graph
 
 NodeFlowType = Literal["MERGE", "FORK", "BLOOM", "BRANCH", "NORMAL", "OTHER"]
 
@@ -27,15 +25,18 @@ NodeFlowType = Literal["MERGE", "FORK", "BLOOM", "BRANCH", "NORMAL", "OTHER"]
 # Validation Types
 # =============================================================================
 
+
 class ValidationLevel(Enum):
     """Severity level for validation issues."""
-    ERROR = "error"      # Must fix, will raise exception
+
+    ERROR = "error"  # Must fix, will raise exception
     WARNING = "warning"  # Should fix, logged as warning
 
 
 @dataclass
 class ValidationIssue:
     """A single validation issue found in the graph."""
+
     level: ValidationLevel
     category: str
     message: str
@@ -67,6 +68,7 @@ class ValidationIssue:
 @dataclass
 class ValidationResult:
     """Result of graph validation."""
+
     graph_name: str
     issues: List[ValidationIssue] = field(default_factory=list)
 
@@ -100,7 +102,11 @@ class ValidationResult:
     def raise_if_errors(self):
         """Raise exception if there are any errors."""
         if self.has_errors:
-            LOGGER.error("Graph [highlight]%s[/highlight] validation found %d error(s):", self.graph_name, len(self.errors))
+            LOGGER.error(
+                "Graph [highlight]%s[/highlight] validation found %d error(s):",
+                self.graph_name,
+                len(self.errors),
+            )
             for issue in self.errors:
                 LOGGER.error(
                     "  [%s] %s: %s | Location: %s -> '%s' | Available nodes: %s",
@@ -109,7 +115,7 @@ class ValidationResult:
                     issue.message,
                     issue.node_name,
                     issue.target_name,
-                    issue.available_nodes
+                    issue.available_nodes,
                 )
             raise GraphValidationError(self)
 
@@ -119,7 +125,9 @@ class GraphValidationError(Exception):
 
     def __init__(self, result: ValidationResult):
         self.result = result
-        super().__init__(f"Graph '{result.graph_name}' validation failed with {len(result.errors)} error(s). See logs above for details.")
+        super().__init__(
+            f"Graph '{result.graph_name}' validation failed with {len(result.errors)} error(s). See logs above for details."
+        )
 
 
 class GraphNode(BaseNode):
@@ -136,18 +144,18 @@ class GraphNode(BaseNode):
     """
 
     __slots__ = [
-        '_token',
-        '_nodes',
-        'entries',
-        'exits',
-        'prevs',
-        'nexts',
-        'ready_count',
-        'has_soft_preds',  # Set of nodes that have soft predecessors
-        'flowtype_map',
-        '_edges',
-        '_edges_lookup',
-        '_is_building'
+        "_token",
+        "_nodes",
+        "entries",
+        "exits",
+        "prevs",
+        "nexts",
+        "ready_count",
+        "has_soft_preds",  # Set of nodes that have soft predecessors
+        "flowtype_map",
+        "_edges",
+        "_edges_lookup",
+        "_is_building",
     ]
 
     type: NodeType = "graph"
@@ -187,10 +195,16 @@ class GraphNode(BaseNode):
             self.exits = [node for node in self._nodes if not self.nexts[node]]
 
         if not self.entries:
-            LOGGER.error("Graph [highlight]%s[/highlight]: không tìm thấy entry node. Kiểm tra kết nối START >> node.", self.name)
+            LOGGER.error(
+                "Graph [highlight]%s[/highlight]: không tìm thấy entry node. Kiểm tra kết nối START >> node.",
+                self.name,
+            )
             raise ValueError("Graph phải có ít nhất một entry node.")
         if not self.exits:
-            LOGGER.error("Graph [highlight]%s[/highlight]: không tìm thấy exit node. Kiểm tra kết nối node >> END.", self.name)
+            LOGGER.error(
+                "Graph [highlight]%s[/highlight]: không tìm thấy exit node. Kiểm tra kết nối node >> END.",
+                self.name,
+            )
             raise ValueError("Graph phải có ít nhất một exit node.")
 
     def _setup_schema(self):
@@ -213,7 +227,7 @@ class GraphNode(BaseNode):
                         type=param.type,
                         required=param.required,
                         default=param.default,
-                        description=param.description
+                        description=param.description,
                     )
 
             # Kiểm tra outputs: nếu ref trỏ đến self (father), đó là graph output
@@ -225,7 +239,7 @@ class GraphNode(BaseNode):
                         type=param.type,
                         required=param.required,
                         default=param.default,
-                        description=param.description
+                        description=param.description,
                     )
 
         # Merge với user-provided inputs/outputs (nếu có)
@@ -234,7 +248,9 @@ class GraphNode(BaseNode):
 
     def _build_flow_type(self):
         """Xác định flow type của mỗi node dựa trên pattern kết nối."""
-        LOGGER.debug("Graph [highlight]%s[/highlight]: đang xác định flow type của các node...", self.name)
+        LOGGER.debug(
+            "Graph [highlight]%s[/highlight]: đang xác định flow type của các node...", self.name
+        )
         self.flowtype_map = BiMap[str, NodeFlowType]()
 
         # Phát hiện orphan node (không có kết nối nào)
@@ -245,7 +261,13 @@ class GraphNode(BaseNode):
             next_count = len(self.nexts[name])
 
             # Kiểm tra orphan node (không phải start/end, không phải inner graph, và không có kết nối)
-            if prev_count == 0 and next_count == 0 and not node.start and not node.end and name != BaseNode.INNER_PROCESS:
+            if (
+                prev_count == 0
+                and next_count == 0
+                and not node.start
+                and not node.end
+                and name != BaseNode.INNER_PROCESS
+            ):
                 orphan_nodes.append(name)
 
             flow_type: NodeFlowType = "OTHER"
@@ -271,13 +293,14 @@ class GraphNode(BaseNode):
         if orphan_nodes:
             LOGGER.warning(
                 "Graph [highlight]%s[/highlight]: phát hiện orphan node [muted](không có edge)[/muted]: %s. Các node này sẽ không bao giờ được thực thi.",
-                self.full_name, orphan_nodes
+                self.full_name,
+                orphan_nodes,
             )
 
     def build(self):
         """Build graph bằng cách build các node con trước, sau đó graph này."""
         for node in self._nodes.values():
-            if hasattr(node, 'build'):
+            if hasattr(node, "build"):
                 node.build()
 
         self._setup_schema()
@@ -374,26 +397,28 @@ class GraphNode(BaseNode):
                 continue
 
             # Get all possible targets from branch node
-            candidates = getattr(node, 'candidates', [])
+            candidates = getattr(node, "candidates", [])
 
             for target in candidates:
                 if target == END.name:
                     continue  # END is always valid
 
                 if target not in self._nodes:
-                    issues.append(ValidationIssue(
-                        level=ValidationLevel.ERROR,
-                        category="Invalid branch target",
-                        message=f"Branch node '{name}' references target '{target}' which doesn't exist",
-                        node_name=name,
-                        target_name=target,
-                        available_nodes=available,
-                        suggestions=[
-                            f"Check if '{target}' matches the 'name' parameter of the target node",
-                            f"Use the node variable directly: if_(condition, my_node) instead of if_(condition, \"{target}\")",
-                            f"Available nodes: {available}"
-                        ]
-                    ))
+                    issues.append(
+                        ValidationIssue(
+                            level=ValidationLevel.ERROR,
+                            category="Invalid branch target",
+                            message=f"Branch node '{name}' references target '{target}' which doesn't exist",
+                            node_name=name,
+                            target_name=target,
+                            available_nodes=available,
+                            suggestions=[
+                                f"Check if '{target}' matches the 'name' parameter of the target node",
+                                f'Use the node variable directly: if_(condition, my_node) instead of if_(condition, "{target}")',
+                                f"Available nodes: {available}",
+                            ],
+                        )
+                    )
 
         return issues
 
@@ -438,17 +463,19 @@ class GraphNode(BaseNode):
 
         for cycle in cycle_nodes:
             cycle_str = " -> ".join(cycle)
-            issues.append(ValidationIssue(
-                level=ValidationLevel.WARNING,
-                category="Cycle detected",
-                message=f"Circular dependency found: {cycle_str}",
-                node_name=cycle[0],
-                suggestions=[
-                    "Use lookback edge type for intentional cycles",
-                    "Check if this cycle is intentional (e.g., retry logic)",
-                    "Break the cycle by restructuring the flow"
-                ]
-            ))
+            issues.append(
+                ValidationIssue(
+                    level=ValidationLevel.WARNING,
+                    category="Cycle detected",
+                    message=f"Circular dependency found: {cycle_str}",
+                    node_name=cycle[0],
+                    suggestions=[
+                        "Use lookback edge type for intentional cycles",
+                        "Check if this cycle is intentional (e.g., retry logic)",
+                        "Break the cycle by restructuring the flow",
+                    ],
+                )
+            )
 
         return issues
 
@@ -470,7 +497,7 @@ class GraphNode(BaseNode):
                 forward_dfs(neighbor)
             # Also follow branch candidates
             if self._nodes[node].type == "branch":
-                for target in getattr(self._nodes[node], 'candidates', []):
+                for target in getattr(self._nodes[node], "candidates", []):
                     if target in self._nodes:
                         forward_dfs(target)
 
@@ -493,30 +520,34 @@ class GraphNode(BaseNode):
         # Find unreachable nodes
         for name in self._nodes:
             if name not in reachable_from_start:
-                issues.append(ValidationIssue(
-                    level=ValidationLevel.WARNING,
-                    category="Unreachable node",
-                    message=f"Node '{name}' is not reachable from any entry point",
-                    node_name=name,
-                    suggestions=[
-                        f"Connect START >> {name} or connect from another reachable node",
-                        "Remove this node if it's not needed"
-                    ]
-                ))
+                issues.append(
+                    ValidationIssue(
+                        level=ValidationLevel.WARNING,
+                        category="Unreachable node",
+                        message=f"Node '{name}' is not reachable from any entry point",
+                        node_name=name,
+                        suggestions=[
+                            f"Connect START >> {name} or connect from another reachable node",
+                            "Remove this node if it's not needed",
+                        ],
+                    )
+                )
 
             if name not in reachable_to_end and name in reachable_from_start:
                 # Only warn about dead-ends that are reachable
                 if not self._nodes[name].end:
-                    issues.append(ValidationIssue(
-                        level=ValidationLevel.WARNING,
-                        category="Dead-end node",
-                        message=f"Node '{name}' cannot reach any exit point",
-                        node_name=name,
-                        suggestions=[
-                            f"Connect {name} >> END or connect to another node leading to END",
-                            "Mark this node as an exit: node.end = True"
-                        ]
-                    ))
+                    issues.append(
+                        ValidationIssue(
+                            level=ValidationLevel.WARNING,
+                            category="Dead-end node",
+                            message=f"Node '{name}' cannot reach any exit point",
+                            node_name=name,
+                            suggestions=[
+                                f"Connect {name} >> END or connect to another node leading to END",
+                                "Mark this node as an exit: node.end = True",
+                            ],
+                        )
+                    )
 
         return issues
 
@@ -534,30 +565,34 @@ class GraphNode(BaseNode):
                 ref_node = ref.raw_node
 
                 # Skip PARENT refs (they refer to the graph itself)
-                if ref_node is self or (hasattr(ref_node, 'name') and ref_node.name == "__PARENT__"):
+                if ref_node is self or (
+                    hasattr(ref_node, "name") and ref_node.name == "__PARENT__"
+                ):
                     continue
 
                 # Check if referenced node exists
-                if hasattr(ref_node, 'name'):
+                if hasattr(ref_node, "name"):
                     ref_node_name = ref_node.name
                     if ref_node_name not in self._nodes and ref_node_name != self.name:
-                        issues.append(ValidationIssue(
-                            level=ValidationLevel.ERROR,
-                            category="Invalid Ref",
-                            message=f"Node '{name}' input '{var}' references non-existent node '{ref_node_name}'",
-                            node_name=name,
-                            target_name=ref_node_name,
-                            available_nodes=sorted(self._nodes.keys()),
-                            suggestions=[
-                                f"Check if node '{ref_node_name}' is defined in the graph",
-                                "Ensure the referenced node is created before this node"
-                            ]
-                        ))
+                        issues.append(
+                            ValidationIssue(
+                                level=ValidationLevel.ERROR,
+                                category="Invalid Ref",
+                                message=f"Node '{name}' input '{var}' references non-existent node '{ref_node_name}'",
+                                node_name=name,
+                                target_name=ref_node_name,
+                                available_nodes=sorted(self._nodes.keys()),
+                                suggestions=[
+                                    f"Check if node '{ref_node_name}' is defined in the graph",
+                                    "Ensure the referenced node is created before this node",
+                                ],
+                            )
+                        )
 
         return issues
 
     @staticmethod
-    def get_current_graph() -> Optional['GraphNode']:
+    def get_current_graph() -> Optional["GraphNode"]:
         """Lấy graph hiện tại từ context."""
         try:
             return _current_graph.get()
@@ -569,11 +604,12 @@ class GraphNode(BaseNode):
         if not self._is_building:
             raise RuntimeError("Không thể thêm node sau khi graph đã được build")
 
-        if getattr(node, '_is_hush_builder', False):
-            name = getattr(node, '_name', None) or type(node).__name__
+        if getattr(node, "_is_hush_builder", False):
+            name = getattr(node, "_name", None) or type(node).__name__
             LOGGER.error(
                 "%s '%s' chưa được build. Hãy gọi .build() hoặc .else_() trước khi thêm vào graph.",
-                type(node).__name__, name
+                type(node).__name__,
+                name,
             )
             raise TypeError(
                 f"{type(node).__name__} '{name}' chưa được build. "
@@ -587,16 +623,17 @@ class GraphNode(BaseNode):
         if node.name in self._nodes:
             LOGGER.warning(
                 "Graph [highlight]%s[/highlight]: node [highlight]%s[/highlight] đã tồn tại và sẽ bị ghi đè",
-                self.name, node.name
+                self.name,
+                node.name,
             )
 
         self._nodes[node.name] = node
 
-        if hasattr(node, 'start') and node.start:
+        if hasattr(node, "start") and node.start:
             if node.name not in self.entries:
                 self.entries.append(node.name)
 
-        if hasattr(node, 'end') and node.end:
+        if hasattr(node, "end") and node.end:
             if node.name not in self.exits:
                 self.exits.append(node.name)
 
@@ -663,7 +700,9 @@ class GraphNode(BaseNode):
         LOGGER.debug("%sEdges:", prefix)
         for edge in self._edges:
             soft_marker = " (soft)" if edge.soft else ""
-            LOGGER.debug("%s  %s -> %s: %s%s", prefix, edge.from_node, edge.to_node, edge.type, soft_marker)
+            LOGGER.debug(
+                "%s  %s -> %s: %s%s", prefix, edge.from_node, edge.to_node, edge.type, soft_marker
+            )
         LOGGER.debug("%sReady count: %s", prefix, dict(self.ready_count))
 
         for node in self._nodes.values():
@@ -672,9 +711,9 @@ class GraphNode(BaseNode):
 
     async def run(
         self,
-        state: 'MemoryState',
+        state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None
+        parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Thực thi graph bằng cách chạy tất cả node theo thứ tự dependency.
 
@@ -698,8 +737,7 @@ class GraphNode(BaseNode):
 
             if self._is_building:
                 raise ValueError(
-                    f"Graph {self.name} not built. "
-                    "Must call graph.build() before execution!!"
+                    f"Graph {self.name} not built. Must call graph.build() before execution!!"
                 )
 
             active_tasks: Dict[str, asyncio.Task] = {}
@@ -710,15 +748,13 @@ class GraphNode(BaseNode):
 
             for entry in self.entries:
                 task = asyncio.create_task(
-                    name=entry,
-                    coro=self._nodes[entry].run(state, context_id, parent_context)
+                    name=entry, coro=self._nodes[entry].run(state, context_id, parent_context)
                 )
                 active_tasks[entry] = task
 
             while active_tasks:
                 done_tasks, _ = await asyncio.wait(
-                    active_tasks.values(),
-                    return_when=asyncio.FIRST_COMPLETED
+                    active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
                 )
 
                 # Cache dict lookups for performance
@@ -752,7 +788,7 @@ class GraphNode(BaseNode):
                                 f"  Source: Branch node '{node_name}' routed to '{next_node}'\n"
                                 f"  Available nodes: {available_nodes}\n"
                                 f"\n"
-                                f"  This usually means the target string in if_(..., \"{next_node}\") "
+                                f'  This usually means the target string in if_(..., "{next_node}") '
                                 f"doesn't match any node's actual name.\n"
                                 f"  Check that your branch targets match the 'name' parameter of the target nodes."
                             )
@@ -772,18 +808,20 @@ class GraphNode(BaseNode):
                         if ready_count[next_node] == 0:
                             task = asyncio.create_task(
                                 name=next_node,
-                                coro=nodes[next_node].run(state, context_id, parent_context)
+                                coro=nodes[next_node].run(state, context_id, parent_context),
                             )
                             active_tasks[next_node] = task
 
             _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
             self.store_result(state, _outputs, context_id)
 
-        except Exception as e:
+        except Exception:
             error_msg = traceback.format_exc()
             LOGGER.error(
                 "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]:\n%s",
-                request_id, self.name, error_msg.rstrip()
+                request_id,
+                self.name,
+                error_msg.rstrip(),
             )
             state[self.full_name, "error", context_id] = error_msg
 

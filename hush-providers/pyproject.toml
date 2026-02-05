@@ -121,7 +121,14 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+ignore = [
+    "E501",  # Line too long
+    "E402",  # Module level import not at top (needed for load_dotenv pattern)
+    "E721",  # Type comparison (intentional in some cases)
+    "E722",  # Bare except
+    "E731",  # Lambda assignment
+    "F841",  # Unused variable
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

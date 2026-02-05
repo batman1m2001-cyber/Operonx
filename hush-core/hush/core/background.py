@@ -35,7 +35,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from time import time, sleep
+from time import sleep, time
 from typing import Any, Dict, List, Optional, Tuple
 
 # Default database path - can be overridden via HUSH_TRACES_DB env var
@@ -44,6 +44,7 @@ DEFAULT_DB_PATH = Path(os.environ.get("HUSH_TRACES_DB", Path.home() / ".hush" / 
 
 class TaskType(str, Enum):
     """Types of background tasks."""
+
     TRACE_WRITE = "trace_write"
     TRACE_COMPLETE = "trace_complete"
     TRACE_FLUSH = "trace_flush"
@@ -53,6 +54,7 @@ class TaskType(str, Enum):
 @dataclass
 class BackgroundTask:
     """A task to be executed in the background process."""
+
     task_type: TaskType
     data: Dict[str, Any]
 
@@ -141,13 +143,15 @@ def _write_trace(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
     if duration_ms is None and data.get("start_time") and data.get("end_time"):
         try:
             from datetime import datetime
+
             start = datetime.fromisoformat(data["start_time"])
             end = datetime.fromisoformat(data["end_time"])
             duration_ms = (end - start).total_seconds() * 1000
         except (ValueError, TypeError):
             pass
 
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO traces (
             request_id, workflow_name, node_name, node_type, parent_name, context_id,
             execution_order, start_time, end_time, duration_ms,
@@ -155,30 +159,32 @@ def _write_trace(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
             input, output, user_id, session_id,
             contain_generation, metadata, status, retry_count, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'writing', 0, ?)
-    """, (
-        data["request_id"],
-        data["workflow_name"],
-        data["node_name"],
-        data.get("node_type"),
-        data.get("parent_name"),
-        data.get("context_id"),
-        data.get("execution_order", 0),
-        data.get("start_time"),
-        data.get("end_time"),
-        duration_ms,
-        data.get("model"),
-        data.get("prompt_tokens"),
-        data.get("completion_tokens"),
-        data.get("total_tokens"),
-        data.get("cost_usd"),
-        json.dumps(data.get("input_data")) if data.get("input_data") else None,
-        json.dumps(data.get("output_data")) if data.get("output_data") else None,
-        data.get("user_id"),
-        data.get("session_id"),
-        1 if data.get("contain_generation") else 0,
-        json.dumps(data.get("metadata")) if data.get("metadata") else None,
-        now,
-    ))
+    """,
+        (
+            data["request_id"],
+            data["workflow_name"],
+            data["node_name"],
+            data.get("node_type"),
+            data.get("parent_name"),
+            data.get("context_id"),
+            data.get("execution_order", 0),
+            data.get("start_time"),
+            data.get("end_time"),
+            duration_ms,
+            data.get("model"),
+            data.get("prompt_tokens"),
+            data.get("completion_tokens"),
+            data.get("total_tokens"),
+            data.get("cost_usd"),
+            json.dumps(data.get("input_data")) if data.get("input_data") else None,
+            json.dumps(data.get("output_data")) if data.get("output_data") else None,
+            data.get("user_id"),
+            data.get("session_id"),
+            1 if data.get("contain_generation") else 0,
+            json.dumps(data.get("metadata")) if data.get("metadata") else None,
+            now,
+        ),
+    )
     conn.commit()
 
 
@@ -196,14 +202,17 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
         outer_loop.inner_loop.scale (ctx=[0].[1]) -> outer_loop.inner_loop.iteration[1].scale
                                                      (under outer_loop.iteration[0].inner_loop)
     """
-    cursor = conn.execute("""
+    cursor = conn.execute(
+        """
         SELECT id, node_name, parent_name, context_id, start_time, end_time,
                duration_ms, workflow_name, user_id, session_id,
                prompt_tokens, completion_tokens, total_tokens, cost_usd
         FROM traces
         WHERE request_id = ? AND status = 'writing'
         ORDER BY execution_order
-    """, (request_id,))
+    """,
+        (request_id,),
+    )
     rows = cursor.fetchall()
 
     if not rows:
@@ -216,19 +225,22 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
     def _get_parent_loop(parent_name: str) -> Optional[Dict]:
         if parent_name in parent_loop_cache:
             return parent_loop_cache[parent_name]
-        cur = conn.execute("""
+        cur = conn.execute(
+            """
             SELECT input, output, metadata
             FROM traces
             WHERE request_id = ? AND node_name = ? AND status = 'writing'
             LIMIT 1
-        """, (request_id, parent_name))
+        """,
+            (request_id, parent_name),
+        )
         r = cur.fetchone()
         if r:
             try:
                 inp = json.loads(r[0]) if r[0] else {}
                 out = json.loads(r[1]) if r[1] else {}
                 meta = json.loads(r[2]) if r[2] else {}
-                parent_loop_cache[parent_name] = {'input': inp, 'output': out, 'metadata': meta}
+                parent_loop_cache[parent_name] = {"input": inp, "output": out, "metadata": meta}
             except (json.JSONDecodeError, TypeError):
                 parent_loop_cache[parent_name] = None
         else:
@@ -240,9 +252,22 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
     iteration_groups: Dict[Tuple[str, str], Dict] = {}
 
     for row in rows:
-        (node_id, node_name, parent_name, context_id, start_time, end_time,
-         duration_ms, workflow_name, user_id, session_id,
-         prompt_tokens, completion_tokens, total_tokens, cost_usd) = row
+        (
+            node_id,
+            node_name,
+            parent_name,
+            context_id,
+            start_time,
+            end_time,
+            duration_ms,
+            workflow_name,
+            user_id,
+            session_id,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cost_usd,
+        ) = row
 
         if not context_id or not parent_name:
             continue
@@ -253,38 +278,38 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
 
         if key not in iteration_groups:
             iteration_groups[key] = {
-                'parent_name': parent_name,
-                'context_id': context_id,
-                'children': [],
-                'start_time': start_time,
-                'end_time': end_time,
-                'workflow_name': workflow_name,
-                'user_id': user_id,
-                'session_id': session_id,
-                'prompt_tokens': 0,
-                'completion_tokens': 0,
-                'total_tokens': 0,
-                'cost_usd': 0.0,
+                "parent_name": parent_name,
+                "context_id": context_id,
+                "children": [],
+                "start_time": start_time,
+                "end_time": end_time,
+                "workflow_name": workflow_name,
+                "user_id": user_id,
+                "session_id": session_id,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
             }
 
         group = iteration_groups[key]
-        group['children'].append(node_id)
+        group["children"].append(node_id)
 
         # Aggregate tokens and cost
         if prompt_tokens:
-            group['prompt_tokens'] += prompt_tokens
+            group["prompt_tokens"] += prompt_tokens
         if completion_tokens:
-            group['completion_tokens'] += completion_tokens
+            group["completion_tokens"] += completion_tokens
         if total_tokens:
-            group['total_tokens'] += total_tokens
+            group["total_tokens"] += total_tokens
         if cost_usd:
-            group['cost_usd'] += cost_usd
+            group["cost_usd"] += cost_usd
 
         # Update time bounds
-        if start_time and (not group['start_time'] or start_time < group['start_time']):
-            group['start_time'] = start_time
-        if end_time and (not group['end_time'] or end_time > group['end_time']):
-            group['end_time'] = end_time
+        if start_time and (not group["start_time"] or start_time < group["start_time"]):
+            group["start_time"] = start_time
+        if end_time and (not group["end_time"] or end_time > group["end_time"]):
+            group["end_time"] = end_time
 
     # Create iteration group traces
     now = time()
@@ -292,25 +317,28 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
     for (parent_name, context_id), group in iteration_groups.items():
         # Extract the last index from context_id for parent_context calculation
         # e.g., [0] -> parent_context=None, [0].[1] -> parent_context=[0]
-        last_bracket_start = context_id.rfind('[')
+        last_bracket_start = context_id.rfind("[")
         if last_bracket_start == -1:
             continue
 
         # The iteration group's context is the parent's context (everything before last bracket)
-        parent_context = context_id[:last_bracket_start].rstrip('.') if last_bracket_start > 0 else None
+        parent_context = (
+            context_id[:last_bracket_start].rstrip(".") if last_bracket_start > 0 else None
+        )
 
         # Use full context_id for iteration name: iteration[0], iteration[0][1], iteration[0][1][2]
         # Remove dots from context_id: [0].[1] -> [0][1]
-        iteration_suffix = context_id.replace('.', '')
+        iteration_suffix = context_id.replace(".", "")
         iteration_name = f"{parent_name}.iteration{iteration_suffix}"
 
         # Calculate duration
         duration_ms = None
-        if group['start_time'] and group['end_time']:
+        if group["start_time"] and group["end_time"]:
             try:
                 from datetime import datetime
-                start = datetime.fromisoformat(group['start_time'])
-                end = datetime.fromisoformat(group['end_time'])
+
+                start = datetime.fromisoformat(group["start_time"])
+                end = datetime.fromisoformat(group["end_time"])
                 duration_ms = (end - start).total_seconds() * 1000
             except (ValueError, TypeError):
                 pass
@@ -318,7 +346,7 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
         # Extract iteration index from context_id (e.g., [0] -> 0, [0].[1] -> last is 1)
         last_bracket = context_id[last_bracket_start:]
         try:
-            iteration_index = int(last_bracket.strip('[]'))
+            iteration_index = int(last_bracket.strip("[]"))
         except (ValueError, TypeError):
             iteration_index = None
 
@@ -329,13 +357,13 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
         if iteration_index is not None:
             parent_data = _get_parent_loop(parent_name)
             if parent_data:
-                parent_input = parent_data['input']
-                parent_output = parent_data['output']
-                parent_meta = parent_data['metadata']
+                parent_input = parent_data["input"]
+                parent_output = parent_data["output"]
+                parent_meta = parent_data["metadata"]
 
                 # Input: slice each "each" field at iteration_index
                 # metadata.each tells us which input fields are iterated
-                each_fields = parent_meta.get('each', [])
+                each_fields = parent_meta.get("each", [])
                 sliced_input = {}
                 for field_name, field_value in parent_input.items():
                     if field_name in each_fields and isinstance(field_value, list):
@@ -352,7 +380,7 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
                 # Loop outputs are collected as arrays, one element per iteration
                 sliced_output = {}
                 for field_name, field_value in parent_output.items():
-                    if field_name.startswith('$') or field_name == 'iteration_metrics':
+                    if field_name.startswith("$") or field_name == "iteration_metrics":
                         continue
                     if isinstance(field_value, list) and iteration_index < len(field_value):
                         sliced_output[field_name] = field_value[iteration_index]
@@ -363,14 +391,15 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
 
         # Build iteration metadata
         iter_metadata = {
-            '_synthetic': True,
-            '_iteration_group': True,
-            'iteration_index': iteration_index,
-            'children_count': len(group['children']),
+            "_synthetic": True,
+            "_iteration_group": True,
+            "iteration_index": iteration_index,
+            "children_count": len(group["children"]),
         }
 
         # Insert iteration group trace
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO traces (
                 request_id, workflow_name, node_name, node_type, parent_name, context_id,
                 execution_order, start_time, end_time, duration_ms,
@@ -379,37 +408,42 @@ def _create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
                 user_id, session_id, contain_generation, metadata,
                 status, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, -1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'writing', ?)
-        """, (
-            request_id,
-            group['workflow_name'],
-            iteration_name,
-            'iteration',
-            parent_name,
-            parent_context,
-            group['start_time'],
-            group['end_time'],
-            duration_ms,
-            group['prompt_tokens'] or None,
-            group['completion_tokens'] or None,
-            group['total_tokens'] or None,
-            group['cost_usd'] or None,
-            iter_input,
-            iter_output,
-            group['user_id'],
-            group['session_id'],
-            json.dumps(iter_metadata),
-            now,
-        ))
+        """,
+            (
+                request_id,
+                group["workflow_name"],
+                iteration_name,
+                "iteration",
+                parent_name,
+                parent_context,
+                group["start_time"],
+                group["end_time"],
+                duration_ms,
+                group["prompt_tokens"] or None,
+                group["completion_tokens"] or None,
+                group["total_tokens"] or None,
+                group["cost_usd"] or None,
+                iter_input,
+                iter_output,
+                group["user_id"],
+                group["session_id"],
+                json.dumps(iter_metadata),
+                now,
+            ),
+        )
 
         # Update children to point to this iteration group
-        child_ids = group['children']
+        child_ids = group["children"]
         if child_ids:
-            placeholders = ','.join('?' * len(child_ids))
-            conn.execute(f"""
+            placeholders = ",".join("?" * len(child_ids))
+            conn.execute(
+                f"""
                 UPDATE traces
                 SET parent_name = ?
                 WHERE id IN ({placeholders})
-            """, [iteration_name] + child_ids)
+            """,
+                [iteration_name] + child_ids,
+            )
 
     conn.commit()
 
@@ -427,40 +461,52 @@ def _mark_complete(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
 
     # LocalTracer doesn't need external flushing - mark as flushed directly
     if tracer_type == "LocalTracer":
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE traces
             SET status = 'flushed', tracer_type = ?, tracer_config = ?, tags = ?, flushed_at = ?
             WHERE request_id = ? AND status = 'writing'
-        """, (tracer_type, tracer_config_json, tags_json, time(), request_id))
+        """,
+            (tracer_type, tracer_config_json, tags_json, time(), request_id),
+        )
     else:
         # Other tracers need the background flush loop
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE traces
             SET status = 'pending', tracer_type = ?, tracer_config = ?, tags = ?
             WHERE request_id = ? AND status = 'writing'
-        """, (tracer_type, tracer_config_json, tags_json, request_id))
+        """,
+            (tracer_type, tracer_config_json, tags_json, request_id),
+        )
     conn.commit()
 
 
 def _fetch_pending(conn: sqlite3.Connection, limit: int = 50) -> Dict[str, List[sqlite3.Row]]:
     """Fetch pending traces grouped by request_id."""
-    cursor = conn.execute("""
+    cursor = conn.execute(
+        """
         SELECT DISTINCT request_id FROM traces
         WHERE status = 'pending'
         ORDER BY created_at
         LIMIT ?
-    """, (limit,))
+    """,
+        (limit,),
+    )
     request_ids = [row[0] for row in cursor.fetchall()]
 
     if not request_ids:
         return {}
 
     placeholders = ",".join("?" * len(request_ids))
-    cursor = conn.execute(f"""
+    cursor = conn.execute(
+        f"""
         SELECT * FROM traces
         WHERE request_id IN ({placeholders})
         ORDER BY request_id, execution_order
-    """, request_ids)
+    """,
+        request_ids,
+    )
 
     result: Dict[str, List[sqlite3.Row]] = {}
     for row in cursor.fetchall():
@@ -484,7 +530,9 @@ def _rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
     first_row = rows[0]
     flush_data = {
         "tracer_type": first_row["tracer_type"],
-        "tracer_config": json.loads(first_row["tracer_config"]) if first_row["tracer_config"] else {},
+        "tracer_config": json.loads(first_row["tracer_config"])
+        if first_row["tracer_config"]
+        else {},
         "workflow_name": first_row["workflow_name"],
         "request_id": first_row["request_id"],
         "user_id": first_row["user_id"],
@@ -530,12 +578,14 @@ def _rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
                 "usage": usage,
                 "cost": row["cost_usd"],
                 "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
-            }
+            },
         }
 
     # Topological sort: parents before children
     # Build adjacency: parent_key -> [child_keys]
-    def get_parent_key(node_name: str, parent_name: Optional[str], context_id: Optional[str]) -> Optional[str]:
+    def get_parent_key(
+        node_name: str, parent_name: Optional[str], context_id: Optional[str]
+    ) -> Optional[str]:
         """Get the key for the parent node."""
         if parent_name is None:
             return None
@@ -570,12 +620,14 @@ def _rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
     # Build execution_order and nodes_trace_data in correct order
     for key in ordered_keys:
         data = node_data_map[key]
-        flush_data["execution_order"].append({
-            "node": data["node"],
-            "parent": data["parent"],
-            "context_id": data["context_id"],
-            "contain_generation": data["contain_generation"],
-        })
+        flush_data["execution_order"].append(
+            {
+                "node": data["node"],
+                "parent": data["parent"],
+                "context_id": data["context_id"],
+                "contain_generation": data["contain_generation"],
+            }
+        )
         flush_data["nodes_trace_data"][key] = data["trace_data"]
 
     return flush_data
@@ -633,17 +685,19 @@ def _background_worker(
     if dotenv_path:
         try:
             from dotenv import load_dotenv
+
             load_dotenv(dotenv_path)
         except ImportError:
             pass
 
     # Set HUSH_CONFIG env var
     if config_path:
-        os.environ['HUSH_CONFIG'] = config_path
+        os.environ["HUSH_CONFIG"] = config_path
 
     # Initialize ResourceHub
     try:
         from hush.core.registry import get_hub
+
         get_hub()
     except Exception as e:
         print(f"[BackgroundWorker] Failed to initialize ResourceHub: {e}")
@@ -691,10 +745,13 @@ def _background_worker(
 
                 # Retry failed traces
                 try:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         UPDATE traces SET status = 'pending', error = NULL
                         WHERE status = 'failed' AND retry_count < ?
-                    """, (max_retries,))
+                    """,
+                        (max_retries,),
+                    )
                     conn.commit()
                 except Exception:
                     pass
@@ -706,10 +763,13 @@ def _background_worker(
                     for request_id, rows in pending.items():
                         try:
                             # Mark as flushing
-                            conn.execute("""
+                            conn.execute(
+                                """
                                 UPDATE traces SET status = 'flushing'
                                 WHERE request_id = ? AND status = 'pending'
-                            """, (request_id,))
+                            """,
+                                (request_id,),
+                            )
                             conn.commit()
 
                             # Rebuild and dispatch
@@ -717,20 +777,26 @@ def _background_worker(
                             _dispatch_flush(flush_data)
 
                             # Mark as flushed
-                            conn.execute("""
+                            conn.execute(
+                                """
                                 UPDATE traces SET status = 'flushed', flushed_at = ?
                                 WHERE request_id = ?
-                            """, (time(), request_id))
+                            """,
+                                (time(), request_id),
+                            )
                             conn.commit()
 
                         except Exception as e:
                             error_msg = traceback.format_exc()
                             print(f"[BackgroundWorker] Error flushing {request_id}: {e}")
-                            conn.execute("""
+                            conn.execute(
+                                """
                                 UPDATE traces
                                 SET status = 'failed', error = ?, retry_count = retry_count + 1
                                 WHERE request_id = ?
-                            """, (error_msg, request_id))
+                            """,
+                                (error_msg, request_id),
+                            )
                             conn.commit()
 
                 except Exception as e:
@@ -757,7 +823,7 @@ class BackgroundProcess:
     Thread-safe: Multiple threads can submit tasks concurrently.
     """
 
-    __slots__ = ['_db_path', '_process', '_queue', '_lock', '_started']
+    __slots__ = ["_db_path", "_process", "_queue", "_lock", "_started"]
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize BackgroundProcess.
@@ -785,8 +851,9 @@ class BackgroundProcess:
             config_path = None
             try:
                 from hush.core.registry import get_hub
+
                 hub = get_hub()
-                if hasattr(hub._storage, '_file_path'):
+                if hasattr(hub._storage, "_file_path"):
                     config_path = str(hub._storage._file_path.resolve())
             except Exception:
                 pass
@@ -852,29 +919,32 @@ class BackgroundProcess:
         Args:
             All trace fields - see insert_node_trace for details
         """
-        self.submit(TaskType.TRACE_WRITE, {
-            "request_id": request_id,
-            "workflow_name": workflow_name,
-            "node_name": node_name,
-            "node_type": node_type,
-            "parent_name": parent_name,
-            "context_id": context_id,
-            "execution_order": execution_order,
-            "start_time": start_time,
-            "end_time": end_time,
-            "duration_ms": duration_ms,
-            "input_data": input_data,
-            "output_data": output_data,
-            "user_id": user_id,
-            "session_id": session_id,
-            "model": model,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "cost_usd": cost_usd,
-            "contain_generation": contain_generation,
-            "metadata": metadata,
-        })
+        self.submit(
+            TaskType.TRACE_WRITE,
+            {
+                "request_id": request_id,
+                "workflow_name": workflow_name,
+                "node_name": node_name,
+                "node_type": node_type,
+                "parent_name": parent_name,
+                "context_id": context_id,
+                "execution_order": execution_order,
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration_ms": duration_ms,
+                "input_data": input_data,
+                "output_data": output_data,
+                "user_id": user_id,
+                "session_id": session_id,
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "cost_usd": cost_usd,
+                "contain_generation": contain_generation,
+                "metadata": metadata,
+            },
+        )
 
     def mark_complete(
         self,
@@ -891,12 +961,15 @@ class BackgroundProcess:
             tracer_config: Tracer configuration
             tags: Optional list of tags for filtering/grouping traces
         """
-        self.submit(TaskType.TRACE_COMPLETE, {
-            "request_id": request_id,
-            "tracer_type": tracer_type,
-            "tracer_config": tracer_config,
-            "tags": tags,
-        })
+        self.submit(
+            TaskType.TRACE_COMPLETE,
+            {
+                "request_id": request_id,
+                "tracer_type": tracer_type,
+                "tracer_config": tracer_config,
+                "tags": tags,
+            },
+        )
 
     def shutdown(self, timeout: float = 5.0) -> None:
         """Shutdown the background process gracefully.

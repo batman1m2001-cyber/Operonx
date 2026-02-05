@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import ClassVar, Optional
+
 from hush.core.utils import YamlModel
 
 
@@ -36,6 +37,7 @@ class EmbeddingConfig(YamlModel):
         dimensions (Optional[int]): The dimensionality of the generated embeddings.
             Required for OpenAI, Azure, and TEI. Default is None.
     """
+
     _category: ClassVar[str] = "embedding"
 
     api_type: EmbeddingType = EmbeddingType.VLLM
@@ -46,7 +48,7 @@ class EmbeddingConfig(YamlModel):
     dimensions: Optional[int] = None
 
     @classmethod
-    def default(cls) -> 'EmbeddingConfig':
+    def default(cls) -> "EmbeddingConfig":
         """Load default config with hardcoded values"""
         return cls(
             api_type=EmbeddingType.VLLM,
@@ -54,5 +56,5 @@ class EmbeddingConfig(YamlModel):
             base_url="http://localhost:8000/v1/embeddings",
             embed_batch_size=None,
             model="BAAI/bge-m3",
-            dimensions=1024
+            dimensions=1024,
         )

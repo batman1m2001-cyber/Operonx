@@ -1,15 +1,12 @@
-from abc import ABC, abstractmethod
-from typing import Dict, List, AsyncGenerator, Any, Union, Optional, Sequence
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-from openai.types.chat import (
-    ChatCompletion,
-    ChatCompletionMessageParam
-)
-import time
 import asyncio
-import sys
 import base64
 import mimetypes
+import sys
+from abc import ABC, abstractmethod
+from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence, Union
+
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from hush.providers.llms.config import LLMConfig
 
@@ -47,7 +44,7 @@ class BaseLLM(ABC):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """Stream responses from LLM with performance tracking and configurable parameters.
 
@@ -89,7 +86,7 @@ class BaseLLM(ABC):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletion:
         """Generate a complete chat completion for a given conversation with configurable parameters.
 
@@ -135,7 +132,7 @@ class BaseLLM(ABC):
         presence_penalty: Optional[float] = None,
         response_format: Optional[dict] = None,
         tools: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> List[ChatCompletion]:
         """Generate chat completions for multiple requests in parallel batches with configurable parameters.
 
@@ -199,16 +196,16 @@ class BaseLLM(ABC):
         """
         mime_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
         with open(image_path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            base64_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         return {
             "type": "image_url",
-            "image_url": {
-                "url": f"data:{mime_type};base64,{base64_image}"
-            }
+            "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
         }
 
-    def resolve_image_paths(self, message: ChatCompletionMessageParam) -> ChatCompletionMessageParam:
+    def resolve_image_paths(
+        self, message: ChatCompletionMessageParam
+    ) -> ChatCompletionMessageParam:
         """
         Convert local image file paths to base64 data URLs in chat completion messages.
 
@@ -259,7 +256,7 @@ class BaseLLM(ABC):
         # Only create copy if we made changes
         if copy_trigger:
             result = message.copy()
-            result['content'] = processed_content
+            result["content"] = processed_content
             return result
 
         return message
@@ -279,12 +276,10 @@ class BaseLLM(ABC):
         if not isinstance(text, str):
             return False
 
-        return any('\u4e00' <= char <= '\u9fff' for char in text)
+        return any("\u4e00" <= char <= "\u9fff" for char in text)
 
     def check_chinese_characters(
-        self,
-        response: Union[ChatCompletion, ChatCompletionChunk],
-        raise_on_found: bool = False
+        self, response: Union[ChatCompletion, ChatCompletionChunk], raise_on_found: bool = False
     ) -> bool:
         """
         Check if a chat response contains Chinese (CJK) characters.
@@ -304,17 +299,17 @@ class BaseLLM(ABC):
             AttributeError/IndexError: Returns False for any parsing errors or missing content
         """
         try:
-            if not hasattr(response, 'choices') or not response.choices:
+            if not hasattr(response, "choices") or not response.choices:
                 return False
 
             choice = response.choices[0]
 
             # Handle streaming response (ChatCompletionChunk)
-            if hasattr(choice, 'delta'):
-                content = getattr(choice.delta, 'content', None)
+            if hasattr(choice, "delta"):
+                content = getattr(choice.delta, "content", None)
             # Handle non-streaming response (ChatCompletion)
-            elif hasattr(choice, 'message'):
-                content = getattr(choice.message, 'content', None)
+            elif hasattr(choice, "message"):
+                content = getattr(choice.message, "content", None)
             else:
                 return False
 
@@ -326,8 +321,8 @@ class BaseLLM(ABC):
             elif isinstance(content, list):
                 # Handle multimodal content (list of content parts)
                 for item in content:
-                    if isinstance(item, dict) and item.get('type') == 'text':
-                        text_content = item.get('text', '')
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_content = item.get("text", "")
                         if self.has_chinese_characters(text_content):
                             has_chinese = True
                             break
@@ -348,14 +343,14 @@ class BaseLLM(ABC):
         stream: bool,
         temperature: float,
         top_p: float,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Prepare API parameters, filtering None values and resolving image paths."""
         return {
-            'model': model,
-            'messages': [self.resolve_image_paths(msg) for msg in messages],
-            'stream': stream,
-            'temperature': temperature,
-            'top_p': top_p,
-            **{k: v for k, v in kwargs.items() if v is not None}
+            "model": model,
+            "messages": [self.resolve_image_paths(msg) for msg in messages],
+            "stream": stream,
+            "temperature": temperature,
+            "top_p": top_p,
+            **{k: v for k, v in kwargs.items() if v is not None},
         }

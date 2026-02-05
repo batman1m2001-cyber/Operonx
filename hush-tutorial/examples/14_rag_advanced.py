@@ -16,13 +16,13 @@ Chạy: cd hush-tutorial && uv run python examples/14_rag_advanced.py
 
 import asyncio
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import numpy as np
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.nodes.transform.code_node import code_node
-
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 
 # =============================================================================
 # Sample data
@@ -45,6 +45,7 @@ DOCUMENTS = [
 # =============================================================================
 # Search utilities
 # =============================================================================
+
 
 def keyword_search(query: str, documents: list, top_k: int = 5) -> list:
     """Simple keyword search — đếm term overlap."""
@@ -90,6 +91,7 @@ def reciprocal_rank_fusion(results_lists: list, k: int = 60) -> list:
 # Ví dụ 1: Keyword search + RRF (no API key needed)
 # =============================================================================
 
+
 async def example_1_keyword_rrf():
     """Keyword search từ 2 góc nhìn → merge bằng RRF."""
     print("=" * 50)
@@ -115,9 +117,7 @@ async def example_1_keyword_rrf():
         # Merge with RRF
         merge = CodeNode(
             name="merge",
-            code_fn=lambda r1, r2: {
-                "merged": reciprocal_rank_fusion([r1, r2])[:5]
-            },
+            code_fn=lambda r1, r2: {"merged": reciprocal_rank_fusion([r1, r2])[:5]},
             inputs={
                 "r1": search_original["results"],
                 "r2": search_expanded["results"],
@@ -129,20 +129,23 @@ async def example_1_keyword_rrf():
         START >> [search_original, search_expanded] >> merge >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "query": "biển đẹp",
-        "documents": DOCUMENTS,
-    })
+    result = await engine.run(
+        inputs={
+            "query": "biển đẹp",
+            "documents": DOCUMENTS,
+        }
+    )
 
-    print(f"  Query: 'biển đẹp'")
-    print(f"  Top results (RRF merged):")
+    print("  Query: 'biển đẹp'")
+    print("  Top results (RRF merged):")
     for i, doc in enumerate(result["results"][:3]):
-        print(f"    {i+1}. {doc[:60]}...")
+        print(f"    {i + 1}. {doc[:60]}...")
 
 
 # =============================================================================
 # Ví dụ 2: Hybrid search (keyword + vector) → LLM
 # =============================================================================
+
 
 async def example_2_hybrid_rag():
     """Keyword + vector search song song → RRF merge → LLM answer."""
@@ -152,11 +155,12 @@ async def example_2_hybrid_rag():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("OPENAI_API_KEY"):
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import EmbeddingNode, PromptNode, LLMNode
+    from hush.providers import EmbeddingNode, LLMNode, PromptNode
 
     # Step 0: Pre-compute document embeddings
     print("  Embedding documents...")
@@ -248,11 +252,13 @@ async def example_2_hybrid_rag():
     ]
 
     for query in queries:
-        result = await engine.run(inputs={
-            "query": query,
-            "documents": DOCUMENTS,
-            "doc_vectors": doc_vectors,
-        })
+        result = await engine.run(
+            inputs={
+                "query": query,
+                "documents": DOCUMENTS,
+                "doc_vectors": doc_vectors,
+            }
+        )
         print(f"\n  Q: {query}")
         print(f"  A: {result['answer']}")
         print(f"  Sources: {[s[:40] + '...' for s in result['sources'][:2]]}")
@@ -262,6 +268,7 @@ async def example_2_hybrid_rag():
 # Ví dụ 3: Two-stage retrieval (retrieve → rerank)
 # =============================================================================
 
+
 async def example_3_rerank():
     """Retrieve top 8 → RerankNode → top 3 → LLM answer."""
     print()
@@ -270,6 +277,7 @@ async def example_3_rerank():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("OPENAI_API_KEY"):
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
@@ -283,7 +291,7 @@ async def example_3_rerank():
         print("      base_url: https://api.pinecone.io/rerank")
         return
 
-    from hush.providers import RerankNode, PromptNode, LLMNode
+    from hush.providers import LLMNode, PromptNode, RerankNode
 
     with GraphNode(name="rerank-rag") as graph:
         # Stage 1: Keyword retrieve top 8
@@ -328,22 +336,25 @@ async def example_3_rerank():
         START >> retrieve >> rerank >> prompt >> llm >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "query": "Thành phố du lịch biển đẹp nhất?",
-        "documents": DOCUMENTS,
-    })
+    result = await engine.run(
+        inputs={
+            "query": "Thành phố du lịch biển đẹp nhất?",
+            "documents": DOCUMENTS,
+        }
+    )
 
-    print(f"  Q: Thành phố du lịch biển đẹp nhất?")
+    print("  Q: Thành phố du lịch biển đẹp nhất?")
     print(f"  A: {result['answer']}")
-    print(f"  Top sources (reranked):")
+    print("  Top sources (reranked):")
     for i, s in enumerate(result.get("sources", [])[:3]):
         src = s if isinstance(s, str) else str(s)
-        print(f"    {i+1}. {src[:60]}...")
+        print(f"    {i + 1}. {src[:60]}...")
 
 
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main():
     await example_1_keyword_rrf()

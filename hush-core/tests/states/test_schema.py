@@ -1,15 +1,14 @@
 """Tests for StateSchema - workflow state structure definition."""
 
-import pytest
-from hush.core.states.schema import StateSchema
-from hush.core.states.ref import Ref
-from hush.core.nodes.graph.graph_node import GraphNode, START, END, PARENT
+from hush.core.nodes.graph.graph_node import END, PARENT, START, GraphNode
 from hush.core.nodes.transform.code_node import CodeNode
-
+from hush.core.states.ref import Ref
+from hush.core.states.schema import StateSchema
 
 # ============================================================
 # Test 1: Simple Linear Graph
 # ============================================================
+
 
 class TestSimpleLinearGraph:
     """Test schema creation from linear graph."""
@@ -18,9 +17,7 @@ class TestSimpleLinearGraph:
         """Test that schema name matches graph name."""
         with GraphNode(name="linear_graph") as graph:
             node_a = CodeNode(
-                name="node_a",
-                code_fn=lambda x: {"result": x + 10},
-                inputs={"x": PARENT["x"]}
+                name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
 
@@ -33,9 +30,7 @@ class TestSimpleLinearGraph:
         """Test that input refs are created correctly."""
         with GraphNode(name="linear_graph") as graph:
             node_a = CodeNode(
-                name="node_a",
-                code_fn=lambda x: {"result": x + 10},
-                inputs={"x": PARENT["x"]}
+                name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
 
@@ -53,7 +48,7 @@ class TestSimpleLinearGraph:
                 name="node_a",
                 code_fn=lambda x: {"result": x + 10},
                 inputs={"x": PARENT["x"]},
-                outputs={"result": PARENT["result"]}
+                outputs={"result": PARENT["result"]},
             )
             START >> node_a >> END
 
@@ -72,14 +67,10 @@ class TestSimpleLinearGraph:
         """Test that all indices are unique."""
         with GraphNode(name="test_graph") as graph:
             node_a = CodeNode(
-                name="node_a",
-                code_fn=lambda x: {"result": x + 10},
-                inputs={"x": PARENT["x"]}
+                name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             node_b = CodeNode(
-                name="node_b",
-                code_fn=lambda x: {"result": x * 2},
-                inputs={"x": node_a["result"]}
+                name="node_b", code_fn=lambda x: {"result": x * 2}, inputs={"x": node_a["result"]}
             )
             START >> node_a >> node_b >> END
 
@@ -94,6 +85,7 @@ class TestSimpleLinearGraph:
 # Test 2: Ref with Operations
 # ============================================================
 
+
 class TestRefWithOperations:
     """Test refs with chained operations."""
 
@@ -103,12 +95,12 @@ class TestRefWithOperations:
             node_a = CodeNode(
                 name="data_source",
                 code_fn=lambda: {"data": {"items": [1, 2, 3], "name": "test"}},
-                inputs={}
+                inputs={},
             )
             node_b = CodeNode(
                 name="extract_items",
                 code_fn=lambda items: {"count": len(items)},
-                inputs={"items": node_a["data"]["items"]}
+                inputs={"items": node_a["data"]["items"]},
             )
             START >> node_a >> node_b >> END
 
@@ -124,14 +116,12 @@ class TestRefWithOperations:
         """Test ref with method call operations."""
         with GraphNode(name="ref_ops_graph") as graph:
             node_a = CodeNode(
-                name="data_source",
-                code_fn=lambda: {"data": {"name": "test"}},
-                inputs={}
+                name="data_source", code_fn=lambda: {"data": {"name": "test"}}, inputs={}
             )
             node_b = CodeNode(
                 name="transform_name",
                 code_fn=lambda name: {"upper_name": name},
-                inputs={"name": node_a["data"]["name"].upper()}
+                inputs={"name": node_a["data"]["name"].upper()},
             )
             START >> node_a >> node_b >> END
 
@@ -148,6 +138,7 @@ class TestRefWithOperations:
 # Test 3: Ref with Apply
 # ============================================================
 
+
 class TestRefWithApply:
     """Test refs with apply() function."""
 
@@ -155,14 +146,12 @@ class TestRefWithApply:
         """Test ref with apply(len)."""
         with GraphNode(name="ref_apply_graph") as graph:
             node_a = CodeNode(
-                name="list_source",
-                code_fn=lambda: {"numbers": [5, 2, 8, 1, 9, 3]},
-                inputs={}
+                name="list_source", code_fn=lambda: {"numbers": [5, 2, 8, 1, 9, 3]}, inputs={}
             )
             node_b = CodeNode(
                 name="get_length",
                 code_fn=lambda length: {"length": length},
-                inputs={"length": node_a["numbers"].apply(len)}
+                inputs={"length": node_a["numbers"].apply(len)},
             )
             START >> node_a >> node_b >> END
 
@@ -176,15 +165,11 @@ class TestRefWithApply:
     def test_apply_sorted(self):
         """Test ref with apply(sorted)."""
         with GraphNode(name="ref_apply_graph") as graph:
-            node_a = CodeNode(
-                name="list_source",
-                code_fn=lambda: {"numbers": [5, 2, 8]},
-                inputs={}
-            )
+            node_a = CodeNode(name="list_source", code_fn=lambda: {"numbers": [5, 2, 8]}, inputs={})
             node_b = CodeNode(
                 name="sort_numbers",
                 code_fn=lambda sorted_nums: {"sorted": sorted_nums},
-                inputs={"sorted_nums": node_a["numbers"].apply(sorted)}
+                inputs={"sorted_nums": node_a["numbers"].apply(sorted)},
             )
             START >> node_a >> node_b >> END
 
@@ -200,21 +185,18 @@ class TestRefWithApply:
 # Test 4: Arithmetic Operations
 # ============================================================
 
+
 class TestArithmeticOperations:
     """Test refs with arithmetic operations."""
 
     def test_add_and_multiply(self):
         """Test ref with (value + 5) * 2."""
         with GraphNode(name="arithmetic_graph") as graph:
-            node_a = CodeNode(
-                name="number_source",
-                code_fn=lambda: {"value": 10},
-                inputs={}
-            )
+            node_a = CodeNode(name="number_source", code_fn=lambda: {"value": 10}, inputs={})
             node_b = CodeNode(
                 name="compute",
                 code_fn=lambda x: {"result": x},
-                inputs={"x": (node_a["value"] + 5) * 2}
+                inputs={"x": (node_a["value"] + 5) * 2},
             )
             START >> node_a >> node_b >> END
 
@@ -229,6 +211,7 @@ class TestArithmeticOperations:
 # Test 5: Nested Graph
 # ============================================================
 
+
 class TestNestedGraph:
     """Test schema with nested graphs."""
 
@@ -236,15 +219,13 @@ class TestNestedGraph:
         """Test refs in nested graph structure."""
         with GraphNode(name="outer") as outer:
             with GraphNode(
-                name="inner",
-                inputs={"x": PARENT["x"]},
-                outputs={"result": PARENT["inner_result"]}
+                name="inner", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["inner_result"]}
             ) as inner:
                 double = CodeNode(
                     name="double",
                     code_fn=lambda x: {"result": x * 2},
                     inputs={"x": PARENT["x"]},
-                    outputs={"result": PARENT["result"]}
+                    outputs={"result": PARENT["result"]},
                 )
                 START >> double >> END
 
@@ -267,6 +248,7 @@ class TestNestedGraph:
 # Test 6: Deeply Nested Graphs
 # ============================================================
 
+
 class TestDeeplyNestedGraphs:
     """Test schema with 3-level nesting."""
 
@@ -274,20 +256,16 @@ class TestDeeplyNestedGraphs:
         """Test refs chain through 3 nested levels."""
         with GraphNode(name="level1") as level1:
             with GraphNode(
-                name="level2",
-                inputs={"x": PARENT["x"]},
-                outputs={"result": PARENT["result"]}
+                name="level2", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["result"]}
             ) as level2:
                 with GraphNode(
-                    name="level3",
-                    inputs={"x": PARENT["x"]},
-                    outputs={"result": PARENT["result"]}
+                    name="level3", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["result"]}
                 ) as level3:
                     core = CodeNode(
                         name="core",
                         code_fn=lambda x: {"result": x * 3},
                         inputs={"x": PARENT["x"]},
-                        outputs={"result": PARENT["result"]}
+                        outputs={"result": PARENT["result"]},
                     )
                     START >> core >> END
                 START >> level3 >> END
@@ -299,12 +277,15 @@ class TestDeeplyNestedGraphs:
         # Verify deep nesting refs
         assert isinstance(schema._pull_refs[schema.get_index("level1.level2", "x")], Ref)
         assert isinstance(schema._pull_refs[schema.get_index("level1.level2.level3", "x")], Ref)
-        assert isinstance(schema._pull_refs[schema.get_index("level1.level2.level3.core", "x")], Ref)
+        assert isinstance(
+            schema._pull_refs[schema.get_index("level1.level2.level3.core", "x")], Ref
+        )
 
 
 # ============================================================
 # Test 7: Iteration Node
 # ============================================================
+
 
 class TestIterationNode:
     """Test schema with iteration nodes."""
@@ -321,13 +302,13 @@ class TestIterationNode:
             name="counter_loop",
             inputs={"counter": 0},
             stop_condition="counter >= 5",
-            max_iterations=10
+            max_iterations=10,
         ) as loop:
             inc = CodeNode(
                 name="increment",
                 code_fn=lambda counter: {"new_counter": counter + 1},
                 inputs={"counter": PARENT["counter"]},
-                outputs={"new_counter": PARENT["counter"]}
+                outputs={"new_counter": PARENT["counter"]},
             )
             START >> inc >> END
 
@@ -347,17 +328,14 @@ class TestIterationNode:
 # Test 8: Collection Interface
 # ============================================================
 
+
 class TestCollectionInterface:
     """Test schema collection interface (__iter__, __len__, __contains__)."""
 
     def test_iteration(self):
         """Test iterating over schema."""
         with GraphNode(name="test_graph") as graph:
-            node = CodeNode(
-                name="node",
-                code_fn=lambda x: {"y": x},
-                inputs={"x": PARENT["x"]}
-            )
+            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()
@@ -370,11 +348,7 @@ class TestCollectionInterface:
     def test_contains(self):
         """Test __contains__ method."""
         with GraphNode(name="test_graph") as graph:
-            node = CodeNode(
-                name="node",
-                code_fn=lambda x: {"y": x},
-                inputs={"x": PARENT["x"]}
-            )
+            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()
@@ -387,11 +361,7 @@ class TestCollectionInterface:
     def test_len(self):
         """Test __len__ method."""
         with GraphNode(name="test_graph") as graph:
-            node = CodeNode(
-                name="node",
-                code_fn=lambda x: {"y": x},
-                inputs={"x": PARENT["x"]}
-            )
+            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()

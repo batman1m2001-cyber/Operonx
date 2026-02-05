@@ -4,7 +4,7 @@ This tracer inherits from hush.core.tracers.BaseTracer and uses
 ResourceHub to get the OTELClient in the subprocess.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from hush.core.tracers import BaseTracer, register_tracer
 
@@ -121,10 +121,12 @@ class OTELTracer(BaseTracer):
             # Get client: direct config or ResourceHub
             if "config" in tracer_config:
                 from hush.observability.backends.otel import OTELClient, OTELConfig
+
                 config = OTELConfig(**tracer_config["config"])
                 client = OTELClient(config)
             else:
                 from hush.core.registry import get_hub
+
                 client = get_hub().otel(tracer_config["resource_key"])
 
             workflow_name = flush_data["workflow_name"]

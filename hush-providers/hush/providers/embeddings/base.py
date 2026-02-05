@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Union, List, Dict
+from typing import Any, Dict, List, Union
 
 
 class BaseEmbedder(ABC):
@@ -8,11 +8,7 @@ class BaseEmbedder(ABC):
     __slots__ = []  # Abstract base class with no instance attributes
 
     @abstractmethod
-    async def run(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    async def run(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """
         Abstract method for embedding a list of text strings into a list of numerical vectors.
 
@@ -26,11 +22,7 @@ class BaseEmbedder(ABC):
         """
         pass
 
-    def run_sync(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    def run_sync(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """
         Synchronous wrapper for the run method.
 
@@ -53,6 +45,7 @@ class BaseEmbedder(ABC):
             if loop.is_running():
                 # If loop is already running, we need to create a new thread
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, self.run(texts, **kwargs))
                     return future.result()

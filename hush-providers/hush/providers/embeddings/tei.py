@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, List, Dict, Union
-
-import json
-import aiohttp
 import asyncio
+import json
 from functools import lru_cache
+from typing import Any, Dict, List, Union
+
+import aiohttp
 from aiohttp.client_exceptions import ClientError
+
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
@@ -25,7 +26,7 @@ class TEIEmbedding(BaseEmbedder):
             - dimensions: Output dimension of the embedding vectors
     """
 
-    __slots__ = ['config', 'default_headers']
+    __slots__ = ["config", "default_headers"]
 
     def __init__(self, config: EmbeddingConfig) -> None:
         """Initialize the TEI embedding client with the provided configuration."""
@@ -37,17 +38,11 @@ class TEIEmbedding(BaseEmbedder):
         self.config = config
 
         # Set up default headers
-        self.default_headers = {
-            'Content-Type': 'application/json'
-        }
+        self.default_headers = {"Content-Type": "application/json"}
         if self.config.api_key:
-            self.default_headers['Authorization'] = f'Bearer {self.config.api_key}'
+            self.default_headers["Authorization"] = f"Bearer {self.config.api_key}"
 
-    async def run(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    async def run(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """Generate embeddings for the given texts.
 
         Args:
@@ -78,7 +73,7 @@ class TEIEmbedding(BaseEmbedder):
                     headers=self.default_headers,
                     data=payload,
                     timeout=aiohttp.ClientTimeout(total=30),  # Add reasonable timeout
-                    **kwargs
+                    **kwargs,
                 ) as response:
                     response.raise_for_status()
                     result = await response.json()
@@ -102,7 +97,6 @@ class TEIEmbedding(BaseEmbedder):
         except (json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid response format: {str(e)}") from e
 
-
     @lru_cache(maxsize=1)
     def get_output_dim(self) -> int:
         r"""Get the output dimension of the embeddings.
@@ -113,10 +107,14 @@ class TEIEmbedding(BaseEmbedder):
         return self.output_dim
 
 
-import numpy as np
-from typing import List, Tuple
+from typing import Tuple
 
-def cosine_similarity_search(query_emb: List[float], embs: List[List[float]]) -> List[Tuple[int, float]]:
+import numpy as np
+
+
+def cosine_similarity_search(
+    query_emb: List[float], embs: List[List[float]]
+) -> List[Tuple[int, float]]:
     """
     Calculate cosine similarity between a query embedding and a list of embeddings.
 
@@ -155,14 +153,16 @@ async def main() -> None:
     start_time = time.time()
     print("Starting embedding generation...")
 
-    tei_embed = TEIEmbedding(EmbeddingConfig(
-        api_type = "tei",
-        api_key = "your-api-key",
-        base_url = "http://localhost:8080/embed",
-        model = "BAAI/bge-m3",
-        embed_batch_size = 32,
-        dimensions = 1024
-    ))
+    tei_embed = TEIEmbedding(
+        EmbeddingConfig(
+            api_type="tei",
+            api_key="your-api-key",
+            base_url="http://localhost:8080/embed",
+            model="BAAI/bge-m3",
+            embed_batch_size=32,
+            dimensions=1024,
+        )
+    )
 
     text1 = """machine learning, deep learning, neural networks"""
 

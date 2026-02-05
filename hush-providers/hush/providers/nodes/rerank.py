@@ -4,13 +4,13 @@ This module provides RerankNode that uses ResourceHub to access reranker resourc
 Follows hush-core design patterns with Param-based schema.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
-from hush.core.utils.common import Param
-from hush.core.registry import ResourceHub, get_hub
 from hush.core.exceptions import RerankError
+from hush.core.nodes import BaseNode
+from hush.core.registry import ResourceHub, get_hub
+from hush.core.utils.common import Param
 
 
 class RerankNode(BaseNode):
@@ -36,7 +36,7 @@ class RerankNode(BaseNode):
         ```
     """
 
-    __slots__ = ['resource_key', 'backend']
+    __slots__ = ["resource_key", "backend"]
 
     type: NodeType = "rerank"
 
@@ -45,7 +45,7 @@ class RerankNode(BaseNode):
         resource_key: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs
+        **kwargs,
     ):
         """Initialize RerankNode.
 
@@ -85,11 +85,7 @@ class RerankNode(BaseNode):
         self.core = self._process
 
     async def _process(
-        self,
-        query: str,
-        documents: List,
-        top_k: int,
-        threshold: float
+        self, query: str, documents: List, top_k: int, threshold: float
     ) -> Dict[str, Any]:
         """Process reranking request.
 
@@ -115,7 +111,7 @@ class RerankNode(BaseNode):
             is_dict = True
             # documents is a List[Dict]
             # Extract text field from each dictionary
-            texts = [doc.get('content', '') for doc in documents]
+            texts = [doc.get("content", "") for doc in documents]
         else:
             # Handle unexpected type
             raise RerankError(
@@ -123,7 +119,9 @@ class RerankNode(BaseNode):
                 resource_key=self.resource_key or "unknown",
                 query=query,
                 document_count=len(documents),
-                original_error=TypeError(f"Expected List[str] or List[Dict], got list of {type(documents[0]).__name__}")
+                original_error=TypeError(
+                    f"Expected List[str] or List[Dict], got list of {type(documents[0]).__name__}"
+                ),
             )
 
         try:
@@ -131,7 +129,7 @@ class RerankNode(BaseNode):
                 query=query,
                 texts=texts,
                 top_k=top_k if top_k > 0 else len(texts),
-                threshold=threshold
+                threshold=threshold,
             )
         except RerankError:
             raise  # Already wrapped
@@ -141,32 +139,22 @@ class RerankNode(BaseNode):
                 resource_key=self.resource_key or "unknown",
                 query=query,
                 document_count=len(documents),
-                original_error=e
+                original_error=e,
             ) from e
 
         reranked_docs = []
 
         for r in results:
             if is_dict:
-                reranked_docs.append({
-                    **documents[r['index']],
-                    "score": r['score']
-                })
+                reranked_docs.append({**documents[r["index"]], "score": r["score"]})
             else:
-                reranked_docs.append({
-                    "content": documents[r['index']],
-                    "score": r['score']
-                })
+                reranked_docs.append({"content": documents[r["index"]], "score": r["score"]})
 
-        return {
-            "reranks": reranked_docs
-        }
+        return {"reranks": reranked_docs}
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Return rerank-specific metadata dictionary."""
-        return {
-            "model": self.resource_key
-        }
+        return {"model": self.resource_key}
 
 
 def rerank_(resource_key=None, **kwargs) -> RerankNode:
@@ -176,6 +164,7 @@ def rerank_(resource_key=None, **kwargs) -> RerankNode:
         rerank = rerank_("bge-m3", query=PARENT["q"], documents=PARENT["docs"], outputs={"*": PARENT})
     """
     from hush.core.nodes import split_shorthand_kwargs
+
     _skip_auto_name = True  # noqa: F841
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     return RerankNode(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)

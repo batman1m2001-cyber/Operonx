@@ -15,31 +15,56 @@ Chạy: cd hush-tutorial && uv run python examples/13_parallel_advanced.py
 
 import asyncio
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.nodes.iteration.map_node import MapNode
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 from hush.core.nodes.iteration.base import Each
+from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.transform.code_node import code_node
-
 
 # =============================================================================
 # Ví dụ 1: Fan-out / Fan-in
 # =============================================================================
 
+
 @code_node
 def analyze_sentiment(text: str):
     """Phân tích sentiment (giả lập)."""
-    positive = sum(1 for w in text.lower().split() if w in {"good", "great", "excellent", "love", "happy"})
-    negative = sum(1 for w in text.lower().split() if w in {"bad", "terrible", "hate", "awful", "sad"})
-    return {"sentiment": "positive" if positive > negative else ("negative" if negative > positive else "neutral")}
+    positive = sum(
+        1 for w in text.lower().split() if w in {"good", "great", "excellent", "love", "happy"}
+    )
+    negative = sum(
+        1 for w in text.lower().split() if w in {"bad", "terrible", "hate", "awful", "sad"}
+    )
+    return {
+        "sentiment": "positive"
+        if positive > negative
+        else ("negative" if negative > positive else "neutral")
+    }
 
 
 @code_node
 def extract_keywords(text: str):
     """Trích keywords (giả lập)."""
-    stop_words = {"the", "is", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with"}
+    stop_words = {
+        "the",
+        "is",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+    }
     words = [w.lower().strip(".,!?") for w in text.split()]
     keywords = [w for w in words if w not in stop_words and len(w) > 2]
     return {"keywords": keywords[:5]}
@@ -49,7 +74,11 @@ def extract_keywords(text: str):
 def count_stats(text: str):
     """Đếm thống kê text."""
     words = text.split()
-    return {"word_count": len(words), "char_count": len(text), "avg_word_len": round(len(text) / max(len(words), 1), 1)}
+    return {
+        "word_count": len(words),
+        "char_count": len(text),
+        "avg_word_len": round(len(text) / max(len(words), 1), 1),
+    }
 
 
 async def example_1_fan_out_fan_in():
@@ -99,7 +128,9 @@ async def example_1_fan_out_fan_in():
         START >> [sentiment, keywords, stats] >> merge >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={"text": "This is a great excellent product with good quality and love it"})
+    result = await engine.run(
+        inputs={"text": "This is a great excellent product with good quality and love it"}
+    )
     analysis = result["analysis"]
     print(f"  Sentiment:    {analysis['sentiment']}")
     print(f"  Keywords:     {analysis['keywords']}")
@@ -111,10 +142,12 @@ async def example_1_fan_out_fan_in():
 # Ví dụ 2: MapNode với concurrency control
 # =============================================================================
 
+
 @code_node
 def process_item(item: int):
     """Process 1 item (giả lập I/O với sleep)."""
     import time
+
     time.sleep(0.05)  # Simulate API call
     return {"result": item * item, "status": "ok"}
 
@@ -145,6 +178,7 @@ async def example_2_concurrency_control():
     engine = Hush(graph)
 
     import time
+
     items = list(range(1, 10))
     start = time.time()
     result = await engine.run(inputs={"items": items})
@@ -152,12 +186,13 @@ async def example_2_concurrency_control():
 
     print(f"  Items: {items}")
     print(f"  Results: {result['results']}")
-    print(f"  Time: {elapsed:.2f}s (max_concurrency=3, ~{len(items)//3} batches)")
+    print(f"  Time: {elapsed:.2f}s (max_concurrency=3, ~{len(items) // 3} batches)")
 
 
 # =============================================================================
 # Ví dụ 3: Partial failure handling
 # =============================================================================
+
 
 @code_node
 def risky_process(item: int):
@@ -180,6 +215,7 @@ async def example_3_partial_failure():
             name="safe_process",
             inputs={"item": Each(PARENT["items"])},
         ) as map_node:
+
             @code_node
             def safe_op(item: int):
                 if item % 2 != 0:
@@ -212,7 +248,7 @@ async def example_3_partial_failure():
     engine = Hush(graph)
     result = await engine.run(inputs={"items": [1, 2, 3, 4, 5, 6, 7]})
 
-    print(f"  Input:      [1, 2, 3, 4, 5, 6, 7]")
+    print("  Input:      [1, 2, 3, 4, 5, 6, 7]")
     print(f"  Successful: {result['successful']}")
     print(f"  Failed:     {result['failed']}")
 
@@ -220,6 +256,7 @@ async def example_3_partial_failure():
 # =============================================================================
 # Ví dụ 4: Parallel LLM calls + Batch LLM
 # =============================================================================
+
 
 async def example_4_parallel_llm():
     """Nhiều LLM prompts song song + batch queries qua MapNode."""
@@ -229,11 +266,12 @@ async def example_4_parallel_llm():
     print("=" * 50)
 
     import os
+
     if not os.environ.get("OPENAI_API_KEY"):
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import PromptNode, LLMNode
+    from hush.providers import LLMNode, PromptNode
 
     # --- Part A: Parallel prompts (different tasks, same input) ---
     print("\n  A) Parallel prompts (summary + keywords from same text):")
@@ -249,7 +287,10 @@ async def example_4_parallel_llm():
         prompt_keywords = PromptNode(
             name="prompt_keywords",
             inputs={
-                "template": {"system": "List 3 keywords, comma-separated.", "user": "{text}"},
+                "template": {
+                    "system": "List 3 keywords, comma-separated.",
+                    "user": "{text}",
+                },
                 "text": PARENT["text"],
             },
         )
@@ -278,9 +319,11 @@ async def example_4_parallel_llm():
         [llm_summary, llm_keywords] >> merge >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "text": "Python is a versatile programming language used in web development, data science, and AI."
-    })
+    result = await engine.run(
+        inputs={
+            "text": "Python is a versatile programming language used in web development, data science, and AI."
+        }
+    )
     print(f"    Summary:  {result['summary']}")
     print(f"    Keywords: {result['keywords']}")
 
@@ -296,7 +339,10 @@ async def example_4_parallel_llm():
             prompt = PromptNode(
                 name="prompt",
                 inputs={
-                    "template": {"system": "Answer in one sentence.", "user": "{query}"},
+                    "template": {
+                        "system": "Answer in one sentence.",
+                        "user": "{query}",
+                    },
                     "query": PARENT["query"],
                 },
             )
@@ -312,9 +358,9 @@ async def example_4_parallel_llm():
         START >> map_node >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "queries": ["What is Python?", "What is JavaScript?", "What is Rust?"]
-    })
+    result = await engine.run(
+        inputs={"queries": ["What is Python?", "What is JavaScript?", "What is Rust?"]}
+    )
     for q, a in zip(["Python", "JavaScript", "Rust"], result["answers"]):
         print(f"    {q}: {a[:60]}...")
 
@@ -322,6 +368,7 @@ async def example_4_parallel_llm():
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main():
     await example_1_fan_out_fan_in()

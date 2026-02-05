@@ -6,8 +6,8 @@ Module này export các type và class config chính:
     - EdgeType: Các loại edge (normal, lookback, condition)
 """
 
-from .node_config import NodeType
 from .edge_config import EdgeConfig, EdgeType
+from .node_config import NodeType
 
 __all__ = [
     "NodeType",

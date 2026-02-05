@@ -25,23 +25,23 @@ Config class requirements:
 """
 
 from .config_registry import (
-    ConfigRegistry,
-    ConfigEntry,
     REGISTRY,
+    ConfigEntry,
+    ConfigRegistry,
 )
 from .resource_hub import (
-    ResourceHub,
     CacheEntry,
+    ResourceHub,
 )
 from .shortcuts import (
+    HealthCheckResult,
     get_hub,
     set_global_hub,
-    HealthCheckResult,
 )
 from .storage import (
     ConfigStorage,
-    YamlConfigStorage,
     JsonConfigStorage,
+    YamlConfigStorage,
 )
 
 __all__ = [

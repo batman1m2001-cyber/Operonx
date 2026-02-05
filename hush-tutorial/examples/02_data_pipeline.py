@@ -12,12 +12,13 @@ Chạy: cd hush-tutorial && uv run python examples/02_data_pipeline.py
 """
 
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
 
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 
 # =============================================================================
 # Định nghĩa functions cho các nodes
 # =============================================================================
+
 
 def fetch_data():
     """Bước 1: Lấy data (giả lập)."""
@@ -42,6 +43,7 @@ def aggregate(data: list) -> dict:
 # Text processing pipeline
 # =============================================================================
 
+
 def clean_text(text: str) -> dict:
     """Tiền xử lý: loại bỏ whitespace thừa, lowercase."""
     cleaned = " ".join(text.split()).strip().lower()
@@ -64,7 +66,7 @@ def summarize_stats(word_count: int, unique_words: int, cleaned_text: str) -> di
         "report": (
             f"Văn bản có {word_count} từ, "
             f"{unique_words} từ unique, "
-            f"tỉ lệ unique: {unique_words/word_count:.0%}"
+            f"tỉ lệ unique: {unique_words / word_count:.0%}"
         )
     }
 
@@ -142,13 +144,15 @@ async def main():
         START >> step_clean >> step_count >> step_summary >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={
-        "text": """
+    result = await engine.run(
+        inputs={
+            "text": """
         Trí tuệ nhân tạo   đang thay đổi   cách chúng ta sống
         và   làm việc. Trí tuệ nhân tạo   đã trở thành
         một phần không thể thiếu trong cuộc sống hàng ngày.
         """
-    })
+        }
+    )
 
     print(f"Text đã clean:  {result['cleaned_text']}")
     print(f"Số từ:          {result['word_count']}")

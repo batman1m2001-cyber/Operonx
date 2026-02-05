@@ -2,8 +2,9 @@
 
 import os
 import sys
-import pytest
 from pathlib import Path
+
+import pytest
 from dotenv import load_dotenv
 
 # Load .env file from package root
@@ -79,9 +80,8 @@ def pytest_configure(config):
     if not os.environ.get("HUSH_CONFIG"):
         print(SETUP_TUTORIAL, file=sys.stderr)
         pytest.exit(
-            "HUSH_CONFIG environment variable not set. "
-            "Please follow the setup tutorial above.",
-            returncode=1
+            "HUSH_CONFIG environment variable not set. Please follow the setup tutorial above.",
+            returncode=1,
         )
 
     # Check if config file exists
@@ -90,13 +90,12 @@ def pytest_configure(config):
         pytest.exit(
             f"Config file not found: {CONFIGS_PATH}\n"
             "Please create resources.yaml or update HUSH_CONFIG path.",
-            returncode=1
+            returncode=1,
         )
 
     # Register custom markers
     config.addinivalue_line(
-        "markers",
-        "integration: mark test as integration test (requires real API credentials)"
+        "markers", "integration: mark test as integration test (requires real API credentials)"
     )
 
 
@@ -104,13 +103,13 @@ def pytest_configure(config):
 # Session Fixtures
 # =============================================================================
 
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_resource_hub():
     """Setup ResourceHub with test configurations for the entire test session."""
     from hush.core.registry import ResourceHub, set_global_hub
 
     # Import plugins to auto-register config classes and factory handlers
-    from hush.providers.registry import LLMPlugin, EmbeddingPlugin, RerankPlugin
 
     # Create hub from config file
     hub = ResourceHub.from_yaml(CONFIGS_PATH)

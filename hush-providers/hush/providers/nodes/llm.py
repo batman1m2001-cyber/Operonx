@@ -13,13 +13,13 @@ import asyncio
 import random
 from datetime import datetime
 from time import perf_counter
-from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from hush.core.nodes import BaseNode
+from hush.core import LOGGER, STREAM_SERVICE
 from hush.core.configs import NodeType
-from hush.core.utils.common import Param
+from hush.core.nodes import BaseNode
 from hush.core.registry import ResourceHub, get_hub
-from hush.core import STREAM_SERVICE, LOGGER
+from hush.core.utils.common import Param
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -68,9 +68,15 @@ class LLMNode(BaseNode):
     """
 
     __slots__ = [
-        'resource_key', 'batch_mode',
-        'ratios', '_llms', '_llm', '_batch_coordinator',
-        'fallback', '_fallback_llms', '_rng'
+        "resource_key",
+        "batch_mode",
+        "ratios",
+        "_llms",
+        "_llm",
+        "_batch_coordinator",
+        "fallback",
+        "_fallback_llms",
+        "_rng",
     ]
 
     type: NodeType = "llm"
@@ -84,7 +90,7 @@ class LLMNode(BaseNode):
         seed: Optional[int] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs
+        **kwargs,
     ):
         """Initialize LLMNode.
 
@@ -112,9 +118,9 @@ class LLMNode(BaseNode):
         self._rng = random.Random(seed)
 
         # Handle load balancing setup
-        self._llms: List['BaseLLM'] = []
-        self._llm: Optional['BaseLLM'] = None
-        self._fallback_llms: List['BaseLLM'] = []
+        self._llms: List["BaseLLM"] = []
+        self._llm: Optional["BaseLLM"] = None
+        self._fallback_llms: List["BaseLLM"] = []
         self._batch_coordinator = None
 
         if isinstance(resource_key, list):
@@ -196,23 +202,25 @@ class LLMNode(BaseNode):
         if self.batch_mode:
             # Batch mode: use BatchCoordinator
             from hush.providers.llms.batch_coordinator import BatchCoordinator
+
             # Get batch config from LLM config if available
             config = self._llm.config
             batch_kwargs = {}
-            if hasattr(config, 'batch_size'):
-                batch_kwargs['max_batch_size'] = config.batch_size
-            if hasattr(config, 'batch_flush_interval'):
-                batch_kwargs['flush_interval'] = config.batch_flush_interval
-            if hasattr(config, 'batch_poll_interval'):
-                batch_kwargs['poll_interval'] = config.batch_poll_interval
-            if hasattr(config, 'batch_timeout'):
-                batch_kwargs['timeout'] = config.batch_timeout
+            if hasattr(config, "batch_size"):
+                batch_kwargs["max_batch_size"] = config.batch_size
+            if hasattr(config, "batch_flush_interval"):
+                batch_kwargs["flush_interval"] = config.batch_flush_interval
+            if hasattr(config, "batch_poll_interval"):
+                batch_kwargs["poll_interval"] = config.batch_poll_interval
+            if hasattr(config, "batch_timeout"):
+                batch_kwargs["timeout"] = config.batch_timeout
 
             self._batch_coordinator = BatchCoordinator.get_coordinator(
-                resource_key=self.resource_key if isinstance(self.resource_key, str)
+                resource_key=self.resource_key
+                if isinstance(self.resource_key, str)
                 else self.resource_key[0],
                 llm=self._llm,
-                **batch_kwargs
+                **batch_kwargs,
             )
             self.core = self._batch_coordinator.submit
         elif self.stream:
@@ -220,7 +228,7 @@ class LLMNode(BaseNode):
         else:
             self.core = self._llm.generate
 
-    def _select_llm(self) -> 'BaseLLM':
+    def _select_llm(self) -> "BaseLLM":
         """Select an LLM using weighted random selection for load balancing.
 
         Uses dedicated RNG instance for isolation from global random state.
@@ -234,7 +242,7 @@ class LLMNode(BaseNode):
         # Weighted random selection using dedicated RNG
         return self._rng.choices(self._llms, weights=self.ratios, k=1)[0]
 
-    def _get_selected_resource_key(self, llm: 'BaseLLM') -> str:
+    def _get_selected_resource_key(self, llm: "BaseLLM") -> str:
         """Get the resource key for the selected LLM.
 
         Args:
@@ -260,9 +268,21 @@ class LLMNode(BaseNode):
             Dict with only non-None LLM parameters
         """
         llm_param_keys = [
-            "messages", "temperature", "max_tokens", "tools", "tool_choice",
-            "response_format", "top_p", "stop", "frequency_penalty",
-            "presence_penalty", "seed", "logprobs", "top_logprobs", "n", "user"
+            "messages",
+            "temperature",
+            "max_tokens",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "logprobs",
+            "top_logprobs",
+            "n",
+            "user",
         ]
         params = {}
         for key in llm_param_keys:
@@ -272,10 +292,7 @@ class LLMNode(BaseNode):
         return params
 
     def _extract_completion_data(
-        self,
-        completion: Any,
-        _inputs: Dict[str, Any],
-        selected_resource_key: str
+        self, completion: Any, _inputs: Dict[str, Any], selected_resource_key: str
     ) -> Dict[str, Any]:
         """Extract data from a completion response.
 
@@ -297,7 +314,7 @@ class LLMNode(BaseNode):
         logprobs_data = None
 
         # Extract thinking content (for reasoning models)
-        if hasattr(message, 'reasoning_content'):
+        if hasattr(message, "reasoning_content"):
             thinking_content = message.reasoning_content or ""
 
         # Extract usage info
@@ -309,14 +326,16 @@ class LLMNode(BaseNode):
             tool_calls = [tc.model_dump() for tc in message.tool_calls]
 
         # Extract refusal (OpenAI safety refusals)
-        if hasattr(message, 'refusal'):
+        if hasattr(message, "refusal"):
             refusal = message.refusal
 
         # Extract logprobs
-        if hasattr(completion.choices[0], 'logprobs') and completion.choices[0].logprobs:
-            logprobs_data = completion.choices[0].logprobs.model_dump() if hasattr(
-                completion.choices[0].logprobs, 'model_dump'
-            ) else completion.choices[0].logprobs
+        if hasattr(completion.choices[0], "logprobs") and completion.choices[0].logprobs:
+            logprobs_data = (
+                completion.choices[0].logprobs.model_dump()
+                if hasattr(completion.choices[0].logprobs, "model_dump")
+                else completion.choices[0].logprobs
+            )
 
         return {
             "role": "assistant",
@@ -337,12 +356,12 @@ class LLMNode(BaseNode):
 
     async def _handle_streaming(
         self,
-        llm: 'BaseLLM',
+        llm: "BaseLLM",
         llm_params: Dict[str, Any],
         resource_key: str,
         request_id: str,
         channel_name: str,
-        _inputs: Dict[str, Any]
+        _inputs: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Handle streaming response from LLM.
 
@@ -367,7 +386,7 @@ class LLMNode(BaseNode):
                 choice = chunk.choices[0]
 
                 # Accumulate thinking content
-                if hasattr(choice.delta, 'reasoning_content') and choice.delta.reasoning_content:
+                if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
                     thinking_content += choice.delta.reasoning_content
 
                 # Accumulate main content
@@ -383,15 +402,13 @@ class LLMNode(BaseNode):
                     tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
 
                 # Capture refusal (streaming)
-                if hasattr(choice.delta, 'refusal') and choice.delta.refusal:
+                if hasattr(choice.delta, "refusal") and choice.delta.refusal:
                     refusal = (refusal or "") + choice.delta.refusal
 
             # Push chunk to STREAM_SERVICE
-            asyncio.create_task(STREAM_SERVICE.push(
-                request_id=request_id,
-                channel_name=channel_name,
-                data=chunk
-            ))
+            asyncio.create_task(
+                STREAM_SERVICE.push(request_id=request_id, channel_name=channel_name, data=chunk)
+            )
 
         # Signal end of stream
         asyncio.create_task(STREAM_SERVICE.end(request_id, channel_name))
@@ -411,9 +428,9 @@ class LLMNode(BaseNode):
 
     async def run(
         self,
-        state: 'MemoryState',
+        state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None
+        parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run the LLM node with streaming support via STREAM_SERVICE.
 
@@ -431,7 +448,9 @@ class LLMNode(BaseNode):
 
         # Select LLM for this request (load balancing)
         selected_llm = self._select_llm() if self._llms else None
-        selected_resource_key = self._get_selected_resource_key(selected_llm) if selected_llm else self.resource_key
+        selected_resource_key = (
+            self._get_selected_resource_key(selected_llm) if selected_llm else self.resource_key
+        )
 
         try:
             _inputs = self.get_inputs(state, context_id=context_id)
@@ -453,7 +472,7 @@ class LLMNode(BaseNode):
                     resource_key=selected_resource_key,
                     request_id=request_id,
                     channel_name=self.identity(context_id),
-                    _inputs=_inputs
+                    _inputs=_inputs,
                 )
 
             else:
@@ -468,6 +487,7 @@ class LLMNode(BaseNode):
 
         except Exception as e:
             import traceback
+
             primary_error = str(e)
             LOGGER.error(f"Error in node {self.name}: {primary_error}")
 
@@ -485,12 +505,14 @@ class LLMNode(BaseNode):
                                 resource_key=fallback_key,
                                 request_id=request_id,
                                 channel_name=self.identity(context_id),
-                                _inputs=_inputs
+                                _inputs=_inputs,
                             )
                         else:
                             # Non-streaming fallback
                             completion = await fallback_llm.generate(**llm_params)
-                            _outputs = self._extract_completion_data(completion, _inputs, fallback_key)
+                            _outputs = self._extract_completion_data(
+                                completion, _inputs, fallback_key
+                            )
 
                         selected_llm = fallback_llm
                         selected_resource_key = fallback_key
@@ -505,7 +527,9 @@ class LLMNode(BaseNode):
                     # All fallbacks failed
                     error_msg = traceback.format_exc()
                     LOGGER.error(error_msg)
-                    state[self.full_name, "error", context_id] = f"Primary and all fallbacks failed. Primary error: {primary_error}"
+                    state[self.full_name, "error", context_id] = (
+                        f"Primary and all fallbacks failed. Primary error: {primary_error}"
+                    )
             else:
                 # No fallback configured or not applicable
                 error_msg = traceback.format_exc()
@@ -524,10 +548,10 @@ class LLMNode(BaseNode):
 
             # Calculate cost from LLM config if cost_per_token is configured
             cost = None
-            if selected_llm and hasattr(selected_llm, 'config'):
+            if selected_llm and hasattr(selected_llm, "config"):
                 config = selected_llm.config
-                cost_input = getattr(config, 'cost_per_input_token', None)
-                cost_output = getattr(config, 'cost_per_output_token', None)
+                cost_input = getattr(config, "cost_per_input_token", None)
+                cost_output = getattr(config, "cost_per_output_token", None)
                 if cost_input is not None or cost_output is not None:
                     tokens = _outputs.get("tokens_used", {})
                     input_tokens = tokens.get("prompt_tokens", 0)
@@ -570,7 +594,9 @@ class LLMNode(BaseNode):
         return metadata
 
 
-def llm_(resource_key=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs) -> LLMNode:
+def llm_(
+    resource_key=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
+) -> LLMNode:
     """Shorthand to create an LLMNode with flat kwargs.
 
     Example:
@@ -579,9 +605,15 @@ def llm_(resource_key=None, *, ratios=None, fallback=None, batch_mode=False, see
         llm = llm_(["gpt-4", "claude-3"], seed=42)  # reproducible load balancing
     """
     from hush.core.nodes import split_shorthand_kwargs
+
     _skip_auto_name = True  # noqa: F841
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     return LLMNode(
-        resource_key=resource_key, ratios=ratios, fallback=fallback,
-        batch_mode=batch_mode, seed=seed, inputs=input_mappings or None, **init_kwargs
+        resource_key=resource_key,
+        ratios=ratios,
+        fallback=fallback,
+        batch_mode=batch_mode,
+        seed=seed,
+        inputs=input_mappings or None,
+        **init_kwargs,
     )

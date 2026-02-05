@@ -16,20 +16,22 @@ import asyncio
 import base64
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import Hush, GraphNode, START, END, PARENT
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.iteration.for_loop_node import ForLoopNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.tracers import BaseTracer
-
 
 # =============================================================================
 # Helper: tạo OTELConfig trỏ đến Langfuse
 # =============================================================================
+
 
 def create_langfuse_otel_config(service_name: str = "hush-tutorial"):
     """Tạo OTELConfig gửi traces đến Langfuse qua OTEL endpoint.
@@ -55,6 +57,7 @@ def create_langfuse_otel_config(service_name: str = "hush-tutorial"):
 # =============================================================================
 # Code nodes
 # =============================================================================
+
 
 @code_node
 def validate(x: int):
@@ -92,6 +95,7 @@ def halve_value(value: int):
 # Ví dụ 1: OTELTracer với nested ForLoop
 # =============================================================================
 
+
 async def example_1_otel_basic():
     """OTELTracer gửi traces qua OTEL protocol đến Langfuse."""
     print("=" * 50)
@@ -105,17 +109,13 @@ async def example_1_otel_basic():
     from hush.observability import OTELTracer
 
     with GraphNode(name="nested-loop") as graph:
-        with ForLoopNode(
-            name="outer_loop",
-            inputs={"x": Each([2, 3, 4])}
-        ) as outer:
+        with ForLoopNode(name="outer_loop", inputs={"x": Each([2, 3, 4])}) as outer:
             val = validate(
                 name="validate",
                 inputs={"x": PARENT["x"]},
             )
             with ForLoopNode(
-                name="inner_loop",
-                inputs={"y": Each([10, 20]), "x": val["validated_x"]}
+                name="inner_loop", inputs={"y": Each([10, 20]), "x": val["validated_x"]}
             ) as inner:
                 mult = multiply(
                     name="multiply",
@@ -156,6 +156,7 @@ async def example_1_otel_basic():
 # =============================================================================
 # Ví dụ 2: OTELTracer với WhileLoop
 # =============================================================================
+
 
 async def example_2_otel_while():
     """WhileLoop workflow traced qua OTEL."""
@@ -208,6 +209,7 @@ async def example_2_otel_while():
 # Ví dụ 3: Raw OTEL SDK (không dùng Hush)
 # =============================================================================
 
+
 def example_3_raw_otel():
     """Gửi spans trực tiếp bằng OTEL SDK — không cần Hush.
 
@@ -224,10 +226,11 @@ def example_3_raw_otel():
         return
 
     import time
+
     from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
     public_key = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
     secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "")
@@ -276,6 +279,7 @@ def example_3_raw_otel():
 # =============================================================================
 # Main
 # =============================================================================
+
 
 async def main():
     await example_1_otel_basic()

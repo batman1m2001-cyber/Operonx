@@ -22,10 +22,10 @@ Example:
     state.show()
 """
 
+from hush.core.states.cell import Cell
 from hush.core.states.ref import Ref
 from hush.core.states.schema import StateSchema
 from hush.core.states.state import MemoryState
-from hush.core.states.cell import Cell
 
 __all__ = [
     "Ref",

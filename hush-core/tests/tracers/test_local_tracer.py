@@ -7,10 +7,10 @@ from time import sleep
 
 import pytest
 
-from hush.core import Hush, GraphNode, START, END, PARENT
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.background import BackgroundProcess, shutdown_background
 from hush.core.nodes import CodeNode
 from hush.core.tracers import LocalTracer, get_registered_tracers
-from hush.core.background import shutdown_background, BackgroundProcess
 
 
 class TestLocalTracerBasic:
@@ -46,11 +46,13 @@ class TestLocalTracerBasic:
     def test_flush_does_nothing(self):
         """Test flush() is a no-op."""
         # Should not raise any errors
-        LocalTracer.flush({
-            "request_id": "test-123",
-            "workflow_name": "test-workflow",
-            "tracer_config": {"name": "test"},
-        })
+        LocalTracer.flush(
+            {
+                "request_id": "test-123",
+                "workflow_name": "test-workflow",
+                "tracer_config": {"name": "test"},
+            }
+        )
 
     def test_local_tracer_with_static_tags(self):
         """Test LocalTracer can be created with static tags."""
@@ -180,8 +182,7 @@ class TestBackgroundProcess:
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT status, tracer_type FROM traces WHERE request_id = ?",
-                ("req-002",)
+                "SELECT status, tracer_type FROM traces WHERE request_id = ?", ("req-002",)
             )
             rows = cursor.fetchall()
             conn.close()
@@ -266,7 +267,7 @@ class TestTracerWithWorkflow:
                 name="processor",
                 inputs={"data": PARENT["data"]},
                 outputs={"processed": PARENT},
-                code_fn=lambda data: {"processed": data.upper()}
+                code_fn=lambda data: {"processed": data.upper()},
             )
             START >> node >> END
 
@@ -302,7 +303,7 @@ class TestWorkflowTracesWrittenToDb:
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=lambda x: {"result": x * 2}
+                code_fn=lambda x: {"result": x * 2},
             )
             START >> node >> END
 
@@ -328,8 +329,7 @@ class TestWorkflowTracesWrittenToDb:
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(
-            "SELECT * FROM traces WHERE request_id = ? ORDER BY execution_order",
-            (request_id,)
+            "SELECT * FROM traces WHERE request_id = ? ORDER BY execution_order", (request_id,)
         )
         rows = cursor.fetchall()
         conn.close()
@@ -360,7 +360,7 @@ class TestWorkflowTracesWrittenToDb:
                 name="echo",
                 inputs={"msg": PARENT["msg"]},
                 outputs={"out": PARENT},
-                code_fn=lambda msg: {"out": msg}
+                code_fn=lambda msg: {"out": msg},
             )
             START >> node >> END
 
@@ -387,7 +387,7 @@ class TestWorkflowTracesWrittenToDb:
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(
             "SELECT user_id, session_id, workflow_name FROM traces WHERE request_id = ?",
-            (request_id,)
+            (request_id,),
         )
         rows = cursor.fetchall()
         conn.close()
@@ -396,7 +396,9 @@ class TestWorkflowTracesWrittenToDb:
 
         for row in rows:
             assert row["user_id"] == user_id, f"Expected user_id={user_id}, got {row['user_id']}"
-            assert row["session_id"] == session_id, f"Expected session_id={session_id}, got {row['session_id']}"
+            assert row["session_id"] == session_id, (
+                f"Expected session_id={session_id}, got {row['session_id']}"
+            )
             assert row["workflow_name"] == "metadata-db-test"
 
         # Cleanup
@@ -440,8 +442,7 @@ class TestTracerTags:
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT tags FROM traces WHERE request_id = ?",
-                ("tags-test-001",)
+                "SELECT tags FROM traces WHERE request_id = ?", ("tags-test-001",)
             )
             row = cursor.fetchone()
             conn.close()
@@ -457,6 +458,7 @@ class TestTracerTags:
     async def test_workflow_with_static_tags(self):
         """Test workflow execution with static tracer tags."""
         import json
+
         from hush.core.background import DEFAULT_DB_PATH
 
         with GraphNode(name="static-tags-test") as graph:
@@ -464,7 +466,7 @@ class TestTracerTags:
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=lambda x: {"result": x * 2}
+                code_fn=lambda x: {"result": x * 2},
             )
             START >> node >> END
 
@@ -486,10 +488,7 @@ class TestTracerTags:
         # Verify tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
         conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT tags FROM traces WHERE request_id = ?",
-            (request_id,)
-        )
+        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
         rows = cursor.fetchall()
         conn.close()
 
@@ -508,6 +507,7 @@ class TestTracerTags:
     async def test_workflow_with_dynamic_tags(self):
         """Test workflow execution with dynamic tags via $tags in node output."""
         import json
+
         from hush.core.background import DEFAULT_DB_PATH
 
         # Node that returns dynamic tags
@@ -524,7 +524,7 @@ class TestTracerTags:
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=process_with_tags
+                code_fn=process_with_tags,
             )
             START >> node >> END
 
@@ -546,10 +546,7 @@ class TestTracerTags:
         # Verify tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
         conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT tags FROM traces WHERE request_id = ?",
-            (request_id,)
-        )
+        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
         rows = cursor.fetchall()
         conn.close()
 
@@ -573,6 +570,7 @@ class TestTracerTags:
     async def test_workflow_with_merged_tags(self):
         """Test workflow with both static and dynamic tags merged."""
         import json
+
         from hush.core.background import DEFAULT_DB_PATH
 
         # Node that returns dynamic tags
@@ -584,7 +582,7 @@ class TestTracerTags:
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=process_with_dynamic_tags
+                code_fn=process_with_dynamic_tags,
             )
             START >> node >> END
 
@@ -606,10 +604,7 @@ class TestTracerTags:
         # Verify merged tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
         conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT tags FROM traces WHERE request_id = ?",
-            (request_id,)
-        )
+        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
         rows = cursor.fetchall()
         conn.close()
 
@@ -635,6 +630,7 @@ class TestTracerTags:
     async def test_duplicate_tags_are_deduplicated(self):
         """Test that duplicate tags (static + dynamic) are deduplicated."""
         import json
+
         from hush.core.background import DEFAULT_DB_PATH
 
         # Node that returns a tag that's also in static tags
@@ -646,7 +642,7 @@ class TestTracerTags:
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=process_with_duplicate_tag
+                code_fn=process_with_duplicate_tag,
             )
             START >> node >> END
 
@@ -668,10 +664,7 @@ class TestTracerTags:
         # Verify tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
         conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT tags FROM traces WHERE request_id = ?",
-            (request_id,)
-        )
+        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
         rows = cursor.fetchall()
         conn.close()
 
@@ -725,8 +718,7 @@ class TestTracerFlushCycle:
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT status FROM traces WHERE request_id = ?",
-                ("flush-test-001",)
+                "SELECT status FROM traces WHERE request_id = ?", ("flush-test-001",)
             )
             row = cursor.fetchone()
             conn.close()
@@ -758,7 +750,7 @@ class TestTracerNonBlocking:
                     name="processor",
                     inputs={"x": PARENT["x"]},
                     outputs={"result": PARENT},
-                    code_fn=lambda x: {"result": x * 2}
+                    code_fn=lambda x: {"result": x * 2},
                 )
                 START >> node >> END
             return graph
@@ -798,8 +790,12 @@ class TestTracerNonBlocking:
         overhead_percent = (overhead_per_request / avg_no_tracer) * 100 if avg_no_tracer > 0 else 0
 
         print(f"\n=== Stress Test Results ({NUM_REQUESTS} requests) ===")
-        print(f"Without tracer: {time_no_tracer*1000:.2f}ms total, {avg_no_tracer:.3f}ms avg/request")
-        print(f"With tracer:    {time_with_tracer*1000:.2f}ms total, {avg_with_tracer:.3f}ms avg/request")
+        print(
+            f"Without tracer: {time_no_tracer * 1000:.2f}ms total, {avg_no_tracer:.3f}ms avg/request"
+        )
+        print(
+            f"With tracer:    {time_with_tracer * 1000:.2f}ms total, {avg_with_tracer:.3f}ms avg/request"
+        )
         print(f"Overhead:       {overhead_per_request:.3f}ms/request ({overhead_percent:.1f}%)")
 
         # Tracer overhead should be minimal (< 5ms per request on average)
@@ -826,21 +822,19 @@ class TestTracerWithIterationNodes:
         def double(value: int):
             return {"result": value * 2}
 
-        with ForLoopNode(
-            name="double_loop",
-            inputs={"value": Each([1, 2, 3, 4, 5])}
-        ) as loop:
+        with ForLoopNode(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
         # Run directly without workflow engine
-        from hush.core.states import StateSchema, MemoryState
+        from hush.core.states import MemoryState, StateSchema
+
         loop.build()
         schema = StateSchema(loop)
         state = MemoryState(schema)
 
         result = await loop.run(state)
-        assert result['result'] == [2, 4, 6, 8, 10]
+        assert result["result"] == [2, 4, 6, 8, 10]
 
         # NOTE: This test verifies ForLoopNode works. Tracer integration
         # with iteration nodes is tested implicitly by the workflow tests

@@ -1,7 +1,7 @@
 """Tests for PromptNode functionality."""
 
 import pytest
-from hush.core.states import StateSchema, MemoryState
+from hush.core.states import MemoryState, StateSchema
 
 
 class TestPromptNodeUnified:
@@ -10,6 +10,7 @@ class TestPromptNodeUnified:
     def test_import(self):
         """Test PromptNode can be imported."""
         from hush.providers.nodes import PromptNode
+
         assert PromptNode is not None
 
     def test_string_prompt_creation(self):
@@ -21,8 +22,8 @@ class TestPromptNodeUnified:
             inputs={
                 "template": "Hello {name}, help me with {task}.",
                 "name": "Alice",
-                "task": "coding"
-            }
+                "task": "coding",
+            },
         )
 
         assert node.name == "string_prompt"
@@ -37,13 +38,10 @@ class TestPromptNodeUnified:
         node = PromptNode(
             name="dict_prompt",
             inputs={
-                "template": {
-                    "system": "You are {role}.",
-                    "user": "Help me with {task}."
-                },
+                "template": {"system": "You are {role}.", "user": "Help me with {task}."},
                 "role": "Claude",
-                "task": "coding"
-            }
+                "task": "coding",
+            },
         )
 
         assert node.name == "dict_prompt"
@@ -59,15 +57,18 @@ class TestPromptNodeUnified:
             inputs={
                 "template": [
                     {"role": "system", "content": "You are {role}."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Analyze: {query}"},
-                        {"type": "image_url", "image_url": {"url": "{image_url}"}}
-                    ]}
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analyze: {query}"},
+                            {"type": "image_url", "image_url": {"url": "{image_url}"}},
+                        ],
+                    },
                 ],
                 "role": "a vision expert",
                 "query": "What is this?",
-                "image_url": "https://example.com/image.png"
-            }
+                "image_url": "https://example.com/image.png",
+            },
         )
 
         assert node.name == "list_prompt"
@@ -84,8 +85,8 @@ class TestPromptNodeUnified:
             inputs={
                 "template": "Hello {name}, help me with {task}.",
                 "name": "Alice",
-                "task": "coding"
-            }
+                "task": "coding",
+            },
         )
 
         schema = StateSchema(node=node)
@@ -107,13 +108,10 @@ class TestPromptNodeUnified:
         node = PromptNode(
             name="format_dict",
             inputs={
-                "template": {
-                    "system": "You are {role}.",
-                    "user": "Help with {task}."
-                },
+                "template": {"system": "You are {role}.", "user": "Help with {task}."},
                 "role": "Claude",
-                "task": "coding"
-            }
+                "task": "coding",
+            },
         )
 
         schema = StateSchema(node=node)
@@ -135,11 +133,7 @@ class TestPromptNodeUnified:
         from hush.providers.nodes import PromptNode
 
         node = PromptNode(
-            name="format_dict_user",
-            inputs={
-                "template": {"user": "Hello {name}!"},
-                "name": "Bob"
-            }
+            name="format_dict_user", inputs={"template": {"user": "Hello {name}!"}, "name": "Bob"}
         )
 
         schema = StateSchema(node=node)
@@ -162,11 +156,11 @@ class TestPromptNodeUnified:
             inputs={
                 "template": [
                     {"role": "system", "content": "You are {role}."},
-                    {"role": "user", "content": "Help with {task}."}
+                    {"role": "user", "content": "Help with {task}."},
                 ],
                 "role": "an assistant",
-                "task": "math"
-            }
+                "task": "math",
+            },
         )
 
         schema = StateSchema(node=node)
@@ -189,14 +183,17 @@ class TestPromptNodeUnified:
             inputs={
                 "template": [
                     {"role": "system", "content": "You are a vision expert."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Describe: {query}"},
-                        {"type": "image_url", "image_url": {"url": "{image_url}"}}
-                    ]}
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Describe: {query}"},
+                            {"type": "image_url", "image_url": {"url": "{image_url}"}},
+                        ],
+                    },
                 ],
                 "query": "this image",
-                "image_url": "https://example.com/cat.jpg"
-            }
+                "image_url": "https://example.com/cat.jpg",
+            },
         )
 
         schema = StateSchema(node=node)
@@ -221,9 +218,9 @@ class TestPromptNodeUnified:
                 "message": "What was my question?",
                 "conversation_history": [
                     {"role": "user", "content": "Hello"},
-                    {"role": "assistant", "content": "Hi there!"}
-                ]
-            }
+                    {"role": "assistant", "content": "Hi there!"},
+                ],
+            },
         )
 
         schema = StateSchema(node=node)
@@ -252,8 +249,8 @@ class TestPromptNodeUnified:
                 "template": {"user": "What's the weather?"},
                 "tool_results": [
                     {"role": "tool", "content": "Weather: Sunny, 25C", "tool_call_id": "call_123"}
-                ]
-            }
+                ],
+            },
         )
 
         schema = StateSchema(node=node)
@@ -273,9 +270,7 @@ class TestPromptNodeUnified:
 
         node = PromptNode(
             name="metadata_test",
-            inputs={
-                "template": {"system": "System prompt", "user": "User prompt"}
-            }
+            inputs={"template": {"system": "System prompt", "user": "User prompt"}},
         )
 
         metadata = node.specific_metadata()
@@ -291,12 +286,7 @@ class TestPromptNodeSchema:
         """Test that PromptNode has fixed input schema."""
         from hush.providers.nodes import PromptNode
 
-        node = PromptNode(
-            name="schema_test",
-            inputs={
-                "template": "Test"
-            }
-        )
+        node = PromptNode(name="schema_test", inputs={"template": "Test"})
 
         assert "template" in node.inputs
         assert "conversation_history" in node.inputs
@@ -306,12 +296,7 @@ class TestPromptNodeSchema:
         """Test that output schema has 'messages' key."""
         from hush.providers.nodes import PromptNode
 
-        node = PromptNode(
-            name="output_test",
-            inputs={
-                "template": "Test"
-            }
-        )
+        node = PromptNode(name="output_test", inputs={"template": "Test"})
 
         assert "messages" in node.outputs
 
@@ -329,8 +314,8 @@ class TestPromptNodeWithVars:
             inputs={
                 "template": "Hello {name}, teach me about {topic}.",
                 "name": "Alice",
-                "topic": "Python"
-            }
+                "topic": "Python",
+            },
         )
 
         schema = StateSchema(node=node)
@@ -353,16 +338,13 @@ class TestPromptNodeWithVars:
             inputs={
                 "template": {"system": "You are {role}.", "user": "Task: {task}"},
                 "role": "default role",  # placeholder, will be overridden
-                "task": "default task"   # placeholder, will be overridden
-            }
+                "task": "default task",  # placeholder, will be overridden
+            },
         )
 
         schema = StateSchema(node=node)
         # Override via state inputs
-        state = MemoryState(schema, inputs={
-            "role": "a helpful assistant",
-            "task": "explain code"
-        })
+        state = MemoryState(schema, inputs={"role": "a helpful assistant", "task": "explain code"})
 
         result = await node.run(state)
 
@@ -378,9 +360,7 @@ class TestPromptNodeWithVars:
 
         node = PromptNode(
             name="no_vars_test",
-            inputs={
-                "template": {"system": "You are helpful.", "user": "Hello!"}
-            }
+            inputs={"template": {"system": "You are helpful.", "user": "Hello!"}},
         )
 
         schema = StateSchema(node=node)
@@ -402,19 +382,16 @@ class TestPromptNodeDynamic:
         """Test receiving template dynamically from state."""
         from hush.providers.nodes import PromptNode
 
-        node = PromptNode(
-            name="dynamic_prompt",
-            inputs={
-                "template": None,
-                "name": "default"
-            }
-        )
+        node = PromptNode(name="dynamic_prompt", inputs={"template": None, "name": "default"})
 
         schema = StateSchema(node=node)
-        state = MemoryState(schema, inputs={
-            "template": {"system": "You are {name}.", "user": "Hello!"},
-            "name": "a dynamic assistant"
-        })
+        state = MemoryState(
+            schema,
+            inputs={
+                "template": {"system": "You are {name}.", "user": "Hello!"},
+                "name": "a dynamic assistant",
+            },
+        )
 
         result = await node.run(state)
 

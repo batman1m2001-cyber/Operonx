@@ -4,13 +4,12 @@ This module provides LLMChainNode - a composite node that combines
 PromptNode, LLMNode, and optionally ParserNode into a single reusable chain.
 """
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
 
-from hush.core.nodes import GraphNode, ParserNode, START, END, PARENT
 from hush.core.configs import NodeType
-
-from hush.providers.nodes.prompt import PromptNode
+from hush.core.nodes import END, PARENT, START, GraphNode, ParserNode
 from hush.providers.nodes.llm import LLMNode
+from hush.providers.nodes.prompt import PromptNode
 
 
 class LLMChainNode(GraphNode):
@@ -104,13 +103,13 @@ class LLMChainNode(GraphNode):
     """
 
     __slots__ = [
-        'resource_key',
-        'ratios',
-        'fallback',
-        'extract',
-        'parser',
-        'response_format',
-        'enable_thinking'
+        "resource_key",
+        "ratios",
+        "fallback",
+        "extract",
+        "parser",
+        "response_format",
+        "enable_thinking",
     ]
 
     type: NodeType = "graph"
@@ -124,7 +123,7 @@ class LLMChainNode(GraphNode):
         parser: str = "xml",
         response_format: Optional[Dict[str, Any]] = None,
         enable_thinking: bool = False,
-        **kwargs
+        **kwargs,
     ):
         """Initialize LLMChainNode.
 
@@ -165,10 +164,7 @@ class LLMChainNode(GraphNode):
         """Build the internal processing graph based on configuration."""
         with self:
             # Step 1: Create prompt formatting node - forwards all inputs from parent
-            _prompt = PromptNode(
-                name="prompt",
-                inputs={"*": PARENT}
-            )
+            _prompt = PromptNode(name="prompt", inputs={"*": PARENT})
 
             # Build LLM inputs - always include messages from prompt
             llm_inputs = {"messages": _prompt["messages"]}
@@ -184,7 +180,7 @@ class LLMChainNode(GraphNode):
                     resource_key=self.resource_key,
                     ratios=self.ratios,
                     fallback=self.fallback,
-                    inputs=llm_inputs
+                    inputs=llm_inputs,
                 )
 
                 _parser = ParserNode(
@@ -192,7 +188,7 @@ class LLMChainNode(GraphNode):
                     format=self.parser,
                     extract=self.extract,
                     inputs={"text": _llm["content"]},
-                    outputs={"*": PARENT}
+                    outputs={"*": PARENT},
                 )
 
                 START >> _prompt >> _llm >> _parser >> END
@@ -206,7 +202,7 @@ class LLMChainNode(GraphNode):
                     fallback=self.fallback,
                     inputs=llm_inputs,
                     outputs={"*": PARENT},
-                    stream=getattr(self, 'stream', False)
+                    stream=getattr(self, "stream", False),
                 )
 
                 START >> _prompt >> _llm >> END
@@ -242,22 +238,37 @@ class LLMChainNode(GraphNode):
         return {k: v for k, v in metadata.items() if v is not None}
 
 
-def llmchain_(resource_key=None, template=None, *, ratios=None, fallback=None,
-              extract=None, parser="xml", response_format=None,
-              enable_thinking=False, **kwargs) -> LLMChainNode:
+def llmchain_(
+    resource_key=None,
+    template=None,
+    *,
+    ratios=None,
+    fallback=None,
+    extract=None,
+    parser="xml",
+    response_format=None,
+    enable_thinking=False,
+    **kwargs,
+) -> LLMChainNode:
     """Shorthand to create an LLMChainNode with flat kwargs.
 
     Example:
         chain = llmchain_("gpt-4", {"system": "You are helpful.", "user": "{query}"}, query="Hi")
     """
     from hush.core.nodes import split_shorthand_kwargs
+
     _skip_auto_name = True  # noqa: F841
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     if template is not None:
-        input_mappings['template'] = template
+        input_mappings["template"] = template
     return LLMChainNode(
-        resource_key=resource_key, ratios=ratios, fallback=fallback,
-        extract=extract, parser=parser,
-        response_format=response_format, enable_thinking=enable_thinking,
-        inputs=input_mappings or None, **init_kwargs
+        resource_key=resource_key,
+        ratios=ratios,
+        fallback=fallback,
+        extract=extract,
+        parser=parser,
+        response_format=response_format,
+        enable_thinking=enable_thinking,
+        inputs=input_mappings or None,
+        **init_kwargs,
     )

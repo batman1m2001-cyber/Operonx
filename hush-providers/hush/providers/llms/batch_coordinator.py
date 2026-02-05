@@ -6,10 +6,10 @@ LLM nodes and submits them as batch jobs to OpenAI's Batch API.
 
 import asyncio
 import uuid
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from hush.providers.llms.base import BaseLLM
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class BatchStatus(Enum):
     """Status of a batch job."""
+
     PENDING = "pending"
     SUBMITTED = "submitted"
     PROCESSING = "processing"
@@ -28,6 +29,7 @@ class BatchStatus(Enum):
 @dataclass
 class BatchRequest:
     """A single request waiting to be batched."""
+
     request_id: str
     messages: List[dict]
     params: Dict[str, Any]
@@ -38,6 +40,7 @@ class BatchRequest:
 @dataclass
 class BatchJob:
     """A batch job containing multiple requests."""
+
     job_id: str
     batch_id: Optional[str] = None  # OpenAI batch ID
     requests: List[BatchRequest] = field(default_factory=list)
@@ -66,16 +69,16 @@ class BatchCoordinator:
         ```
     """
 
-    _instance: Optional['BatchCoordinator'] = None
-    _coordinators: Dict[str, 'BatchCoordinator'] = {}
+    _instance: Optional["BatchCoordinator"] = None
+    _coordinators: Dict[str, "BatchCoordinator"] = {}
 
     def __init__(
         self,
-        llm: 'BaseLLM',
+        llm: "BaseLLM",
         max_batch_size: int = 50000,  # OpenAI limit
         flush_interval: float = 60.0,  # Auto-flush after 60 seconds
         poll_interval: float = 30.0,
-        timeout: float = 86400.0  # 24 hours
+        timeout: float = 86400.0,  # 24 hours
     ):
         """Initialize BatchCoordinator.
 
@@ -107,12 +110,12 @@ class BatchCoordinator:
     def get_coordinator(
         cls,
         resource_key: str,
-        llm: 'BaseLLM',
+        llm: "BaseLLM",
         max_batch_size: int = 50000,
         flush_interval: float = 60.0,
         poll_interval: float = 30.0,
-        timeout: float = 86400.0
-    ) -> 'BatchCoordinator':
+        timeout: float = 86400.0,
+    ) -> "BatchCoordinator":
         """Get or create a coordinator for a specific resource key.
 
         Args:
@@ -132,15 +135,11 @@ class BatchCoordinator:
                 max_batch_size=max_batch_size,
                 flush_interval=flush_interval,
                 poll_interval=poll_interval,
-                timeout=timeout
+                timeout=timeout,
             )
         return cls._coordinators[resource_key]
 
-    async def submit(
-        self,
-        messages: List[dict],
-        **params
-    ) -> Any:
+    async def submit(self, messages: List[dict], **params) -> Any:
         """Submit a request for batch processing.
 
         This method queues the request and returns a future that will
@@ -160,7 +159,7 @@ class BatchCoordinator:
             request_id=f"req-{uuid.uuid4().hex[:12]}",
             messages=messages,
             params=params,
-            future=future
+            future=future,
         )
 
         async with self._lock:
@@ -190,14 +189,11 @@ class BatchCoordinator:
             return
 
         # Take requests (up to max batch size)
-        requests_to_batch = self._pending_requests[:self.max_batch_size]
-        self._pending_requests = self._pending_requests[self.max_batch_size:]
+        requests_to_batch = self._pending_requests[: self.max_batch_size]
+        self._pending_requests = self._pending_requests[self.max_batch_size :]
 
         # Create batch job
-        job = BatchJob(
-            job_id=f"job-{uuid.uuid4().hex[:12]}",
-            requests=requests_to_batch
-        )
+        job = BatchJob(job_id=f"job-{uuid.uuid4().hex[:12]}", requests=requests_to_batch)
         self._active_jobs[job.job_id] = job
 
         # Submit batch asynchronously
@@ -219,7 +215,7 @@ class BatchCoordinator:
                 batch_messages=batch_messages,
                 poll_interval=self.poll_interval,
                 timeout=self.timeout,
-                **params
+                **params,
             )
 
             job.status = BatchStatus.COMPLETED
@@ -273,9 +269,7 @@ class BatchCoordinator:
         async with self._lock:
             for request in self._pending_requests:
                 if not request.future.done():
-                    request.future.set_exception(
-                        RuntimeError("BatchCoordinator shutdown")
-                    )
+                    request.future.set_exception(RuntimeError("BatchCoordinator shutdown"))
             self._pending_requests.clear()
 
     @classmethod

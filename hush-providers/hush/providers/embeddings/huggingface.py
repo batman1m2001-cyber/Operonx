@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union, Dict
 from functools import lru_cache
+from typing import Any, Dict, List, Union
+
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
@@ -13,7 +14,7 @@ class HFEmbedding(BaseEmbedder):
     Requires: pip install transformers torch
     """
 
-    __slots__ = ['config', 'model', 'tokenizer', '_output_dim']
+    __slots__ = ["config", "model", "tokenizer", "_output_dim"]
 
     def __init__(self, config: EmbeddingConfig) -> None:
         """Initialize the local embedding client with the provided configuration.
@@ -26,8 +27,8 @@ class HFEmbedding(BaseEmbedder):
             ValueError: If model name is not provided
         """
         try:
-            from transformers import AutoTokenizer, AutoModel
             import torch
+            from transformers import AutoModel, AutoTokenizer
         except ImportError as e:
             raise ImportError(
                 "transformers and torch are required for HFEmbedding. "
@@ -43,7 +44,6 @@ class HFEmbedding(BaseEmbedder):
         # Load model and tokenizer
         try:
             import os
-            from pathlib import Path
 
             # Check if model path is a local directory
             model_path = config.model
@@ -56,21 +56,18 @@ class HFEmbedding(BaseEmbedder):
 
             # Load tokenizer and model from either local path or HuggingFace Hub
             self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
-                local_files_only=is_local_path
+                model_path, local_files_only=is_local_path
             )
-            self.model = AutoModel.from_pretrained(
-                model_path,
-                local_files_only=is_local_path
-            )
+            self.model = AutoModel.from_pretrained(model_path, local_files_only=is_local_path)
 
             # Move model to GPU if available
             import torch
+
             if torch.cuda.is_available():
                 self.model = self.model.cuda()
-                print(f"Model loaded on GPU")
+                print("Model loaded on GPU")
             else:
-                print(f"Model loaded on CPU")
+                print("Model loaded on CPU")
 
             # Set model to evaluation mode
             self.model.eval()
@@ -90,15 +87,15 @@ class HFEmbedding(BaseEmbedder):
         """
         import torch
 
-        token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
+        token_embeddings = model_output[
+            0
+        ]  # First element of model_output contains all token embeddings
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+            input_mask_expanded.sum(1), min=1e-9
+        )
 
-    async def run(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    async def run(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """Generate embeddings for the given texts.
 
         Args:
@@ -119,15 +116,15 @@ class HFEmbedding(BaseEmbedder):
 
         try:
             # Tokenize sentences
-            max_length = kwargs.get('max_length', 512)
-            truncation = kwargs.get('truncation', True)
+            max_length = kwargs.get("max_length", 512)
+            truncation = kwargs.get("truncation", True)
 
             encoded_input = self.tokenizer(
                 texts,
                 padding=True,
                 truncation=truncation,
                 max_length=max_length,
-                return_tensors='pt'
+                return_tensors="pt",
             )
 
             # Move to same device as model
@@ -139,10 +136,11 @@ class HFEmbedding(BaseEmbedder):
                 model_output = self.model(**encoded_input)
 
             # Perform pooling
-            embeddings = self._mean_pooling(model_output, encoded_input['attention_mask'])
+            embeddings = self._mean_pooling(model_output, encoded_input["attention_mask"])
 
             # Normalize embeddings
             import torch.nn.functional as F
+
             embeddings = F.normalize(embeddings, p=2, dim=1)
 
             # Store output dimension
@@ -173,14 +171,16 @@ class HFEmbedding(BaseEmbedder):
 
         # Fallback: run a test to get dimension
         import asyncio
+
         test_result = asyncio.run(self.run("test"))
         return len(test_result["embeddings"][0])
 
 
 async def main() -> None:
     """Main function for testing and demonstration with Vietnamese similarity."""
-    import numpy as np
     import time
+
+    import numpy as np
 
     print("Starting HF embedding generation with Vietnamese similarity test...")
     print("=" * 80)
@@ -188,7 +188,7 @@ async def main() -> None:
     # Example configuration - update with your ONNX model path
     config = EmbeddingConfig(
         model="BAAI/bge-m3",  # Path to your ONNX model folder
-        dimensions=1024  # BGE-M3 has 1024 dimensions
+        dimensions=1024,  # BGE-M3 has 1024 dimensions
     )
 
     hf_embed = HFEmbedding(config)
@@ -198,15 +198,12 @@ async def main() -> None:
         # Topic 1: Technology and AI
         "Trí tuệ nhân tạo đang thay đổi cách chúng ta làm việc và sinh hoạt.",
         "AI và machine learning đang cách mạng hóa nhiều ngành công nghiệp.",
-
         # Topic 2: Food and cuisine
         "Phở là món ăn truyền thống nổi tiếng của Việt Nam.",
         "Bún chả Hà Nội là một trong những đặc sản được yêu thích nhất.",
-
         # Topic 3: Weather
         "Hôm nay trời nắng đẹp, nhiệt độ khoảng 28 độ C.",
         "Thời tiết hôm nay rất tốt cho việc đi chơi.",
-
         # Topic 4: Unrelated
         "Tôi thích đọc sách vào buổi tối trước khi ngủ.",
     ]
@@ -260,9 +257,13 @@ async def main() -> None:
         similarities.sort(key=lambda x: x[1], reverse=True)
 
         # Print top 3 most similar texts
-        print(f"    Most similar to:")
+        print("    Most similar to:")
         for rank, (j, sim) in enumerate(similarities[:3], 1):
-            other_text = vietnamese_texts[j][:50] + "..." if len(vietnamese_texts[j]) > 50 else vietnamese_texts[j]
+            other_text = (
+                vietnamese_texts[j][:50] + "..."
+                if len(vietnamese_texts[j]) > 50
+                else vietnamese_texts[j]
+            )
             print(f"      {rank}. [{j}] (similarity: {sim:.4f}) {other_text}")
 
     # Print specific similarity comparisons
@@ -292,4 +293,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union, Dict
 from functools import lru_cache
+from typing import Any, Dict, List, Union
+
+import numpy as np
+
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
-import numpy as np
 
 
 class ONNXEmbedding(BaseEmbedder):
@@ -14,7 +16,7 @@ class ONNXEmbedding(BaseEmbedder):
     Requires: pip install onnxruntime tokenizers
     """
 
-    __slots__ = ['config', 'session', 'tokenizer', '_output_dim', '_device']
+    __slots__ = ["config", "session", "tokenizer", "_output_dim", "_device"]
 
     def __init__(self, config: EmbeddingConfig) -> None:
         """Initialize the ONNX embedding client with the provided configuration.
@@ -43,7 +45,6 @@ class ONNXEmbedding(BaseEmbedder):
 
         # Load model and tokenizer
         try:
-            import os
             from pathlib import Path
 
             # Check if model path is a local directory
@@ -54,14 +55,14 @@ class ONNXEmbedding(BaseEmbedder):
             print(f"Loading ONNX model from local path: {model_path}")
 
             # Check for CUDA availability
-            providers = ['CPUExecutionProvider']
-            if 'CUDAExecutionProvider' in ort.get_available_providers():
-                providers.insert(0, 'CUDAExecutionProvider')
-                self._device = 'cuda'
-                print(f"ONNX Runtime will use GPU (CUDA)")
+            providers = ["CPUExecutionProvider"]
+            if "CUDAExecutionProvider" in ort.get_available_providers():
+                providers.insert(0, "CUDAExecutionProvider")
+                self._device = "cuda"
+                print("ONNX Runtime will use GPU (CUDA)")
             else:
-                self._device = 'cpu'
-                print(f"ONNX Runtime will use CPU")
+                self._device = "cpu"
+                print("ONNX Runtime will use CPU")
 
             # Load ONNX model
             onnx_model_path = model_path / "model.onnx"
@@ -72,9 +73,7 @@ class ONNXEmbedding(BaseEmbedder):
             session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
             self.session = ort.InferenceSession(
-                str(onnx_model_path),
-                sess_options=session_options,
-                providers=providers
+                str(onnx_model_path), sess_options=session_options, providers=providers
             )
 
             # Load tokenizer
@@ -85,7 +84,7 @@ class ONNXEmbedding(BaseEmbedder):
             self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
 
             # Enable padding and truncation
-            from tokenizers import processors
+
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
             self.tokenizer.enable_truncation(max_length=512)
 
@@ -130,11 +129,7 @@ class ONNXEmbedding(BaseEmbedder):
         norms = np.maximum(norms, 1e-12)
         return embeddings / norms
 
-    async def run(
-        self,
-        texts: Union[str, List[str]],
-        **kwargs: Any
-    ) -> Dict[str, Any]:
+    async def run(self, texts: Union[str, List[str]], **kwargs: Any) -> Dict[str, Any]:
         """Generate embeddings for the given texts.
 
         Args:
@@ -153,8 +148,8 @@ class ONNXEmbedding(BaseEmbedder):
 
         try:
             # Get parameters
-            max_length = kwargs.get('max_length', 512)
-            truncation = kwargs.get('truncation', True)
+            max_length = kwargs.get("max_length", 512)
+            truncation = kwargs.get("truncation", True)
 
             # Update tokenizer settings
             if truncation:
@@ -170,10 +165,7 @@ class ONNXEmbedding(BaseEmbedder):
             attention_mask = np.array([enc.attention_mask for enc in encodings], dtype=np.int64)
 
             # Prepare ONNX inputs
-            onnx_inputs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask
-            }
+            onnx_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
             # Add token_type_ids if the model expects it
             input_names = [inp.name for inp in self.session.get_inputs()]
@@ -221,13 +213,13 @@ class ONNXEmbedding(BaseEmbedder):
 
         # Fallback: run a test to get dimension
         import asyncio
+
         test_result = asyncio.run(self.run("test"))
         return len(test_result["embeddings"][0])
 
 
 async def main() -> None:
     """Main function for testing and demonstration with Vietnamese similarity."""
-    import asyncio
     import time
 
     print("Starting ONNX embedding generation with Vietnamese similarity test...")
@@ -236,7 +228,7 @@ async def main() -> None:
     # Example configuration - update with your ONNX model path
     config = EmbeddingConfig(
         model="/path/to/your/onnx-model",  # Path to your ONNX model folder
-        dimensions=1024  # BGE-M3 has 1024 dimensions
+        dimensions=1024,  # BGE-M3 has 1024 dimensions
     )
 
     onnx_embed = ONNXEmbedding(config)
@@ -246,15 +238,12 @@ async def main() -> None:
         # Topic 1: Technology and AI
         "Trí tuệ nhân tạo đang thay đổi cách chúng ta làm việc và sinh hoạt.",
         "AI và machine learning đang cách mạng hóa nhiều ngành công nghiệp.",
-
         # Topic 2: Food and cuisine
         "Phở là món ăn truyền thống nổi tiếng của Việt Nam.",
         "Bún chả Hà Nội là một trong những đặc sản được yêu thích nhất.",
-
         # Topic 3: Weather
         "Hôm nay trời nắng đẹp, nhiệt độ khoảng 28 độ C.",
         "Thời tiết hôm nay rất tốt cho việc đi chơi.",
-
         # Topic 4: Unrelated
         "Tôi thích đọc sách vào buổi tối trước khi ngủ.",
     ]
@@ -308,9 +297,13 @@ async def main() -> None:
         similarities.sort(key=lambda x: x[1], reverse=True)
 
         # Print top 3 most similar texts
-        print(f"    Most similar to:")
+        print("    Most similar to:")
         for rank, (j, sim) in enumerate(similarities[:3], 1):
-            other_text = vietnamese_texts[j][:50] + "..." if len(vietnamese_texts[j]) > 50 else vietnamese_texts[j]
+            other_text = (
+                vietnamese_texts[j][:50] + "..."
+                if len(vietnamese_texts[j]) > 50
+                else vietnamese_texts[j]
+            )
             print(f"      {rank}. [{j}] (similarity: {sim:.4f}) {other_text}")
 
     # Print specific similarity comparisons
@@ -340,4 +333,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

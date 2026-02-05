@@ -9,19 +9,19 @@ Usage:
 """
 
 import asyncio
-import logging
-import time
-from pathlib import Path
 
 # Setup path
 import sys
+import time
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-from hush.core import GraphNode, START, END, PARENT
+from hush.core import END, PARENT, START, GraphNode
 from hush.core.registry import ResourceHub, set_global_hub
-from hush.core.states import StateSchema, MemoryState
-from hush.providers.registry import LLMPlugin
+from hush.core.states import MemoryState, StateSchema
+
 from hush.providers.nodes import LLMNode
 
 
@@ -55,15 +55,13 @@ async def test_batch_llm_node():
                 resource_key="gpt-4o",
                 batch_mode=True,
                 inputs={"messages": PARENT["messages"]},
-                outputs={"*": PARENT}
+                outputs={"*": PARENT},
             )
             START >> llm >> END
         workflow.build()
 
         schema = StateSchema(node=workflow)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": question}]
-        })
+        state = MemoryState(schema, inputs={"messages": [{"role": "user", "content": question}]})
 
         workflows.append(workflow)
         states.append(state)
@@ -74,10 +72,7 @@ async def test_batch_llm_node():
     start = time.time()
 
     # Run all workflows concurrently - BatchCoordinator will batch them together
-    await asyncio.gather(*[
-        workflow.run(state)
-        for workflow, state in zip(workflows, states)
-    ])
+    await asyncio.gather(*[workflow.run(state) for workflow, state in zip(workflows, states)])
 
     elapsed = time.time() - start
 
@@ -123,15 +118,13 @@ async def test_normal_llm_node():
                 resource_key="gpt-4o",
                 batch_mode=False,  # Normal mode
                 inputs={"messages": PARENT["messages"]},
-                outputs={"*": PARENT}
+                outputs={"*": PARENT},
             )
             START >> llm >> END
         workflow.build()
 
         schema = StateSchema(node=workflow)
-        state = MemoryState(schema, inputs={
-            "messages": [{"role": "user", "content": question}]
-        })
+        state = MemoryState(schema, inputs={"messages": [{"role": "user", "content": question}]})
 
         workflows.append(workflow)
         states.append(state)
@@ -141,10 +134,7 @@ async def test_normal_llm_node():
     start = time.time()
 
     # Run all workflows concurrently
-    await asyncio.gather(*[
-        workflow.run(state)
-        for workflow, state in zip(workflows, states)
-    ])
+    await asyncio.gather(*[workflow.run(state) for workflow, state in zip(workflows, states)])
 
     elapsed = time.time() - start
 

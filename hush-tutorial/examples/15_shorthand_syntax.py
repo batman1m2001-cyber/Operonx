@@ -13,20 +13,23 @@ Run: cd hush-tutorial && uv run python examples/15_shorthand_syntax.py
 """
 
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+
+from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 
 # Shorthand imports
 from hush.core.nodes import (
-    code_node,     # Decorator
-    for_, map_, while_,  # Iteration shorthands
-    if_,           # Branch shorthand
-    Each,          # Iteration marker
+    Each,  # Iteration marker
+    code_node,  # Decorator
+    for_,
+    if_,  # Branch shorthand
+    map_,
+    while_,  # Iteration shorthands
 )
-
 
 # =============================================================================
 # @code_node decorator - Turn function into CodeNode
 # =============================================================================
+
 
 @code_node
 def add_prefix(text: str, prefix: str):
@@ -49,13 +52,19 @@ def halve(value: int):
 @code_node
 def grade_to_message(grade: str):
     """Convert grade to message."""
-    messages = {"A": "Excellent!", "B": "Good!", "C": "Average", "F": "Need improvement"}
+    messages = {
+        "A": "Excellent!",
+        "B": "Good!",
+        "C": "Average",
+        "F": "Need improvement",
+    }
     return {"message": messages.get(grade, "Unknown")}
 
 
 # =============================================================================
 # Examples
 # =============================================================================
+
 
 async def example_1_code_node_decorator():
     """@code_node decorator - Create node from function."""
@@ -67,15 +76,15 @@ async def example_1_code_node_decorator():
         # Shorthand: pass inputs directly instead of inputs={}
         step = add_prefix(
             name="add_prefix",
-            text=PARENT["text"],      # Direct input
+            text=PARENT["text"],  # Direct input
             prefix=PARENT["prefix"],  # Direct input
-            outputs={"result": PARENT["output"]}
+            outputs={"result": PARENT["output"]},
         )
         START >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"text": "Hello World", "prefix": "Greeting"})
-    print(f"  Input:  text='Hello World', prefix='Greeting'")
+    print("  Input:  text='Hello World', prefix='Greeting'")
     print(f"  Output: {result['output']}")
 
 
@@ -90,13 +99,13 @@ async def example_2_for_shorthand():
         # Shorthand: item=Each(...) instead of inputs={"item": Each(...)}
         with for_(
             item=Each(["apple", "banana", "cherry"]),  # Iterate
-            prefix="Fruit"                              # Broadcast
+            prefix="Fruit",  # Broadcast
         ) as loop:
             step = add_prefix(
                 name="process",
                 text=PARENT["item"],
                 prefix=PARENT["prefix"],
-                outputs={"*": PARENT}  # Write all outputs
+                outputs={"*": PARENT},  # Write all outputs
             )
             START >> step >> END
 
@@ -106,7 +115,7 @@ async def example_2_for_shorthand():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"  Items:   ['apple', 'banana', 'cherry']")
+    print("  Items:   ['apple', 'banana', 'cherry']")
     print(f"  Results: {result['results']}")
 
 
@@ -121,13 +130,9 @@ async def example_3_map_shorthand():
         # Shorthand with config option
         with map_(
             x=Each([1, 2, 3, 4, 5]),  # Iterate
-            max_concurrency=3          # Config
+            max_concurrency=3,  # Config
         ) as loop:
-            step = square(
-                name="square",
-                x=PARENT["x"],
-                outputs={"*": PARENT}
-            )
+            step = square(name="square", x=PARENT["x"], outputs={"*": PARENT})
             START >> step >> END
 
         loop["squared"] >> PARENT["results"]
@@ -136,7 +141,7 @@ async def example_3_map_shorthand():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"  Input:   [1, 2, 3, 4, 5]")
+    print("  Input:   [1, 2, 3, 4, 5]")
     print(f"  Squared: {result['results']}")
 
 
@@ -152,7 +157,7 @@ async def example_4_while_shorthand():
         with while_(
             value=256,
             stop_condition="value < 10",  # Stop when value < 10
-            max_iterations=20
+            max_iterations=20,
         ) as loop:
             step = halve(name="halve", value=PARENT["value"])
             step["new_value"] >> PARENT["value"]
@@ -164,8 +169,8 @@ async def example_4_while_shorthand():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"  Start: 256")
-    print(f"  Path:  256 -> 128 -> 64 -> 32 -> 16 -> 8")
+    print("  Start: 256")
+    print("  Path:  256 -> 128 -> 64 -> 32 -> 16 -> 8")
     print(f"  Final: {result['final']} (stopped because < 10)")
 
 
@@ -178,14 +183,20 @@ async def example_5_if_shorthand():
 
     with GraphNode(name="if-shorthand") as graph:
         # Fluent chaining syntax
-        grade_router = (if_(PARENT["score"] >= 90, "excellent")
-                        .if_(PARENT["score"] >= 70, "good")
-                        .if_(PARENT["score"] >= 50, "average")
-                        .else_("fail"))
+        grade_router = (
+            if_(PARENT["score"] >= 90, "excellent")
+            .if_(PARENT["score"] >= 70, "good")
+            .if_(PARENT["score"] >= 50, "average")
+            .else_("fail")
+        )
 
-        excellent = CodeNode(name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT})
+        excellent = CodeNode(
+            name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT}
+        )
         good = CodeNode(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
-        average = CodeNode(name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT})
+        average = CodeNode(
+            name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT}
+        )
         fail = CodeNode(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
 
         # Add message
@@ -220,23 +231,17 @@ async def example_6_combined():
         # Nested loops with shorthand
         with for_(outer=Each([2, 3, 4])) as outer_loop:
             with map_(
-                inner=Each([10, 20, 30]),
-                multiplier=PARENT["outer"],
-                max_concurrency=3
+                inner=Each([10, 20, 30]), multiplier=PARENT["outer"], max_concurrency=3
             ) as inner_loop:
                 calc = multiply(
                     name="calc",
                     x=PARENT["inner"],
                     y=PARENT["multiplier"],
-                    outputs={"*": PARENT}
+                    outputs={"*": PARENT},
                 )
                 START >> calc >> END
 
-            total = sum_list(
-                name="sum",
-                numbers=inner_loop["product"],
-                outputs={"*": PARENT}
-            )
+            total = sum_list(name="sum", numbers=inner_loop["product"], outputs={"*": PARENT})
             START >> inner_loop >> total >> END
 
         outer_loop["total"] >> PARENT["results"]
@@ -264,18 +269,12 @@ async def example_7_comparison():
     from hush.core.nodes.iteration import ForLoopNode
 
     with GraphNode(name="verbose-style") as graph1:
-        with ForLoopNode(
-            name="loop",
-            inputs={
-                "x": Each([1, 2, 3]),
-                "multiplier": 10
-            }
-        ) as loop:
+        with ForLoopNode(name="loop", inputs={"x": Each([1, 2, 3]), "multiplier": 10}) as loop:
             step = CodeNode(
                 name="calc",
                 code_fn=lambda x, multiplier: {"result": x * multiplier},
                 inputs={"x": PARENT["x"], "multiplier": PARENT["multiplier"]},
-                outputs={"result": PARENT}
+                outputs={"result": PARENT},
             )
             START >> step >> END
 
@@ -289,7 +288,12 @@ async def example_7_comparison():
 
     with GraphNode(name="shorthand-style") as graph2:
         with for_(x=Each([1, 2, 3]), multiplier=10) as loop:
-            step = calc(name="calc", x=PARENT["x"], multiplier=PARENT["multiplier"], outputs={"*": PARENT})
+            step = calc(
+                name="calc",
+                x=PARENT["x"],
+                multiplier=PARENT["multiplier"],
+                outputs={"*": PARENT},
+            )
             START >> step >> END
 
         loop["result"] >> PARENT["results"]

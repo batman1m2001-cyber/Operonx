@@ -8,11 +8,11 @@ from typing import Any, Dict, Optional
 import yaml
 
 from hush.core.loggings import LOGGER
+
 from .base import ConfigStorage
 
-
 # Pattern to match ${VAR} or ${VAR:default}
-ENV_VAR_PATTERN = re.compile(r'\$\{([^}:]+)(?::([^}]*))?\}')
+ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 
 
 def _interpolate_env_vars(value: Any) -> Any:
@@ -28,6 +28,7 @@ def _interpolate_env_vars(value: Any) -> Any:
         port: ${REDIS_PORT:6379}
     """
     if isinstance(value, str):
+
         def replace_env_var(match):
             var_name = match.group(1)
             default = match.group(2)
@@ -40,8 +41,7 @@ def _interpolate_env_vars(value: Any) -> Any:
                 return default
             else:
                 LOGGER.warning(
-                    "Environment variable '%s' not set and no default provided",
-                    var_name
+                    "Environment variable '%s' not set and no default provided", var_name
                 )
                 return match.group(0)  # Return original ${VAR} if not found
 
@@ -95,12 +95,12 @@ class YamlConfigStorage(ConfigStorage):
         if not self._file_path.exists():
             return {}
 
-        with open(self._file_path, 'r') as f:
+        with open(self._file_path, "r") as f:
             return yaml.safe_load(f) or {}
 
     def _save_file(self, data: Dict[str, Any]):
         """Ghi dữ liệu vào file YAML."""
-        with open(self._file_path, 'w') as f:
+        with open(self._file_path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     def load_one(self, key: str) -> Optional[Dict[str, Any]]:
