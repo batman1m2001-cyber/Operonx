@@ -7,6 +7,7 @@ import os
 from hush.core.configs.node_config import NodeType
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.loggings import LOGGER
+from hush.core.exceptions import IterationError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -35,12 +36,13 @@ class MapNode(BaseIterationNode):
 
     type: NodeType = "map"
 
-    __slots__ = ['_max_concurrency']
+    __slots__ = ['_max_concurrency', '_fail_fast']
 
     def __init__(
         self,
         inputs: Optional[Dict[str, Any]] = None,
         max_concurrency: Optional[int] = None,
+        fail_fast: bool = False,
         **kwargs
     ):
         """Initialize MapNode.
@@ -48,9 +50,11 @@ class MapNode(BaseIterationNode):
         Args:
             inputs: Dict mapping variable names to values or Each(source).
             max_concurrency: Max concurrent tasks. Defaults to CPU count.
+            fail_fast: If True, raise IterationError on first failure instead of continuing.
         """
         super().__init__(inputs=inputs, **kwargs)
         self._max_concurrency = max_concurrency if max_concurrency is not None else os.cpu_count()
+        self._fail_fast = fail_fast
 
     def _post_build(self):
         """Setup inputs/outputs after graph is built."""
@@ -77,20 +81,32 @@ class MapNode(BaseIterationNode):
             )
 
         semaphore = asyncio.Semaphore(self._max_concurrency)
+        total_iterations = len(iteration_data)
 
-        async def execute_iteration(iter_context: str, loop_data: Dict[str, Any]) -> Dict[str, Any]:
+        async def execute_iteration(i: int, iter_context: str, loop_data: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 async with semaphore:
                     for var_name, value in loop_data.items():
                         state[self.full_name, var_name, iter_context] = value
                     result = await self._run_graph(state, iter_context, iter_context)
-                return {"result": result, "success": True}
+                return {"result": result, "success": True, "index": i}
             except Exception as e:
-                return {"result": {"error": str(e), "error_type": type(e).__name__}, "success": False}
+                error = IterationError(
+                    message=f"Iteration {i} failed",
+                    iteration_index=i,
+                    loop_data=loop_data,
+                    total_iterations=total_iterations,
+                    node_type="map",
+                    original_error=e
+                )
+                if self._fail_fast:
+                    raise error from e
+                LOGGER.warning(str(error))
+                return {"result": {"error": str(e), "error_type": type(e).__name__}, "success": False, "index": i}
 
         ctx_prefix = (context_id + ".") if context_id else ""
         raw_results = await asyncio.gather(*[
-            execute_iteration(get_iter_context(ctx_prefix, i), data)
+            execute_iteration(i, get_iter_context(ctx_prefix, i), data)
             for i, data in enumerate(iteration_data)
         ])
 

@@ -8,6 +8,7 @@ import yaml
 from hush.core.nodes.base import BaseNode
 from hush.core.configs.node_config import NodeType
 from hush.core.utils.common import Param
+from hush.core.exceptions import ParserError
 
 
 ParserType = Literal["json", "xml", "yaml"]
@@ -181,7 +182,15 @@ class ParserNode(BaseNode):
         if not text:
             return {}
 
-        parsed_data = self.backend(text)
+        try:
+            parsed_data = self.backend(text)
+        except Exception as e:
+            raise ParserError(
+                message="Failed to parse input text",
+                input_text=text,
+                format_type=self.format,
+                original_error=e
+            ) from e
 
         result = {}
         for field in self.extract_fields:

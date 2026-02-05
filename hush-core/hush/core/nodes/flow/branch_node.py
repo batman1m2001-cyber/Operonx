@@ -7,6 +7,7 @@ from hush.core.nodes.base import BaseNode
 from hush.core.states.ref import Ref
 from hush.core.utils.common import Param
 from hush.core.loggings import LOGGER
+from hush.core.exceptions import BranchError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -124,7 +125,14 @@ class BranchNode(BaseNode):
                     return target, condition_desc
 
             except Exception as e:
-                LOGGER.error("Lỗi khi đánh giá condition cho [str]'%s'[/str]: %s", ref.var, e)
+                error = BranchError(
+                    message=f"Condition evaluation failed for '{ref.var}'",
+                    condition=str(ref),
+                    inputs=safe_inputs,
+                    candidates=self.candidates,
+                    original_error=e
+                )
+                LOGGER.warning(str(error))
                 continue
 
         if self.default:

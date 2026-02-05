@@ -53,7 +53,7 @@ class Each:
 
 
 # Iteration-specific init keys (beyond base keys)
-_ITER_EXTRA_KEYS = {'max_concurrency', 'stop_condition', 'max_iterations', 'callback', 'batch_fn'}
+_ITER_EXTRA_KEYS = {'max_concurrency', 'stop_condition', 'max_iterations', 'callback', 'batch_fn', 'fail_fast'}
 
 
 def split_iter_kwargs(kwargs: dict) -> tuple:

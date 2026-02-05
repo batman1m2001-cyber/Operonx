@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 from hush.core.configs.node_config import NodeType
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.loggings import LOGGER
+from hush.core.exceptions import IterationError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -31,6 +32,23 @@ class ForLoopNode(BaseIterationNode):
     """
 
     type: NodeType = "for"
+
+    __slots__ = ['_fail_fast']
+
+    def __init__(
+        self,
+        inputs: Optional[Dict[str, Any]] = None,
+        fail_fast: bool = False,
+        **kwargs
+    ):
+        """Initialize ForLoopNode.
+
+        Args:
+            inputs: Dict mapping variable names to values or Each(source).
+            fail_fast: If True, raise IterationError on first failure instead of continuing.
+        """
+        super().__init__(inputs=inputs, **kwargs)
+        self._fail_fast = fail_fast
 
     def _post_build(self):
         """Setup inputs/outputs after graph is built."""
@@ -74,6 +92,17 @@ class ForLoopNode(BaseIterationNode):
                 final_results.append(result)
                 success_count += 1
             except Exception as e:
+                error = IterationError(
+                    message=f"Iteration {i} failed",
+                    iteration_index=i,
+                    loop_data=loop_data,
+                    total_iterations=len(iteration_data),
+                    node_type="for",
+                    original_error=e
+                )
+                if self._fail_fast:
+                    raise error from e
+                LOGGER.warning(str(error))
                 final_results.append({"error": str(e), "error_type": type(e).__name__})
 
         error_count = len(iteration_data) - success_count

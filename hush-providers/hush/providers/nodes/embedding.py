@@ -10,6 +10,7 @@ from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
 from hush.core.utils.common import Param
 from hush.core.registry import ResourceHub, get_hub
+from hush.core.exceptions import EmbeddingError
 
 
 class EmbeddingNode(BaseNode):
@@ -82,9 +83,20 @@ class EmbeddingNode(BaseNode):
 
     async def _process(self, texts: Union[str, List[str]]) -> Dict[str, Any]:
         """Process texts and return embeddings."""
-        result = await self.backend.run(texts)
-        # backend.run() returns {"embeddings": [[...], [...], ...]}
-        return result
+        text_list = [texts] if isinstance(texts, str) else texts
+        try:
+            result = await self.backend.run(texts)
+            # backend.run() returns {"embeddings": [[...], [...], ...]}
+            return result
+        except EmbeddingError:
+            raise  # Already wrapped
+        except Exception as e:
+            raise EmbeddingError(
+                message="Embedding backend failed",
+                resource_key=self.resource_key or "unknown",
+                text_count=len(text_list),
+                original_error=e
+            ) from e
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Return embedding-specific metadata dictionary."""

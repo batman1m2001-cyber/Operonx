@@ -5,10 +5,12 @@ Unified design: single `template` input that accepts multiple formats.
 """
 
 from typing import Dict, Any, List, Union
+import re
 
 from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
 from hush.core.utils.common import Param
+from hush.core.exceptions import PromptError
 
 
 # Reserved keys that are not template variables
@@ -234,18 +236,31 @@ class PromptNode(BaseNode):
         traverse(template)
         return vars_found
 
-    def _format_value(self, value: Any, vars: Dict[str, Any]) -> Any:
-        """Recursively format template variables in a value."""
+    def _format_value(self, value: Any, vars: Dict[str, Any], template: Any = None) -> Any:
+        """Recursively format template variables in a value.
+
+        Args:
+            value: Value to format
+            vars: Template variables
+            template: Original template (for error context)
+        """
         if isinstance(value, str):
             try:
                 return value.format_map(vars) if '{' in value else value
-            except KeyError:
-                # Return as-is if variable not found
-                return value
+            except KeyError as e:
+                # Find all missing variables
+                required = set(re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', value))
+                missing = [v for v in required if v not in vars]
+                raise PromptError(
+                    message="Missing template variable(s)",
+                    template=template or value,
+                    missing_vars=missing,
+                    original_error=e
+                ) from e
         elif isinstance(value, dict):
-            return {k: self._format_value(v, vars) for k, v in value.items()}
+            return {k: self._format_value(v, vars, template) for k, v in value.items()}
         elif isinstance(value, list):
-            return [self._format_value(item, vars) for item in value]
+            return [self._format_value(item, vars, template) for item in value]
         return value
 
     def _template_to_messages(
@@ -267,7 +282,7 @@ class PromptNode(BaseNode):
 
         # Form 1: String → user message only
         if isinstance(template, str):
-            content = self._format_value(template, vars)
+            content = self._format_value(template, vars, template)
             return [{"role": "user", "content": content}]
 
         # Form 2: Dict with system/user keys
@@ -276,22 +291,26 @@ class PromptNode(BaseNode):
 
             if "system" in template or "user" in template:
                 if "system" in template:
-                    content = self._format_value(template["system"], vars)
+                    content = self._format_value(template["system"], vars, template)
                     messages.append({"role": "system", "content": content})
                 if "user" in template:
-                    content = self._format_value(template["user"], vars)
+                    content = self._format_value(template["user"], vars, template)
                     messages.append({"role": "user", "content": content})
                 return messages
 
             # Otherwise treat as a single message dict
-            formatted = self._format_value(template, vars)
+            formatted = self._format_value(template, vars, template)
             return [formatted]
 
         # Form 3: List → full messages array
         if isinstance(template, list):
-            return [self._format_value(msg, vars) for msg in template]
+            return [self._format_value(msg, vars, template) for msg in template]
 
-        raise TypeError(f"Invalid template type: {type(template)}. Expected str, dict, or list.")
+        raise PromptError(
+            message="Invalid template type",
+            template=template,
+            original_error=TypeError(f"Expected str, dict, or list, got {type(template).__name__}")
+        )
 
     async def _format(self, **kwargs) -> Dict[str, Any]:
         """Build messages from templates and context.

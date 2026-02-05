@@ -6,6 +6,7 @@ from hush.core.configs.node_config import NodeType
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.utils.common import Param, extract_condition_variables
 from hush.core.loggings import LOGGER
+from hush.core.exceptions import ConditionError
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -58,11 +59,19 @@ class WhileLoopNode(BaseIterationNode):
         try:
             return compile(condition, f'<stop_condition: {condition}>', 'eval')
         except SyntaxError as e:
-            LOGGER.error("Invalid stop_condition syntax [str]'%s'[/str]: %s", condition, e)
-            raise ValueError(f"Invalid stop_condition syntax: {condition}") from e
+            raise ConditionError(
+                message="Invalid stop_condition syntax",
+                condition=condition,
+                phase="compile",
+                original_error=e
+            ) from e
 
-    def _evaluate_stop_condition(self, inputs: Dict[str, Any]) -> bool:
+    def _evaluate_stop_condition(self, inputs: Dict[str, Any], iteration: Optional[int] = None) -> bool:
         """Evaluate stop condition with current inputs.
+
+        Args:
+            inputs: Current input values
+            iteration: Current iteration number (for error context)
 
         Returns:
             True if loop should stop, False to continue.
@@ -74,7 +83,15 @@ class WhileLoopNode(BaseIterationNode):
             result = eval(self._compiled_condition, {"__builtins__": {}}, inputs)
             return bool(result)
         except Exception as e:
-            LOGGER.error("Error evaluating stop_condition [str]'%s'[/str]: %s", self._stop_condition, e)
+            error = ConditionError(
+                message="Stop condition evaluation failed",
+                condition=self._stop_condition,
+                inputs=inputs,
+                iteration=iteration,
+                phase="eval",
+                original_error=e
+            )
+            LOGGER.warning(str(error))
             return False
 
     def _post_build(self):
@@ -125,7 +142,7 @@ class WhileLoopNode(BaseIterationNode):
         step_inputs = _inputs
         step_count = 0
 
-        should_stop = self._evaluate_stop_condition(step_inputs)
+        should_stop = self._evaluate_stop_condition(step_inputs, iteration=0)
 
         ctx_prefix = (context_id + ".") if context_id else ""
         while not should_stop and step_count < self._max_iterations:
@@ -139,7 +156,7 @@ class WhileLoopNode(BaseIterationNode):
             step_inputs = {**step_inputs, **_outputs}
             step_count += 1
 
-            should_stop = self._evaluate_stop_condition(step_inputs)
+            should_stop = self._evaluate_stop_condition(step_inputs, iteration=step_count)
 
         if step_count >= self._max_iterations and not should_stop:
             LOGGER.warning(

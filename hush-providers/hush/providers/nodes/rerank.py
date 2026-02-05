@@ -10,6 +10,7 @@ from hush.core.nodes import BaseNode
 from hush.core.configs import NodeType
 from hush.core.utils.common import Param
 from hush.core.registry import ResourceHub, get_hub
+from hush.core.exceptions import RerankError
 
 
 class RerankNode(BaseNode):
@@ -117,14 +118,31 @@ class RerankNode(BaseNode):
             texts = [doc.get('content', '') for doc in documents]
         else:
             # Handle unexpected type
-            raise TypeError(f"Expected documents to be List[str] or List[Dict], got list of {type(documents[0]).__name__}")
+            raise RerankError(
+                message="Invalid document type",
+                resource_key=self.resource_key or "unknown",
+                query=query,
+                document_count=len(documents),
+                original_error=TypeError(f"Expected List[str] or List[Dict], got list of {type(documents[0]).__name__}")
+            )
 
-        results = await self.backend.run(
-            query=query,
-            texts=texts,
-            top_k=top_k if top_k > 0 else len(texts),
-            threshold=threshold
-        )
+        try:
+            results = await self.backend.run(
+                query=query,
+                texts=texts,
+                top_k=top_k if top_k > 0 else len(texts),
+                threshold=threshold
+            )
+        except RerankError:
+            raise  # Already wrapped
+        except Exception as e:
+            raise RerankError(
+                message="Rerank backend failed",
+                resource_key=self.resource_key or "unknown",
+                query=query,
+                document_count=len(documents),
+                original_error=e
+            ) from e
 
         reranked_docs = []
 

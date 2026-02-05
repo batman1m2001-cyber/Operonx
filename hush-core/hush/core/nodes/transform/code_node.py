@@ -1,6 +1,6 @@
 """Node thực thi code Python trong workflow."""
 
-from typing import Dict, Callable, Any, Optional, List
+from typing import Dict, Callable, Any, Optional, List, TYPE_CHECKING
 import inspect
 import ast
 from functools import wraps
@@ -8,6 +8,10 @@ from functools import wraps
 from hush.core.nodes.base import BaseNode, split_shorthand_kwargs
 from hush.core.configs.node_config import NodeType
 from hush.core.utils.common import Param, ensure_async
+from hush.core.exceptions import CodeError
+
+if TYPE_CHECKING:
+    from hush.core.states import MemoryState
 
 
 def code_node(func):
@@ -279,6 +283,31 @@ class CodeNode(BaseNode):
             outputs = extract_return_schema(code_fn)
 
         return inputs, outputs
+
+    async def run(
+        self,
+        state: 'MemoryState',
+        context_id: Optional[str] = None,
+        parent_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Thực thi CodeNode với error wrapping.
+
+        Override để wrap exceptions trong CodeError với context đầy đủ.
+        """
+        try:
+            return await super().run(state, context_id, parent_context)
+        except CodeError:
+            raise  # Đã wrapped, không wrap lại
+        except Exception as e:
+            # Lấy inputs để có context cho error
+            _inputs = self.get_inputs(state, context_id, parent_context)
+            raise CodeError(
+                message=f"Function '{self.code_fn.__name__ if self.code_fn else 'unknown'}' raised an exception",
+                function_name=self.code_fn.__name__ if self.code_fn else "unknown",
+                source=self.source,
+                inputs=_inputs,
+                original_error=e
+            ) from e
 
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass."""
