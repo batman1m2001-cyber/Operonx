@@ -26,6 +26,7 @@ class BaseNode(ABC):
         'core',         # Callable - function thực thi logic chính
         'father',       # Parent GraphNode
         'contain_generation',  # Có chứa LLM generation không
+        'enabled',      # Node có được thực thi hay không (default True)
     ]
 ```
 
@@ -45,7 +46,8 @@ def __init__(
     start: bool = False,
     end: bool = False,
     contain_generation: bool = False,
-    verbose: bool = True
+    verbose: bool = True,
+    enabled: bool = True  # Có thực thi node hay không
 ):
 ```
 
@@ -180,10 +182,11 @@ async def run(
 
 Flow:
 1. Record execution với state
-2. Lấy inputs từ state qua `get_inputs()`
-3. Thực thi `self.core(**inputs)`
-4. Lưu outputs vào state qua `store_result()`
-5. Log và record trace metadata
+2. **Skip nếu `enabled=False`** (return {} ngay)
+3. Lấy inputs từ state qua `get_inputs()`
+4. Thực thi `self.core(**inputs)`
+5. Lưu outputs vào state qua `store_result()`
+6. Log và record trace metadata
 
 ### get_inputs()
 

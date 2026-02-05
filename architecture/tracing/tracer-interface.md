@@ -15,6 +15,20 @@ class BaseTracer(ABC):
     def __init__(self, tags: Optional[List[str]] = None):
         self._tags = tags or []
 
+    @property
+    def tags(self) -> List[str]:
+        """Get static tags for this tracer."""
+        return self._tags.copy()
+
+    @classmethod
+    def shutdown_worker(cls, timeout: float = 5.0) -> None:
+        """Shutdown the background process gracefully."""
+        from hush.core.background import shutdown_background
+        shutdown_background()
+
+    # Backwards compatibility alias
+    shutdown_executor = shutdown_worker
+
     @abstractmethod
     def _get_tracer_config(self) -> Dict[str, Any]:
         """Return tracer-specific config for serialization."""
@@ -120,6 +134,7 @@ def get_registered_tracers() -> Dict[str, type]:
 ## Shutdown
 
 ```python
-# Graceful shutdown
+# Graceful shutdown (2 equivalent methods)
 BaseTracer.shutdown_worker(timeout=5.0)
+BaseTracer.shutdown_executor(timeout=5.0)  # Backwards compatibility alias
 ```

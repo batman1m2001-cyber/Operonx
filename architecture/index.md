@@ -2,6 +2,66 @@
 
 > Tài liệu này dành cho core developers và AI assistants để hiểu cách Hush hoạt động bên trong.
 
+## Documentation System
+
+Hush sử dụng ba lớp documentation:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 1: CLAUDE.md           Layer 2: architecture/            │
+│  (Quick Reference)            (Deep Documentation)              │
+│  ─────────────────            ────────────────────              │
+│  • "How to add X"             • "Why X works this way"          │
+│  • Patterns & examples        • Algorithms & diagrams           │
+│  • For quick lookup           • For deep understanding          │
+│  • Updated with API changes   • Updated with internals          │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: hush-tutorial/                                        │
+│  (User Guide - Vietnamese)                                      │
+│  ─────────────────────────                                      │
+│  • docs/  → User-facing documentation (00-12 chapters)          │
+│  • examples/ → Runnable Python examples (01-15)                 │
+│  • Updated when API/features change                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Khi nào dùng gì?
+
+| Cần gì | Đọc ở đâu |
+|--------|-----------|
+| Quick reference khi coding | `CLAUDE.md` trong package tương ứng |
+| "Làm sao để thêm X?" | `CLAUDE.md` |
+| "Tại sao X hoạt động như vậy?" | `architecture/` (bạn đang ở đây) |
+| Deep dive internals | `architecture/` |
+| Learning từ đầu | `architecture/index.md` → reading order |
+| User documentation (Vietnamese) | `hush-tutorial/docs/` |
+| Runnable examples | `hush-tutorial/examples/` |
+| Dạy người khác dùng Hush | `hush-tutorial/docs/00-tong-quan.md` → reading order |
+
+### CLAUDE.md Files
+
+| Package | CLAUDE.md | Nội dung |
+|---------|-----------|----------|
+| Root | [/CLAUDE.md](../CLAUDE.md) | Monorepo overview, conventions |
+| hush-core | [/hush-core/CLAUDE.md](../hush-core/CLAUDE.md) | Node patterns, state management |
+| hush-providers | [/hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) | Provider patterns |
+| hush-observability | [/hush-observability/CLAUDE.md](../hush-observability/CLAUDE.md) | Tracer patterns |
+| hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
+| hush-vscode-traceview | [/hush-vscode-traceview/CLAUDE.md](../hush-vscode-traceview/CLAUDE.md) | Extension patterns |
+
+### Sync Rules
+
+Khi thay đổi code:
+
+| Loại thay đổi | CLAUDE.md | architecture/ | hush-tutorial/ |
+|---------------|-----------|---------------|----------------|
+| New node/provider/tracer | ✓ Usage pattern | ✓ Internals | ✓ docs/ + examples/ |
+| API change | ✓ Update examples | ✓ Update explanations | ✓ Update docs + examples |
+| Internal refactor (same API) | - | ✓ If algorithm changes | - |
+| Bug fix | - | - | - |
+
+Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mapping).
+
 ## Tổng quan hệ thống
 
 ```
@@ -82,11 +142,11 @@
 
 ## Packages
 
-| Package | Mô tả | Key Files |
-|---------|-------|-----------|
-| hush-core | Core workflow engine | `engine.py`, `nodes/`, `states/` |
-| hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` |
-| hush-observability | Tracing backends | `tracers/`, external integrations |
+| Package | Mô tả | Key Files | Quick Ref |
+|---------|-------|-----------|-----------|
+| hush-core | Core workflow engine | `engine.py`, `nodes/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
+| hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
+| hush-observability | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-observability/CLAUDE.md) |
 
 ## Folder Structure
 

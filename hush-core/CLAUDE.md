@@ -1,0 +1,229 @@
+# hush-core
+
+Core workflow engine providing nodes, state management, tracing, and the execution engine.
+
+## Module Structure
+
+```
+hush/core/
+├── engine.py           # Hush engine - compiles and runs workflows
+├── background.py       # Background task management
+├── exceptions.py       # Unified exception hierarchy (NodeError, etc.)
+├── nodes/              # Node types (BaseNode, CodeNode, GraphNode, etc.)
+├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
+├── configs/            # Configuration classes (NodeConfig, EdgeConfig)
+├── registry/           # Resource management (ResourceHub, plugins)
+├── tracers/            # Local tracing (BaseTracer, SQLite storage)
+├── streams/            # Data streaming
+├── loggings/           # Logging configuration with Rich
+└── utils/              # Utilities (context vars, common helpers)
+```
+
+## Key Files to Read First
+
+1. `nodes/base.py` - BaseNode class, `>>` operator, input/output handling
+2. `nodes/graph/graph_node.py` - GraphNode for nested workflows
+3. `states/schema.py` - StateSchema for compile-time state validation
+4. `states/state.py` - MemoryState for runtime state access
+5. `engine.py` - Hush engine execution flow
+
+## Node System
+
+### Creating a New Node Type
+
+1. Create file in appropriate subdirectory under `nodes/`:
+   - `transform/` - Data transformation nodes
+   - `flow/` - Control flow nodes (branch)
+   - `iteration/` - Loop nodes (for, map, while, async_iter)
+   - `graph/` - Container nodes
+
+2. Inherit from `BaseNode`:
+```python
+from hush.core.nodes.base import BaseNode
+from hush.core.configs.node_config import NodeType
+
+class MyNode(BaseNode):
+    type: NodeType = "my_type"  # Literal type for identification
+
+    def __init__(self, name: str, my_param: str, **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.my_param = my_param
+        # Set self.core to the execution function
+        self.core = self._execute
+
+    def _execute(self, **inputs) -> dict:
+        # Process inputs and return outputs dict
+        return {"result": ...}
+```
+
+3. Export in `nodes/__init__.py`
+
+### Node Lifecycle
+
+1. **Definition**: Node created inside `with GraphNode(...) as graph:` context
+2. **Registration**: Auto-registered to parent graph via `get_current()`
+3. **Compilation**: `StateSchema` resolves all Refs and builds index
+4. **Execution**: Engine calls `node.run(state, context_id)` → `node.core(**inputs)`
+
+### Edge Operators
+
+```python
+# Hard edge (counts toward ready_count)
+a >> b >> c
+
+# Soft edge (for branch outputs - doesn't count toward ready_count)
+branch >> ~case_a >> merge
+branch >> ~case_b >> merge
+
+# Fork to multiple
+START >> [a, b, c]
+
+# Join from multiple
+[a, b, c] >> merge
+```
+
+## State Management
+
+### StateSchema
+
+Compile-time structure that:
+- Resolves all `Ref` chains to canonical storage locations
+- Builds O(1) lookup index for state access
+- Validates input/output connections
+
+### MemoryState
+
+Runtime state storage:
+```python
+# Access pattern: state[node_name, var_name, context_id]
+value = state["workflow.step1", "output", "ctx_0"]
+state["workflow.step1", "result", "ctx_0"] = value
+```
+
+### Ref System
+
+```python
+from hush.core.states.ref import Ref
+
+# Reference another node's output
+ref = node["output_var"]  # Returns Ref(node, "output_var")
+
+# Reference with operations
+ref = PARENT["items"].apply(len)  # Apply function to value
+
+# PARENT marker resolves to parent GraphNode at build time
+```
+
+### Cell System
+
+Cells provide isolated contexts for iteration nodes:
+- Each loop iteration gets its own `context_id`
+- Child nodes access parent context via `parent_context` parameter
+
+## Registry System
+
+### ResourceHub
+
+Central registry for configurations loaded from YAML/JSON:
+```python
+from hush.core.registry import get_hub, set_global_hub
+
+hub = get_hub()
+config = hub.get("llm", "gpt-4o")  # Get LLM config by key
+```
+
+### Plugin Pattern
+
+Plugins register handlers for resource types:
+```python
+from hush.core.registry import REGISTRY
+
+@REGISTRY.register("llm")
+def llm_plugin(config: dict) -> LLMConfig:
+    return LLMConfig(**config)
+```
+
+## Tracer System
+
+### BaseTracer Interface
+
+```python
+from hush.core.tracers import BaseTracer
+
+class MyTracer(BaseTracer):
+    async def start_trace(self, name: str, **kwargs) -> str:
+        # Return trace_id
+        pass
+
+    async def end_trace(self, trace_id: str, **kwargs):
+        pass
+
+    async def start_span(self, trace_id: str, name: str, **kwargs) -> str:
+        # Return span_id
+        pass
+
+    async def end_span(self, span_id: str, **kwargs):
+        pass
+```
+
+### Registration
+
+```python
+from hush.core.tracers import register_tracer
+
+register_tracer("my_tracer", MyTracer)
+```
+
+## Testing Patterns
+
+```python
+import pytest
+from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+
+@pytest.mark.asyncio
+async def test_workflow():
+    with GraphNode(name="test") as graph:
+        node = CodeNode(
+            name="step",
+            code_fn=lambda x: {"y": x + 1},
+            inputs={"x": PARENT["input"]},
+            outputs={"y": PARENT["output"]}
+        )
+        START >> node >> END
+
+    engine = Hush(graph)
+    result = await engine.run(inputs={"input": 1})
+    assert result["output"] == 2
+```
+
+## Common Patterns
+
+### Shorthand Functions
+
+For concise node definitions:
+```python
+from hush.core import code_node, for_, map_, while_
+
+@code_node
+def process(x: int) -> dict:
+    return {"result": x * 2}
+```
+
+### Wildcard Forwarding
+
+Forward all inputs from parent:
+```python
+CodeNode(
+    name="step",
+    inputs={"specific": PARENT["x"], "*": PARENT},  # x explicit, rest forwarded
+    ...
+)
+```
+
+## Gotchas
+
+1. **Node names**: Only alphanumeric, underscore, hyphen allowed
+2. **Input/output overlap**: Same key cannot be in both inputs and outputs
+3. **Soft edges**: Use `>>~` or `>` for branch outputs to avoid deadlocks
+4. **PARENT resolution**: PARENT resolves at build time, not definition time
+5. **Async core**: If `node.core` is async, engine awaits it automatically
