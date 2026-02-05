@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - hush-core
+          - hush-providers
+          - hush-observability
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.package }}
+        run: uv sync --all-extras
+
+      - name: Run tests
+        working-directory: ${{ matrix.package }}
+        run: uv run pytest --tb=short -q
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install hush-core with dev dependencies
+        working-directory: hush-core
+        run: uv sync --all-extras
+
+      - name: Run coverage
+        working-directory: hush-core
+        run: uv run pytest --cov=hush --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: hush-core/coverage.xml
+          fail_ci_if_error: false

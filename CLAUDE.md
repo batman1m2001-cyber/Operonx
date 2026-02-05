@@ -12,7 +12,11 @@ Hush-ai/
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
 ├── hush-vscode-traceview/ # VS Code extension for trace visualization
 ├── hush-ai/            # Meta-package for installation bundles
-└── architecture/       # Deep technical documentation
+├── architecture/       # Deep technical documentation
+├── .github/            # CI/CD workflows, issue/PR templates
+├── env.example         # Environment variables template
+├── CONTRIBUTING.md     # Contributor guide
+└── SECURITY.md         # Security policy
 ```
 
 ## Documentation System
@@ -137,7 +141,7 @@ hush-observability (depends on hush-core)
 
 - **Python**: 3.10+
 - **Async-first**: All I/O operations use asyncio
-- **Formatter**: Black with 100 char line length
+- **Formatter**: Ruff (Black-compatible) with 100 char line length
 - **Linter**: Ruff with rules E, F, I, W
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
@@ -169,6 +173,45 @@ cd hush-observability && uv pip install -e ".[dev]" && pytest
 # VS Code extension
 cd hush-vscode-traceview && npm install && npm run compile
 ```
+
+## Development Workflow
+
+### Environment Setup
+
+Copy `env.example` to `.env` and fill in your API keys:
+```bash
+cp env.example .env
+# Edit .env with your OPENAI_API_KEY, LANGFUSE_* keys, etc.
+```
+
+### Pre-commit Hooks
+
+Auto-format and lint on every commit:
+```bash
+# Install hooks (one-time setup)
+pre-commit install
+
+# Run manually on all files
+pre-commit run --all-files
+```
+
+### CI/CD (GitHub Actions)
+
+Workflows run automatically on every PR:
+
+| Workflow | File | Purpose |
+|----------|------|---------|
+| Format & Lint | `.github/workflows/format.yaml` | Ruff format/lint check |
+| Tests | `.github/workflows/tests.yaml` | Pytest for all packages |
+| Python Compatibility | `.github/workflows/python-compatibility.yaml` | Python 3.10-3.12 matrix |
+
+### Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full contributor guide, including:
+- Development setup
+- Code style requirements
+- PR workflow
+- Documentation update rules
 
 ## Key Patterns
 

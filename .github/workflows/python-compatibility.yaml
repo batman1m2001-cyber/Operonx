@@ -1,0 +1,50 @@
+name: Python Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "**/pyproject.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/pyproject.toml"
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+        package:
+          - hush-core
+          - hush-providers
+          - hush-observability
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install package
+        working-directory: ${{ matrix.package }}
+        run: uv sync --all-extras
+
+      - name: Verify import
+        working-directory: ${{ matrix.package }}
+        run: |
+          if [ "${{ matrix.package }}" = "hush-core" ]; then
+            uv run python -c "from hush.core import GraphNode, CodeNode, START, END"
+          elif [ "${{ matrix.package }}" = "hush-providers" ]; then
+            uv run python -c "from hush.providers import LLMProvider"
+          elif [ "${{ matrix.package }}" = "hush-observability" ]; then
+            uv run python -c "from hush.observability import LangfuseTracer"
+          fi
