@@ -12,7 +12,7 @@ Thank you for your interest in contributing to Hush! This guide will help you ge
 ### Clone and Install
 
 ```bash
-git clone https://github.com/your-org/Hush-ai.git
+git clone https://github.com/batman1m2001-cyber/Hush-ai.git
 cd Hush-ai
 
 # Install hush-core (foundation)
@@ -129,7 +129,7 @@ hush-observability (depends on hush-core)
 
 ## Questions?
 
-- Open a [Question issue](https://github.com/your-org/Hush-ai/issues/new?template=3-question.yml)
+- Open a [Question issue](https://github.com/batman1m2001-cyber/Hush-ai/issues/new?template=3-question.yml)
 - Check existing documentation in `hush-tutorial/docs/`
 
 ## License
