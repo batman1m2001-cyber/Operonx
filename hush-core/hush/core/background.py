@@ -823,7 +823,7 @@ class BackgroundProcess:
     Thread-safe: Multiple threads can submit tasks concurrently.
     """
 
-    __slots__ = ["_db_path", "_process", "_queue", "_lock", "_started"]
+    __slots__ = ["_db_path", "_process", "_queue", "_lock", "_started", "_owner_pid"]
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize BackgroundProcess.
@@ -837,9 +837,19 @@ class BackgroundProcess:
         self._queue: Optional[multiprocessing.Queue] = None
         self._lock = threading.Lock()
         self._started = False
+        self._owner_pid: Optional[int] = None
 
     def _ensure_started(self) -> None:
         """Ensure the background process is running."""
+        # Detect fork: if we're in a different process than the one that
+        # spawned the background worker, the old _process handle is invalid.
+        # Reset stale state so this worker spawns its own background process.
+        if self._started and self._owner_pid != os.getpid():
+            self._process = None
+            self._queue = None
+            self._started = False
+            self._lock = threading.Lock()
+
         if self._started and self._process is not None and self._process.is_alive():
             return
 
@@ -879,6 +889,7 @@ class BackgroundProcess:
             )
             self._process.start()
             self._started = True
+            self._owner_pid = os.getpid()
 
     def submit(self, task_type: TaskType, data: Dict[str, Any]) -> None:
         """Submit a task to the background process.
