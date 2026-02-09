@@ -38,6 +38,8 @@ from pathlib import Path
 from time import sleep, time
 from typing import Any, Dict, List, Optional, Tuple
 
+from hush.core.loggings import LOGGER
+
 # Default database path - can be overridden via HUSH_TRACES_DB env var
 DEFAULT_DB_PATH = Path(os.environ.get("HUSH_TRACES_DB", Path.home() / ".hush" / "traces.db"))
 
@@ -678,11 +680,8 @@ def _background_worker(
     import os
     import traceback
 
-    # Ignore SIGINT - let main process handle it (only works in main thread)
-    try:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-    except ValueError:
-        pass
+    # Ignore SIGINT - let main process handle it
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Load .env file if provided
     if dotenv_path:
@@ -826,7 +825,7 @@ class BackgroundProcess:
     Thread-safe: Multiple threads can submit tasks concurrently.
     """
 
-    __slots__ = ["_db_path", "_process", "_queue", "_lock", "_started", "_owner_pid"]
+    __slots__ = ["_db_path", "_process", "_queue", "_lock", "_started", "_owner_pid", "_disabled"]
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize BackgroundProcess.
@@ -841,9 +840,13 @@ class BackgroundProcess:
         self._lock = threading.Lock()
         self._started = False
         self._owner_pid: Optional[int] = None
+        self._disabled = False
 
     def _ensure_started(self) -> None:
         """Ensure the background process is running."""
+        if self._disabled:
+            return
+
         # Detect fork: if we're in a different process than the one that
         # spawned the background worker, the old _process handle is invalid.
         # Reset stale state so this worker spawns its own background process.
@@ -857,6 +860,8 @@ class BackgroundProcess:
             return
 
         with self._lock:
+            if self._disabled:
+                return
             if self._started and self._process is not None and self._process.is_alive():
                 return
 
@@ -882,10 +887,7 @@ class BackgroundProcess:
                 if cwd_env.exists():
                     dotenv_path = str(cwd_env.resolve())
 
-            # Create queue and worker.
-            # Prefer a separate process, but fall back to a thread if we're
-            # inside a daemon process (e.g. Gunicorn/Uvicorn worker) where
-            # Python forbids spawning child processes.
+            # Create queue and process
             try:
                 ctx = multiprocessing.get_context("spawn")
                 self._queue = ctx.Queue()
@@ -896,15 +898,16 @@ class BackgroundProcess:
                 )
                 self._process.start()
             except AssertionError:
-                import queue
-
-                self._queue = queue.Queue()
-                self._process = threading.Thread(
-                    target=_background_worker,
-                    args=(self._queue, str(self._db_path), config_path, dotenv_path),
-                    daemon=True,
+                # Daemon processes (e.g. Gunicorn/Uvicorn workers) cannot
+                # spawn children. Disable background tracing for this worker.
+                self._disabled = True
+                self._process = None
+                self._queue = None
+                LOGGER.warning(
+                    "Cannot spawn background process (daemon worker). "
+                    "Background trace writing to local DB is disabled for this worker."
                 )
-                self._process.start()
+                return
             self._started = True
             self._owner_pid = os.getpid()
 
@@ -916,6 +919,8 @@ class BackgroundProcess:
             data: Task data
         """
         self._ensure_started()
+        if self._disabled:
+            return
         self._queue.put({"task_type": task_type.value, "data": data})
 
     def write_trace(
