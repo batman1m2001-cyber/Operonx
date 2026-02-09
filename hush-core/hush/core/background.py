@@ -678,8 +678,11 @@ def _background_worker(
     import os
     import traceback
 
-    # Ignore SIGINT - let main process handle it
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # Ignore SIGINT - let main process handle it (only works in main thread)
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        pass
 
     # Load .env file if provided
     if dotenv_path:
@@ -879,15 +882,29 @@ class BackgroundProcess:
                 if cwd_env.exists():
                     dotenv_path = str(cwd_env.resolve())
 
-            # Create queue and process
-            ctx = multiprocessing.get_context("spawn")
-            self._queue = ctx.Queue()
-            self._process = ctx.Process(
-                target=_background_worker,
-                args=(self._queue, str(self._db_path), config_path, dotenv_path),
-                daemon=True,
-            )
-            self._process.start()
+            # Create queue and worker.
+            # Prefer a separate process, but fall back to a thread if we're
+            # inside a daemon process (e.g. Gunicorn/Uvicorn worker) where
+            # Python forbids spawning child processes.
+            try:
+                ctx = multiprocessing.get_context("spawn")
+                self._queue = ctx.Queue()
+                self._process = ctx.Process(
+                    target=_background_worker,
+                    args=(self._queue, str(self._db_path), config_path, dotenv_path),
+                    daemon=True,
+                )
+                self._process.start()
+            except AssertionError:
+                import queue
+
+                self._queue = queue.Queue()
+                self._process = threading.Thread(
+                    target=_background_worker,
+                    args=(self._queue, str(self._db_path), config_path, dotenv_path),
+                    daemon=True,
+                )
+                self._process.start()
             self._started = True
             self._owner_pid = os.getpid()
 
