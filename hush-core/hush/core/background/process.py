@@ -349,15 +349,25 @@ class BackgroundProcess:
         tracer_config: Dict[str, Any],
         tags: Optional[List[str]] = None,
     ) -> None:
-        """Mark traces as ready for flushing (non-blocking)."""
-        self.submit(
-            TaskType.TRACE_COMPLETE,
+        """Mark traces as ready for flushing (non-blocking).
+
+        Uses enqueue() (buffer) instead of submit() (direct queue) to ensure
+        ordering: trace_write items in the buffer are drained before this
+        mark_complete reaches the worker.
+        """
+        self._ensure_started()
+        if self._disabled:
+            return
+        self.enqueue(
             {
-                "request_id": request_id,
-                "tracer_type": tracer_type,
-                "tracer_config": tracer_config,
-                "tags": tags,
-            },
+                "task_type": TaskType.TRACE_COMPLETE.value,
+                "data": {
+                    "request_id": request_id,
+                    "tracer_type": tracer_type,
+                    "tracer_config": tracer_config,
+                    "tags": tags,
+                },
+            }
         )
 
     def shutdown(self, timeout: float = 5.0) -> None:
