@@ -1,10 +1,20 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Hush Logo" width="160">
+  <img src="assets/banner.png" alt="Hush" width="280">
 </p>
-<h1 align="center">Hush</h1>
-<h3 align="center">High-performance workflow engine for AI agents, LLMs, and beyond</h3>
 
-![Tests](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg) ![Format](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+<p align="center">
+  <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg" alt="Format"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python">
+</p>
+
+---
+
+## ⚡ Hush: High-Performance Workflow Engine for AI
+
+**Hush** is a high-performance workflow engine for building AI applications. Orchestrate LLMs, agents, embeddings, and CPU-bound workloads as DAG-based pipelines — with async execution, built-in tracing, and provider-agnostic design.
+
+> Want to dive right in? Jump to the [Quick Start](#quick-start).
 
 ## Why Hush?
 
@@ -13,6 +23,14 @@
 - **Built-in tracing** — full observability via SQLite + external backends (Langfuse, OpenTelemetry)
 - **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
 - **Type-safe state** — O(1) state access with compile-time validation, zero magic
+
+## What You Can Build
+
+- **LLM pipelines** — chain prompts, parsers, and tools into reliable workflows
+- **AI agents** — loops, branches, and dynamic routing with full observability
+- **RAG systems** — embeddings, reranking, and retrieval in a single graph
+- **Multi-model workflows** — mix OpenAI, Gemini, vLLM, ONNX — swap with one line
+- **CPU-bound tasks** — data processing, transformations, and custom code nodes
 
 ## Quick Start
 
