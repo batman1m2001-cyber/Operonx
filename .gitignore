@@ -91,5 +91,8 @@ Thumbs.db
 tmp/
 temp/
 
+# MkDocs build output
+site/
+
 # Local sync scripts
 sync_to_internal.bat
