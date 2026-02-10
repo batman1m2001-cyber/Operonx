@@ -1,10 +1,7 @@
-<div align="center">
-
-<h1><img src="assets/logo.png" alt="Hush Logo" width="48" style="vertical-align: middle"> Hush</h1>
-
-**Run anything as a workflow — from LLMs and agents to CPU-bound workloads**
-
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="Hush" width="400">
+</p>
+<p align="center"><b>Run anything as a workflow — from LLMs and agents to CPU-bound workloads</b></p>
 
 ![Tests](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg) ![Format](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
