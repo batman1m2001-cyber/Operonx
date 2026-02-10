@@ -6,6 +6,7 @@ subprocess.Popen when running inside daemon workers (Gunicorn/Uvicorn).
 """
 
 import atexit
+import collections
 import json
 import multiprocessing
 import os
@@ -82,6 +83,9 @@ class BackgroundProcess:
         "_owner_pid",
         "_disabled",
         "_is_subprocess",
+        "_buffer",
+        "_drain_thread",
+        "_drain_stop",
     ]
 
     def __init__(self, db_path: Optional[Path] = None):
@@ -93,6 +97,9 @@ class BackgroundProcess:
         self._owner_pid: Optional[int] = None
         self._disabled = False
         self._is_subprocess = False
+        self._buffer: collections.deque = collections.deque()
+        self._drain_thread: Optional[threading.Thread] = None
+        self._drain_stop = threading.Event()
 
     def _ensure_started(self) -> None:
         """Ensure the background process is running."""
@@ -107,6 +114,9 @@ class BackgroundProcess:
             self._started = False
             self._is_subprocess = False
             self._lock = threading.Lock()
+            self._buffer = collections.deque()
+            self._drain_thread = None
+            self._drain_stop = threading.Event()
 
         if self._started and self._is_process_alive():
             return
@@ -145,6 +155,7 @@ class BackgroundProcess:
                 self._is_subprocess = False
                 self._started = True
                 self._owner_pid = os.getpid()
+                self._start_drain_thread()
                 return
             except AssertionError:
                 LOGGER.info(
@@ -158,6 +169,7 @@ class BackgroundProcess:
                 self._is_subprocess = True
                 self._started = True
                 self._owner_pid = os.getpid()
+                self._start_drain_thread()
                 return
             except Exception as e:
                 self._disabled = True
@@ -203,6 +215,61 @@ class BackgroundProcess:
             stderr=None,
         )
         self._queue = _PipeQueue(self._process.stdin)
+
+    def enqueue(self, data: Dict[str, Any]) -> None:
+        """Append a task to the buffer (near-zero latency).
+
+        The drain thread will pick it up and send to the worker process.
+        This is the preferred way to submit tasks from the hot path.
+        """
+        self._buffer.append(data)
+
+    def _start_drain_thread(self) -> None:
+        """Start the drain thread that moves items from buffer to queue."""
+        self._drain_stop.clear()
+        self._drain_thread = threading.Thread(
+            target=self._drain_loop, daemon=True, name="hush-drain"
+        )
+        self._drain_thread.start()
+
+    def _drain_loop(self) -> None:
+        """Drain thread: move items from deque buffer to the IPC queue.
+
+        Runs continuously, draining all available items each cycle.
+        Uses a short sleep to avoid busy-waiting while keeping latency low.
+        """
+        buffer = self._buffer
+        stop = self._drain_stop
+        queue = self._queue
+
+        while not stop.is_set():
+            # Drain all available items
+            drained = 0
+            while True:
+                try:
+                    item = buffer.popleft()
+                except IndexError:
+                    break
+                try:
+                    queue.put(item)
+                    drained += 1
+                except Exception:
+                    break
+
+            if drained == 0:
+                # No items — sleep briefly before checking again
+                stop.wait(0.002)  # 2ms
+
+        # Final drain on shutdown
+        while True:
+            try:
+                item = buffer.popleft()
+            except IndexError:
+                break
+            try:
+                queue.put(item)
+            except Exception:
+                break
 
     def _is_process_alive(self) -> bool:
         """Check if the background process is still running."""
@@ -292,6 +359,12 @@ class BackgroundProcess:
 
     def shutdown(self, timeout: float = 5.0) -> None:
         """Shutdown the background process gracefully."""
+        # Stop drain thread first — flushes remaining buffer items
+        if self._drain_thread is not None:
+            self._drain_stop.set()
+            self._drain_thread.join(timeout=2.0)
+            self._drain_thread = None
+
         if not self._is_process_alive():
             return
 
@@ -319,6 +392,8 @@ class BackgroundProcess:
         self._queue = None
         self._started = False
         self._is_subprocess = False
+        self._buffer = collections.deque()
+        self._drain_stop = threading.Event()
 
     @property
     def is_running(self) -> bool:

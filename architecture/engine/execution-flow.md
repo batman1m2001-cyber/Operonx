@@ -19,9 +19,6 @@ class Hush:
         # Build graph và tạo schema
         self.graph.build()
         self._schema = StateSchema(self.graph)
-
-        # Eagerly start background process để tránh spawn cost khi thực thi node đầu tiên
-        get_background()._ensure_started()
 ```
 
 ## Execution Phases
@@ -35,7 +32,7 @@ engine = Hush(graph)
 - Build graph structure
 - Create StateSchema từ graph
 - Validate graph (entries, exits, edges)
-- **Eagerly start background process** (tránh spawn cost lúc runtime)
+- Background process is **not** started here (lazy — only spawned on first traced request)
 
 ### 2. Run Request
 

@@ -278,11 +278,11 @@ class MemoryState:
             if cost is not None:
                 data["cost_usd"] = cost
 
-            # Submit directly to queue (skip TraceStore → bg.write_trace → bg.submit chain)
+            # Submit to buffer (near-zero latency, drain thread handles IPC)
             bg = get_background(self._trace_store._db_path)
             bg._ensure_started()
             if not bg._disabled:
-                bg._queue.put({"task_type": "trace_write", "data": data})
+                bg.enqueue({"task_type": "trace_write", "data": data})
 
             self._execution_count += 1
         else:

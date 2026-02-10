@@ -403,26 +403,20 @@ class TestBackgroundPerformance:
         - P95 latency
         """
         NUM_REQUESTS = 500
+        WARMUP = 10
 
-        # --- Run WITHOUT tracer ---
-        graph_no_tracer = self._create_pipeline_graph("bench-no-tracer")
-        engine_no_tracer = Hush(graph_no_tracer)
-
-        latencies_no_tracer = []
-        for i in range(NUM_REQUESTS):
-            t0 = time.perf_counter()
-            result = await engine_no_tracer.run(
-                inputs={"x": 0},
-                request_id=f"bench-no-{i}",
-            )
-            latencies_no_tracer.append((time.perf_counter() - t0) * 1000)
-            # sum(0..11) = 66
-            assert result["x"] == 66
-
-        # --- Run WITH tracer ---
+        # --- Run WITH tracer FIRST (takes the cold-start penalty) ---
         graph_with_tracer = self._create_pipeline_graph("bench-with-tracer")
         engine_with_tracer = Hush(graph_with_tracer)
         tracer = LocalTracer(name="bench")
+
+        # Warmup: process spawn + drain thread + cache warmup
+        for i in range(WARMUP):
+            await engine_with_tracer.run(
+                inputs={"x": 0},
+                request_id=f"bench-warmup-yes-{i}",
+                tracer=tracer,
+            )
 
         latencies_with_tracer = []
         for i in range(NUM_REQUESTS):
@@ -433,6 +427,24 @@ class TestBackgroundPerformance:
                 tracer=tracer,
             )
             latencies_with_tracer.append((time.perf_counter() - t0) * 1000)
+            assert result["x"] == 66
+
+        # --- Run WITHOUT tracer SECOND (benefits from warm caches) ---
+        graph_no_tracer = self._create_pipeline_graph("bench-no-tracer")
+        engine_no_tracer = Hush(graph_no_tracer)
+
+        for i in range(WARMUP):
+            await engine_no_tracer.run(inputs={"x": 0}, request_id=f"bench-warmup-no-{i}")
+
+        latencies_no_tracer = []
+        for i in range(NUM_REQUESTS):
+            t0 = time.perf_counter()
+            result = await engine_no_tracer.run(
+                inputs={"x": 0},
+                request_id=f"bench-no-{i}",
+            )
+            latencies_no_tracer.append((time.perf_counter() - t0) * 1000)
+            # sum(0..11) = 66
             assert result["x"] == 66
 
         # --- Calculate metrics ---

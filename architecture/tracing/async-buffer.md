@@ -9,23 +9,25 @@ Location: `hush-core/hush/core/background/` (package)
 ## Architecture
 
 ```
-Main Process                Background Process
-     │                            │
-     │  write_trace(data)         │
-     ├───────────────────────────>│
-     │  (non-blocking)            │
-     │                            ├── Insert to SQLite
-     │                            │
-     │  mark_complete(req_id)     │
-     ├───────────────────────────>│
-     │  (non-blocking)            │
-     │                            ├── Update status
-     │                            │
-     │                            ├── Flush loop (periodic)
-     │                            │   └── For each pending:
-     │                            │       ├── Load traces from DB
-     │                            │       ├── Call tracer.flush()
-     │                            │       └── Update status
+Main Process                 Drain Thread          Background Process
+     │                            │                       │
+     │  enqueue(data)             │                       │
+     ├──> deque.append()          │                       │
+     │    (~0.1μs)                │                       │
+     │                            ├── deque.popleft()     │
+     │                            ├── queue.put() ───────>│
+     │                            │                       ├── Insert to SQLite
+     │                            │                       │
+     │  enqueue(mark_complete)    │                       │
+     ├──> deque.append()          │                       │
+     │                            ├── queue.put() ───────>│
+     │                            │                       ├── Update status
+     │                            │                       │
+     │                            │                       ├── Flush loop (periodic)
+     │                            │                       │   └── For each pending:
+     │                            │                       │       ├── Load traces from DB
+     │                            │                       │       ├── Call tracer.flush()
+     │                            │                       │       └── Update status
 ```
 
 ## Background Process
@@ -34,28 +36,63 @@ The `BackgroundProcess` class manages a separate process for trace writes and fl
 It uses `multiprocessing.Process` by default, and falls back to `subprocess.Popen`
 when running inside daemon workers (Gunicorn/Uvicorn) where multiprocessing is forbidden.
 
+The process is started **lazily** on first use (when a tracer is provided), not at engine init.
+
 ```python
 class BackgroundProcess:
     def _ensure_started(self):
         # Strategy 1: multiprocessing.Process (preferred)
         try:
             self._start_multiprocessing(...)
+            self._start_drain_thread()
         except AssertionError:
             pass  # Daemon worker — fall back
 
         # Strategy 2: subprocess.Popen (bypasses daemon restriction)
         try:
             self._start_subprocess(...)
+            self._start_drain_thread()
         except Exception:
             self._disabled = True  # Last resort
 
+    def enqueue(self, data):
+        """Near-zero latency (~0.1μs). Drain thread handles IPC."""
+        self._buffer.append(data)  # collections.deque, thread-safe
+
     def write_trace(self, **kwargs):
-        """Non-blocking enqueue."""
-        self._queue.put({"task_type": "trace_write", "data": kwargs})
+        """Non-blocking enqueue via submit()."""
+        self.submit(TaskType.TRACE_WRITE, kwargs)
 
     def mark_complete(self, **kwargs):
-        """Non-blocking enqueue."""
-        self._queue.put({"task_type": "mark_complete", "data": kwargs})
+        """Non-blocking enqueue via submit()."""
+        self.submit(TaskType.TRACE_COMPLETE, kwargs)
+```
+
+## Deque Buffer + Drain Thread
+
+The hot path (main thread) never touches the IPC queue directly. Instead:
+
+1. **Main thread**: `deque.append(task)` — ~0.1μs, lock-free
+2. **Drain thread**: polls deque every 2ms, moves items to IPC queue
+3. **Worker process**: reads from queue, writes to SQLite
+
+```python
+def _drain_loop(self):
+    while not stop.is_set():
+        # Drain all available items
+        while True:
+            try:
+                item = buffer.popleft()
+            except IndexError:
+                break
+            queue.put(item)
+
+        if no items drained:
+            stop.wait(0.002)  # 2ms sleep
+
+    # Final drain on shutdown
+    while buffer:
+        queue.put(buffer.popleft())
 ```
 
 ## Flush Logic
@@ -134,19 +171,16 @@ def shutdown_background():
 
 ```python
 def shutdown(self, timeout: float = 5.0):
-    """Graceful shutdown - flush remaining items."""
-    self._running = False
+    """Graceful shutdown - drain buffer, then stop process."""
+    # 1. Stop drain thread (flushes remaining buffer items)
+    self._drain_stop.set()
+    self._drain_thread.join(timeout=2.0)
 
-    # Process remaining queue items
-    while not self._queue.empty():
-        try:
-            msg_type, data = self._queue.get_nowait()
-            # Process...
-        except Empty:
-            break
-
-    # Final flush
-    self._flush_pending()
-
-    self._thread.join(timeout)
+    # 2. Stop process
+    if self._is_subprocess:
+        self._process.stdin.close()  # EOF → SHUTDOWN
+        self._process.wait(timeout)
+    else:
+        self._queue.put({"task_type": "shutdown", "data": {}})
+        self._process.join(timeout)
 ```

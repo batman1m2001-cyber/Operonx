@@ -24,7 +24,6 @@ Example:
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from hush.core.background import get_background
 from hush.core.loggings import LOGGER
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.states import StateSchema
@@ -84,12 +83,6 @@ class Hush:
         # Build graph and create schema immediately
         self.graph.build()
         self._schema = StateSchema(self.graph)
-
-        # Eagerly start background process to avoid spawn cost during first node execution
-        try:
-            get_background()._ensure_started()
-        except Exception:
-            LOGGER.warning("Background trace process failed to start. Tracing may be unavailable.")
 
         LOGGER.debug("Hush engine initialized for workflow [highlight]%s[/highlight]", self.name)
 
