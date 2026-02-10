@@ -48,7 +48,7 @@ _TRACER_REGISTRY = {}
 
 # Module-level "globals": underscore prefix
 _store: Optional[TraceStore] = None
-_background: Optional[BackgroundWorker] = None
+_background: Optional[BackgroundProcess] = None
 ```
 
 ### Type Hints

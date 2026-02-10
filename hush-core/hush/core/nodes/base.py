@@ -174,6 +174,7 @@ class BaseNode(ABC):
         "father",
         "contain_generation",
         "enabled",
+        "_metadata_cache",
     ]
 
     def __init__(
@@ -209,6 +210,7 @@ class BaseNode(ABC):
 
         self.core: Optional[Callable] = None
         self.contain_generation = contain_generation
+        self._metadata_cache: Optional[Dict[str, Any]] = None
         # Đăng ký vào graph cha
         self.father = get_current()
         # Use getattr to avoid hasattr's double lookup
@@ -740,7 +742,7 @@ class BaseNode(ABC):
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
 
-            # Record trace metadata for observability (no input/output duplication)
+            # Record trace metadata for observability
             state.record_trace_metadata(
                 node_name=self.full_name,
                 context_id=context_id,
@@ -752,7 +754,7 @@ class BaseNode(ABC):
                 end_time=end_time,
                 duration_ms=duration_ms,
                 contain_generation=self.contain_generation,
-                metadata=self.metadata(),
+                metadata=self._cached_metadata(),
             )
             return _outputs
 
@@ -767,6 +769,15 @@ class BaseNode(ABC):
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass. Override ở các subclass."""
         return {}
+
+    def _cached_metadata(self) -> Dict[str, Any]:
+        """Return cached metadata dict. Built once, reused across runs."""
+        cache = self._metadata_cache
+        if cache is not None:
+            return cache
+        cache = self.metadata()
+        self._metadata_cache = cache
+        return cache
 
     def metadata(self) -> Dict[str, Any]:
         """Tạo dictionary metadata cho node."""

@@ -7,7 +7,12 @@ Core workflow engine providing nodes, state management, tracing, and the executi
 ```
 hush/core/
 ├── engine.py           # Hush engine - compiles and runs workflows
-├── background.py       # Background task management
+├── background/         # Background trace process (SQLite writes + flush)
+│   ├── __init__.py     # Re-exports public API
+│   ├── db.py           # SQLite operations with fallback chain
+│   ├── flush.py        # Trace reconstruction and dispatch
+│   ├── process.py      # BackgroundProcess, subprocess fallback, _PipeQueue
+│   └── worker.py       # Worker loop + subprocess entry point
 ├── exceptions.py       # Unified exception hierarchy (NodeError, etc.)
 ├── nodes/              # Node types (BaseNode, CodeNode, GraphNode, etc.)
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)

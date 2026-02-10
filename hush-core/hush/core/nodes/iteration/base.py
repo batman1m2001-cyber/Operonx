@@ -319,6 +319,7 @@ class BaseIterationNode(GraphNode):
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
 
+            # Record trace metadata for observability
             state.record_trace_metadata(
                 node_name=self.full_name,
                 context_id=context_id,
@@ -330,7 +331,7 @@ class BaseIterationNode(GraphNode):
                 end_time=end_time,
                 duration_ms=duration_ms,
                 contain_generation=False,
-                metadata=self.metadata(),
+                metadata=self._cached_metadata(),
             )
 
         return _outputs

@@ -4,7 +4,7 @@
 
 Background process xử lý trace writes và flushes non-blocking.
 
-Location: `hush-core/hush/core/background.py`
+Location: `hush-core/hush/core/background/` (package)
 
 ## Architecture
 
@@ -30,33 +30,32 @@ Main Process                Background Process
 
 ## Background Process
 
+The `BackgroundProcess` class manages a separate process for trace writes and flushes.
+It uses `multiprocessing.Process` by default, and falls back to `subprocess.Popen`
+when running inside daemon workers (Gunicorn/Uvicorn) where multiprocessing is forbidden.
+
 ```python
-class BackgroundWorker:
-    def __init__(self, db_path: Path):
-        self._db_path = db_path
-        self._queue = Queue()
-        self._running = True
-        self._thread = Thread(target=self._worker_loop)
-        self._thread.start()
+class BackgroundProcess:
+    def _ensure_started(self):
+        # Strategy 1: multiprocessing.Process (preferred)
+        try:
+            self._start_multiprocessing(...)
+        except AssertionError:
+            pass  # Daemon worker — fall back
+
+        # Strategy 2: subprocess.Popen (bypasses daemon restriction)
+        try:
+            self._start_subprocess(...)
+        except Exception:
+            self._disabled = True  # Last resort
 
     def write_trace(self, **kwargs):
         """Non-blocking enqueue."""
-        self._queue.put(("trace", kwargs))
+        self._queue.put({"task_type": "trace_write", "data": kwargs})
 
     def mark_complete(self, **kwargs):
         """Non-blocking enqueue."""
-        self._queue.put(("complete", kwargs))
-
-    def _worker_loop(self):
-        while self._running:
-            try:
-                msg_type, data = self._queue.get(timeout=1.0)
-                if msg_type == "trace":
-                    self._insert_trace(data)
-                elif msg_type == "complete":
-                    self._mark_complete(data)
-            except Empty:
-                self._flush_pending()
+        self._queue.put({"task_type": "mark_complete", "data": kwargs})
 ```
 
 ## Flush Logic
@@ -116,12 +115,12 @@ def _handle_failure(self, request, error):
 ## Global Access
 
 ```python
-_background: Optional[BackgroundWorker] = None
+_background: Optional[BackgroundProcess] = None
 
-def get_background(db_path: Path = None) -> BackgroundWorker:
+def get_background(db_path: Path = None) -> BackgroundProcess:
     global _background
     if _background is None:
-        _background = BackgroundWorker(db_path or DEFAULT_DB_PATH)
+        _background = BackgroundProcess(db_path or DEFAULT_DB_PATH)
     return _background
 
 def shutdown_background():

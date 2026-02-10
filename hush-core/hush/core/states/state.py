@@ -242,51 +242,48 @@ class MemoryState:
             metadata: Additional metadata dict
         """
         if self._trace_store is not None:
-            # New mode: write directly to SQLite
-            # Build input/output data from cells
-            input_data = {}
-            for var in input_vars:
-                input_data[var] = self.get(node_name, var, context_id)
+            # Fast path: build data dict and submit directly to background queue
+            # (avoids 3 layers of function call overhead with 20+ kwargs each)
+            from hush.core.background import get_background
 
-            output_data = {}
-            for var in output_vars:
-                output_data[var] = self.get(node_name, var, context_id)
+            data = {
+                "request_id": self._request_id,
+                "workflow_name": self.schema.name,
+                "node_name": node_name,
+                "node_type": node_type,
+                "parent_name": parent_name,
+                "context_id": context_id,
+                "execution_order": self._execution_count,
+                "start_time": start_time.isoformat() if start_time else None,
+                "end_time": end_time.isoformat() if end_time else None,
+                "duration_ms": duration_ms,
+                "user_id": self._user_id,
+                "session_id": self._session_id,
+                "model": model,
+                "contain_generation": contain_generation,
+                "metadata": metadata,
+            }
 
-            # Extract token counts from usage dict
-            prompt_tokens = None
-            completion_tokens = None
-            total_tokens = None
+            # Build input/output data inline
+            if input_vars:
+                data["input_data"] = {v: self.get(node_name, v, context_id) for v in input_vars}
+            if output_vars:
+                data["output_data"] = {v: self.get(node_name, v, context_id) for v in output_vars}
+
+            # Extract token counts
             if usage:
-                prompt_tokens = usage.get("prompt_tokens")
-                completion_tokens = usage.get("completion_tokens")
-                total_tokens = usage.get("total_tokens")
+                data["prompt_tokens"] = usage.get("prompt_tokens")
+                data["completion_tokens"] = usage.get("completion_tokens")
+                data["total_tokens"] = usage.get("total_tokens")
+            if cost is not None:
+                data["cost_usd"] = cost
 
-            # Format times as ISO strings
-            start_time_str = start_time.isoformat() if start_time else None
-            end_time_str = end_time.isoformat() if end_time else None
+            # Submit directly to queue (skip TraceStore → bg.write_trace → bg.submit chain)
+            bg = get_background(self._trace_store._db_path)
+            bg._ensure_started()
+            if not bg._disabled:
+                bg._queue.put({"task_type": "trace_write", "data": data})
 
-            self._trace_store.insert_node_trace(
-                request_id=self._request_id,
-                workflow_name=self.schema.name,
-                node_name=node_name,
-                parent_name=parent_name,
-                context_id=context_id,
-                execution_order=self._execution_count,
-                start_time=start_time_str,
-                end_time=end_time_str,
-                duration_ms=duration_ms,
-                input_data=input_data,
-                output_data=output_data,
-                user_id=self._user_id,
-                session_id=self._session_id,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                cost_usd=cost,
-                contain_generation=contain_generation,
-                metadata=metadata,
-            )
             self._execution_count += 1
         else:
             # Legacy mode: store in memory

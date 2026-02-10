@@ -86,7 +86,10 @@ class Hush:
         self._schema = StateSchema(self.graph)
 
         # Eagerly start background process to avoid spawn cost during first node execution
-        get_background()._ensure_started()
+        try:
+            get_background()._ensure_started()
+        except Exception:
+            LOGGER.warning("Background trace process failed to start. Tracing may be unavailable.")
 
         LOGGER.debug("Hush engine initialized for workflow [highlight]%s[/highlight]", self.name)
 
