@@ -32,25 +32,25 @@ theme:
   logo: assets/logo.png
   favicon: assets/logo.png
 
-docs_dir: .
+docs_dir: docs
 
 nav:
-  - Home: docs/index.md
+  - Home: index.md
   - Getting Started:
-      - Overview: hush-tutorial/docs/00-tong-quan.md
-      - Installation: hush-tutorial/docs/01-cai-dat-va-thiet-lap.md
-      - Quick Start: hush-tutorial/docs/02-quickstart.md
+      - Overview: tutorial/00-tong-quan.md
+      - Installation: tutorial/01-cai-dat-va-thiet-lap.md
+      - Quick Start: tutorial/02-quickstart.md
   - User Guide:
-      - Core Concepts: hush-tutorial/docs/03-core-concepts.md
-      - LLM Integration: hush-tutorial/docs/04-llm-integration.md
-      - Loops & Branches: hush-tutorial/docs/05-loops-branches.md
-      - Embeddings & RAG: hush-tutorial/docs/06-embeddings-rag.md
-      - Error Handling: hush-tutorial/docs/07-error-handling.md
-      - Parallel Execution: hush-tutorial/docs/08-parallel-execution.md
-      - Tracing & Observability: hush-tutorial/docs/09-tracing-observability.md
-      - Agent Workflows: hush-tutorial/docs/10-agent-workflow.md
-      - Multi-Model: hush-tutorial/docs/11-multi-model.md
-      - Shorthand Syntax: hush-tutorial/docs/12-shorthand-syntax.md
+      - Core Concepts: tutorial/03-core-concepts.md
+      - LLM Integration: tutorial/04-llm-integration.md
+      - Loops & Branches: tutorial/05-loops-branches.md
+      - Embeddings & RAG: tutorial/06-embeddings-rag.md
+      - Error Handling: tutorial/07-error-handling.md
+      - Parallel Execution: tutorial/08-parallel-execution.md
+      - Tracing & Observability: tutorial/09-tracing-observability.md
+      - Agent Workflows: tutorial/10-agent-workflow.md
+      - Multi-Model: tutorial/11-multi-model.md
+      - Shorthand Syntax: tutorial/12-shorthand-syntax.md
   - Architecture:
       - Overview: architecture/index.md
       - Engine:
@@ -89,35 +89,6 @@ nav:
       - Code Style: architecture/contributing/code-style.md
       - Testing: architecture/contributing/testing.md
       - Release Process: architecture/contributing/release-process.md
-
-exclude_docs: |
-  **/__pycache__/
-  **/node_modules/
-  **/.venv/
-  **/venv/
-  **/*.pyc
-  site/
-  legacy/
-  .git/
-  .github/
-  .ruff_cache/
-  hush-core/
-  hush-providers/
-  hush-observability/
-  hush-vscode-traceview/
-  hush-tutorial/examples/
-  hush-tutorial/CLAUDE.md
-  hush-tutorial/*.toml
-  **/CLAUDE.md
-  README.md
-  SECURITY.md
-  env.example
-
-validation:
-  nav:
-    not_found: warn
-  links:
-    not_found: ignore
 
 markdown_extensions:
   - admonition

@@ -27,5 +27,12 @@ jobs:
       - name: Install MkDocs Material
         run: pip install mkdocs-material
 
+      - name: Create symlinks for docs
+        run: |
+          ln -s ../architecture docs/architecture
+          ln -s ../hush-tutorial/docs docs/tutorial
+          ln -s ../CONTRIBUTING.md docs/CONTRIBUTING.md
+          ln -s ../assets docs/assets
+
       - name: Build and deploy
         run: mkdocs gh-deploy --force

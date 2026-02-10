@@ -39,8 +39,8 @@ asyncio.run(main())
 
 | Section | Description |
 |---------|-------------|
-| [Getting Started](hush-tutorial/docs/00-tong-quan.md) | Overview, installation, and quick start |
-| [User Guide](hush-tutorial/docs/03-core-concepts.md) | Core concepts, LLM integration, loops, tracing |
+| [Getting Started](tutorial/00-tong-quan.md) | Overview, installation, and quick start |
+| [User Guide](tutorial/03-core-concepts.md) | Core concepts, LLM integration, loops, tracing |
 | [Architecture](architecture/index.md) | Deep technical documentation for contributors |
 | [Contributing](CONTRIBUTING.md) | How to contribute to Hush |
 
