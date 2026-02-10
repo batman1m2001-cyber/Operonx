@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg" alt="Tests"></a>
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg" alt="Format"></a>
-  <a href="https://codecov.io/gh/batman1m2001-cyber/Hush-ai"><img src="https://codecov.io/gh/batman1m2001-cyber/Hush-ai/branch/main/graph/badge.svg" alt="Codecov"></a>
+  <a href="https://codecov.io/gh/batman1m2001-cyber/hush-ai"><img src="https://codecov.io/gh/batman1m2001-cyber/hush-ai/branch/main/graph/badge.svg" alt="Codecov"></a>
   <a href="https://batman1m2001-cyber.github.io/Hush-ai/"><img src="https://img.shields.io/badge/docs-mkdocs-blue" alt="Documentation"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python">
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
