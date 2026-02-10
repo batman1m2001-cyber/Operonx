@@ -273,6 +273,72 @@ START >> node_a >> node_b >> END
 inputs = {"data": PARENT["input_data"]}
 ```
 
+### Auto-Output Mapping với >> END
+
+Khi một node kết nối trực tiếp đến END mà không có outputs định nghĩa sẵn, tất cả auto-parsed output keys sẽ tự động forward lên parent graph.
+
+**Helper function** kiểm tra node có outputs explicit:
+
+```python
+def _has_explicit_outputs(node) -> bool:
+    """Kiểm tra node có outputs được user định nghĩa explicit hay không.
+
+    Returns False nếu:
+    - outputs là None
+    - outputs rỗng
+    - outputs chỉ có các Param với value=None (auto-parsed từ function)
+
+    Returns True nếu có bất kỳ output nào có value != None (user set).
+    """
+    if not hasattr(node, "outputs") or node.outputs is None:
+        return False
+    if len(node.outputs) == 0:
+        return False
+    for param in node.outputs.values():
+        if hasattr(param, "value") and param.value is not None:
+            return True
+    return False
+```
+
+**Trong `BaseNode.__rshift__`**:
+
+```python
+def __rshift__(self, other):
+    # ... existing logic ...
+
+    # Check if other is END - auto-set wildcard outputs
+    if getattr(other, "name", None) == "__END__":
+        if not _has_explicit_outputs(self):
+            if self.outputs is None:
+                self.outputs = {}
+            father = getattr(self, "father", None) or PARENT
+            for key in self.outputs:
+                param = self.outputs[key]
+                if hasattr(param, "value") and param.value is None:
+                    param.value = Ref(father, key)
+    # ... continue with edge creation ...
+```
+
+**Ví dụ**:
+
+```python
+with GraphNode(name="demo") as graph:
+    # Không cần định nghĩa outputs
+    node = CodeNode(
+        name="compute",
+        code_fn=lambda: {"a": 1, "b": 2}
+    )
+    START >> node >> END  # Tự động: outputs = {"a": PARENT, "b": PARENT}
+
+result = await engine.run(inputs={})
+# result["a"] == 1, result["b"] == 2
+```
+
+**Lưu ý quan trọng**:
+- Chỉ áp dụng khi node không có explicit outputs
+- Nodes với `outputs={"key": PARENT}` đã định nghĩa sẵn sẽ không bị thay đổi
+- Hoạt động với cả `[node1, node2] >> END`
+
 ## Metadata
 
 ```python

@@ -138,6 +138,36 @@ Node đích chờ **bất kỳ một** soft predecessor hoàn thành. Dùng sau 
 merge["context_docs"] >> PARENT["sources"]
 ```
 
+### Tự động forward outputs với >> END
+
+Khi node kết nối trực tiếp đến END mà không có `outputs` định nghĩa sẵn, tất cả output keys sẽ tự động forward lên parent graph.
+
+```python
+with GraphNode(name="auto-forward") as graph:
+    # Không cần định nghĩa outputs - tự động forward
+    node = CodeNode(
+        name="compute",
+        code_fn=lambda: {"a": 1, "b": 2, "c": 3}
+    )
+    START >> node >> END
+
+engine = Hush(graph)
+result = await engine.run(inputs={})
+# result["a"] == 1, result["b"] == 2, result["c"] == 3
+```
+
+**Lưu ý**: Nếu node đã có `outputs` định nghĩa sẵn, `>> END` sẽ không thay đổi outputs.
+
+```python
+# outputs đã định nghĩa - không bị thay đổi
+node = CodeNode(
+    name="custom",
+    code_fn=lambda: {"result": 42},
+    outputs={"result": PARENT["answer"]}  # Explicit mapping
+)
+START >> node >> END  # Giữ nguyên outputs={"result": PARENT["answer"]}
+```
+
 ## Hush Engine — Chạy Workflow
 
 ```python

@@ -421,6 +421,35 @@ grade_router = if_(PARENT["score"] >= 90, "a").else_("b")
 router = if_(PARENT["score"] >= 90, "a", name="my_router").else_("b")
 ```
 
+### 4. Auto-forward outputs với >> END
+
+Khi node kết nối trực tiếp đến END mà không định nghĩa `outputs`, tất cả outputs sẽ tự động forward lên parent:
+
+```python
+# ❌ Verbose: phải viết outputs
+node = CodeNode(
+    name="compute",
+    code_fn=lambda: {"a": 1, "b": 2},
+    outputs={"a": PARENT, "b": PARENT}
+)
+START >> node >> END
+
+# ✅ Shorthand: auto-forward tất cả outputs
+node = CodeNode(
+    name="compute",
+    code_fn=lambda: {"a": 1, "b": 2}
+)
+START >> node >> END  # result["a"] == 1, result["b"] == 2
+
+# Với @code_node decorator
+@code_node
+def compute():
+    return {"a": 1, "b": 2}
+
+step = compute(name="step")  # Không cần outputs
+START >> step >> END         # Auto-forward
+```
+
 ## Tổng kết
 
 | Shorthand | Config Options | Khi nào dùng |
