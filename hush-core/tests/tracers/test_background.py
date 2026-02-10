@@ -456,19 +456,23 @@ class TestBackgroundPerformance:
         overhead_ms = avg_yes - avg_no
         overhead_pct = (overhead_ms / avg_no) * 100 if avg_no > 0 else 0
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f" Background Tracing Performance Benchmark")
         print(f" {NUM_REQUESTS} requests x 12-node pipeline")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f" {'Metric':<30} {'No Tracer':>12} {'With Tracer':>12}")
-        print(f" {'-'*30} {'-'*12} {'-'*12}")
+        print(f" {'-' * 30} {'-' * 12} {'-' * 12}")
         print(f" {'Avg latency (ms)':<30} {avg_no:>12.3f} {avg_yes:>12.3f}")
         print(f" {'P95 latency (ms)':<30} {p95_no:>12.3f} {p95_yes:>12.3f}")
-        print(f" {'Min latency (ms)':<30} {min(latencies_no_tracer):>12.3f} {min(latencies_with_tracer):>12.3f}")
-        print(f" {'Max latency (ms)':<30} {max(latencies_no_tracer):>12.3f} {max(latencies_with_tracer):>12.3f}")
-        print(f"{'='*60}")
+        print(
+            f" {'Min latency (ms)':<30} {min(latencies_no_tracer):>12.3f} {min(latencies_with_tracer):>12.3f}"
+        )
+        print(
+            f" {'Max latency (ms)':<30} {max(latencies_no_tracer):>12.3f} {max(latencies_with_tracer):>12.3f}"
+        )
+        print(f"{'=' * 60}")
         print(f" Overhead: {overhead_ms:.3f} ms/request ({overhead_pct:.1f}%)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Background tracing overhead should be < 2ms per request for a 12-node graph
         assert overhead_ms < 2.0, (
@@ -515,13 +519,13 @@ class TestBackgroundPerformance:
         avg_latency = sum(latencies) / len(latencies)
         p95 = sorted(latencies)[int(len(latencies) * 0.95)]
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f" Subprocess Fallback Write Latency ({NUM_REQUESTS} writes)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f" Avg: {avg_latency:.3f}ms")
         print(f" P95: {p95:.3f}ms")
         print(f" Max: {max(latencies):.3f}ms")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         bg_sub.shutdown()
 

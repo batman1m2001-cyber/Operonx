@@ -182,7 +182,9 @@ class BackgroundProcess:
                     e,
                 )
 
-    def _start_multiprocessing(self, config_path: Optional[str], dotenv_path: Optional[str]) -> None:
+    def _start_multiprocessing(
+        self, config_path: Optional[str], dotenv_path: Optional[str]
+    ) -> None:
         """Start background worker via multiprocessing.Process."""
         from hush.core.background.worker import _background_worker
 
