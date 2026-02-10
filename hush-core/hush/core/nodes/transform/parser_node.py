@@ -189,6 +189,7 @@ class ParserNode(BaseNode):
 
         return result
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass."""
         return {"format": self.format}

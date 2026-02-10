@@ -147,6 +147,7 @@ class MapNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
         return {

@@ -210,6 +210,7 @@ class LLMChainNode(GraphNode):
         # Build the internal graph
         self.build()
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLMChainNode-specific metadata."""
         metadata = {

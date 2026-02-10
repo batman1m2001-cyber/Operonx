@@ -1,12 +1,10 @@
-<h1><div align="center">
+<div align="center">
 
-# Hush
+<h1><img src="assets/logo.png" alt="Hush Logo" width="48" style="vertical-align: middle"> Hush</h1>
 
-**High-performance workflow engine for GenAI applications**
+**Run anything as a workflow — from LLMs and agents to CPU-bound workloads**
 
-*Run anything as a workflow — from LLMs and agents to CPU-bound workloads*
-
-</div></h1>
+</div>
 
 ![Tests](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg) ![Format](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 

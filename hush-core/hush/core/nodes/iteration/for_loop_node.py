@@ -125,6 +125,7 @@ class ForLoopNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
         return {"each": list(self._each.keys()), "inputs": list(self._broadcast_inputs.keys())}

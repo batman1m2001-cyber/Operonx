@@ -174,7 +174,6 @@ class BaseNode(ABC):
         "father",
         "contain_generation",
         "enabled",
-        "_metadata_cache",
     ]
 
     def __init__(
@@ -210,7 +209,6 @@ class BaseNode(ABC):
 
         self.core: Optional[Callable] = None
         self.contain_generation = contain_generation
-        self._metadata_cache: Optional[Dict[str, Any]] = None
         # Đăng ký vào graph cha
         self.father = get_current()
         # Use getattr to avoid hasattr's double lookup
@@ -765,7 +763,7 @@ class BaseNode(ABC):
                 end_time=end_time,
                 duration_ms=duration_ms,
                 contain_generation=self.contain_generation,
-                metadata=self._cached_metadata(),
+                metadata=self.metadata,
             )
             return _outputs
 
@@ -777,19 +775,12 @@ class BaseNode(ABC):
         """Trả về danh sách tên biến output."""
         return list(self.outputs.keys()) if self.outputs else []
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass. Override ở các subclass."""
         return {}
 
-    def _cached_metadata(self) -> Dict[str, Any]:
-        """Return cached metadata dict. Built once, reused across runs."""
-        cache = self._metadata_cache
-        if cache is not None:
-            return cache
-        cache = self.metadata()
-        self._metadata_cache = cache
-        return cache
-
+    @property
     def metadata(self) -> Dict[str, Any]:
         """Tạo dictionary metadata cho node."""
 
@@ -823,7 +814,7 @@ class BaseNode(ABC):
             if getattr(self, flag, False):
                 result[flag] = True
 
-        result.update({k: v for k, v in self.specific_metadata().items() if v})
+        result.update({k: v for k, v in self.specific_metadata.items() if v})
 
         return result
 

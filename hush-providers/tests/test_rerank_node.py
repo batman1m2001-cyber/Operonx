@@ -68,7 +68,7 @@ class TestRerankNode:
 
             node = RerankNode(name="metadata_test", resource_key="bge-m3")
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["model"] == "bge-m3"
 
     @pytest.mark.asyncio

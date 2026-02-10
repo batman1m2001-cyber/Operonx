@@ -855,7 +855,7 @@ class GraphNode(BaseNode):
                 end_time=end_time,
                 duration_ms=duration_ms,
                 contain_generation=False,
-                metadata=self._cached_metadata(),
+                metadata=self.metadata,
             )
             return _outputs
 

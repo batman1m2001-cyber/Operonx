@@ -340,6 +340,7 @@ class PromptNode(BaseNode):
 
         return {"messages": messages}
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return prompt-specific metadata."""
         metadata = {}

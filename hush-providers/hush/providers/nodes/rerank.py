@@ -152,6 +152,7 @@ class RerankNode(BaseNode):
 
         return {"reranks": reranked_docs}
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return rerank-specific metadata dictionary."""
         return {"model": self.resource_key}

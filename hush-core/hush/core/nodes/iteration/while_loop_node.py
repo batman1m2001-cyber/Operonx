@@ -187,6 +187,7 @@ class WhileLoopNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
         return {"max_iterations": self._max_iterations, "stop_condition": self._stop_condition}

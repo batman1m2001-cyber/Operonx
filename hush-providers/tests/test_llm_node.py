@@ -68,7 +68,7 @@ class TestLLMNode:
 
         node = LLMNode(name="metadata_test", resource_key="gpt-4o")
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert metadata["model"] == "gpt-4o"
 
 
@@ -271,7 +271,7 @@ class TestLLMNodeLoadBalancing:
             name="meta_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.6, 0.4]
         )
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert metadata["load_balancing"] is True
         assert metadata["ratios"] == [0.6, 0.4]
 
@@ -327,7 +327,7 @@ class TestLLMNodeBatchMode:
 
         node = LLMNode(name="batch_meta_test", resource_key="gpt-4o", batch_mode=True)
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert metadata["batch_mode"] is True
 
     def test_batch_mode_coordinator_singleton(self, hub):
@@ -450,7 +450,7 @@ class TestLLMNodeFallback:
             name="meta_fallback_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"]
         )
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert "fallback" in metadata
         assert metadata["fallback"] == ["or-claude-4-sonnet"]
 
@@ -463,7 +463,7 @@ class TestLLMNodeFallback:
 
         node = LLMNode(name="no_fallback_test", resource_key="gpt-4o")
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert "fallback" not in metadata
 
     @pytest.mark.asyncio

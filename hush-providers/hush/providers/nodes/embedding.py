@@ -98,6 +98,7 @@ class EmbeddingNode(BaseNode):
                 original_error=e,
             ) from e
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return embedding-specific metadata dictionary."""
         return {"model": self.resource_key}

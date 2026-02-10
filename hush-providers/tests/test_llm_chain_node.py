@@ -141,7 +141,7 @@ class TestLLMChainNode:
                 parser="json",
             )
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["resource_key"] == "gpt-4"
             assert metadata["extract"] == ["field: str"]
             assert metadata["parser"] == "json"
@@ -188,7 +188,7 @@ class TestLLMChainNodeLoadBalancing:
                 inputs={"template": "Test"},
             )
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["resource_key"] == ["gpt-4o", "claude-sonnet"]
             assert metadata["load_balancing"] is True
             assert metadata["ratios"] == [0.6, 0.4]
@@ -232,7 +232,7 @@ class TestLLMChainNodeFallback:
                 inputs={"template": "Test"},
             )
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["fallback"] == ["claude-sonnet"]
 
 
@@ -310,7 +310,7 @@ class TestLLMChainNodeResponseFormat:
                 inputs={"template": "Test"},
             )
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["response_format"] == {"type": "json_object"}
 
 
@@ -338,7 +338,7 @@ class TestLLMChainNodeCombined:
             assert node.ratios == [0.8, 0.2]
             assert node.fallback == ["claude-sonnet"]
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["load_balancing"] is True
             assert metadata["ratios"] == [0.8, 0.2]
             assert metadata["fallback"] == ["claude-sonnet"]
@@ -366,7 +366,7 @@ class TestLLMChainNodeCombined:
                 },
             )
 
-            metadata = node.specific_metadata()
+            metadata = node.specific_metadata
             assert metadata["resource_key"] == ["gpt-4o", "gpt-4o-mini"]
             assert metadata["load_balancing"] is True
             assert metadata["ratios"] == [0.7, 0.3]

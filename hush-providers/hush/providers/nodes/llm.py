@@ -575,11 +575,12 @@ class LLMNode(BaseNode):
                 model=_outputs.get("model_used") or selected_resource_key,
                 usage=_outputs.get("tokens_used"),
                 cost=cost,
-                metadata=self.metadata(),
+                metadata=self.metadata,
             )
 
         return _outputs
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLM-specific metadata dictionary."""
         metadata = {

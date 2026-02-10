@@ -148,6 +148,7 @@ class BranchNode(BaseNode):
         """Lấy target đã định tuyến từ state."""
         return state[self.full_name, "target", context_id]
 
+    @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Trả về metadata riêng của subclass."""
         return {

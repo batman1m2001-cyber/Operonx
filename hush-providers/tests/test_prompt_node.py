@@ -273,7 +273,7 @@ class TestPromptNodeUnified:
             inputs={"template": {"system": "System prompt", "user": "User prompt"}},
         )
 
-        metadata = node.specific_metadata()
+        metadata = node.specific_metadata
         assert "template" in metadata
         assert metadata["template"]["system"] == "System prompt"
         assert metadata["template"]["user"] == "User prompt"
