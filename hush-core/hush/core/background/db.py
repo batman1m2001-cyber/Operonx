@@ -6,13 +6,34 @@ This module handles all SQLite interactions:
 - Iteration group creation for loop nodes
 """
 
-import json
 import os
 import sqlite3
 import tempfile
 from pathlib import Path
 from time import time
 from typing import Any, Dict, List, Optional, Tuple
+
+import orjson
+
+# Max JSON payload size (1MB) — larger payloads are truncated to prevent DB bloat
+_MAX_JSON_SIZE = 1024 * 1024
+
+
+def _json_dumps(obj: Any) -> Optional[str]:
+    """Serialize to JSON string using orjson. Returns None for None input.
+
+    Truncates payloads exceeding 1MB with a marker to prevent DB bloat
+    from large LLM responses or embedding vectors.
+    """
+    if obj is None:
+        return None
+    try:
+        raw = orjson.dumps(obj).decode()
+        if len(raw) > _MAX_JSON_SIZE:
+            return raw[: _MAX_JSON_SIZE - 50] + "...[TRUNCATED]"
+        return raw
+    except (TypeError, ValueError):
+        return f"<non-serializable: {type(obj).__name__}>"
 
 # Default database path - can be overridden via HUSH_TRACES_DB env var
 DEFAULT_DB_PATH = Path(os.environ.get("HUSH_TRACES_DB", Path.home() / ".hush" / "traces.db"))
@@ -130,10 +151,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     return _connect_and_init(":memory:")
 
 
-def write_trace(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
-    """Write a single trace to database."""
-    now = time()
-
+def _prepare_trace_row(data: Dict[str, Any], now: float) -> tuple:
+    """Prepare a single trace row tuple for insertion."""
     # Calculate duration_ms from start_time/end_time if not provided
     duration_ms = data.get("duration_ms")
     if duration_ms is None and data.get("start_time") and data.get("end_time"):
@@ -146,42 +165,59 @@ def write_trace(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
         except (ValueError, TypeError):
             pass
 
-    conn.execute(
-        """
-        INSERT INTO traces (
-            request_id, workflow_name, node_name, node_type, parent_name, context_id,
-            execution_order, start_time, end_time, duration_ms,
-            model, prompt_tokens, completion_tokens, total_tokens, cost_usd,
-            input, output, user_id, session_id,
-            contain_generation, metadata, status, retry_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'writing', 0, ?)
-    """,
-        (
-            data["request_id"],
-            data["workflow_name"],
-            data["node_name"],
-            data.get("node_type"),
-            data.get("parent_name"),
-            data.get("context_id"),
-            data.get("execution_order", 0),
-            data.get("start_time"),
-            data.get("end_time"),
-            duration_ms,
-            data.get("model"),
-            data.get("prompt_tokens"),
-            data.get("completion_tokens"),
-            data.get("total_tokens"),
-            data.get("cost_usd"),
-            json.dumps(data.get("input_data")) if data.get("input_data") else None,
-            json.dumps(data.get("output_data")) if data.get("output_data") else None,
-            data.get("user_id"),
-            data.get("session_id"),
-            1 if data.get("contain_generation") else 0,
-            json.dumps(data.get("metadata")) if data.get("metadata") else None,
-            now,
-        ),
+    return (
+        data["request_id"],
+        data["workflow_name"],
+        data["node_name"],
+        data.get("node_type"),
+        data.get("parent_name"),
+        data.get("context_id"),
+        data.get("execution_order", 0),
+        data.get("start_time"),
+        data.get("end_time"),
+        duration_ms,
+        data.get("model"),
+        data.get("prompt_tokens"),
+        data.get("completion_tokens"),
+        data.get("total_tokens"),
+        data.get("cost_usd"),
+        _json_dumps(data.get("input_data")),
+        _json_dumps(data.get("output_data")),
+        data.get("user_id"),
+        data.get("session_id"),
+        1 if data.get("contain_generation") else 0,
+        _json_dumps(data.get("metadata")),
+        now,
     )
+
+
+_INSERT_SQL = """
+    INSERT INTO traces (
+        request_id, workflow_name, node_name, node_type, parent_name, context_id,
+        execution_order, start_time, end_time, duration_ms,
+        model, prompt_tokens, completion_tokens, total_tokens, cost_usd,
+        input, output, user_id, session_id,
+        contain_generation, metadata, status, retry_count, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'writing', 0, ?)
+"""
+
+
+def write_traces_batch(conn: sqlite3.Connection, traces: List[Dict[str, Any]]) -> None:
+    """Write multiple traces in a single transaction (batch optimization).
+
+    Uses executemany + single commit instead of individual execute+commit per trace.
+    """
+    if not traces:
+        return
+    now = time()
+    rows = [_prepare_trace_row(data, now) for data in traces]
+    conn.executemany(_INSERT_SQL, rows)
     conn.commit()
+
+
+def write_trace(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
+    """Write a single trace to database."""
+    write_traces_batch(conn, [data])
 
 
 def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
@@ -233,11 +269,11 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
         r = cur.fetchone()
         if r:
             try:
-                inp = json.loads(r[0]) if r[0] else {}
-                out = json.loads(r[1]) if r[1] else {}
-                meta = json.loads(r[2]) if r[2] else {}
+                inp = orjson.loads(r[0]) if r[0] else {}
+                out = orjson.loads(r[1]) if r[1] else {}
+                meta = orjson.loads(r[2]) if r[2] else {}
                 parent_loop_cache[parent_name] = {"input": inp, "output": out, "metadata": meta}
-            except (json.JSONDecodeError, TypeError):
+            except (orjson.JSONDecodeError, TypeError):
                 parent_loop_cache[parent_name] = None
         else:
             parent_loop_cache[parent_name] = None
@@ -357,7 +393,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
                     else:
                         sliced_input[field_name] = field_value
                 if sliced_input:
-                    iter_input = json.dumps(sliced_input)
+                    iter_input = _json_dumps(sliced_input)
 
                 sliced_output = {}
                 for field_name, field_value in parent_output.items():
@@ -368,7 +404,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
                     else:
                         sliced_output[field_name] = field_value
                 if sliced_output:
-                    iter_output = json.dumps(sliced_output)
+                    iter_output = _json_dumps(sliced_output)
 
         iter_metadata = {
             "_synthetic": True,
@@ -406,7 +442,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
                 iter_output,
                 group["user_id"],
                 group["session_id"],
-                json.dumps(iter_metadata),
+                _json_dumps(iter_metadata),
                 now,
             ),
         )
@@ -430,10 +466,10 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
 def mark_complete(conn: sqlite3.Connection, data: Dict[str, Any]) -> None:
     """Mark traces as ready for flushing or flushed for local tracers."""
     tracer_type = data["tracer_type"]
-    tracer_config_json = json.dumps(data.get("tracer_config", {}))
+    tracer_config_json = _json_dumps(data.get("tracer_config", {}))
     request_id = data["request_id"]
     tags = data.get("tags")
-    tags_json = json.dumps(tags) if tags else None
+    tags_json = _json_dumps(tags)
 
     # Create synthetic iteration groups before finalizing
     create_iteration_groups(conn, request_id)

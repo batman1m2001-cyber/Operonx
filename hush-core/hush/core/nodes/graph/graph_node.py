@@ -156,6 +156,7 @@ class GraphNode(BaseNode):
         "_edges",
         "_edges_lookup",
         "_is_building",
+        "_compiled_adj",
     ]
 
     type: NodeType = "graph"
@@ -174,6 +175,7 @@ class GraphNode(BaseNode):
         self.nexts = defaultdict(list)
         self.flowtype_map = BiMap[str, NodeFlowType]()
         self.has_soft_preds = set()  # Các node có soft predecessor
+        self._compiled_adj = {}
 
     def __enter__(self):
         """Vào chế độ context manager."""
@@ -334,6 +336,16 @@ class GraphNode(BaseNode):
         # Run full validation (errors will raise, warnings will be logged)
         result = self.validate()
         result.raise_if_errors()
+
+        # Compile adjacency list for faster traversal at runtime
+        self._compiled_adj = {}
+        for name in self._nodes:
+            adj = []
+            for next_node in self.nexts[name]:
+                edge = self._edges_lookup.get((name, next_node))
+                is_soft = bool(edge and edge.soft)
+                adj.append((next_node, is_soft))
+            self._compiled_adj[name] = adj
 
         self._is_building = False
         self._post_build()
@@ -759,8 +771,7 @@ class GraphNode(BaseNode):
 
                 # Cache dict lookups for performance
                 nodes = self._nodes
-                nexts = self.nexts
-                edges_lookup = self._edges_lookup
+                compiled_adj = self._compiled_adj
 
                 for task in done_tasks:
                     node_name = task.get_name()
@@ -771,32 +782,32 @@ class GraphNode(BaseNode):
                     if node.type == "branch":
                         branch_target = node.get_target(state, context_id)
                         if branch_target != END.name:
-                            next_nodes = [branch_target]
+                            # Find the selected target in compiled adjacency
+                            targets = []
+                            for tgt, soft in compiled_adj[node_name]:
+                                if tgt == branch_target:
+                                    targets.append((tgt, soft))
+                                    break
+                            else:
+                                # Target not in connections — detailed error
+                                available_nodes = sorted(ready_count.keys())
+                                raise KeyError(
+                                    f"\n"
+                                    f"Node '{branch_target}' not found in graph '{self.name}'.\n"
+                                    f"\n"
+                                    f"  Source: Branch node '{node_name}' routed to '{branch_target}'\n"
+                                    f"  Available nodes: {available_nodes}\n"
+                                    f"\n"
+                                    f'  This usually means the target string in if_(..., "{branch_target}") '
+                                    f"doesn't match any node's actual name.\n"
+                                    f"  Check that your branch targets match the 'name' parameter of the target nodes."
+                                )
                         else:
-                            next_nodes = []
+                            targets = []
                     else:
-                        next_nodes = nexts[node_name]
+                        targets = compiled_adj[node_name]
 
-                    for next_node in next_nodes:
-                        # Validate node exists in graph
-                        if next_node not in ready_count:
-                            available_nodes = sorted(ready_count.keys())
-                            raise KeyError(
-                                f"\n"
-                                f"Node '{next_node}' not found in graph '{self.name}'.\n"
-                                f"\n"
-                                f"  Source: Branch node '{node_name}' routed to '{next_node}'\n"
-                                f"  Available nodes: {available_nodes}\n"
-                                f"\n"
-                                f'  This usually means the target string in if_(..., "{next_node}") '
-                                f"doesn't match any node's actual name.\n"
-                                f"  Check that your branch targets match the 'name' parameter of the target nodes."
-                            )
-
-                        # Kiểm tra edge type
-                        edge = edges_lookup.get((node_name, next_node))
-                        is_soft = edge and edge.soft
-
+                    for next_node, is_soft in targets:
                         if is_soft:
                             # Soft edge: chỉ đếm 1 lần cho tất cả soft predecessors
                             if next_node in soft_satisfied:

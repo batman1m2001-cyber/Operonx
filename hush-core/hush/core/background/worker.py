@@ -10,7 +10,6 @@ Usage as subprocess:
 """
 
 import argparse
-import json
 import os
 import queue
 import signal
@@ -22,7 +21,9 @@ from pathlib import Path
 from time import sleep, time
 from typing import Optional
 
-from hush.core.background.db import fetch_pending, init_db, mark_complete, write_trace
+import orjson
+
+from hush.core.background.db import fetch_pending, init_db, mark_complete, write_traces_batch
 from hush.core.background.flush import dispatch_flush, rebuild_flush_data
 
 
@@ -49,6 +50,7 @@ def worker_loop(
     """
     last_flush_time = time()
     running = True
+    pending_traces = []  # Batch trace writes for better performance
 
     while running:
         try:
@@ -68,12 +70,25 @@ def worker_loop(
                         running = False
                         break
                     elif task_type == "trace_write":
-                        write_trace(conn, data)
+                        pending_traces.append(data)
+                        # Flush batch when it reaches 10 items
+                        if len(pending_traces) >= 10:
+                            write_traces_batch(conn, pending_traces)
+                            pending_traces.clear()
                     elif task_type == "trace_complete":
+                        # Flush any pending traces before marking complete
+                        if pending_traces:
+                            write_traces_batch(conn, pending_traces)
+                            pending_traces.clear()
                         mark_complete(conn, data)
 
             except Exception as e:
                 print(f"[BackgroundWorker] Error processing queue: {e}")
+
+            # Flush remaining batched traces after draining queue
+            if pending_traces:
+                write_traces_batch(conn, pending_traces)
+                pending_traces.clear()
 
             if not running:
                 break
@@ -222,9 +237,9 @@ def _stdin_reader(pipe, task_queue: queue.Queue) -> None:
             if not line:
                 continue
             try:
-                task_data = json.loads(line)
+                task_data = orjson.loads(line)
                 task_queue.put(task_data)
-            except json.JSONDecodeError as e:
+            except orjson.JSONDecodeError as e:
                 print(f"[BackgroundWorker] Invalid JSON from stdin: {e}")
     except Exception as e:
         print(f"[BackgroundWorker] Stdin reader error: {e}")

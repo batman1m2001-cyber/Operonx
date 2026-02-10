@@ -269,14 +269,9 @@ class TestEngineResilience:
             )
             START >> node >> END
 
-        # Mock get_background to raise
-        with patch(
-            "hush.core.engine.get_background",
-            side_effect=RuntimeError("background broken"),
-        ):
-            # Should NOT raise — engine should catch and warn
-            engine = Hush(graph)
-            assert engine.name == "resilience-test"
+        # Engine init doesn't touch background — should always succeed
+        engine = Hush(graph)
+        assert engine.name == "resilience-test"
 
     @pytest.mark.asyncio
     async def test_engine_runs_without_background(self):
@@ -290,13 +285,14 @@ class TestEngineResilience:
             )
             START >> node >> END
 
+        # Mock get_background at its source — lazy import in state.py pulls from here
         with patch(
-            "hush.core.engine.get_background",
+            "hush.core.background.process.get_background",
             side_effect=RuntimeError("background broken"),
         ):
             engine = Hush(graph)
 
-        # Workflow should still execute correctly
+        # Workflow should still execute correctly (no tracer = no background needed)
         result = await engine.run(inputs={"x": 21})
         assert result["result"] == 42
 

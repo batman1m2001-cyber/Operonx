@@ -7,7 +7,6 @@ subprocess.Popen when running inside daemon workers (Gunicorn/Uvicorn).
 
 import atexit
 import collections
-import json
 import multiprocessing
 import os
 import subprocess
@@ -53,9 +52,11 @@ class _PipeQueue:
 
     def put(self, data: Dict[str, Any]) -> None:
         """Write a task as a JSON line to the pipe."""
-        line = json.dumps(data) + "\n"
+        import orjson
+
+        line = orjson.dumps(data) + b"\n"
         with self._lock:
-            self._pipe.write(line.encode())
+            self._pipe.write(line)
             self._pipe.flush()
 
 

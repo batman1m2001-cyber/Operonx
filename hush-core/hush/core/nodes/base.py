@@ -722,6 +722,8 @@ class BaseNode(ABC):
                 _outputs = await self.core(**_inputs)
             else:
                 _outputs = self.core(**_inputs)
+                # Yield control after synchronous CPU-bound operations
+                await asyncio.sleep(0)
 
             self.store_result(state, _outputs, context_id)
 
@@ -741,6 +743,15 @@ class BaseNode(ABC):
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
+
+            # Performance monitoring: log slow nodes (>100ms)
+            if duration_ms > 100:
+                LOGGER.warning(
+                    "[title]\\[%s][/title] Slow node [highlight]%s[/highlight]: [red]%.1fms[/red]",
+                    request_id,
+                    self.full_name,
+                    duration_ms,
+                )
 
             # Record trace metadata for observability
             state.record_trace_metadata(
