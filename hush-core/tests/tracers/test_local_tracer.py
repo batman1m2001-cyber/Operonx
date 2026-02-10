@@ -541,8 +541,8 @@ class TestTracerTags:
             tracer=tracer,
         )
 
-        # Give background process time to write
-        sleep(1.0)
+        # Shutdown flushes all pending background work before we query
+        shutdown_background()
 
         # Verify tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
@@ -563,9 +563,6 @@ class TestTracerTags:
                     assert "high-value" in tags, "Expected high-value tag for result > 10"
 
         assert found_tags, "Expected dynamic tags to be stored"
-
-        # Cleanup
-        shutdown_background()
 
     @pytest.mark.asyncio
     async def test_workflow_with_merged_tags(self):
@@ -599,8 +596,8 @@ class TestTracerTags:
             tracer=tracer,
         )
 
-        # Give background process time to write
-        sleep(1.0)
+        # Shutdown flushes all pending background work before we query
+        shutdown_background()
 
         # Verify merged tags in database
         conn = sqlite3.connect(str(DEFAULT_DB_PATH))
@@ -623,9 +620,6 @@ class TestTracerTags:
                     found_merged = True
 
         assert found_merged, "Expected both static and dynamic tags to be merged"
-
-        # Cleanup
-        shutdown_background()
 
     @pytest.mark.asyncio
     async def test_duplicate_tags_are_deduplicated(self):
