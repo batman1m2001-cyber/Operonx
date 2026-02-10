@@ -67,6 +67,27 @@ class SoftEdge:
         return self.node.__rshift__(other)
 
 
+def _has_explicit_outputs(node) -> bool:
+    """Kiểm tra node có outputs được user định nghĩa explicit hay không.
+
+    Returns True nếu:
+    - outputs là None (chưa set)
+    - outputs rỗng
+    - outputs chỉ có các Param với value=None (auto-parsed từ function)
+
+    Returns False nếu có bất kỳ output nào có value != None (user set).
+    """
+    if not hasattr(node, "outputs") or node.outputs is None:
+        return False
+    if len(node.outputs) == 0:
+        return False
+    # Kiểm tra nếu có output nào có value (user đã set explicit)
+    for param in node.outputs.values():
+        if hasattr(param, "value") and param.value is not None:
+            return True
+    return False
+
+
 # Base init keys shared by ALL nodes (from BaseNode.__init__)
 _BASE_INIT_KEYS = frozenset(
     {
@@ -442,6 +463,7 @@ class BaseNode(ABC):
             a >> b      # hard edge
             a >> ~b     # soft edge (b wrapped trong SoftEdge)
             a >> [b, c] # hard edges đến nhiều nodes
+            a >> END    # auto-set outputs wildcard
         """
         edge_type = "condition" if self.type == "branch" else "normal"
         add_edge = getattr(self.father, "add_edge", None)
@@ -462,6 +484,17 @@ class BaseNode(ABC):
                         add_edge(self.name, node.name, edge_type)
             return other
         elif getattr(other, "name", None) is not None:
+            # Check if other is END - auto-set wildcard outputs
+            if getattr(other, "name", None) == "__END__":
+                if not _has_explicit_outputs(self):
+                    if self.outputs is None:
+                        self.outputs = {}
+                    father = getattr(self, "father", None) or PARENT
+                    for key in self.outputs:
+                        param = self.outputs[key]
+                        # Only update if param is a Param with value=None
+                        if hasattr(param, "value") and param.value is None:
+                            param.value = Ref(father, key)
             if add_edge is not None:
                 add_edge(self.name, other.name, edge_type)
             return other
@@ -850,7 +883,10 @@ class DummyNode(BaseNode):
         return super().__rshift__(other)
 
     def __rrshift__(self, other):
-        """[nodes] >> START or [nodes] >> END"""
+        """[nodes] >> START or [nodes] >> END
+
+        Khi node >> END, tự động set outputs = {"*": PARENT} nếu chưa có.
+        """
         current_graph = get_current()
         if current_graph and hasattr(current_graph, "add_edge"):
             if self == START:
@@ -862,25 +898,51 @@ class DummyNode(BaseNode):
                 return self
 
             elif self == END:
+                # Auto-set outputs: mỗi output key -> father[key]
+                def _set_wildcard_outputs(node):
+                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
+                        if node.outputs is None:
+                            node.outputs = {}
+                        father = getattr(node, "father", None) or PARENT
+                        for key in node.outputs:
+                            param = node.outputs[key]
+                            if hasattr(param, "value") and param.value is None:
+                                param.value = Ref(father, key)
+
                 if isinstance(other, list):
                     for node in other:
+                        _set_wildcard_outputs(node)
                         current_graph.add_edge(node.name, self.name)
                 elif hasattr(other, "name"):
+                    _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name)
                 return self
 
         return self
 
     def __rlshift__(self, other):
-        """node >> END"""
+        """node >> END (deprecated path, __rrshift__ handles this)"""
         if self == END:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):
+                # Auto-set outputs: mỗi output key -> father[key]
+                def _set_wildcard_outputs(node):
+                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
+                        if node.outputs is None:
+                            node.outputs = {}
+                        father = getattr(node, "father", None) or PARENT
+                        for key in node.outputs:
+                            param = node.outputs[key]
+                            if hasattr(param, "value") and param.value is None:
+                                param.value = Ref(father, key)
+
                 if isinstance(other, list):
                     for node in other:
+                        _set_wildcard_outputs(node)
                         current_graph.add_edge(node.name, self.name)
                     return self
                 elif hasattr(other, "name"):
+                    _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name)
                     return self
         return self
@@ -904,10 +966,23 @@ class DummyNode(BaseNode):
         current_graph = get_current()
         if current_graph and hasattr(current_graph, "add_edge"):
             if self == END:
+                # Auto-set outputs: mỗi output key -> father[key]
+                def _set_wildcard_outputs(node):
+                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
+                        if node.outputs is None:
+                            node.outputs = {}
+                        father = getattr(node, "father", None) or PARENT
+                        for key in node.outputs:
+                            param = node.outputs[key]
+                            if hasattr(param, "value") and param.value is None:
+                                param.value = Ref(father, key)
+
                 if isinstance(other, list):
                     for node in other:
+                        _set_wildcard_outputs(node)
                         current_graph.add_edge(node.name, self.name, soft=True)
                 elif hasattr(other, "name"):
+                    _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name, soft=True)
                 return self
         return self
