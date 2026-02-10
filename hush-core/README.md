@@ -86,10 +86,10 @@ inputs={"value": other_node["output_key"]}
 from hush.core.tracers import LocalTracer
 
 tracer = LocalTracer()  # ~/.hush/traces.db
-engine = Hush(graph, tracer=tracer)
-await engine.run()
+engine = Hush(graph)
+await engine.run(inputs={...}, tracer=tracer)
 
-# Xem traces: python -m hush.core.ui.server
+# Xem traces: VS Code extension hush-vscode-traceview
 ```
 
 ## Documentation

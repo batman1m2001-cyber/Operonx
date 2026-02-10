@@ -150,16 +150,16 @@ def mybackend_plugin(config: dict):
 
 ### 4. Export in `__init__.py`
 
-## Subprocess-Based Flushing
+## Background Flushing
 
-Tracers use subprocess-based flushing to avoid blocking the main workflow:
+Tracers use a long-running background process to avoid blocking the main workflow:
 
-1. During workflow execution, trace data is collected in memory
-2. After workflow completes, `tracer.async_flush()` spawns a subprocess
-3. Subprocess runs `Tracer.flush(flush_data)` with serialized trace data
+1. During workflow execution, trace data is written incrementally to SQLite via the background process
+2. After workflow completes, `tracer.flush_in_background()` marks traces as ready for flushing
+3. The background worker calls `Tracer.flush(flush_data)` with the collected trace data
 4. Main process continues without waiting
 
-**Important**: The `flush()` method runs in a subprocess, so it must:
+**Important**: The `flush()` method runs in the background worker process, so it must:
 - Re-import all dependencies
 - Use only data from `flush_data` dict
 - Not access any shared state

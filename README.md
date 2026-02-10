@@ -1,31 +1,28 @@
+<h1><div align="center">
+
 # Hush
 
-> Async workflow orchestration engine cho GenAI applications.
+**High-performance workflow engine for GenAI applications**
 
-## Features
+*Run anything as a workflow — from LLMs and agents to CPU-bound workloads*
 
-- **DAG-based workflows** - Định nghĩa workflows với nodes và edges
-- **Async-first** - Native async execution với parallel processing
-- **Built-in tracing** - Observability với SQLite và external backends
-- **Provider agnostic** - OpenAI, Azure, Gemini, vLLM, ONNX
-- **Type-safe state** - O(1) state access với compile-time validation
+</div></h1>
 
-## Cài đặt
+![Tests](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg) ![Format](https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-```bash
-# Khuyến nghị — đầy đủ cho phát triển
-uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+## Why Hush?
 
-# Nhẹ hơn — chỉ OpenAI + Langfuse
-uv pip install "hush-ai[openai,langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
-
-# Tối thiểu — chỉ workflow engine
-uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
-```
-
-Xem chi tiết tại [Cài đặt và Thiết lập](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md).
+- **DAG-based workflows** — define complex pipelines with nodes and edges, inspired by Airflow operators
+- **Async-first** — native async execution with automatic parallel processing
+- **Built-in tracing** — full observability via SQLite + external backends (Langfuse, OpenTelemetry)
+- **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
+- **Type-safe state** — O(1) state access with compile-time validation, zero magic
 
 ## Quick Start
+
+```bash
+uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+```
 
 ```python
 import asyncio
@@ -48,7 +45,9 @@ async def main():
 asyncio.run(main())
 ```
 
-## Sử dụng với LLM
+> Want more? See the [quickstart guide](hush-tutorial/docs/02-quickstart.md) or [runnable examples](hush-tutorial/examples/).
+
+## LLM Integration
 
 ```python
 from hush.core import Hush, GraphNode, START, END, PARENT
@@ -59,7 +58,7 @@ async def main():
         prompt = PromptNode(
             name="prompt",
             inputs={
-                "prompt": {"system": "Bạn là trợ lý AI.", "user": "{question}"},
+                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
                 "question": PARENT["question"]
             },
             outputs={"messages": PARENT}
@@ -73,40 +72,58 @@ async def main():
         START >> prompt >> llm >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={"question": "Python là gì?"})
+    result = await engine.run(inputs={"question": "What is Python?"})
     print(result["answer"])
-
-asyncio.run(main())
 ```
 
-## Documentation
+## Installation
 
-| Tài liệu | Mô tả |
-|----------|-------|
-| [hush-tutorial/docs/](hush-tutorial/docs/) | User documentation - tutorials, guides, examples |
-| [architecture/](architecture/) | Internal documentation - cho developers và AI |
+```bash
+# Full (all providers + observability)
+uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+
+# OpenAI + Langfuse
+uv pip install "hush-ai[openai,langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+
+# Core only (no external dependencies)
+uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+```
+
+See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for details.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [hush-core](hush-core/) | Core workflow engine |
-| [hush-providers](hush-providers/) | LLM, embedding, reranking providers |
-| [hush-observability](hush-observability/) | Tracing backends (Langfuse, Phoenix) |
-| [hush-tutorial](hush-tutorial/) | Tutorials và examples |
-| [hush-vscode-traceview](hush-vscode-traceview/) | VS Code extension |
+| [hush-core](hush-core/) | Core workflow engine — nodes, state, tracing, execution |
+| [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations |
+| [hush-observability](hush-observability/) | External tracing backends (Langfuse, OpenTelemetry) |
+| [hush-tutorial](hush-tutorial/) | Documentation (Vietnamese) and runnable examples |
+| [hush-vscode-traceview](hush-vscode-traceview/) | VS Code extension for trace visualization |
 
-## Local Trace Viewer
+## Trace Viewer
 
-Traces được tự động lưu vào `~/.hush/traces.db`. Xem traces bằng:
+Traces are automatically saved to `~/.hush/traces.db`. View them in VS Code:
+
+1. Install the extension from [hush-vscode-traceview](hush-vscode-traceview/)
+2. Open Command Palette → **Hush: Open Trace Viewer**
+
+## Documentation
+
+| Need | Go to |
+|------|-------|
+| Learning from scratch | [hush-tutorial/docs/](hush-tutorial/docs/) |
+| Runnable examples | [hush-tutorial/examples/](hush-tutorial/examples/) |
+| Deep internals | [architecture/](architecture/) |
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
 
 ```bash
-# Web UI
-python -m hush.core.ui.server
-# Mở http://localhost:8765
+git clone https://github.com/batman1m2001-cyber/Hush-ai.git
+cd Hush-ai/hush-core && uv sync --all-extras && uv run pytest
 ```
-
-Hoặc cài VS Code extension: [hush-vscode-traceview](hush-vscode-traceview/)
 
 ## License
 

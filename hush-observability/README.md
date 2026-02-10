@@ -21,26 +21,24 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 ## Quick Start
 
 ```python
-from hush.core import RESOURCE_HUB
-from hush.observability import LangfuseConfig
-
-# Đăng ký tracer config
-config = LangfuseConfig(
-    public_key="pk-...",
-    secret_key="sk-...",
-    host="https://cloud.langfuse.com"
-)
-RESOURCE_HUB.register(config, registry_key="tracer:langfuse")
-
-# Sử dụng với workflow
 from hush.core import Hush, GraphNode, START, END
+from hush.observability import LangfuseTracer
 
-with GraphNode(name="demo", tracer_key="langfuse") as graph:
+# Định nghĩa workflow
+with GraphNode(name="demo") as graph:
     # ... định nghĩa nodes
     pass
 
+# Tạo tracer
+tracer = LangfuseTracer(
+    resource_key="langfuse:default",
+    tags=["production"]
+)
+
+# Chạy workflow với tracer
 engine = Hush(graph)
-await engine.run()  # Traces tự động gửi đến Langfuse
+result = await engine.run(inputs={...}, tracer=tracer)
+# Traces tự động gửi đến Langfuse
 ```
 
 ## Supported Backends
