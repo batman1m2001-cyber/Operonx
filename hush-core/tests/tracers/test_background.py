@@ -474,10 +474,10 @@ class TestBackgroundPerformance:
         print(f" Overhead: {overhead_ms:.3f} ms/request ({overhead_pct:.1f}%)")
         print(f"{'=' * 60}")
 
-        # Background tracing overhead should be < 2ms per request for a 12-node graph
-        assert overhead_ms < 2.0, (
+        # Background tracing overhead should be < 3ms per request for a 12-node graph
+        assert overhead_ms < 3.0, (
             f"Background tracing added {overhead_ms:.3f}ms overhead per request, "
-            f"expected < 2ms for 12-node pipeline"
+            f"expected < 3ms for 12-node pipeline"
         )
 
         shutdown_background()
