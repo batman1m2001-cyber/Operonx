@@ -150,17 +150,19 @@ class TestSubprocessFallback:
                 node_name="test-node",
             )
 
-            # Give subprocess time to process
-            sleep(1.0)
-
-            # Verify trace was written
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM traces WHERE request_id = ?", ("subprocess-test-001",)
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            # Poll until trace appears (subprocess startup can be slow on CI)
+            rows = []
+            for _ in range(50):  # up to 5 seconds
+                sleep(0.1)
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute(
+                    "SELECT * FROM traces WHERE request_id = ?", ("subprocess-test-001",)
+                )
+                rows = cursor.fetchall()
+                conn.close()
+                if len(rows) == 1:
+                    break
 
             assert len(rows) == 1
             assert rows[0]["node_name"] == "test-node"
@@ -184,7 +186,18 @@ class TestSubprocessFallback:
                 node_name="node-1",
                 execution_order=0,
             )
-            sleep(0.5)
+
+            # Poll until trace is written
+            for _ in range(50):
+                sleep(0.1)
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT * FROM traces WHERE request_id = ?", ("sub-complete-001",)
+                ).fetchone()
+                conn.close()
+                if row is not None:
+                    break
 
             bg.mark_complete(
                 request_id="sub-complete-001",
@@ -192,17 +205,20 @@ class TestSubprocessFallback:
                 tracer_config={"name": "test"},
                 tags=["subprocess-test"],
             )
-            sleep(0.5)
 
-            # Verify status and tags
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT status, tags FROM traces WHERE request_id = ?",
-                ("sub-complete-001",),
-            )
-            row = cursor.fetchone()
-            conn.close()
+            # Poll until mark_complete is processed
+            row = None
+            for _ in range(50):
+                sleep(0.1)
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT status, tags FROM traces WHERE request_id = ?",
+                    ("sub-complete-001",),
+                ).fetchone()
+                conn.close()
+                if row and row["status"] == "flushed":
+                    break
 
             assert row["status"] == "flushed"
             assert json.loads(row["tags"]) == ["subprocess-test"]
