@@ -165,10 +165,10 @@ async def example_4_branch_node():
 
     with GraphNode(name="grade-workflow") as graph:
         grade_router = (
-            if_(PARENT["score"] >= 90, "excellent")
-            .if_(PARENT["score"] >= 70, "good")
-            .if_(PARENT["score"] >= 50, "average")
-            .else_("fail")
+            if_(PARENT["score"] >= 90, "ex")
+            .if_(PARENT["score"] >= 70, "gd")
+            .if_(PARENT["score"] >= 50, "av")
+            .else_("fl")
         )
 
         ex = excellent(outputs={"grade": PARENT, "message": PARENT})

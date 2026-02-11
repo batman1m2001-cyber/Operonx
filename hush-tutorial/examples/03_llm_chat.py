@@ -115,7 +115,6 @@ async def example_3_text_summarization():
         }
     )
 
-    print(f"Text gốc (đã clean): {result['cleaned_text'][:80]}...")
     print(f"Tóm tắt: {result['summary']}")
 
 

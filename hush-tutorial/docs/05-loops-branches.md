@@ -32,9 +32,14 @@ with GraphNode(name="sequential-process") as graph:
         item=Each(PARENT["items"]),  # Iterate qua mỗi item
         prefix=PARENT["prefix"],     # Broadcast cho tất cả iterations
     ) as loop:
-        step = process(item=PARENT["item"], prefix=PARENT["prefix"])
+        step = process(
+            name="process",
+            inputs={"item": PARENT["item"], "prefix": PARENT["prefix"]},
+            outputs={"*": PARENT},
+        )
         START >> step >> END
 
+    loop["result"] >> PARENT["results"]  # Map loop output → graph output
     START >> loop >> END
 
 engine = Hush(graph)
@@ -56,19 +61,25 @@ Xử lý nhiều items cùng lúc (parallel). Dùng cho I/O bound tasks hoặc i
 from hush.core.nodes import map_, Each
 
 @code_node
-def fetch(url: str, timeout: int):
-    return {"data": f"Content from {url}"}
+def square(x: int):
+    return {"squared": x * x}
 
-with GraphNode(name="parallel-fetch") as graph:
+with GraphNode(name="parallel-map") as graph:
     with map_(
-        url=Each(PARENT["urls"]),
-        timeout=30,
-        max_concurrency=10,  # Giới hạn concurrent tasks
+        x=Each(PARENT["numbers"]),
+        max_concurrency=3,  # Giới hạn concurrent tasks
     ) as map_node:
-        step = fetch(url=PARENT["url"], timeout=PARENT["timeout"])
+        step = square(
+            name="square",
+            inputs={"x": PARENT["x"]},
+            outputs={"*": PARENT},
+        )
         START >> step >> END
 
+    map_node["squared"] >> PARENT["results"]  # Map loop output → graph output
     START >> map_node >> END
+
+# result["results"] = [1, 4, 9, 16, 25]
 ```
 
 ### So sánh ForLoopNode vs MapNode
@@ -89,22 +100,28 @@ Chạy cho đến khi điều kiện trả về False.
 from hush.core.nodes import while_
 
 @code_node
-def decrement(count: int):
-    return {"count": count - 1, "message": f"Count: {count}"}
+def halve_value(value: int):
+    return {"new_value": value // 2}
 
 with GraphNode(name="countdown") as graph:
     with while_(
-        count=PARENT["start"],
-        stop_condition="count <= 0",
-        max_iterations=100,
-    ) as loop:
-        step = decrement(count=PARENT["count"])
+        value=PARENT["start_value"],
+        stop_condition="value < 5",
+        max_iterations=20,
+    ) as while_loop:
+        step = halve_value(
+            name="halve",
+            inputs={"value": PARENT["value"]},
+        )
+        step["new_value"] >> PARENT["value"]  # Update loop state
         START >> step >> END
 
-    START >> loop >> END
+    while_loop["value"] >> PARENT["final_value"]  # Map loop output → graph
+    START >> while_loop >> END
 
-result = await engine.run(inputs={"start": 5})
-# result["final_count"] = 0
+result = await engine.run(inputs={"start_value": 256})
+# 256 → 128 → 64 → 32 → 16 → 8 → 4 (dừng vì < 5)
+# result["final_value"] = 4
 ```
 
 ## BranchNode — Conditional Routing
@@ -136,14 +153,15 @@ with GraphNode(name="grade-workflow") as graph:
                     .if_(PARENT["score"] >= 50, "average")
                     .else_("fail"))
 
-    a = excellent()
-    b = good()
-    c = average()
-    d = fail()
+    ex = excellent(outputs={"grade": PARENT, "message": PARENT})
+    gd = good(outputs={"grade": PARENT, "message": PARENT})
+    av = average(outputs={"grade": PARENT, "message": PARENT})
+    fl = fail(outputs={"grade": PARENT, "message": PARENT})
 
     START >> grade_router
-    grade_router >> [a, b, c, d]
-    [a, b, c, d] >> ~END  # Soft edge — chỉ 1 nhánh chạy
+    grade_router >> [ex, gd, av, fl]
+    # Soft edge (~) vì chỉ 1 nhánh chạy
+    [ex, gd, av, fl] >> ~END
 
 result = await engine.run(inputs={"score": 85})
 # result["grade"] = "B"
@@ -167,16 +185,27 @@ result = await engine.run(inputs={"score": 85})
 Loops có thể nest bên trong nhau:
 
 ```python
-with GraphNode(name="nested") as graph:
-    with for_(category=Each(PARENT["categories"])) as outer:
-        with map_(
-            item=Each(PARENT["category"]["items"]),
-            max_concurrency=5,
-        ) as inner:
-            step = process(...)
-            START >> step >> END
-        START >> inner >> END
+with GraphNode(name="nested-loops") as graph:
+    with for_(x=Each([2, 3, 4])) as outer:
+        with for_(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
+            mult = multiply(
+                name="multiply",
+                inputs={"x": PARENT["x"], "y": PARENT["y"]},
+                outputs={"*": PARENT},
+            )
+            START >> mult >> END
+
+        sum_node = summarize(
+            name="summarize",
+            inputs={"products": inner["product"]},
+            outputs={"*": PARENT},
+        )
+        START >> inner >> sum_node >> END
+
+    outer["total"] >> PARENT["results"]  # Map outer output → graph
     START >> outer >> END
+
+# result["results"] = [120, 180, 240]
 ```
 
 ## Tổng kết
@@ -193,6 +222,8 @@ with GraphNode(name="nested") as graph:
 | `Each(PARENT["items"])` | Đánh dấu biến để iterate |
 | `>>` | Hard edge — chờ tất cả |
 | `~` | Soft edge — chờ bất kỳ một |
+| `node["key"] >> PARENT["key"]` | Output mapping — map node output sang graph/parent |
+| `outputs={"*": PARENT}` | Forward tất cả outputs lên parent |
 
 ## Tiếp theo
 

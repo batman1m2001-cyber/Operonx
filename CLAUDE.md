@@ -280,7 +280,28 @@ u = upper(text=PARENT["greeting"])   # ✗ greeting is in g's state, not parent
 - `PARENT["key"]` : External inputs from `engine.run(inputs={...})` or parent graph
 - `node["key"]` : Output from a sibling node within the same graph
 - `>> END` : Auto-forwards the last node's outputs to graph result
-- `outputs={"content": PARENT["answer"]}` : Explicit output mapping (for renaming keys or nested graphs)
+- `outputs={"content": PARENT["answer"]}` : Explicit output mapping (inline, for renaming keys)
+- `node["src"] >> PARENT["dest"]` : Output mapping via `>>` operator (standalone, same effect)
+
+### Output Mapping with `>>`
+
+Use `node["key"] >> PARENT["key"]` to map a node's output to the parent graph state. This is equivalent to `outputs={"key": PARENT["dest"]}` but more readable for selective forwarding:
+
+```python
+# Style 1: outputs= parameter (inline with node creation)
+llm = llm_(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
+
+# Style 2: >> operator (standalone line, equivalent)
+llm = llm_(resource_key="gpt-4o", messages=p["messages"])
+llm["content"] >> PARENT["answer"]
+
+# Common in loops — forward loop outputs or update loop state
+process["new_messages"] >> PARENT["messages"]
+loop["final_answer"] >> PARENT["answer"]
+
+# Wildcard — forward all outputs
+step = process(x=PARENT["x"], outputs={"*": PARENT})
+```
 
 ## Exception Hierarchy
 

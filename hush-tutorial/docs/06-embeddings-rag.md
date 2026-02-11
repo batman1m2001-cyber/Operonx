@@ -65,11 +65,15 @@ from hush.core import GraphNode, START, END, PARENT
 from hush.providers import embedding_
 
 with GraphNode(name="embed-workflow") as graph:
-    embed = embedding_(resource_key="openai", texts=PARENT["documents"])
+    embed = embedding_(
+        resource_key="openai",
+        texts=PARENT["documents"],
+        outputs={"embeddings": PARENT["vectors"]},  # Rename output
+    )
     START >> embed >> END
 
 # Input: {"documents": ["Hello world", "Goodbye world"]}
-# Output: {"embeddings": [[0.1, 0.2, ...], [0.3, 0.4, ...]]}
+# Output: {"vectors": [[0.1, 0.2, ...], [0.3, 0.4, ...]]}
 ```
 
 ### EmbeddingNode outputs
@@ -120,6 +124,9 @@ rr = rerank_(
     documents=PARENT["documents"],
     top_k=5,
 )
+
+# Output mapping via >> operator
+rr["reranks"] >> PARENT["sources"]  # Map rerank output sang graph output
 ```
 
 ### RerankNode outputs
@@ -145,6 +152,7 @@ with GraphNode(name="rag-pipeline") as graph:
         query_vec=embed_query["embeddings"],
         docs=PARENT["documents"],
         doc_vecs=PARENT["doc_embeddings"],
+        outputs={"context_docs": PARENT},
     )
     rr = rerank_(
         resource_key="bge-m3",
@@ -154,11 +162,19 @@ with GraphNode(name="rag-pipeline") as graph:
     )
     p = prompt_(
         template={"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
-        context=rr["reranked_documents"],
+        context=rr["reranks"],
         query=PARENT["query"],
     )
-    llm = llm_(resource_key="gpt-4o", messages=p["messages"])
+    llm = llm_(
+        resource_key="gpt-4o",
+        messages=p["messages"],
+        outputs={"content": PARENT["answer"]},  # Rename output
+    )
+
+    rr["reranks"] >> PARENT["sources"]  # Map rerank results to graph output
     START >> embed_query >> ret >> rr >> p >> llm >> END
+
+# result["answer"] = "...", result["sources"] = [...], result["context_docs"] = [...]
 ```
 
 ## Hybrid Search — Keyword + Vector + RRF

@@ -95,21 +95,11 @@ async def example_2_branch_error_routing():
 
         router = if_(divide["success"], "on_success").else_("on_error")
 
-        on_success = handle_success(
-            name="on_success",
-            inputs={"result": divide["result"]},
-            outputs={"output": PARENT},
-        )
+        on_success = handle_success(result = divide["result"])
 
-        on_error = handle_error(
-            name="on_error",
-            inputs={"error": divide["error"]},
-            outputs={"output": PARENT},
-        )
+        on_error = handle_error(error=divide["error"])
 
-        START >> divide >> router
-        router >> [on_success, on_error]
-        [on_success, on_error] >> ~END
+        START >> divide >> router >> [on_success, on_error] >> END
 
     engine = Hush(graph)
 
@@ -190,18 +180,11 @@ async def example_3_retry_and_fallback():
     _call_count = 0
 
     with GraphNode(name="retry-demo") as graph:
-        api_call = retry_with_backoff(
-            name="api_call",
-            inputs={"query": PARENT["query"]},
-        )
+        api_call = retry_with_backoff(query = PARENT["query"])
 
         fallback = with_fallback(
-            name="fallback",
-            inputs={
-                "primary_result": api_call["answer"],
-                "success": api_call["success"],
-            },
-            outputs={"output": PARENT, "used_fallback": PARENT},
+            primary_result = api_call["answer"],
+            success = api_call["success"]
         )
 
         START >> api_call >> fallback >> END

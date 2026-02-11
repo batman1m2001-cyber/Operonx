@@ -96,8 +96,6 @@ async def main():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"Data gốc:       {result['data']}")
-    print(f"Sau transform:  {result['transformed']}")
     print(f"Tổng:           {result['total']}")
     print(f"Trung bình:     {result['average']}")
     print(f"Số phần tử:     {result['count']}")
@@ -132,9 +130,6 @@ async def main():
         }
     )
 
-    print(f"Text đã clean:  {result['cleaned_text']}")
-    print(f"Số từ:          {result['word_count']}")
-    print(f"Từ unique:      {result['unique_words']}")
     print(f"Report:         {result['report']}")
 
 

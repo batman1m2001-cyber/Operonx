@@ -92,32 +92,42 @@ def init_agent(query: str):
     }
 
 @code_node
-def process(tool_calls, content, messages, iteration):
+def process(content, tool_calls, messages, iteration):
     return process_response(tool_calls, content, messages, iteration)
 
 with GraphNode(name="agent") as graph:
-    init = init_agent(query=PARENT["query"])
+    init = init_agent(
+        query=PARENT["query"],
+        outputs={"*": PARENT},  # Forward all init outputs to graph state
+    )
 
     # Agent loop
     with while_(
-        done=PARENT["done"],
         messages=PARENT["messages"],
         iteration=PARENT["iteration"],
-        stop_condition="done == True",
-        max_iterations=5,
+        done=PARENT["done"],
+        final_answer=PARENT["final_answer"],
+        stop_condition="done == True or iteration >= 5",
+        max_iterations=10,
     ) as loop:
         llm = llm_(
             resource_key="gpt-4o",
             messages=PARENT["messages"],
             tools=tools,
-            tool_choice="auto",
         )
         proc = process(
-            tool_calls=llm["tool_calls"],
             content=llm["content"],
+            tool_calls=llm["tool_calls"],
             messages=PARENT["messages"],
             iteration=PARENT["iteration"],
         )
+
+        # Update loop state via >> operator
+        proc["new_messages"] >> PARENT["messages"]
+        proc["new_iteration"] >> PARENT["iteration"]
+        proc["is_done"] >> PARENT["done"]
+        proc["answer"] >> PARENT["final_answer"]
+
         START >> llm >> proc >> END
 
     loop["final_answer"] >> PARENT["answer"]
@@ -128,22 +138,26 @@ with GraphNode(name="agent") as graph:
 
 ```python
 def process_response(tool_calls, content, messages, iteration):
+    new_messages = messages + [{"role": "assistant", "content": content,
+                                **({"tool_calls": tool_calls} if tool_calls else {})}]
     if tool_calls:
         # Có tool calls → execute tools → continue loop
-        new_messages = execute_tools(tool_calls, messages)
+        for tc in tool_calls:
+            new_messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                 "content": execute_tool(tc)})
         return {
-            "messages": new_messages,
-            "done": False,
-            "final_answer": "",
-            "iteration": iteration + 1
+            "new_messages": new_messages,
+            "new_iteration": iteration + 1,
+            "is_done": False,
+            "answer": None,
         }
     else:
         # Không có tool calls → LLM trả lời trực tiếp → done
         return {
-            "messages": messages,
-            "done": True,
-            "final_answer": content,
-            "iteration": iteration + 1
+            "new_messages": new_messages,
+            "new_iteration": iteration + 1,
+            "is_done": True,
+            "answer": content,
         }
 ```
 

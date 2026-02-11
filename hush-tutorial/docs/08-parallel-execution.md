@@ -39,7 +39,10 @@ with GraphNode(name="fan-out") as graph:
     a = task_a()
     b = task_b()
     c = task_c()
-    m = merge(a=a["result"], b=b["result"], c=c["result"])
+    m = merge(
+        a=a["result"], b=b["result"], c=c["result"],
+        outputs={"analysis": PARENT},  # Explicit output mapping
+    )
 
     START >> [a, b, c]  # Fan-out
     [a, b, c] >> m >> END  # Fan-in (hard edge: chờ tất cả)
@@ -59,11 +62,16 @@ def process(item):
 with GraphNode(name="parallel-map") as graph:
     with map_(
         item=Each(PARENT["items"]),
-        max_concurrency=5,  # Tối đa 5 tasks cùng lúc
+        max_concurrency=3,  # Tối đa 3 tasks cùng lúc
     ) as map_node:
-        step = process(item=PARENT["item"])
+        step = process(
+            name="process",
+            inputs={"item": PARENT["item"]},
+            outputs={"*": PARENT},
+        )
         START >> step >> END
 
+    map_node["result"] >> PARENT["results"]  # Map loop output → graph output
     START >> map_node >> END
 ```
 
@@ -81,21 +89,25 @@ def safe_process(item: dict):
         return {"result": None, "error": str(e)}
 
 @code_node
-def summarize(results):
+def summarize(results, errors):
     return {
-        "succeeded": [r for r in results if r.get("error") is None],
-        "failed": [r for r in results if r.get("error") is not None],
+        "successful": [r for r, e in zip(results, errors) if e is None],
+        "failed": [e for e in errors if e is not None],
     }
 
 with GraphNode(name="partial-failure") as graph:
-    with map_(
-        item=Each(PARENT["items"]),
-        max_concurrency=3,
-    ) as map_node:
-        proc = safe_process(item=PARENT["item"])
+    with map_(item=Each(PARENT["items"])) as map_node:
+        proc = safe_process(
+            item=PARENT["item"],
+            outputs={"result": PARENT, "error": PARENT},
+        )
         START >> proc >> END
 
-    s = summarize(results=map_node["results"])
+    s = summarize(
+        results=map_node["result"],
+        errors=map_node["error"],
+        outputs={"*": PARENT},
+    )
     START >> map_node >> s >> END
 ```
 
@@ -106,16 +118,58 @@ Gọi nhiều LLMs song song (ví dụ: so sánh models).
 ```python
 from hush.providers import prompt_, llm_
 
-with GraphNode(name="parallel-llm") as graph:
-    p = prompt_(
-        template={"system": "Answer briefly.", "user": "{query}"},
-        query=PARENT["query"],
-    )
-    a = llm_(resource_key="gpt-4o", messages=p["messages"])
-    b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
+@code_node
+def merge_results(s, k):
+    return {"summary": s, "keywords": k}
 
-    START >> p >> [a, b]  # Song song
-    [a, b] >> END         # Chờ cả hai
+with GraphNode(name="parallel-llm") as graph:
+    p_summary = prompt_(
+        template={"system": "Summarize in one sentence.", "user": "{text}"},
+        text=PARENT["text"],
+    )
+    p_keywords = prompt_(
+        template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
+        text=PARENT["text"],
+    )
+
+    llm_summary = llm_(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+    llm_keywords = llm_(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+
+    m = merge_results(
+        s=llm_summary["content"],
+        k=llm_keywords["content"],
+        outputs={"*": PARENT},  # Forward all outputs
+    )
+
+    START >> [p_summary, p_keywords]
+    p_summary >> llm_summary
+    p_keywords >> llm_keywords
+    [llm_summary, llm_keywords] >> m >> END
+```
+
+### Batch LLM via MapNode
+
+Gọi nhiều queries song song qua MapNode:
+
+```python
+with GraphNode(name="batch-llm") as graph:
+    with map_(
+        query=Each(PARENT["queries"]),
+        max_concurrency=3,
+    ) as map_node:
+        p = prompt_(
+            template={"system": "Answer in one sentence.", "user": "{query}"},
+            query=PARENT["query"],
+        )
+        llm = llm_(
+            resource_key="gpt-4o-mini",
+            messages=p["messages"],
+            outputs={"content": PARENT["answer"]},
+        )
+        START >> p >> llm >> END
+
+    map_node["answer"] >> PARENT["answers"]  # Collect all answers
+    START >> map_node >> END
 ```
 
 Xem thêm parallel LLM comparison tại `examples/12_multi_model.py`.

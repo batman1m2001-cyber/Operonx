@@ -119,6 +119,7 @@ asyncio.run(main())
 | `PARENT["key"]` | Lấy data từ state của parent graph / external inputs |
 | `node["key"]` | Lấy output từ node anh em (sibling) |
 | `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
+| `node["key"] >> PARENT["key"]` | Output mapping via `>>` operator |
 | `llmchain_()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 
 ## Tiếp theo

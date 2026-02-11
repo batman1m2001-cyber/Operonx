@@ -59,11 +59,7 @@ async def example_1_parallel_models():
         gpt4o_mini = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
 
         # So sánh
-        cmp = compare(
-            a=gpt4o["content"],
-            b=gpt4o_mini["content"],
-            outputs={"*": PARENT},
-        )
+        cmp = compare(a=gpt4o["content"], b=gpt4o_mini["content"])
 
         START >> p >> [gpt4o, gpt4o_mini] >> cmp >> END
 

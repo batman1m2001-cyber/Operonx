@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from hush.core.configs.node_config import NodeType
 from hush.core.exceptions import CodeError
-from hush.core.nodes.base import BaseNode, split_shorthand_kwargs
+from hush.core.loggings import LOGGER
+from hush.core.nodes.base import BaseNode, _BASE_INIT_KEYS, split_shorthand_kwargs
 from hush.core.utils.common import Param, ensure_async
 
 if TYPE_CHECKING:
@@ -24,6 +25,19 @@ def code_node(func):
 
         node = my_function(inputs={"arg1": PARENT, "arg2": "value"})
     """
+    # Warn at decoration time if function params collide with reserved node keywords
+    sig = inspect.signature(func)
+    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
+    if collisions:
+        LOGGER.warning(
+            "@code_node function '%s' has parameter(s) %s that collide with reserved node keywords %s. "
+            "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
+            "as node constructor args instead of function inputs. Consider renaming them.",
+            func.__name__,
+            sorted(collisions),
+            sorted(_BASE_INIT_KEYS),
+            func.__name__,
+        )
 
     @wraps(func)
     def wrapper(**kwargs):

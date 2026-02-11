@@ -176,12 +176,7 @@ async def example_1_simple_agent():
     with GraphNode(name="simple-agent") as graph:
         init = init_agent(
             query=PARENT["query"],
-            outputs={
-                "messages": PARENT,
-                "iteration": PARENT,
-                "done": PARENT,
-                "final_answer": PARENT,
-            },
+            outputs={"*": PARENT},
         )
 
         with while_(

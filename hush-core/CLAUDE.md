@@ -117,6 +117,14 @@ ref = node["output_var"]  # Returns Ref(node, "output_var")
 ref = PARENT["items"].apply(len)  # Apply function to value
 
 # PARENT marker resolves to parent GraphNode at build time
+
+# Output mapping via >> operator (Ref.__rshift__)
+node["src_key"] >> PARENT["dest_key"]  # Map node output to graph output
+# Equivalent to: outputs={"src_key": PARENT["dest_key"]}
+
+# Common in loops — update loop state or forward results
+process["new_messages"] >> PARENT["messages"]
+loop["final_answer"] >> PARENT["answer"]
 ```
 
 ### Cell System

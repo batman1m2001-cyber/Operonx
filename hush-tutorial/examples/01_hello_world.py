@@ -83,7 +83,7 @@ async def main():
 
     with GraphNode(name="two-steps") as graph:
         # Node 1: Tạo greeting
-        g = greet_en(name=PARENT["name"])
+        g = greet_en(name=PARENT["name"], outputs={"*": PARENT})
 
         # Node 2: Chuyển thành uppercase — đọc output từ node g
         u = upper(text=g["greeting"])
@@ -116,8 +116,6 @@ async def main():
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"A: {result['a_result']}")
-    print(f"B: {result['b_result']}")
     print(f"Combined: {result['combined']}")
 
 

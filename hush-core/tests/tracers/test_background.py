@@ -133,97 +133,111 @@ class TestSubprocessFallback:
 
     def test_subprocess_fallback_on_daemon_assertion(self):
         """Test that BackgroundProcess falls back to subprocess when multiprocessing raises AssertionError."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "subprocess_test.db"
             bg = BackgroundProcess(db_path)
 
-            _force_subprocess_mode(bg)
+            try:
+                _force_subprocess_mode(bg)
 
-            # Should have fallen back to subprocess
-            assert bg._is_subprocess is True
-            assert bg.is_running
+                # Should have fallen back to subprocess
+                assert bg._is_subprocess is True
+                assert bg.is_running
 
-            # Write a trace through the subprocess fallback
-            bg.write_trace(
-                request_id="subprocess-test-001",
-                workflow_name="test-wf",
-                node_name="test-node",
-            )
-
-            # Poll until trace appears (subprocess startup can be slow on CI)
-            rows = []
-            for _ in range(50):  # up to 5 seconds
-                sleep(0.1)
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute(
-                    "SELECT * FROM traces WHERE request_id = ?", ("subprocess-test-001",)
+                # Write a trace through the subprocess fallback
+                bg.write_trace(
+                    request_id="subprocess-test-001",
+                    workflow_name="test-wf",
+                    node_name="test-node",
                 )
-                rows = cursor.fetchall()
-                conn.close()
-                if len(rows) == 1:
-                    break
 
-            assert len(rows) == 1
-            assert rows[0]["node_name"] == "test-node"
+                # Poll until trace appears (subprocess startup can be slow on CI)
+                rows = []
+                for _ in range(50):  # up to 5 seconds
+                    sleep(0.1)
+                    try:
+                        conn = sqlite3.connect(str(db_path))
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.execute(
+                            "SELECT * FROM traces WHERE request_id = ?",
+                            ("subprocess-test-001",),
+                        )
+                        rows = cursor.fetchall()
+                        conn.close()
+                    except sqlite3.OperationalError:
+                        # Table not yet created by subprocess — keep polling
+                        continue
+                    if len(rows) == 1:
+                        break
 
-            bg.shutdown()
+                assert len(rows) == 1
+                assert rows[0]["node_name"] == "test-node"
+            finally:
+                bg.shutdown()
 
     def test_subprocess_fallback_mark_complete(self):
         """Test mark_complete works through subprocess fallback."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "subprocess_complete.db"
             bg = BackgroundProcess(db_path)
 
-            _force_subprocess_mode(bg)
+            try:
+                _force_subprocess_mode(bg)
 
-            assert bg._is_subprocess is True
+                assert bg._is_subprocess is True
 
-            # Write and complete
-            bg.write_trace(
-                request_id="sub-complete-001",
-                workflow_name="test-wf",
-                node_name="node-1",
-                execution_order=0,
-            )
+                # Write and complete
+                bg.write_trace(
+                    request_id="sub-complete-001",
+                    workflow_name="test-wf",
+                    node_name="node-1",
+                    execution_order=0,
+                )
 
-            # Poll until trace is written
-            for _ in range(50):
-                sleep(0.1)
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM traces WHERE request_id = ?", ("sub-complete-001",)
-                ).fetchone()
-                conn.close()
-                if row is not None:
-                    break
+                # Poll until trace is written
+                for _ in range(50):
+                    sleep(0.1)
+                    try:
+                        conn = sqlite3.connect(str(db_path))
+                        conn.row_factory = sqlite3.Row
+                        row = conn.execute(
+                            "SELECT * FROM traces WHERE request_id = ?",
+                            ("sub-complete-001",),
+                        ).fetchone()
+                        conn.close()
+                    except sqlite3.OperationalError:
+                        continue
+                    if row is not None:
+                        break
 
-            bg.mark_complete(
-                request_id="sub-complete-001",
-                tracer_type="LocalTracer",
-                tracer_config={"name": "test"},
-                tags=["subprocess-test"],
-            )
+                bg.mark_complete(
+                    request_id="sub-complete-001",
+                    tracer_type="LocalTracer",
+                    tracer_config={"name": "test"},
+                    tags=["subprocess-test"],
+                )
 
-            # Poll until mark_complete is processed
-            row = None
-            for _ in range(50):
-                sleep(0.1)
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT status, tags FROM traces WHERE request_id = ?",
-                    ("sub-complete-001",),
-                ).fetchone()
-                conn.close()
-                if row and row["status"] == "flushed":
-                    break
+                # Poll until mark_complete is processed
+                row = None
+                for _ in range(50):
+                    sleep(0.1)
+                    try:
+                        conn = sqlite3.connect(str(db_path))
+                        conn.row_factory = sqlite3.Row
+                        row = conn.execute(
+                            "SELECT status, tags FROM traces WHERE request_id = ?",
+                            ("sub-complete-001",),
+                        ).fetchone()
+                        conn.close()
+                    except sqlite3.OperationalError:
+                        continue
+                    if row and row["status"] == "flushed":
+                        break
 
-            assert row["status"] == "flushed"
-            assert json.loads(row["tags"]) == ["subprocess-test"]
-
-            bg.shutdown()
+                assert row["status"] == "flushed"
+                assert json.loads(row["tags"]) == ["subprocess-test"]
+            finally:
+                bg.shutdown()
 
     def test_subprocess_shutdown_closes_pipe(self):
         """Test shutdown properly closes stdin pipe for subprocess mode."""

@@ -136,9 +136,17 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     init_kwargs = {}
 
     for key, value in kwargs.items():
-        if key in init_keys:
+        if key in init_keys and not isinstance(value, Ref):
             init_kwargs[key] = value
         else:
+            if key in init_keys:
+                LOGGER.warning(
+                    "Keyword '%s' is a reserved node parameter (one of %s) but received a Ref value. "
+                    "It will be treated as an input mapping instead of a node constructor arg. "
+                    "Consider renaming this parameter to avoid ambiguity.",
+                    key,
+                    sorted(init_keys),
+                )
             inputs[key] = value
 
     return inputs, init_kwargs

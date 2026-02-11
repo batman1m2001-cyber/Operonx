@@ -38,6 +38,9 @@ hush-core = { path = "../hush-core", editable = true }
 hush-providers = { path = "../hush-providers", editable = true }
 hush-observability = { path = "../hush-observability", editable = true }
 
+[tool.hatch.build.targets.wheel]
+packages = ["examples"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
