@@ -95,7 +95,7 @@ async def example_2_branch_error_routing():
 
         router = if_(divide["success"], "on_success").else_("on_error")
 
-        on_success = handle_success(result = divide["result"])
+        on_success = handle_success(result=divide["result"])
 
         on_error = handle_error(error=divide["error"])
 
@@ -180,12 +180,9 @@ async def example_3_retry_and_fallback():
     _call_count = 0
 
     with GraphNode(name="retry-demo") as graph:
-        api_call = retry_with_backoff(query = PARENT["query"])
+        api_call = retry_with_backoff(query=PARENT["query"])
 
-        fallback = with_fallback(
-            primary_result = api_call["answer"],
-            success = api_call["success"]
-        )
+        fallback = with_fallback(primary_result=api_call["answer"], success=api_call["success"])
 
         START >> api_call >> fallback >> END
 
@@ -219,7 +216,7 @@ async def example_4_llm_fallback():
         print()
         print("  Cách dùng LLM fallback:")
         print("  ```python")
-        print('  llm = llm_(')
+        print("  llm = llm_(")
         print('      resource_key="gpt-4o",')
         print('      fallback=["gpt-4o-mini"],')
         print('      messages=p["messages"],')
