@@ -189,6 +189,7 @@ class BaseNode(ABC):
     __slots__ = [
         "id",
         "name",
+        "_full_name",
         "description",
         "type",
         "stream",
@@ -225,6 +226,7 @@ class BaseNode(ABC):
         if name is None:
             name = _auto_name()
         self.name = name or unique_name()
+        self._full_name = None  # Cached at build time by GraphNode.build()
         self.description = description
 
         self.stream = stream
@@ -436,10 +438,16 @@ class BaseNode(ABC):
 
     @property
     def full_name(self) -> str:
-        """Đường dẫn phân cấp đầy đủ của node."""
+        """Đường dẫn phân cấp đầy đủ của node. Cached after build()."""
+        if self._full_name is not None:
+            return self._full_name
         if self.father:
             return f"{self.father.full_name}.{self.name}"
         return self.name
+
+    def _cache_full_name(self) -> None:
+        """Cache full_name as stored attribute. Called at build time."""
+        self._full_name = self.full_name
 
     def identity(self, context_id: str) -> str:
         """Đường dẫn đầy đủ kèm context_id."""

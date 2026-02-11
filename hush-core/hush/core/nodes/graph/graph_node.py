@@ -349,6 +349,15 @@ class GraphNode(BaseNode):
 
         self._is_building = False
         self._post_build()
+        self._cache_full_names()
+
+    def _cache_full_names(self) -> None:
+        """Cache full_name for this node and all descendants after build."""
+        self._cache_full_name()
+        for node in self._nodes.values():
+            node._cache_full_name()
+            if hasattr(node, "_cache_full_names"):
+                node._cache_full_names()
 
     def _post_build(self):
         """Hook for subclasses to run after build. Override in subclasses."""
