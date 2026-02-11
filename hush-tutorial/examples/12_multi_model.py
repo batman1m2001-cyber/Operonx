@@ -21,9 +21,9 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import os
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.core.nodes.flow.branch_node import if_
-from hush.providers import LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import code_node, if_
+from hush.providers import llm_, prompt_
 
 # =============================================================================
 # Ví dụ 1: Parallel multi-model comparison
@@ -40,46 +40,32 @@ async def example_1_parallel_models():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
+    @code_node
+    def compare(a, b):
+        return {
+            "gpt4o": a,
+            "gpt4o_mini": b,
+            "same_length": abs(len(a) - len(b)) < 50,
+        }
+
     with GraphNode(name="multi-model-parallel") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Answer in one sentence.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
-            },
+        p = prompt_(
+            template={"system": "Answer in one sentence.", "user": "{query}"},
+            query=PARENT["query"],
         )
 
         # 2 models chạy song song
-        gpt4o = LLMNode(
-            name="gpt4o",
-            resource_key="gpt-4o",
-            inputs={"messages": prompt["messages"]},
-        )
-        gpt4o_mini = LLMNode(
-            name="gpt4o_mini",
-            resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
-        )
+        gpt4o = llm_(resource_key="gpt-4o", messages=p["messages"])
+        gpt4o_mini = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
 
         # So sánh
-        compare = CodeNode(
-            name="compare",
-            code_fn=lambda a, b: {
-                "gpt4o": a,
-                "gpt4o_mini": b,
-                "same_length": abs(len(a) - len(b)) < 50,
-            },
-            inputs={
-                "a": gpt4o["content"],
-                "b": gpt4o_mini["content"],
-            },
+        cmp = compare(
+            a=gpt4o["content"],
+            b=gpt4o_mini["content"],
             outputs={"*": PARENT},
         )
 
-        START >> prompt >> [gpt4o, gpt4o_mini] >> compare >> END
+        START >> p >> [gpt4o, gpt4o_mini] >> cmp >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "What is machine learning?"})
@@ -106,20 +92,16 @@ async def example_2_cost_routing():
 
     with GraphNode(name="smart-routing") as graph:
         # Step 1: Classify complexity (cheap model)
-        cls_prompt = PromptNode(
-            name="cls_prompt",
-            inputs={
-                "template": {
-                    "system": "Classify if this query is SIMPLE or COMPLEX. Reply with just one word.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
+        cls_p = prompt_(
+            template={
+                "system": "Classify if this query is SIMPLE or COMPLEX. Reply with just one word.",
+                "user": "{query}",
             },
+            query=PARENT["query"],
         )
-        classifier = LLMNode(
-            name="classifier",
+        classifier = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": cls_prompt["messages"]},
+            messages=cls_p["messages"],
             outputs={"content": PARENT["classification"]},
         )
 
@@ -130,36 +112,28 @@ async def example_2_cost_routing():
         ).else_("complex_prompt")
 
         # Simple path — cheap model
-        simple_prompt = PromptNode(
-            name="simple_prompt",
-            inputs={
-                "template": {"system": "Be concise.", "user": "{query}"},
-                "query": PARENT["query"],
-            },
+        simple_prompt = prompt_(
+            template={"system": "Be concise.", "user": "{query}"},
+            query=PARENT["query"],
         )
-        simple_llm = LLMNode(
-            name="simple_llm",
+        simple_llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": simple_prompt["messages"]},
+            messages=simple_prompt["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
         # Complex path — powerful model
-        complex_prompt = PromptNode(
-            name="complex_prompt",
-            inputs={
-                "template": {"system": "Think step by step.", "user": "{query}"},
-                "query": PARENT["query"],
-            },
+        complex_prompt = prompt_(
+            template={"system": "Think step by step.", "user": "{query}"},
+            query=PARENT["query"],
         )
-        complex_llm = LLMNode(
-            name="complex_llm",
+        complex_llm = llm_(
             resource_key="gpt-4o",
-            inputs={"messages": complex_prompt["messages"]},
+            messages=complex_prompt["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
-        START >> cls_prompt >> classifier >> router
+        START >> cls_p >> classifier >> router
         router >> simple_prompt >> simple_llm
         router >> complex_prompt >> complex_llm
         [simple_llm, complex_llm] >> ~END
@@ -197,24 +171,20 @@ async def example_3_load_balancing():
         return
 
     with GraphNode(name="load-balanced") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {"system": "Answer briefly.", "user": "{query}"},
-                "query": PARENT["query"],
-            },
+        p = prompt_(
+            template={"system": "Answer briefly.", "user": "{query}"},
+            query=PARENT["query"],
         )
 
         # 70% gpt-4o-mini, 30% gpt-4o
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key=["gpt-4o-mini", "gpt-4o"],
             ratios=[0.7, 0.3],
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},
         )
 
-        START >> prompt >> llm >> END
+        START >> p >> llm >> END
 
     engine = Hush(graph)
 
@@ -248,24 +218,20 @@ async def example_4_fallback():
         return
 
     with GraphNode(name="fallback-demo") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {"system": "Answer briefly.", "user": "{query}"},
-                "query": PARENT["query"],
-            },
+        p = prompt_(
+            template={"system": "Answer briefly.", "user": "{query}"},
+            query=PARENT["query"],
         )
 
         # Primary: gpt-4o, fallback: gpt-4o-mini
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o",
             fallback=["gpt-4o-mini"],
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},
         )
 
-        START >> prompt >> llm >> END
+        START >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "What is Python?"})
@@ -290,65 +256,47 @@ async def example_5_ensemble():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
+    @code_node
+    def select(choice, a1, a2):
+        return {
+            "answer": a1 if "1" in choice else a2,
+            "chosen": "gpt-4o" if "1" in choice else "gpt-4o-mini",
+        }
+
     with GraphNode(name="ensemble") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Answer the question accurately in 1-2 sentences.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": "Answer the question accurately in 1-2 sentences.",
+                "user": "{query}",
             },
+            query=PARENT["query"],
         )
 
         # 2 models generate answers in parallel
-        model_a = LLMNode(
-            name="model_a",
-            resource_key="gpt-4o",
-            inputs={"messages": prompt["messages"]},
-        )
-        model_b = LLMNode(
-            name="model_b",
-            resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
-        )
+        model_a = llm_(resource_key="gpt-4o", messages=p["messages"])
+        model_b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
 
         # Judge picks the best
-        judge_prompt = PromptNode(
-            name="judge_prompt",
-            inputs={
-                "template": {
-                    "system": "Given a question and two answers, reply with just '1' or '2' for the better answer.",
-                    "user": "Question: {query}\n\nAnswer 1: {a1}\n\nAnswer 2: {a2}",
-                },
-                "query": PARENT["query"],
-                "a1": model_a["content"],
-                "a2": model_b["content"],
+        jp = prompt_(
+            template={
+                "system": "Given a question and two answers, reply with just '1' or '2' for the better answer.",
+                "user": "Question: {query}\n\nAnswer 1: {a1}\n\nAnswer 2: {a2}",
             },
+            query=PARENT["query"],
+            a1=model_a["content"],
+            a2=model_b["content"],
         )
 
-        judge = LLMNode(
-            name="judge",
-            resource_key="gpt-4o-mini",
-            inputs={"messages": judge_prompt["messages"]},
-        )
+        judge = llm_(resource_key="gpt-4o-mini", messages=jp["messages"])
 
-        select = CodeNode(
-            name="select",
-            code_fn=lambda choice, a1, a2: {
-                "answer": a1 if "1" in choice else a2,
-                "chosen": "gpt-4o" if "1" in choice else "gpt-4o-mini",
-            },
-            inputs={
-                "choice": judge["content"],
-                "a1": model_a["content"],
-                "a2": model_b["content"],
-            },
+        sel = select(
+            choice=judge["content"],
+            a1=model_a["content"],
+            a2=model_b["content"],
             outputs={"*": PARENT},
         )
 
-        START >> prompt >> [model_a, model_b] >> judge_prompt >> judge >> select >> END
+        START >> p >> [model_a, model_b] >> jp >> judge >> sel >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "What causes the seasons on Earth?"})

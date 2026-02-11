@@ -132,61 +132,54 @@ class MyReranker(BaseReranker):
 
 ## Workflow Nodes
 
-### LLMNode
-```python
-from hush.providers import LLMNode
+All provider nodes have shorthand functions (recommended) and full class equivalents.
 
-llm = LLMNode(
-    name="generate",
-    resource_key="gpt-4o",           # Key in resources.yaml
-    inputs={"messages": PARENT["messages"]},
-    outputs={"content": PARENT["response"]},
-    temperature=0.7,
-    max_tokens=1000
-)
-```
-
-### PromptNode
-```python
-from hush.providers import PromptNode
-
-prompt = PromptNode(
-    name="format",
-    inputs={
-        "template": {"system": "You are helpful.", "user": "{question}"},
-        "question": PARENT["question"]
-    },
-    outputs={"messages": PARENT}
-)
-```
-
-### LLMChainNode (Prompt + LLM combined)
-```python
-from hush.providers import LLMChainNode
-
-chain = LLMChainNode(
-    name="chat",
-    resource_key="gpt-4o",
-    inputs={
-        "template": {"system": "...", "user": "{input}"},
-        "input": PARENT["query"]
-    },
-    outputs={"content": PARENT["answer"]}
-)
-```
-
-### Shorthand Functions
+### Shorthand Functions (Recommended)
 ```python
 from hush.providers import llmchain_, llm_, prompt_, embedding_, rerank_
 
-# Prompt + LLM all-in-one (recommended)
+# Prompt + LLM all-in-one
 chat = llmchain_(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Separate LLM call
-node = llm_("gpt-4o", messages=PARENT["messages"])
+llm = llm_(resource_key="gpt-4o", messages=PARENT["messages"])
 
 # Separate prompt formatting
-p = prompt_({"system": "...", "user": "{query}"}, query=PARENT["query"])
+p = prompt_(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+
+# Embeddings
+embed = embedding_(resource_key="bge-m3", texts=PARENT["texts"])
+
+# Reranking
+rerank = rerank_(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
+```
+
+### Full Class Equivalents
+```python
+from hush.providers import LLMChainNode, LLMNode, PromptNode, EmbeddingNode, RerankNode
+
+# LLMChainNode = Prompt + LLM combined
+chain = LLMChainNode(
+    name="chat",
+    resource_key="gpt-4o",
+    inputs={"template": {"system": "...", "user": "{input}"}, "input": PARENT["query"]},
+    outputs={"content": PARENT["answer"]}
+)
+
+# LLMNode = Raw LLM call
+llm = LLMNode(
+    name="generate",
+    resource_key="gpt-4o",
+    inputs={"messages": PARENT["messages"]},
+    outputs={"content": PARENT["response"]},
+)
+
+# PromptNode = Template formatting
+prompt = PromptNode(
+    name="format",
+    inputs={"template": {"system": "...", "user": "{question}"}, "question": PARENT["question"]},
+    outputs={"messages": PARENT}
+)
 ```
 
 ## Plugin Registration

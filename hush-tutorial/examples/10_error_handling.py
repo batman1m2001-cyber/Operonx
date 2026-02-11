@@ -21,9 +21,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.core.nodes.flow.branch_node import if_
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import code_node, if_
 
 # =============================================================================
 # Ví dụ 1: Error capture trong state
@@ -36,13 +35,13 @@ async def example_1_error_capture():
     print("Ví dụ 1: Error capture trong state")
     print("=" * 50)
 
+    @code_node
+    def failing():
+        return {"result": 1 / 0}  # ZeroDivisionError!
+
     with GraphNode(name="error-demo") as graph:
-        failing = CodeNode(
-            name="failing",
-            code_fn=lambda: 1 / 0,  # ZeroDivisionError!
-            inputs={},
-        )
-        START >> failing >> END
+        f = failing()
+        START >> f >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={})
@@ -237,39 +236,34 @@ async def example_4_llm_fallback():
         print()
         print("  Cách dùng LLM fallback:")
         print("  ```python")
-        print("  llm = LLMNode(")
-        print('      name="llm",')
+        print('  llm = llm_(')
         print('      resource_key="gpt-4o",')
-        print('      fallback=["gpt-4o-mini"],  # Nếu gpt-4o fails → thử gpt-4o-mini')
-        print('      inputs={"messages": prompt["messages"]}')
+        print('      fallback=["gpt-4o-mini"],')
+        print('      messages=p["messages"],')
         print("  )")
         print("  ```")
         return
 
-    from hush.providers import LLMNode, PromptNode
+    from hush.providers import llm_, prompt_
 
     with GraphNode(name="llm-fallback") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Answer briefly.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": "Answer briefly.",
+                "user": "{query}",
             },
+            query=PARENT["query"],
         )
 
         # fallback: nếu gpt-4o fails → thử gpt-4o-mini
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o",
             fallback=["gpt-4o-mini"],
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},
         )
 
-        START >> prompt >> llm >> END
+        START >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "What is Python?"})

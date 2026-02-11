@@ -7,21 +7,26 @@
 **Hush** là workflow engine cho các ứng dụng AI/LLM, được thiết kế để xây dựng các pipeline phức tạp một cách đơn giản và hiệu quả. Hush tập trung vào việc điều phối (orchestration) và thực thi (execution) các node trong một graph.
 
 ```python
-from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import llmchain_
+import asyncio
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
 
-with GraphNode(name="chat-workflow") as graph:
-    chat = llmchain_(
-        resource_key="gpt-4o",
-        template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
-        question=PARENT["question"],
-    )
-    START >> chat >> END
+@code_node
+def greet(name: str):
+    return {"message": f"Xin chào, {name}!"}
 
-engine = Hush(graph)
-result = await engine.run(inputs={"question": "Python là gì?"})
-print(result["content"])
+async def main():
+    with GraphNode(name="hello") as graph:
+        step = greet(name=PARENT["name"])
+        START >> step >> END
+
+    engine = Hush(graph)
+    result = await engine.run(inputs={"name": "Hush"})
+    print(result["message"])  # Xin chào, Hush!
+
+asyncio.run(main())
 ```
+
+> Ví dụ trên chỉ dùng `hush-core`, không cần API key. Để dùng LLM, embedding, tracing — xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).
 
 ## Kiến trúc 3 lớp
 
@@ -40,9 +45,11 @@ print(result["content"])
 
 | Package | Mô tả |
 |---------|-------|
-| `hush-core` | **Nền tảng** — GraphNode, CodeNode, BranchNode đủ cho gần như mọi workflow |
-| `hush-providers` | Add-on — LLM, embedding, reranking (cài khi cần) |
+| `hush-core` | **Nền tảng** — `@code_node`, `for_()`, `map_()`, `while_()`, `if_()` đủ cho gần như mọi workflow |
+| `hush-providers` | Add-on — `llm_()`, `prompt_()`, `embedding_()`, `rerank_()` (cài khi cần) |
 | `hush-observability` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
+
+> **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (CodeNode, LLMNode, ...). Trong code, hãy dùng **shorthand syntax** (`@code_node`, `llm_()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
 
 ## Cài đặt nhanh
 
@@ -60,9 +67,11 @@ Xem chi tiết tại [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md)
 
 | Bước | Nội dung | Link |
 |------|----------|------|
-| 1 | Cài đặt Hush | [Cài đặt](01-cai-dat-va-thiet-lap.md) |
+| 1 | **Cài đặt + thiết lập `.env` & `resources.yaml`** | [Cài đặt](01-cai-dat-va-thiet-lap.md) |
 | 2 | Hello World | [Quickstart](02-quickstart.md) |
 | 3 | Core concepts | [Core Concepts](03-core-concepts.md) |
+
+> **Quan trọng:** Bước 1 là bắt buộc. Mọi ví dụ dùng LLM, embedding, hoặc tracing đều cần `.env` (API keys) và `resources.yaml` (provider config) được thiết lập trước.
 
 ## Tutorials & Guides
 

@@ -4,6 +4,16 @@ Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 
 > **Ví dụ chạy được**: `examples/07_embeddings_and_rag.py`, `examples/14_rag_advanced.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `embedding_()` | `EmbeddingNode` | `embedding_(resource_key="bge-m3", texts=PARENT["texts"])` |
+> | `rerank_()` | `RerankNode` | `rerank_(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
+> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+
 ## Embedding Providers
 
 | Provider | Type | Đặc điểm |
@@ -48,23 +58,18 @@ embedding:bge-m3-onnx:
   dimensions: 1024
 ```
 
-## EmbeddingNode
+## embedding_()
 
 ```python
 from hush.core import GraphNode, START, END, PARENT
-from hush.providers import EmbeddingNode
+from hush.providers import embedding_
 
 with GraphNode(name="embed-workflow") as graph:
-    embed = EmbeddingNode(
-        name="embed",
-        resource_key="openai",
-        inputs={"texts": PARENT["documents"]},
-        outputs={"embeddings": PARENT["vectors"]}
-    )
+    embed = embedding_(resource_key="openai", texts=PARENT["documents"])
     START >> embed >> END
 
 # Input: {"documents": ["Hello world", "Goodbye world"]}
-# Output: {"vectors": [[0.1, 0.2, ...], [0.3, 0.4, ...]]}
+# Output: {"embeddings": [[0.1, 0.2, ...], [0.3, 0.4, ...]]}
 ```
 
 ### EmbeddingNode outputs
@@ -104,19 +109,16 @@ reranking:bge-m3:
   base_url: https://api.pinecone.io/rerank
 ```
 
-## RerankNode
+## rerank_()
 
 ```python
-from hush.providers import RerankNode
+from hush.providers import rerank_
 
-rerank = RerankNode(
-    name="rerank",
+rr = rerank_(
     resource_key="bge-m3",
-    inputs={
-        "query": PARENT["query"],
-        "documents": PARENT["documents"],
-        "top_k": 5
-    }
+    query=PARENT["query"],
+    documents=PARENT["documents"],
+    top_k=5,
 )
 ```
 
@@ -131,47 +133,32 @@ rerank = RerankNode(
 ## RAG Pipeline: Embed → Retrieve → Rerank → Generate
 
 ```python
+from hush.providers import embedding_, rerank_, prompt_, llm_
+
+@code_node
+def retrieve(query_vec, docs, doc_vecs):
+    return {"retrieved": cosine_search(query_vec, doc_vecs, docs, top_k=20)}
+
 with GraphNode(name="rag-pipeline") as graph:
-    embed_query = EmbeddingNode(
-        name="embed_query",
-        resource_key="openai",
-        inputs={"texts": PARENT["query"]}
+    embed_query = embedding_(resource_key="openai", texts=PARENT["query"])
+    ret = retrieve(
+        query_vec=embed_query["embeddings"],
+        docs=PARENT["documents"],
+        doc_vecs=PARENT["doc_embeddings"],
     )
-    retrieve = CodeNode(
-        name="retrieve",
-        code_fn=lambda query_vec, docs, doc_vecs: {
-            "retrieved": cosine_search(query_vec, doc_vecs, docs, top_k=20)
-        },
-        inputs={
-            "query_vec": embed_query["embeddings"],
-            "docs": PARENT["documents"],
-            "doc_vecs": PARENT["doc_embeddings"]
-        }
-    )
-    rerank = RerankNode(
-        name="rerank",
+    rr = rerank_(
         resource_key="bge-m3",
-        inputs={
-            "query": PARENT["query"],
-            "documents": retrieve["retrieved"],
-            "top_k": 5
-        }
+        query=PARENT["query"],
+        documents=ret["retrieved"],
+        top_k=5,
     )
-    prompt = PromptNode(
-        name="prompt",
-        inputs={
-            "template": {"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
-            "context": rerank["reranked_documents"],
-            "query": PARENT["query"]
-        }
+    p = prompt_(
+        template={"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
+        context=rr["reranked_documents"],
+        query=PARENT["query"],
     )
-    llm = LLMNode(
-        name="llm",
-        resource_key="gpt-4o",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer"]}
-    )
-    START >> embed_query >> retrieve >> rerank >> prompt >> llm >> END
+    llm = llm_(resource_key="gpt-4o", messages=p["messages"])
+    START >> embed_query >> ret >> rr >> p >> llm >> END
 ```
 
 ## Hybrid Search — Keyword + Vector + RRF
@@ -179,33 +166,28 @@ with GraphNode(name="rag-pipeline") as graph:
 Kết hợp keyword search và vector search, merge bằng Reciprocal Rank Fusion.
 
 ```python
+@code_node
+def kw_search(query, docs):
+    return {"results": keyword_search(query, docs, top_k=8)}
+
+@code_node
+def vec_search(qv, docs, dvs):
+    return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
+
+@code_node
+def merge(kw, vec):
+    return {"merged": reciprocal_rank_fusion([kw, vec])[:5]}
+
 with GraphNode(name="hybrid-rag") as graph:
-    # Song song: keyword + vector
-    kw_search = CodeNode(
-        name="keyword_search",
-        code_fn=lambda query, docs: {"results": keyword_search(query, docs, top_k=8)},
-        inputs={"query": PARENT["query"], "docs": PARENT["documents"]}
-    )
-    embed_q = EmbeddingNode(
-        name="embed_query",
-        resource_key="openai",
-        inputs={"texts": PARENT["query"]}
-    )
-    vec_search = CodeNode(
-        name="vector_search",
-        code_fn=lambda qv, docs, dvs: {"results": cosine_search(qv[0], dvs, docs, top_k=8)},
-        inputs={"qv": embed_q["embeddings"], "docs": PARENT["documents"], "dvs": PARENT["doc_vectors"]}
-    )
-    merge = CodeNode(
-        name="merge",
-        code_fn=lambda kw, vec: {"merged": reciprocal_rank_fusion([kw, vec])[:5]},
-        inputs={"kw": kw_search["results"], "vec": vec_search["results"]}
-    )
+    kw = kw_search(query=PARENT["query"], docs=PARENT["documents"])
+    embed_q = embedding_(resource_key="openai", texts=PARENT["query"])
+    vs = vec_search(qv=embed_q["embeddings"], docs=PARENT["documents"], dvs=PARENT["doc_vectors"])
+    m = merge(kw=kw["results"], vec=vs["results"])
 
     # Parallel: keyword + vector search
-    START >> [kw_search, embed_q]
-    embed_q >> vec_search
-    [kw_search, vec_search] >> merge >> END
+    START >> [kw, embed_q]
+    embed_q >> vs
+    [kw, vs] >> m >> END
 ```
 
 Xem ví dụ đầy đủ tại `examples/14_rag_advanced.py`.
@@ -213,37 +195,24 @@ Xem ví dụ đầy đủ tại `examples/14_rag_advanced.py`.
 ## Batch Embedding
 
 ```python
-from hush.core.nodes.iteration import MapNode
-from hush.core.nodes.iteration.base import Each
+from hush.core.nodes import map_, Each
+
+@code_node
+def make_batches(docs):
+    return {"batches": [docs[i:i+100] for i in range(0, len(docs), 100)]}
+
+@code_node
+def flatten(batches):
+    return {"all_embeddings": [e for b in batches for e in b]}
 
 with GraphNode(name="batch-embed") as graph:
-    batch = CodeNode(
-        name="batch",
-        code_fn=lambda docs: {
-            "batches": [docs[i:i+100] for i in range(0, len(docs), 100)]
-        },
-        inputs={"docs": PARENT["documents"]}
-    )
-    with MapNode(
-        name="embed_batches",
-        inputs={"batch": Each(batch["batches"])},
-        max_concurrency=5
-    ) as map_node:
-        embed = EmbeddingNode(
-            name="embed",
-            resource_key="openai",
-            inputs={"texts": PARENT["batch"]},
-            outputs={"embeddings": PARENT}
-        )
+    batch = make_batches(docs=PARENT["documents"])
+    with map_(batch=Each(batch["batches"]), max_concurrency=5) as map_node:
+        embed = embedding_(resource_key="openai", texts=PARENT["batch"])
         START >> embed >> END
 
-    flatten = CodeNode(
-        name="flatten",
-        code_fn=lambda batches: {"all_embeddings": [e for b in batches for e in b]},
-        inputs={"batches": map_node["embeddings"]},
-        outputs={"*": PARENT}
-    )
-    START >> batch >> map_node >> flatten >> END
+    flat = flatten(batches=map_node["embeddings"])
+    START >> batch >> map_node >> flat >> END
 ```
 
 ## Best Practices

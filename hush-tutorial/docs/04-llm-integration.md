@@ -4,6 +4,15 @@ Cấu hình và sử dụng LLM providers trong Hush workflows.
 
 > **Ví dụ chạy được**: `examples/03_llm_chat.py`, `examples/04_llm_advanced.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `llmchain_()` | `LLMChainNode` | `llmchain_(resource_key="gpt-4o", template={...}, query=PARENT["q"])` |
+> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+
 ## Cấu hình Providers trong resources.yaml
 
 ### OpenAI
@@ -116,111 +125,84 @@ classifier = llmchain_(
 | `tool_calls` | list | Tool calls nếu có |
 | `finish_reason` | str | "stop", "tool_calls", etc. |
 
-## LLMChainNode — Class đầy đủ
+## llmchain_() — Config nâng cao
 
 Khi cần config chi tiết hơn (load balancing, fallback, extract, v.v.):
 
 ```python
-from hush.providers import LLMChainNode
+from hush.providers import llmchain_
 
-chain = LLMChainNode(
-    name="chain",
+chain = llmchain_(
     resource_key=["gpt-4o", "gpt-4o-mini"],
+    template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     ratios=[0.7, 0.3],
     fallback=["or-claude-4-sonnet"],
-    inputs={
-        "template": {"system": "Bạn là assistant hữu ích.", "user": "{query}"},
-        "query": PARENT["query"],
-        "*": PARENT,
-    },
+    query=PARENT["query"],
 )
 ```
 
 ---
 
-## PromptNode + LLMNode — Dùng khi cần linh hoạt
+## prompt_() + llm_() — Dùng khi cần linh hoạt
 
 Dùng pattern tách riêng khi cần:
 - **Một prompt → nhiều LLMs** (so sánh models, ensemble)
 - **Tool calling loops** (reinject tool results vào messages)
-- **Pipeline phức tạp** (CodeNode xen giữa prompt và LLM)
+- **Pipeline phức tạp** (`@code_node` xen giữa prompt và LLM)
 - **Multimodal prompts** (image, audio)
 
-### PromptNode — Xây dựng Messages
+### prompt_() — Xây dựng Messages
 
 Template hỗ trợ 3 định dạng: string, dict, hoặc list.
 
 ```python
-from hush.providers import PromptNode
+from hush.providers import prompt_
 
 # String → [{"role": "user", "content": "..."}]
-prompt = PromptNode(
-    name="prompt",
-    inputs={
-        "template": "Tóm tắt văn bản sau: {text}",
-        "text": PARENT["text"]
-    }
-)
+p = prompt_(template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
 
 # Dict → system + user messages
-prompt = PromptNode(
-    name="prompt",
-    inputs={
-        "template": {
-            "system": "Bạn là assistant chuyên {task}.",
-            "user": "{query}"
-        },
-        "task": "tóm tắt văn bản",
-        "query": PARENT["query"]
-    }
+p = prompt_(
+    template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
+    task="tóm tắt văn bản",
+    query=PARENT["query"],
 )
 
 # List → full messages array (multimodal)
-prompt = PromptNode(
-    name="prompt",
-    inputs={
-        "template": [
-            {"role": "system", "content": "Bạn là assistant phân tích hình ảnh."},
-            {"role": "user", "content": [
-                {"type": "text", "text": "Mô tả hình ảnh: {query}"},
-                {"type": "image_url", "image_url": {"url": "{image_url}"}}
-            ]}
-        ],
-        "query": PARENT["query"],
-        "image_url": PARENT["image_url"]
-    }
+p = prompt_(
+    template=[
+        {"role": "system", "content": "Bạn là assistant phân tích hình ảnh."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "Mô tả hình ảnh: {query}"},
+            {"type": "image_url", "image_url": {"url": "{image_url}"}}
+        ]}
+    ],
+    query=PARENT["query"],
+    image_url=PARENT["image_url"],
 )
 ```
 
-### LLMNode — Gọi LLM
+### llm_() — Gọi LLM
 
 ```python
-from hush.providers import LLMNode
+from hush.providers import llm_
 
-llm = LLMNode(
-    name="llm",
-    resource_key="gpt-4o",
-    inputs={"messages": prompt["messages"]},
-    outputs={"content": PARENT["response"]}
-)
+llm = llm_(resource_key="gpt-4o", messages=p["messages"])
 ```
 
 ### Generation Parameters
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
-    inputs={
-        "messages": prompt["messages"],
-        "temperature": 0.7,       # 0.0 = deterministic, 1.0 = creative
-        "max_tokens": 1000,
-        "top_p": 0.9,
-        "frequency_penalty": 0.5,
-        "presence_penalty": 0.5,
-        "stop": ["\n\n", "END"],
-        "seed": 42
-    }
+    messages=p["messages"],
+    temperature=0.7,       # 0.0 = deterministic, 1.0 = creative
+    max_tokens=1000,
+    top_p=0.9,
+    frequency_penalty=0.5,
+    presence_penalty=0.5,
+    stop=["\n\n", "END"],
+    seed=42,
 )
 ```
 
@@ -232,11 +214,10 @@ Hướng dẫn chọn temperature:
 ## Streaming
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
     stream=True,  # Default
-    inputs={"messages": prompt["messages"]}
+    messages=p["messages"],
 )
 
 # Subscribe to stream
@@ -251,24 +232,11 @@ async for chunk in STREAM_SERVICE.subscribe(request_id, channel_name):
 Phân tải requests giữa nhiều models theo tỷ lệ.
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
-    seed=42,            # Optional: reproducible selection
-    inputs={"messages": prompt["messages"]}
-)
-```
-
-### Shorthand
-
-```python
-llm = llm_(
-    ["gpt-4o", "gpt-4o-mini"],
-    ratios=[0.3, 0.7],
-    seed=42,
-    name="balanced",
-    messages=prompt["messages"]
+    seed=42,             # Optional: reproducible selection
+    messages=p["messages"],
 )
 ```
 
@@ -279,11 +247,10 @@ Xem thêm ví dụ tại `examples/12_multi_model.py`.
 Tự động chuyển model khi primary fails.
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
-    inputs={"messages": prompt["messages"]}
+    messages=p["messages"],
 )
 # Nếu gpt-4o fails → try azure-gpt4 → try gemini
 ```
@@ -311,17 +278,14 @@ tools = [
 ]
 ```
 
-### Sử dụng trong LLMNode
+### Sử dụng trong llm_()
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
-    inputs={
-        "messages": prompt["messages"],
-        "tools": tools,
-        "tool_choice": "auto"
-    }
+    messages=p["messages"],
+    tools=tools,
+    tool_choice="auto",
 )
 ```
 
@@ -332,26 +296,23 @@ Xem ví dụ agent workflow đầy đủ tại `examples/11_agent_workflow.py`.
 Force LLM trả về JSON theo schema.
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
-    inputs={
-        "messages": prompt["messages"],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "sentiment_response",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]},
-                        "confidence": {"type": "number"}
-                    },
-                    "required": ["sentiment", "confidence"]
-                }
+    messages=p["messages"],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "sentiment_response",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["sentiment", "confidence"]
             }
         }
-    }
+    },
 )
 ```
 
@@ -382,33 +343,34 @@ for node_name, metadata in state.trace_metadata.items():
 ## Multi-turn Chat
 
 ```python
+from hush.core import code_node
+from hush.providers import prompt_, llm_
+
+@code_node
+def update_history(history: list, message: str, response: str):
+    return {"new_history": history + [
+        {"role": "user", "content": message},
+        {"role": "assistant", "content": response}
+    ]}
+
 with GraphNode(name="multi-turn-chat") as graph:
-    prompt = PromptNode(
-        name="prompt",
-        inputs={
-            "template": {"system": "Bạn là assistant hữu ích.", "user": "{message}"},
-            "conversation_history": PARENT["history"],
-            "message": PARENT["message"]
-        }
+    p = prompt_(
+        template={"system": "Bạn là assistant hữu ích.", "user": "{message}"},
+        conversation_history=PARENT["history"],
+        message=PARENT["message"],
     )
-    llm = LLMNode(
-        name="llm",
+    llm = llm_(
         resource_key="gpt-4o",
-        inputs={"messages": prompt["messages"], "temperature": 0.7, "max_tokens": 500},
-        outputs={"content": PARENT["response"]}
+        messages=p["messages"],
+        temperature=0.7,
+        max_tokens=500,
     )
-    update = CodeNode(
-        name="update",
-        code_fn=lambda history, message, response: {
-            "new_history": history + [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": response}
-            ]
-        },
-        inputs={"history": PARENT["history"], "message": PARENT["message"], "response": PARENT["response"]},
-        outputs={"new_history": PARENT}
+    update = update_history(
+        history=PARENT["history"],
+        message=PARENT["message"],
+        response=PARENT["response"],
     )
-    START >> prompt >> llm >> update >> END
+    START >> p >> llm >> update >> END
 
 # Sử dụng
 history = []

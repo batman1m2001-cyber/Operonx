@@ -22,7 +22,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import numpy as np
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import code_node
 
 # =============================================================================
 # Sample data
@@ -98,35 +99,32 @@ async def example_1_keyword_rrf():
     print("Ví dụ 1: Keyword Search + RRF")
     print("=" * 50)
 
+    @code_node
+    def search_original(query, docs):
+        return {"results": keyword_search(query, docs, top_k=5)}
+
+    @code_node
+    def search_expanded(query, docs):
+        return {"results": keyword_search(query + " thành phố du lịch", docs, top_k=5)}
+
+    @code_node
+    def merge(r1, r2):
+        return {"merged": reciprocal_rank_fusion([r1, r2])[:5]}
+
     with GraphNode(name="keyword-rrf") as graph:
         # 2 keyword searches khác nhau: original query + expanded query
-        search_original = CodeNode(
-            name="search_original",
-            code_fn=lambda query, docs: {"results": keyword_search(query, docs, top_k=5)},
-            inputs={"query": PARENT["query"], "docs": PARENT["documents"]},
-        )
-
-        search_expanded = CodeNode(
-            name="search_expanded",
-            code_fn=lambda query, docs: {
-                "results": keyword_search(query + " thành phố du lịch", docs, top_k=5)
-            },
-            inputs={"query": PARENT["query"], "docs": PARENT["documents"]},
-        )
+        s_orig = search_original(query=PARENT["query"], docs=PARENT["documents"])
+        s_exp = search_expanded(query=PARENT["query"], docs=PARENT["documents"])
 
         # Merge with RRF
-        merge = CodeNode(
-            name="merge",
-            code_fn=lambda r1, r2: {"merged": reciprocal_rank_fusion([r1, r2])[:5]},
-            inputs={
-                "r1": search_original["results"],
-                "r2": search_expanded["results"],
-            },
+        m = merge(
+            r1=s_orig["results"],
+            r2=s_exp["results"],
             outputs={"merged": PARENT["results"]},
         )
 
         # Parallel keyword searches → merge
-        START >> [search_original, search_expanded] >> merge >> END
+        START >> [s_orig, s_exp] >> m >> END
 
     engine = Hush(graph)
     result = await engine.run(
@@ -160,15 +158,14 @@ async def example_2_hybrid_rag():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import EmbeddingNode, LLMNode, PromptNode
+    from hush.providers import embedding_, llm_, prompt_
 
     # Step 0: Pre-compute document embeddings
     print("  Embedding documents...")
     with GraphNode(name="embed-docs") as embed_graph:
-        embed = EmbeddingNode(
-            name="embed",
+        embed = embedding_(
             resource_key="openai",
-            inputs={"texts": PARENT["texts"]},
+            texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
         START >> embed >> END
@@ -179,70 +176,59 @@ async def example_2_hybrid_rag():
     print(f"  Embedded {len(doc_vectors)} documents")
 
     # Hybrid RAG workflow
+    @code_node
+    def kw_search_fn(query, docs):
+        return {"results": keyword_search(query, docs, top_k=8)}
+
+    @code_node
+    def vec_search_fn(qv, docs, dvs):
+        return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
+
+    @code_node
+    def merge_results(kw, vec):
+        return {"context_docs": reciprocal_rank_fusion([kw, vec])[:5]}
+
     with GraphNode(name="hybrid-rag") as graph:
         # Branch A: Keyword search
-        kw_search = CodeNode(
-            name="keyword_search",
-            code_fn=lambda query, docs: {"results": keyword_search(query, docs, top_k=8)},
-            inputs={"query": PARENT["query"], "docs": PARENT["documents"]},
-        )
+        kw = kw_search_fn(query=PARENT["query"], docs=PARENT["documents"])
 
         # Branch B: Vector search
-        embed_q = EmbeddingNode(
-            name="embed_query",
-            resource_key="openai",
-            inputs={"texts": PARENT["query"]},
-        )
-        vec_search = CodeNode(
-            name="vector_search",
-            code_fn=lambda qv, docs, dvs: {"results": cosine_search(qv[0], dvs, docs, top_k=8)},
-            inputs={
-                "qv": embed_q["embeddings"],
-                "docs": PARENT["documents"],
-                "dvs": PARENT["doc_vectors"],
-            },
+        embed_q = embedding_(resource_key="openai", texts=PARENT["query"])
+        vec = vec_search_fn(
+            qv=embed_q["embeddings"],
+            docs=PARENT["documents"],
+            dvs=PARENT["doc_vectors"],
         )
 
         # RRF merge
-        merge = CodeNode(
-            name="merge",
-            code_fn=lambda kw, vec: {"context_docs": reciprocal_rank_fusion([kw, vec])[:5]},
-            inputs={
-                "kw": kw_search["results"],
-                "vec": vec_search["results"],
-            },
-        )
+        mrg = merge_results(kw=kw["results"], vec=vec["results"])
 
         # LLM answer
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": (
-                        "Trả lời câu hỏi dựa trên context.\n"
-                        "Nếu không tìm thấy, nói 'Không tìm thấy thông tin.'\n\n"
-                        "Context:\n{context}"
-                    ),
-                    "user": "{query}",
-                },
-                "context": merge["context_docs"],
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": (
+                    "Trả lời câu hỏi dựa trên context.\n"
+                    "Nếu không tìm thấy, nói 'Không tìm thấy thông tin.'\n\n"
+                    "Context:\n{context}"
+                ),
+                "user": "{query}",
             },
+            context=mrg["context_docs"],
+            query=PARENT["query"],
         )
 
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
-        merge["context_docs"] >> PARENT["sources"]
+        mrg["context_docs"] >> PARENT["sources"]
 
         # Parallel: keyword + vector search
-        START >> [kw_search, embed_q]
-        embed_q >> vec_search
-        [kw_search, vec_search] >> merge >> prompt >> llm >> END
+        START >> [kw, embed_q]
+        embed_q >> vec
+        [kw, vec] >> mrg >> p >> llm >> END
 
     engine = Hush(graph)
 
@@ -291,49 +277,42 @@ async def example_3_rerank():
         print("      base_url: https://api.pinecone.io/rerank")
         return
 
-    from hush.providers import LLMNode, PromptNode, RerankNode
+    from hush.providers import llm_, prompt_, rerank_
+
+    @code_node
+    def retrieve(query, docs):
+        return {"candidates": keyword_search(query, docs, top_k=8)}
 
     with GraphNode(name="rerank-rag") as graph:
         # Stage 1: Keyword retrieve top 8
-        retrieve = CodeNode(
-            name="retrieve",
-            code_fn=lambda query, docs: {"candidates": keyword_search(query, docs, top_k=8)},
-            inputs={"query": PARENT["query"], "docs": PARENT["documents"]},
-        )
+        ret = retrieve(query=PARENT["query"], docs=PARENT["documents"])
 
         # Stage 2: Rerank to top 3
-        rerank = RerankNode(
-            name="rerank",
+        rr = rerank_(
             resource_key="bge-m3",
-            inputs={
-                "query": PARENT["query"],
-                "documents": retrieve["candidates"],
-                "top_k": 3,
-            },
+            query=PARENT["query"],
+            documents=ret["candidates"],
+            top_k=3,
         )
 
         # LLM answer
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Trả lời dựa trên context:\n\n{context}",
-                    "user": "{query}",
-                },
-                "context": rerank["reranks"],
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": "Trả lời dựa trên context:\n\n{context}",
+                "user": "{query}",
             },
+            context=rr["reranks"],
+            query=PARENT["query"],
         )
 
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
-        rerank["reranks"] >> PARENT["sources"]
-        START >> retrieve >> rerank >> prompt >> llm >> END
+        rr["reranks"] >> PARENT["sources"]
+        START >> ret >> rr >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(

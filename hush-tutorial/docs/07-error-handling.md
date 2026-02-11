@@ -4,18 +4,26 @@ Xử lý lỗi trong workflows: error capture, retry, fallback, và error routin
 
 > **Ví dụ chạy được**: `examples/10_error_handling.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
+> | `if_().else_()` | `BranchNode` | `if_(PARENT["ok"], "success").else_("error")` |
+
 ## Error Capture trong State
 
 Khi node lỗi, Hush **không crash** workflow — error được lưu vào `$state`.
 
 ```python
+@code_node
+def failing():
+    return 1 / 0  # ZeroDivisionError!
+
 with GraphNode(name="error-demo") as graph:
-    failing = CodeNode(
-        name="failing",
-        code_fn=lambda: 1 / 0,  # ZeroDivisionError!
-        inputs={},
-    )
-    START >> failing >> END
+    step = failing()
+    START >> step >> END
 
 engine = Hush(graph)
 result = await engine.run(inputs={})
@@ -50,28 +58,23 @@ Dùng `if_()` để route success/error theo nhánh khác nhau.
 from hush.core.nodes.flow.branch_node import if_
 
 with GraphNode(name="error-routing") as graph:
-    divide = safe_divide(
-        name="divide",
-        inputs={"a": PARENT["a"], "b": PARENT["b"]},
-    )
+    divide = safe_divide(a=PARENT["a"], b=PARENT["b"])
     router = if_(divide["success"] == True, "on_success").else_("on_error")
 
-    on_success = CodeNode(
-        name="on_success",
-        code_fn=lambda result: {"output": f"Result: {result}"},
-        inputs={"result": divide["result"]},
-        outputs={"output": PARENT},
-    )
-    on_error = CodeNode(
-        name="on_error",
-        code_fn=lambda error: {"output": f"Error: {error}"},
-        inputs={"error": divide["error"]},
-        outputs={"output": PARENT},
-    )
+    @code_node
+    def on_success(result):
+        return {"output": f"Result: {result}"}
+
+    @code_node
+    def on_error(error):
+        return {"output": f"Error: {error}"}
+
+    s = on_success(result=divide["result"])
+    e = on_error(error=divide["error"])
 
     START >> divide >> router
-    router >> [on_success, on_error]
-    [on_success, on_error] >> ~END
+    router >> [s, e]
+    [s, e] >> ~END
 ```
 
 ## Retry với Exponential Backoff
@@ -100,20 +103,14 @@ def retry_with_backoff(query: str):
 Kết hợp retry + fallback value.
 
 ```python
+@code_node
+def fallback_check(answer, success):
+    return {"output": answer if success else "Default answer (fallback)"}
+
 with GraphNode(name="retry-demo") as graph:
-    api_call = retry_with_backoff(
-        name="api_call",
-        inputs={"query": PARENT["query"]},
-    )
-    fallback = CodeNode(
-        name="fallback",
-        code_fn=lambda answer, success: {
-            "output": answer if success else "Default answer (fallback)"
-        },
-        inputs={"answer": api_call["answer"], "success": api_call["success"]},
-        outputs={"output": PARENT},
-    )
-    START >> api_call >> fallback >> END
+    api_call = retry_with_backoff(query=PARENT["query"])
+    fb = fallback_check(answer=api_call["answer"], success=api_call["success"])
+    START >> api_call >> fb >> END
 ```
 
 ## LLM Fallback Chain
@@ -121,14 +118,12 @@ with GraphNode(name="retry-demo") as graph:
 LLMNode hỗ trợ tự động fallback khi model fails.
 
 ```python
-from hush.providers import LLMNode
+from hush.providers import llm_
 
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
     fallback=["gpt-4o-mini"],  # Nếu gpt-4o fails → thử gpt-4o-mini
-    inputs={"messages": prompt["messages"]},
-    outputs={"content": PARENT["answer"], "model_used": PARENT["model"]}
+    messages=p["messages"],
 )
 ```
 

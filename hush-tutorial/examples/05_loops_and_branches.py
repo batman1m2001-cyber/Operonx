@@ -15,13 +15,8 @@ Chạy: cd hush-tutorial && uv run python examples/05_loops_and_branches.py
 
 import asyncio
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.core.nodes.flow.branch_node import if_
-from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.for_loop_node import ForLoopNode
-from hush.core.nodes.iteration.map_node import MapNode
-from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import Each, code_node, for_, if_, map_, while_
 
 # =============================================================================
 # Code nodes dùng @code_node decorator (gọn hơn CodeNode class)
@@ -58,12 +53,9 @@ async def example_1_for_loop():
     print("=" * 50)
 
     with GraphNode(name="for-loop-demo") as graph:
-        with ForLoopNode(
-            name="process_items",
-            inputs={
-                "item": Each(PARENT["items"]),  # Iterate qua mỗi item
-                "prefix": PARENT["prefix"],  # Broadcast cho tất cả iterations
-            },
+        with for_(
+            item=Each(PARENT["items"]),  # Iterate qua mỗi item
+            prefix=PARENT["prefix"],  # Broadcast cho tất cả iterations
         ) as loop:
             step = process_item(
                 name="process",
@@ -95,9 +87,8 @@ async def example_2_map_node():
     print("=" * 50)
 
     with GraphNode(name="map-node-demo") as graph:
-        with MapNode(
-            name="square_items",
-            inputs={"x": Each(PARENT["numbers"])},
+        with map_(
+            x=Each(PARENT["numbers"]),
             max_concurrency=3,  # Tối đa 3 tasks cùng lúc
         ) as map_node:
             step = square(
@@ -126,9 +117,8 @@ async def example_3_while_loop():
     print("=" * 50)
 
     with GraphNode(name="while-loop-demo") as graph:
-        with WhileLoopNode(
-            name="halve_loop",
-            inputs={"value": PARENT["start_value"]},
+        with while_(
+            value=PARENT["start_value"],
             stop_condition="value < 5",
             max_iterations=20,
         ) as while_loop:
@@ -157,6 +147,22 @@ async def example_4_branch_node():
     print("Ví dụ 4: if_() (conditional routing)")
     print("=" * 50)
 
+    @code_node
+    def excellent():
+        return {"grade": "A", "message": "Xuất sắc!"}
+
+    @code_node
+    def good():
+        return {"grade": "B", "message": "Tốt!"}
+
+    @code_node
+    def average():
+        return {"grade": "C", "message": "Trung bình"}
+
+    @code_node
+    def fail():
+        return {"grade": "F", "message": "Cần cải thiện"}
+
     with GraphNode(name="grade-workflow") as graph:
         grade_router = (
             if_(PARENT["score"] >= 90, "excellent")
@@ -165,31 +171,15 @@ async def example_4_branch_node():
             .else_("fail")
         )
 
-        excellent = CodeNode(
-            name="excellent",
-            code_fn=lambda: {"grade": "A", "message": "Xuất sắc!"},
-            outputs={"grade": PARENT, "message": PARENT},
-        )
-        good = CodeNode(
-            name="good",
-            code_fn=lambda: {"grade": "B", "message": "Tốt!"},
-            outputs={"grade": PARENT, "message": PARENT},
-        )
-        average = CodeNode(
-            name="average",
-            code_fn=lambda: {"grade": "C", "message": "Trung bình"},
-            outputs={"grade": PARENT, "message": PARENT},
-        )
-        fail = CodeNode(
-            name="fail",
-            code_fn=lambda: {"grade": "F", "message": "Cần cải thiện"},
-            outputs={"grade": PARENT, "message": PARENT},
-        )
+        ex = excellent(outputs={"grade": PARENT, "message": PARENT})
+        gd = good(outputs={"grade": PARENT, "message": PARENT})
+        av = average(outputs={"grade": PARENT, "message": PARENT})
+        fl = fail(outputs={"grade": PARENT, "message": PARENT})
 
         START >> grade_router
-        grade_router >> [excellent, good, average, fail]
+        grade_router >> [ex, gd, av, fl]
         # Soft edge (~) vì chỉ 1 nhánh chạy
-        [excellent, good, average, fail] >> ~END
+        [ex, gd, av, fl] >> ~END
 
     engine = Hush(graph)
 
@@ -214,17 +204,8 @@ async def example_5_nested_loops():
         return {"total": sum(products) if products else 0}
 
     with GraphNode(name="nested-loops") as graph:
-        with ForLoopNode(
-            name="outer_loop",
-            inputs={"x": Each([2, 3, 4])},
-        ) as outer:
-            with ForLoopNode(
-                name="inner_loop",
-                inputs={
-                    "y": Each([10, 20, 30]),
-                    "x": PARENT["x"],
-                },
-            ) as inner:
+        with for_(x=Each([2, 3, 4])) as outer:
+            with for_(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
                 mult = multiply(
                     name="multiply",
                     inputs={"x": PARENT["x"], "y": PARENT["y"]},

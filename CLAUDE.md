@@ -234,26 +234,53 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full contributor guide, including:
 
 ### Node Definition
 ```python
-from hush.core import GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+
+@code_node
+def double(x: int):
+    return {"result": x * 2}
 
 with GraphNode(name="workflow") as graph:
-    node = CodeNode(
-        name="step",
-        code_fn=lambda x: {"result": x * 2},
-        inputs={"x": PARENT["input"]},
-        outputs={"result": PARENT}
-    )
-    START >> node >> END
+    step = double(x=PARENT["input"])
+    START >> step >> END
+```
+
+### Shorthand Style Rule
+
+**Always use explicit keyword arguments** when calling shorthand functions. Never use positional args:
+
+```python
+# CORRECT
+chat = llmchain_(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = llm_(resource_key="gpt-4o", messages=PARENT["msgs"])
+embed = embedding_(resource_key="bge-m3", texts=PARENT["texts"])
+
+# WRONG — no positional args
+chat = llmchain_("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 ```
 
 ### Edge Types
 - `>>` : Hard edge (sequential, counts toward ready_count)
 - `>>~` or `>` : Soft edge (conditional, for branch outputs)
 
-### State References
-- `PARENT["key"]` : Reference parent graph's state
-- `node["key"]` : Reference another node's output
-- `{"*": PARENT}` : Forward all keys from parent
+### State References — PARENT vs node["key"]
+
+**Rule: Use `node["key"]` to pass data between sibling nodes. Use `PARENT["key"]` only for external inputs (from `engine.run()` or from the parent graph in nested contexts).**
+
+```python
+# CORRECT — read from sibling node's output
+g = greet(name=PARENT["name"])       # PARENT["name"] = external input
+u = upper(text=g["greeting"])        # g["greeting"] = sibling node output
+START >> g >> u >> END
+
+# WRONG — PARENT["greeting"] doesn't exist, g didn't forward there
+u = upper(text=PARENT["greeting"])   # ✗ greeting is in g's state, not parent
+```
+
+- `PARENT["key"]` : External inputs from `engine.run(inputs={...})` or parent graph
+- `node["key"]` : Output from a sibling node within the same graph
+- `>> END` : Auto-forwards the last node's outputs to graph result
+- `outputs={"content": PARENT["answer"]}` : Explicit output mapping (for renaming keys or nested graphs)
 
 ## Exception Hierarchy
 

@@ -193,28 +193,112 @@ Nếu thấy 3 dòng "OK" → cài đặt packages thành công. Tiếp tục th
 
 ---
 
-## 3. Thiết lập file .env
+## 3. Hiểu ResourceHub — trung tâm cấu hình của Hush
+
+Trước khi thiết lập files, cần hiểu cách Hush kết nối đến LLM, embedding, tracing.
+
+### Luồng khởi tạo
+
+Khi bạn tạo một node dùng provider (`llm_()`, `embedding_()`, `rerank_()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
+
+```
+Code: llm_(resource_key="gpt-4o", messages=...)
+  ↓
+get_hub()  →  singleton ResourceHub
+  ↓
+Tìm resources.yaml theo thứ tự:
+  1. HUSH_CONFIG env var  (nếu có)
+  2. ./resources.yaml     (thư mục hiện tại)
+  3. ~/.hush/resources.yaml
+  ↓
+Đọc YAML → thay ${OPENAI_API_KEY} bằng os.environ
+  ↓
+hub.llm("gpt-4o")  →  tìm key "llm:gpt-4o" → tạo LLM client
+```
+
+### Điều này có nghĩa là gì?
+
+**3 thứ phải có trước khi chạy bất kỳ workflow nào dùng LLM/embedding/tracing:**
+
+| # | Cần gì | File | Chi tiết |
+|---|--------|------|----------|
+| 1 | **API keys + Hush config** | `.env` | API keys cho providers, đường dẫn `HUSH_CONFIG`, `HUSH_TRACES_DB`... |
+| 2 | **Provider config** | `resources.yaml` | Định nghĩa từng provider: model nào, endpoint nào, dùng key nào |
+| 3 | **Load env trước khi tạo node** | Trong code | Gọi `load_dotenv()` **trước** khi import/tạo node dùng provider |
+
+> **Nếu thiếu bất kỳ thứ nào:** bạn sẽ gặp `RuntimeError: Cannot initialize global ResourceHub` hoặc `WARNING: Environment variable ... not found`.
+
+---
+
+## 4. Thiết lập file .env
 
 ### .env là gì?
 
-File `.env` lưu các **API keys** và **cấu hình bí mật** — những thứ không được commit lên git. Hush dùng thư viện `python-dotenv` để đọc file này.
+File `.env` lưu **tất cả biến môi trường** mà Hush cần: API keys, đường dẫn config, đường dẫn traces DB, logging... Hush dùng `python-dotenv` để đọc file này.
 
 ### Tạo file .env
 
-Tạo file `.env` ở thư mục gốc project và điền API keys của bạn:
+Repo đã có template sẵn. Copy và điền giá trị:
 
-```dotenv
-# OpenAI
-OPENAI_API_KEY=sk-proj-your-actual-key
-
-# OpenRouter
-OPENROUTER_API_KEY=sk-or-v1-your-actual-key
-
-# Langfuse
-LANGFUSE_PUBLIC_KEY=pk-lf-your-actual-key
-LANGFUSE_SECRET_KEY=sk-lf-your-actual-key
-LANGFUSE_HOST=https://cloud.langfuse.com
+```bash
+cp env.example .env
+# Mở .env và điền API keys + cấu hình
 ```
+
+### Danh sách biến môi trường
+
+#### Hush system (cấu hình engine)
+
+| Biến | Bắt buộc? | Mặc định | Mô tả |
+|------|-----------|----------|-------|
+| `HUSH_CONFIG` | Tuỳ chọn | `./resources.yaml` | Đường dẫn đến file `resources.yaml`. Set nếu chạy code từ thư mục khác nơi đặt file |
+| `HUSH_TRACES_DB` | Tuỳ chọn | `~/.hush/traces.db` | Đường dẫn SQLite lưu traces (LocalTracer, background flush) |
+| `LOG_LEVEL` | Tuỳ chọn | `WARNING` | Mức log: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_USE_RICH` | Tuỳ chọn | `auto` | Bật rich formatting cho logs |
+
+#### LLM providers (điền key của provider bạn dùng)
+
+| Biến | Bắt buộc? | Mô tả |
+|------|-----------|-------|
+| `OPENAI_API_KEY` | **Cần nếu dùng OpenAI** | Dùng cho `llm:gpt-4o`, `llm:gpt-4o-mini`, `embedding:openai` |
+| `OPENROUTER_API_KEY` | **Cần nếu dùng OpenRouter** | Dùng cho `llm:or-claude-4-sonnet` — truy cập Claude, Llama, Mistral qua 1 API |
+| `ANTHROPIC_API_KEY` | Tuỳ chọn | Anthropic API trực tiếp |
+| `GOOGLE_API_KEY` | Tuỳ chọn | Google Gemini |
+| `AZURE_OPENAI_API_KEY` | Tuỳ chọn | Azure OpenAI |
+| `AZURE_OPENAI_ENDPOINT` | Tuỳ chọn | Azure endpoint URL |
+| `AWS_ACCESS_KEY_ID` | Tuỳ chọn | AWS Bedrock |
+| `AWS_SECRET_ACCESS_KEY` | Tuỳ chọn | AWS Bedrock |
+| `DEEPINFRA_API_KEY` | Tuỳ chọn | DeepInfra (embedding BGE-M3) |
+| `PINECONE_API_KEY` | Tuỳ chọn | Pinecone reranker |
+
+#### Observability (tracing & monitoring)
+
+| Biến | Bắt buộc? | Mô tả |
+|------|-----------|-------|
+| `LANGFUSE_PUBLIC_KEY` | **Cần nếu dùng Langfuse** | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | **Cần nếu dùng Langfuse** | Langfuse secret key |
+| `LANGFUSE_HOST` | **Cần nếu dùng Langfuse** | Langfuse host (mặc định `https://cloud.langfuse.com`) |
+
+#### Enterprise / Internal (Keycloak auth)
+
+| Biến | Bắt buộc? | Mô tả |
+|------|-----------|-------|
+| `KEYCLOAK_URL` | Tuỳ chọn | Keycloak token endpoint |
+| `KEYCLOAK_CLIENT_NAME` | Tuỳ chọn | Keycloak client name |
+| `KEYCLOAK_CLIENT_SECRET` | Tuỳ chọn | Keycloak client secret |
+| `KEYCLOAK_REFRESH_INTERVAL` | Tuỳ chọn | Token refresh interval (giây) |
+| `LLM_BASE_URL` | Tuỳ chọn | Base URL cho LLM qua Keycloak |
+| `LLM_MODEL` | Tuỳ chọn | Model name qua Keycloak |
+
+#### Local models (ONNX)
+
+| Biến | Bắt buộc? | Mô tả |
+|------|-----------|-------|
+| `BGE_M3_EMBEDDING_PATH` | Tuỳ chọn | Đường dẫn ONNX embedding model |
+| `BGE_M3_RERANKER_PATH` | Tuỳ chọn | Đường dẫn ONNX reranker model |
+
+> **Tối thiểu để bắt đầu:** Chỉ cần `OPENAI_API_KEY` hoặc `OPENROUTER_API_KEY` là đủ chạy các ví dụ LLM.
+> Các biến khác thêm khi cần dùng provider tương ứng.
 
 ### Lấy API keys ở đâu?
 
@@ -230,77 +314,56 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 
 - **KHÔNG commit file `.env` lên git.** File `.gitignore` của Hush đã bao gồm `.env`.
 - Mỗi người dùng tự tạo file `.env` riêng với keys của mình.
+- Phải gọi `load_dotenv()` ở đầu code **trước** khi tạo node dùng provider.
+
+Xem đầy đủ template: [`env.example`](../../env.example)
 
 ---
 
-## 4. Thiết lập file resources.yaml
+## 5. Thiết lập file resources.yaml
 
 ### resources.yaml là gì?
 
-File `resources.yaml` là **cấu hình trung tâm** của Hush. Nó định nghĩa tất cả providers mà workflow của bạn sử dụng: LLM nào, embedding nào, tracing ở đâu.
+File `resources.yaml` là **cấu hình trung tâm** được đọc bởi **ResourceHub** (`get_hub()`). Mọi node dùng provider (LLM, embedding, reranking, tracing) đều tra cứu cấu hình từ file này.
 
-Khi bạn viết `hub.llm("gpt-4o-mini")` trong code, Hush sẽ tìm config `llm:gpt-4o-mini` trong file này.
+Khi bạn viết `llm_(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
 
-### Tạo file resources.yaml
+### Copy từ template có sẵn
 
-Tạo file `resources.yaml` ở thư mục gốc project với nội dung sau:
+Repo đã có file [`resources.yaml`](../../resources.yaml) ở thư mục gốc — đây là template đầy đủ với tất cả providers (LLM, embedding, reranking, Langfuse, OTEL, Keycloak).
 
-```yaml
-# LLM — OpenRouter (Claude Sonnet, chi phí thấp)
-llm:or-claude-4-sonnet:
-  api_type: openai
-  api_key: ${OPENROUTER_API_KEY}
-  base_url: https://openrouter.ai/api/v1
-  model: anthropic/claude-sonnet-4
+```bash
+# Nếu làm việc trong monorepo
+# resources.yaml đã có sẵn ở thư mục gốc — không cần làm gì thêm
 
-# LLM — OpenAI GPT-4o-mini (nhanh, rẻ, phù hợp test)
-llm:gpt-4o-mini:
-  api_type: openai
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1
-  model: gpt-4o-mini
-
-# LLM — OpenAI GPT-4o
-llm:gpt-4o:
-  api_type: openai
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1
-  model: gpt-4o
-
-# Embedding — OpenAI
-embedding:openai:
-  api_type: openai
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1/embeddings
-  model: text-embedding-3-small
-  dimensions: 1536
-
-# Langfuse — tracing & monitoring
-langfuse:default:
-  public_key: ${LANGFUSE_PUBLIC_KEY}
-  secret_key: ${LANGFUSE_SECRET_KEY}
-  host: ${LANGFUSE_HOST}
-  enabled: true
-  sample_rate: 1.0
+# Nếu tạo project riêng — copy template
+cp resources.yaml /path/to/my-project/resources.yaml
 ```
 
-Cú pháp `${TÊN_BIẾN}` sẽ được Hush tự động thay bằng giá trị từ file `.env`.
+Hoặc dùng phiên bản nhẹ hơn (chỉ OpenAI + OpenRouter + Langfuse):
+
+```bash
+cp hush-tutorial/docs/resources.starter.yaml /path/to/my-project/resources.yaml
+```
 
 ### Cấu trúc file
 
-Mỗi resource có dạng:
+Mỗi resource có dạng `category:tên_resource`:
 
 ```yaml
-category:tên_resource:
-  property1: value
-  property2: ${BIẾN_MÔI_TRƯỜNG}
+llm:gpt-4o:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}     # ← thay bằng giá trị từ .env lúc runtime
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
 ```
 
 | Category | Ý nghĩa | Ví dụ |
 |----------|----------|-------|
-| `llm` | Model ngôn ngữ | `llm:gpt-4o-mini` |
-| `embedding` | Chuyển text → vector | `embedding:openai` |
-| `reranking` | Xếp hạng lại kết quả tìm kiếm | `reranking:bge-m3` |
+| `keycloak` | Token provider (enterprise) | `keycloak:myapp` |
+| `llm` | Model ngôn ngữ | `llm:gpt-4o-mini`, `llm:or-claude-4-sonnet` |
+| `embedding` | Chuyển text → vector | `embedding:openai`, `embedding:bge-m3` |
+| `reranking` | Xếp hạng lại kết quả | `reranking:bge-m3` |
 | `langfuse` | Tracing với Langfuse | `langfuse:default` |
 | `otel` | Tracing với OpenTelemetry | `otel:default` |
 
@@ -311,37 +374,55 @@ api_key: ${OPENAI_API_KEY}          # Bắt buộc — warning nếu chưa set
 base_url: ${MY_URL:http://default}  # Tuỳ chọn — dùng default nếu chưa set
 ```
 
-### Hush tìm resources.yaml ở đâu?
+### ResourceHub tìm resources.yaml ở đâu?
 
-Theo thứ tự ưu tiên:
+Theo thứ tự ưu tiên (code: `_get_global_hub()` trong `hush.core.registry`):
 
 1. Biến môi trường `HUSH_CONFIG` (nếu có)
-2. `./resources.yaml` (thư mục hiện tại)
+2. `./resources.yaml` (thư mục hiện tại — **phổ biến nhất**)
 3. `~/.hush/resources.yaml` (thư mục home)
 
-Vì chúng ta đã copy file vào thư mục gốc project → Hush sẽ tự tìm thấy (rule 2).
+> **Tip:** Nếu chạy code từ thư mục khác với nơi đặt `resources.yaml`, set `HUSH_CONFIG` trong `.env`:
+> ```dotenv
+> HUSH_CONFIG=/path/to/resources.yaml
+> ```
 
 ---
 
-## 5. Kiểm tra toàn bộ
+## 6. Traces database
 
-### Test 1 — Workflow cơ bản (không cần API key)
+Hush tự động lưu traces (lịch sử chạy workflow) vào SQLite database.
 
-Chạy lệnh sau để kiểm tra hush-core hoạt động:
+| Config | Mặc định | Cách thay đổi |
+|--------|----------|---------------|
+| Đường dẫn DB | `~/.hush/traces.db` | Set `HUSH_TRACES_DB` trong `.env` |
+
+Traces được dùng bởi:
+- **LocalTracer** — lưu traces cho debug local
+- **Background process** — buffer traces trước khi flush đến Langfuse/OTEL
+- **VS Code Trace Viewer** — đọc DB để hiển thị traces
+
+Không cần tạo DB thủ công — Hush tự tạo khi chạy workflow đầu tiên.
+
+---
+
+## 7. Kiểm tra toàn bộ
+
+### Test 1 — Workflow cơ bản (không cần API key, không cần resources.yaml)
 
 ```bash
 python3 -c "
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+
+@code_node
+def hello():
+    return {'message': 'Hello from Hush!'}
 
 async def main():
     with GraphNode(name='hello-hush') as graph:
-        hello = CodeNode(
-            name='hello',
-            code_fn=lambda: {'message': 'Hello from Hush!'},
-            outputs={'message': PARENT}
-        )
-        START >> hello >> END
+        step = hello()
+        START >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={})
@@ -357,36 +438,28 @@ Kết quả mong đợi:
 Result: Hello from Hush!
 ```
 
-✓ Nếu thấy dòng trên → hush-core hoạt động.
-
-### Test 2 — Kết nối LLM (cần API key)
+### Test 2 — Kết nối LLM (cần .env + resources.yaml)
 
 ```bash
 python3 -c "
 import asyncio
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo node
 
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.providers import llmchain_
 
 async def main():
     with GraphNode(name='test-llm') as graph:
-        prompt = PromptNode(
-            name='prompt',
-            inputs={'template': 'Say hello in exactly 3 words.'},
+        chat = llmchain_(
+            resource_key='gpt-4o-mini',  # ← tra cứu trong resources.yaml
+            template='Say hello in exactly 3 words.',
         )
-        llm = LLMNode(
-            name='llm',
-            resource_key='llm:gpt-4o-mini',
-            inputs={'messages': prompt['messages']},
-            outputs={'content': PARENT['answer']},
-        )
-        START >> prompt >> llm >> END
+        START >> chat >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={})
-    print(f'LLM response: {result[\"answer\"]}')
+    print(f'LLM response: {result[\"content\"]}')
 
 asyncio.run(main())
 "
@@ -398,8 +471,6 @@ Kết quả mong đợi (nội dung sẽ khác mỗi lần):
 LLM response: Hello, dear friend!
 ```
 
-✓ Nếu thấy response từ LLM → kết nối API thành công.
-
 ### Test 3 — Kiểm tra Langfuse tracing
 
 ```bash
@@ -408,17 +479,17 @@ import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
 from hush.observability import LangfuseTracer
+
+@code_node
+def hello():
+    return {'message': 'Tracing works!'}
 
 async def main():
     with GraphNode(name='test-tracing') as graph:
-        hello = CodeNode(
-            name='hello',
-            code_fn=lambda: {'message': 'Tracing works!'},
-            outputs={'message': PARENT}
-        )
-        START >> hello >> END
+        step = hello()
+        START >> step >> END
 
     tracer = LangfuseTracer(resource_key='langfuse:default')
     engine = Hush(graph)
@@ -430,18 +501,19 @@ asyncio.run(main())
 "
 ```
 
-Kết quả mong đợi:
-
-```
-Result: Tracing works!
-Check Langfuse dashboard for the trace.
-```
-
-✓ Mở [cloud.langfuse.com](https://cloud.langfuse.com) → Traces → bạn sẽ thấy trace `test-tracing`.
+Mở [cloud.langfuse.com](https://cloud.langfuse.com) → Traces → bạn sẽ thấy trace `test-tracing`.
 
 ---
 
-## 6. Troubleshooting
+## 8. Troubleshooting
+
+### `RuntimeError: Cannot initialize global ResourceHub`
+
+ResourceHub không tìm được `resources.yaml`. Kiểm tra:
+
+1. File `resources.yaml` có ở thư mục hiện tại không? (`ls resources.yaml`)
+2. Hoặc set `HUSH_CONFIG` trong `.env` trỏ đến đúng đường dẫn
+3. Đã gọi `load_dotenv()` trước khi import node chưa?
 
 ### `ModuleNotFoundError: No module named 'hush'`
 
@@ -457,7 +529,7 @@ uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.gi
 File `.env` chưa được tạo hoặc chưa load. Kiểm tra:
 
 1. File `.env` có tồn tại ở thư mục gốc project không?
-2. Code có gọi `load_dotenv()` trước khi import hush không?
+2. Code có gọi `load_dotenv()` **trước** khi tạo node dùng provider không?
 
 ### `openai.AuthenticationError: Incorrect API key`
 

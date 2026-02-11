@@ -4,7 +4,7 @@ Không cần API key. Chỉ dùng hush-core.
 
 Học được:
 - GraphNode: container chứa workflow
-- CodeNode: chạy Python function
+- @code_node: decorator tạo node từ Python function
 - PARENT: truy cập data từ parent state
 - START >> node >> END: kết nối nodes
 - Hush engine: chạy workflow
@@ -14,7 +14,45 @@ Chạy: cd hush-tutorial && uv run python examples/01_hello_world.py
 
 import asyncio
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes.transform.code_node import code_node
+
+# =============================================================================
+# Định nghĩa code nodes với @code_node decorator
+# =============================================================================
+
+
+@code_node
+def greet(name: str):
+    """Tạo greeting từ tên."""
+    return {"greeting": f"Xin chào, {name}!"}
+
+
+@code_node
+def greet_en(name: str):
+    """Tạo greeting tiếng Anh."""
+    return {"greeting": f"Hello, {name}!"}
+
+
+@code_node
+def upper(text: str):
+    """Chuyển thành uppercase."""
+    return {"result": text.upper()}
+
+
+@code_node
+def step_a():
+    return {"a_result": "Kết quả A"}
+
+
+@code_node
+def step_b():
+    return {"b_result": "Kết quả B"}
+
+
+@code_node
+def merge(a: str, b: str):
+    return {"combined": f"{a} + {b}"}
 
 
 async def main():
@@ -26,13 +64,8 @@ async def main():
     print("=" * 50)
 
     with GraphNode(name="hello-world") as graph:
-        greet = CodeNode(
-            name="greet",
-            code_fn=lambda name: {"greeting": f"Xin chào, {name}!"},
-            inputs={"name": PARENT["name"]},  # Lấy 'name' từ input
-            outputs={"greeting": PARENT},  # Ghi 'greeting' lên parent state
-        )
-        START >> greet >> END
+        g = greet(name=PARENT["name"])
+        START >> g >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"name": "Hush"})
@@ -50,22 +83,12 @@ async def main():
 
     with GraphNode(name="two-steps") as graph:
         # Node 1: Tạo greeting
-        greet = CodeNode(
-            name="greet",
-            code_fn=lambda name: {"greeting": f"Hello, {name}!"},
-            inputs={"name": PARENT["name"]},
-            outputs={"greeting": PARENT},
-        )
+        g = greet_en(name=PARENT["name"])
 
-        # Node 2: Chuyển thành uppercase
-        upper = CodeNode(
-            name="upper",
-            code_fn=lambda text: {"result": text.upper()},
-            inputs={"text": PARENT["greeting"]},  # Dùng output từ node trước
-            outputs={"result": PARENT},
-        )
+        # Node 2: Chuyển thành uppercase — đọc output từ node g
+        u = upper(text=g["greeting"])
 
-        START >> greet >> upper >> END
+        START >> g >> u >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"name": "Hush User"})
@@ -83,25 +106,12 @@ async def main():
     print("=" * 50)
 
     with GraphNode(name="parallel") as graph:
-        step_a = CodeNode(
-            name="step_a",
-            code_fn=lambda: {"a_result": "Kết quả A"},
-            outputs={"a_result": PARENT},
-        )
-        step_b = CodeNode(
-            name="step_b",
-            code_fn=lambda: {"b_result": "Kết quả B"},
-            outputs={"b_result": PARENT},
-        )
-        merge = CodeNode(
-            name="merge",
-            code_fn=lambda a, b: {"combined": f"{a} + {b}"},
-            inputs={"a": PARENT["a_result"], "b": PARENT["b_result"]},
-            outputs={"combined": PARENT},
-        )
+        a = step_a()
+        b = step_b()
+        m = merge(a=a["a_result"], b=b["b_result"])
 
         # step_a và step_b chạy song song, rồi merge
-        START >> [step_a, step_b] >> merge >> END
+        START >> [a, b] >> m >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={})

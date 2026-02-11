@@ -4,6 +4,8 @@ Hướng dẫn chạy workflow đầu tiên với Hush.
 
 > **Ví dụ chạy được**: `examples/01_hello_world.py`, `examples/02_data_pipeline.py`
 
+> **Yêu cầu trước khi bắt đầu:** Hoàn thành [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) — bao gồm cài packages, tạo `.env`, và có `resources.yaml`. Mục 2-3 dưới đây chỉ cần `hush-core`. Mục 4 (LLM) cần `.env` + `resources.yaml` đã thiết lập.
+
 ## 1. Cài đặt
 
 Xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) để cài đặt Hush (hỗ trợ cả pip và uv).
@@ -12,17 +14,16 @@ Xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) để cài đặ
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+
+@code_node
+def greet(name: str):
+    return {"greeting": f"Xin chào, {name}!"}
 
 async def main():
     with GraphNode(name="hello-world") as graph:
-        greet = CodeNode(
-            name="greet",
-            code_fn=lambda name: {"greeting": f"Xin chào, {name}!"},
-            inputs={"name": PARENT["name"]},
-            outputs={"greeting": PARENT}
-        )
-        START >> greet >> END
+        step = greet(name=PARENT["name"])
+        START >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"name": "Hush"})
@@ -35,28 +36,26 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+
+@code_node
+def fetch():
+    return {"data": [1, 2, 3, 4, 5]}
+
+@code_node
+def transform(data: list):
+    return {"transformed": [x * 2 for x in data]}
+
+@code_node
+def aggregate(data: list):
+    return {"total": sum(data)}
 
 async def main():
     with GraphNode(name="data-pipeline") as graph:
-        fetch = CodeNode(
-            name="fetch",
-            code_fn=lambda: {"data": [1, 2, 3, 4, 5]},
-            outputs={"data": PARENT}
-        )
-        transform = CodeNode(
-            name="transform",
-            code_fn=lambda data: {"transformed": [x * 2 for x in data]},
-            inputs={"data": PARENT["data"]},
-            outputs={"transformed": PARENT}
-        )
-        aggregate = CodeNode(
-            name="aggregate",
-            code_fn=lambda data: {"total": sum(data)},
-            inputs={"data": PARENT["transformed"]},
-            outputs={"total": PARENT}
-        )
-        START >> fetch >> transform >> aggregate >> END
+        f = fetch()
+        t = transform(data=f["data"])
+        a = aggregate(data=t["transformed"])
+        START >> f >> t >> a >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={})
@@ -114,11 +113,11 @@ asyncio.run(main())
 | Khái niệm | Mô tả |
 |-----------|-------|
 | `GraphNode` | Container chứa workflow — **core** |
-| `CodeNode` | Node chạy Python function — **core** |
-| `BranchNode` | Rẽ nhánh có điều kiện — **core** |
+| `@code_node` | Decorator biến function thành CodeNode — **core** |
+| `if_().else_()` | Rẽ nhánh có điều kiện — **core** |
 | `START >> node >> END` | Kết nối nodes thành pipeline |
-| `PARENT["key"]` | Lấy data từ state của parent graph |
-| `inputs` | Mapping input variables cho node |
+| `PARENT["key"]` | Lấy data từ state của parent graph / external inputs |
+| `node["key"]` | Lấy output từ node anh em (sibling) |
 | `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
 | `llmchain_()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 

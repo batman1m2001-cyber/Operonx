@@ -20,9 +20,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.providers import LLMNode
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import code_node, while_
+from hush.providers import llm_
 
 # =============================================================================
 # Tool definitions (OpenAI function calling format)
@@ -93,6 +93,7 @@ TOOL_DESCRIPTIONS = [
 # =============================================================================
 
 
+@code_node
 def init_agent(query: str):
     """Khởi tạo agent state."""
     return {
@@ -109,6 +110,7 @@ def init_agent(query: str):
     }
 
 
+@code_node
 def process_llm_response(content, tool_calls, messages, iteration):
     """Xử lý response từ LLM: execute tools hoặc return final answer."""
     new_messages = messages.copy()
@@ -172,10 +174,8 @@ async def example_1_simple_agent():
         return
 
     with GraphNode(name="simple-agent") as graph:
-        init = CodeNode(
-            name="init",
-            code_fn=init_agent,
-            inputs={"query": PARENT["query"]},
+        init = init_agent(
+            query=PARENT["query"],
             outputs={
                 "messages": PARENT,
                 "iteration": PARENT,
@@ -184,37 +184,27 @@ async def example_1_simple_agent():
             },
         )
 
-        with WhileLoopNode(
-            name="agent_loop",
-            inputs={
-                "messages": PARENT["messages"],
-                "iteration": PARENT["iteration"],
-                "done": PARENT["done"],
-                "final_answer": PARENT["final_answer"],
-            },
+        with while_(
+            messages=PARENT["messages"],
+            iteration=PARENT["iteration"],
+            done=PARENT["done"],
+            final_answer=PARENT["final_answer"],
             stop_condition="done == True or iteration >= 5",
             max_iterations=10,
         ) as loop:
             # Gọi LLM với tools
-            llm = LLMNode(
-                name="llm",
+            llm = llm_(
                 resource_key="gpt-4o-mini",
-                inputs={
-                    "messages": PARENT["messages"],
-                    "tools": TOOL_DESCRIPTIONS,
-                },
+                messages=PARENT["messages"],
+                tools=TOOL_DESCRIPTIONS,
             )
 
             # Xử lý response
-            process = CodeNode(
-                name="process",
-                code_fn=process_llm_response,
-                inputs={
-                    "content": llm["content"],
-                    "tool_calls": llm["tool_calls"],
-                    "messages": PARENT["messages"],
-                    "iteration": PARENT["iteration"],
-                },
+            process = process_llm_response(
+                content=llm["content"],
+                tool_calls=llm["tool_calls"],
+                messages=PARENT["messages"],
+                iteration=PARENT["iteration"],
             )
 
             # Update loop state

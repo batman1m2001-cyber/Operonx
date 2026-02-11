@@ -4,32 +4,30 @@ Sử dụng nhiều LLM models: load balancing, fallback, ensemble, cost routing
 
 > **Ví dụ chạy được**: `examples/12_multi_model.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+> | `if_().else_()` | `BranchNode` | `if_(PARENT["x"] > 0, "a").else_("b")` |
+
 ## Parallel Model Comparison
 
 So sánh output từ nhiều models song song.
 
 ```python
+from hush.providers import prompt_, llm_
+
 with GraphNode(name="compare") as graph:
-    prompt = PromptNode(
-        name="prompt",
-        inputs={
-            "template": {"system": "Answer briefly.", "user": "{query}"},
-            "query": PARENT["query"]
-        }
+    p = prompt_(
+        template={"system": "Answer briefly.", "user": "{query}"},
+        query=PARENT["query"],
     )
-    llm_a = LLMNode(
-        name="gpt4o",
-        resource_key="gpt-4o",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer_a"]}
-    )
-    llm_b = LLMNode(
-        name="gpt4o_mini",
-        resource_key="gpt-4o-mini",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer_b"]}
-    )
-    START >> prompt >> [llm_a, llm_b] >> END
+    a = llm_(resource_key="gpt-4o", messages=p["messages"])
+    b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
+    START >> p >> [a, b] >> END
 ```
 
 ## Cost-based Routing
@@ -39,20 +37,19 @@ Chọn model dựa trên complexity.
 ```python
 from hush.core.nodes.flow.branch_node import if_
 
+@code_node
+def classify(query: str):
+    return {"complexity": "complex" if len(query) > 100 else "simple"}
+
 with GraphNode(name="cost-routing") as graph:
-    classify = CodeNode(
-        name="classify",
-        code_fn=lambda query: {"complexity": "complex" if len(query) > 100 else "simple"},
-        inputs={"query": PARENT["query"]},
-        outputs={"complexity": PARENT}
-    )
-    router = if_(PARENT["complexity"] == "complex", "use_gpt4o").else_("use_mini")
+    cls = classify(query=PARENT["query"])
+    router = if_(cls["complexity"] == "complex", "use_gpt4o").else_("use_mini")
 
     # Complex → gpt-4o, Simple → gpt-4o-mini
-    use_gpt4o = LLMNode(name="use_gpt4o", resource_key="gpt-4o", ...)
-    use_mini = LLMNode(name="use_mini", resource_key="gpt-4o-mini", ...)
+    use_gpt4o = llm_(resource_key="gpt-4o", messages=PARENT["messages"])
+    use_mini = llm_(resource_key="gpt-4o-mini", messages=PARENT["messages"])
 
-    START >> classify >> router
+    START >> cls >> router
     router >> [use_gpt4o, use_mini]
     [use_gpt4o, use_mini] >> ~END
 ```
@@ -62,11 +59,10 @@ with GraphNode(name="cost-routing") as graph:
 Phân tải requests giữa nhiều models theo tỷ lệ. LLMNode dùng weighted random selection.
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
-    inputs={"messages": prompt["messages"]}
+    messages=p["messages"],
 )
 ```
 
@@ -78,11 +74,10 @@ llm = LLMNode(
 Tự động chuyển sang model khác khi primary fails.
 
 ```python
-llm = LLMNode(
-    name="llm",
+llm = llm_(
     resource_key="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
-    inputs={"messages": prompt["messages"]}
+    messages=prompt["messages"],
 )
 # gpt-4o fails → try azure-gpt4 → try gemini
 ```
@@ -91,29 +86,44 @@ llm = LLMNode(
 
 Nhiều models trả lời → model khác chọn câu trả lời tốt nhất.
 
+> **Lưu ý:** Khi nhiều nodes chạy song song và output cùng key (`content`),
+> phải dùng `outputs=` để map sang keys khác nhau, tránh ghi đè lẫn nhau.
+
 ```python
 with GraphNode(name="ensemble") as graph:
-    prompt = PromptNode(name="prompt", ...)
+    p = prompt_(
+        template={"system": "Answer the question.", "user": "{query}"},
+        query=PARENT["query"],
+    )
 
-    # 3 models trả lời song song
-    llm_a = LLMNode(name="a", resource_key="gpt-4o", ...)
-    llm_b = LLMNode(name="b", resource_key="gpt-4o-mini", ...)
-    llm_c = LLMNode(name="c", resource_key="or-claude-4-sonnet", ...)
+    # 3 models trả lời song song — mỗi model map content → key riêng
+    llm_a = llm_(
+        resource_key="gpt-4o",
+        messages=p["messages"],
+        outputs={"content": PARENT["answer_a"]},
+    )
+    llm_b = llm_(
+        resource_key="gpt-4o-mini",
+        messages=p["messages"],
+        outputs={"content": PARENT["answer_b"]},
+    )
+    llm_c = llm_(
+        resource_key="or-claude-4-sonnet",
+        messages=p["messages"],
+        outputs={"content": PARENT["answer_c"]},
+    )
 
     # Judge chọn câu tốt nhất
-    judge_prompt = PromptNode(
-        name="judge_prompt",
-        inputs={
-            "template": {"system": "Chọn câu trả lời tốt nhất.", "user": "..."},
-            "answer_a": PARENT["answer_a"],
-            "answer_b": PARENT["answer_b"],
-            "answer_c": PARENT["answer_c"]
-        }
+    jp = prompt_(
+        template={"system": "Chọn câu trả lời tốt nhất.", "user": "{answer_a}\n{answer_b}\n{answer_c}"},
+        answer_a=PARENT["answer_a"],
+        answer_b=PARENT["answer_b"],
+        answer_c=PARENT["answer_c"],
     )
-    judge = LLMNode(name="judge", resource_key="gpt-4o", ...)
+    judge = llm_(resource_key="gpt-4o", messages=jp["messages"])
 
-    START >> prompt >> [llm_a, llm_b, llm_c]
-    [llm_a, llm_b, llm_c] >> judge_prompt >> judge >> END
+    START >> p >> [llm_a, llm_b, llm_c]
+    [llm_a, llm_b, llm_c] >> jp >> judge >> END
 ```
 
 Xem ví dụ đầy đủ tại `examples/12_multi_model.py`.

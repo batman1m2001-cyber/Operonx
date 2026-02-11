@@ -4,11 +4,20 @@ Xây dựng AI agent với tool calling và WhileLoopNode.
 
 > **Ví dụ chạy được**: `examples/11_agent_workflow.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
+> | `while_()` | `WhileLoopNode` | `while_(counter=0, stop_condition="counter >= 5")` |
+> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+
 ## Kiến trúc Agent
 
 ```
-Init → WhileLoopNode(not done):
-         → PromptNode → LLMNode → Check tool_calls
+Init → while_(not done):
+         → llm_() → Check tool_calls
            → Nếu có: Execute tools → Update messages → Loop
            → Nếu không: Done → Exit
 ```
@@ -63,61 +72,53 @@ def execute_tools(tool_calls, messages):
     return new_messages
 ```
 
-### Bước 3: Agent workflow với WhileLoopNode
+### Bước 3: Agent workflow với while_()
 
 ```python
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.nodes.iteration import WhileLoopNode
-from hush.providers import PromptNode, LLMNode
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core.nodes import while_
+from hush.providers import llm_
+
+@code_node
+def init_agent(query: str):
+    return {
+        "messages": [
+            {"role": "system", "content": "Bạn là assistant có thể tra cứu thời tiết."},
+            {"role": "user", "content": query}
+        ],
+        "iteration": 0,
+        "done": False,
+        "final_answer": ""
+    }
+
+@code_node
+def process(tool_calls, content, messages, iteration):
+    return process_response(tool_calls, content, messages, iteration)
 
 with GraphNode(name="agent") as graph:
-    # Init state
-    init = CodeNode(
-        name="init",
-        code_fn=lambda query: {
-            "messages": [
-                {"role": "system", "content": "Bạn là assistant có thể tra cứu thời tiết."},
-                {"role": "user", "content": query}
-            ],
-            "iteration": 0,
-            "done": False,
-            "final_answer": ""
-        },
-        inputs={"query": PARENT["query"]},
-        outputs={"messages": PARENT, "iteration": PARENT, "done": PARENT, "final_answer": PARENT}
-    )
+    init = init_agent(query=PARENT["query"])
 
     # Agent loop
-    with WhileLoopNode(
-        name="loop",
-        condition=lambda done: not done,
-        inputs={"done": PARENT["done"], "messages": PARENT["messages"],
-                "iteration": PARENT["iteration"]},
+    with while_(
+        done=PARENT["done"],
+        messages=PARENT["messages"],
+        iteration=PARENT["iteration"],
+        stop_condition="done == True",
         max_iterations=5,
     ) as loop:
-        # Call LLM với tools
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o",
-            inputs={"messages": PARENT["messages"], "tools": tools, "tool_choice": "auto"}
+            messages=PARENT["messages"],
+            tools=tools,
+            tool_choice="auto",
         )
-
-        # Process response
-        process = CodeNode(
-            name="process",
-            code_fn=lambda tool_calls, content, messages, iteration: process_response(
-                tool_calls, content, messages, iteration
-            ),
-            inputs={
-                "tool_calls": llm["tool_calls"],
-                "content": llm["content"],
-                "messages": PARENT["messages"],
-                "iteration": PARENT["iteration"]
-            },
-            outputs={"messages": PARENT, "done": PARENT, "final_answer": PARENT, "iteration": PARENT}
+        proc = process(
+            tool_calls=llm["tool_calls"],
+            content=llm["content"],
+            messages=PARENT["messages"],
+            iteration=PARENT["iteration"],
         )
-
-        START >> llm >> process >> END
+        START >> llm >> proc >> END
 
     loop["final_answer"] >> PARENT["answer"]
     START >> init >> loop >> END

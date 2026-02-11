@@ -4,51 +4,65 @@ Thực thi song song trong workflows: fan-out/fan-in, MapNode, partial failure.
 
 > **Ví dụ chạy được**: `examples/13_parallel_advanced.py`
 
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
+> | `map_()` | `MapNode` | `map_(x=Each([1,2,3]), max_concurrency=4)` |
+> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+
 ## Fan-out / Fan-in
 
 Chạy nhiều nodes song song, rồi merge kết quả.
 
 ```python
+@code_node
+def task_a():
+    return {"result": "A"}
+
+@code_node
+def task_b():
+    return {"result": "B"}
+
+@code_node
+def task_c():
+    return {"result": "C"}
+
+@code_node
+def merge(a, b, c):
+    return {"combined": f"{a}+{b}+{c}"}
+
 with GraphNode(name="fan-out") as graph:
-    # Fan-out: 3 nodes chạy song song
-    task_a = CodeNode(name="a", code_fn=lambda: {"result": "A"}, outputs={"result": PARENT["a"]})
-    task_b = CodeNode(name="b", code_fn=lambda: {"result": "B"}, outputs={"result": PARENT["b"]})
-    task_c = CodeNode(name="c", code_fn=lambda: {"result": "C"}, outputs={"result": PARENT["c"]})
+    a = task_a()
+    b = task_b()
+    c = task_c()
+    m = merge(a=a["result"], b=b["result"], c=c["result"])
 
-    # Fan-in: merge khi tất cả xong
-    merge = CodeNode(
-        name="merge",
-        code_fn=lambda a, b, c: {"combined": f"{a}+{b}+{c}"},
-        inputs={"a": PARENT["a"], "b": PARENT["b"], "c": PARENT["c"]},
-        outputs={"combined": PARENT}
-    )
-
-    START >> [task_a, task_b, task_c]  # Fan-out
-    [task_a, task_b, task_c] >> merge >> END  # Fan-in (hard edge: chờ tất cả)
+    START >> [a, b, c]  # Fan-out
+    [a, b, c] >> m >> END  # Fan-in (hard edge: chờ tất cả)
 ```
 
-## MapNode với max_concurrency
+## map_() với max_concurrency
 
 Xử lý list items song song với giới hạn concurrency.
 
 ```python
-from hush.core.nodes.iteration import MapNode
-from hush.core.nodes.iteration.base import Each
+from hush.core.nodes import map_, Each
+
+@code_node
+def process(item):
+    return {"result": item * 2}
 
 with GraphNode(name="parallel-map") as graph:
-    with MapNode(
-        name="process_all",
-        inputs={"item": Each(PARENT["items"])},
+    with map_(
+        item=Each(PARENT["items"]),
         max_concurrency=5,  # Tối đa 5 tasks cùng lúc
-        outputs={"results": PARENT}
     ) as map_node:
-        process = CodeNode(
-            name="process",
-            code_fn=lambda item: {"result": item * 2},
-            inputs={"item": PARENT["item"]},
-            outputs={"result": PARENT}
-        )
-        START >> process >> END
+        step = process(item=PARENT["item"])
+        START >> step >> END
 
     START >> map_node >> END
 ```
@@ -66,32 +80,23 @@ def safe_process(item: dict):
     except Exception as e:
         return {"result": None, "error": str(e)}
 
+@code_node
+def summarize(results):
+    return {
+        "succeeded": [r for r in results if r.get("error") is None],
+        "failed": [r for r in results if r.get("error") is not None],
+    }
+
 with GraphNode(name="partial-failure") as graph:
-    with MapNode(
-        name="safe_map",
-        inputs={"item": Each(PARENT["items"])},
+    with map_(
+        item=Each(PARENT["items"]),
         max_concurrency=3,
-        outputs={"results": PARENT}
     ) as map_node:
-        proc = safe_process(
-            name="process",
-            inputs={"item": PARENT["item"]},
-            outputs={"result": PARENT, "error": PARENT}
-        )
+        proc = safe_process(item=PARENT["item"])
         START >> proc >> END
 
-    # Tách kết quả thành công/thất bại
-    summarize = CodeNode(
-        name="summarize",
-        code_fn=lambda results: {
-            "succeeded": [r for r in results if r.get("error") is None],
-            "failed": [r for r in results if r.get("error") is not None],
-        },
-        inputs={"results": PARENT["results"]},
-        outputs={"succeeded": PARENT, "failed": PARENT}
-    )
-
-    START >> map_node >> summarize >> END
+    s = summarize(results=map_node["results"])
+    START >> map_node >> s >> END
 ```
 
 ## Parallel LLM Calls
@@ -99,31 +104,18 @@ with GraphNode(name="partial-failure") as graph:
 Gọi nhiều LLMs song song (ví dụ: so sánh models).
 
 ```python
-from hush.providers import PromptNode, LLMNode
+from hush.providers import prompt_, llm_
 
 with GraphNode(name="parallel-llm") as graph:
-    prompt = PromptNode(
-        name="prompt",
-        inputs={
-            "template": {"system": "Answer briefly.", "user": "{query}"},
-            "query": PARENT["query"]
-        }
+    p = prompt_(
+        template={"system": "Answer briefly.", "user": "{query}"},
+        query=PARENT["query"],
     )
-    llm_a = LLMNode(
-        name="llm_a",
-        resource_key="gpt-4o",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer_a"]}
-    )
-    llm_b = LLMNode(
-        name="llm_b",
-        resource_key="gpt-4o-mini",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer_b"]}
-    )
+    a = llm_(resource_key="gpt-4o", messages=p["messages"])
+    b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
 
-    START >> prompt >> [llm_a, llm_b]  # Song song
-    [llm_a, llm_b] >> END              # Chờ cả hai
+    START >> p >> [a, b]  # Song song
+    [a, b] >> END         # Chờ cả hai
 ```
 
 Xem thêm parallel LLM comparison tại `examples/12_multi_model.py`.

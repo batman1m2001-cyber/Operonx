@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.providers import LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes.transform.code_node import code_node
+from hush.providers import llm_, prompt_
 
 
 async def example_1_structured_output():
@@ -30,43 +31,37 @@ async def example_1_structured_output():
     print("=" * 50)
 
     with GraphNode(name="sentiment-analysis") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Phân tích sentiment của văn bản. Trả về JSON.",
-                    "user": "{text}",
-                },
-                "text": PARENT["text"],
+        p = prompt_(
+            template={
+                "system": "Phân tích sentiment của văn bản. Trả về JSON.",
+                "user": "{text}",
             },
+            text=PARENT["text"],
         )
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={
-                "messages": prompt["messages"],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "sentiment_response",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "sentiment": {
-                                    "type": "string",
-                                    "enum": ["positive", "negative", "neutral"],
-                                },
-                                "confidence": {"type": "number"},
-                                "reason": {"type": "string"},
+            messages=p["messages"],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "sentiment_response",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "sentiment": {
+                                "type": "string",
+                                "enum": ["positive", "negative", "neutral"],
                             },
-                            "required": ["sentiment", "confidence", "reason"],
+                            "confidence": {"type": "number"},
+                            "reason": {"type": "string"},
                         },
+                        "required": ["sentiment", "confidence", "reason"],
                     },
                 },
             },
             outputs={"content": PARENT["analysis"]},
         )
-        START >> prompt >> llm >> END
+        START >> p >> llm >> END
 
     engine = Hush(graph)
 
@@ -116,48 +111,37 @@ async def example_2_tool_calling():
         except Exception as e:
             return f"Error: {e}"
 
+    @code_node
+    def process_response(content, tool_calls):
+        return {
+            "has_tool_call": bool(tool_calls),
+            "tool_result": (
+                execute_tool(json.loads(tool_calls[0]["function"]["arguments"])["expression"])
+                if tool_calls
+                else None
+            ),
+            "llm_response": content,
+        }
+
     with GraphNode(name="tool-calling") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
+                "user": "{query}",
             },
+            query=PARENT["query"],
         )
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={
-                "messages": prompt["messages"],
-                "tools": tools,
-                "tool_choice": "auto",
-            },
+            messages=p["messages"],
+            tools=tools,
+            tool_choice="auto",
         )
-        process = CodeNode(
-            name="process",
-            code_fn=lambda content, tool_calls: {
-                "has_tool_call": bool(tool_calls),
-                "tool_result": (
-                    execute_tool(json.loads(tool_calls[0]["function"]["arguments"])["expression"])
-                    if tool_calls
-                    else None
-                ),
-                "llm_response": content,
-            },
-            inputs={
-                "content": llm["content"],
-                "tool_calls": llm["tool_calls"],
-            },
-            outputs={
-                "has_tool_call": PARENT,
-                "tool_result": PARENT,
-                "llm_response": PARENT,
-            },
+        proc = process_response(
+            content=llm["content"],
+            tool_calls=llm["tool_calls"],
         )
-        START >> prompt >> llm >> process >> END
+        START >> p >> llm >> proc >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "Tính 25 * 4 + 100"})
@@ -176,45 +160,38 @@ async def example_3_multi_turn_chat():
     print("Ví dụ 3: Multi-turn Chat")
     print("=" * 50)
 
+    @code_node
+    def update_history(history, message, response):
+        return {
+            "new_history": history
+            + [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response},
+            ]
+        }
+
     with GraphNode(name="multi-turn-chat") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
-                    "user": "{message}",
-                },
-                "conversation_history": PARENT["history"],
-                "message": PARENT["message"],
+        p = prompt_(
+            template={
+                "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
+                "user": "{message}",
             },
+            conversation_history=PARENT["history"],
+            message=PARENT["message"],
         )
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={
-                "messages": prompt["messages"],
-                "temperature": 0.7,
-                "max_tokens": 200,
-            },
+            messages=p["messages"],
+            temperature=0.7,
+            max_tokens=200,
             outputs={"content": PARENT["response"]},
         )
-        update = CodeNode(
-            name="update_history",
-            code_fn=lambda history, message, response: {
-                "new_history": history
-                + [
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": response},
-                ]
-            },
-            inputs={
-                "history": PARENT["history"],
-                "message": PARENT["message"],
-                "response": PARENT["response"],
-            },
-            outputs={"new_history": PARENT},
+        upd = update_history(
+            history=PARENT["history"],
+            message=PARENT["message"],
+            response=llm["content"],
         )
-        START >> prompt >> llm >> update >> END
+        START >> p >> llm >> upd >> END
 
     engine = Hush(graph)
 

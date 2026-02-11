@@ -89,6 +89,8 @@ async def main():
     print(result["content"])
 ```
 
+> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
+
 ## Installation
 
 Hush is a monorepo with 3 separate packages. Install what you need:

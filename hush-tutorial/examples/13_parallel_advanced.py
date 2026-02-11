@@ -20,10 +20,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.map_node import MapNode
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import Each, code_node, map_
 
 # =============================================================================
 # Ví dụ 1: Fan-out / Fan-in
@@ -87,45 +85,36 @@ async def example_1_fan_out_fan_in():
     print("Ví dụ 1: Fan-out / Fan-in")
     print("=" * 50)
 
+    @code_node
+    def merge(s, k, wc, cc, awl):
+        return {
+            "analysis": {
+                "sentiment": s,
+                "keywords": k,
+                "word_count": wc,
+                "char_count": cc,
+                "avg_word_len": awl,
+            }
+        }
+
     with GraphNode(name="fan-out-fan-in") as graph:
         # Fan-out: 3 branches chạy song song
-        sentiment = analyze_sentiment(
-            name="sentiment",
-            inputs={"text": PARENT["text"]},
-        )
-        keywords = extract_keywords(
-            name="keywords",
-            inputs={"text": PARENT["text"]},
-        )
-        stats = count_stats(
-            name="stats",
-            inputs={"text": PARENT["text"]},
-        )
+        sent = analyze_sentiment(text=PARENT["text"])
+        kw = extract_keywords(text=PARENT["text"])
+        st = count_stats(text=PARENT["text"])
 
         # Fan-in: merge results
-        merge = CodeNode(
-            name="merge",
-            code_fn=lambda s, k, wc, cc, awl: {
-                "analysis": {
-                    "sentiment": s,
-                    "keywords": k,
-                    "word_count": wc,
-                    "char_count": cc,
-                    "avg_word_len": awl,
-                }
-            },
-            inputs={
-                "s": sentiment["sentiment"],
-                "k": keywords["keywords"],
-                "wc": stats["word_count"],
-                "cc": stats["char_count"],
-                "awl": stats["avg_word_len"],
-            },
+        m = merge(
+            s=sent["sentiment"],
+            k=kw["keywords"],
+            wc=st["word_count"],
+            cc=st["char_count"],
+            awl=st["avg_word_len"],
             outputs={"analysis": PARENT},
         )
 
-        # [sentiment, keywords, stats] chạy song song
-        START >> [sentiment, keywords, stats] >> merge >> END
+        # [sent, kw, st] chạy song song
+        START >> [sent, kw, st] >> m >> END
 
     engine = Hush(graph)
     result = await engine.run(
@@ -160,9 +149,8 @@ async def example_2_concurrency_control():
     print("=" * 50)
 
     with GraphNode(name="concurrency-demo") as graph:
-        with MapNode(
-            name="parallel_process",
-            inputs={"item": Each(PARENT["items"])},
+        with map_(
+            item=Each(PARENT["items"]),
             max_concurrency=3,  # Max 3 concurrent tasks
         ) as map_node:
             proc = process_item(
@@ -209,12 +197,16 @@ async def example_3_partial_failure():
     print("Ví dụ 3: Partial Failure Handling")
     print("=" * 50)
 
+    @code_node
+    def filter_results(results, errors):
+        return {
+            "successful": [r for r, e in zip(results, errors) if e is None],
+            "failed": [e for e in errors if e is not None],
+        }
+
     with GraphNode(name="partial-failure") as graph:
         # Wrap risky logic trong try/catch
-        with MapNode(
-            name="safe_process",
-            inputs={"item": Each(PARENT["items"])},
-        ) as map_node:
+        with map_(item=Each(PARENT["items"])) as map_node:
 
             @code_node
             def safe_op(item: int):
@@ -223,27 +215,19 @@ async def example_3_partial_failure():
                 return {"result": None, "error": f"Even number: {item}"}
 
             proc = safe_op(
-                name="process",
-                inputs={"item": PARENT["item"]},
+                item=PARENT["item"],
                 outputs={"result": PARENT, "error": PARENT},
             )
             START >> proc >> END
 
         # Filter results
-        filter_node = CodeNode(
-            name="filter",
-            code_fn=lambda results, errors: {
-                "successful": [r for r, e in zip(results, errors) if e is None],
-                "failed": [e for e in errors if e is not None],
-            },
-            inputs={
-                "results": map_node["result"],
-                "errors": map_node["error"],
-            },
+        flt = filter_results(
+            results=map_node["result"],
+            errors=map_node["error"],
             outputs={"*": PARENT},
         )
 
-        START >> map_node >> filter_node >> END
+        START >> map_node >> flt >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"items": [1, 2, 3, 4, 5, 6, 7]})
@@ -271,52 +255,38 @@ async def example_4_parallel_llm():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import LLMNode, PromptNode
+    from hush.providers import llm_, prompt_
 
     # --- Part A: Parallel prompts (different tasks, same input) ---
     print("\n  A) Parallel prompts (summary + keywords from same text):")
 
+    @code_node
+    def merge_results(s, k):
+        return {"summary": s, "keywords": k}
+
     with GraphNode(name="parallel-llm") as graph:
-        prompt_summary = PromptNode(
-            name="prompt_summary",
-            inputs={
-                "template": {"system": "Summarize in one sentence.", "user": "{text}"},
-                "text": PARENT["text"],
-            },
+        p_summary = prompt_(
+            template={"system": "Summarize in one sentence.", "user": "{text}"},
+            text=PARENT["text"],
         )
-        prompt_keywords = PromptNode(
-            name="prompt_keywords",
-            inputs={
-                "template": {
-                    "system": "List 3 keywords, comma-separated.",
-                    "user": "{text}",
-                },
-                "text": PARENT["text"],
-            },
+        p_keywords = prompt_(
+            template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
+            text=PARENT["text"],
         )
 
-        llm_summary = LLMNode(
-            name="llm_summary",
-            resource_key="gpt-4o-mini",
-            inputs={"messages": prompt_summary["messages"]},
-        )
-        llm_keywords = LLMNode(
-            name="llm_keywords",
-            resource_key="gpt-4o-mini",
-            inputs={"messages": prompt_keywords["messages"]},
-        )
+        llm_summary = llm_(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+        llm_keywords = llm_(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
 
-        merge = CodeNode(
-            name="merge",
-            code_fn=lambda s, k: {"summary": s, "keywords": k},
-            inputs={"s": llm_summary["content"], "k": llm_keywords["content"]},
+        m = merge_results(
+            s=llm_summary["content"],
+            k=llm_keywords["content"],
             outputs={"*": PARENT},
         )
 
-        START >> [prompt_summary, prompt_keywords]
-        prompt_summary >> llm_summary
-        prompt_keywords >> llm_keywords
-        [llm_summary, llm_keywords] >> merge >> END
+        START >> [p_summary, p_keywords]
+        p_summary >> llm_summary
+        p_keywords >> llm_keywords
+        [llm_summary, llm_keywords] >> m >> END
 
     engine = Hush(graph)
     result = await engine.run(
@@ -331,28 +301,20 @@ async def example_4_parallel_llm():
     print("\n  B) Batch LLM (multiple queries via MapNode):")
 
     with GraphNode(name="batch-llm") as graph:
-        with MapNode(
-            name="llm_batch",
-            inputs={"query": Each(PARENT["queries"])},
+        with map_(
+            query=Each(PARENT["queries"]),
             max_concurrency=3,
         ) as map_node:
-            prompt = PromptNode(
-                name="prompt",
-                inputs={
-                    "template": {
-                        "system": "Answer in one sentence.",
-                        "user": "{query}",
-                    },
-                    "query": PARENT["query"],
-                },
+            p = prompt_(
+                template={"system": "Answer in one sentence.", "user": "{query}"},
+                query=PARENT["query"],
             )
-            llm = LLMNode(
-                name="llm",
+            llm = llm_(
                 resource_key="gpt-4o-mini",
-                inputs={"messages": prompt["messages"]},
+                messages=p["messages"],
                 outputs={"content": PARENT["answer"]},
             )
-            START >> prompt >> llm >> END
+            START >> p >> llm >> END
 
         map_node["answer"] >> PARENT["answers"]
         START >> map_node >> END

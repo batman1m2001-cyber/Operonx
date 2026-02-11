@@ -4,10 +4,10 @@ Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env + resources.yaml
 
 Học được:
 - load_dotenv() để load API keys
-- PromptNode: tạo messages cho LLM
-- LLMNode: gọi LLM qua resource_key
-- LLMChainNode: kết hợp prompt + LLM trong 1 node
-- CodeNode + PromptNode + LLMNode pipeline (tiền xử lý → prompt → LLM)
+- prompt_(): tạo messages cho LLM
+- llm_(): gọi LLM qua resource_key
+- llmchain_(): kết hợp prompt + LLM trong 1 node
+- @code_node + prompt_() + llm_() pipeline (tiền xử lý → prompt → LLM)
 
 Chạy: cd hush-tutorial && uv run python examples/03_llm_chat.py
 """
@@ -19,34 +19,31 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.providers import LLMChainNode, LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes.transform.code_node import code_node
+from hush.providers import llm_, llmchain_, prompt_
 
 
 async def example_1_basic_chat():
-    """PromptNode + LLMNode — Cách cơ bản nhất."""
+    """prompt_() + llm_() — Cách cơ bản nhất."""
     print("=" * 50)
-    print("Ví dụ 1: Basic Chat (PromptNode + LLMNode)")
+    print("Ví dụ 1: Basic Chat (prompt_ + llm_)")
     print("=" * 50)
 
     with GraphNode(name="basic-chat") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
-                    "user": "{question}",
-                },
-                "question": PARENT["question"],
+        p = prompt_(
+            template={
+                "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
+                "user": "{question}",
             },
+            question=PARENT["question"],
         )
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
-        START >> prompt >> llm >> END
+        START >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"question": "Python là gì? Trả lời trong 1 câu."})
@@ -54,24 +51,20 @@ async def example_1_basic_chat():
 
 
 async def example_2_chain_node():
-    """LLMChainNode — All-in-one, gọn hơn."""
+    """llmchain_() — All-in-one, gọn hơn."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: LLMChainNode (all-in-one)")
+    print("Ví dụ 2: llmchain_ (all-in-one)")
     print("=" * 50)
 
     with GraphNode(name="chain-chat") as graph:
-        chain = LLMChainNode(
-            name="chain",
+        chain = llmchain_(
             resource_key="gpt-4o-mini",
-            inputs={
-                "template": {
-                    "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
-                    "user": "{query}",
-                },
-                "query": PARENT["query"],
-                "*": PARENT,
+            template={
+                "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
+                "user": "{query}",
             },
+            query=PARENT["query"],
             outputs={"content": PARENT["response"]},
         )
         START >> chain >> END
@@ -88,34 +81,26 @@ async def example_3_text_summarization():
     print("Ví dụ 3: Text Summarization Pipeline")
     print("=" * 50)
 
-    def clean_text(text: str) -> dict:
+    @code_node
+    def clean_text(text: str):
         cleaned = " ".join(text.split()).strip()
         return {"cleaned_text": cleaned}
 
     with GraphNode(name="summarize-pipeline") as graph:
-        preprocess = CodeNode(
-            name="preprocess",
-            code_fn=clean_text,
-            inputs={"text": PARENT["text"]},
-            outputs={"cleaned_text": PARENT},
-        )
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
-                    "user": "Tóm tắt:\n\n{text}",
-                },
-                "text": PARENT["cleaned_text"],
+        preprocess = clean_text(text=PARENT["text"])
+        p = prompt_(
+            template={
+                "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
+                "user": "Tóm tắt:\n\n{text}",
             },
+            text=preprocess["cleaned_text"],
         )
-        summarize = LLMNode(
-            name="summarize",
+        summarize = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["summary"]},
         )
-        START >> preprocess >> prompt >> summarize >> END
+        START >> preprocess >> p >> summarize >> END
 
     engine = Hush(graph)
     result = await engine.run(

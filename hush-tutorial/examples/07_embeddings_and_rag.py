@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
-from hush.providers import EmbeddingNode, LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core.nodes import code_node
+from hush.providers import embedding_, llm_, prompt_
 
 # =============================================================================
 # Helper: Cosine similarity search
@@ -62,10 +63,9 @@ async def example_1_basic_embedding():
     print("=" * 50)
 
     with GraphNode(name="embed-texts") as graph:
-        embed = EmbeddingNode(
-            name="embed",
+        embed = embedding_(
             resource_key="openai",  # Tham chiếu embedding:openai trong resources.yaml
-            inputs={"texts": PARENT["texts"]},
+            texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
         START >> embed >> END
@@ -93,10 +93,9 @@ async def example_2_simple_rag():
     # Bước 0: Pre-compute document embeddings
     print("  Đang embed documents...")
     with GraphNode(name="embed-docs") as embed_graph:
-        embed = EmbeddingNode(
-            name="embed",
+        embed = embedding_(
             resource_key="openai",
-            inputs={"texts": PARENT["texts"]},
+            texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
         START >> embed >> END
@@ -107,54 +106,47 @@ async def example_2_simple_rag():
     print(f"  Embedded {len(doc_vectors)} documents ({len(doc_vectors[0])} dims)")
 
     # RAG workflow
+    @code_node
+    def retrieve(query_vec, doc_vectors, documents):
+        return {"context_docs": cosine_search(query_vec[0], doc_vectors, documents, top_k=3)}
+
     with GraphNode(name="simple-rag") as graph:
         # Step 1: Embed query
-        embed_query = EmbeddingNode(
-            name="embed_query",
+        embed_query = embedding_(
             resource_key="openai",
-            inputs={"texts": PARENT["query"]},
+            texts=PARENT["query"],
         )
 
         # Step 2: Cosine similarity search
-        retrieve = CodeNode(
-            name="retrieve",
-            code_fn=lambda query_vec, doc_vectors, documents: {
-                "context_docs": cosine_search(query_vec[0], doc_vectors, documents, top_k=3)
-            },
-            inputs={
-                "query_vec": embed_query["embeddings"],
-                "doc_vectors": PARENT["doc_vectors"],
-                "documents": PARENT["documents"],
-            },
+        ret = retrieve(
+            query_vec=embed_query["embeddings"],
+            doc_vectors=PARENT["doc_vectors"],
+            documents=PARENT["documents"],
             outputs={"context_docs": PARENT},
         )
 
         # Step 3: Build prompt with context
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": (
-                        "Trả lời câu hỏi dựa trên context được cung cấp.\n"
-                        "Nếu không tìm thấy câu trả lời, nói 'Không tìm thấy thông tin.'\n\n"
-                        "Context:\n{context}"
-                    ),
-                    "user": "{query}",
-                },
-                "context": PARENT["context_docs"],
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": (
+                    "Trả lời câu hỏi dựa trên context được cung cấp.\n"
+                    "Nếu không tìm thấy câu trả lời, nói 'Không tìm thấy thông tin.'\n\n"
+                    "Context:\n{context}"
+                ),
+                "user": "{query}",
             },
+            context=PARENT["context_docs"],
+            query=PARENT["query"],
         )
 
         # Step 4: Generate answer
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
-        START >> embed_query >> retrieve >> prompt >> llm >> END
+        START >> embed_query >> ret >> p >> llm >> END
 
     engine = Hush(graph)
 
@@ -186,9 +178,9 @@ async def example_3_rag_with_rerank():
     print("=" * 50)
 
     try:
-        from hush.providers import RerankNode
+        from hush.providers import rerank_
     except ImportError:
-        print("  Skipped — RerankNode chưa available")
+        print("  Skipped — rerank_ chưa available")
         return
 
     import os
@@ -200,37 +192,30 @@ async def example_3_rag_with_rerank():
 
     with GraphNode(name="rag-rerank") as graph:
         # Rerank documents theo query
-        rerank = RerankNode(
-            name="rerank",
+        rr = rerank_(
             resource_key="bge-m3",  # reranking:bge-m3 trong resources.yaml
-            inputs={
-                "query": PARENT["query"],
-                "documents": PARENT["documents"],
-                "top_k": 3,
-            },
+            query=PARENT["query"],
+            documents=PARENT["documents"],
+            top_k=3,
         )
 
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "template": {
-                    "system": "Trả lời dựa trên context:\n\n{context}",
-                    "user": "{query}",
-                },
-                "context": rerank["reranks"],
-                "query": PARENT["query"],
+        p = prompt_(
+            template={
+                "system": "Trả lời dựa trên context:\n\n{context}",
+                "user": "{query}",
             },
+            context=rr["reranks"],
+            query=PARENT["query"],
         )
 
-        llm = LLMNode(
-            name="llm",
+        llm = llm_(
             resource_key="gpt-4o-mini",
-            inputs={"messages": prompt["messages"]},
+            messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
-        rerank["reranks"] >> PARENT["sources"]
-        START >> rerank >> prompt >> llm >> END
+        rr["reranks"] >> PARENT["sources"]
+        START >> rr >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(

@@ -1,36 +1,39 @@
 # Loops và Branches
 
-Sử dụng các node điều khiển luồng: ForLoopNode, MapNode, WhileLoopNode và if_() / BranchNode.
+Sử dụng các node điều khiển luồng: `for_()`, `map_()`, `while_()` và `if_()`.
 
 > **Ví dụ chạy được**: `examples/05_loops_and_branches.py`, `examples/15_shorthand_syntax.py`
->
-> **Tip**: Xem [Shorthand Syntax](12-shorthand-syntax.md) để viết code ngắn gọn hơn với `for_()`, `map_()`, `while_()`.
 
-## ForLoopNode — Iterate tuần tự
+> **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
+> Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
+>
+> | Viết tắt | Class gốc | Ví dụ |
+> |----------|-----------|-------|
+> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
+> | `for_()` | `ForLoopNode` | `for_(x=Each([1,2,3]))` |
+> | `map_()` | `MapNode` | `map_(x=Each([1,2,3]), max_concurrency=4)` |
+> | `while_()` | `WhileLoopNode` | `while_(counter=0, stop_condition="counter >= 5")` |
+> | `if_().else_()` | `BranchNode` | `if_(PARENT["x"] > 0, "pos").else_("neg")` |
+
+## for_() — Iterate tuần tự
 
 Xử lý từng item một cách tuần tự. Dùng khi items có thể phụ thuộc vào nhau.
 
 ```python
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.core.nodes.iteration import ForLoopNode
-from hush.core.nodes.iteration.base import Each
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core.nodes import for_, Each
+
+@code_node
+def process(item: str, prefix: str):
+    return {"result": f"{prefix}: {item}"}
 
 with GraphNode(name="sequential-process") as graph:
-    with ForLoopNode(
-        name="process_items",
-        inputs={
-            "item": Each(PARENT["items"]),  # Iterate qua mỗi item
-            "prefix": PARENT["prefix"]       # Broadcast cho tất cả iterations
-        },
-        outputs={"results": PARENT}
+    with for_(
+        item=Each(PARENT["items"]),  # Iterate qua mỗi item
+        prefix=PARENT["prefix"],     # Broadcast cho tất cả iterations
     ) as loop:
-        process = CodeNode(
-            name="process",
-            code_fn=lambda item, prefix: {"result": f"{prefix}: {item}"},
-            inputs={"item": PARENT["item"], "prefix": PARENT["prefix"]},
-            outputs={"result": PARENT}
-        )
-        START >> process >> END
+        step = process(item=PARENT["item"], prefix=PARENT["prefix"])
+        START >> step >> END
 
     START >> loop >> END
 
@@ -45,56 +48,27 @@ result = await engine.run(inputs={"items": ["a", "b", "c"], "prefix": "Item"})
 - Các biến không có `Each()` sẽ được broadcast cho tất cả iterations
 - Output là list kết quả theo thứ tự
 
-### Shorthand: for_()
-
-```python
-from hush.core.nodes import for_, Each
-
-# Shorthand — truyền inputs trực tiếp
-with for_(
-    item=Each(PARENT["items"]),  # Iterate
-    prefix=PARENT["prefix"]       # Broadcast
-) as loop:
-    ...
-```
-
-## MapNode — Iterate song song
+## map_() — Iterate song song
 
 Xử lý nhiều items cùng lúc (parallel). Dùng cho I/O bound tasks hoặc items độc lập.
 
 ```python
-from hush.core.nodes.iteration import MapNode
-
-with GraphNode(name="parallel-fetch") as graph:
-    with MapNode(
-        name="fetch_all",
-        inputs={"url": Each(PARENT["urls"]), "timeout": 30},
-        max_concurrency=10,  # Giới hạn concurrent tasks
-        outputs={"results": PARENT}
-    ) as map_node:
-        fetch = CodeNode(
-            name="fetch",
-            code_fn=lambda url, timeout: {"data": f"Content from {url}"},
-            inputs={"url": PARENT["url"], "timeout": PARENT["timeout"]},
-            outputs={"data": PARENT}
-        )
-        START >> fetch >> END
-
-    START >> map_node >> END
-```
-
-### Shorthand: map_()
-
-```python
 from hush.core.nodes import map_, Each
 
-# Shorthand — truyền inputs và config trực tiếp
-with map_(
-    url=Each(PARENT["urls"]),
-    timeout=30,
-    max_concurrency=10
-) as map_node:
-    ...
+@code_node
+def fetch(url: str, timeout: int):
+    return {"data": f"Content from {url}"}
+
+with GraphNode(name="parallel-fetch") as graph:
+    with map_(
+        url=Each(PARENT["urls"]),
+        timeout=30,
+        max_concurrency=10,  # Giới hạn concurrent tasks
+    ) as map_node:
+        step = fetch(url=PARENT["url"], timeout=PARENT["timeout"])
+        START >> step >> END
+
+    START >> map_node >> END
 ```
 
 ### So sánh ForLoopNode vs MapNode
@@ -107,46 +81,30 @@ with map_(
 | Use case | Chain processing, stateful | I/O bound, batch processing |
 | Shorthand | `for_(...)` | `map_(...)` |
 
-## WhileLoopNode — Loop với điều kiện
+## while_() — Loop với điều kiện
 
 Chạy cho đến khi điều kiện trả về False.
 
 ```python
-from hush.core.nodes.iteration import WhileLoopNode
+from hush.core.nodes import while_
+
+@code_node
+def decrement(count: int):
+    return {"count": count - 1, "message": f"Count: {count}"}
 
 with GraphNode(name="countdown") as graph:
-    with WhileLoopNode(
-        name="countdown_loop",
-        condition=lambda count: count > 0,
-        inputs={"count": PARENT["start"]},
-        outputs={"final_count": PARENT}
+    with while_(
+        count=PARENT["start"],
+        stop_condition="count <= 0",
+        max_iterations=100,
     ) as loop:
-        decrement = CodeNode(
-            name="decrement",
-            code_fn=lambda count: {"count": count - 1, "message": f"Count: {count}"},
-            inputs={"count": PARENT["count"]},
-            outputs={"count": PARENT, "message": PARENT}
-        )
-        START >> decrement >> END
+        step = decrement(count=PARENT["count"])
+        START >> step >> END
 
     START >> loop >> END
 
 result = await engine.run(inputs={"start": 5})
 # result["final_count"] = 0
-```
-
-### Shorthand: while_()
-
-```python
-from hush.core.nodes import while_
-
-# Shorthand — truyền inputs và config trực tiếp
-with while_(
-    count=PARENT["start"],
-    stop_condition="count <= 0",  # String expression
-    max_iterations=100
-) as loop:
-    ...
 ```
 
 ## BranchNode — Conditional Routing
@@ -156,20 +114,36 @@ with while_(
 ```python
 from hush.core.nodes.flow.branch_node import if_
 
+@code_node
+def excellent():
+    return {"grade": "A"}
+
+@code_node
+def good():
+    return {"grade": "B"}
+
+@code_node
+def average():
+    return {"grade": "C"}
+
+@code_node
+def fail():
+    return {"grade": "F"}
+
 with GraphNode(name="grade-workflow") as graph:
     grade_router = (if_(PARENT["score"] >= 90, "excellent")
                     .if_(PARENT["score"] >= 70, "good")
                     .if_(PARENT["score"] >= 50, "average")
                     .else_("fail"))
 
-    excellent = CodeNode(name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT})
-    good = CodeNode(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
-    average = CodeNode(name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT})
-    fail = CodeNode(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
+    a = excellent()
+    b = good()
+    c = average()
+    d = fail()
 
     START >> grade_router
-    grade_router >> [excellent, good, average, fail]
-    [excellent, good, average, fail] >> ~END  # Soft edge — chỉ 1 nhánh chạy
+    grade_router >> [a, b, c, d]
+    [a, b, c, d] >> ~END  # Soft edge — chỉ 1 nhánh chạy
 
 result = await engine.run(inputs={"score": 85})
 # result["grade"] = "B"
@@ -194,19 +168,13 @@ Loops có thể nest bên trong nhau:
 
 ```python
 with GraphNode(name="nested") as graph:
-    with ForLoopNode(
-        name="outer",
-        inputs={"category": Each(PARENT["categories"])},
-        outputs={"all_results": PARENT}
-    ) as outer:
-        with MapNode(
-            name="inner",
-            inputs={"item": Each(PARENT["category"]["items"])},
+    with for_(category=Each(PARENT["categories"])) as outer:
+        with map_(
+            item=Each(PARENT["category"]["items"]),
             max_concurrency=5,
-            outputs={"category_results": PARENT}
         ) as inner:
-            process = CodeNode(...)
-            START >> process >> END
+            step = process(...)
+            START >> step >> END
         START >> inner >> END
     START >> outer >> END
 ```
