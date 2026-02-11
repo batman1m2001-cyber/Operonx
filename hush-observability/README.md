@@ -5,14 +5,16 @@
 ## Cài đặt
 
 ```bash
-# Qua meta-package (khuyến nghị)
-uv pip install "hush-ai[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Với pip
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
 
-# Hoặc với tất cả backends
-uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Với uv
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
 
-# Hoặc editable (cho development)
-git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd hush
+# Editable (cho development)
+git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core -e "hush-observability[all]"
 ```
 

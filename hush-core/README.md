@@ -5,11 +5,14 @@
 ## Cài đặt
 
 ```bash
-# Qua meta-package (khuyến nghị)
-uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Với pip
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 
-# Hoặc editable (cho development)
-git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd hush
+# Với uv
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+
+# Editable (cho development)
+git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core
 ```
 

@@ -160,7 +160,7 @@ with GraphNode(name="rag-pipeline") as graph:
     prompt = PromptNode(
         name="prompt",
         inputs={
-            "prompt": {"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
+            "template": {"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
             "context": rerank["reranked_documents"],
             "query": PARENT["query"]
         }

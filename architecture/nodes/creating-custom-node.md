@@ -257,8 +257,8 @@ class LLMNode(BaseNode):
     def _create_llm_core(self):
         async def core(messages, temperature=None):
             # Get LLM client from ResourceHub
-            from hush.core.resources import get_resource
-            client = get_resource(f"llm:{self.provider}")
+            from hush.core.registry import ResourceHub
+            client = ResourceHub.instance().get(f"llm:{self.provider}")
 
             # Call LLM
             response = await client.chat(

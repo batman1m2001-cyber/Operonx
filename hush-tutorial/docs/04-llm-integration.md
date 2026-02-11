@@ -65,30 +65,108 @@ llm:or-claude-4-sonnet:
   model: anthropic/claude-sonnet-4
 ```
 
-## PromptNode — Xây dựng Messages
+## llmchain_() — Shorthand (khuyến nghị)
 
-### Cách 1: String prompt
+Cách ngắn nhất để gọi LLM. Kết hợp prompt + LLM trong một node, auto-naming từ biến, `>> END` auto-forward outputs.
+
+```python
+from hush.providers import llmchain_
+
+# String template
+summarize = llmchain_(resource_key="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
+
+# Dict với system/user
+chat = llmchain_(
+    resource_key="gpt-4o",
+    template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
+    task="tóm tắt văn bản",
+    query=PARENT["query"],
+)
+
+# Với conversation history
+chat = llmchain_(
+    resource_key="gpt-4o",
+    template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
+    conversation_history=PARENT["history"],
+    query=PARENT["query"],
+)
+
+START >> chat >> END  # auto-forward: result["content"], result["model_used"], ...
+```
+
+### Structured output (JSON mode)
+
+```python
+classifier = llmchain_(
+    resource_key="gpt-4o",
+    template={"user": "Phân loại và trả về JSON: {text}"},
+    text=PARENT["text"],
+    response_format={"type": "json_object"},
+)
+```
+
+### LLM outputs
+
+| Output | Type | Mô tả |
+|--------|------|-------|
+| `content` | str | Response content |
+| `role` | str | "assistant" |
+| `model_used` | str | Model đã dùng |
+| `tokens_used` | dict | `{prompt_tokens, completion_tokens, total_tokens}` |
+| `tool_calls` | list | Tool calls nếu có |
+| `finish_reason` | str | "stop", "tool_calls", etc. |
+
+## LLMChainNode — Class đầy đủ
+
+Khi cần config chi tiết hơn (load balancing, fallback, extract, v.v.):
+
+```python
+from hush.providers import LLMChainNode
+
+chain = LLMChainNode(
+    name="chain",
+    resource_key=["gpt-4o", "gpt-4o-mini"],
+    ratios=[0.7, 0.3],
+    fallback=["or-claude-4-sonnet"],
+    inputs={
+        "template": {"system": "Bạn là assistant hữu ích.", "user": "{query}"},
+        "query": PARENT["query"],
+        "*": PARENT,
+    },
+)
+```
+
+---
+
+## PromptNode + LLMNode — Dùng khi cần linh hoạt
+
+Dùng pattern tách riêng khi cần:
+- **Một prompt → nhiều LLMs** (so sánh models, ensemble)
+- **Tool calling loops** (reinject tool results vào messages)
+- **Pipeline phức tạp** (CodeNode xen giữa prompt và LLM)
+- **Multimodal prompts** (image, audio)
+
+### PromptNode — Xây dựng Messages
+
+Template hỗ trợ 3 định dạng: string, dict, hoặc list.
 
 ```python
 from hush.providers import PromptNode
 
+# String → [{"role": "user", "content": "..."}]
 prompt = PromptNode(
     name="prompt",
     inputs={
-        "prompt": "Tóm tắt văn bản sau: {text}",
+        "template": "Tóm tắt văn bản sau: {text}",
         "text": PARENT["text"]
     }
 )
-# Output: [{"role": "user", "content": "Tóm tắt văn bản sau: ..."}]
-```
 
-### Cách 2: Dict với system/user
-
-```python
+# Dict → system + user messages
 prompt = PromptNode(
     name="prompt",
     inputs={
-        "prompt": {
+        "template": {
             "system": "Bạn là assistant chuyên {task}.",
             "user": "{query}"
         },
@@ -96,19 +174,12 @@ prompt = PromptNode(
         "query": PARENT["query"]
     }
 )
-# Output: [
-#   {"role": "system", "content": "Bạn là assistant chuyên tóm tắt văn bản."},
-#   {"role": "user", "content": "..."}
-# ]
-```
 
-### Cách 3: Full messages array (multimodal)
-
-```python
+# List → full messages array (multimodal)
 prompt = PromptNode(
     name="prompt",
     inputs={
-        "prompt": [
+        "template": [
             {"role": "system", "content": "Bạn là assistant phân tích hình ảnh."},
             {"role": "user", "content": [
                 {"type": "text", "text": "Mô tả hình ảnh: {query}"},
@@ -121,62 +192,18 @@ prompt = PromptNode(
 )
 ```
 
-### Với conversation history
-
-```python
-prompt = PromptNode(
-    name="prompt",
-    inputs={
-        "prompt": {"system": "Bạn là assistant hữu ích.", "user": "{query}"},
-        "conversation_history": PARENT["history"],  # List of previous messages
-        "query": PARENT["query"]
-    }
-)
-# History được insert trước user message cuối
-```
-
-## LLMNode — Gọi LLM
-
-### Basic usage
+### LLMNode — Gọi LLM
 
 ```python
 from hush.providers import LLMNode
 
 llm = LLMNode(
     name="llm",
-    resource_key="gpt-4o",  # Tham chiếu llm:gpt-4o trong resources.yaml
+    resource_key="gpt-4o",
     inputs={"messages": prompt["messages"]},
     outputs={"content": PARENT["response"]}
 )
 ```
-
-### Shorthand: llm_()
-
-```python
-from hush.providers import llm_
-
-# Shorthand — truyền inputs trực tiếp
-llm = llm_(
-    "gpt-4o",
-    name="llm",
-    messages=prompt["messages"],     # Input trực tiếp
-    temperature=0.7,
-    outputs={"content": PARENT["response"]}
-)
-```
-
-Xem [Shorthand Syntax](12-shorthand-syntax.md) để biết thêm chi tiết.
-
-### LLMNode outputs
-
-| Output | Type | Mô tả |
-|--------|------|-------|
-| `role` | str | "assistant" |
-| `content` | str | Response content |
-| `model_used` | str | Model đã dùng |
-| `tokens_used` | dict | `{prompt_tokens, completion_tokens, total_tokens}` |
-| `tool_calls` | list | Tool calls nếu có |
-| `finish_reason` | str | "stop", "tool_calls", etc. |
 
 ### Generation Parameters
 
@@ -201,27 +228,6 @@ Hướng dẫn chọn temperature:
 - `0.0`: Factual Q&A, code generation
 - `0.3-0.5`: General conversation
 - `0.7-1.0`: Creative writing
-
-## LLMChainNode — All-in-one
-
-Kết hợp PromptNode + LLMNode trong một node.
-
-```python
-from hush.providers import LLMChainNode
-
-chain = LLMChainNode(
-    name="chain",
-    resource_key="gpt-4o",
-    prompt={
-        "system": "Bạn là assistant hữu ích.",
-        "user": "{query}"
-    },
-    inputs={"query": PARENT["query"]},
-    outputs={"content": PARENT["response"]}
-)
-```
-
-> **Lưu ý**: Nếu template variables không interpolate đúng, dùng pattern PromptNode + LLMNode riêng biệt thay vì LLMChainNode.
 
 ## Streaming
 
@@ -380,7 +386,7 @@ with GraphNode(name="multi-turn-chat") as graph:
     prompt = PromptNode(
         name="prompt",
         inputs={
-            "prompt": {"system": "Bạn là assistant hữu ích.", "user": "{message}"},
+            "template": {"system": "Bạn là assistant hữu ích.", "user": "{message}"},
             "conversation_history": PARENT["history"],
             "message": PARENT["message"]
         }

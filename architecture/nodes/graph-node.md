@@ -24,7 +24,8 @@ class GraphNode(BaseNode):
         'flowtype_map',     # BiMap[node_name, NodeFlowType]
         '_edges',           # List[EdgeConfig]
         '_edges_lookup',    # Dict[(source, target), EdgeConfig]
-        '_is_building'      # Flag đang trong quá trình build
+        '_is_building',     # Flag đang trong quá trình build
+        '_compiled_adj'     # Compiled adjacency data for fast execution
     ]
 ```
 

@@ -105,7 +105,7 @@ with GraphNode(name="parallel-llm") as graph:
     prompt = PromptNode(
         name="prompt",
         inputs={
-            "prompt": {"system": "Answer briefly.", "user": "{query}"},
+            "template": {"system": "Answer briefly.", "user": "{query}"},
             "query": PARENT["query"]
         }
     )

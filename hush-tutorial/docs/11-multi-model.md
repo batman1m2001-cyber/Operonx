@@ -13,7 +13,7 @@ with GraphNode(name="compare") as graph:
     prompt = PromptNode(
         name="prompt",
         inputs={
-            "prompt": {"system": "Answer briefly.", "user": "{query}"},
+            "template": {"system": "Answer briefly.", "user": "{query}"},
             "query": PARENT["query"]
         }
     )
@@ -104,7 +104,7 @@ with GraphNode(name="ensemble") as graph:
     judge_prompt = PromptNode(
         name="judge_prompt",
         inputs={
-            "prompt": {"system": "Chọn câu trả lời tốt nhất.", "user": "..."},
+            "template": {"system": "Chọn câu trả lời tốt nhất.", "user": "..."},
             "answer_a": PARENT["answer_a"],
             "answer_b": PARENT["answer_b"],
             "answer_c": PARENT["answer_c"]

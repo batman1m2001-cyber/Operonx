@@ -6,11 +6,7 @@ Hướng dẫn chạy workflow đầu tiên với Hush.
 
 ## 1. Cài đặt
 
-```bash
-pip install hush-ai[standard]
-```
-
-Xem chi tiết tại [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).
+Xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) để cài đặt Hush (hỗ trợ cả pip và uv).
 
 ## 2. Hello World
 
@@ -95,31 +91,20 @@ export HUSH_CONFIG=/path/to/resources.yaml
 ```python
 import asyncio
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.providers import llmchain_
 
 async def main():
     with GraphNode(name="chat-workflow") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "prompt": {
-                    "system": "Bạn là trợ lý AI thân thiện.",
-                    "user": "{question}"
-                },
-                "question": PARENT["question"]
-            }
-        )
-        llm = LLMNode(
-            name="llm",
+        chat = llmchain_(
             resource_key="gpt-4o",
-            inputs={"messages": prompt["messages"]},
-            outputs={"content": PARENT["answer"]}
+            template={"system": "Bạn là trợ lý AI thân thiện.", "user": "{question}"},
+            question=PARENT["question"],
         )
-        START >> prompt >> llm >> END
+        START >> chat >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"question": "Python là gì?"})
-    print(f"Trả lời: {result['answer']}")
+    print(f"Trả lời: {result['content']}")
 
 asyncio.run(main())
 ```
@@ -128,14 +113,14 @@ asyncio.run(main())
 
 | Khái niệm | Mô tả |
 |-----------|-------|
-| `GraphNode` | Container chứa workflow |
-| `CodeNode` | Node chạy Python function |
-| `PromptNode` | Node tạo messages cho LLM |
-| `LLMNode` | Node gọi LLM qua ResourceHub |
+| `GraphNode` | Container chứa workflow — **core** |
+| `CodeNode` | Node chạy Python function — **core** |
+| `BranchNode` | Rẽ nhánh có điều kiện — **core** |
 | `START >> node >> END` | Kết nối nodes thành pipeline |
 | `PARENT["key"]` | Lấy data từ state của parent graph |
 | `inputs` | Mapping input variables cho node |
-| `outputs` | Mapping output variables từ node |
+| `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
+| `llmchain_()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 
 ## Tiếp theo
 

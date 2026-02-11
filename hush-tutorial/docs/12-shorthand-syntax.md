@@ -14,7 +14,11 @@ Hush cung cấp các hàm shorthand để viết workflow ngắn gọn hơn. Tha
 | `WhileLoopNode(inputs={...})` | `while_(counter=0, stop_condition=...)` | Loop với điều kiện |
 | `AsyncIterNode(inputs={...})` | `aiter_(chunk=Each(stream), ...)` | Xử lý async streaming |
 | `BranchNode(...)` | `if_(...).else_(...)` | Routing có điều kiện |
+| `LLMChainNode(inputs={...})` | `llmchain_("gpt-4o", template, ...)` | Prompt + LLM all-in-one |
 | `LLMNode(inputs={...})` | `llm_("gpt-4o", messages=...)` | Gọi LLM |
+| `PromptNode(inputs={...})` | `prompt_(template, ...)` | Tạo messages từ template |
+| `EmbeddingNode(inputs={...})` | `embedding_("model", texts=...)` | Tạo embeddings |
+| `RerankNode(inputs={...})` | `rerank_("model", query=..., documents=...)` | Rerank documents |
 
 ## @code_node — Decorator
 
@@ -356,6 +360,105 @@ llm = llm_(
 )
 ```
 
+## llmchain_() — LLMChainNode Shorthand
+
+Prompt + LLM all-in-one. Ngắn nhất có thể.
+
+### So sánh
+
+```python
+from hush.providers import LLMChainNode, llmchain_
+
+# ❌ Verbose
+chain = LLMChainNode(
+    name="chat",
+    resource_key="gpt-4o",
+    inputs={
+        "template": {"system": "Bạn là assistant.", "user": "{query}"},
+        "query": PARENT["query"],
+        "*": PARENT,
+    },
+    outputs={"content": PARENT["response"]},
+)
+
+# ✅ Shorthand (auto-name + >> END auto-forward)
+chat = llmchain_(
+    "gpt-4o",
+    {"system": "Bạn là assistant.", "user": "{query}"},
+    query=PARENT["query"],
+)
+START >> chat >> END  # result["content"], result["model_used"], ...
+```
+
+### String template
+
+```python
+summarize = llmchain_("gpt-4o", "Tóm tắt: {text}", text=PARENT["text"])
+```
+
+### Structured output
+
+```python
+classifier = llmchain_(
+    "gpt-4o",
+    {"user": "Phân loại: {text}"},
+    text=PARENT["text"],
+    response_format={"type": "json_object"},
+)
+```
+
+### Load Balancing + Fallback
+
+```python
+chat = llmchain_(
+    ["gpt-4o", "gpt-4o-mini"],
+    {"system": "Help.", "user": "{query}"},
+    ratios=[0.7, 0.3],
+    fallback=["or-claude-4-sonnet"],
+    query=PARENT["query"],
+)
+```
+
+## prompt_() — PromptNode Shorthand
+
+Tạo messages từ template, dùng khi cần tách riêng prompt và LLM.
+
+```python
+from hush.providers import prompt_
+
+# String → [{"role": "user", "content": "..."}]
+p = prompt_("Tóm tắt: {text}", text=PARENT["text"])
+
+# Dict → system + user messages
+p = prompt_(
+    {"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
+    task="tóm tắt",
+    query=PARENT["query"],
+)
+```
+
+## embedding_() — EmbeddingNode Shorthand
+
+Tạo embeddings từ text.
+
+```python
+from hush.providers import embedding_
+
+embed = embedding_("bge-m3", texts=PARENT["texts"])
+START >> embed >> END  # result["embeddings"]
+```
+
+## rerank_() — RerankNode Shorthand
+
+Rerank documents theo query.
+
+```python
+from hush.providers import rerank_
+
+rerank = rerank_("bge-m3", query=PARENT["query"], documents=PARENT["docs"], top_k=5)
+START >> rerank >> END  # result["reranked_documents"]
+```
+
 ## Best Practices
 
 ### 1. Khi nào dùng Shorthand
@@ -460,7 +563,11 @@ START >> step >> END         # Auto-forward
 | `while_(...)` | `stop_condition`, `max_iterations` | Conditional loop |
 | `aiter_(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
 | `if_(...).else_(...)` | - | Conditional routing |
+| `llmchain_(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
 | `llm_(...)` | `ratios`, `fallback`, `batch_mode`, `seed` | LLM calls |
+| `prompt_(...)` | - | Tạo messages từ template |
+| `embedding_(...)` | - | Tạo embeddings |
+| `rerank_(...)` | - | Rerank documents |
 
 ## Tiếp theo
 

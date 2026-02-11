@@ -153,7 +153,7 @@ from hush.providers import PromptNode
 prompt = PromptNode(
     name="format",
     inputs={
-        "prompt": {"system": "You are helpful.", "user": "{question}"},
+        "template": {"system": "You are helpful.", "user": "{question}"},
         "question": PARENT["question"]
     },
     outputs={"messages": PARENT}
@@ -168,7 +168,7 @@ chain = LLMChainNode(
     name="chat",
     resource_key="gpt-4o",
     inputs={
-        "prompt": {"system": "...", "user": "{input}"},
+        "template": {"system": "...", "user": "{input}"},
         "input": PARENT["query"]
     },
     outputs={"content": PARENT["answer"]}
@@ -177,10 +177,16 @@ chain = LLMChainNode(
 
 ### Shorthand Functions
 ```python
-from hush.providers import llm_, prompt_, embedding_, rerank_
+from hush.providers import llmchain_, llm_, prompt_, embedding_, rerank_
 
-# Functional style
-node = llm_("gpt-4o", messages=PARENT["messages"], content=PARENT["response"])
+# Prompt + LLM all-in-one (recommended)
+chat = llmchain_(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+
+# Separate LLM call
+node = llm_("gpt-4o", messages=PARENT["messages"])
+
+# Separate prompt formatting
+p = prompt_({"system": "...", "user": "{query}"}, query=PARENT["query"])
 ```
 
 ## Plugin Registration
@@ -212,11 +218,15 @@ llm_config = hub.get("llm", "gpt-4o")  # Returns OpenAIConfig
 ## Feature Flags (pyproject.toml)
 
 Optional dependencies for specific providers:
-- `[gemini]` - Google Cloud AI Platform
-- `[bedrock]` - AWS Bedrock
-- `[onnx]` - ONNX runtime
+- `[openai]` - OpenAI + Azure OpenAI (already in base deps, no-op extra)
+- `[gemini]` - Google Cloud AI Platform + requests
+- `[bedrock]` - AWS Bedrock (boto3)
+- `[onnx]` - ONNX Runtime
 - `[huggingface]` - Transformers + PyTorch
-- `[all]` - Everything
+- `[embeddings]` - ONNX embedding
+- `[rerankers]` - ONNX reranking
+- `[all-light]` - All providers without PyTorch
+- `[all]` - Everything including PyTorch
 
 ## Testing Providers
 

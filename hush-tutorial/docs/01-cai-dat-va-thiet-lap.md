@@ -29,101 +29,148 @@ git --version
 
 ## 2. Cài đặt
 
-### 2.1 Tạo thư mục project và virtual environment
+Hush là **monorepo** với 3 packages riêng biệt:
 
-```bash
-mkdir my-hush-project && cd my-hush-project
-```
+| Package | Mô tả | Khi nào cần |
+|---------|--------|-------------|
+| `hush-core` | Workflow engine (GraphNode, CodeNode, BranchNode) | **Luôn cần** — đây là nền tảng |
+| `hush-providers` | LLM, embedding, reranking providers | Khi dùng LLM, embedding, hoặc reranking |
+| `hush-observability` | Langfuse, OpenTelemetry tracing | Khi cần tracing với backend bên ngoài |
 
-**Với uv (khuyến nghị):**
+> **Quan trọng:** `hush-providers` và `hush-observability` phụ thuộc vào `hush-core`, nên luôn cài `hush-core` trước.
 
-```bash
-uv venv
-source .venv/bin/activate
-```
+#### Extras — kết hợp tuỳ ý
 
-**Với pip:**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-> Trên Windows, dùng `.venv\Scripts\activate` thay cho `source .venv/bin/activate`.
-
-Sau khi activate, bạn sẽ thấy `(.venv)` ở đầu dòng terminal.
-
-### 2.2 Cài đặt Hush từ GitHub
-
-Hush dùng meta-package `hush-ai` — bạn chọn **extras** phù hợp với nhu cầu.
-
-Cú pháp chung:
-
-```bash
-uv pip install "hush-ai[EXTRAS] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
-```
-
-> **Dùng pip thay uv?** Thay `uv pip install` bằng `pip install`.
-
-#### Tiers — chọn 1 làm base
-
-| Extra | Bao gồm | Khi nào dùng |
-|-------|----------|--------------|
-| `core` | hush-core | Chỉ cần workflow engine, không cần LLM |
-| `standard` | core + hush-providers | Dùng LLM qua API (OpenAI, OpenRouter...) |
-| `all` | standard + tất cả providers nhẹ + observability | **Khuyến nghị** — đầy đủ cho phát triển |
-| `full` | all + PyTorch + Transformers | Chạy model local (nặng ~2GB+) |
-
-#### LLM Providers — kết hợp tuỳ ý
+**hush-providers:**
 
 | Extra | Provider |
 |-------|----------|
-| `openai` | OpenAI (GPT-4o, GPT-4o-mini...) + OpenRouter + vLLM |
-| `azure` | Azure OpenAI |
+| `openai` | OpenAI + Azure OpenAI (GPT-4o, GPT-4o-mini...) + OpenRouter + vLLM |
 | `gemini` | Google Gemini |
+| `bedrock` | AWS Bedrock |
+| `embeddings` | ONNX embedding local |
+| `rerankers` | ONNX reranking local |
+| `onnx` | ONNX Runtime (embedding + reranking) |
+| `huggingface` | Transformers + PyTorch (nặng ~2GB+) |
+| `all-light` | Tất cả providers nhẹ (không có PyTorch) |
+| `all` | Tất cả bao gồm PyTorch |
 
-#### Local Inference
+> OpenAI (bao gồm Azure OpenAI) đã có sẵn trong base dependencies của `hush-providers`, không cần thêm extra.
 
-| Extra | Mô tả |
-|-------|-------|
-| `onnx` | ONNX Runtime (embedding, reranking local) |
-| `huggingface` | Transformers + PyTorch (nặng) |
-
-#### Observability — kết hợp tuỳ ý
+**hush-observability:**
 
 | Extra | Backend |
 |-------|---------|
 | `langfuse` | Langfuse tracing |
 | `otel` | OpenTelemetry |
-
-#### Development
-
-| Extra | Mô tả |
-|-------|-------|
-| `dev` | Tất cả providers nhẹ + observability + pytest, black, ruff |
+| `all` | Langfuse + OpenTelemetry |
 
 ---
 
-**Ví dụ cài đặt:**
+Chọn **một trong hai** cách cài đặt bên dưới.
+
+### Cách A: Với pip
+
+#### Bước 1 — Tạo project và virtual environment
 
 ```bash
-# Khuyến nghị — đầy đủ cho phát triển
-uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+mkdir my-hush-project && cd my-hush-project
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+```
 
-# Nhẹ hơn — chỉ OpenAI + Langfuse
-uv pip install "hush-ai[openai,langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+#### Bước 2 — Cài đặt trực tiếp
 
+```bash
 # Tối thiểu — chỉ workflow engine
-uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 
-# Kết hợp tự do — OpenAI + Gemini + Langfuse
-uv pip install "hush-ai[openai,gemini,langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Core + LLM providers + Langfuse tracing
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
 ```
 
-Kết quả mong đợi (ví dụ với tier `all`):
+#### Hoặc: Dùng requirements.txt
+
+Tạo file `requirements.txt` trong thư mục project:
+
+```txt
+# requirements.txt
+hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core
+hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers
+hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability
+```
+
+Sau đó cài đặt:
+
+```bash
+pip install -r requirements.txt
+```
+
+> Bỏ dòng nào không cần. Chỉ `hush-core` là bắt buộc.
+
+---
+
+### Cách B: Với uv (khuyến nghị)
+
+> [uv](https://docs.astral.sh/uv/) nhanh hơn pip rất nhiều. Cài uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+#### Bước 1 — Tạo project
+
+```bash
+uv init my-hush-project && cd my-hush-project
+```
+
+#### Bước 2a — Cài đặt trực tiếp
+
+```bash
+# Tối thiểu — chỉ workflow engine
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+
+# Core + LLM providers + Langfuse tracing
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+uv pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
+```
+
+#### Hoặc: Dùng pyproject.toml (khuyến nghị cho dự án thực tế)
+
+Thêm vào `pyproject.toml` (hoặc tạo mới):
+
+```toml
+[project]
+name = "my-hush-project"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "hush-core",
+    "hush-providers",
+    "hush-observability[langfuse]",
+]
+
+[tool.uv.sources]
+hush-core = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-core" }
+hush-providers = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-providers" }
+hush-observability = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-observability" }
+```
+
+Sau đó cài đặt:
+
+```bash
+uv sync
+```
+
+> Bỏ dòng nào không cần trong `dependencies` và `[tool.uv.sources]`. Chỉ `hush-core` là bắt buộc.
+
+---
+
+Kết quả mong đợi:
 
 ```
-Successfully installed hush-core-0.1.0 hush-providers-0.1.0 hush-observability-0.1.0 ...
+Successfully installed hush-core-0.1.0 ...
+Successfully installed hush-providers-0.1.0 ...
+Successfully installed hush-observability-0.1.0 ...
 ```
 
 ### 2.3 Kiểm tra cài đặt cơ bản
@@ -327,11 +374,11 @@ async def main():
     with GraphNode(name='test-llm') as graph:
         prompt = PromptNode(
             name='prompt',
-            messages=[{'role': 'user', 'content': 'Say hello in exactly 3 words.'}],
+            inputs={'template': 'Say hello in exactly 3 words.'},
         )
         llm = LLMNode(
             name='llm',
-            resource='llm:gpt-4o-mini',
+            resource_key='llm:gpt-4o-mini',
             inputs={'messages': prompt['messages']},
             outputs={'content': PARENT['answer']},
         )
@@ -373,7 +420,7 @@ async def main():
         )
         START >> hello >> END
 
-    tracer = LangfuseTracer(resource='langfuse:default')
+    tracer = LangfuseTracer(resource_key='langfuse:default')
     engine = Hush(graph)
     result = await engine.run(inputs={}, tracer=tracer)
     print(f'Result: {result[\"message\"]}')
@@ -402,7 +449,7 @@ Bạn chưa cài packages hoặc chưa activate virtual environment:
 
 ```bash
 source .venv/bin/activate
-uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 ```
 
 ### `WARNING: Environment variable OPENAI_API_KEY not found`

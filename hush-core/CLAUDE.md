@@ -152,31 +152,41 @@ def llm_plugin(config: dict) -> LLMConfig:
 
 ### BaseTracer Interface
 
+Tracers use subprocess-based flushing — traces are written to SQLite during execution,
+then flushed to external services in the background.
+
 ```python
-from hush.core.tracers import BaseTracer
+from hush.core.tracers import BaseTracer, register_tracer
 
+@register_tracer
 class MyTracer(BaseTracer):
-    async def start_trace(self, name: str, **kwargs) -> str:
-        # Return trace_id
-        pass
+    def __init__(self, resource_key=None, tags=None):
+        super().__init__(tags=tags)
+        self._resource_key = resource_key
 
-    async def end_trace(self, trace_id: str, **kwargs):
-        pass
+    def _get_tracer_config(self) -> dict:
+        """Return config for serialization (passed to flush())."""
+        return {"resource_key": self._resource_key}
 
-    async def start_span(self, trace_id: str, name: str, **kwargs) -> str:
-        # Return span_id
-        pass
-
-    async def end_span(self, span_id: str, **kwargs):
+    @staticmethod
+    def flush(flush_data: dict) -> None:
+        """Called by background process. Re-import deps here."""
+        # flush_data contains: nodes, tracer_config, tags, etc.
+        config = flush_data["tracer_config"]
+        # Send traces to your platform
         pass
 ```
 
 ### Registration
 
+`@register_tracer` is a **decorator** that registers tracer classes for subprocess dispatch:
+
 ```python
 from hush.core.tracers import register_tracer
 
-register_tracer("my_tracer", MyTracer)
+@register_tracer
+class MyTracer(BaseTracer):
+    ...
 ```
 
 ## Testing Patterns

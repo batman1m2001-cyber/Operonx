@@ -30,28 +30,18 @@ dependencies = [
     "aiohttp>=3.8",
     "pyyaml>=6.0",
     "numpy>=2.2.6",
-    "requests>=2.32.5",
-    "python-dotenv>=1.0",
-    "pytest>=9.0.1",
-    "pytest-asyncio>=0.21",
 ]
 
 [project.optional-dependencies]
-# ============================================================
-# LLM PROVIDERS
-# ============================================================
-openai = []  # Already in base dependencies
-azure = []   # Uses openai package (already in base)
+openai = []  # Already in base dependencies (Azure OpenAI also uses this)
 gemini = [
     "google-cloud-aiplatform>=1.38",
+    "requests>=2.32",
 ]
 bedrock = [
     "boto3>=1.28",
 ]
 
-# ============================================================
-# LOCAL INFERENCE
-# ============================================================
 onnx = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
@@ -60,10 +50,6 @@ huggingface = [
     "transformers>=4.30",
     "torch>=2.0",
 ]
-
-# ============================================================
-# EMBEDDING & RERANKING (lightweight by default)
-# ============================================================
 embeddings = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
@@ -72,18 +58,16 @@ rerankers = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
 ]
-
-# ============================================================
-# BUNDLES
-# ============================================================
 all-light = [
     "google-cloud-aiplatform>=1.38",
+    "requests>=2.32",
     "boto3>=1.28",
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
 ]
 all = [
     "google-cloud-aiplatform>=1.38",
+    "requests>=2.32",
     "boto3>=1.28",
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
@@ -91,14 +75,10 @@ all = [
     "torch>=2.0",
 ]
 
-# ============================================================
-# DEVELOPMENT
-# ============================================================
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "python-dotenv>=1.0",
-    "black>=23.0",
     "ruff>=0.1",
 ]
 

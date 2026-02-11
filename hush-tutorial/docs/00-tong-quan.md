@@ -7,28 +7,20 @@
 **Hush** là workflow engine cho các ứng dụng AI/LLM, được thiết kế để xây dựng các pipeline phức tạp một cách đơn giản và hiệu quả. Hush tập trung vào việc điều phối (orchestration) và thực thi (execution) các node trong một graph.
 
 ```python
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.core import Hush, GraphNode, START, END, PARENT
+from hush.providers import llmchain_
 
 with GraphNode(name="chat-workflow") as graph:
-    prompt = PromptNode(
-        name="prompt",
-        inputs={
-            "prompt": {"system": "Bạn là trợ lý AI.", "user": "{question}"},
-            "question": PARENT["question"]
-        }
-    )
-    llm = LLMNode(
-        name="llm",
+    chat = llmchain_(
         resource_key="gpt-4o",
-        inputs={"messages": prompt["messages"]},
-        outputs={"content": PARENT["answer"]}
+        template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
+        question=PARENT["question"],
     )
-    START >> prompt >> llm >> END
+    START >> chat >> END
 
 engine = Hush(graph)
 result = await engine.run(inputs={"question": "Python là gì?"})
-print(result["answer"])
+print(result["content"])
 ```
 
 ## Kiến trúc 3 lớp
@@ -48,18 +40,18 @@ print(result["answer"])
 
 | Package | Mô tả |
 |---------|-------|
-| `hush-core` | Workflow engine cốt lõi — không có dependency nặng |
-| `hush-providers` | AI/LLM providers (OpenAI, Azure, Gemini, etc.) |
-| `hush-observability` | Tracing backends (LocalTracer, Langfuse, OTEL) |
+| `hush-core` | **Nền tảng** — GraphNode, CodeNode, BranchNode đủ cho gần như mọi workflow |
+| `hush-providers` | Add-on — LLM, embedding, reranking (cài khi cần) |
+| `hush-observability` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
 ## Cài đặt nhanh
 
 ```bash
-# Standard - Core + LLM providers
-pip install hush-ai[standard]
+# Với pip
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 
-# Hoặc với uv (nhanh hơn)
-uv add hush-ai[standard]
+# Với uv (nhanh hơn)
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 ```
 
 Xem chi tiết tại [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).

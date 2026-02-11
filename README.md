@@ -36,22 +36,22 @@
 ## Quick Start
 
 ```bash
-uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+# Or with uv: uv pip install "hush-core @ git+..."
 ```
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+
+@code_node
+def greet(name: str):
+    return {"message": f"Hello, {name}!"}
 
 async def main():
     with GraphNode(name="hello") as graph:
-        step1 = CodeNode(
-            name="greet",
-            code_fn=lambda name: {"message": f"Hello, {name}!"},
-            inputs={"name": PARENT["name"]},
-            outputs={"message": PARENT}
-        )
-        START >> step1 >> END
+        step = greet(name=PARENT["name"])
+        START >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"name": "World"})
@@ -60,51 +60,66 @@ async def main():
 asyncio.run(main())
 ```
 
+> **Core philosophy:** `GraphNode`, `CodeNode`, and `BranchNode` handle nearly every workflow pattern.
+> LLM, embedding, and other specialized nodes are optional add-ons — install and learn them as needed.
+
 > Want more? See the [quickstart guide](hush-tutorial/docs/02-quickstart.md) or [runnable examples](hush-tutorial/examples/).
 
 ## LLM Integration
 
+```bash
+pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+```
+
 ```python
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.providers import llmchain_
 
 async def main():
     with GraphNode(name="chat") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
-                "question": PARENT["question"]
-            },
-            outputs={"messages": PARENT}
-        )
-        llm = LLMNode(
-            name="llm",
+        chat = llmchain_(
             resource_key="gpt-4o",
-            inputs={"messages": PARENT["messages"]},
-            outputs={"content": PARENT["answer"]}
+            template={"system": "You are a helpful assistant.", "user": "{question}"},
+            question=PARENT["question"],
         )
-        START >> prompt >> llm >> END
+        START >> chat >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"question": "What is Python?"})
-    print(result["answer"])
+    print(result["content"])
 ```
 
 ## Installation
 
+Hush is a monorepo with 3 separate packages. Install what you need:
+
+**With pip:**
+
 ```bash
-# Full (all providers + observability)
-uv pip install "hush-ai[all] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Core only (workflow engine, no LLM)
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 
-# OpenAI + Langfuse
-uv pip install "hush-ai[openai,langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
-
-# Core only (no external dependencies)
-uv pip install "hush-ai[core] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Core + LLM providers + Langfuse tracing
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
 ```
 
-See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for details.
+**With uv (recommended):**
+
+```bash
+# Core only
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+
+# Core + LLM providers + Langfuse tracing
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+uv pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
+```
+
+> **Note:** `hush-providers` and `hush-observability` depend on `hush-core`, so always install `hush-core` first.
+
+See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
 
 ## Packages
 

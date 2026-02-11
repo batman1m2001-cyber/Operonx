@@ -252,7 +252,7 @@ async def example_4_llm_fallback():
         prompt = PromptNode(
             name="prompt",
             inputs={
-                "prompt": {
+                "template": {
                     "system": "Answer briefly.",
                     "user": "{query}",
                 },

@@ -5,14 +5,16 @@
 ## Cài đặt
 
 ```bash
-# Qua meta-package (khuyến nghị)
-uv pip install "hush-ai[standard] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Với pip
+pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 
-# Với provider cụ thể
-uv pip install "hush-ai[openai,gemini] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ai"
+# Với uv
+uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 
-# Hoặc editable (cho development)
-git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd hush
+# Editable (cho development)
+git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core -e hush-providers
 ```
 
@@ -24,25 +26,16 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 
 ```python
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import PromptNode, LLMNode
+from hush.providers import llmchain_
 
 async def main():
     with GraphNode(name="chat") as graph:
-        prompt = PromptNode(
-            name="prompt",
-            inputs={
-                "prompt": {"system": "Bạn là trợ lý AI.", "user": "{question}"},
-                "question": PARENT["question"]
-            },
-            outputs={"messages": PARENT}
-        )
-        llm = LLMNode(
-            name="llm",
+        chat = llmchain_(
             resource_key="gpt-4o",
-            inputs={"messages": PARENT["messages"]},
-            outputs={"content": PARENT["answer"]}
+            template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
+            question=PARENT["question"],
         )
-        START >> prompt >> llm >> END
+        START >> chat >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"question": "Hello!"})
