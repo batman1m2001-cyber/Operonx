@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from hush.core.tracers import BaseTracer, register_tracer
 
 if TYPE_CHECKING:
-    from hush.ops.backends.langfuse import LangfuseConfig
+    from hush.telemetry.backends.langfuse import LangfuseConfig
 
 
 @register_tracer
@@ -22,7 +22,7 @@ class LangfuseTracer(BaseTracer):
 
     Example:
         ```python
-        from hush.ops import LangfuseTracer, LangfuseConfig
+        from hush.telemetry import LangfuseTracer, LangfuseConfig
 
         # Simple: Direct config (no ResourceHub needed)
         tracer = LangfuseTracer(config=LangfuseConfig.from_env())
@@ -164,7 +164,7 @@ class LangfuseTracer(BaseTracer):
 
             # Get client: direct config or ResourceHub
             if "config" in tracer_config:
-                from hush.ops.backends.langfuse import LangfuseClient, LangfuseConfig
+                from hush.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig
 
                 config = LangfuseConfig(**tracer_config["config"])
                 client = LangfuseClient(config)

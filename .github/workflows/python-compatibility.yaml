@@ -21,7 +21,7 @@ jobs:
         package:
           - hush-core
           - hush-providers
-          - hush-ops
+          - hush-telemetry
 
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +45,6 @@ jobs:
             uv run python -c "from hush.core import GraphOp, FuncOp, START, END"
           elif [ "${{ matrix.package }}" = "hush-providers" ]; then
             uv run python -c "from hush.providers import LLMFactory, EmbeddingFactory"
-          elif [ "${{ matrix.package }}" = "hush-ops" ]; then
-            uv run python -c "from hush.ops import LangfuseTracer"
+          elif [ "${{ matrix.package }}" = "hush-telemetry" ]; then
+            uv run python -c "from hush.telemetry import LangfuseTracer"
           fi

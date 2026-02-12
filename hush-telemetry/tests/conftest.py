@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures for hush-ops tests."""
+"""Pytest configuration and shared fixtures for hush-telemetry tests."""
 
 import os
 import sys
@@ -28,7 +28,7 @@ SETUP_TUTORIAL = """
 ║                 HUSH OBSERVABILITY TEST CONFIGURATION REQUIRED               ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║                                                                              ║
-║  To run hush-ops tests, you need to configure credentials.         ║
+║  To run hush-telemetry tests, you need to configure credentials.   ║
 ║                                                                              ║
 ║  STEP 1: Create .env file                                                    ║
 ║  ─────────────────────────────────────────────────────────────────────────── ║
@@ -319,7 +319,7 @@ def mock_state():
 @pytest.fixture
 def langfuse_tracer():
     """Create LangfuseTracer with test resource key."""
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     return LangfuseTracer(resource_key="langfuse:default")
 
@@ -327,7 +327,7 @@ def langfuse_tracer():
 @pytest.fixture
 def langfuse_tracer_with_tags():
     """Create LangfuseTracer with static tags."""
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     return LangfuseTracer(resource_key="langfuse:default", tags=["test", "unit"])
 
@@ -335,7 +335,7 @@ def langfuse_tracer_with_tags():
 @pytest.fixture
 def otel_tracer():
     """Create OTELTracer with test resource key."""
-    from hush.ops import OTELTracer
+    from hush.telemetry import OTELTracer
 
     return OTELTracer(resource_key="otel:jaeger")
 
@@ -343,7 +343,7 @@ def otel_tracer():
 @pytest.fixture
 def otel_tracer_with_config():
     """Create OTELTracer with direct config."""
-    from hush.ops import OTELConfig, OTELTracer
+    from hush.telemetry import OTELConfig, OTELTracer
 
     config = OTELConfig.jaeger()
     return OTELTracer(config=config)

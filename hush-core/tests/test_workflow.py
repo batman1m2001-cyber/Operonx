@@ -167,9 +167,9 @@ class TestHushWithTracer:
         import time
 
         try:
-            from hush.ops import LangfuseTracer
+            from hush.telemetry import LangfuseTracer
         except ImportError:
-            pytest.skip("hush-ops not installed")
+            pytest.skip("hush-telemetry not installed")
 
         tracer = LangfuseTracer(resource_key="langfuse:default")
 

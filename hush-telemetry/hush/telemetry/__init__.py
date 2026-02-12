@@ -9,7 +9,7 @@ This package provides:
 
 Example:
     ```python
-    from hush.ops import LangfuseTracer, OTELTracer
+    from hush.telemetry import LangfuseTracer, OTELTracer
 
     # Langfuse tracer
     tracer = LangfuseTracer(resource_key="langfuse:default")
@@ -49,16 +49,16 @@ from hush.core.tracers import (
 )
 
 # Backends (configs + clients)
-from hush.ops.backends import (
+from hush.telemetry.backends import (
     LangfuseClient,
     LangfuseConfig,
     OTELClient,
     OTELConfig,
 )
-from hush.ops.plugin import ObservabilityPlugin  # noqa: F401
+from hush.telemetry.plugin import ObservabilityPlugin  # noqa: F401
 
 # Tracers
-from hush.ops.tracers import (
+from hush.telemetry.tracers import (
     LangfuseTracer,
     OTELTracer,
 )

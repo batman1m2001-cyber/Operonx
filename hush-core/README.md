@@ -106,7 +106,7 @@ await engine.run(inputs={...}, tracer=tracer)
 ## Related Packages
 
 - [hush-providers](../hush-providers/) - LLM, embedding, reranking
-- [hush-ops](../hush-ops/) - Langfuse, OpenTelemetry
+- [hush-telemetry](../hush-telemetry/) - Langfuse, OpenTelemetry
 - [hush-eyes](../hush-eyes/) - VS Code extension
 
 ## License

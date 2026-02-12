@@ -45,7 +45,7 @@ Hush su dung ba lop documentation:
 | Root | [/CLAUDE.md](../CLAUDE.md) | Monorepo overview, conventions |
 | hush-core | [/hush-core/CLAUDE.md](../hush-core/CLAUDE.md) | Op patterns, state management |
 | hush-providers | [/hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) | Provider patterns |
-| hush-ops | [/hush-ops/CLAUDE.md](../hush-ops/CLAUDE.md) | Tracer patterns |
+| hush-telemetry | [/hush-telemetry/CLAUDE.md](../hush-telemetry/CLAUDE.md) | Tracer patterns |
 | hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
 | hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Extension patterns |
 
@@ -147,7 +147,7 @@ Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mappi
 |---------|-------|-----------|-----------|
 | hush-core | Core workflow engine | `engine.py`, `ops/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
-| hush-ops | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-ops/CLAUDE.md) |
+| hush-telemetry | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-telemetry/CLAUDE.md) |
 
 ## Folder Structure
 

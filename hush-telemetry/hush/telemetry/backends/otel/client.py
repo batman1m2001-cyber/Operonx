@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional
 
-from hush.ops.backends.otel.config import OTELConfig
+from hush.telemetry.backends.otel.config import OTELConfig
 
 
 class OTELClient:

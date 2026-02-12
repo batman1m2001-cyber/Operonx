@@ -1,11 +1,11 @@
-# hush-ops
+# hush-telemetry
 
 External tracing backend integrations for Hush workflows. Supports Langfuse, OpenTelemetry, and more.
 
 ## Module Structure
 
 ```
-hush/ops/
+hush/telemetry/
 ├── __init__.py         # Package exports, auto-registers plugin
 ├── plugin.py           # ObservabilityPlugin for ResourceHub
 ├── backends/           # Backend clients (config + client)
@@ -33,7 +33,7 @@ Tracers use backends internally but provide the `BaseTracer` interface expected 
 
 ### With ResourceHub (Production)
 ```python
-from hush.ops import LangfuseTracer
+from hush.telemetry import LangfuseTracer
 
 # Config in resources.yaml:
 # observability:
@@ -49,7 +49,7 @@ result = await engine.run(inputs={...}, tracer=tracer)
 
 ### With Direct Config (Simple)
 ```python
-from hush.ops import LangfuseTracer, LangfuseConfig
+from hush.telemetry import LangfuseTracer, LangfuseConfig
 
 config = LangfuseConfig.from_env()  # Reads LANGFUSE_* env vars
 tracer = LangfuseTracer(config=config)
@@ -78,7 +78,7 @@ class MyBackendConfig(BaseModel):
 
 **client.py:**
 ```python
-from hush.ops.backends.mybackend.config import MyBackendConfig
+from hush.telemetry.backends.mybackend.config import MyBackendConfig
 
 class MyBackendClient:
     def __init__(self, config: MyBackendConfig):
@@ -150,7 +150,7 @@ from hush.core.registry import REGISTRY
 
 @REGISTRY.register("mybackend")
 def mybackend_plugin(config: dict):
-    from hush.ops.backends.mybackend import MyBackendConfig, MyBackendClient
+    from hush.telemetry.backends.mybackend import MyBackendConfig, MyBackendClient
     return MyBackendClient(MyBackendConfig(**config))
 ```
 
@@ -242,7 +242,7 @@ from unittest.mock import patch, MagicMock
 
 @pytest.mark.asyncio
 async def test_langfuse_tracer():
-    with patch("hush.ops.tracers.langfuse.LangfuseClient") as mock_client:
+    with patch("hush.telemetry.tracers.langfuse.LangfuseClient") as mock_client:
         mock_client.return_value.trace.return_value = MagicMock()
         # Test tracer initialization and flush
 ```

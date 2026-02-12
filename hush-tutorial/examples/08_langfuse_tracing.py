@@ -138,7 +138,7 @@ async def example_1_resource_hub():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     # Tạo tracer với static tags
     tracer = LangfuseTracer(
@@ -182,7 +182,7 @@ async def example_2_direct_config():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.ops import LangfuseConfig, LangfuseTracer
+    from hush.telemetry import LangfuseConfig, LangfuseTracer
 
     # Load config từ env vars (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST)
     config = LangfuseConfig.from_env()
@@ -227,7 +227,7 @@ async def example_3_multi_user():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     engine = Hush(build_text_analysis())
 

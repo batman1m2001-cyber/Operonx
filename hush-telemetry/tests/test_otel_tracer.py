@@ -24,7 +24,7 @@ class TestOTELConfig:
 
     def test_config_creation_basic(self):
         """Test basic OTELConfig creation."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig(
             endpoint="http://localhost:4317",
@@ -40,7 +40,7 @@ class TestOTELConfig:
 
     def test_config_creation_with_headers(self):
         """Test OTELConfig creation with custom headers."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig(
             endpoint="https://tempo.example.com:4317",
@@ -53,7 +53,7 @@ class TestOTELConfig:
 
     def test_config_http_protocol(self):
         """Test OTELConfig with HTTP protocol."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig(
             endpoint="http://localhost:4318/v1/traces",
@@ -65,7 +65,7 @@ class TestOTELConfig:
 
     def test_config_jaeger_factory(self):
         """Test OTELConfig.jaeger() factory method."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig.jaeger()
 
@@ -75,7 +75,7 @@ class TestOTELConfig:
 
     def test_config_jaeger_custom_host(self):
         """Test OTELConfig.jaeger() with custom host and port."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig.jaeger(host="jaeger.local", port=14250)
 
@@ -83,7 +83,7 @@ class TestOTELConfig:
 
     def test_config_tempo_factory(self):
         """Test OTELConfig.tempo() factory method."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig.tempo(
             endpoint="https://tempo.grafana.net",
@@ -95,7 +95,7 @@ class TestOTELConfig:
 
     def test_config_model_dump(self):
         """Test OTELConfig serialization via model_dump."""
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         config = OTELConfig(
             endpoint="http://localhost:4317",
@@ -117,7 +117,7 @@ class TestOTELClient:
 
     def test_client_creation(self):
         """Test OTELClient can be created."""
-        from hush.ops import OTELClient, OTELConfig
+        from hush.telemetry import OTELClient, OTELConfig
 
         config = OTELConfig(
             endpoint="http://localhost:4317",
@@ -131,7 +131,7 @@ class TestOTELClient:
 
     def test_client_lazy_initialization(self):
         """Test OTELClient uses lazy initialization."""
-        from hush.ops import OTELClient, OTELConfig
+        from hush.telemetry import OTELClient, OTELConfig
 
         config = OTELConfig(
             endpoint="http://localhost:4317",
@@ -154,7 +154,7 @@ class TestOTELTracer:
 
     def test_tracer_creation_with_resource_key(self):
         """Test OTELTracer creation with resource_key."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource_key="otel:jaeger")
 
@@ -163,7 +163,7 @@ class TestOTELTracer:
 
     def test_tracer_creation_with_config(self):
         """Test OTELTracer creation with direct config."""
-        from hush.ops import OTELConfig, OTELTracer
+        from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig.jaeger()
         tracer = OTELTracer(config=config)
@@ -174,7 +174,7 @@ class TestOTELTracer:
 
     def test_tracer_creation_with_tags(self):
         """Test OTELTracer creation with static tags."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource_key="otel:jaeger", tags=["prod", "ml-team"])
 
@@ -182,14 +182,14 @@ class TestOTELTracer:
 
     def test_tracer_requires_config_or_resource_key(self):
         """Test OTELTracer raises error if neither config nor resource_key provided."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         with pytest.raises(ValueError, match="Must provide either"):
             OTELTracer()
 
     def test_tracer_rejects_both_config_and_resource_key(self):
         """Test OTELTracer raises error if both config and resource_key provided."""
-        from hush.ops import OTELConfig, OTELTracer
+        from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig.jaeger()
 
@@ -198,7 +198,7 @@ class TestOTELTracer:
 
     def test_tracer_config_serialization_resource_key(self):
         """Test tracer config returns resource_key for subprocess."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource_key="otel:jaeger")
 
@@ -208,7 +208,7 @@ class TestOTELTracer:
 
     def test_tracer_config_serialization_direct_config(self):
         """Test tracer config returns serialized config for subprocess."""
-        from hush.ops import OTELConfig, OTELTracer
+        from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig(
             endpoint="http://localhost:4317",
@@ -226,7 +226,7 @@ class TestOTELTracer:
         """Test OTELTracer is registered in tracer registry."""
         from hush.core.tracers import get_registered_tracers
 
-        from hush.ops import OTELTracer  # noqa: F401
+        from hush.telemetry import OTELTracer  # noqa: F401
 
         tracers = get_registered_tracers()
         assert "OTELTracer" in tracers
@@ -242,7 +242,7 @@ class TestOTELTracerHelpers:
 
     def test_datetime_to_ns_with_datetime(self):
         """Test _datetime_to_ns with datetime object."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         ns = OTELTracer._datetime_to_ns(dt)
@@ -254,7 +254,7 @@ class TestOTELTracerHelpers:
 
     def test_datetime_to_ns_with_iso_string(self):
         """Test _datetime_to_ns with ISO format string."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         iso_str = "2024-01-15T10:30:00+00:00"
         ns = OTELTracer._datetime_to_ns(iso_str)
@@ -264,7 +264,7 @@ class TestOTELTracerHelpers:
 
     def test_datetime_to_ns_with_z_suffix(self):
         """Test _datetime_to_ns with Z suffix for UTC."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         iso_str = "2024-01-15T10:30:00Z"
         ns = OTELTracer._datetime_to_ns(iso_str)
@@ -274,13 +274,13 @@ class TestOTELTracerHelpers:
 
     def test_datetime_to_ns_with_none(self):
         """Test _datetime_to_ns returns None for None input."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         assert OTELTracer._datetime_to_ns(None) is None
 
     def test_get_short_name(self):
         """Test _get_short_name extracts last part after dot."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         assert OTELTracer._get_short_name("workflow.node.child") == "child"
         assert OTELTracer._get_short_name("simple") == "simple"
@@ -288,7 +288,7 @@ class TestOTELTracerHelpers:
 
     def test_get_short_name_with_empty(self):
         """Test _get_short_name with empty string."""
-        from hush.ops.tracers.otel import OTELTracer
+        from hush.telemetry.tracers.otel import OTELTracer
 
         assert OTELTracer._get_short_name("") == ""
         assert OTELTracer._get_short_name(None) is None
@@ -412,7 +412,7 @@ class TestOTELTracerFlush:
 
     def test_flush_with_resource_key(self, mock_flush_data):
         """Test flush with resource_key creates spans correctly."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         # Mock the OTEL dependencies
         mock_tracer = MagicMock()
@@ -441,14 +441,14 @@ class TestOTELTracerFlush:
 
     def test_flush_with_direct_config(self, mock_flush_data_with_direct_config):
         """Test flush with direct config creates client correctly."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         # Mock the OTEL client
         mock_tracer = MagicMock()
         mock_span = MagicMock()
         mock_tracer.start_span.return_value = mock_span
 
-        with patch("hush.ops.backends.otel.OTELClient") as MockClient:
+        with patch("hush.telemetry.backends.otel.OTELClient") as MockClient:
             mock_client = MagicMock()
             mock_client.tracer = mock_tracer
             MockClient.return_value = mock_client
@@ -465,7 +465,7 @@ class TestOTELTracerFlush:
 
     def test_flush_creates_correct_attributes(self, mock_flush_data):
         """Test flush creates correct span attributes."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         captured_attributes = {}
 
@@ -496,7 +496,7 @@ class TestOTELTracerFlush:
 
     def test_flush_with_context_aware_nodes(self):
         """Test flush correctly handles context-aware nodes (from iteration)."""
-        from hush.ops import OTELTracer
+        from hush.telemetry import OTELTracer
 
         flush_data = {
             "tracer_type": "OTELTracer",
@@ -561,7 +561,7 @@ class TestOTELToLangfuse:
         """Test creating OTELConfig for Langfuse endpoint."""
         import base64
 
-        from hush.ops import OTELConfig
+        from hush.telemetry import OTELConfig
 
         # Create config for Langfuse OTEL endpoint
         public_key = "pk-test"

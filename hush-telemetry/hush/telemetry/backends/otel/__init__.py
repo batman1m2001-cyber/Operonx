@@ -1,4 +1,4 @@
-"""OpenTelemetry backend for hush-ops.
+"""OpenTelemetry backend for hush-telemetry.
 
 OpenTelemetry (OTEL) is a vendor-neutral observability framework
 that can export traces to any OTLP-compatible backend.
@@ -20,8 +20,8 @@ References:
     - GitHub: https://github.com/open-telemetry/opentelemetry-python
 """
 
-from hush.ops.backends.otel.client import OTELClient
-from hush.ops.backends.otel.config import OTELConfig
+from hush.telemetry.backends.otel.client import OTELClient
+from hush.telemetry.backends.otel.config import OTELConfig
 
 __all__ = [
     "OTELConfig",

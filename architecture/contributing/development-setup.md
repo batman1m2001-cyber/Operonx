@@ -12,7 +12,7 @@
 hush/
 ├── hush-core/          # Core workflow engine
 ├── hush-providers/     # LLM, embedding, reranker providers
-├── hush-ops/ # Tracing integration (Langfuse, etc.)
+├── hush-telemetry/ # Tracing integration (Langfuse, etc.)
 ├── hush-tutorial/      # Tutorials và examples
 ├── architecture/       # Internal documentation
 └── hush-tutorial/docs/ # User documentation
@@ -55,10 +55,10 @@ uv pip install -e ".[dev,gemini,huggingface]"
 uv pip install -e ".[dev,all]"
 ```
 
-### hush-ops
+### hush-telemetry
 
 ```bash
-cd hush-ops
+cd hush-telemetry
 uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
@@ -75,7 +75,7 @@ hush-core = { path = "../hush-core", editable = true }
 
 # hush-core/pyproject.toml
 [tool.uv.sources]
-hush-ops = { path = "../hush-ops", editable = true }
+hush-telemetry = { path = "../hush-telemetry", editable = true }
 ```
 
 Khi develop, thay đổi ở một package sẽ reflect ngay ở packages khác.

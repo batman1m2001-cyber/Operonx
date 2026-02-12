@@ -15,7 +15,7 @@ Example:
 
     ```python
     # Auto-registration happens on import
-    import hush.ops
+    import hush.telemetry
 
     from hush.core.registry import get_hub
     client = get_hub().langfuse("default")
@@ -40,7 +40,7 @@ class ObservabilityPlugin:
             from hush.core.registry import REGISTRY
 
             # Register Langfuse
-            from hush.ops.backends.langfuse import (
+            from hush.telemetry.backends.langfuse import (
                 LangfuseClient,
                 LangfuseConfig,
             )
@@ -48,7 +48,7 @@ class ObservabilityPlugin:
             REGISTRY.register(LangfuseConfig, lambda c: LangfuseClient(c))
 
             # Register OpenTelemetry
-            from hush.ops.backends.otel import (
+            from hush.telemetry.backends.otel import (
                 OTELClient,
                 OTELConfig,
             )

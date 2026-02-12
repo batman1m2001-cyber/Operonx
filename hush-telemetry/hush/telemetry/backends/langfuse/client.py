@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from hush.ops.backends.langfuse.config import LangfuseConfig
+from hush.telemetry.backends.langfuse.config import LangfuseConfig
 
 
 class LangfuseClient:

@@ -64,7 +64,7 @@ langfuse:default:
 ### Sử dụng
 
 ```python
-from hush.ops import LangfuseTracer
+from hush.telemetry import LangfuseTracer
 
 # Cách 1: Dùng ResourceHub
 tracer = LangfuseTracer(
@@ -105,7 +105,7 @@ otel:default:
 ### Sử dụng
 
 ```python
-from hush.ops import OTelTracer
+from hush.telemetry import OTelTracer
 
 tracer = OTelTracer(resource_key="otel:default")
 result = await engine.run(inputs={...}, tracer=tracer)

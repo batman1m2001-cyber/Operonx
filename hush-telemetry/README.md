@@ -7,15 +7,15 @@
 ```bash
 # Với pip
 pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
-pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
+pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 
 # Với uv
 uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
-uv pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
+uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 
 # Editable (cho development)
 git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
-uv pip install -e hush-core -e "hush-ops[all]"
+uv pip install -e hush-core -e "hush-telemetry[all]"
 ```
 
 Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-cai-dat-va-thiet-lap.md).
@@ -24,7 +24,7 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 
 ```python
 from hush.core import Hush, GraphOp, START, END
-from hush.ops import LangfuseTracer
+from hush.telemetry import LangfuseTracer
 
 # Định nghĩa workflow
 with GraphOp(name="demo") as graph:

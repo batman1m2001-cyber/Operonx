@@ -1,7 +1,7 @@
 """Hush Core Tracers - Base tracing infrastructure for workflow observability.
 
 This module provides the abstract base tracer and media utilities.
-Concrete tracer implementations (Langfuse, OpenTelemetry, etc.) are in hush-ops.
+Concrete tracer implementations (Langfuse, OpenTelemetry, etc.) are in hush-telemetry.
 
 Example:
     ```python

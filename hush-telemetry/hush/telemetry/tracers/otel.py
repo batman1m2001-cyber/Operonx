@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from hush.core.tracers import BaseTracer, register_tracer
 
 if TYPE_CHECKING:
-    from hush.ops.backends.otel import OTELConfig
+    from hush.telemetry.backends.otel import OTELConfig
 
 
 @register_tracer
@@ -25,7 +25,7 @@ class OTELTracer(BaseTracer):
 
     Example:
         ```python
-        from hush.ops import OTELTracer, OTELConfig
+        from hush.telemetry import OTELTracer, OTELConfig
 
         # Simple: Direct config (no ResourceHub needed)
         tracer = OTELTracer(config=OTELConfig.jaeger())
@@ -120,7 +120,7 @@ class OTELTracer(BaseTracer):
 
             # Get client: direct config or ResourceHub
             if "config" in tracer_config:
-                from hush.ops.backends.otel import OTELClient, OTELConfig
+                from hush.telemetry.backends.otel import OTELClient, OTELConfig
 
                 config = OTELConfig(**tracer_config["config"])
                 client = OTELClient(config)

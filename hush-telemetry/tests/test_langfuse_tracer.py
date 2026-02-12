@@ -74,7 +74,7 @@ class MockMemoryState:
 
 def test_langfuse_config_creation():
     """Test LangfuseConfig can be created."""
-    from hush.ops import LangfuseConfig
+    from hush.telemetry import LangfuseConfig
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     assert config.public_key == LANGFUSE_CONFIG["public_key"]
@@ -84,7 +84,7 @@ def test_langfuse_config_creation():
 
 def test_langfuse_client_creation():
     """Test LangfuseClient can be created."""
-    from hush.ops import LangfuseClient, LangfuseConfig
+    from hush.telemetry import LangfuseClient, LangfuseConfig
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     client = LangfuseClient(config)
@@ -95,7 +95,7 @@ def test_langfuse_client_creation():
 
 def test_langfuse_tracer_creation():
     """Test LangfuseTracer can be created with resource_key."""
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource_key="langfuse:default")
 
@@ -105,7 +105,7 @@ def test_langfuse_tracer_creation():
 
 def test_tracer_config_serialization():
     """Test tracer config returns resource_key for subprocess."""
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource_key="langfuse:default")
 
@@ -117,7 +117,7 @@ def test_langfuse_tracer_registered():
     """Test LangfuseTracer is registered in tracer registry."""
     from hush.core.tracers import get_registered_tracers
 
-    from hush.ops import LangfuseTracer  # noqa: F401
+    from hush.telemetry import LangfuseTracer  # noqa: F401
 
     tracers = get_registered_tracers()
     assert "LangfuseTracer" in tracers
@@ -130,7 +130,7 @@ def test_langfuse_cloud_connection():
     This test creates a real trace in Langfuse cloud.
     Run with: pytest -m integration
     """
-    from hush.ops import LangfuseClient, LangfuseConfig
+    from hush.telemetry import LangfuseClient, LangfuseConfig
 
     try:
         from langfuse import Langfuse  # noqa: F401
@@ -142,10 +142,10 @@ def test_langfuse_cloud_connection():
 
     # Create a test trace
     trace = client.trace(
-        name="hush-ops-test",
+        name="hush-telemetry-test",
         user_id="test-user",
         session_id="test-session",
-        metadata={"test": True, "source": "hush-ops-tests"},
+        metadata={"test": True, "source": "hush-telemetry-tests"},
         input={"message": "Testing LangfuseClient integration"},
         output={"status": "success"},
     )
@@ -175,7 +175,7 @@ def test_langfuse_tracer_flush_with_resource_hub():
     This test calls the static flush method with mock data.
     Requires ResourceHub to be configured with langfuse:test key.
     """
-    from hush.ops import LangfuseTracer
+    from hush.telemetry import LangfuseTracer
 
     try:
         import langfuse  # noqa: F401
@@ -183,7 +183,7 @@ def test_langfuse_tracer_flush_with_resource_hub():
         pytest.skip("langfuse package not installed")
 
     # Mock ResourceHub to return a LangfuseClient
-    from hush.ops import LangfuseClient, LangfuseConfig
+    from hush.telemetry import LangfuseClient, LangfuseConfig
 
     mock_config = LangfuseConfig(**LANGFUSE_CONFIG)
     mock_client = LangfuseClient(mock_config)

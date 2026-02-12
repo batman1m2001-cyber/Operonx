@@ -127,7 +127,7 @@ def dispatch_flush(flush_data: Dict[str, Any]) -> None:
 
     if tracer_type not in _TRACER_REGISTRY:
         try:
-            import hush.ops  # noqa: F401
+            import hush.telemetry  # noqa: F401
         except ImportError:
             pass
 

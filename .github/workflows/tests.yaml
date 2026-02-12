@@ -20,7 +20,7 @@ jobs:
         package:
           - hush-core
           - hush-providers
-          - hush-ops
+          - hush-telemetry
 
     steps:
       - uses: actions/checkout@v4

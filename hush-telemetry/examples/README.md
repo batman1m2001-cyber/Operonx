@@ -1,6 +1,6 @@
 # Hush Observability Examples
 
-This directory contains examples demonstrating how to use the hush-ops package.
+This directory contains examples demonstrating how to use the hush-telemetry package.
 
 ## Examples
 
@@ -15,7 +15,7 @@ Basic example showing:
 **Setup:**
 
 ```bash
-# Install hush-ops with Langfuse support
+# Install hush-telemetry with Langfuse support
 pip install -e ".[langfuse]"
 
 # Set environment variables
@@ -31,7 +31,7 @@ python examples/langfuse_basic.py
 
 To add examples for other backends (Phoenix, Opik, LangSmith):
 
-1. Implement the backend tracer in `hush/ops/tracers/`
+1. Implement the backend tracer in `hush/telemetry/tracers/`
 2. Create corresponding example in this directory
 3. Update this README
 

@@ -36,7 +36,7 @@ def create_langfuse_otel_config(service_name: str = "hush-tutorial"):
     Langfuse hỗ trợ nhận traces qua OTEL protocol, nên bạn không cần
     Langfuse SDK — chỉ cần standard OTEL.
     """
-    from hush.ops.backends.otel import OTELConfig
+    from hush.telemetry.backends.otel import OTELConfig
 
     public_key = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
     secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "")
@@ -103,7 +103,7 @@ async def example_1_otel_basic():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.ops import OTELTracer
+    from hush.telemetry import OTELTracer
 
     with GraphOp(name="nested-loop") as graph:
         with ForOp.of(x=Each([2, 3, 4])) as outer:
@@ -164,7 +164,7 @@ async def example_2_otel_while():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    from hush.ops import OTELTracer
+    from hush.telemetry import OTELTracer
 
     with GraphOp(name="while-loop") as graph:
         with WhileOp.of(

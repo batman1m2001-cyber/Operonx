@@ -104,7 +104,7 @@ pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#s
 # Core + LLM providers + Langfuse tracing
 pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
+pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
 
 **With uv (recommended):**
@@ -116,10 +116,10 @@ uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.gi
 # Core + LLM providers + Langfuse tracing
 uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-uv pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
+uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
 
-> **Note:** `hush-providers` and `hush-ops` depend on `hush-core`, so always install `hush-core` first.
+> **Note:** `hush-providers` and `hush-telemetry` depend on `hush-core`, so always install `hush-core` first.
 
 See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
 
@@ -129,7 +129,7 @@ See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for deta
 |---------|-------------|
 | [hush-core](hush-core/) | Core workflow engine — nodes, state, tracing, execution |
 | [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations |
-| [hush-ops](hush-ops/) | External tracing backends (Langfuse, OpenTelemetry) |
+| [hush-telemetry](hush-telemetry/) | External tracing backends (Langfuse, OpenTelemetry) |
 | [hush-tutorial](hush-tutorial/) | Documentation (Vietnamese) and runnable examples |
 | [hush-eyes](hush-eyes/) | VS Code extension for trace visualization |
 

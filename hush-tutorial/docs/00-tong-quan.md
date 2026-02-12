@@ -32,7 +32,7 @@ asyncio.run(main())
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    hush-ops                    │
+│                    hush-telemetry                    │
 │         (LocalTracer, Langfuse, OpenTelemetry)           │
 ├─────────────────────────────────────────────────────────┤
 │                     hush-providers                       │
@@ -47,7 +47,7 @@ asyncio.run(main())
 |---------|-------|
 | `hush-core` | **Nền tảng** — `@op`, `ForOp.of()`, `MapOp.of()`, `WhileOp.of()`, `if_()` đủ cho gần như mọi workflow |
 | `hush-providers` | Add-on — `LLMOp.of()`, `PromptOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()` (cài khi cần) |
-| `hush-ops` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
+| `hush-telemetry` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
 > **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (FuncOp, LLMOp, ...). Trong code, hãy dùng **shorthand syntax** (`@op`, `LLMOp.of()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
 

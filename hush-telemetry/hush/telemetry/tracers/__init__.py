@@ -8,8 +8,8 @@ Available tracers:
 - OTELTracer: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
 """
 
-from hush.ops.tracers.langfuse import LangfuseTracer
-from hush.ops.tracers.otel import OTELTracer
+from hush.telemetry.tracers.langfuse import LangfuseTracer
+from hush.telemetry.tracers.otel import OTELTracer
 
 __all__ = [
     "LangfuseTracer",

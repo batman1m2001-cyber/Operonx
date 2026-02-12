@@ -11,16 +11,16 @@ This example demonstrates:
 import asyncio
 
 from hush.core.registry import get_hub
-from hush.ops.models import MessageTraceInfo
+from hush.telemetry.models import MessageTraceInfo
 
-# IMPORTANT: Import hush.ops FIRST to register TracerPlugin
+# IMPORTANT: Import hush.telemetry FIRST to register TracerPlugin
 # before get_hub() creates the global hub
-import hush.ops  # noqa: F401
+import hush.telemetry  # noqa: F401
 
 
 async def main():
     # Get the global ResourceHub (loaded from resources.yaml in project root)
-    # TracerPlugin is auto-registered when hush.ops is imported
+    # TracerPlugin is auto-registered when hush.telemetry is imported
     hub = get_hub()
 
     # Get tracer from ResourceHub using the key from resources.yaml

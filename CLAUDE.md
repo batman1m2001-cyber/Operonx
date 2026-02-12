@@ -8,7 +8,7 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
 ├── hush-providers/     # LLM, embedding, reranking integrations
-├── hush-ops/ # External tracing backends (Langfuse, OTEL)
+├── hush-telemetry/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
 ├── hush-eyes/ # VS Code extension for trace visualization
 ├── architecture/       # Deep technical documentation
@@ -29,7 +29,7 @@ Hush-ai/
 │  ├── /CLAUDE.md              → Monorepo overview, conventions   │
 │  ├── /hush-core/CLAUDE.md    → Core patterns, how to extend     │
 │  ├── /hush-providers/CLAUDE.md → Provider patterns              │
-│  ├── /hush-ops/CLAUDE.md → Tracer patterns            │
+│  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
 │  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
 │  └── /hush-eyes/CLAUDE.md → Extension patterns      │
 │                                                                  │
@@ -95,7 +95,7 @@ When making significant changes:
 | hush-providers/llm/ | 04-llm-integration.md | 03-04 |
 | hush-providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
 | hush-providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
-| hush-ops/tracers/ | 09-tracing-observability.md | 06, 08, 09 |
+| hush-telemetry/tracers/ | 09-tracing-observability.md | 06, 08, 09 |
 | Control flow (For/While/Branch) | 05-loops-branches.md | 05 |
 | Error handling | 07-error-handling.md | 10 |
 | Parallel patterns | 08-parallel-execution.md | 13 |
@@ -121,7 +121,7 @@ hush-core (foundation - no hush dependencies)
     ↓
 hush-providers (depends on hush-core)
     ↓
-hush-ops (depends on hush-core)
+hush-telemetry (depends on hush-core)
 ```
 
 ## When to Modify Which Package
@@ -130,13 +130,13 @@ hush-ops (depends on hush-core)
 |------|---------|
 | New op type | hush-core/hush/core/ops/ |
 | New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
-| New tracing backend | hush-ops/hush/ops/ |
+| New tracing backend | hush-telemetry/hush/telemetry/ |
 | Documentation or examples | hush-tutorial/ |
 | VS Code extension features | hush-eyes/ |
 
 ## Global Coding Conventions
 
-### Python (hush-core, hush-providers, hush-ops)
+### Python (hush-core, hush-providers, hush-telemetry)
 
 - **Python**: 3.10+
 - **Async-first**: All I/O operations use asyncio
@@ -170,8 +170,8 @@ cd hush-core && uv pip install -e ".[dev]" && pytest
 # hush-providers
 cd hush-providers && uv pip install -e ".[dev]" && pytest
 
-# hush-ops
-cd hush-ops && uv pip install -e ".[dev]" && pytest
+# hush-telemetry
+cd hush-telemetry && uv pip install -e ".[dev]" && pytest
 
 # VS Code extension
 cd hush-eyes && npm install && npm run compile
