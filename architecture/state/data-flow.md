@@ -1,14 +1,14 @@
-# Data Flow Through Nodes
+# Data Flow Through Ops
 
 ## Overview
 
-Data flows qua nodes thông qua Pull và Push refs. Document này giải thích cách data di chuyển trong workflow.
+Data flows qua ops thong qua Pull va Push refs. Document nay giai thich cach data di chuyen trong workflow.
 
 ## Ref Class
 
 ```python
 class Ref:
-    _node: Union[BaseNode, str]  # Source node
+    _source: Union[BaseOp, str]  # Source op
     var: str                      # Source variable name
     idx: int                      # Resolved storage index
     _ops: List[Tuple]            # Chained operations
@@ -21,11 +21,11 @@ class Ref:
 ### Definition
 
 ```python
-node = CodeNode(
+processor = FuncOp(
     name="processor",
     inputs={
         "data": PARENT["input"],           # Pull from PARENT.input
-        "config": other_node["result"],    # Pull from other_node.result
+        "config": other_op["result"],      # Pull from other_op.result
     }
 )
 ```
@@ -71,7 +71,7 @@ result = _fn(source_value)  # "HELLO"
 ### Definition
 
 ```python
-node = CodeNode(
+processor = FuncOp(
     name="processor",
     outputs={
         "result": PARENT,              # Push to PARENT.result
@@ -154,9 +154,9 @@ Lý do:
 ### Normal Context
 
 ```python
-# Same context for all nodes in chain
-state[node_a, result, "main"]
-state[node_b, input, "main"]  # Pulls from node_a.result["main"]
+# Same context for all ops in chain
+state[op_a, result, "main"]
+state[op_b, input, "main"]  # Pulls from op_a.result["main"]
 ```
 
 ### Iteration Context
@@ -174,7 +174,7 @@ state[child, result, "[0]"]   # Child writes to same context
 def get_inputs(self, state, context_id, parent_context=None):
     for var_name, param in self.inputs.items():
         # PARENT ref → use parent_context
-        if parent_context and isinstance(param.value, Ref) and param.value.raw_node is self.father:
+        if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.father:
             lookup_ctx = parent_context
         else:
             # Sibling/other → use context_id
@@ -203,14 +203,14 @@ def __rshift__(self, other):
     # other = PARENT["dest"] or consumer["input"]
 
     # Set producer.outputs[output].value = Ref(target, dest)
-    source_node.outputs[self.var] = Param(value=Ref(target_node, other.var))
+    source_op.outputs[self.var] = Param(value=Ref(target_op, other.var))
 ```
 
 ## Example Flow
 
 ```python
-with GraphNode(name="workflow") as g:
-    a = CodeNode(
+with GraphOp(name="workflow") as g:
+    a = FuncOp(
         name="a",
         code_fn=lambda x: {"y": x * 2},
         inputs={"x": PARENT["input"]},
@@ -231,10 +231,10 @@ with GraphNode(name="workflow") as g:
 ```python
 # Show schema refs
 schema.show()
-# node.var [idx] <- pull source[src_idx] ops
-# node.var [idx] -> push target[tgt_idx]
+# op.var [idx] <- pull source[src_idx] transforms
+# op.var [idx] -> push target[tgt_idx]
 
 # Show state values
 state.show()
-# node.var [ctx] = value
+# op.var [ctx] = value
 ```

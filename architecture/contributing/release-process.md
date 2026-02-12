@@ -71,14 +71,14 @@ dependencies = [
 ## [0.2.0] - 2024-01-15
 
 ### Added
-- New MapNode for parallel iteration
+- New MapOp for parallel iteration
 - ResourceHub plugin system
 
 ### Changed
 - Improved error messages
 
 ### Fixed
-- Bug in BranchNode condition evaluation
+- Bug in BranchOp condition evaluation
 ```
 
 ### 4. Update Documentation
@@ -108,7 +108,7 @@ hatch build
 pip install dist/hush_core-0.2.0-py3-none-any.whl
 
 # Verify import
-python -c "from hush.core import GraphNode; print('OK')"
+python -c "from hush.core import GraphOp; print('OK')"
 ```
 
 ## Publish to PyPI
@@ -173,7 +173,7 @@ source test_env/bin/activate
 pip install hush-core==0.2.0
 
 # Test
-python -c "from hush.core import GraphNode; print('Success!')"
+python -c "from hush.core import GraphOp; print('Success!')"
 ```
 
 ### Announce

@@ -30,15 +30,15 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
         "session_id": first_row["session_id"],
         "tags": json.loads(first_row["tags"]) if first_row["tags"] else [],
         "execution_order": [],
-        "nodes_trace_data": {},
+        "ops_trace_data": {},
     }
 
     # Build node data first
     node_data_map = {}
     for row in rows:
-        node_name = row["node_name"]
+        op_name = row["op_name"]
         context_id = row["context_id"]
-        trace_key = f"{node_name}:{context_id}" if context_id else node_name
+        trace_key = f"{op_name}:{context_id}" if context_id else op_name
 
         # Skip duplicates (keep first occurrence)
         if trace_key in node_data_map:
@@ -55,12 +55,12 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
                 usage["total_tokens"] = row["total_tokens"]
 
         node_data_map[trace_key] = {
-            "node": node_name,
+            "op": op_name,
             "parent": row["parent_name"],
             "context_id": context_id,
             "contain_generation": bool(row["contain_generation"]),
             "trace_data": {
-                "name": node_name,
+                "name": op_name,
                 "start_time": row["start_time"],
                 "end_time": row["end_time"],
                 "input": json.loads(row["input"]) if row["input"] else {},
@@ -74,7 +74,7 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
 
     # Topological sort: parents before children
     def get_parent_key(
-        node_name: str, parent_name: Optional[str], context_id: Optional[str]
+        op_name: str, parent_name: Optional[str], context_id: Optional[str]
     ) -> Optional[str]:
         """Get the key for the parent node."""
         if parent_name is None:
@@ -103,7 +103,7 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
     for key in node_data_map:
         visit(key)
 
-    # Build execution_order and nodes_trace_data in correct order
+    # Build execution_order and ops_trace_data in correct order
     for key in ordered_keys:
         data = node_data_map[key]
         flush_data["execution_order"].append(
@@ -114,7 +114,7 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
                 "contain_generation": data["contain_generation"],
             }
         )
-        flush_data["nodes_trace_data"][key] = data["trace_data"]
+        flush_data["ops_trace_data"][key] = data["trace_data"]
 
     return flush_data
 

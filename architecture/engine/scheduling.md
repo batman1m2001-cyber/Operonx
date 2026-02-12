@@ -1,14 +1,14 @@
-# Node Scheduling & Dependency Resolution
+# Op Scheduling & Dependency Resolution
 
 ## Overview
 
-Hush sử dụng topological-order scheduling với parallel execution cho independent nodes.
+Hush su dung topological-order scheduling voi parallel execution cho independent ops.
 
 ## Ready Count
 
 ### Concept
 
-Mỗi node có `ready_count` = số predecessors cần chờ hoàn thành.
+Moi op co `ready_count` = so predecessors can cho hoan thanh.
 
 ```python
 # Example graph
@@ -16,7 +16,7 @@ START >> A >> [B, C]
 [B, C] >> D >> END
 
 # Ready counts:
-A: 0  (entry node)
+A: 0  (entry op)
 B: 1  (waits for A)
 C: 1  (waits for A)
 D: 2  (waits for B AND C)
@@ -25,21 +25,21 @@ D: 2  (waits for B AND C)
 ### Hard vs Soft Edges
 
 ```python
-# Hard edge (>>): đếm từng predecessor
+# Hard edge (>>): dem tung predecessor
 A >> B  # B.ready_count += 1
 
-# Soft edge (>>~): tất cả soft predecessors đếm chung là 1
+# Soft edge (>>~): tat ca soft predecessors dem chung la 1
 A >> ~D
 B >> ~D
 C >> ~D
-# D.ready_count = 1 (chỉ cần 1 trong A,B,C hoàn thành)
+# D.ready_count = 1 (chi can 1 trong A,B,C hoan thanh)
 ```
 
 ### Calculation
 
 ```python
 ready_count = {}
-for name in self._nodes:
+for name in self._ops:
     hard_pred_count = 0
     has_soft = False
 
@@ -58,7 +58,7 @@ for name in self._nodes:
 
 ## Execution Loop
 
-### GraphNode.run()
+### GraphOp.run()
 
 ```python
 async def run(self, state, context_id=None, parent_context=None):
@@ -66,11 +66,11 @@ async def run(self, state, context_id=None, parent_context=None):
     ready_count = self.ready_count.copy()
     soft_satisfied = set()
 
-    # 1. Start entry nodes
+    # 1. Start entry ops
     for entry in self.entries:
         task = asyncio.create_task(
             name=entry,
-            coro=self._nodes[entry].run(state, context_id, parent_context)
+            coro=self._ops[entry].run(state, context_id, parent_context)
         )
         active_tasks[entry] = task
 
@@ -82,35 +82,35 @@ async def run(self, state, context_id=None, parent_context=None):
         )
 
         for task in done_tasks:
-            node_name = task.get_name()
-            active_tasks.pop(node_name)
-            node = self._nodes[node_name]
+            op_name = task.get_name()
+            active_tasks.pop(op_name)
+            op = self._ops[op_name]
 
-            # Determine next nodes
-            if node.type == "branch":
-                branch_target = node.get_target(state, context_id)
-                next_nodes = [branch_target] if branch_target != END.name else []
+            # Determine next ops
+            if op.type == "branch":
+                branch_target = op.get_target(state, context_id)
+                next_ops = [branch_target] if branch_target != END.name else []
             else:
-                next_nodes = self.nexts[node_name]
+                next_ops = self.nexts[op_name]
 
             # Update ready counts and schedule
-            for next_node in next_nodes:
-                edge = self._edges_lookup.get((node_name, next_node))
+            for next_op in next_ops:
+                edge = self._edges_lookup.get((op_name, next_op))
                 is_soft = edge and edge.soft
 
                 if is_soft:
-                    if next_node in soft_satisfied:
+                    if next_op in soft_satisfied:
                         continue  # Already satisfied
-                    soft_satisfied.add(next_node)
+                    soft_satisfied.add(next_op)
 
-                ready_count[next_node] -= 1
+                ready_count[next_op] -= 1
 
-                if ready_count[next_node] == 0:
+                if ready_count[next_op] == 0:
                     task = asyncio.create_task(
-                        name=next_node,
-                        coro=self._nodes[next_node].run(state, context_id, parent_context)
+                        name=next_op,
+                        coro=self._ops[next_op].run(state, context_id, parent_context)
                     )
-                    active_tasks[next_node] = task
+                    active_tasks[next_op] = task
 
     return self.get_outputs(state, context_id, parent_context)
 ```
@@ -145,11 +145,11 @@ Execution order:
 START >> branch >> ~case_a >> merge >> END
          branch >> ~case_b >> merge
 
-Execution order (if branch → case_a):
+Execution order (if branch -> case_a):
 1. branch
 2. case_a (soft edge, ready_count=1)
 3. merge (ready_count=0 after case_a satisfies soft group)
-   - case_b không chạy
+   - case_b khong chay
 ```
 
 ### Diamond
@@ -165,37 +165,37 @@ Execution order:
 
 ## Branch Handling
 
-### BranchNode Returns Target
+### BranchOp Returns Target
 
 ```python
-# BranchNode.core returns
+# BranchOp.core returns
 {"target": "case_a", "matched": "score >= 90"}
 ```
 
-### GraphNode Uses Target
+### GraphOp Uses Target
 
 ```python
-if node.type == "branch":
-    branch_target = node.get_target(state, context_id)
+if op.type == "branch":
+    branch_target = op.get_target(state, context_id)
     if branch_target != END.name:
-        next_nodes = [branch_target]  # Chỉ 1 target
+        next_ops = [branch_target]  # Chi 1 target
     else:
-        next_nodes = []
+        next_ops = []
 else:
-    next_nodes = self.nexts[node_name]  # Tất cả successors
+    next_ops = self.nexts[op_name]  # Tat ca successors
 ```
 
 ## Soft Edge Handling
 
 ### Purpose
 
-Soft edges dùng cho merge sau branch - chỉ cần 1 predecessor hoàn thành:
+Soft edges dung cho merge sau branch - chi can 1 predecessor hoan thanh:
 
 ```python
 # Branch outputs use soft edges
 branch >> ~case_a >> merge
 branch >> ~case_b >> merge
-# merge chờ BẤT KỲ MỘT trong case_a, case_b
+# merge cho BAT KY MOT trong case_a, case_b
 ```
 
 ### Tracking
@@ -203,41 +203,41 @@ branch >> ~case_b >> merge
 ```python
 soft_satisfied = set()
 
-for next_node in next_nodes:
-    edge = self._edges_lookup.get((node_name, next_node))
+for next_op in next_ops:
+    edge = self._edges_lookup.get((op_name, next_op))
     is_soft = edge and edge.soft
 
     if is_soft:
-        if next_node in soft_satisfied:
-            continue  # Đã có soft predecessor hoàn thành
-        soft_satisfied.add(next_node)  # Mark as satisfied
+        if next_op in soft_satisfied:
+            continue  # Da co soft predecessor hoan thanh
+        soft_satisfied.add(next_op)  # Mark as satisfied
 
-    ready_count[next_node] -= 1
+    ready_count[next_op] -= 1
 ```
 
 ## Error Handling
 
-Errors trong node không stop graph execution:
+Errors trong op khong stop graph execution:
 
 ```python
-# In BaseNode.run()
+# In BaseOp.run()
 try:
     _outputs = await self.core(**_inputs)
 except Exception as e:
     state[self.full_name, "error", context_id] = traceback.format_exc()
-    # Node vẫn "hoàn thành", successors có thể chạy
+    # Op van "hoan thanh", successors co the chay
 ```
 
-## Iteration Node Scheduling
+## Iteration Op Scheduling
 
-Iteration nodes tự quản lý scheduling cho child graph:
+Iteration ops tu quan ly scheduling cho child graph:
 
 ```python
-# ForLoopNode - sequential
+# ForOp - sequential
 for i, data in enumerate(iteration_data):
     result = await self._run_graph(state, f"[{i}]", ...)
 
-# MapNode - parallel với semaphore
+# MapOp - parallel voi semaphore
 semaphore = asyncio.Semaphore(max_concurrency)
 await asyncio.gather(*[
     execute_iteration(f"[{i}]", data)

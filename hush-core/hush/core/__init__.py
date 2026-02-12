@@ -5,12 +5,12 @@ A powerful async workflow orchestration framework.
 
 Example:
     ```python
-    from hush.core import Hush, GraphNode, START, END, PARENT
-    from hush.core.nodes import CodeNode
+    from hush.core import Hush, GraphOp, START, END, PARENT
+    from hush.core.ops import FuncOp
 
     # Define graph
-    with GraphNode(name="my-workflow") as graph:
-        node = CodeNode(name="processor", ...)
+    with GraphOp(name="my-workflow") as graph:
+        node = FuncOp(name="processor", ...)
         START >> node >> END
 
     # Create engine and run
@@ -32,24 +32,24 @@ from hush.core.configs import (
 )
 from hush.core.engine import Hush
 from hush.core.loggings import LOGGER
-from hush.core.nodes import (
+from hush.core.ops import (
     END,
     PARENT,
     START,
-    AsyncIterNode,
-    BaseNode,
-    BranchNode,
-    CodeNode,
-    DummyNode,
+    AIterOp,
+    BaseOp,
+    BranchOp,
+    DummyOp,
     Each,
-    ForLoopNode,
-    GraphNode,
-    MapNode,
-    ParserNode,
+    ForOp,
+    FuncOp,
+    GraphOp,
+    MapOp,
+    ParserOp,
     ParserType,
-    WhileLoopNode,
-    code_node,
-    subgraph,
+    WhileOp,
+    graph,
+    op,
 )
 from hush.core.registry import (
     REGISTRY,
@@ -89,19 +89,19 @@ __all__ = [
     # Main engine
     "Hush",
     # Nodes
-    "BaseNode",
-    "DummyNode",
-    "GraphNode",
-    "BranchNode",
+    "BaseOp",
+    "DummyOp",
+    "GraphOp",
+    "BranchOp",
     "Each",
-    "ForLoopNode",
-    "MapNode",
-    "WhileLoopNode",
-    "AsyncIterNode",
-    "CodeNode",
-    "code_node",
-    "subgraph",
-    "ParserNode",
+    "ForOp",
+    "MapOp",
+    "WhileOp",
+    "AIterOp",
+    "FuncOp",
+    "op",
+    "graph",
+    "ParserOp",
     "ParserType",
     # Markers
     "START",
@@ -114,7 +114,7 @@ __all__ = [
     "RedisState",
     # Config
     "NodeConfig",
-    "NodeType",
+    "OpType",
     "EdgeConfig",
     "EdgeType",
     # Schema

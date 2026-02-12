@@ -10,7 +10,7 @@ hush-tutorial/
 │   ├── 00-tong-quan.md           # Overview
 │   ├── 01-cai-dat-va-thiet-lap.md # Installation & setup
 │   ├── 02-quickstart.md          # First workflow
-│   ├── 03-core-concepts.md       # GraphNode, CodeNode, PARENT
+│   ├── 03-core-concepts.md       # GraphOp, FuncOp, PARENT
 │   ├── 04-llm-integration.md     # LLM usage
 │   ├── 05-loops-branches.md      # Control flow
 │   ├── 06-embeddings-rag.md      # Vector search
@@ -59,7 +59,7 @@ hush-tutorial/
 ## When to Add Documentation
 
 1. **New feature in hush-core/providers**: Add to relevant existing doc or create new one
-2. **New node type**: Add to 03-core-concepts.md or create dedicated doc
+2. **New op type**: Add to 03-core-concepts.md or create dedicated doc
 3. **New provider**: Add to 04-llm-integration.md or 06-embeddings-rag.md
 
 ## When to Add Examples
@@ -86,13 +86,13 @@ Run:
 """
 
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphOp, FuncOp, START, END, PARENT
 
 
 async def main():
     # Define workflow
-    with GraphNode(name="example") as graph:
-        # ... nodes ...
+    with GraphOp(name="example") as graph:
+        # ... ops ...
         START >> ... >> END
 
     # Run
@@ -120,7 +120,7 @@ See [/CLAUDE.md](../CLAUDE.md) for the full sync mapping:
 
 | Code Change | Update Here |
 |-------------|-------------|
-| New/changed node types | docs/03-core-concepts.md |
+| New/changed op types | docs/03-core-concepts.md |
 | LLM provider changes | docs/04-llm-integration.md |
 | Embedding/reranker changes | docs/06-embeddings-rag.md |
 | Tracer changes | docs/09-tracing-observability.md |

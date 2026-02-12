@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
-    from hush.core.nodes.base import BaseNode
+    from hush.core.ops.base import BaseOp
 
 __all__ = ["Ref"]
 
@@ -22,7 +22,7 @@ class Ref:
         ~(node["flag"])  # negation
 
     Attributes:
-        _node: Node nguồn (có thể là string hoặc BaseNode)
+        _node: Node nguồn (có thể là string hoặc BaseOp)
         var: Tên biến nguồn
         _ops: Danh sách các operation đã ghi
         _fn: Function đã compile từ ops (signature: fn(value, context) -> result)
@@ -30,18 +30,18 @@ class Ref:
         is_output: True nếu đây là output ref (đẩy giá trị ra ngoài)
     """
 
-    __slots__ = ("_node", "var", "_ops", "_fn", "idx", "is_output")
+    __slots__ = ("_source", "var", "_ops", "_fn", "idx", "is_output")
 
     _RESERVED_ATTRS = frozenset(
         {
-            "_node",
+            "_source",
             "var",
             "_ops",
             "_fn",
             "idx",
             "is_output",
-            "node",
-            "raw_node",
+            "source",
+            "raw_source",
             "ops",
             "as_tuple",
             "apply",
@@ -56,7 +56,7 @@ class Ref:
 
     def __init__(
         self,
-        node: Union["BaseNode", str],
+        node: Union["BaseOp", str],
         var: str,
         _ops: Optional[List[Tuple[str, Any]]] = None,
         _fn: Optional[Callable] = None,
@@ -65,13 +65,13 @@ class Ref:
         """Khởi tạo Ref.
 
         Args:
-            node: Node nguồn (BaseNode hoặc string tên node)
+            node: Node nguồn (BaseOp hoặc string tên node)
             var: Tên biến nguồn
             _ops: Danh sách operation (dùng cho deserialization)
             _fn: Function đã compile (dùng cho clone)
             is_output: True nếu là output ref
         """
-        object.__setattr__(self, "_node", node)
+        object.__setattr__(self, "_source", node)
         object.__setattr__(self, "var", var)
         object.__setattr__(self, "_ops", _ops or [])
         object.__setattr__(self, "idx", -1)  # Được set bởi StateSchema._build()
@@ -84,14 +84,14 @@ class Ref:
         object.__setattr__(self, "_fn", _fn or (lambda x, ctx={}: x))
 
     @property
-    def node(self) -> str:
+    def source(self) -> str:
         """Tên đầy đủ của node nguồn."""
-        return self._node.full_name if hasattr(self._node, "full_name") else self._node
+        return self._source.full_name if hasattr(self._source, "full_name") else self._source
 
     @property
-    def raw_node(self) -> Union["BaseNode", str]:
+    def raw_source(self) -> Union["BaseOp", str]:
         """Node nguồn gốc (có thể là object hoặc string)."""
-        return self._node
+        return self._source
 
     @property
     def ops(self) -> List[Tuple[str, Tuple[Any, ...]]]:
@@ -104,18 +104,18 @@ class Ref:
         return len(self._ops) > 0
 
     def as_tuple(self) -> Tuple[str, str]:
-        """Trả về tuple (node_name, var_name)."""
-        return (self.node, self.var)
+        """Trả về tuple (op_name, var_name)."""
+        return (self.source, self.var)
 
     def _clone(self) -> "Ref":
         """Tạo bản sao của Ref."""
-        return Ref(self._node, self.var, list(self._ops), self._fn, self.is_output)
+        return Ref(self._source, self.var, list(self._ops), self._fn, self.is_output)
 
     def _with_op(self, op: str, *args: Any) -> "Ref":
         """Tạo Ref mới với thêm một operation."""
         new_ops = self._ops + [(op, args)]
         new_fn = self._wrap(self._fn, op, args)
-        return Ref(self._node, self.var, new_ops, new_fn)
+        return Ref(self._source, self.var, new_ops, new_fn)
 
     @staticmethod
     def _wrap(fn: Callable, op: str, args: Tuple) -> Callable:
@@ -377,8 +377,8 @@ class Ref:
         if not isinstance(other, Ref):
             raise TypeError(f">> operator chỉ hỗ trợ Ref, không hỗ trợ {type(other).__name__}")
 
-        source_node = self.raw_node  # producer node
-        target_node = other.raw_node  # consumer node hoặc PARENT
+        source_node = self.raw_source  # producer node
+        target_node = other.raw_source  # consumer node hoặc PARENT
 
         # Kiểm tra nếu target là PARENT["key"]
         if hasattr(target_node, "name") and target_node.name == "__PARENT__":
@@ -459,5 +459,5 @@ class Ref:
     # =========================================================================
     def __repr__(self) -> str:
         if not self._ops:
-            return f"Ref({self.node!r}, {self.var!r})"
-        return f"Ref({self.node!r}, {self.var!r}, ops={len(self._ops)})"
+            return f"Ref({self.source!r}, {self.var!r})"
+        return f"Ref({self.source!r}, {self.var!r}, ops={len(self._ops)})"

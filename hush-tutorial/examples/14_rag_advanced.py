@@ -9,7 +9,7 @@ Học được:
 - Reciprocal Rank Fusion (RRF): merge kết quả từ nhiều sources
 - Hybrid search: keyword + vector + RRF → better retrieval
 - Two-stage retrieval: retrieve top 20 → rerank to top 5
-- RerankNode: cross-encoder reranking
+- RerankOp: cross-encoder reranking
 
 Chạy: cd hush-tutorial && uv run python examples/14_rag_advanced.py
 """
@@ -22,8 +22,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import numpy as np
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import op
 
 # =============================================================================
 # Sample data
@@ -99,19 +99,19 @@ async def example_1_keyword_rrf():
     print("Ví dụ 1: Keyword Search + RRF")
     print("=" * 50)
 
-    @code_node
+    @op
     def search_original(query, docs):
         return {"results": keyword_search(query, docs, top_k=5)}
 
-    @code_node
+    @op
     def search_expanded(query, docs):
         return {"results": keyword_search(query + " thành phố du lịch", docs, top_k=5)}
 
-    @code_node
+    @op
     def merge(r1, r2):
         return {"merged": reciprocal_rank_fusion([r1, r2])[:5]}
 
-    with GraphNode(name="keyword-rrf") as graph:
+    with GraphOp(name="keyword-rrf") as graph:
         # 2 keyword searches khác nhau: original query + expanded query
         s_orig = search_original(query=PARENT["query"], docs=PARENT["documents"])
         s_exp = search_expanded(query=PARENT["query"], docs=PARENT["documents"])
@@ -158,12 +158,12 @@ async def example_2_hybrid_rag():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import EmbeddingNode, LLMNode, PromptNode
+    from hush.providers import EmbeddingOp, LLMOp, PromptOp
 
     # Step 0: Pre-compute document embeddings
     print("  Embedding documents...")
-    with GraphNode(name="embed-docs") as embed_graph:
-        embed = EmbeddingNode.of(
+    with GraphOp(name="embed-docs") as embed_graph:
+        embed = EmbeddingOp.of(
             resource_key="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -176,24 +176,24 @@ async def example_2_hybrid_rag():
     print(f"  Embedded {len(doc_vectors)} documents")
 
     # Hybrid RAG workflow
-    @code_node
+    @op
     def kw_search_fn(query, docs):
         return {"results": keyword_search(query, docs, top_k=8)}
 
-    @code_node
+    @op
     def vec_search_fn(qv, docs, dvs):
         return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
 
-    @code_node
+    @op
     def merge_results(kw, vec):
         return {"context_docs": reciprocal_rank_fusion([kw, vec])[:5]}
 
-    with GraphNode(name="hybrid-rag") as graph:
+    with GraphOp(name="hybrid-rag") as graph:
         # Branch A: Keyword search
         kw = kw_search_fn(query=PARENT["query"], docs=PARENT["documents"])
 
         # Branch B: Vector search
-        embed_q = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
+        embed_q = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
         vec = vec_search_fn(
             qv=embed_q["embeddings"],
             docs=PARENT["documents"],
@@ -204,7 +204,7 @@ async def example_2_hybrid_rag():
         mrg = merge_results(kw=kw["results"], vec=vec["results"])
 
         # LLM answer
-        p = PromptNode.of(
+        p = PromptOp.of(
             template={
                 "system": (
                     "Trả lời câu hỏi dựa trên context.\n"
@@ -217,7 +217,7 @@ async def example_2_hybrid_rag():
             query=PARENT["query"],
         )
 
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -256,7 +256,7 @@ async def example_2_hybrid_rag():
 
 
 async def example_3_rerank():
-    """Retrieve top 8 → RerankNode → top 3 → LLM answer."""
+    """Retrieve top 8 → RerankOp → top 3 → LLM answer."""
     print()
     print("=" * 50)
     print("Ví dụ 3: Two-stage Retrieval (Reranking)")
@@ -268,7 +268,7 @@ async def example_3_rerank():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
     if not os.environ.get("PINECONE_API_KEY"):
-        print("  Skipped — PINECONE_API_KEY chưa set (cần cho RerankNode)")
+        print("  Skipped — PINECONE_API_KEY chưa set (cần cho RerankOp)")
         print("  Thêm reranking:bge-m3 vào resources.yaml:")
         print("    reranking:bge-m3:")
         print("      api_type: pinecone")
@@ -277,18 +277,18 @@ async def example_3_rerank():
         print("      base_url: https://api.pinecone.io/rerank")
         return
 
-    from hush.providers import LLMNode, PromptNode, RerankNode
+    from hush.providers import LLMOp, PromptOp, RerankOp
 
-    @code_node
+    @op
     def retrieve(query, docs):
         return {"candidates": keyword_search(query, docs, top_k=8)}
 
-    with GraphNode(name="rerank-rag") as graph:
+    with GraphOp(name="rerank-rag") as graph:
         # Stage 1: Keyword retrieve top 8
         ret = retrieve(query=PARENT["query"], docs=PARENT["documents"])
 
         # Stage 2: Rerank to top 3
-        rr = RerankNode.of(
+        rr = RerankOp.of(
             resource_key="bge-m3",
             query=PARENT["query"],
             documents=ret["candidates"],
@@ -296,7 +296,7 @@ async def example_3_rerank():
         )
 
         # LLM answer
-        p = PromptNode.of(
+        p = PromptOp.of(
             template={
                 "system": "Trả lời dựa trên context:\n\n{context}",
                 "user": "{query}",
@@ -305,7 +305,7 @@ async def example_3_rerank():
             query=PARENT["query"],
         )
 
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},

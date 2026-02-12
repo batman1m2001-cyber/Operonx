@@ -20,16 +20,16 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops.transform.func_op import op
 from hush.core.tracers import LocalTracer
 
 # =============================================================================
-# Code nodes với dynamic tags
+# Code ops với dynamic tags
 # =============================================================================
 
 
-@code_node
+@op
 def analyze_text(text: str):
     """Phân tích text và thêm dynamic tags."""
     words = text.split()
@@ -48,7 +48,7 @@ def analyze_text(text: str):
     }
 
 
-@code_node
+@op
 def classify(word_count: int):
     """Phân loại dựa trên word count."""
     if word_count > 20:
@@ -70,7 +70,7 @@ async def example_1_local_tracer():
     print("Ví dụ 1: LocalTracer (offline debug)")
     print("=" * 50)
 
-    with GraphNode(name="text-analyzer") as graph:
+    with GraphOp(name="text-analyzer") as graph:
         analyze = analyze_text(
             name="analyze",
             inputs={"text": PARENT["text"]},
@@ -115,7 +115,7 @@ async def example_2_multiple_traces():
     print("Ví dụ 2: Multiple traces, different users")
     print("=" * 50)
 
-    with GraphNode(name="simple-pipeline") as graph:
+    with GraphOp(name="simple-pipeline") as graph:
         step = analyze_text(
             name="analyze",
             inputs={"text": PARENT["text"]},
@@ -166,7 +166,7 @@ async def example_3_langfuse_tracer():
         print("  Skipped — LANGFUSE keys chưa set trong .env")
         return
 
-    with GraphNode(name="langfuse-demo") as graph:
+    with GraphOp(name="langfuse-demo") as graph:
         step = analyze_text(
             name="analyze",
             inputs={"text": PARENT["text"]},

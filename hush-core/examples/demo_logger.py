@@ -25,7 +25,7 @@ def demo_all_project_logs():
     channel_name = "output"
     context_id = "main"
     workflow_name = "my-workflow"
-    node_name = "processor"
+    op_name = "processor"
     full_name = "my-workflow.processor"
 
     print("\n" + "=" * 60)
@@ -50,10 +50,10 @@ def demo_all_project_logs():
     )
 
     print("\n" + "=" * 60)
-    print("NODES/BASE.PY - Base Node Execution")
+    print("OPS/BASE.PY - Base Op Execution")
     print("=" * 60 + "\n")
 
-    # base.py:457-461 - Node execution log (INFO)
+    # base.py:457-461 - Op execution log (INFO)
     inputs = {"query": "hello", "max_tokens": 100}
     outputs = {"response": "Hi there!", "tokens_used": 15}
     duration_ms = 123.45
@@ -68,12 +68,12 @@ def demo_all_project_logs():
         format_log_data(outputs),
     )
 
-    # base.py:490-491 - Node error (ERROR)
+    # base.py:490-491 - Op error (ERROR)
     error_str = "ValueError: Invalid input"
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
-        node_name,
+        op_name,
         error_str,
     )
     logger.error(
@@ -84,45 +84,45 @@ def demo_all_project_logs():
     print("NODES/GRAPH/GRAPH_NODE.PY - Graph Execution")
     print("=" * 60 + "\n")
 
-    # graph_node.py:80 - Endpoint setup (DEBUG)
+    # graph_op.py:80 - Endpoint setup (DEBUG)
     logger.debug("Graph [highlight]%s[/highlight]: đang khởi tạo endpoints...", workflow_name)
 
-    # graph_node.py:89 - No entry node (ERROR)
+    # graph_op.py:89 - No entry node (ERROR)
     logger.error(
         "Graph [highlight]%s[/highlight]: không tìm thấy entry node. Kiểm tra kết nối START >> node.",
         workflow_name,
     )
 
-    # graph_node.py:92 - No exit node (ERROR)
+    # graph_op.py:92 - No exit node (ERROR)
     logger.error(
         "Graph [highlight]%s[/highlight]: không tìm thấy exit node. Kiểm tra kết nối node >> END.",
         workflow_name,
     )
 
-    # graph_node.py:101 - Schema creation (DEBUG)
+    # graph_op.py:101 - Schema creation (DEBUG)
     logger.debug("Graph [highlight]%s[/highlight]: đang tạo schema...", workflow_name)
 
-    # graph_node.py:136 - Flow type detection (DEBUG)
+    # graph_op.py:136 - Flow type detection (DEBUG)
     logger.debug(
         "Graph [highlight]%s[/highlight]: đang xác định flow type của các node...", workflow_name
     )
 
-    # graph_node.py:171-174 - Orphan node warning (WARNING)
-    orphan_nodes = ["unused_node_1", "unused_node_2"]
+    # graph_op.py:171-174 - Orphan node warning (WARNING)
+    orphan_ops = ["unused_op_1", "unused_op_2"]
     logger.warning(
         "Graph [highlight]%s[/highlight]: phát hiện orphan node [muted](không có edge)[/muted]: %s. Các node này sẽ không bao giờ được thực thi.",
         full_name,
-        orphan_nodes,
+        orphan_ops,
     )
 
-    # graph_node.py:230-233 - Node override warning (WARNING)
+    # graph_op.py:230-233 - Op override warning (WARNING)
     logger.warning(
         "Graph [highlight]%s[/highlight]: node [highlight]%s[/highlight] đã tồn tại và sẽ bị ghi đè",
         workflow_name,
-        node_name,
+        op_name,
     )
 
-    # graph_node.py:405-406 - Graph error (ERROR)
+    # graph_op.py:405-406 - Graph error (ERROR)
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
@@ -134,7 +134,7 @@ def demo_all_project_logs():
     print("NODES/ITERATION/ASYNC_ITER_NODE.PY - Async Iteration")
     print("=" * 60 + "\n")
 
-    # async_iter_node.py:228 - Chunk processing error (ERROR)
+    # aiter_op.py:228 - Chunk processing error (ERROR)
     chunk_id = 5
     logger.error(
         "[title]\\[%s][/title] Error processing chunk [value]%s[/value]: %s",
@@ -143,20 +143,20 @@ def demo_all_project_logs():
         "Connection timeout",
     )
 
-    # async_iter_node.py:262 - Source is None (WARNING)
+    # aiter_op.py:262 - Source is None (WARNING)
     logger.warning(
-        "[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: source is None.",
+        "[title]\\[%s][/title] AIterOp [highlight]%s[/highlight]: source is None.",
         request_id,
         full_name,
     )
 
-    # async_iter_node.py:357 - Callback error (ERROR)
+    # aiter_op.py:357 - Callback error (ERROR)
     logger.error("[title]\\[%s][/title] Callback error: %s", request_id, "Handler raised exception")
 
-    # async_iter_node.py:380-383 - High error rate (WARNING)
+    # aiter_op.py:380-383 - High error rate (WARNING)
     error_count, total_chunks = 15, 100
     logger.warning(
-        "[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s failed.",
+        "[title]\\[%s][/title] AIterOp [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s failed.",
         request_id,
         full_name,
         f"{error_count / total_chunks:.1%}",
@@ -164,16 +164,16 @@ def demo_all_project_logs():
         total_chunks,
     )
 
-    # async_iter_node.py:394-397 - High callback error rate (WARNING)
+    # aiter_op.py:394-397 - High callback error rate (WARNING)
     handler_error_count, handler_count = 3, 50
     logger.warning(
-        "[title]\\[%s][/title] AsyncIterNode [highlight]%s[/highlight]: high callback error rate [muted](%s)[/muted].",
+        "[title]\\[%s][/title] AIterOp [highlight]%s[/highlight]: high callback error rate [muted](%s)[/muted].",
         request_id,
         full_name,
         f"{handler_error_count / handler_count:.1%}",
     )
 
-    # async_iter_node.py:411-412 - Node error (ERROR)
+    # aiter_op.py:411-412 - Op error (ERROR)
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
@@ -185,25 +185,25 @@ def demo_all_project_logs():
     print("NODES/ITERATION/FOR_LOOP_NODE.PY - Sequential Loop")
     print("=" * 60 + "\n")
 
-    # for_loop_node.py:191-194 - Length mismatch (ERROR)
+    # for_op.py:191-194 - Length mismatch (ERROR)
     lengths = {"x": 5, "y": 3}
     logger.error(
-        "ForLoopNode [highlight]%s[/highlight]: 'each' variables have different lengths: %s. All 'each' variables must have the same length.",
+        "ForOp [highlight]%s[/highlight]: 'each' variables have different lengths: %s. All 'each' variables must have the same length.",
         full_name,
         lengths,
     )
 
-    # for_loop_node.py:237-240 - No iteration data (WARNING)
+    # for_op.py:237-240 - No iteration data (WARNING)
     logger.warning(
-        "[title]\\[%s][/title] ForLoopNode [highlight]%s[/highlight]: no iteration data. No iterations will be executed.",
+        "[title]\\[%s][/title] ForOp [highlight]%s[/highlight]: no iteration data. No iterations will be executed.",
         request_id,
         full_name,
     )
 
-    # for_loop_node.py:273-276 - High error rate (WARNING)
+    # for_op.py:273-276 - High error rate (WARNING)
     iteration_count = 100
     logger.warning(
-        "[title]\\[%s][/title] ForLoopNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s iterations failed.",
+        "[title]\\[%s][/title] ForOp [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s iterations failed.",
         request_id,
         full_name,
         f"{error_count / iteration_count:.1%}",
@@ -211,7 +211,7 @@ def demo_all_project_logs():
         iteration_count,
     )
 
-    # for_loop_node.py:290-291 - Node error (ERROR)
+    # for_op.py:290-291 - Op error (ERROR)
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
@@ -223,22 +223,22 @@ def demo_all_project_logs():
     print("NODES/ITERATION/WHILE_LOOP_NODE.PY - While Loop")
     print("=" * 60 + "\n")
 
-    # while_loop_node.py:65 - Invalid condition syntax (ERROR)
+    # while_op.py:65 - Invalid condition syntax (ERROR)
     condition = "counter >== 5"
     logger.error("Invalid stop_condition syntax [str]'%s'[/str]: %s", condition, "invalid syntax")
 
-    # while_loop_node.py:81 - Condition evaluation error (ERROR)
+    # while_op.py:81 - Condition evaluation error (ERROR)
     logger.error(
         "Error evaluating stop_condition [str]'%s'[/str]: %s",
         "counter >= max",
         "name 'max' is not defined",
     )
 
-    # while_loop_node.py:168-172 - Max iterations reached (WARNING)
+    # while_op.py:168-172 - Max iterations reached (WARNING)
     max_iterations = 100
     stop_condition = "done == True"
     logger.warning(
-        "[title]\\[%s][/title] WhileLoopNode [highlight]%s[/highlight]: max_iterations [muted](%s)[/muted] reached. "
+        "[title]\\[%s][/title] WhileOp [highlight]%s[/highlight]: max_iterations [muted](%s)[/muted] reached. "
         "Condition [str]'%s'[/str] never evaluated to True. This may indicate an infinite loop or incorrect stop condition.",
         request_id,
         full_name,
@@ -246,7 +246,7 @@ def demo_all_project_logs():
         stop_condition,
     )
 
-    # while_loop_node.py:191-192 - Node error (ERROR)
+    # while_op.py:191-192 - Op error (ERROR)
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
@@ -258,23 +258,23 @@ def demo_all_project_logs():
     print("NODES/ITERATION/MAP_NODE.PY - Parallel Map")
     print("=" * 60 + "\n")
 
-    # map_node.py:197-200 - Length mismatch (ERROR)
+    # map_op.py:197-200 - Length mismatch (ERROR)
     logger.error(
-        "MapNode [highlight]%s[/highlight]: 'each' variables have different lengths: %s",
+        "MapOp [highlight]%s[/highlight]: 'each' variables have different lengths: %s",
         full_name,
         lengths,
     )
 
-    # map_node.py:243-246 - No iteration data (WARNING)
+    # map_op.py:243-246 - No iteration data (WARNING)
     logger.warning(
-        "[title]\\[%s][/title] MapNode [highlight]%s[/highlight]: no iteration data. No iterations will be executed.",
+        "[title]\\[%s][/title] MapOp [highlight]%s[/highlight]: no iteration data. No iterations will be executed.",
         request_id,
         full_name,
     )
 
-    # map_node.py:288-291 - High error rate (WARNING)
+    # map_op.py:288-291 - High error rate (WARNING)
     logger.warning(
-        "[title]\\[%s][/title] MapNode [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s iterations failed.",
+        "[title]\\[%s][/title] MapOp [highlight]%s[/highlight]: high error rate [muted](%s)[/muted]. %s/%s iterations failed.",
         request_id,
         full_name,
         f"{error_count / iteration_count:.1%}",
@@ -282,7 +282,7 @@ def demo_all_project_logs():
         iteration_count,
     )
 
-    # map_node.py:305-306 - Node error (ERROR)
+    # map_op.py:305-306 - Op error (ERROR)
     logger.error(
         "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
         request_id,
@@ -294,46 +294,46 @@ def demo_all_project_logs():
     print("NODES/FLOW/BRANCH_NODE.PY - Branching")
     print("=" * 60 + "\n")
 
-    # branch_node.py:126 - Invalid condition syntax (ERROR)
+    # branch_op.py:126 - Invalid condition syntax (ERROR)
     logger.error(
         "Cú pháp điều kiện không hợp lệ [str]'%s'[/str]: %s", "score >> 90", "invalid syntax"
     )
 
-    # branch_node.py:153 - Condition matched (DEBUG)
+    # branch_op.py:153 - Condition matched (DEBUG)
     logger.debug(
         "Điều kiện [str]'%s'[/str] khớp, định tuyến đến [highlight]%s[/highlight]",
         "score >= 90",
         "excellent_path",
     )
 
-    # branch_node.py:157 - Condition evaluation error (ERROR)
+    # branch_op.py:157 - Condition evaluation error (ERROR)
     logger.error(
         "Lỗi khi đánh giá điều kiện [str]'%s'[/str]: %s",
         "score >= threshold",
         "name 'threshold' is not defined",
     )
 
-    # branch_node.py:170 - Ref condition matched (DEBUG)
+    # branch_op.py:170 - Ref condition matched (DEBUG)
     logger.debug(
         "Điều kiện [str]'%s'[/str] khớp, định tuyến đến [highlight]%s[/highlight]",
         "ref:is_valid",
         "success_path",
     )
 
-    # branch_node.py:174 - Ref condition error (ERROR)
+    # branch_op.py:174 - Ref condition error (ERROR)
     logger.error(
         "Lỗi khi đánh giá ref condition cho [str]'%s'[/str]: %s",
         "is_valid",
         "TypeError: unsupported operand",
     )
 
-    # branch_node.py:178 - Using default target (DEBUG)
+    # branch_op.py:178 - Using default target (DEBUG)
     logger.debug(
         "Không có điều kiện khớp, sử dụng target mặc định [highlight]%s[/highlight]",
         "fallback_path",
     )
 
-    # branch_node.py:181 - No condition matched, no default (WARNING)
+    # branch_op.py:181 - No condition matched, no default (WARNING)
     logger.warning("Không có điều kiện khớp và không có target mặc định")
 
     print("\n" + "=" * 60)

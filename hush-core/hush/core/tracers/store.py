@@ -30,10 +30,10 @@ class TraceStore:
         store = TraceStore()
 
         # During node execution - write asynchronously (non-blocking)
-        store.insert_node_trace(
+        store.insert_op_trace(
             request_id="req-123",
             workflow_name="my-workflow",
-            node_name="llm",
+            op_name="llm",
             parent_name="my-workflow",
             ...
         )
@@ -53,12 +53,12 @@ class TraceStore:
         """
         self._db_path = db_path or DEFAULT_DB_PATH
 
-    def insert_node_trace(
+    def insert_op_trace(
         self,
         request_id: str,
         workflow_name: str,
-        node_name: str,
-        node_type: Optional[str] = None,
+        op_name: str,
+        op_type: Optional[str] = None,
         parent_name: Optional[str] = None,
         context_id: Optional[str] = None,
         execution_order: int = 0,
@@ -85,8 +85,8 @@ class TraceStore:
         Args:
             request_id: Unique request identifier
             workflow_name: Name of the workflow
-            node_name: Full name of the node
-            node_type: Type of node (e.g., llm, branch, for, while, code)
+            op_name: Full name of the node
+            op_type: Type of node (e.g., llm, branch, for, while, code)
             parent_name: Parent node name (None for root)
             context_id: Context ID for iteration nodes
             execution_order: Order of execution (0-indexed)
@@ -109,8 +109,8 @@ class TraceStore:
         bg.write_trace(
             request_id=request_id,
             workflow_name=workflow_name,
-            node_name=node_name,
-            node_type=node_type,
+            op_name=op_name,
+            op_type=op_type,
             parent_name=parent_name,
             context_id=context_id,
             execution_order=execution_order,

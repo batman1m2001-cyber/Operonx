@@ -1,15 +1,15 @@
-"""Example demonstrating iteration nodes: ForLoopNode and MapNode.
+"""Example demonstrating iteration nodes: ForOp and MapOp.
 
 This example shows:
-1. MapNode: Parallel iteration (for independent items)
-2. ForLoopNode: Sequential iteration (for dependent iterations or nested loops)
-3. WhileLoopNode: Conditional iteration
+1. MapOp: Parallel iteration (for independent items)
+2. ForOp: Sequential iteration (for dependent iterations or nested loops)
+3. WhileOp: Conditional iteration
 4. Using >> operator for output mapping
 5. Nested graph structures with PARENT references
 
 Key difference:
-- MapNode: Runs all iterations in parallel (faster, but no order guarantee)
-- ForLoopNode: Runs iterations one at a time (slower, but supports dependencies)
+- MapOp: Runs all iterations in parallel (faster, but no order guarantee)
+- ForOp: Runs iterations one at a time (slower, but supports dependencies)
 """
 
 import asyncio
@@ -18,30 +18,30 @@ from hush.core import (
     END,
     PARENT,
     START,
-    GraphNode,
+    GraphOp,
     StateSchema,
-    code_node,
+    op,
 )
-from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.for_loop_node import ForLoopNode
-from hush.core.nodes.iteration.map_node import MapNode
-from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
+from hush.core.ops.iteration.base import Each
+from hush.core.ops.iteration.for_op import ForOp
+from hush.core.ops.iteration.map_op import MapOp
+from hush.core.ops.iteration.while_op import WhileOp
 
 # ============================================================================
-# Example 1: MapNode with WhileLoop Inside (Parallel Outer Loop)
+# Example 1: MapOp with WhileLoop Inside (Parallel Outer Loop)
 # ============================================================================
 
 
-@code_node
+@op
 def halve(value: int):
     """Divide value by 2."""
     return {"new_value": value // 2}
 
 
 async def run_mapnode_whileloop_example():
-    """MapNode iterating items in parallel, with WhileLoop processing each item.
+    """MapOp iterating items in parallel, with WhileLoop processing each item.
 
-    MapNode: iterate over [10, 20, 30] (parallel)
+    MapOp: iterate over [10, 20, 30] (parallel)
     WhileLoop: for each item, divide by 2 until < 5 (sequential within each)
 
     Expected results:
@@ -50,16 +50,16 @@ async def run_mapnode_whileloop_example():
     - 30 -> 15 -> 7 -> 3 (stops at 3)
     """
     print("=" * 60)
-    print("Example 1: MapNode (parallel) + WhileLoop")
+    print("Example 1: MapOp (parallel) + WhileLoop")
     print("=" * 60)
     print()
 
     # Build the graph
-    with GraphNode(name="mapnode_whileloop_graph") as graph:
-        # Outer MapNode: iterate over [10, 20, 30] in PARALLEL
-        with MapNode(name="outer_map", inputs={"item": Each([10, 20, 30])}) as map_node:
+    with GraphOp(name="mapnode_whileloop_graph") as graph:
+        # Outer MapOp: iterate over [10, 20, 30] in PARALLEL
+        with MapOp(name="outer_map", inputs={"item": Each([10, 20, 30])}) as map_op:
             # Inner WhileLoop: divide by 2 until value < 5
-            with WhileLoopNode(
+            with WhileOp(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
                 stop_condition="value < 5",
@@ -72,8 +72,8 @@ async def run_mapnode_whileloop_example():
             while_loop["value"] >> PARENT["value"]
             START >> while_loop >> END
 
-        map_node["value"] >> PARENT["results"]
-        START >> map_node >> END
+        map_op["value"] >> PARENT["results"]
+        START >> map_op >> END
 
     # Build and run
     graph.build()
@@ -99,32 +99,32 @@ async def run_mapnode_whileloop_example():
 
 
 # ============================================================================
-# Example 2: Nested ForLoopNode (Sequential Nested Loops)
+# Example 2: Nested ForOp (Sequential Nested Loops)
 # ============================================================================
 
 
-@code_node
+@op
 def multiply(x: int, y: int):
     """Multiply two numbers."""
     return {"result": x * y}
 
 
 async def run_nested_forloop_example():
-    """Nested ForLoopNode - inner loop depends on outer loop variable.
+    """Nested ForOp - inner loop depends on outer loop variable.
 
-    This pattern REQUIRES ForLoopNode (sequential) because MapNode (parallel)
+    This pattern REQUIRES ForOp (sequential) because MapOp (parallel)
     would cause race conditions when inner loop depends on outer loop variables.
 
     Outer ForLoop: iterate over [1, 2, 3] (sequential)
     Inner ForLoop: for each x, iterate over [10, 20] and multiply by x
     """
     print("=" * 60)
-    print("Example 2: Nested ForLoopNode (Sequential)")
+    print("Example 2: Nested ForOp (Sequential)")
     print("=" * 60)
     print()
 
-    with ForLoopNode(name="outer_loop", inputs={"x": Each([1, 2, 3])}) as outer:
-        with ForLoopNode(
+    with ForOp(name="outer_loop", inputs={"x": Each([1, 2, 3])}) as outer:
+        with ForOp(
             name="inner_loop",
             inputs={
                 "y": Each([10, 20]),

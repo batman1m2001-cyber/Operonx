@@ -179,7 +179,7 @@ if sys.platform.startswith("win"):
 
 ```bash
 # Verify installation
-python -c "from hush.core import GraphNode, CodeNode; print('OK')"
+python -c "from hush.core import GraphOp, FuncOp; print('OK')"
 
 # Run tests
 pytest tests/ -v

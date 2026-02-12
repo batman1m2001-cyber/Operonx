@@ -182,21 +182,21 @@ class BaseTracer(ABC):
         trace_metadata = state.trace_metadata
 
         for idx, execution in enumerate(execution_order):
-            node_name = execution["node"]
+            op_name = execution["op"]
             parent_name = execution.get("parent")
             context_id = execution.get("context_id")
 
             # Get trace data for this node
-            trace_key = f"{node_name}:{context_id}" if context_id else node_name
+            trace_key = f"{op_name}:{context_id}" if context_id else op_name
             trace_data = trace_metadata.get(trace_key, {})
 
             # Extract fields from trace_data
             usage = trace_data.get("usage") or {}
 
-            store.insert_node_trace(
+            store.insert_op_trace(
                 request_id=state.request_id,
                 workflow_name=workflow_name,
-                node_name=node_name,
+                op_name=op_name,
                 parent_name=parent_name,
                 context_id=context_id,
                 execution_order=idx,

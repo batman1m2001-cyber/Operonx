@@ -4,18 +4,18 @@
 
 ## Hush là gì?
 
-**Hush** là workflow engine cho các ứng dụng AI/LLM, được thiết kế để xây dựng các pipeline phức tạp một cách đơn giản và hiệu quả. Hush tập trung vào việc điều phối (orchestration) và thực thi (execution) các node trong một graph.
+**Hush** là workflow engine cho các ứng dụng AI/LLM, được thiết kế để xây dựng các pipeline phức tạp một cách đơn giản và hiệu quả. Hush tập trung vào việc điều phối (orchestration) và thực thi (execution) các op trong một graph.
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def greet(name: str):
     return {"message": f"Xin chào, {name}!"}
 
 async def main():
-    with GraphNode(name="hello") as graph:
+    with GraphOp(name="hello") as graph:
         step = greet(name=PARENT["name"])
         START >> step >> END
 
@@ -36,20 +36,20 @@ asyncio.run(main())
 │         (LocalTracer, Langfuse, OpenTelemetry)           │
 ├─────────────────────────────────────────────────────────┤
 │                     hush-providers                       │
-│    (LLMNode, PromptNode, EmbeddingNode, RerankNode)      │
+│    (LLMOp, PromptOp, EmbeddingOp, RerankOp)      │
 ├─────────────────────────────────────────────────────────┤
 │                       hush-core                          │
-│  (GraphNode, CodeNode, BranchNode, State, ResourceHub)   │
+│  (GraphOp, FuncOp, BranchOp, State, ResourceHub)   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 | Package | Mô tả |
 |---------|-------|
-| `hush-core` | **Nền tảng** — `@code_node`, `ForLoopNode.of()`, `MapNode.of()`, `WhileLoopNode.of()`, `if_()` đủ cho gần như mọi workflow |
-| `hush-providers` | Add-on — `LLMNode.of()`, `PromptNode.of()`, `EmbeddingNode.of()`, `RerankNode.of()` (cài khi cần) |
+| `hush-core` | **Nền tảng** — `@op`, `ForOp.of()`, `MapOp.of()`, `WhileOp.of()`, `if_()` đủ cho gần như mọi workflow |
+| `hush-providers` | Add-on — `LLMOp.of()`, `PromptOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()` (cài khi cần) |
 | `hush-ops` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
-> **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (CodeNode, LLMNode, ...). Trong code, hãy dùng **shorthand syntax** (`@code_node`, `LLMNode.of()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
+> **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (FuncOp, LLMOp, ...). Trong code, hãy dùng **shorthand syntax** (`@op`, `LLMOp.of()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
 
 ## Cài đặt nhanh
 
@@ -82,24 +82,24 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
 | [Quickstart](02-quickstart.md) | `01_hello_world.py`, `02_data_pipeline.py` | Hello world, data pipeline |
-| [Core Concepts](03-core-concepts.md) | `01_hello_world.py`, `02_data_pipeline.py` | GraphNode, CodeNode, inputs/outputs, PARENT, edges |
+| [Core Concepts](03-core-concepts.md) | `01_hello_world.py`, `02_data_pipeline.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
 
 ### LLM & AI
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [LLM Integration](04-llm-integration.md) | `03_llm_chat.py`, `04_llm_advanced.py` | PromptNode, LLMNode, providers, tools, structured output |
+| [LLM Integration](04-llm-integration.md) | `03_llm_chat.py`, `04_llm_advanced.py` | PromptOp, LLMOp, providers, tools, structured output |
 | [Embeddings & RAG](06-embeddings-rag.md) | `07_embeddings_and_rag.py`, `14_rag_advanced.py` | Embedding, reranking, RAG pipeline, hybrid search |
 | [Multi-model](11-multi-model.md) | `12_multi_model.py` | Load balancing, fallback, ensemble, cost routing |
-| [Agent Workflow](10-agent-workflow.md) | `11_agent_workflow.py` | Tool-calling agent, WhileLoopNode |
+| [Agent Workflow](10-agent-workflow.md) | `11_agent_workflow.py` | Tool-calling agent, WhileOp |
 
 ### Flow Control
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Loops & Branches](05-loops-branches.md) | `05_loops_and_branches.py` | ForLoop, MapNode, WhileLoop, BranchNode |
-| [Parallel Execution](08-parallel-execution.md) | `13_parallel_advanced.py` | Fan-out/fan-in, MapNode, partial failure |
-| [Error Handling](07-error-handling.md) | `10_error_handling.py` | Error capture, retry, fallback, BranchNode routing |
+| [Loops & Branches](05-loops-branches.md) | `05_loops_and_branches.py` | ForLoop, MapOp, WhileLoop, BranchOp |
+| [Parallel Execution](08-parallel-execution.md) | `13_parallel_advanced.py` | Fan-out/fan-in, MapOp, partial failure |
+| [Error Handling](07-error-handling.md) | `10_error_handling.py` | Error capture, retry, fallback, BranchOp routing |
 
 ### Production
 

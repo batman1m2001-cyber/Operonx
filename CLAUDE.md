@@ -6,7 +6,7 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 
 ```
 Hush-ai/
-├── hush-core/          # Core workflow engine (nodes, state, tracing)
+├── hush-core/          # Core workflow engine (ops, state, tracing)
 ├── hush-providers/     # LLM, embedding, reranking integrations
 ├── hush-ops/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
@@ -36,7 +36,7 @@ Hush-ai/
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
 │  ├── state/       → StateSchema, MemoryState, indexer           │
-│  ├── nodes/       → Node internals, creating custom nodes       │
+│  ├── ops/       → Op internals, creating custom ops            │
 │  ├── providers/   → Provider abstractions                       │
 │  ├── resources/   → ResourceHub, plugin system                  │
 │  ├── tracing/     → Tracer internals, data model                │
@@ -68,7 +68,7 @@ Hush-ai/
 
 | Change Type | CLAUDE.md | architecture/ | hush-tutorial/ |
 |-------------|-----------|---------------|----------------|
-| New node type | ✓ How to use | ✓ How it works internally | ✓ Add to docs/03 + example |
+| New op type | ✓ How to use | ✓ How it works internally | ✓ Add to docs/03 + example |
 | New provider | ✓ Integration pattern | ✓ Abstraction design | ✓ Add to docs/04 or 06 + example |
 | New tracer | ✓ Usage pattern | ✓ Implementation details | ✓ Add to docs/09 + example |
 | API change | ✓ Update examples | ✓ Update explanations | ✓ Update docs + examples |
@@ -90,7 +90,7 @@ When making significant changes:
 
 | Code Location | docs/ Update | examples/ Update |
 |---------------|--------------|------------------|
-| hush-core/nodes/ | 03-core-concepts.md | 01-02, 05 |
+| hush-core/ops/ | 03-core-concepts.md | 01-02, 05 |
 | hush-core/engine.py | 03-core-concepts.md | 01-02 |
 | hush-providers/llm/ | 04-llm-integration.md | 03-04 |
 | hush-providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
@@ -128,7 +128,7 @@ hush-ops (depends on hush-core)
 
 | Task | Package |
 |------|---------|
-| New node type | hush-core/hush/core/nodes/ |
+| New op type | hush-core/hush/core/ops/ |
 | New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
 | New tracing backend | hush-ops/hush/ops/ |
 | Documentation or examples | hush-tutorial/ |
@@ -159,7 +159,7 @@ hush-ops (depends on hush-core)
 
 ### Fix Bugs at the Root, Never Patch Around Them
 
-When a core API doesn't work as expected (e.g., `node >> END` not auto-forwarding outputs), **fix the root cause** in the core code. Never add workaround calls like `node._setup_schema()` or other private-method hacks in user-facing code, examples, tests, or decorators. If something that should "just work" doesn't, the fix belongs in the internal implementation (e.g., `__exit__`, `build()`, `__rrshift__`), not in a wrapper that papers over the gap.
+When a core API doesn't work as expected (e.g., `op >> END` not auto-forwarding outputs), **fix the root cause** in the core code. Never add workaround calls like `op._setup_schema()` or other private-method hacks in user-facing code, examples, tests, or decorators. If something that should "just work" doesn't, the fix belongs in the internal implementation (e.g., `__exit__`, `build()`, `__rrshift__`), not in a wrapper that papers over the gap.
 
 ## Build & Test Commands
 
@@ -236,37 +236,37 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full contributor guide, including:
 
 ## Key Patterns
 
-### Node Definition
+### Op Definition
 ```python
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def double(x: int):
     return {"result": x * 2}
 
-with GraphNode(name="workflow") as graph:
+with GraphOp(name="workflow") as graph:
     step = double(x=PARENT["input"])
     START >> step >> END
 ```
 
-### @subgraph — Modular Workflows
+### @graph — Modular Workflows
 
-Turn a builder function into a reusable GraphNode factory with auto-naming:
+Turn a builder function into a reusable GraphOp factory with auto-naming:
 
 ```python
-from hush.core import subgraph, code_node, START, END, PARENT
+from hush.core import graph, op, START, END, PARENT
 
-@code_node
+@op
 def detect_card(conversation: str):
     return {"has_card": "card" in conversation}
 
-@subgraph
+@graph
 def verify_card(conversation):
     check = detect_card(conversation=conversation)
     START >> check >> END
 
 # Use like a function call — auto-named from variable
-with GraphNode(name="main") as graph:
+with GraphOp(name="main") as graph:
     v = verify_card(conversation=PARENT["conv"])
     START >> v >> END  # v.name == "v"
 ```
@@ -277,30 +277,30 @@ with GraphNode(name="main") as graph:
 
 ### Shorthand Style Rule
 
-**Always use `Node.of()` classmethods** for concise node creation. Use explicit keyword arguments — never positional args:
+**Always use `Op.of()` classmethods** for concise op creation. Use explicit keyword arguments — never positional args:
 
 ```python
 # CORRECT
-chat = LLMChainNode.of(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
-llm = LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])
-embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])
+chat = ChainOp.of(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])
+embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
 
 # WRONG — no positional args
-chat = LLMChainNode.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
+chat = ChainOp.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 ```
 
 ### Edge Types
 - `>>` : Hard edge (sequential, counts toward ready_count)
 - `>>~` or `>` : Soft edge (conditional, for branch outputs)
 
-### State References — PARENT vs node["key"]
+### State References — PARENT vs op["key"]
 
-**Rule: Use `node["key"]` to pass data between sibling nodes. Use `PARENT["key"]` only for external inputs (from `engine.run()` or from the parent graph in nested contexts).**
+**Rule: Use `op["key"]` to pass data between sibling ops. Use `PARENT["key"]` only for external inputs (from `engine.run()` or from the parent graph in nested contexts).**
 
 ```python
-# CORRECT — read from sibling node's output
+# CORRECT — read from sibling op's output
 g = greet(name=PARENT["name"])       # PARENT["name"] = external input
-u = upper(text=g["greeting"])        # g["greeting"] = sibling node output
+u = upper(text=g["greeting"])        # g["greeting"] = sibling op output
 START >> g >> u >> END
 
 # WRONG — PARENT["greeting"] doesn't exist, g didn't forward there
@@ -308,21 +308,21 @@ u = upper(text=PARENT["greeting"])   # ✗ greeting is in g's state, not parent
 ```
 
 - `PARENT["key"]` : External inputs from `engine.run(inputs={...})` or parent graph
-- `node["key"]` : Output from a sibling node within the same graph
-- `>> END` : Auto-forwards the last node's outputs to graph result
+- `op["key"]` : Output from a sibling op within the same graph
+- `>> END` : Auto-forwards the last op's outputs to graph result
 - `outputs={"content": PARENT["answer"]}` : Explicit output mapping (inline, for renaming keys)
-- `node["src"] >> PARENT["dest"]` : Output mapping via `>>` operator (standalone, same effect)
+- `op["src"] >> PARENT["dest"]` : Output mapping via `>>` operator (standalone, same effect)
 
 ### Output Mapping with `>>`
 
-Use `node["key"] >> PARENT["key"]` to map a node's output to the parent graph state. This is equivalent to `outputs={"key": PARENT["dest"]}` but more readable for selective forwarding:
+Use `op["key"] >> PARENT["key"]` to map an op's output to the parent graph state. This is equivalent to `outputs={"key": PARENT["dest"]}` but more readable for selective forwarding:
 
 ```python
-# Style 1: outputs= parameter (inline with node creation)
-llm = LLMNode.of(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
+# Style 1: outputs= parameter (inline with op creation)
+llm = LLMOp.of(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
 
 # Style 2: >> operator (standalone line, equivalent)
-llm = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
+llm = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
 llm["content"] >> PARENT["answer"]
 
 # Common in loops — forward loop outputs or update loop state
@@ -335,7 +335,7 @@ step = process(x=PARENT["x"], outputs={"*": PARENT})
 
 ## Exception Hierarchy
 
-All node errors inherit from `NodeError` in `hush-core/hush/core/exceptions.py`:
+All op errors inherit from `OpError` in `hush-core/hush/core/exceptions.py`:
 - `ParserError`, `CodeError`, `BranchError`, `ConditionError`, `IterationError`
 - `PromptError`, `EmbeddingError`, `RerankError`
 
@@ -346,10 +346,10 @@ For detailed explanations, see [architecture/](architecture/):
 | Topic | Quick (CLAUDE.md) | Deep (architecture/) |
 |-------|-------------------|---------------------|
 | Execution flow | - | [engine/execution-flow.md](architecture/engine/execution-flow.md) |
-| Auto-naming | hush-core/CLAUDE.md | [nodes/auto-naming.md](architecture/nodes/auto-naming.md) |
+| Auto-naming | hush-core/CLAUDE.md | [ops/auto-naming.md](architecture/ops/auto-naming.md) |
 | State system | hush-core/CLAUDE.md | [state/overview.md](architecture/state/overview.md) |
-| Node internals | hush-core/CLAUDE.md | [nodes/base-node.md](architecture/nodes/base-node.md) |
-| Creating nodes | hush-core/CLAUDE.md | [nodes/creating-custom-node.md](architecture/nodes/creating-custom-node.md) |
+| Op internals | hush-core/CLAUDE.md | [ops/base-op.md](architecture/ops/base-op.md) |
+| Creating ops | hush-core/CLAUDE.md | [ops/creating-custom-op.md](architecture/ops/creating-custom-op.md) |
 | Adding providers | hush-providers/CLAUDE.md | [providers/adding-new-provider.md](architecture/providers/adding-new-provider.md) |
 
 ## Local Development with uv

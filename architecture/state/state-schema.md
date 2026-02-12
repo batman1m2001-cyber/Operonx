@@ -12,7 +12,7 @@ Location: `hush-core/hush/core/states/schema.py`
 class StateSchema:
     __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs")
 
-    # Map (node, var) → storage index
+    # Map (op, var) → storage index
     _var_to_idx: Dict[Tuple[str, str], int]
 
     # Default values theo index
@@ -27,14 +27,14 @@ class StateSchema:
 
 ## Construction
 
-### From Node
+### From Op
 
 ```python
-schema = StateSchema(node=my_graph, name="my_workflow")
+schema = StateSchema(op=my_graph, name="my_workflow")
 ```
 
 Internally:
-1. `_load_from(node)` - traverse graph, collect variables
+1. `_load_from(op)` - traverse graph, collect variables
 2. `_build()` - resolve refs to indices
 
 ### Manual
@@ -48,42 +48,42 @@ schema.set("node_a", "var", default_value)
 
 ### _load_from()
 
-Recursive traversal của node tree:
+Recursive traversal cua op tree:
 
 ```python
-def _load_from(self, node):
-    node_name = node.full_name
+def _load_from(self, op):
+    op_name = op.full_name
 
     # 1. Register input variables
-    for var_name, param in node.inputs.items():
+    for var_name, param in op.inputs.items():
         if param.value is not None:
-            self._register(node_name, var_name, param.value)
+            self._register(op_name, var_name, param.value)
         else:
-            self._register(node_name, var_name, param.default)
+            self._register(op_name, var_name, param.default)
 
     # 2. Register output variables
-    for var_name, param in node.outputs.items():
+    for var_name, param in op.outputs.items():
         if isinstance(param.value, Ref):
-            # Push ref: node.var -> target.var
-            self._register_push_ref(node_name, var_name, Ref(...))
+            # Push ref: op.var -> target.var
+            self._register_push_ref(op_name, var_name, Ref(...))
         else:
-            self._register(node_name, var_name, param.default)
+            self._register(op_name, var_name, param.default)
 
     # 3. Register metadata variables
     for meta_var in ("start_time", "end_time", "error"):
-        self._register(node_name, meta_var, None)
+        self._register(op_name, meta_var, None)
 
-    # 4. Recursively load child nodes
-    if hasattr(node, '_nodes'):
-        for child in node._nodes.values():
+    # 4. Recursively load child ops
+    if hasattr(op, '_ops'):
+        for child in op._ops.values():
             self._load_from(child)
 ```
 
 ### _register()
 
 ```python
-def _register(self, node: str, var: str, value: Any):
-    key = (node, var)
+def _register(self, op: str, var: str, value: Any):
+    key = (op, var)
 
     if key in self._var_to_idx:
         # Already registered - update if value is Ref or current is None
@@ -113,7 +113,7 @@ def _build(self):
         # Resolve pull refs (Refs in _defaults)
         value = self._defaults[idx]
         if isinstance(value, Ref):
-            source_key = (value.node, value.var)
+            source_key = (value.source, value.var)
             source_idx = self._var_to_idx.get(source_key, -1)
             value.idx = source_idx  # Set source index on Ref
             self._pull_refs[idx] = value
@@ -122,7 +122,7 @@ def _build(self):
         # Resolve push refs
         push_ref = self._push_refs[idx]
         if push_ref is not None:
-            target_key = (push_ref.node, push_ref.var)
+            target_key = (push_ref.source, push_ref.var)
             target_idx = self._var_to_idx.get(target_key, -1)
             push_ref.idx = target_idx
 ```
@@ -132,9 +132,9 @@ def _build(self):
 ### get_index()
 
 ```python
-def get_index(self, node: str, var: str) -> int:
+def get_index(self, op: str, var: str) -> int:
     """O(1) lookup. Returns -1 if not found."""
-    return self._var_to_idx.get((node, var), -1)
+    return self._var_to_idx.get((op, var), -1)
 ```
 
 ### get_pull_ref() / get_push_ref()
@@ -160,17 +160,17 @@ schema.show()
 
 # Output:
 # === StateSchema: my_workflow ===
-# my_graph.node_a.input [0] <- pull my_graph.input[1]
-# my_graph.node_a.result [2] -> push my_graph.output[3]
+# my_graph.op_a.input [0] <- pull my_graph.input[1]
+# my_graph.op_a.result [2] -> push my_graph.output[3]
 # ...
 ```
 
 ## Collection Interface
 
 ```python
-# Iterate over (node, var) pairs
-for node, var in schema:
-    print(f"{node}.{var}")
+# Iterate over (op, var) pairs
+for op, var in schema:
+    print(f"{op}.{var}")
 
 # Check if variable exists
 if ("node_a", "result") in schema:

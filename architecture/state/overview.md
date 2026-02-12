@@ -2,7 +2,7 @@
 
 ## Mục đích
 
-State system quản lý data flow giữa các nodes trong workflow với **O(1) lookup** sử dụng index-based storage.
+State system quản lý data flow giữa các ops trong workflow với **O(1) lookup** sử dụng index-based storage.
 
 ## Components
 
@@ -10,7 +10,7 @@ State system quản lý data flow giữa các nodes trong workflow với **O(1) 
 ┌─────────────────────────────────────────┐
 │              StateSchema                │
 │  ┌───────────────────────────────────┐  │
-│  │ _var_to_idx: {(node,var): index}  │  │
+│  │ _var_to_idx: {(op,var): index}    │  │
 │  │ _defaults: [default_values]       │  │
 │  │ _pull_refs: [Ref or None]         │  │
 │  │ _push_refs: [Ref or None]         │  │
@@ -43,8 +43,8 @@ State system quản lý data flow giữa các nodes trong workflow với **O(1) 
 Thay vì hash map lookup mỗi lần, pre-compute indices lúc build:
 
 ```python
-# Build time: map (node, var) → index
-_var_to_idx = {("node_a", "result"): 0, ("node_b", "input"): 1, ...}
+# Build time: map (op, var) → index
+_var_to_idx = {("op_a", "result"): 0, ("op_b", "input"): 1, ...}
 
 # Runtime: O(1) access by index
 value = self._cells[0][context_id]
@@ -84,11 +84,11 @@ def __getitem__(self, key):
 
 ### 4. Cell-based Multi-context
 
-Mỗi variable có thể có nhiều values trong các contexts khác nhau (cho iteration nodes):
+Mỗi variable có thể có nhiều values trong các contexts khác nhau (cho iteration ops):
 
 ```python
 # Normal execution
-state["node", "var", None]  # context = "main"
+state["op", "var", None]  # context = "main"
 
 # Iteration execution
 state["loop.inner", "result", "[0]"]
@@ -102,11 +102,11 @@ state["loop.inner", "result", "[1]"]
 ```
 Pull ref (trong inputs):
   inputs={"data": PARENT["input"]}
-  Khi node đọc "data", pull từ PARENT["input"]
+  Khi op đọc "data", pull từ PARENT["input"]
 
 Push ref (trong outputs):
   outputs={"result": PARENT}
-  Khi node ghi "result", push đến PARENT["result"]
+  Khi op ghi "result", push đến PARENT["result"]
 ```
 
 ### Example Flow
@@ -124,7 +124,7 @@ PARENT["input"] ──pull──> A["data"]
 1. **Build StateSchema từ graph**
    - Traverse graph tree
    - Collect tất cả variables
-   - Map (node, var) → index
+   - Map (op, var) → index
    - Build pull_refs và push_refs
 
 2. **Create MemoryState**
@@ -132,6 +132,6 @@ PARENT["input"] ──pull──> A["data"]
    - Set initial inputs
 
 3. **Runtime**
-   - Nodes đọc inputs (auto pull)
-   - Nodes ghi outputs (auto push)
+   - Ops đọc inputs (auto pull)
+   - Ops ghi outputs (auto push)
    - Values cached in cells

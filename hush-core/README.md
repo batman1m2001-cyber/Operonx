@@ -22,16 +22,16 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphOp, FuncOp, START, END, PARENT
 
 async def main():
-    with GraphNode(name="my-workflow") as graph:
-        step1 = CodeNode(
+    with GraphOp(name="my-workflow") as graph:
+        step1 = FuncOp(
             name="fetch",
             code_fn=lambda: {"data": [1, 2, 3, 4, 5]},
             outputs={"data": PARENT}
         )
-        step2 = CodeNode(
+        step2 = FuncOp(
             name="transform",
             code_fn=lambda data: {"result": sum(data)},
             inputs={"data": PARENT["data"]},
@@ -46,16 +46,16 @@ async def main():
 asyncio.run(main())
 ```
 
-## Node Types
+## Op Types
 
-| Node | Mô tả |
+| Op | Mô tả |
 |------|-------|
-| `GraphNode` | Container chứa subgraph |
-| `CodeNode` | Chạy Python function |
-| `BranchNode` | Conditional routing |
-| `ForLoopNode` | Sequential iteration |
-| `MapNode` | Parallel iteration |
-| `WhileLoopNode` | Loop với điều kiện |
+| `GraphOp` | Container chứa graph |
+| `FuncOp` | Chạy Python function |
+| `BranchOp` | Conditional routing |
+| `ForOp` | Sequential iteration |
+| `MapOp` | Parallel iteration |
+| `WhileOp` | Loop với điều kiện |
 
 ## Flow Control
 
@@ -67,7 +67,7 @@ START >> node1 >> node2 >> END
 START >> node1 >> [node2a, node2b] >> node3 >> END
 
 # Branch (conditional)
-START >> branch_node >> {"case_a": node_a, "case_b": node_b} >> END
+START >> branch_op >> {"case_a": node_a, "case_b": node_b} >> END
 ```
 
 ## State Management
@@ -101,7 +101,7 @@ await engine.run(inputs={...}, tracer=tracer)
 - [Architecture](../architecture/) - Internal documentation
   - [Engine](../architecture/engine/) - Execution internals
   - [State](../architecture/state/) - State management
-  - [Nodes](../architecture/nodes/) - Node system
+  - [Ops](../architecture/ops/) - Op system
 
 ## Related Packages
 

@@ -3,7 +3,7 @@
 This module provides utilities for attaching media (images, PDFs, audio, etc.)
 to workflow traces. Media can be attached to input, output, or metadata of a trace.
 
-Usage in CodeNode or custom nodes:
+Usage in FuncOp or custom nodes:
 
     ```python
     def my_code_fn(pdf_bytes: bytes) -> Dict:
@@ -151,7 +151,7 @@ def serialize_media_attachments(media_dict: Dict[str, Any]) -> Dict[str, Dict[st
         if isinstance(value, MediaAttachment):
             serialized[key] = value.to_dict()
         elif isinstance(value, dict):
-            # Handle raw dict format from CodeNode
+            # Handle raw dict format from FuncOp
             if "bytes" in value:
                 content_bytes = value["bytes"]
                 content_type = value.get("content_type", "application/octet-stream")

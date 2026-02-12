@@ -9,19 +9,19 @@ Xử lý lỗi trong workflows: error capture, retry, fallback, và error routin
 >
 > | Viết tắt | Class gốc | Ví dụ |
 > |----------|-----------|-------|
-> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `if_().else_()` | `BranchNode` | `if_(PARENT["ok"], "success").else_("error")` |
+> | `@op` | `FuncOp` | `@op` decorator trên function |
+> | `if_().else_()` | `BranchOp` | `if_(PARENT["ok"], "success").else_("error")` |
 
 ## Error Capture trong State
 
-Khi node lỗi, Hush **không crash** workflow — error được lưu vào `$state`.
+Khi op lỗi, Hush **không crash** workflow — error được lưu vào `$state`.
 
 ```python
-@code_node
+@op
 def failing():
     return 1 / 0  # ZeroDivisionError!
 
-with GraphNode(name="error-demo") as graph:
+with GraphOp(name="error-demo") as graph:
     step = failing()
     START >> step >> END
 
@@ -34,14 +34,14 @@ error = state["error-demo.failing", "error", None]
 print(f"Error captured: {error is not None}")  # True
 ```
 
-## Try/Catch Pattern trong CodeNode
+## Try/Catch Pattern trong FuncOp
 
 Trả về `success`/`error` thay vì throw exception.
 
 ```python
-from hush.core.nodes.transform.code_node import code_node
+from hush.core.ops.transform.func_op import op
 
-@code_node
+@op
 def safe_divide(a: int, b: int):
     try:
         result = a / b
@@ -55,17 +55,17 @@ def safe_divide(a: int, b: int):
 Dùng `if_()` để route success/error theo nhánh khác nhau.
 
 ```python
-from hush.core.nodes.flow.branch_node import if_
+from hush.core.ops.flow.branch_op import if_
 
-with GraphNode(name="error-routing") as graph:
+with GraphOp(name="error-routing") as graph:
     divide = safe_divide(a=PARENT["a"], b=PARENT["b"])
     router = if_(divide["success"] == True, "on_success").else_("on_error")
 
-    @code_node
+    @op
     def on_success(result):
         return {"output": f"Result: {result}"}
 
-    @code_node
+    @op
     def on_error(error):
         return {"output": f"Error: {error}"}
 
@@ -80,7 +80,7 @@ with GraphNode(name="error-routing") as graph:
 ## Retry với Exponential Backoff
 
 ```python
-@code_node
+@op
 def retry_with_backoff(query: str):
     import time
     max_attempts = 3
@@ -103,11 +103,11 @@ def retry_with_backoff(query: str):
 Kết hợp retry + fallback value.
 
 ```python
-@code_node
+@op
 def fallback_check(answer, success):
     return {"output": answer if success else "Default answer (fallback)"}
 
-with GraphNode(name="retry-demo") as graph:
+with GraphOp(name="retry-demo") as graph:
     api_call = retry_with_backoff(query=PARENT["query"])
     fb = fallback_check(answer=api_call["answer"], success=api_call["success"])
     START >> api_call >> fb >> END
@@ -115,12 +115,12 @@ with GraphNode(name="retry-demo") as graph:
 
 ## LLM Fallback Chain
 
-LLMNode hỗ trợ tự động fallback khi model fails.
+LLMOp hỗ trợ tự động fallback khi model fails.
 
 ```python
-from hush.providers import LLMNode
+from hush.providers import LLMOp
 
-llm = LLMNode.of(
+llm = LLMOp.of(
     resource_key="gpt-4o",
     fallback=["gpt-4o-mini"],  # Nếu gpt-4o fails → thử gpt-4o-mini
     messages=p["messages"],
@@ -129,7 +129,7 @@ llm = LLMNode.of(
 
 ## Best Practices
 
-1. **Try/catch trong CodeNode** — Trả success/error thay vì throw
+1. **Try/catch trong FuncOp** — Trả success/error thay vì throw
 2. **if_() routing** — Route success/error theo nhánh riêng
 3. **Retry với backoff** — Cho external API calls
 4. **LLM fallback** — Cấu hình backup models

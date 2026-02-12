@@ -23,19 +23,19 @@ markers = [
 ```
 tests/
 ├── conftest.py              # Shared fixtures
-├── nodes/
+├── ops/
 │   ├── __init__.py
 │   ├── flow/
-│   │   ├── test_branch_node.py
+│   │   ├── test_branch_op.py
 │   │   └── test_operator_precedence.py
 │   ├── graph/
-│   │   └── test_graph_node.py
+│   │   └── test_graph_op.py
 │   ├── iteration/
-│   │   ├── test_for_loop_node.py
-│   │   ├── test_map_node.py
-│   │   └── test_while_loop_node.py
+│   │   ├── test_for_op.py
+│   │   ├── test_map_op.py
+│   │   └── test_while_op.py
 │   └── transform/
-│       └── test_code_node.py
+│       └── test_func_op.py
 ├── states/
 │   ├── test_cell.py
 │   ├── test_ref.py
@@ -59,7 +59,7 @@ pytest tests/ -v
 
 ```bash
 pytest tests/states/test_state.py -v
-pytest tests/nodes/ -v
+pytest tests/ops/ -v
 ```
 
 ### Specific Test
@@ -91,8 +91,8 @@ pytest tests/ -v -m integration
 import pytest
 from hush.core.states.schema import StateSchema
 from hush.core.states.state import MemoryState
-from hush.core.nodes.graph.graph_node import GraphNode, START, END, PARENT
-from hush.core.nodes.transform.code_node import CodeNode
+from hush.core.ops.graph.graph_op import GraphOp, START, END, PARENT
+from hush.core.ops.transform.func_op import FuncOp
 
 
 # ============================================================
@@ -104,13 +104,13 @@ class TestSimpleLinearGraphValueFlow:
 
     def test_input_set(self):
         """Test that input values are set correctly."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
-                name="node_a",
+        with GraphOp(name="linear_graph") as graph:
+            op_a = FuncOp(
+                name="op_a",
                 code_fn=lambda x: {"result": x + 10},
                 inputs={"x": PARENT["x"]}
             )
-            START >> node_a >> END
+            START >> op_a >> END
 
         graph.build()
         schema = StateSchema(graph)
@@ -141,19 +141,19 @@ async def test_async_workflow():
 ```python
 # conftest.py
 import pytest
-from hush.core import GraphNode, CodeNode, START, END, PARENT, StateSchema, MemoryState
+from hush.core import GraphOp, FuncOp, START, END, PARENT, StateSchema, MemoryState
 
 
 @pytest.fixture
 def simple_graph():
     """Create a simple single-node graph."""
-    @code_node
+    @op
     def double(x: int):
         return {"result": x * 2}
 
-    with GraphNode(name="simple_graph") as graph:
-        node = double(inputs={"x": PARENT["x"]}, outputs={"*": PARENT})
-        START >> node >> END
+    with GraphOp(name="simple_graph") as graph:
+        step = double(inputs={"x": PARENT["x"]}, outputs={"*": PARENT})
+        START >> step >> END
 
     graph.build()
     return graph
@@ -162,7 +162,7 @@ def simple_graph():
 @pytest.fixture
 def create_state():
     """Factory fixture to create state from a graph with inputs."""
-    def _create_state(graph: GraphNode, inputs: Dict[str, Any] = None) -> MemoryState:
+    def _create_state(graph: GraphOp, inputs: Dict[str, Any] = None) -> MemoryState:
         schema = StateSchema(graph)
         return schema.create_state(inputs=inputs or {})
     return _create_state
@@ -186,8 +186,8 @@ def test_with_fixtures(simple_graph, create_state):
     (-3, -6),
     (100, 200),
 ])
-def test_double_node(simple_graph, create_state, input_val, expected):
-    """Test double node with various inputs."""
+def test_double_op(simple_graph, create_state, input_val, expected):
+    """Test double op with various inputs."""
     state = create_state(simple_graph, {"x": input_val})
     # Run graph...
     assert state["simple_graph", "result", None] == expected
@@ -238,31 +238,31 @@ def openai_config():
 ### Testing State Flow
 
 ```python
-def test_value_flow_through_nodes(self):
-    """Test value flow through multiple nodes."""
-    with GraphNode(name="linear_graph") as graph:
-        node_a = CodeNode(
-            name="node_a",
+def test_value_flow_through_ops(self):
+    """Test value flow through multiple ops."""
+    with GraphOp(name="linear_graph") as graph:
+        op_a = FuncOp(
+            name="op_a",
             code_fn=lambda x: {"result": x + 10},
             inputs={"x": PARENT["x"]}
         )
-        node_b = CodeNode(
-            name="node_b",
+        op_b = FuncOp(
+            name="op_b",
             code_fn=lambda x: {"result": x * 2},
-            inputs={"x": node_a["result"]}
+            inputs={"x": op_a["result"]}
         )
-        START >> node_a >> node_b >> END
+        START >> op_a >> op_b >> END
 
     graph.build()
     schema = StateSchema(graph)
     state = MemoryState(schema, inputs={"x": 5})
 
-    # Simulate node_a execution
-    x_val = state["linear_graph.node_a", "x", None]
-    state["linear_graph.node_a", "result", None] = x_val + 10  # 15
+    # Simulate op_a execution
+    x_val = state["linear_graph.op_a", "x", None]
+    state["linear_graph.op_a", "result", None] = x_val + 10  # 15
 
-    # Verify node_b can read from node_a
-    assert state["linear_graph.node_b", "x", None] == 15
+    # Verify op_b can read from op_a
+    assert state["linear_graph.op_b", "x", None] == 15
 ```
 
 ### Testing Multiple Contexts

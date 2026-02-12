@@ -9,7 +9,7 @@ from hush.core.states.ref import Ref
 # ============================================================
 
 
-class MockNode:
+class MockOp:
     """Mock node for testing."""
 
     def __init__(self, name: str):
@@ -28,17 +28,17 @@ class TestBasicCreation:
         """Test Ref creation with string node."""
         ref = Ref("graph.node", "output")
 
-        assert ref.node == "graph.node"
+        assert ref.source == "graph.node"
         assert ref.var == "output"
         assert ref.has_ops is False
 
-    def test_mock_node(self):
-        """Test Ref creation with MockNode."""
-        mock = MockNode("graph.mock")
+    def test_mock_op(self):
+        """Test Ref creation with MockOp."""
+        mock = MockOp("graph.mock")
         ref = Ref(mock, "result")
 
-        assert ref.node == "graph.mock"
-        assert ref.raw_node is mock
+        assert ref.source == "graph.mock"
+        assert ref.raw_source is mock
 
     def test_as_tuple(self):
         """Test as_tuple method."""
@@ -381,7 +381,7 @@ class TestClone:
         ref = Ref("n", "x")["key"] + 5
         ref_clone = ref._clone()
 
-        assert ref_clone.node == ref.node
+        assert ref_clone.source == ref.source
         assert ref_clone.ops == ref.ops
 
     def test_clone_executes_same(self):

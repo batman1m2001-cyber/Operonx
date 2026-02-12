@@ -1,7 +1,7 @@
 """Integration tests for hush-providers nodes working together."""
 
 import pytest
-from hush.core.nodes import END, PARENT, START, GraphNode
+from hush.core.ops import END, PARENT, START, GraphOp
 from hush.core.states import MemoryState, StateSchema
 
 
@@ -11,25 +11,25 @@ class TestNodeIntegration:
     def test_all_nodes_importable(self):
         """Test all nodes can be imported from hush.providers."""
         from hush.providers import (
-            EmbeddingNode,
-            LLMChainNode,
-            LLMNode,
-            PromptNode,
-            RerankNode,
+            EmbeddingOp,
+            ChainOp,
+            LLMOp,
+            PromptOp,
+            RerankOp,
         )
 
-        assert LLMNode is not None
-        assert EmbeddingNode is not None
-        assert RerankNode is not None
-        assert PromptNode is not None
-        assert LLMChainNode is not None
+        assert LLMOp is not None
+        assert EmbeddingOp is not None
+        assert RerankOp is not None
+        assert PromptOp is not None
+        assert ChainOp is not None
 
     def test_prompt_node_with_parent_outputs(self):
-        """Test PromptNode with PARENT reference for outputs."""
-        from hush.providers.nodes import PromptNode
+        """Test PromptOp with PARENT reference for outputs."""
+        from hush.providers.ops import PromptOp
 
-        with GraphNode(name="test_graph") as graph:
-            prompt = PromptNode(
+        with GraphOp(name="test_graph") as graph:
+            prompt = PromptOp(
                 name="prompt",
                 inputs={
                     "template": "Hello world",
@@ -45,10 +45,10 @@ class TestNodeIntegration:
 
     @pytest.mark.asyncio
     async def test_prompt_node_execution(self):
-        """Test PromptNode standalone execution."""
-        from hush.providers.nodes import PromptNode
+        """Test PromptOp standalone execution."""
+        from hush.providers.ops import PromptOp
 
-        prompt = PromptNode(
+        prompt = PromptOp(
             name="prompt",
             inputs={
                 "template": {"system": "You are helpful.", "user": "Task: {task}"},
@@ -56,7 +56,7 @@ class TestNodeIntegration:
             },
         )
 
-        schema = StateSchema(node=prompt)
+        schema = StateSchema(op=prompt)
         state = MemoryState(schema)
 
         result = await prompt.run(state)
@@ -125,15 +125,15 @@ class TestEndToEndPipeline:
 
     @pytest.mark.asyncio
     async def test_prompt_to_llm_pipeline(self, hub):
-        """Test a pipeline from PromptNode to LLMNode."""
-        from hush.providers.nodes import LLMNode, PromptNode
+        """Test a pipeline from PromptOp to LLMOp."""
+        from hush.providers.ops import LLMOp, PromptOp
 
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured")
 
         # Create a graph with Prompt -> LLM
-        with GraphNode(name="chat_pipeline") as pipeline:
-            prompt = PromptNode(
+        with GraphOp(name="chat_pipeline") as pipeline:
+            prompt = PromptOp(
                 name="prompt",
                 inputs={
                     "template": {
@@ -145,7 +145,7 @@ class TestEndToEndPipeline:
                 outputs={"messages": PARENT["messages"]},
             )
 
-            llm = LLMNode(
+            llm = LLMOp(
                 name="llm",
                 resource_key="or-claude-4-sonnet",
                 inputs={"messages": prompt["messages"]},
@@ -156,7 +156,7 @@ class TestEndToEndPipeline:
 
         pipeline.build()
 
-        schema = StateSchema(node=pipeline)
+        schema = StateSchema(op=pipeline)
         state = MemoryState(schema, inputs={"question": "What is 2+2?"})
 
         result = await pipeline.run(state)

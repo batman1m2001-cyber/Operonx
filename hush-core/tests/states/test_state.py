@@ -1,7 +1,7 @@
 """Tests for MemoryState - workflow state with Cell-based storage."""
 
-from hush.core.nodes.graph.graph_node import END, PARENT, START, GraphNode
-from hush.core.nodes.transform.code_node import CodeNode
+from hush.core.ops.graph.graph_op import END, PARENT, START, GraphOp
+from hush.core.ops.transform.func_op import FuncOp
 from hush.core.states.schema import StateSchema
 from hush.core.states.state import MemoryState
 
@@ -15,8 +15,8 @@ class TestSimpleLinearGraphValueFlow:
 
     def test_input_set(self):
         """Test that input values are set correctly."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -29,8 +29,8 @@ class TestSimpleLinearGraphValueFlow:
 
     def test_ref_resolution(self):
         """Test that refs are resolved correctly."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -45,11 +45,11 @@ class TestSimpleLinearGraphValueFlow:
 
     def test_value_flow_through_nodes(self):
         """Test value flow through multiple nodes."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="node_b", code_fn=lambda x: {"result": x * 2}, inputs={"x": node_a["result"]}
             )
             START >> node_a >> node_b >> END
@@ -77,13 +77,13 @@ class TestRefWithOperations:
 
     def test_getitem_applied(self):
         """Test getitem operations are applied."""
-        with GraphNode(name="ref_ops_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_ops_graph") as graph:
+            node_a = FuncOp(
                 name="data_source",
                 code_fn=lambda: {"data": {"items": [1, 2, 3], "name": "test"}},
                 inputs={},
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="extract_items",
                 code_fn=lambda items: {"count": len(items)},
                 inputs={"items": node_a["data"]["items"]},
@@ -103,11 +103,11 @@ class TestRefWithOperations:
 
     def test_method_call_applied(self):
         """Test method call operations are applied."""
-        with GraphNode(name="ref_ops_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_ops_graph") as graph:
+            node_a = FuncOp(
                 name="data_source", code_fn=lambda: {"data": {"name": "test"}}, inputs={}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="transform_name",
                 code_fn=lambda name: {"upper_name": name},
                 inputs={"name": node_a["data"]["name"].upper()},
@@ -136,21 +136,21 @@ class TestRefWithApply:
 
     def test_apply_functions(self):
         """Test apply(len), apply(sorted), apply(sum)."""
-        with GraphNode(name="ref_apply_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_apply_graph") as graph:
+            node_a = FuncOp(
                 name="list_source", code_fn=lambda: {"numbers": [5, 2, 8, 1, 9, 3]}, inputs={}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="get_length",
                 code_fn=lambda length: {"length": length},
                 inputs={"length": node_a["numbers"].apply(len)},
             )
-            node_c = CodeNode(
+            node_c = FuncOp(
                 name="sort_numbers",
                 code_fn=lambda sorted_nums: {"sorted": sorted_nums},
                 inputs={"sorted_nums": node_a["numbers"].apply(sorted)},
             )
-            node_d = CodeNode(
+            node_d = FuncOp(
                 name="sum_numbers",
                 code_fn=lambda total: {"total": total},
                 inputs={"total": node_a["numbers"].apply(sum)},
@@ -180,8 +180,8 @@ class TestMultipleContexts:
 
     def test_different_context_values(self):
         """Test that different contexts have independent values."""
-        with GraphNode(name="loop_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="loop_graph") as graph:
+            node_a = FuncOp(
                 name="accumulator", code_fn=lambda x: {"result": x}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -201,8 +201,8 @@ class TestMultipleContexts:
 
     def test_refs_work_per_context(self):
         """Test that refs work correctly per context."""
-        with GraphNode(name="loop_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="loop_graph") as graph:
+            node_a = FuncOp(
                 name="accumulator", code_fn=lambda x: {"result": x}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -230,11 +230,11 @@ class TestNestedGraphValueFlow:
 
     def test_nested_ref_resolution(self):
         """Test refs resolve through nested graphs."""
-        with GraphNode(name="outer") as outer:
-            with GraphNode(
+        with GraphOp(name="outer") as outer:
+            with GraphOp(
                 name="inner", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["inner_result"]}
             ) as inner:
-                double = CodeNode(
+                double = FuncOp(
                     name="double",
                     code_fn=lambda x: {"result": x * 2},
                     inputs={"x": PARENT["x"]},
@@ -296,7 +296,7 @@ class TestExecutionRecording:
         state.record_execution("node2", "node1", "ctx1")
 
         assert len(state.execution_order) == 2
-        assert state.execution_order[0]["node"] == "node1"
+        assert state.execution_order[0]["op"] == "node1"
         assert state.execution_order[1]["parent"] == "node1"
 
 
@@ -342,8 +342,8 @@ class TestCollectionInterface:
 
     def test_contains(self):
         """Test __contains__ method."""
-        with GraphNode(name="test_graph") as graph:
-            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
+        with GraphOp(name="test_graph") as graph:
+            node = FuncOp(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()

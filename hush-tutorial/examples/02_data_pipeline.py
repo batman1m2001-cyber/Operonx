@@ -4,8 +4,8 @@ Không cần API key. Chỉ dùng hush-core.
 
 Học được:
 - Pipeline nhiều bước: fetch → transform → aggregate
-- @code_node decorator: định nghĩa node từ function
-- node["key"]: truyền data giữa sibling nodes
+- @op decorator: định nghĩa op từ function
+- step["key"]: truyền data giữa sibling ops
 - PARENT["key"]: đọc external inputs
 
 Chạy: cd hush-tutorial && uv run python examples/02_data_pipeline.py
@@ -13,27 +13,27 @@ Chạy: cd hush-tutorial && uv run python examples/02_data_pipeline.py
 
 import asyncio
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops.transform.func_op import op
 
 # =============================================================================
-# Định nghĩa functions cho các nodes
+# Định nghĩa functions cho các ops
 # =============================================================================
 
 
-@code_node
+@op
 def fetch_data():
     """Bước 1: Lấy data (giả lập)."""
     return {"data": [1, 2, 3, 4, 5]}
 
 
-@code_node
+@op
 def transform(data: list):
     """Bước 2: Nhân đôi mỗi phần tử."""
     return {"transformed": [x * 2 for x in data]}
 
 
-@code_node
+@op
 def aggregate(data: list):
     """Bước 3: Tính tổng và trung bình."""
     return {
@@ -48,14 +48,14 @@ def aggregate(data: list):
 # =============================================================================
 
 
-@code_node
+@op
 def clean_text(text: str):
     """Tiền xử lý: loại bỏ whitespace thừa, lowercase."""
     cleaned = " ".join(text.split()).strip().lower()
     return {"cleaned_text": cleaned}
 
 
-@code_node
+@op
 def count_words(text: str):
     """Đếm số từ."""
     words = text.split()
@@ -66,7 +66,7 @@ def count_words(text: str):
     }
 
 
-@code_node
+@op
 def summarize_stats(word_count: int, unique_words: int, cleaned_text: str):
     """Tổng hợp thống kê."""
     return {
@@ -86,7 +86,7 @@ async def main():
     print("Pipeline 1: Data Transformation")
     print("=" * 50)
 
-    with GraphNode(name="data-pipeline") as graph:
+    with GraphOp(name="data-pipeline") as graph:
         f = fetch_data()
         t = transform(data=f["data"])
         a = aggregate(data=t["transformed"])
@@ -108,7 +108,7 @@ async def main():
     print("Pipeline 2: Text Processing")
     print("=" * 50)
 
-    with GraphNode(name="text-pipeline") as graph:
+    with GraphOp(name="text-pipeline") as graph:
         c = clean_text(text=PARENT["text"])
         w = count_words(text=c["cleaned_text"])
         s = summarize_stats(

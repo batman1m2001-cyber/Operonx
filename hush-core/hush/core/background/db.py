@@ -47,8 +47,8 @@ _SCHEMA_SQL = """
         workflow_name TEXT NOT NULL,
 
         -- Node identity
-        node_name TEXT,
-        node_type TEXT,
+        op_name TEXT,
+        op_type TEXT,
         parent_name TEXT,
         context_id TEXT,
         execution_order INTEGER,
@@ -111,8 +111,8 @@ def _connect_and_init(db_path_str: str) -> sqlite3.Connection:
     columns = {row[1] for row in cursor.fetchall()}
     if "tags" not in columns:
         conn.execute("ALTER TABLE traces ADD COLUMN tags TEXT")
-    if "node_type" not in columns:
-        conn.execute("ALTER TABLE traces ADD COLUMN node_type TEXT")
+    if "op_type" not in columns:
+        conn.execute("ALTER TABLE traces ADD COLUMN op_type TEXT")
 
     conn.commit()
     return conn
@@ -169,8 +169,8 @@ def _prepare_trace_row(data: Dict[str, Any], now: float) -> tuple:
     return (
         data["request_id"],
         data["workflow_name"],
-        data["node_name"],
-        data.get("node_type"),
+        data["op_name"],
+        data.get("op_type"),
         data.get("parent_name"),
         data.get("context_id"),
         data.get("execution_order", 0),
@@ -194,7 +194,7 @@ def _prepare_trace_row(data: Dict[str, Any], now: float) -> tuple:
 
 _INSERT_SQL = """
     INSERT INTO traces (
-        request_id, workflow_name, node_name, node_type, parent_name, context_id,
+        request_id, workflow_name, op_name, op_type, parent_name, context_id,
         execution_order, start_time, end_time, duration_ms,
         model, prompt_tokens, completion_tokens, total_tokens, cost_usd,
         input, output, user_id, session_id,
@@ -237,7 +237,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
     """
     cursor = conn.execute(
         """
-        SELECT id, node_name, parent_name, context_id, start_time, end_time,
+        SELECT id, op_name, parent_name, context_id, start_time, end_time,
                duration_ms, workflow_name, user_id, session_id,
                prompt_tokens, completion_tokens, total_tokens, cost_usd
         FROM traces
@@ -262,7 +262,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
             """
             SELECT input, output, metadata
             FROM traces
-            WHERE request_id = ? AND node_name = ? AND status = 'writing'
+            WHERE request_id = ? AND op_name = ? AND status = 'writing'
             LIMIT 1
         """,
             (request_id, parent_name),
@@ -285,8 +285,8 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
 
     for row in rows:
         (
-            node_id,
-            node_name,
+            op_id,
+            op_name,
             parent_name,
             context_id,
             start_time,
@@ -323,7 +323,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
             }
 
         group = iteration_groups[key]
-        group["children"].append(node_id)
+        group["children"].append(op_id)
 
         # Aggregate tokens and cost
         if prompt_tokens:
@@ -417,7 +417,7 @@ def create_iteration_groups(conn: sqlite3.Connection, request_id: str) -> None:
         conn.execute(
             """
             INSERT INTO traces (
-                request_id, workflow_name, node_name, node_type, parent_name, context_id,
+                request_id, workflow_name, op_name, op_type, parent_name, context_id,
                 execution_order, start_time, end_time, duration_ms,
                 prompt_tokens, completion_tokens, total_tokens, cost_usd,
                 input, output,

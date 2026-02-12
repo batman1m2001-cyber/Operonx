@@ -7,9 +7,9 @@ from time import sleep
 
 import pytest
 
-from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.background import BackgroundProcess, shutdown_background
-from hush.core.nodes import CodeNode
+from hush.core.ops import FuncOp
 from hush.core.tracers import LocalTracer, get_registered_tracers
 
 
@@ -99,7 +99,7 @@ class TestBackgroundProcess:
             bg.write_trace(
                 request_id="test-123",
                 workflow_name="test-wf",
-                node_name="test-node",
+                op_name="test-node",
             )
 
             # Should be running now
@@ -119,7 +119,7 @@ class TestBackgroundProcess:
             bg.write_trace(
                 request_id="req-001",
                 workflow_name="test-workflow",
-                node_name="node-a",
+                op_name="node-a",
                 parent_name=None,
                 context_id=None,
                 execution_order=0,
@@ -139,7 +139,7 @@ class TestBackgroundProcess:
 
             assert len(rows) == 1
             assert rows[0]["workflow_name"] == "test-workflow"
-            assert rows[0]["node_name"] == "node-a"
+            assert rows[0]["op_name"] == "node-a"
             assert rows[0]["status"] == "writing"
 
             # Cleanup
@@ -155,13 +155,13 @@ class TestBackgroundProcess:
             bg.write_trace(
                 request_id="req-002",
                 workflow_name="test-wf",
-                node_name="node-1",
+                op_name="node-1",
                 execution_order=0,
             )
             bg.write_trace(
                 request_id="req-002",
                 workflow_name="test-wf",
-                node_name="node-2",
+                op_name="node-2",
                 execution_order=1,
             )
 
@@ -203,13 +203,13 @@ class TestTracerWithWorkflow:
     @pytest.fixture
     def simple_graph(self):
         """Create a simple test graph."""
-        with GraphNode(name="test-workflow") as graph:
-            node1 = CodeNode(
+        with GraphOp(name="test-workflow") as graph:
+            node1 = FuncOp(
                 name="add",
                 code_fn=lambda x: {"result": x + 10},
                 inputs={"x": PARENT["x"]},
             )
-            node2 = CodeNode(
+            node2 = FuncOp(
                 name="multiply",
                 code_fn=lambda value: {"final": value * 2},
                 inputs={"value": node1["result"]},
@@ -262,8 +262,8 @@ class TestTracerWithWorkflow:
     @pytest.mark.asyncio
     async def test_tracer_with_user_session_ids(self):
         """Test workflow with tracer and user/session IDs."""
-        with GraphNode(name="metadata-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="metadata-test") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"data": PARENT["data"]},
                 outputs={"processed": PARENT},
@@ -299,8 +299,8 @@ class TestWorkflowTracesWrittenToDb:
         from hush.core.background import DEFAULT_DB_PATH
 
         # Create a simple workflow
-        with GraphNode(name="db-test-workflow") as graph:
-            node = CodeNode(
+        with GraphOp(name="db-test-workflow") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -343,7 +343,7 @@ class TestWorkflowTracesWrittenToDb:
         for row in rows:
             assert row["request_id"] == request_id
             assert row["workflow_name"] == "db-test-workflow"
-            if row["node_name"] == "db-test-workflow":
+            if row["op_name"] == "db-test-workflow":
                 found_workflow = True
 
         assert found_workflow, "Should have trace for workflow graph node"
@@ -356,8 +356,8 @@ class TestWorkflowTracesWrittenToDb:
         """Test workflow traces contain user_id, session_id correctly."""
         from hush.core.background import DEFAULT_DB_PATH
 
-        with GraphNode(name="metadata-db-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="metadata-db-test") as graph:
+            node = FuncOp(
                 name="echo",
                 inputs={"msg": PARENT["msg"]},
                 outputs={"out": PARENT},
@@ -421,7 +421,7 @@ class TestTracerTags:
             bg.write_trace(
                 request_id="tags-test-001",
                 workflow_name="test-wf",
-                node_name="test-node",
+                op_name="test-node",
                 execution_order=0,
             )
 
@@ -462,8 +462,8 @@ class TestTracerTags:
 
         from hush.core.background import DEFAULT_DB_PATH
 
-        with GraphNode(name="static-tags-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="static-tags-test") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -520,8 +520,8 @@ class TestTracerTags:
                 tags.append("high-value")
             return {"result": result, "$tags": tags}
 
-        with GraphNode(name="dynamic-tags-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="dynamic-tags-test") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -575,8 +575,8 @@ class TestTracerTags:
         def process_with_dynamic_tags(x):
             return {"result": x * 2, "$tags": ["dynamic-tag", "runtime"]}
 
-        with GraphNode(name="merged-tags-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="merged-tags-test") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -632,8 +632,8 @@ class TestTracerTags:
         def process_with_duplicate_tag(x):
             return {"result": x, "$tags": ["shared-tag", "unique-dynamic"]}
 
-        with GraphNode(name="dedup-tags-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="dedup-tags-test") as graph:
+            node = FuncOp(
                 name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -691,7 +691,7 @@ class TestTracerFlushCycle:
             bg.write_trace(
                 request_id="flush-test-001",
                 workflow_name="test-wf",
-                node_name="test-node",
+                op_name="test-node",
                 execution_order=0,
             )
 
@@ -740,8 +740,8 @@ class TestTracerNonBlocking:
 
         # Create a simple workflow
         def create_graph():
-            with GraphNode(name="stress-test") as graph:
-                node = CodeNode(
+            with GraphOp(name="stress-test") as graph:
+                node = FuncOp(
                     name="processor",
                     inputs={"x": PARENT["x"]},
                     outputs={"result": PARENT},
@@ -808,16 +808,16 @@ class TestTracerWithIterationNodes:
 
     @pytest.mark.asyncio
     async def test_tracer_with_forloop(self):
-        """Test tracer works with ForLoopNode iteration."""
-        from hush.core.nodes import ForLoopNode
-        from hush.core.nodes.iteration import Each
-        from hush.core.nodes.transform.code_node import code_node
+        """Test tracer works with ForOp iteration."""
+        from hush.core.ops import ForOp
+        from hush.core.ops.iteration import Each
+        from hush.core.ops.transform.func_op import op
 
-        @code_node
+        @op
         def double(value: int):
             return {"result": value * 2}
 
-        with ForLoopNode(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
+        with ForOp(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -831,7 +831,7 @@ class TestTracerWithIterationNodes:
         result = await loop.run(state)
         assert result["result"] == [2, 4, 6, 8, 10]
 
-        # NOTE: This test verifies ForLoopNode works. Tracer integration
+        # NOTE: This test verifies ForOp works. Tracer integration
         # with iteration nodes is tested implicitly by the workflow tests
         # since the engine handles tracer registration.
 

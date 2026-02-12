@@ -3,10 +3,10 @@
 Cần: OPENAI_API_KEY trong .env + resources.yaml (embedding:openai, llm:gpt-4o-mini)
 
 Học được:
-- EmbeddingNode: chuyển text thành vector
+- EmbeddingOp: chuyển text thành vector
 - Cosine similarity search (in-memory)
 - RAG pipeline: embed query → search → build context → LLM
-- RerankNode (optional): xếp hạng lại kết quả
+- RerankOp (optional): xếp hạng lại kết quả
 
 Chạy: cd hush-tutorial && uv run python examples/07_embeddings_and_rag.py
 """
@@ -19,9 +19,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import code_node
-from hush.providers import EmbeddingNode, LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import op
+from hush.providers import EmbeddingOp, LLMOp, PromptOp
 
 # =============================================================================
 # Helper: Cosine similarity search
@@ -57,13 +57,13 @@ DOCUMENTS = [
 
 
 async def example_1_basic_embedding():
-    """EmbeddingNode — Chuyển text thành vectors."""
+    """EmbeddingOp — Chuyển text thành vectors."""
     print("=" * 50)
     print("Ví dụ 1: Basic Embedding")
     print("=" * 50)
 
-    with GraphNode(name="embed-texts") as graph:
-        embed = EmbeddingNode.of(
+    with GraphOp(name="embed-texts") as graph:
+        embed = EmbeddingOp.of(
             resource_key="openai",  # Tham chiếu embedding:openai trong resources.yaml
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -92,8 +92,8 @@ async def example_2_simple_rag():
 
     # Bước 0: Pre-compute document embeddings
     print("  Đang embed documents...")
-    with GraphNode(name="embed-docs") as embed_graph:
-        embed = EmbeddingNode.of(
+    with GraphOp(name="embed-docs") as embed_graph:
+        embed = EmbeddingOp.of(
             resource_key="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -106,13 +106,13 @@ async def example_2_simple_rag():
     print(f"  Embedded {len(doc_vectors)} documents ({len(doc_vectors[0])} dims)")
 
     # RAG workflow
-    @code_node
+    @op
     def retrieve(query_vec, doc_vectors, documents):
         return {"context_docs": cosine_search(query_vec[0], doc_vectors, documents, top_k=3)}
 
-    with GraphNode(name="simple-rag") as graph:
+    with GraphOp(name="simple-rag") as graph:
         # Step 1: Embed query
-        embed_query = EmbeddingNode.of(
+        embed_query = EmbeddingOp.of(
             resource_key="openai",
             texts=PARENT["query"],
         )
@@ -126,7 +126,7 @@ async def example_2_simple_rag():
         )
 
         # Step 3: Build prompt with context
-        p = PromptNode.of(
+        p = PromptOp.of(
             template={
                 "system": (
                     "Trả lời câu hỏi dựa trên context được cung cấp.\n"
@@ -140,7 +140,7 @@ async def example_2_simple_rag():
         )
 
         # Step 4: Generate answer
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -171,16 +171,16 @@ async def example_2_simple_rag():
 
 
 async def example_3_rag_with_rerank():
-    """RAG + RerankNode — Thêm bước reranking (optional)."""
+    """RAG + RerankOp — Thêm bước reranking (optional)."""
     print()
     print("=" * 50)
     print("Ví dụ 3: RAG + Reranking (optional)")
     print("=" * 50)
 
     try:
-        from hush.providers import RerankNode
+        from hush.providers import RerankOp
     except ImportError:
-        print("  Skipped — RerankNode chưa available")
+        print("  Skipped — RerankOp chưa available")
         return
 
     import os
@@ -190,16 +190,16 @@ async def example_3_rag_with_rerank():
         print("  Thêm reranking:bge-m3 vào resources.yaml để dùng")
         return
 
-    with GraphNode(name="rag-rerank") as graph:
+    with GraphOp(name="rag-rerank") as graph:
         # Rerank documents theo query
-        rr = RerankNode.of(
+        rr = RerankOp.of(
             resource_key="bge-m3",  # reranking:bge-m3 trong resources.yaml
             query=PARENT["query"],
             documents=PARENT["documents"],
             top_k=3,
         )
 
-        p = PromptNode.of(
+        p = PromptOp.of(
             template={
                 "system": "Trả lời dựa trên context:\n\n{context}",
                 "user": "{query}",
@@ -208,7 +208,7 @@ async def example_3_rag_with_rerank():
             query=PARENT["query"],
         )
 
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},

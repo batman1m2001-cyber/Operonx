@@ -315,25 +315,25 @@ class TestOTELTracerFlush:
             "tags": ["test", "unit"],
             "execution_order": [
                 {
-                    "node": "root",
+                    "op": "root",
                     "parent": None,
                     "context_id": None,
                     "contain_generation": False,
                 },
                 {
-                    "node": "child-1",
+                    "op": "child-1",
                     "parent": "root",
                     "context_id": None,
                     "contain_generation": False,
                 },
                 {
-                    "node": "llm-node",
+                    "op": "llm-node",
                     "parent": "root",
                     "context_id": None,
                     "contain_generation": True,
                 },
             ],
-            "nodes_trace_data": {
+            "ops_trace_data": {
                 "root": {
                     "name": "test-workflow.root",
                     "start_time": "2024-01-15T10:00:00Z",
@@ -392,13 +392,13 @@ class TestOTELTracerFlush:
             "tags": ["otel-test"],
             "execution_order": [
                 {
-                    "node": "root",
+                    "op": "root",
                     "parent": None,
                     "context_id": None,
                     "contain_generation": False,
                 },
             ],
-            "nodes_trace_data": {
+            "ops_trace_data": {
                 "root": {
                     "name": "test-workflow.root",
                     "start_time": "2024-01-15T10:00:00Z",
@@ -507,22 +507,22 @@ class TestOTELTracerFlush:
             "session_id": None,
             "tags": [],
             "execution_order": [
-                {"node": "root", "parent": None, "context_id": None, "contain_generation": False},
-                {"node": "loop", "parent": "root", "context_id": None, "contain_generation": False},
+                {"op": "root", "parent": None, "context_id": None, "contain_generation": False},
+                {"op": "loop", "parent": "root", "context_id": None, "contain_generation": False},
                 {
-                    "node": "process",
+                    "op": "process",
                     "parent": "loop",
                     "context_id": "[0]",
                     "contain_generation": False,
                 },
                 {
-                    "node": "process",
+                    "op": "process",
                     "parent": "loop",
                     "context_id": "[1]",
                     "contain_generation": False,
                 },
             ],
-            "nodes_trace_data": {
+            "ops_trace_data": {
                 "root": {"name": "root", "input": {}, "output": {}},
                 "loop": {"name": "loop", "input": {}, "output": {}},
                 "process:[0]": {"name": "process", "input": {"i": 0}, "output": {"r": 0}},

@@ -46,14 +46,14 @@ def test_reranker_imports():
 def test_node_imports():
     """Test node imports."""
     from hush.providers import (
-        EmbeddingNode,
-        LLMNode,
-        RerankNode,
+        EmbeddingOp,
+        LLMOp,
+        RerankOp,
     )
 
-    assert LLMNode is not None
-    assert EmbeddingNode is not None
-    assert RerankNode is not None
+    assert LLMOp is not None
+    assert EmbeddingOp is not None
+    assert RerankOp is not None
     print("✓ Node imports successful")
 
 

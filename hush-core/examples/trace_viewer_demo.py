@@ -1,7 +1,7 @@
 """Demo script to generate traces for the Hush Trace Viewer UI.
 
 This script demonstrates:
-- Various node types (CodeNode, ForLoopNode, MapNode, WhileLoopNode)
+- Various node types (FuncOp, ForOp, MapOp, WhileOp)
 - Static tags (set on tracer initialization)
 - Dynamic tags (returned via $tags in node output)
 - Nested loops
@@ -17,22 +17,22 @@ from hush.core import (
     END,
     PARENT,
     START,
-    GraphNode,
+    GraphOp,
     Hush,
 )
-from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.for_loop_node import ForLoopNode
-from hush.core.nodes.iteration.map_node import MapNode
-from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
-from hush.core.nodes.transform.code_node import code_node
+from hush.core.ops.iteration.base import Each
+from hush.core.ops.iteration.for_op import ForOp
+from hush.core.ops.iteration.map_op import MapOp
+from hush.core.ops.iteration.while_op import WhileOp
+from hush.core.ops.transform.func_op import op
 from hush.core.tracers import LocalTracer
 
 # ============================================================================
-# Code Nodes with Dynamic Tags
+# Func Ops with Dynamic Tags
 # ============================================================================
 
 
-@code_node
+@op
 def preprocess(text: str):
     """Preprocess input text with dynamic tags."""
     sleep(0.01)
@@ -44,7 +44,7 @@ def preprocess(text: str):
     return {"cleaned": cleaned, "$tags": tags}
 
 
-@code_node
+@op
 def tokenize(text: str):
     """Split text into tokens."""
     sleep(0.02)
@@ -57,7 +57,7 @@ def tokenize(text: str):
     return {"tokens": tokens, "count": count, "$tags": tags}
 
 
-@code_node
+@op
 def analyze_token(token: str, multiplier: int):
     """Analyze a single token."""
     sleep(0.005)
@@ -65,7 +65,7 @@ def analyze_token(token: str, multiplier: int):
     return {"score": score}
 
 
-@code_node
+@op
 def aggregate_scores(scores: list):
     """Aggregate all scores with dynamic tags."""
     sleep(0.01)
@@ -78,7 +78,7 @@ def aggregate_scores(scores: list):
     return {"total": total, "average": avg, "$tags": tags}
 
 
-@code_node
+@op
 def classify(score: float):
     """Classify based on score with dynamic category tag."""
     sleep(0.01)
@@ -92,7 +92,7 @@ def classify(score: float):
     return {"category": category, "confidence": confidence, "$tags": [f"category:{category}"]}
 
 
-@code_node
+@op
 def format_output(category: str, confidence: float, total: int):
     """Format final output."""
     sleep(0.01)
@@ -102,7 +102,7 @@ def format_output(category: str, confidence: float, total: int):
     }
 
 
-@code_node
+@op
 def halve_value(value: int):
     """Halve a value (for while loop demo)."""
     sleep(0.005)
@@ -120,8 +120,8 @@ def halve_value(value: int):
 
 
 def build_text_analysis_workflow():
-    """Build text analysis workflow with MapNode."""
-    with GraphNode(name="text-analysis-pipeline") as graph:
+    """Build text analysis workflow with MapOp."""
+    with GraphOp(name="text-analysis-pipeline") as graph:
         preprocess_node = preprocess(
             name="preprocess",
             inputs={"text": PARENT["input_text"]},
@@ -132,13 +132,13 @@ def build_text_analysis_workflow():
             inputs={"text": preprocess_node["cleaned"]},
         )
 
-        with MapNode(
+        with MapOp(
             name="analyze_tokens",
             inputs={
                 "token": Each(tokenize_node["tokens"]),
                 "multiplier": PARENT["multiplier"],
             },
-        ) as map_node:
+        ) as map_op:
             analyze = analyze_token(
                 name="analyze",
                 inputs={
@@ -151,7 +151,7 @@ def build_text_analysis_workflow():
 
         aggregate_node = aggregate_scores(
             name="aggregate",
-            inputs={"scores": map_node["score"]},
+            inputs={"scores": map_op["score"]},
         )
 
         classify_node = classify(
@@ -173,7 +173,7 @@ def build_text_analysis_workflow():
             START
             >> preprocess_node
             >> tokenize_node
-            >> map_node
+            >> map_op
             >> aggregate_node
             >> classify_node
             >> format_node
@@ -186,12 +186,12 @@ def build_text_analysis_workflow():
 def build_nested_loop_workflow():
     """Build workflow with nested ForLoops."""
 
-    @code_node
+    @op
     def validate(x: int):
         sleep(0.005)
         return {"validated_x": x, "$tags": ["validated"]}
 
-    @code_node
+    @op
     def multiply(x: int, y: int):
         sleep(0.005)
         product = x * y
@@ -200,20 +200,20 @@ def build_nested_loop_workflow():
             tags.append("large-product")
         return {"product": product, "$tags": tags}
 
-    @code_node
+    @op
     def summarize(products: list):
         sleep(0.006)
         total = sum(products) if products else 0
         return {"total": total}
 
-    with GraphNode(name="nested-loop-demo") as graph:
-        with ForLoopNode(name="outer_loop", inputs={"x": Each([2, 3])}) as outer:
+    with GraphOp(name="nested-loop-demo") as graph:
+        with ForOp(name="outer_loop", inputs={"x": Each([2, 3])}) as outer:
             validate_node = validate(
                 name="validate",
                 inputs={"x": PARENT["x"]},
             )
 
-            with ForLoopNode(
+            with ForOp(
                 name="inner_loop",
                 inputs={
                     "y": Each([10, 20]),
@@ -242,9 +242,9 @@ def build_nested_loop_workflow():
 
 
 def build_while_loop_workflow():
-    """Build workflow with WhileLoopNode."""
-    with GraphNode(name="while-loop-demo") as graph:
-        with WhileLoopNode(
+    """Build workflow with WhileOp."""
+    with GraphOp(name="while-loop-demo") as graph:
+        with WhileOp(
             name="halve_loop",
             inputs={"value": PARENT["start_value"]},
             stop_condition="value < 5",

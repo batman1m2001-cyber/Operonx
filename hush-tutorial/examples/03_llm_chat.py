@@ -4,10 +4,10 @@ Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env + resources.yaml
 
 Học được:
 - load_dotenv() để load API keys
-- PromptNode.of(): tạo messages cho LLM
-- LLMNode.of(): gọi LLM qua resource_key
-- LLMChainNode.of(): kết hợp prompt + LLM trong 1 node
-- @code_node + PromptNode.of() + LLMNode.of() pipeline (tiền xử lý → prompt → LLM)
+- PromptOp.of(): tạo messages cho LLM
+- LLMOp.of(): gọi LLM qua resource_key
+- ChainOp.of(): kết hợp prompt + LLM trong 1 op
+- @op + PromptOp.of() + LLMOp.of() pipeline (tiền xử lý → prompt → LLM)
 
 Chạy: cd hush-tutorial && uv run python examples/03_llm_chat.py
 """
@@ -19,26 +19,26 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes.transform.code_node import code_node
-from hush.providers import LLMChainNode, LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops.transform.func_op import op
+from hush.providers import ChainOp, LLMOp, PromptOp
 
 
 async def example_1_basic_chat():
-    """PromptNode.of() + LLMNode.of() — Cách cơ bản nhất."""
+    """PromptOp.of() + LLMOp.of() — Cách cơ bản nhất."""
     print("=" * 50)
-    print("Ví dụ 1: Basic Chat (PromptNode.of + LLMNode.of)")
+    print("Ví dụ 1: Basic Chat (PromptOp.of + LLMOp.of)")
     print("=" * 50)
 
-    with GraphNode(name="basic-chat") as graph:
-        p = PromptNode.of(
+    with GraphOp(name="basic-chat") as graph:
+        p = PromptOp.of(
             template={
                 "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
                 "user": "{question}",
             },
             question=PARENT["question"],
         )
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -51,14 +51,14 @@ async def example_1_basic_chat():
 
 
 async def example_2_chain_node():
-    """LLMChainNode.of() — All-in-one, gọn hơn."""
+    """ChainOp.of() — All-in-one, gọn hơn."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: LLMChainNode.of (all-in-one)")
+    print("Ví dụ 2: ChainOp.of (all-in-one)")
     print("=" * 50)
 
-    with GraphNode(name="chain-chat") as graph:
-        chain = LLMChainNode.of(
+    with GraphOp(name="chain-chat") as graph:
+        chain = ChainOp.of(
             resource_key="gpt-4o-mini",
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
@@ -81,21 +81,21 @@ async def example_3_text_summarization():
     print("Ví dụ 3: Text Summarization Pipeline")
     print("=" * 50)
 
-    @code_node
+    @op
     def clean_text(text: str):
         cleaned = " ".join(text.split()).strip()
         return {"cleaned_text": cleaned}
 
-    with GraphNode(name="summarize-pipeline") as graph:
+    with GraphOp(name="summarize-pipeline") as graph:
         preprocess = clean_text(text=PARENT["text"])
-        p = PromptNode.of(
+        p = PromptOp.of(
             template={
                 "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
                 "user": "Tóm tắt:\n\n{text}",
             },
             text=preprocess["cleaned_text"],
         )
-        summarize = LLMNode.of(
+        summarize = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["summary"]},

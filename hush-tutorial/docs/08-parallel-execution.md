@@ -1,6 +1,6 @@
 # Parallel Execution
 
-Thực thi song song trong workflows: fan-out/fan-in, MapNode, partial failure.
+Thực thi song song trong workflows: fan-out/fan-in, MapOp, partial failure.
 
 > **Ví dụ chạy được**: `examples/13_parallel_advanced.py`
 
@@ -9,33 +9,33 @@ Thực thi song song trong workflows: fan-out/fan-in, MapNode, partial failure.
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `MapNode.of()` | `MapNode` | `MapNode.of(x=Each([1,2,3]), max_concurrency=4)` |
-> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
+> | `@op` | `FuncOp` | `@op` decorator trên function |
+> | `MapOp.of()` | `MapOp` | `MapOp.of(x=Each([1,2,3]), max_concurrency=4)` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
 ## Fan-out / Fan-in
 
-Chạy nhiều nodes song song, rồi merge kết quả.
+Chạy nhiều ops song song, rồi merge kết quả.
 
 ```python
-@code_node
+@op
 def task_a():
     return {"result": "A"}
 
-@code_node
+@op
 def task_b():
     return {"result": "B"}
 
-@code_node
+@op
 def task_c():
     return {"result": "C"}
 
-@code_node
+@op
 def merge(a, b, c):
     return {"combined": f"{a}+{b}+{c}"}
 
-with GraphNode(name="fan-out") as graph:
+with GraphOp(name="fan-out") as graph:
     a = task_a()
     b = task_b()
     c = task_c()
@@ -48,22 +48,22 @@ with GraphNode(name="fan-out") as graph:
     [a, b, c] >> m >> END  # Fan-in (hard edge: chờ tất cả)
 ```
 
-## MapNode.of() với max_concurrency
+## MapOp.of() với max_concurrency
 
 Xử lý list items song song với giới hạn concurrency.
 
 ```python
-from hush.core import MapNode, Each
+from hush.core import MapOp, Each
 
-@code_node
+@op
 def process(item):
     return {"result": item * 2}
 
-with GraphNode(name="parallel-map") as graph:
-    with MapNode.of(
+with GraphOp(name="parallel-map") as graph:
+    with MapOp.of(
         item=Each(PARENT["items"]),
         max_concurrency=3,  # Tối đa 3 tasks cùng lúc
-    ) as map_node:
+    ) as map_op:
         step = process(
             name="process",
             inputs={"item": PARENT["item"]},
@@ -71,16 +71,16 @@ with GraphNode(name="parallel-map") as graph:
         )
         START >> step >> END
 
-    map_node["result"] >> PARENT["results"]  # Map loop output → graph output
-    START >> map_node >> END
+    map_op["result"] >> PARENT["results"]  # Map loop output → graph output
+    START >> map_op >> END
 ```
 
 ## Partial Failure Handling
 
-Xử lý trường hợp một số items fail trong MapNode.
+Xử lý trường hợp một số items fail trong MapOp.
 
 ```python
-@code_node
+@op
 def safe_process(item: dict):
     try:
         result = process_item(item)
@@ -88,15 +88,15 @@ def safe_process(item: dict):
     except Exception as e:
         return {"result": None, "error": str(e)}
 
-@code_node
+@op
 def summarize(results, errors):
     return {
         "successful": [r for r, e in zip(results, errors) if e is None],
         "failed": [e for e in errors if e is not None],
     }
 
-with GraphNode(name="partial-failure") as graph:
-    with MapNode.of(item=Each(PARENT["items"])) as map_node:
+with GraphOp(name="partial-failure") as graph:
+    with MapOp.of(item=Each(PARENT["items"])) as map_op:
         proc = safe_process(
             item=PARENT["item"],
             outputs={"result": PARENT, "error": PARENT},
@@ -104,11 +104,11 @@ with GraphNode(name="partial-failure") as graph:
         START >> proc >> END
 
     s = summarize(
-        results=map_node["result"],
-        errors=map_node["error"],
+        results=map_op["result"],
+        errors=map_op["error"],
         outputs={"*": PARENT},
     )
-    START >> map_node >> s >> END
+    START >> map_op >> s >> END
 ```
 
 ## Parallel LLM Calls
@@ -116,24 +116,24 @@ with GraphNode(name="partial-failure") as graph:
 Gọi nhiều LLMs song song (ví dụ: so sánh models).
 
 ```python
-from hush.providers import PromptNode, LLMNode
+from hush.providers import PromptOp, LLMOp
 
-@code_node
+@op
 def merge_results(s, k):
     return {"summary": s, "keywords": k}
 
-with GraphNode(name="parallel-llm") as graph:
-    p_summary = PromptNode.of(
+with GraphOp(name="parallel-llm") as graph:
+    p_summary = PromptOp.of(
         template={"system": "Summarize in one sentence.", "user": "{text}"},
         text=PARENT["text"],
     )
-    p_keywords = PromptNode.of(
+    p_keywords = PromptOp.of(
         template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
         text=PARENT["text"],
     )
 
-    llm_summary = LLMNode.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-    llm_keywords = LLMNode.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+    llm_summary = LLMOp.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+    llm_keywords = LLMOp.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
 
     m = merge_results(
         s=llm_summary["content"],
@@ -147,29 +147,29 @@ with GraphNode(name="parallel-llm") as graph:
     [llm_summary, llm_keywords] >> m >> END
 ```
 
-### Batch LLM via MapNode
+### Batch LLM via MapOp
 
-Gọi nhiều queries song song qua MapNode:
+Gọi nhiều queries song song qua MapOp:
 
 ```python
-with GraphNode(name="batch-llm") as graph:
-    with MapNode.of(
+with GraphOp(name="batch-llm") as graph:
+    with MapOp.of(
         query=Each(PARENT["queries"]),
         max_concurrency=3,
-    ) as map_node:
-        p = PromptNode.of(
+    ) as map_op:
+        p = PromptOp.of(
             template={"system": "Answer in one sentence.", "user": "{query}"},
             query=PARENT["query"],
         )
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
         START >> p >> llm >> END
 
-    map_node["answer"] >> PARENT["answers"]  # Collect all answers
-    START >> map_node >> END
+    map_op["answer"] >> PARENT["answers"]  # Collect all answers
+    START >> map_op >> END
 ```
 
 Xem thêm parallel LLM comparison tại `examples/12_multi_model.py`.
@@ -177,8 +177,8 @@ Xem thêm parallel LLM comparison tại `examples/12_multi_model.py`.
 ## Best Practices
 
 1. **Fan-out cho independent tasks** — Dùng `START >> [a, b, c]`
-2. **MapNode cho list processing** — Với `max_concurrency` để rate limit
-3. **Try/catch trong MapNode** — Xử lý partial failure
+2. **MapOp cho list processing** — Với `max_concurrency` để rate limit
+3. **Try/catch trong MapOp** — Xử lý partial failure
 4. **Hard edge cho fan-in** — `[a, b, c] >> merge` chờ tất cả
 5. **Soft edge sau branch** — `[path_a, path_b] >> ~c` khi chỉ 1 nhánh chạy
 

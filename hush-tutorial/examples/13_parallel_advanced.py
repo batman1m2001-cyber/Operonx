@@ -5,10 +5,10 @@ Ví dụ 4 cần OPENAI_API_KEY (parallel LLM calls).
 
 Học được:
 - Fan-out / fan-in pattern: split → parallel branches → merge
-- MapNode với max_concurrency để control rate limiting
-- Partial failure handling trong MapNode
+- MapOp với max_concurrency để control rate limiting
+- Partial failure handling trong MapOp
 - Parallel LLM calls: nhiều prompts cùng lúc
-- Batch LLM với MapNode: process list of queries song song
+- Batch LLM với MapOp: process list of queries song song
 
 Chạy: cd hush-tutorial && uv run python examples/13_parallel_advanced.py
 """
@@ -20,15 +20,15 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, MapNode, code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import Each, MapOp, op
 
 # =============================================================================
 # Ví dụ 1: Fan-out / Fan-in
 # =============================================================================
 
 
-@code_node
+@op
 def analyze_sentiment(text: str):
     """Phân tích sentiment (giả lập)."""
     positive = sum(
@@ -44,7 +44,7 @@ def analyze_sentiment(text: str):
     }
 
 
-@code_node
+@op
 def extract_keywords(text: str):
     """Trích keywords (giả lập)."""
     stop_words = {
@@ -68,7 +68,7 @@ def extract_keywords(text: str):
     return {"keywords": keywords[:5]}
 
 
-@code_node
+@op
 def count_stats(text: str):
     """Đếm thống kê text."""
     words = text.split()
@@ -85,7 +85,7 @@ async def example_1_fan_out_fan_in():
     print("Ví dụ 1: Fan-out / Fan-in")
     print("=" * 50)
 
-    @code_node
+    @op
     def merge(s, k, wc, cc, awl):
         return {
             "analysis": {
@@ -97,7 +97,7 @@ async def example_1_fan_out_fan_in():
             }
         }
 
-    with GraphNode(name="fan-out-fan-in") as graph:
+    with GraphOp(name="fan-out-fan-in") as graph:
         # Fan-out: 3 branches chạy song song
         sent = analyze_sentiment(text=PARENT["text"])
         kw = extract_keywords(text=PARENT["text"])
@@ -128,11 +128,11 @@ async def example_1_fan_out_fan_in():
 
 
 # =============================================================================
-# Ví dụ 2: MapNode với concurrency control
+# Ví dụ 2: MapOp với concurrency control
 # =============================================================================
 
 
-@code_node
+@op
 def process_item(item: int):
     """Process 1 item (giả lập I/O với sleep)."""
     import time
@@ -142,17 +142,17 @@ def process_item(item: int):
 
 
 async def example_2_concurrency_control():
-    """MapNode max_concurrency — giới hạn số tasks song song."""
+    """MapOp max_concurrency — giới hạn số tasks song song."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: MapNode Concurrency Control")
+    print("Ví dụ 2: MapOp Concurrency Control")
     print("=" * 50)
 
-    with GraphNode(name="concurrency-demo") as graph:
-        with MapNode.of(
+    with GraphOp(name="concurrency-demo") as graph:
+        with MapOp.of(
             item=Each(PARENT["items"]),
             max_concurrency=3,  # Max 3 concurrent tasks
-        ) as map_node:
+        ) as map_op:
             proc = process_item(
                 name="process",
                 inputs={"item": PARENT["item"]},
@@ -160,8 +160,8 @@ async def example_2_concurrency_control():
             )
             START >> proc >> END
 
-        map_node["result"] >> PARENT["results"]
-        START >> map_node >> END
+        map_op["result"] >> PARENT["results"]
+        START >> map_op >> END
 
     engine = Hush(graph)
 
@@ -182,7 +182,7 @@ async def example_2_concurrency_control():
 # =============================================================================
 
 
-@code_node
+@op
 def risky_process(item: int):
     """Process that fails for even numbers."""
     if item % 2 == 0:
@@ -191,24 +191,24 @@ def risky_process(item: int):
 
 
 async def example_3_partial_failure():
-    """MapNode xử lý partial failures — items lỗi không ảnh hưởng items khác."""
+    """MapOp xử lý partial failures — items lỗi không ảnh hưởng items khác."""
     print()
     print("=" * 50)
     print("Ví dụ 3: Partial Failure Handling")
     print("=" * 50)
 
-    @code_node
+    @op
     def filter_results(results, errors):
         return {
             "successful": [r for r, e in zip(results, errors) if e is None],
             "failed": [e for e in errors if e is not None],
         }
 
-    with GraphNode(name="partial-failure") as graph:
+    with GraphOp(name="partial-failure") as graph:
         # Wrap risky logic trong try/catch
-        with MapNode.of(item=Each(PARENT["items"])) as map_node:
+        with MapOp.of(item=Each(PARENT["items"])) as map_op:
 
-            @code_node
+            @op
             def safe_op(item: int):
                 if item % 2 != 0:
                     return {"result": item * 10, "error": None}
@@ -222,12 +222,12 @@ async def example_3_partial_failure():
 
         # Filter results
         flt = filter_results(
-            results=map_node["result"],
-            errors=map_node["error"],
+            results=map_op["result"],
+            errors=map_op["error"],
             outputs={"*": PARENT},
         )
 
-        START >> map_node >> flt >> END
+        START >> map_op >> flt >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"items": [1, 2, 3, 4, 5, 6, 7]})
@@ -243,7 +243,7 @@ async def example_3_partial_failure():
 
 
 async def example_4_parallel_llm():
-    """Nhiều LLM prompts song song + batch queries qua MapNode."""
+    """Nhiều LLM prompts song song + batch queries qua MapOp."""
     print()
     print("=" * 50)
     print("Ví dụ 4: Parallel & Batch LLM Calls")
@@ -255,27 +255,27 @@ async def example_4_parallel_llm():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import LLMNode, PromptNode
+    from hush.providers import LLMOp, PromptOp
 
     # --- Part A: Parallel prompts (different tasks, same input) ---
     print("\n  A) Parallel prompts (summary + keywords from same text):")
 
-    @code_node
+    @op
     def merge_results(s, k):
         return {"summary": s, "keywords": k}
 
-    with GraphNode(name="parallel-llm") as graph:
-        p_summary = PromptNode.of(
+    with GraphOp(name="parallel-llm") as graph:
+        p_summary = PromptOp.of(
             template={"system": "Summarize in one sentence.", "user": "{text}"},
             text=PARENT["text"],
         )
-        p_keywords = PromptNode.of(
+        p_keywords = PromptOp.of(
             template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
             text=PARENT["text"],
         )
 
-        llm_summary = LLMNode.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-        llm_keywords = LLMNode.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+        llm_summary = LLMOp.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+        llm_keywords = LLMOp.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
 
         m = merge_results(
             s=llm_summary["content"],
@@ -297,27 +297,27 @@ async def example_4_parallel_llm():
     print(f"    Summary:  {result['summary']}")
     print(f"    Keywords: {result['keywords']}")
 
-    # --- Part B: Batch LLM via MapNode ---
-    print("\n  B) Batch LLM (multiple queries via MapNode):")
+    # --- Part B: Batch LLM via MapOp ---
+    print("\n  B) Batch LLM (multiple queries via MapOp):")
 
-    with GraphNode(name="batch-llm") as graph:
-        with MapNode.of(
+    with GraphOp(name="batch-llm") as graph:
+        with MapOp.of(
             query=Each(PARENT["queries"]),
             max_concurrency=3,
-        ) as map_node:
-            p = PromptNode.of(
+        ) as map_op:
+            p = PromptOp.of(
                 template={"system": "Answer in one sentence.", "user": "{query}"},
                 query=PARENT["query"],
             )
-            llm = LLMNode.of(
+            llm = LLMOp.of(
                 resource_key="gpt-4o-mini",
                 messages=p["messages"],
                 outputs={"content": PARENT["answer"]},
             )
             START >> p >> llm >> END
 
-        map_node["answer"] >> PARENT["answers"]
-        START >> map_node >> END
+        map_op["answer"] >> PARENT["answers"]
+        START >> map_op >> END
 
     engine = Hush(graph)
     result = await engine.run(

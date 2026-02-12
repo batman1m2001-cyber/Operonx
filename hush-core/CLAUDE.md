@@ -1,6 +1,6 @@
 # hush-core
 
-Core workflow engine providing nodes, state management, tracing, and the execution engine.
+Core workflow engine providing ops, state management, tracing, and the execution engine.
 
 ## Module Structure
 
@@ -13,10 +13,10 @@ hush/core/
 │   ├── flush.py        # Trace reconstruction and dispatch
 │   ├── process.py      # BackgroundProcess, subprocess fallback, _PipeQueue
 │   └── worker.py       # Worker loop + subprocess entry point
-├── exceptions.py       # Unified exception hierarchy (NodeError, etc.)
-├── nodes/              # Node types (BaseNode, CodeNode, GraphNode, etc.)
+├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
+├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
-├── configs/            # Configuration classes (NodeConfig, EdgeConfig)
+├── configs/            # Configuration classes (OpConfig, EdgeConfig)
 ├── registry/           # Resource management (ResourceHub, plugins)
 ├── tracers/            # Local tracing (BaseTracer, SQLite storage)
 ├── streams/            # Data streaming
@@ -26,29 +26,29 @@ hush/core/
 
 ## Key Files to Read First
 
-1. `nodes/base.py` - BaseNode class, `>>` operator, input/output handling
-2. `nodes/graph/graph_node.py` - GraphNode for nested workflows
+1. `ops/base.py` - BaseOp class, `>>` operator, input/output handling
+2. `ops/graph/graph_op.py` - GraphOp for nested workflows
 3. `states/schema.py` - StateSchema for compile-time state validation
 4. `states/state.py` - MemoryState for runtime state access
 5. `engine.py` - Hush engine execution flow
 
-## Node System
+## Op System
 
-### Creating a New Node Type
+### Creating a New Op Type
 
-1. Create file in appropriate subdirectory under `nodes/`:
-   - `transform/` - Data transformation nodes
-   - `flow/` - Control flow nodes (branch)
-   - `iteration/` - Loop nodes (for, map, while, async_iter)
-   - `graph/` - Container nodes
+1. Create file in appropriate subdirectory under `ops/`:
+   - `transform/` - Data transformation ops
+   - `flow/` - Control flow ops (branch)
+   - `iteration/` - Loop ops (for, map, while, async_iter)
+   - `graph/` - Container ops
 
-2. Inherit from `BaseNode`:
+2. Inherit from `BaseOp`:
 ```python
-from hush.core.nodes.base import BaseNode
-from hush.core.configs.node_config import NodeType
+from hush.core.ops.base import BaseOp
+from hush.core.configs.op_config import OpType
 
-class MyNode(BaseNode):
-    type: NodeType = "my_type"  # Literal type for identification
+class MyOp(BaseOp):
+    type: OpType = "my_type"  # Literal type for identification
 
     def __init__(self, name: str, my_param: str, **kwargs):
         super().__init__(name=name, **kwargs)
@@ -61,14 +61,14 @@ class MyNode(BaseNode):
         return {"result": ...}
 ```
 
-3. Export in `nodes/__init__.py`
+3. Export in `ops/__init__.py`
 
-### Node Lifecycle
+### Op Lifecycle
 
-1. **Definition**: Node created inside `with GraphNode(...) as graph:` context
+1. **Definition**: Op created inside `with GraphOp(...) as graph:` context
 2. **Registration**: Auto-registered to parent graph via `get_current()`
 3. **Compilation**: `StateSchema` resolves all Refs and builds index
-4. **Execution**: Engine calls `node.run(state, context_id)` → `node.core(**inputs)`
+4. **Execution**: Engine calls `op.run(state, context_id)` → `op.core(**inputs)`
 
 ### Edge Operators
 
@@ -100,7 +100,7 @@ Compile-time structure that:
 
 Runtime state storage:
 ```python
-# Access pattern: state[node_name, var_name, context_id]
+# Access pattern: state[op_name, var_name, context_id]
 value = state["workflow.step1", "output", "ctx_0"]
 state["workflow.step1", "result", "ctx_0"] = value
 ```
@@ -110,16 +110,16 @@ state["workflow.step1", "result", "ctx_0"] = value
 ```python
 from hush.core.states.ref import Ref
 
-# Reference another node's output
-ref = node["output_var"]  # Returns Ref(node, "output_var")
+# Reference another op's output
+ref = op["output_var"]  # Returns Ref(source=op, key="output_var")
 
 # Reference with operations
 ref = PARENT["items"].apply(len)  # Apply function to value
 
-# PARENT marker resolves to parent GraphNode at build time
+# PARENT marker resolves to parent GraphOp at build time
 
 # Output mapping via >> operator (Ref.__rshift__)
-node["src_key"] >> PARENT["dest_key"]  # Map node output to graph output
+op["src_key"] >> PARENT["dest_key"]  # Map op output to graph output
 # Equivalent to: outputs={"src_key": PARENT["dest_key"]}
 
 # Common in loops — update loop state or forward results
@@ -129,9 +129,9 @@ loop["final_answer"] >> PARENT["answer"]
 
 ### Cell System
 
-Cells provide isolated contexts for iteration nodes:
+Cells provide isolated contexts for iteration ops:
 - Each loop iteration gets its own `context_id`
-- Child nodes access parent context via `parent_context` parameter
+- Child ops access parent context via `parent_context` parameter
 
 ## Registry System
 
@@ -179,7 +179,7 @@ class MyTracer(BaseTracer):
     @staticmethod
     def flush(flush_data: dict) -> None:
         """Called by background process. Re-import deps here."""
-        # flush_data contains: nodes, tracer_config, tags, etc.
+        # flush_data contains: ops, tracer_config, tags, etc.
         config = flush_data["tracer_config"]
         # Send traces to your platform
         pass
@@ -201,18 +201,18 @@ class MyTracer(BaseTracer):
 
 ```python
 import pytest
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphOp, FuncOp, START, END, PARENT
 
 @pytest.mark.asyncio
 async def test_workflow():
-    with GraphNode(name="test") as graph:
-        node = CodeNode(
+    with GraphOp(name="test") as graph:
+        step = FuncOp(
             name="step",
             code_fn=lambda x: {"y": x + 1},
             inputs={"x": PARENT["input"]},
             outputs={"y": PARENT["output"]}
         )
-        START >> node >> END
+        START >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 1})
@@ -221,26 +221,26 @@ async def test_workflow():
 
 ## Common Patterns
 
-### @subgraph — Reusable GraphNode Factory
+### @graph — Reusable GraphOp Factory
 
-Turn a builder function into a reusable, auto-named GraphNode:
+Turn a builder function into a reusable, auto-named GraphOp:
 
 ```python
-from hush.core import subgraph, code_node, START, END, PARENT, GraphNode, Hush
+from hush.core import graph, op, START, END, PARENT, GraphOp, Hush
 
-@code_node
+@op
 def double(x: int):
     return {"result": x * 2}
 
-@subgraph
+@graph
 def double_flow(val):
     step = double(x=val)        # val is injected as PARENT["val"]
     START >> step >> END
 
 # Use in a parent graph
-with GraphNode(name="main") as main:
+with GraphOp(name="main") as main:
     d1 = double_flow(val=PARENT["input"])       # d1.name == "d1"
-    d2 = double_flow(val=d1["result"])           # reuse the same subgraph
+    d2 = double_flow(val=d1["result"])           # reuse the same graph
     START >> d1 >> d2 >> END
 
 result = await Hush(main).run(inputs={"input": 3})
@@ -255,10 +255,10 @@ Key points:
 
 ### Auto-Naming
 
-Nodes automatically infer their name from the assignment variable:
+Ops automatically infer their name from the assignment variable:
 
 ```python
-llm = LLMNode.of(resource_key="gpt-4o", messages=msgs)
+llm = LLMOp.of(resource_key="gpt-4o", messages=msgs)
 # llm.name == "llm" — extracted via bytecode analysis
 
 router = if_(PARENT["x"] > 0, "pos").else_("neg")
@@ -272,18 +272,18 @@ How it works: `auto_name()` in `utils/auto_name.py` walks the call stack (skippi
 
 Use `register_skip(fn)` to skip your factory function's frame during auto-naming.
 
-### Shorthand via `Node.of()`
+### Shorthand via `Op.of()`
 
-For concise node creation, use the `.of()` classmethod:
+For concise op creation, use the `.of()` classmethod:
 ```python
-from hush.core import code_node, ForLoopNode, MapNode, WhileLoopNode
+from hush.core import op, ForOp, MapOp, WhileOp
 
-@code_node
+@op
 def process(x: int) -> dict:
     return {"result": x * 2}
 
-# Iteration nodes use .of()
-with ForLoopNode.of(x=Each([1, 2, 3])) as loop:
+# Iteration ops use .of()
+with ForOp.of(x=Each([1, 2, 3])) as loop:
     step = process(x=PARENT["x"])
     START >> step >> END
 ```
@@ -292,7 +292,7 @@ with ForLoopNode.of(x=Each([1, 2, 3])) as loop:
 
 Forward all inputs from parent:
 ```python
-CodeNode(
+FuncOp(
     name="step",
     inputs={"specific": PARENT["x"], "*": PARENT},  # x explicit, rest forwarded
     ...
@@ -301,8 +301,8 @@ CodeNode(
 
 ## Gotchas
 
-1. **Node names**: Only alphanumeric, underscore, hyphen allowed
+1. **Op names**: Only alphanumeric, underscore, hyphen allowed
 2. **Input/output overlap**: Same key cannot be in both inputs and outputs
 3. **Soft edges**: Use `>>~` or `>` for branch outputs to avoid deadlocks
 4. **PARENT resolution**: PARENT resolves at build time, not definition time
-5. **Async core**: If `node.core` is async, engine awaits it automatically
+5. **Async core**: If `op.core` is async, engine awaits it automatically

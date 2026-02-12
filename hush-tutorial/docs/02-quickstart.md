@@ -14,14 +14,14 @@ Xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) để cài đặ
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def greet(name: str):
     return {"greeting": f"Xin chào, {name}!"}
 
 async def main():
-    with GraphNode(name="hello-world") as graph:
+    with GraphOp(name="hello-world") as graph:
         step = greet(name=PARENT["name"])
         START >> step >> END
 
@@ -36,22 +36,22 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def fetch():
     return {"data": [1, 2, 3, 4, 5]}
 
-@code_node
+@op
 def transform(data: list):
     return {"transformed": [x * 2 for x in data]}
 
-@code_node
+@op
 def aggregate(data: list):
     return {"total": sum(data)}
 
 async def main():
-    with GraphNode(name="data-pipeline") as graph:
+    with GraphOp(name="data-pipeline") as graph:
         f = fetch()
         t = transform(data=f["data"])
         a = aggregate(data=t["transformed"])
@@ -89,12 +89,12 @@ export HUSH_CONFIG=/path/to/resources.yaml
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import LLMChainNode
+from hush.core import Hush, GraphOp, START, END, PARENT
+from hush.providers import ChainOp
 
 async def main():
-    with GraphNode(name="chat-workflow") as graph:
-        chat = LLMChainNode.of(
+    with GraphOp(name="chat-workflow") as graph:
+        chat = ChainOp.of(
             resource_key="gpt-4o",
             template={"system": "Bạn là trợ lý AI thân thiện.", "user": "{question}"},
             question=PARENT["question"],
@@ -112,15 +112,15 @@ asyncio.run(main())
 
 | Khái niệm | Mô tả |
 |-----------|-------|
-| `GraphNode` | Container chứa workflow — **core** |
-| `@code_node` | Decorator biến function thành CodeNode — **core** |
+| `GraphOp` | Container chứa workflow — **core** |
+| `@op` | Decorator biến function thành FuncOp — **core** |
 | `if_().else_()` | Rẽ nhánh có điều kiện — **core** |
-| `START >> node >> END` | Kết nối nodes thành pipeline |
+| `START >> step >> END` | Kết nối ops thành pipeline |
 | `PARENT["key"]` | Lấy data từ state của parent graph / external inputs |
-| `node["key"]` | Lấy output từ node anh em (sibling) |
+| `step["key"]` | Lấy output từ op anh em (sibling) |
 | `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
-| `node["key"] >> PARENT["key"]` | Output mapping via `>>` operator |
-| `LLMChainNode.of()` | Gọi LLM — **add-on** (cài `hush-providers`) |
+| `step["key"] >> PARENT["key"]` | Output mapping via `>>` operator |
+| `ChainOp.of()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 
 ## Tiếp theo
 

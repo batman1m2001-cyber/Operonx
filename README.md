@@ -42,14 +42,14 @@ pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#s
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def greet(name: str):
     return {"message": f"Hello, {name}!"}
 
 async def main():
-    with GraphNode(name="hello") as graph:
+    with GraphOp(name="hello") as graph:
         step = greet(name=PARENT["name"])
         START >> step >> END
 
@@ -60,7 +60,7 @@ async def main():
 asyncio.run(main())
 ```
 
-> **Core philosophy:** `GraphNode`, `CodeNode`, and `BranchNode` handle nearly every workflow pattern.
+> **Core philosophy:** `GraphOp`, `FuncOp`, and `BranchOp` handle nearly every workflow pattern.
 > LLM, embedding, and other specialized nodes are optional add-ons — install and learn them as needed.
 
 > Want more? See the [quickstart guide](hush-tutorial/docs/02-quickstart.md) or [runnable examples](hush-tutorial/examples/).
@@ -72,11 +72,11 @@ pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.
 ```
 
 ```python
-from hush.core import Hush, GraphNode, START, END, PARENT
+from hush.core import Hush, GraphOp, START, END, PARENT
 from hush.providers import llmchain_
 
 async def main():
-    with GraphNode(name="chat") as graph:
+    with GraphOp(name="chat") as graph:
         chat = llmchain_(
             resource_key="gpt-4o",
             template={"system": "You are a helpful assistant.", "user": "{question}"},

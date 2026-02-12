@@ -19,9 +19,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes.transform.code_node import code_node
-from hush.providers import LLMNode, PromptNode
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops.transform.func_op import op
+from hush.providers import LLMOp, PromptOp
 
 
 async def example_1_structured_output():
@@ -30,15 +30,15 @@ async def example_1_structured_output():
     print("Ví dụ 1: Structured Output (JSON Schema)")
     print("=" * 50)
 
-    with GraphNode(name="sentiment-analysis") as graph:
-        p = PromptNode.of(
+    with GraphOp(name="sentiment-analysis") as graph:
+        p = PromptOp.of(
             template={
                 "system": "Phân tích sentiment của văn bản. Trả về JSON.",
                 "user": "{text}",
             },
             text=PARENT["text"],
         )
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             response_format={
@@ -111,7 +111,7 @@ async def example_2_tool_calling():
         except Exception as e:
             return f"Error: {e}"
 
-    @code_node
+    @op
     def process_response(content, tool_calls):
         return {
             "has_tool_call": bool(tool_calls),
@@ -123,15 +123,15 @@ async def example_2_tool_calling():
             "llm_response": content,
         }
 
-    with GraphNode(name="tool-calling") as graph:
-        p = PromptNode.of(
+    with GraphOp(name="tool-calling") as graph:
+        p = PromptOp.of(
             template={
                 "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
                 "user": "{query}",
             },
             query=PARENT["query"],
         )
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             tools=tools,
@@ -160,7 +160,7 @@ async def example_3_multi_turn_chat():
     print("Ví dụ 3: Multi-turn Chat")
     print("=" * 50)
 
-    @code_node
+    @op
     def update_history(history, message, response):
         return {
             "new_history": history
@@ -170,8 +170,8 @@ async def example_3_multi_turn_chat():
             ]
         }
 
-    with GraphNode(name="multi-turn-chat") as graph:
-        p = PromptNode.of(
+    with GraphOp(name="multi-turn-chat") as graph:
+        p = PromptOp.of(
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
                 "user": "{message}",
@@ -179,7 +179,7 @@ async def example_3_multi_turn_chat():
             conversation_history=PARENT["history"],
             message=PARENT["message"],
         )
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             temperature=0.7,

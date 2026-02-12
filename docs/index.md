@@ -16,11 +16,11 @@ Hush is an async-first workflow engine for building AI applications. Orchestrate
 
 ```python
 import asyncio
-from hush.core import Hush, GraphNode, CodeNode, START, END, PARENT
+from hush.core import Hush, GraphOp, FuncOp, START, END, PARENT
 
 async def main():
-    with GraphNode(name="hello") as graph:
-        step1 = CodeNode(
+    with GraphOp(name="hello") as graph:
+        step1 = FuncOp(
             name="greet",
             code_fn=lambda name: {"message": f"Hello, {name}!"},
             inputs={"name": PARENT["name"]},

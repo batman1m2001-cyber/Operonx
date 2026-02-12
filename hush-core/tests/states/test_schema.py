@@ -1,7 +1,7 @@
 """Tests for StateSchema - workflow state structure definition."""
 
-from hush.core.nodes.graph.graph_node import END, PARENT, START, GraphNode
-from hush.core.nodes.transform.code_node import CodeNode
+from hush.core.ops.graph.graph_op import END, PARENT, START, GraphOp
+from hush.core.ops.transform.func_op import FuncOp
 from hush.core.states.ref import Ref
 from hush.core.states.schema import StateSchema
 
@@ -15,8 +15,8 @@ class TestSimpleLinearGraph:
 
     def test_schema_name(self):
         """Test that schema name matches graph name."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -28,8 +28,8 @@ class TestSimpleLinearGraph:
 
     def test_input_ref_created(self):
         """Test that input refs are created correctly."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
             START >> node_a >> END
@@ -43,8 +43,8 @@ class TestSimpleLinearGraph:
 
     def test_output_ref_created(self):
         """Test that output refs are created correctly."""
-        with GraphNode(name="linear_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="linear_graph") as graph:
+            node_a = FuncOp(
                 name="node_a",
                 code_fn=lambda x: {"result": x + 10},
                 inputs={"x": PARENT["x"]},
@@ -60,16 +60,16 @@ class TestSimpleLinearGraph:
         ref = schema.get_push_ref(idx)
         assert isinstance(ref, Ref)
         assert ref.is_output is True
-        assert ref.node == "linear_graph"
+        assert ref.source == "linear_graph"
         assert ref.var == "result"
 
     def test_unique_indices(self):
         """Test that all indices are unique."""
-        with GraphNode(name="test_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="test_graph") as graph:
+            node_a = FuncOp(
                 name="node_a", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="node_b", code_fn=lambda x: {"result": x * 2}, inputs={"x": node_a["result"]}
             )
             START >> node_a >> node_b >> END
@@ -91,13 +91,13 @@ class TestRefWithOperations:
 
     def test_getitem_operations(self):
         """Test ref with getitem operations."""
-        with GraphNode(name="ref_ops_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_ops_graph") as graph:
+            node_a = FuncOp(
                 name="data_source",
                 code_fn=lambda: {"data": {"items": [1, 2, 3], "name": "test"}},
                 inputs={},
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="extract_items",
                 code_fn=lambda items: {"count": len(items)},
                 inputs={"items": node_a["data"]["items"]},
@@ -114,11 +114,11 @@ class TestRefWithOperations:
 
     def test_method_call_operations(self):
         """Test ref with method call operations."""
-        with GraphNode(name="ref_ops_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_ops_graph") as graph:
+            node_a = FuncOp(
                 name="data_source", code_fn=lambda: {"data": {"name": "test"}}, inputs={}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="transform_name",
                 code_fn=lambda name: {"upper_name": name},
                 inputs={"name": node_a["data"]["name"].upper()},
@@ -144,11 +144,11 @@ class TestRefWithApply:
 
     def test_apply_len(self):
         """Test ref with apply(len)."""
-        with GraphNode(name="ref_apply_graph") as graph:
-            node_a = CodeNode(
+        with GraphOp(name="ref_apply_graph") as graph:
+            node_a = FuncOp(
                 name="list_source", code_fn=lambda: {"numbers": [5, 2, 8, 1, 9, 3]}, inputs={}
             )
-            node_b = CodeNode(
+            node_b = FuncOp(
                 name="get_length",
                 code_fn=lambda length: {"length": length},
                 inputs={"length": node_a["numbers"].apply(len)},
@@ -164,9 +164,9 @@ class TestRefWithApply:
 
     def test_apply_sorted(self):
         """Test ref with apply(sorted)."""
-        with GraphNode(name="ref_apply_graph") as graph:
-            node_a = CodeNode(name="list_source", code_fn=lambda: {"numbers": [5, 2, 8]}, inputs={})
-            node_b = CodeNode(
+        with GraphOp(name="ref_apply_graph") as graph:
+            node_a = FuncOp(name="list_source", code_fn=lambda: {"numbers": [5, 2, 8]}, inputs={})
+            node_b = FuncOp(
                 name="sort_numbers",
                 code_fn=lambda sorted_nums: {"sorted": sorted_nums},
                 inputs={"sorted_nums": node_a["numbers"].apply(sorted)},
@@ -191,9 +191,9 @@ class TestArithmeticOperations:
 
     def test_add_and_multiply(self):
         """Test ref with (value + 5) * 2."""
-        with GraphNode(name="arithmetic_graph") as graph:
-            node_a = CodeNode(name="number_source", code_fn=lambda: {"value": 10}, inputs={})
-            node_b = CodeNode(
+        with GraphOp(name="arithmetic_graph") as graph:
+            node_a = FuncOp(name="number_source", code_fn=lambda: {"value": 10}, inputs={})
+            node_b = FuncOp(
                 name="compute",
                 code_fn=lambda x: {"result": x},
                 inputs={"x": (node_a["value"] + 5) * 2},
@@ -217,11 +217,11 @@ class TestNestedGraph:
 
     def test_nested_refs(self):
         """Test refs in nested graph structure."""
-        with GraphNode(name="outer") as outer:
-            with GraphNode(
+        with GraphOp(name="outer") as outer:
+            with GraphOp(
                 name="inner", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["inner_result"]}
             ) as inner:
-                double = CodeNode(
+                double = FuncOp(
                     name="double",
                     code_fn=lambda x: {"result": x * 2},
                     inputs={"x": PARENT["x"]},
@@ -254,14 +254,14 @@ class TestDeeplyNestedGraphs:
 
     def test_three_level_nesting(self):
         """Test refs chain through 3 nested levels."""
-        with GraphNode(name="level1") as level1:
-            with GraphNode(
+        with GraphOp(name="level1") as level1:
+            with GraphOp(
                 name="level2", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["result"]}
             ) as level2:
-                with GraphNode(
+                with GraphOp(
                     name="level3", inputs={"x": PARENT["x"]}, outputs={"result": PARENT["result"]}
                 ) as level3:
-                    core = CodeNode(
+                    core = FuncOp(
                         name="core",
                         code_fn=lambda x: {"result": x * 3},
                         inputs={"x": PARENT["x"]},
@@ -291,20 +291,20 @@ class TestIterationNode:
     """Test schema with iteration nodes."""
 
     def test_while_loop_refs(self):
-        """Test refs in WhileLoopNode.
+        """Test refs in WhileOp.
 
-        Note: After refactor, iteration nodes inherit directly from GraphNode
+        Note: After refactor, iteration nodes inherit directly from GraphOp
         (no inner graph), so child nodes reference the loop node directly.
         """
-        from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
+        from hush.core.ops.iteration.while_op import WhileOp
 
-        with WhileLoopNode(
+        with WhileOp(
             name="counter_loop",
             inputs={"counter": 0},
             stop_condition="counter >= 5",
             max_iterations=10,
         ) as loop:
-            inc = CodeNode(
+            inc = FuncOp(
                 name="increment",
                 code_fn=lambda counter: {"new_counter": counter + 1},
                 inputs={"counter": PARENT["counter"]},
@@ -316,11 +316,11 @@ class TestIterationNode:
         schema = StateSchema(loop)
 
         # Child node's counter should ref to loop.counter (PARENT resolution)
-        # Iteration nodes now inherit from GraphNode directly, no __inner__ graph
+        # Iteration nodes now inherit from GraphOp directly, no __inner__ graph
         child_counter_idx = schema.get_index("counter_loop.increment", "counter")
         child_counter_ref = schema._pull_refs[child_counter_idx]
         assert child_counter_ref is not None
-        assert child_counter_ref.node == "counter_loop"
+        assert child_counter_ref.source == "counter_loop"
         assert child_counter_ref.var == "counter"
 
 
@@ -334,8 +334,8 @@ class TestCollectionInterface:
 
     def test_iteration(self):
         """Test iterating over schema."""
-        with GraphNode(name="test_graph") as graph:
-            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
+        with GraphOp(name="test_graph") as graph:
+            node = FuncOp(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()
@@ -347,8 +347,8 @@ class TestCollectionInterface:
 
     def test_contains(self):
         """Test __contains__ method."""
-        with GraphNode(name="test_graph") as graph:
-            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
+        with GraphOp(name="test_graph") as graph:
+            node = FuncOp(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()
@@ -360,8 +360,8 @@ class TestCollectionInterface:
 
     def test_len(self):
         """Test __len__ method."""
-        with GraphNode(name="test_graph") as graph:
-            node = CodeNode(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
+        with GraphOp(name="test_graph") as graph:
+            node = FuncOp(name="node", code_fn=lambda x: {"y": x}, inputs={"x": PARENT["x"]})
             START >> node >> END
 
         graph.build()

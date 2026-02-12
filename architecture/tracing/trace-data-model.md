@@ -2,16 +2,16 @@
 
 ## Tables
 
-### node_traces
+### op_traces
 
-Stores individual node execution traces:
+Stores individual op execution traces:
 
 ```sql
-CREATE TABLE node_traces (
+CREATE TABLE op_traces (
     id INTEGER PRIMARY KEY,
     request_id TEXT NOT NULL,
     workflow_name TEXT NOT NULL,
-    node_name TEXT NOT NULL,
+    op_name TEXT NOT NULL,
     parent_name TEXT,
     context_id TEXT,
     execution_order INTEGER,
@@ -32,10 +32,10 @@ CREATE TABLE node_traces (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_node_traces_request ON node_traces(request_id);
-CREATE INDEX idx_node_traces_workflow ON node_traces(workflow_name);
-CREATE INDEX idx_node_traces_user ON node_traces(user_id);
-CREATE INDEX idx_node_traces_session ON node_traces(session_id);
+CREATE INDEX idx_op_traces_request ON op_traces(request_id);
+CREATE INDEX idx_op_traces_workflow ON op_traces(workflow_name);
+CREATE INDEX idx_op_traces_user ON op_traces(user_id);
+CREATE INDEX idx_op_traces_session ON op_traces(session_id);
 ```
 
 ### requests
@@ -67,7 +67,7 @@ writing → pending → flushing → flushed
               failed (retry_count++)
 ```
 
-1. **writing**: Nodes actively writing traces
+1. **writing**: Ops actively writing traces
 2. **pending**: All traces written, ready for flush
 3. **flushing**: Background process flushing to external service
 4. **flushed**: Successfully sent to external service
@@ -76,7 +76,7 @@ writing → pending → flushing → flushed
 ## Relationships
 
 ```
-requests (1) ──────── (*) node_traces
+requests (1) ──────── (*) op_traces
     │
     └── request_id ←── request_id
 ```
@@ -86,7 +86,7 @@ requests (1) ──────── (*) node_traces
 ### Get all traces for a request
 
 ```sql
-SELECT * FROM node_traces
+SELECT * FROM op_traces
 WHERE request_id = ?
 ORDER BY execution_order;
 ```
@@ -107,7 +107,7 @@ SELECT
     SUM(prompt_tokens) as total_prompt,
     SUM(completion_tokens) as total_completion,
     SUM(cost_usd) as total_cost
-FROM node_traces
+FROM op_traces
 WHERE contain_generation = 1
 GROUP BY workflow_name;
 ```

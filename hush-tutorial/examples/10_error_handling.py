@@ -5,7 +5,7 @@ Ví dụ 4 cần OPENAI_API_KEY (LLM fallback).
 
 Học được:
 - Error capture trong state (workflow không crash)
-- Try/catch pattern trong CodeNode
+- Try/catch pattern trong FuncOp
 - Error output key pattern
 - if_() routing dựa trên success/error
 - Graceful degradation với fallback value
@@ -21,8 +21,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import code_node, if_
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import op, if_
 
 # =============================================================================
 # Ví dụ 1: Error capture trong state
@@ -30,16 +30,16 @@ from hush.core.nodes import code_node, if_
 
 
 async def example_1_error_capture():
-    """Khi node lỗi, error được lưu vào state thay vì crash workflow."""
+    """Khi op lỗi, error được lưu vào state thay vì crash workflow."""
     print("=" * 50)
     print("Ví dụ 1: Error capture trong state")
     print("=" * 50)
 
-    @code_node
+    @op
     def failing():
         return {"result": 1 / 0}  # ZeroDivisionError!
 
-    with GraphNode(name="error-demo") as graph:
+    with GraphOp(name="error-demo") as graph:
         f = failing()
         START >> f >> END
 
@@ -58,7 +58,7 @@ async def example_1_error_capture():
 # =============================================================================
 
 
-@code_node
+@op
 def safe_divide(a: int, b: int):
     """Chia an toàn — trả success/error thay vì throw."""
     try:
@@ -68,13 +68,13 @@ def safe_divide(a: int, b: int):
         return {"success": False, "result": None, "error": "Cannot divide by zero"}
 
 
-@code_node
+@op
 def handle_success(result: float):
     """Xử lý kết quả thành công."""
     return {"output": f"Result: {result}"}
 
 
-@code_node
+@op
 def handle_error(error: str):
     """Xử lý lỗi."""
     return {"output": f"Error occurred: {error}"}
@@ -87,7 +87,7 @@ async def example_2_branch_error_routing():
     print("Ví dụ 2: Error routing với if_()")
     print("=" * 50)
 
-    with GraphNode(name="error-routing") as graph:
+    with GraphOp(name="error-routing") as graph:
         divide = safe_divide(
             name="divide",
             inputs={"a": PARENT["a"], "b": PARENT["b"]},
@@ -120,7 +120,7 @@ async def example_2_branch_error_routing():
 _call_count = 0
 
 
-@code_node
+@op
 def unreliable_api(query: str):
     """API giả lập — fail 2 lần đầu, thành công lần thứ 3."""
     global _call_count
@@ -130,7 +130,7 @@ def unreliable_api(query: str):
     return {"answer": f"Result for: {query}"}
 
 
-@code_node
+@op
 def retry_with_backoff(query: str):
     """Retry với exponential backoff."""
     import time
@@ -161,7 +161,7 @@ def retry_with_backoff(query: str):
     }
 
 
-@code_node
+@op
 def with_fallback(primary_result: str, success: bool):
     """Dùng kết quả hoặc fallback."""
     if success:
@@ -179,7 +179,7 @@ async def example_3_retry_and_fallback():
     global _call_count
     _call_count = 0
 
-    with GraphNode(name="retry-demo") as graph:
+    with GraphOp(name="retry-demo") as graph:
         api_call = retry_with_backoff(query=PARENT["query"])
 
         fallback = with_fallback(primary_result=api_call["answer"], success=api_call["success"])
@@ -203,7 +203,7 @@ async def example_3_retry_and_fallback():
 
 
 async def example_4_llm_fallback():
-    """LLMNode fallback — tự động chuyển model khi primary fails."""
+    """LLMOp fallback — tự động chuyển model khi primary fails."""
     print()
     print("=" * 50)
     print("Ví dụ 4: LLM Fallback chain")
@@ -216,7 +216,7 @@ async def example_4_llm_fallback():
         print()
         print("  Cách dùng LLM fallback:")
         print("  ```python")
-        print("  llm = LLMNode.of(")
+        print("  llm = LLMOp.of(")
         print('      resource_key="gpt-4o",')
         print('      fallback=["gpt-4o-mini"],')
         print('      messages=p["messages"],')
@@ -224,10 +224,10 @@ async def example_4_llm_fallback():
         print("  ```")
         return
 
-    from hush.providers import LLMNode, PromptNode
+    from hush.providers import LLMOp, PromptOp
 
-    with GraphNode(name="llm-fallback") as graph:
-        p = PromptNode.of(
+    with GraphOp(name="llm-fallback") as graph:
+        p = PromptOp.of(
             template={
                 "system": "Answer briefly.",
                 "user": "{query}",
@@ -236,7 +236,7 @@ async def example_4_llm_fallback():
         )
 
         # fallback: nếu gpt-4o fails → thử gpt-4o-mini
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o",
             fallback=["gpt-4o-mini"],
             messages=p["messages"],

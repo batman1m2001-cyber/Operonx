@@ -8,7 +8,7 @@ from hush.core.exceptions import (
     ConditionError,
     EmbeddingError,
     IterationError,
-    NodeError,
+    OpError,
     ParserError,
     PromptError,
     RerankError,
@@ -51,30 +51,30 @@ class TestTruncateHelper:
 
 
 # ============================================================
-# Test NodeError (base class)
+# Test OpError (base class)
 # ============================================================
 
 
-class TestNodeError:
-    """Test base NodeError class."""
+class TestOpError:
+    """Test base OpError class."""
 
     def test_basic_error(self):
         """Test basic error creation."""
-        error = NodeError(message="Something went wrong", node_type="test")
+        error = OpError(message="Something went wrong", op_type="test")
         assert "[TEST] Something went wrong" in str(error)
 
     def test_with_original_error(self):
         """Test error with original exception."""
         original = ValueError("Original error")
-        error = NodeError(message="Wrapped error", node_type="test", original_error=original)
+        error = OpError(message="Wrapped error", op_type="test", original_error=original)
         msg = str(error)
         assert "[TEST] Wrapped error" in msg
         assert "Error: Original error" in msg
 
     def test_with_context(self):
         """Test error with context dictionary."""
-        error = NodeError(
-            message="Error with context", node_type="test", context={"key1": "value1", "key2": 42}
+        error = OpError(
+            message="Error with context", op_type="test", context={"key1": "value1", "key2": 42}
         )
         msg = str(error)
         assert "key1: 'value1'" in msg
@@ -83,10 +83,10 @@ class TestNodeError:
     def test_attributes_stored(self):
         """Test that attributes are stored correctly."""
         original = ValueError("test")
-        error = NodeError(
-            message="Test", node_type="custom", original_error=original, context={"foo": "bar"}
+        error = OpError(
+            message="Test", op_type="custom", original_error=original, context={"foo": "bar"}
         )
-        assert error.node_type == "custom"
+        assert error.op_type == "custom"
         assert error.original_error is original
         assert error.context == {"foo": "bar"}
 
@@ -261,7 +261,7 @@ class TestBranchError:
 
 
 class TestConditionError:
-    """Test ConditionError for WhileLoopNode condition failures."""
+    """Test ConditionError for WhileOp condition failures."""
 
     def test_compile_phase_error(self):
         """Test condition error during compile phase."""
@@ -330,30 +330,30 @@ class TestConditionError:
 
 
 class TestIterationError:
-    """Test IterationError for ForLoop/MapNode iteration failures."""
+    """Test IterationError for ForLoop/MapOp iteration failures."""
 
     def test_for_loop_error(self):
-        """Test iteration error for ForLoopNode."""
+        """Test iteration error for ForOp."""
         error = IterationError(
             message="Iteration 2 failed",
             iteration_index=2,
             loop_data={"item": {"id": 3, "name": "test"}},
             total_iterations=10,
-            node_type="for",
+            op_type="for",
         )
         msg = str(error)
         assert "[FOR]" in msg
         assert "iteration_index:" in msg and "2/10" in msg
         assert "loop_data:" in msg
 
-    def test_map_node_error(self):
-        """Test iteration error for MapNode."""
+    def test_map_op_error(self):
+        """Test iteration error for MapOp."""
         error = IterationError(
             message="Iteration 5 failed",
             iteration_index=5,
             loop_data={"x": 100},
             total_iterations=20,
-            node_type="map",
+            op_type="map",
         )
         msg = str(error)
         assert "[MAP]" in msg
@@ -370,7 +370,7 @@ class TestIterationError:
                 iteration_index=3,
                 loop_data={"data": {"a": 1}},
                 total_iterations=5,
-                node_type="for",
+                op_type="for",
                 original_error=e,
             )
         msg = str(error)
@@ -383,7 +383,7 @@ class TestIterationError:
             iteration_index=0,
             loop_data={"big_value": "x" * 200},
             total_iterations=1,
-            node_type="for",
+            op_type="for",
         )
         msg = str(error)
         assert "..." in msg
@@ -395,7 +395,7 @@ class TestIterationError:
             iteration_index=5,
             loop_data={"x": 1},
             total_iterations=10,
-            node_type="map",
+            op_type="map",
         )
         assert error.iteration_index == 5
         assert error.loop_data == {"x": 1}
@@ -408,7 +408,7 @@ class TestIterationError:
 
 
 class TestPromptError:
-    """Test PromptError for PromptNode template failures."""
+    """Test PromptError for PromptOp template failures."""
 
     def test_missing_variable_error(self):
         """Test prompt error with missing template variable."""
@@ -491,7 +491,7 @@ class TestPromptError:
 
 
 class TestEmbeddingError:
-    """Test EmbeddingError for EmbeddingNode failures."""
+    """Test EmbeddingError for EmbeddingOp failures."""
 
     def test_basic_embedding_error(self):
         """Test basic embedding error creation."""
@@ -527,7 +527,7 @@ class TestEmbeddingError:
 
 
 class TestRerankError:
-    """Test RerankError for RerankNode failures."""
+    """Test RerankError for RerankOp failures."""
 
     def test_basic_rerank_error(self):
         """Test basic rerank error creation."""
@@ -581,7 +581,7 @@ class TestRerankError:
 
 
 class TestErrorInheritance:
-    """Test that all errors properly inherit from NodeError and Exception."""
+    """Test that all errors properly inherit from OpError and Exception."""
 
     @pytest.mark.parametrize(
         "error_class,args",
@@ -603,9 +603,9 @@ class TestErrorInheritance:
         ],
     )
     def test_inherits_from_node_error(self, error_class, args):
-        """Test that all error classes inherit from NodeError."""
+        """Test that all error classes inherit from OpError."""
         error = error_class(**args)
-        assert isinstance(error, NodeError)
+        assert isinstance(error, OpError)
         assert isinstance(error, Exception)
 
     @pytest.mark.parametrize(
@@ -632,8 +632,8 @@ class TestErrorInheritance:
         with pytest.raises(error_class):
             raise error_class(**args)
 
-        # Also verify catching as NodeError works
-        with pytest.raises(NodeError):
+        # Also verify catching as OpError works
+        with pytest.raises(OpError):
             raise error_class(**args)
 
 
@@ -665,7 +665,7 @@ class TestErrorMessageFormat:
             assert line.startswith("  "), f"Line should be indented: {line}"
 
     def test_all_node_types_uppercase(self):
-        """Test that node_type is always displayed in uppercase."""
+        """Test that op_type is always displayed in uppercase."""
         errors = [
             ParserError("msg", "input", "json"),
             CodeError("msg", "fn", "src", {}),

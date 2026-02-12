@@ -21,7 +21,7 @@ hush-tutorial/
 │   ├── 00-tong-quan.md      # Tổng quan architecture
 │   ├── 01-cai-dat-va-thiet-lap.md
 │   ├── 02-quickstart.md
-│   ├── 03-core-concepts.md  # GraphNode, CodeNode, PARENT, edges
+│   ├── 03-core-concepts.md  # GraphOp, FuncOp, PARENT, edges
 │   ├── 04-llm-integration.md
 │   ├── 05-loops-branches.md # ForLoop, Map, While, if_()
 │   ├── 06-embeddings-rag.md
@@ -57,7 +57,7 @@ hush-tutorial/
 1. [Tổng quan](docs/00-tong-quan.md) — Architecture overview
 2. [Cài đặt](docs/01-cai-dat-va-thiet-lap.md) — Setup environment
 3. [Quickstart](docs/02-quickstart.md) — First workflow
-4. [Core Concepts](docs/03-core-concepts.md) — GraphNode, CodeNode, PARENT
+4. [Core Concepts](docs/03-core-concepts.md) — GraphOp, FuncOp, PARENT
 
 ### Workflow Control
 
@@ -67,7 +67,7 @@ hush-tutorial/
 
 ### LLM & AI
 
-8. [LLM Integration](docs/04-llm-integration.md) — PromptNode, LLMNode
+8. [LLM Integration](docs/04-llm-integration.md) — PromptOp, LLMOp
 9. [Embeddings & RAG](docs/06-embeddings-rag.md) — Vector search
 10. [Agent Workflow](docs/10-agent-workflow.md) — Tool calling agents
 11. [Multi-model](docs/11-multi-model.md) — Load balancing, fallback
@@ -84,22 +84,22 @@ hush-tutorial/
 
 ```python
 # ❌ Verbose
-with ForLoopNode(name="loop", inputs={"item": Each(items), "prefix": "Hello"}) as loop:
+with ForOp(name="loop", inputs={"item": Each(items), "prefix": "Hello"}) as loop:
     ...
 
 # ✅ Classmethod
-with ForLoopNode.of(item=Each(items), prefix="Hello") as loop:
+with ForOp.of(item=Each(items), prefix="Hello") as loop:
     ...
 ```
 
 | Full Class | Classmethod | Example |
 |------------|-------------|---------|
-| `CodeNode` | `@code_node` | `@code_node def fn(x): return {"y": x*2}` |
-| `ForLoopNode` | `ForLoopNode.of()` | `ForLoopNode.of(item=Each(items), config=10)` |
-| `MapNode` | `MapNode.of()` | `MapNode.of(x=Each(items), max_concurrency=5)` |
-| `WhileLoopNode` | `WhileLoopNode.of()` | `WhileLoopNode.of(count=0, stop_condition="count >= 10")` |
-| `BranchNode` | `if_()` | `if_(score >= 90, "a").else_("b")` |
-| `LLMNode` | `LLMNode.of()` | `LLMNode.of(resource_key="gpt-4o", messages=..., temperature=0.7)` |
+| `FuncOp` | `@op` | `@op def fn(x): return {"y": x*2}` |
+| `ForOp` | `ForOp.of()` | `ForOp.of(item=Each(items), config=10)` |
+| `MapOp` | `MapOp.of()` | `MapOp.of(x=Each(items), max_concurrency=5)` |
+| `WhileOp` | `WhileOp.of()` | `WhileOp.of(count=0, stop_condition="count >= 10")` |
+| `BranchOp` | `if_()` | `if_(score >= 90, "a").else_("b")` |
+| `LLMOp` | `LLMOp.of()` | `LLMOp.of(resource_key="gpt-4o", messages=..., temperature=0.7)` |
 
 See [docs/12-shorthand-syntax.md](docs/12-shorthand-syntax.md) for details.
 

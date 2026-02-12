@@ -91,7 +91,7 @@ tracer = LangfuseTracer(tags=["prod", "ml-team"])
 Added during execution via `$tags`:
 
 ```python
-@code_node
+@op
 def process(data):
     if data["source"] == "cache":
         return {"result": data, "$tags": ["cache-hit"]}

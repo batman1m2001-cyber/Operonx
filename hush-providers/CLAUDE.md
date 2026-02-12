@@ -30,12 +30,12 @@ hush/providers/
 │   ├── config.py       # KeycloakTokenConfig
 │   ├── factory.py      # AuthFactory
 │   └── keycloak.py     # Keycloak token provider
-├── nodes/              # Workflow node wrappers
-│   ├── llm.py          # LLMNode + LLMNode.of()
-│   ├── llm_chain.py    # LLMChainNode + LLMChainNode.of()
-│   ├── embedding.py    # EmbeddingNode + EmbeddingNode.of()
-│   ├── rerank.py       # RerankNode + RerankNode.of()
-│   └── prompt.py       # PromptNode + PromptNode.of()
+├── ops/              # Workflow op wrappers
+│   ├── llm.py          # LLMOp + LLMOp.of()
+│   ├── chain.py    # ChainOp + ChainOp.of()
+│   ├── embedding.py    # EmbeddingOp + EmbeddingOp.of()
+│   ├── rerank.py       # RerankOp + RerankOp.of()
+│   └── prompt.py       # PromptOp + PromptOp.of()
 └── registry/           # Plugin registration
     ├── llm_plugin.py
     ├── embedding_plugin.py
@@ -46,7 +46,7 @@ hush/providers/
 ## Key Files to Read First
 
 1. `llms/base.py` - BaseLLM interface (stream, generate, generate_batch)
-2. `nodes/llm.py` - LLMNode for workflow integration
+2. `ops/llm.py` - LLMOp for workflow integration
 3. `registry/llm_plugin.py` - Plugin registration pattern
 
 ## Provider Pattern
@@ -130,52 +130,52 @@ class MyReranker(BaseReranker):
         pass
 ```
 
-## Workflow Nodes
+## Workflow Ops
 
-All provider nodes use `Node.of()` classmethods for concise creation (recommended) and full `__init__` for explicit control.
+All provider ops use `Op.of()` classmethods for concise creation (recommended) and full `__init__` for explicit control.
 
-### Node.of() Shorthand (Recommended)
+### Op.of() Shorthand (Recommended)
 ```python
-from hush.providers import LLMChainNode, LLMNode, PromptNode, EmbeddingNode, RerankNode
+from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
 
 # Prompt + LLM all-in-one
-chat = LLMChainNode.of(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+chat = ChainOp.of(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Separate LLM call
-llm = LLMNode.of(resource_key="gpt-4o", messages=PARENT["messages"])
+llm = LLMOp.of(resource_key="gpt-4o", messages=PARENT["messages"])
 
 # Separate prompt formatting
-p = PromptNode.of(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+p = PromptOp.of(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Embeddings
-embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])
+embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
 
 # Reranking
-rerank = RerankNode.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
+rerank = RerankOp.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
 ```
 
 ### Full Class Equivalents
 ```python
-from hush.providers import LLMChainNode, LLMNode, PromptNode, EmbeddingNode, RerankNode
+from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
 
-# LLMChainNode = Prompt + LLM combined
-chain = LLMChainNode(
+# ChainOp = Prompt + LLM combined
+chain = ChainOp(
     name="chat",
     resource_key="gpt-4o",
     inputs={"template": {"system": "...", "user": "{input}"}, "input": PARENT["query"]},
     outputs={"content": PARENT["answer"]}
 )
 
-# LLMNode = Raw LLM call
-llm = LLMNode(
+# LLMOp = Raw LLM call
+llm = LLMOp(
     name="generate",
     resource_key="gpt-4o",
     inputs={"messages": PARENT["messages"]},
     outputs={"content": PARENT["response"]},
 )
 
-# PromptNode = Template formatting
-prompt = PromptNode(
+# PromptOp = Template formatting
+prompt = PromptOp(
     name="format",
     inputs={"template": {"system": "...", "user": "{question}"}, "question": PARENT["question"]},
     outputs={"messages": PARENT}
@@ -229,10 +229,10 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 @pytest.mark.asyncio
-async def test_llm_node():
+async def test_llm_op():
     with patch("hush.providers.llms.openai.OpenAISDKModel") as mock:
         mock.return_value.generate = AsyncMock(return_value=mock_completion)
-        # Test node execution
+        # Test op execution
 ```
 
 ## Error Handling

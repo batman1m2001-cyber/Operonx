@@ -8,11 +8,11 @@ from hush.core import (
     END,
     PARENT,
     START,
-    CodeNode,
-    GraphNode,
+    FuncOp,
+    GraphOp,
     MemoryState,
     StateSchema,
-    code_node,
+    op,
 )
 
 # ============================================================
@@ -57,11 +57,11 @@ def increment_fn():
 def simple_graph():
     """Create a simple single-node graph."""
 
-    @code_node
+    @op
     def double(x: int):
         return {"result": x * 2}
 
-    with GraphNode(name="simple_graph") as graph:
+    with GraphOp(name="simple_graph") as graph:
         node = double(inputs={"x": PARENT["x"]}, outputs={"*": PARENT})
         START >> node >> END
 
@@ -72,11 +72,11 @@ def simple_graph():
 @pytest.fixture
 def linear_graph():
     """Create a linear two-node graph: add_10 -> multiply_2."""
-    with GraphNode(name="linear_graph") as graph:
-        node_a = CodeNode(
+    with GraphOp(name="linear_graph") as graph:
+        node_a = FuncOp(
             name="add_10", code_fn=lambda x: {"result": x + 10}, inputs={"x": PARENT["x"]}
         )
-        node_b = CodeNode(
+        node_b = FuncOp(
             name="multiply_2",
             code_fn=lambda x: {"result": x * 2},
             inputs={"x": node_a["result"]},
@@ -97,7 +97,7 @@ def linear_graph():
 def create_state():
     """Factory fixture to create state from a graph with inputs."""
 
-    def _create_state(graph: GraphNode, inputs: Dict[str, Any] = None) -> MemoryState:
+    def _create_state(graph: GraphOp, inputs: Dict[str, Any] = None) -> MemoryState:
         schema = StateSchema(graph)
         return schema.create_state(inputs=inputs or {})
 

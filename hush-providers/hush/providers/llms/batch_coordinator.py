@@ -61,7 +61,7 @@ class BatchCoordinator:
         ```python
         coordinator = BatchCoordinator(llm_backend)
 
-        # From LLMNode with batch_mode=True
+        # From LLMOp with batch_mode=True
         result = await coordinator.submit(
             messages=[{"role": "user", "content": "Hello"}],
             temperature=0.7

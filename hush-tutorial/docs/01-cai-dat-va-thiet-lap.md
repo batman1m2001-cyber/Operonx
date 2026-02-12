@@ -33,7 +33,7 @@ Hush là **monorepo** với 3 packages riêng biệt:
 
 | Package | Mô tả | Khi nào cần |
 |---------|--------|-------------|
-| `hush-core` | Workflow engine (GraphNode, CodeNode, BranchNode) | **Luôn cần** — đây là nền tảng |
+| `hush-core` | Workflow engine (GraphOp, FuncOp, BranchOp) | **Luôn cần** — đây là nền tảng |
 | `hush-providers` | LLM, embedding, reranking providers | Khi dùng LLM, embedding, hoặc reranking |
 | `hush-ops` | Langfuse, OpenTelemetry tracing | Khi cần tracing với backend bên ngoài |
 
@@ -176,8 +176,8 @@ Successfully installed hush-ops-0.1.0 ...
 ### 2.3 Kiểm tra cài đặt cơ bản
 
 ```bash
-python3 -c "from hush.core import Hush, GraphNode; print('hush-core OK')"
-python3 -c "from hush.providers import LLMNode; print('hush-providers OK')"
+python3 -c "from hush.core import Hush, GraphOp; print('hush-core OK')"
+python3 -c "from hush.providers import LLMOp; print('hush-providers OK')"
 python3 -c "from hush.ops import LangfuseTracer; print('hush-ops OK')"
 ```
 
@@ -199,10 +199,10 @@ Trước khi thiết lập files, cần hiểu cách Hush kết nối đến LLM
 
 ### Luồng khởi tạo
 
-Khi bạn tạo một node dùng provider (`LLMNode.of()`, `EmbeddingNode.of()`, `RerankNode.of()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
+Khi bạn tạo một op dùng provider (`LLMOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
 
 ```
-Code: LLMNode.of(resource_key="gpt-4o", messages=...)
+Code: LLMOp.of(resource_key="gpt-4o", messages=...)
   ↓
 get_hub()  →  singleton ResourceHub
   ↓
@@ -224,7 +224,7 @@ hub.llm("gpt-4o")  →  tìm key "llm:gpt-4o" → tạo LLM client
 |---|--------|------|----------|
 | 1 | **API keys + Hush config** | `.env` | API keys cho providers, đường dẫn `HUSH_CONFIG`, `HUSH_TRACES_DB`... |
 | 2 | **Provider config** | `resources.yaml` | Định nghĩa từng provider: model nào, endpoint nào, dùng key nào |
-| 3 | **Load env trước khi tạo node** | Trong code | Gọi `load_dotenv()` **trước** khi import/tạo node dùng provider |
+| 3 | **Load env trước khi tạo op** | Trong code | Gọi `load_dotenv()` **trước** khi import/tạo op dùng provider |
 
 > **Nếu thiếu bất kỳ thứ nào:** bạn sẽ gặp `RuntimeError: Cannot initialize global ResourceHub` hoặc `WARNING: Environment variable ... not found`.
 
@@ -314,7 +314,7 @@ cp env.example .env
 
 - **KHÔNG commit file `.env` lên git.** File `.gitignore` của Hush đã bao gồm `.env`.
 - Mỗi người dùng tự tạo file `.env` riêng với keys của mình.
-- Phải gọi `load_dotenv()` ở đầu code **trước** khi tạo node dùng provider.
+- Phải gọi `load_dotenv()` ở đầu code **trước** khi tạo op dùng provider.
 
 Xem đầy đủ template: [`env.example`](../../env.example)
 
@@ -324,9 +324,9 @@ Xem đầy đủ template: [`env.example`](../../env.example)
 
 ### resources.yaml là gì?
 
-File `resources.yaml` là **cấu hình trung tâm** được đọc bởi **ResourceHub** (`get_hub()`). Mọi node dùng provider (LLM, embedding, reranking, tracing) đều tra cứu cấu hình từ file này.
+File `resources.yaml` là **cấu hình trung tâm** được đọc bởi **ResourceHub** (`get_hub()`). Mọi op dùng provider (LLM, embedding, reranking, tracing) đều tra cứu cấu hình từ file này.
 
-Khi bạn viết `LLMNode.of(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
+Khi bạn viết `LLMOp.of(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
 
 ### Copy từ template có sẵn
 
@@ -413,14 +413,14 @@ Không cần tạo DB thủ công — Hush tự tạo khi chạy workflow đầu
 ```bash
 python3 -c "
 import asyncio
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@code_node
+@op
 def hello():
     return {'message': 'Hello from Hush!'}
 
 async def main():
-    with GraphNode(name='hello-hush') as graph:
+    with GraphOp(name='hello-hush') as graph:
         step = hello()
         START >> step >> END
 
@@ -444,14 +444,14 @@ Result: Hello from Hush!
 python3 -c "
 import asyncio
 from dotenv import load_dotenv
-load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo node
+load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo op
 
-from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import LLMChainNode
+from hush.core import Hush, GraphOp, START, END, PARENT
+from hush.providers import ChainOp
 
 async def main():
-    with GraphNode(name='test-llm') as graph:
-        chat = LLMChainNode.of(
+    with GraphOp(name='test-llm') as graph:
+        chat = ChainOp.of(
             resource_key='gpt-4o-mini',  # ← tra cứu trong resources.yaml
             template='Say hello in exactly 3 words.',
         )
@@ -479,15 +479,15 @@ import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
+from hush.core import Hush, GraphOp, op, START, END, PARENT
 from hush.ops import LangfuseTracer
 
-@code_node
+@op
 def hello():
     return {'message': 'Tracing works!'}
 
 async def main():
-    with GraphNode(name='test-tracing') as graph:
+    with GraphOp(name='test-tracing') as graph:
         step = hello()
         START >> step >> END
 
@@ -513,7 +513,7 @@ ResourceHub không tìm được `resources.yaml`. Kiểm tra:
 
 1. File `resources.yaml` có ở thư mục hiện tại không? (`ls resources.yaml`)
 2. Hoặc set `HUSH_CONFIG` trong `.env` trỏ đến đúng đường dẫn
-3. Đã gọi `load_dotenv()` trước khi import node chưa?
+3. Đã gọi `load_dotenv()` trước khi import op chưa?
 
 ### `ModuleNotFoundError: No module named 'hush'`
 
@@ -529,7 +529,7 @@ uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.gi
 File `.env` chưa được tạo hoặc chưa load. Kiểm tra:
 
 1. File `.env` có tồn tại ở thư mục gốc project không?
-2. Code có gọi `load_dotenv()` **trước** khi tạo node dùng provider không?
+2. Code có gọi `load_dotenv()` **trước** khi tạo op dùng provider không?
 
 ### `openai.AuthenticationError: Incorrect API key`
 

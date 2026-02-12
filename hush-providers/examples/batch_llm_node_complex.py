@@ -1,7 +1,7 @@
-"""Example 3: Complex graph with multiple LLMNodes mixing batch and non-batch.
+"""Example 3: Complex graph with multiple LLMOps mixing batch and non-batch.
 
 This script demonstrates:
-- Multiple LLMNodes in one graph
+- Multiple LLMOps in one graph
 - Mixing batch_mode=True and batch_mode=False nodes
 - Load balancing with multiple models
 - Fallback configuration
@@ -20,15 +20,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hush.core import END, PARENT, START, GraphNode
+from hush.core import END, PARENT, START, GraphOp
 from hush.core.registry import ResourceHub, set_global_hub
 from hush.core.states import MemoryState, StateSchema
 
-from hush.providers.nodes import LLMNode, PromptNode
+from hush.providers.ops import LLMOp, PromptOp
 
 
 async def test_mixed_batch_async():
-    """Test graph with mixed batch and async LLMNodes."""
+    """Test graph with mixed batch and async LLMOps."""
     # Load resources
     config_path = Path(__file__).parent.parent.parent / "resources.yaml"
     hub = ResourceHub.from_yaml(config_path)
@@ -36,7 +36,7 @@ async def test_mixed_batch_async():
     ResourceHub.set_instance(hub)
 
     print("=" * 60)
-    print("TEST: Mixed batch and async LLMNodes")
+    print("TEST: Mixed batch and async LLMOps")
     print("=" * 60)
 
     # Graph structure:
@@ -46,9 +46,9 @@ async def test_mixed_batch_async():
     # batch_llm: uses OpenAI Batch API (slow but cheaper)
     # summarizer: combines results
 
-    with GraphNode(name="mixed_workflow") as workflow:
+    with GraphOp(name="mixed_workflow") as workflow:
         # Prompt node to format input
-        prompt = PromptNode(
+        prompt = PromptOp(
             name="prompt",
             inputs={
                 "system_prompt": "You are a helpful assistant.",
@@ -59,7 +59,7 @@ async def test_mixed_batch_async():
         )
 
         # Fast async LLM (normal mode)
-        async_llm = LLMNode(
+        async_llm = LLMOp(
             name="fast_llm",
             resource_key="gpt-4o",
             batch_mode=False,
@@ -69,7 +69,7 @@ async def test_mixed_batch_async():
 
         # Batch LLM (uses Batch API - slow but 50% cheaper)
         # In real use case, you'd use this for non-time-sensitive tasks
-        batch_llm = LLMNode(
+        batch_llm = LLMOp(
             name="batch_llm",
             resource_key="gpt-4o",
             batch_mode=True,
@@ -86,7 +86,7 @@ async def test_mixed_batch_async():
     workflow.build()
 
     # Create state
-    schema = StateSchema(node=workflow)
+    schema = StateSchema(op=workflow)
     state = MemoryState(
         schema, inputs={"question": "What is the capital of France? Answer in one word."}
     )
@@ -103,7 +103,7 @@ async def test_mixed_batch_async():
 
 
 async def test_load_balancing_with_fallback():
-    """Test LLMNode with load balancing and fallback."""
+    """Test LLMOp with load balancing and fallback."""
     config_path = Path(__file__).parent.parent.parent / "resources.yaml"
     hub = ResourceHub.from_yaml(config_path)
     set_global_hub(hub)
@@ -113,8 +113,8 @@ async def test_load_balancing_with_fallback():
     print("TEST: Load balancing with fallback")
     print("=" * 60)
 
-    with GraphNode(name="lb_workflow") as workflow:
-        llm = LLMNode(
+    with GraphOp(name="lb_workflow") as workflow:
+        llm = LLMOp(
             name="chat",
             # Load balance between gpt-4o (70%) and claude (30%)
             resource_key=["gpt-4o", "or-claude-4-sonnet"],
@@ -132,7 +132,7 @@ async def test_load_balancing_with_fallback():
     print("\nRunning 5 requests with load balancing...\n")
 
     for i in range(5):
-        schema = StateSchema(node=workflow)
+        schema = StateSchema(op=workflow)
         state = MemoryState(
             schema,
             inputs={"messages": [{"role": "user", "content": f"Say 'test {i}' in one word"}]},
@@ -173,8 +173,8 @@ async def test_parallel_async_execution():
     ]
 
     for i, question in enumerate(questions):
-        with GraphNode(name=f"workflow_{i}") as workflow:
-            llm = LLMNode(
+        with GraphOp(name=f"workflow_{i}") as workflow:
+            llm = LLMOp(
                 name="chat",
                 resource_key="gpt-4o",
                 batch_mode=False,  # Fast async mode
@@ -184,7 +184,7 @@ async def test_parallel_async_execution():
             START >> llm >> END
         workflow.build()
 
-        schema = StateSchema(node=workflow)
+        schema = StateSchema(op=workflow)
         state = MemoryState(schema, inputs={"messages": [{"role": "user", "content": question}]})
 
         workflows.append(workflow)
@@ -208,7 +208,7 @@ async def test_parallel_async_execution():
 
 if __name__ == "__main__":
     print("Choose test mode:")
-    print("1. Mixed batch and async LLMNodes")
+    print("1. Mixed batch and async LLMOps")
     print("2. Load balancing with fallback")
     print("3. Parallel async execution (FAST - recommended)")
     print()

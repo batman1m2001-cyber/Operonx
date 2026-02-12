@@ -1,16 +1,16 @@
 import asyncio
 import time
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import END, PARENT, START, FuncOp, GraphOp, Hush
 from hush.core.tracers import LocalTracer
 
 
 async def main():
-    with GraphNode(name="my-workflow-2") as graph:
-        step1 = CodeNode(
+    with GraphOp(name="my-workflow-2") as graph:
+        step1 = FuncOp(
             name="fetch", code_fn=lambda: {"data": [1, 2, 3, 4, 5]}, outputs={"data": PARENT}
         )
-        step2 = CodeNode(
+        step2 = FuncOp(
             name="transform",
             code_fn=lambda data: {"result": sum(data)},
             inputs={"data": PARENT["data"]},

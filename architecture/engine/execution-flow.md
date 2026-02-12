@@ -2,7 +2,7 @@
 
 ## Overview
 
-`Hush` là execution engine chính, điều phối việc thực thi workflows.
+`Hush` la execution engine chinh, dieu phoi viec thuc thi workflows.
 
 Location: `hush-core/hush/core/engine.py`
 
@@ -12,11 +12,11 @@ Location: `hush-core/hush/core/engine.py`
 class Hush:
     __slots__ = ["graph", "name", "_schema"]
 
-    def __init__(self, graph: GraphNode):
+    def __init__(self, graph: GraphOp):
         self.graph = graph
         self.name = graph.name
 
-        # Build graph và tạo schema
+        # Build graph va tao schema
         self.graph.build()
         self._schema = StateSchema(self.graph)
 ```
@@ -30,7 +30,7 @@ engine = Hush(graph)
 ```
 
 - Build graph structure
-- Create StateSchema từ graph
+- Create StateSchema tu graph
 - Validate graph (entries, exits, edges)
 - Background process is **not** started here (lazy — only spawned on first traced request)
 
@@ -49,7 +49,7 @@ result = await engine.run(
 ### 3. State Creation
 
 ```python
-# Create fresh state cho mỗi run
+# Create fresh state cho moi run
 state = self._schema.create_state(
     inputs=inputs,
     user_id=user_id,
@@ -65,7 +65,7 @@ state = self._schema.create_state(
 result = await self.graph.run(state)
 ```
 
-GraphNode.run() thực thi tất cả child nodes theo dependency order.
+GraphOp.run() thuc thi tat ca child ops theo dependency order.
 
 ### 5. Cleanup
 
@@ -89,26 +89,26 @@ result["$state"] = state
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  1. Generate IDs (user_id, session_id, request_id)          │
-│                          ↓                                  │
+│                          |                                  │
 │  2. Create TraceStore (if tracer provided)                  │
-│                          ↓                                  │
+│                          |                                  │
 │  3. Create MemoryState from schema                          │
-│                          ↓                                  │
+│                          |                                  │
 │  4. graph.run(state) ─────────────────────────┐             │
 │                                               │             │
 │     ┌─────────────────────────────────────────┴───────┐     │
-│     │              GraphNode.run()                    │     │
+│     │              GraphOp.run()                    │     │
 │     ├─────────────────────────────────────────────────┤     │
-│     │  • Start entry nodes                            │     │
-│     │  • Wait for task completion                     │     │
-│     │  • Schedule successor nodes                     │     │
-│     │  • Repeat until all complete                    │     │
+│     │  * Start entry ops                              │     │
+│     │  * Wait for task completion                     │     │
+│     │  * Schedule successor ops                       │     │
+│     │  * Repeat until all complete                    │     │
 │     └─────────────────────────────────────────────────┘     │
-│                          ↓                                  │
+│                          |                                  │
 │  5. End streams                                             │
-│                          ↓                                  │
+│                          |                                  │
 │  6. Flush traces (background)                               │
-│                          ↓                                  │
+│                          |                                  │
 │  7. Return result + $state                                  │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -116,7 +116,7 @@ result["$state"] = state
 
 ## Multiple Runs
 
-Engine có thể run nhiều lần với fresh state:
+Engine co the run nhieu lan voi fresh state:
 
 ```python
 engine = Hush(graph)
@@ -124,7 +124,7 @@ engine = Hush(graph)
 # Each run creates new state
 result1 = await engine.run({"query": "first"})
 result2 = await engine.run({"query": "second"})
-# state1 và state2 độc lập
+# state1 va state2 doc lap
 ```
 
 ## Callable Syntax
@@ -143,7 +143,7 @@ engine.show()
 # Output:
 # === Hush Engine: my_workflow ===
 # Graph: my_workflow
-# Nodes: ['a', 'b', 'c']
+# Ops: ['a', 'b', 'c']
 # Edges:
 #   a -> b: normal
 #   b -> c: normal
@@ -175,5 +175,5 @@ from hush.ops import LangfuseTracer
 tracer = LangfuseTracer()
 result = await engine.run(inputs, tracer=tracer)
 
-# Traces được flush non-blocking sau khi run hoàn thành
+# Traces duoc flush non-blocking sau khi run hoan thanh
 ```

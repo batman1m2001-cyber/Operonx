@@ -2,16 +2,16 @@
 
 import pytest
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import END, PARENT, START, FuncOp, GraphOp, Hush
 
 
 class TestHushBasic:
     """Basic Hush engine tests."""
 
     def test_hush_creation(self):
-        """Test Hush can be created with a GraphNode."""
-        with GraphNode(name="test-workflow") as graph:
-            node = CodeNode(name="dummy", code_fn=lambda: {"x": 1})
+        """Test Hush can be created with a GraphOp."""
+        with GraphOp(name="test-workflow") as graph:
+            node = FuncOp(name="dummy", code_fn=lambda: {"x": 1})
             START >> node >> END
 
         engine = Hush(graph)
@@ -20,8 +20,8 @@ class TestHushBasic:
 
     def test_hush_repr(self):
         """Test Hush string representation."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(name="dummy", code_fn=lambda: {"x": 1})
+        with GraphOp(name="test") as graph:
+            node = FuncOp(name="dummy", code_fn=lambda: {"x": 1})
             START >> node >> END
 
         engine = Hush(graph)
@@ -34,8 +34,8 @@ class TestHushSchema:
 
     def test_schema_created_on_init(self):
         """Test schema is created during Hush initialization."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(name="node", code_fn=lambda: {"out": 1})
+        with GraphOp(name="test") as graph:
+            node = FuncOp(name="node", code_fn=lambda: {"out": 1})
             START >> node >> END
 
         engine = Hush(graph)
@@ -50,8 +50,8 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_run_simple_workflow(self):
         """Test running a simple workflow that returns constant."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(
+        with GraphOp(name="test") as graph:
+            node = FuncOp(
                 name="constant", code_fn=lambda: {"result": 42}, outputs={"result": PARENT}
             )
             START >> node >> END
@@ -65,8 +65,8 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_run_generates_ids(self):
         """Test run generates IDs if not provided."""
-        with GraphNode(name="test") as graph:
-            passthrough = CodeNode(name="passthrough", code_fn=lambda: {})
+        with GraphOp(name="test") as graph:
+            passthrough = FuncOp(name="passthrough", code_fn=lambda: {})
             START >> passthrough >> END
 
         engine = Hush(graph)
@@ -78,8 +78,8 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_run_with_custom_ids(self):
         """Test run with custom IDs."""
-        with GraphNode(name="test") as graph:
-            passthrough = CodeNode(name="passthrough", code_fn=lambda: {})
+        with GraphOp(name="test") as graph:
+            passthrough = FuncOp(name="passthrough", code_fn=lambda: {})
             START >> passthrough >> END
 
         engine = Hush(graph)
@@ -96,9 +96,9 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_run_multi_node_pipeline(self):
         """Test running a multi-node pipeline with constant outputs."""
-        with GraphNode(name="pipeline") as graph:
-            step1 = CodeNode(name="step1", code_fn=lambda: {"value": 10})
-            step2 = CodeNode(name="step2", code_fn=lambda: {"final": 20}, outputs={"final": PARENT})
+        with GraphOp(name="pipeline") as graph:
+            step1 = FuncOp(name="step1", code_fn=lambda: {"value": 10})
+            step2 = FuncOp(name="step2", code_fn=lambda: {"final": 20}, outputs={"final": PARENT})
             START >> step1 >> step2 >> END
 
         engine = Hush(graph)
@@ -109,8 +109,8 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_run_with_inputs(self):
         """Test running workflow with input data."""
-        with GraphNode(name="with-inputs") as graph:
-            node = CodeNode(
+        with GraphOp(name="with-inputs") as graph:
+            node = FuncOp(
                 name="doubler",
                 code_fn=lambda x: {"result": x * 2},
                 inputs={"x": PARENT["x"]},
@@ -126,8 +126,8 @@ class TestHushRun:
     @pytest.mark.asyncio
     async def test_callable_syntax(self):
         """Test engine(inputs) callable syntax."""
-        with GraphNode(name="callable") as graph:
-            node = CodeNode(
+        with GraphOp(name="callable") as graph:
+            node = FuncOp(
                 name="adder",
                 code_fn=lambda a, b: {"sum": a + b},
                 inputs={"a": PARENT["a"], "b": PARENT["b"]},
@@ -147,8 +147,8 @@ class TestHushWithTracer:
     @pytest.mark.asyncio
     async def test_run_with_none_tracer(self):
         """Test run with tracer=None works."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(name="node", code_fn=lambda: {"ok": True})
+        with GraphOp(name="test") as graph:
+            node = FuncOp(name="node", code_fn=lambda: {"ok": True})
             START >> node >> END
 
         engine = Hush(graph)
@@ -174,17 +174,17 @@ class TestHushWithTracer:
         tracer = LangfuseTracer(resource_key="langfuse:default")
 
         # Create a multi-step workflow
-        with GraphNode(name="hush-integration-test") as graph:
-            step1 = CodeNode(
+        with GraphOp(name="hush-integration-test") as graph:
+            step1 = FuncOp(
                 name="process_input",
                 code_fn=lambda: {"processed": "Hello from Hush!"},
                 outputs={"processed": PARENT},
             )
-            step2 = CodeNode(
+            step2 = FuncOp(
                 name="transform",
                 code_fn=lambda: {"transformed": "Data transformed"},
             )
-            step3 = CodeNode(
+            step3 = FuncOp(
                 name="finalize",
                 code_fn=lambda: {"result": "Workflow complete!"},
                 outputs={"result": PARENT},
@@ -210,8 +210,8 @@ class TestHushShow:
 
     def test_show(self, capsys):
         """Test show displays workflow structure."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(name="node", code_fn=lambda: {})
+        with GraphOp(name="test") as graph:
+            node = FuncOp(name="node", code_fn=lambda: {})
             START >> node >> END
 
         engine = Hush(graph)
@@ -227,9 +227,9 @@ class TestHushStateAccess:
     @pytest.mark.asyncio
     async def test_state_contains_execution_order(self):
         """Test $state contains execution order."""
-        with GraphNode(name="test") as graph:
-            a = CodeNode(name="step_a", code_fn=lambda: {"a": 1})
-            b = CodeNode(name="step_b", code_fn=lambda: {"b": 2})
+        with GraphOp(name="test") as graph:
+            a = FuncOp(name="step_a", code_fn=lambda: {"a": 1})
+            b = FuncOp(name="step_b", code_fn=lambda: {"b": 2})
             START >> a >> b >> END
 
         engine = Hush(graph)
@@ -244,8 +244,8 @@ class TestHushStateAccess:
     @pytest.mark.asyncio
     async def test_state_contains_trace_metadata(self):
         """Test $state contains trace metadata."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(
+        with GraphOp(name="test") as graph:
+            node = FuncOp(
                 name="processor",
                 code_fn=lambda x: {"y": x * 2},
                 inputs={"x": PARENT["x"]},
@@ -266,8 +266,8 @@ class TestHushStateAccess:
     @pytest.mark.asyncio
     async def test_state_metadata_contains_ids(self):
         """Test state metadata contains user/session/request IDs."""
-        with GraphNode(name="test") as graph:
-            node = CodeNode(name="node", code_fn=lambda: {})
+        with GraphOp(name="test") as graph:
+            node = FuncOp(name="node", code_fn=lambda: {})
             START >> node >> END
 
         engine = Hush(graph)
@@ -285,8 +285,8 @@ class TestHushMultipleRuns:
     @pytest.mark.asyncio
     async def test_multiple_runs_independent(self):
         """Test each run creates fresh state."""
-        with GraphNode(name="counter") as graph:
-            node = CodeNode(
+        with GraphOp(name="counter") as graph:
+            node = FuncOp(
                 name="echo",
                 code_fn=lambda n: {"value": n},
                 inputs={"n": PARENT["n"]},

@@ -6,7 +6,7 @@ Cần: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST trong .env
 Học được:
 - LangfuseTracer qua ResourceHub (resource_key)
 - LangfuseTracer qua direct config (LangfuseConfig.from_env)
-- Static tags (set on tracer) vs dynamic tags ($tags từ code_node)
+- Static tags (set on tracer) vs dynamic tags ($tags từ @op)
 - user_id, session_id, request_id: correlation trong Langfuse UI
 - Truy cập $state sau khi run
 
@@ -20,16 +20,16 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, MapNode, code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import Each, MapOp, op
 from hush.core.tracers import BaseTracer
 
 # =============================================================================
-# Code nodes với dynamic tags
+# Code ops với dynamic tags
 # =============================================================================
 
 
-@code_node
+@op
 def preprocess(text: str):
     """Tiền xử lý text, thêm dynamic tags."""
     cleaned = text.strip().lower()
@@ -39,7 +39,7 @@ def preprocess(text: str):
     return {"cleaned": cleaned, "$tags": tags}
 
 
-@code_node
+@op
 def tokenize(text: str):
     """Tách text thành tokens."""
     tokens = text.split()
@@ -49,13 +49,13 @@ def tokenize(text: str):
     return {"tokens": tokens, "count": len(tokens), "$tags": tags}
 
 
-@code_node
+@op
 def score_token(token: str, multiplier: int):
     """Tính score cho 1 token."""
     return {"score": len(token) * multiplier}
 
 
-@code_node
+@op
 def aggregate(scores: list):
     """Tổng hợp scores."""
     total = sum(scores) if scores else 0
@@ -66,7 +66,7 @@ def aggregate(scores: list):
     return {"total": total, "average": avg, "$tags": tags}
 
 
-@code_node
+@op
 def classify(score: float):
     """Phân loại dựa trên score."""
     if score > 50:
@@ -85,7 +85,7 @@ def classify(score: float):
 
 def build_text_analysis():
     """Pipeline: preprocess → tokenize → map(score) → aggregate → classify."""
-    with GraphNode(name="text-analysis") as graph:
+    with GraphOp(name="text-analysis") as graph:
         prep = preprocess(
             name="preprocess",
             inputs={"text": PARENT["text"]},
@@ -94,10 +94,10 @@ def build_text_analysis():
             name="tokenize",
             inputs={"text": prep["cleaned"]},
         )
-        with MapNode.of(
+        with MapOp.of(
             token=Each(tok["tokens"]),
             multiplier=PARENT["multiplier"],
-        ) as map_node:
+        ) as map_op:
             sc = score_token(
                 name="score",
                 inputs={"token": PARENT["token"], "multiplier": PARENT["multiplier"]},
@@ -107,7 +107,7 @@ def build_text_analysis():
 
         agg = aggregate(
             name="aggregate",
-            inputs={"scores": map_node["score"]},
+            inputs={"scores": map_op["score"]},
         )
         cls = classify(
             name="classify",
@@ -117,7 +117,7 @@ def build_text_analysis():
         agg["total"] >> PARENT["total"]
         agg["average"] >> PARENT["average"]
 
-        START >> prep >> tok >> map_node >> agg >> cls >> END
+        START >> prep >> tok >> map_op >> agg >> cls >> END
     return graph
 
 

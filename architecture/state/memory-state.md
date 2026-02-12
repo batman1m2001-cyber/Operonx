@@ -60,10 +60,10 @@ def __init__(self, schema, inputs=None, ...):
 ```python
 def __setitem__(self, key: Tuple[str, str, Optional[str]], value: Any):
     """Store value. Push to target if push_ref exists (1 hop)."""
-    node, var, ctx = key
-    idx = self.schema.get_index(node, var)
+    op, var, ctx = key
+    idx = self.schema.get_index(op, var)
     if idx < 0:
-        raise KeyError(f"({node}, {var}) không có trong schema")
+        raise KeyError(f"({op}, {var}) không có trong schema")
 
     ctx_key = ctx if ctx is not None else "main"
     self._cells[idx][ctx_key] = value
@@ -79,8 +79,8 @@ def __setitem__(self, key: Tuple[str, str, Optional[str]], value: Any):
 ```python
 def __getitem__(self, key: Tuple[str, str, Optional[str]]) -> Any:
     """Get value. Pull from source if pull_ref exists (1 hop)."""
-    node, var, ctx = key
-    idx = self.schema.get_index(node, var)
+    op, var, ctx = key
+    idx = self.schema.get_index(op, var)
     if idx < 0:
         return None
 
@@ -119,11 +119,11 @@ state.set_by_index(idx, value, ctx)
 ### record_execution()
 
 ```python
-def record_execution(self, node_name, parent, context_id):
-    """Track node execution order."""
+def record_execution(self, op_name, parent, context_id):
+    """Track op execution order."""
     if self._execution_order is not None:
         self._execution_order.append({
-            "node": node_name,
+            "op": op_name,
             "parent": parent,
             "context_id": context_id
         })
@@ -134,7 +134,7 @@ def record_execution(self, node_name, parent, context_id):
 ```python
 def record_trace_metadata(
     self,
-    node_name: str,
+    op_name: str,
     context_id: Optional[str],
     name: str,
     input_vars: List[str],
@@ -152,10 +152,10 @@ def record_trace_metadata(
     """Store trace data."""
     if self._trace_store is not None:
         # Write directly to SQLite
-        self._trace_store.insert_node_trace(...)
+        self._trace_store.insert_op_trace(...)
     else:
         # Store in memory
-        key = f"{node_name}:{context_id}" if context_id else node_name
+        key = f"{op_name}:{context_id}" if context_id else op_name
         self._trace_metadata[key] = {...}
 ```
 
@@ -168,7 +168,7 @@ state.add_tag("cache-hit")
 # Add multiple tags
 state.add_tags(["processed", "validated"])
 
-# From node output
+# From op output
 return {"result": data, "$tags": ["success"]}
 ```
 
@@ -212,8 +212,8 @@ state.show()
 
 # Output:
 # === MemoryState: my_workflow ===
-# my_graph.node_a.input [main] = "hello"
-# my_graph.node_a.result [main] = "HELLO"
+# my_graph.op_a.input [main] = "hello"
+# my_graph.op_a.result [main] = "HELLO"
 # my_graph.loop.inner.item:
 #   [[0]] = 1
 #   [[1]] = 2

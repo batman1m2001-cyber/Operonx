@@ -3,9 +3,9 @@
 Không cần API key. Chỉ dùng hush-core.
 
 Học được:
-- ForLoopNode: iterate tuần tự
-- MapNode: iterate song song (parallel)
-- WhileLoopNode: loop với điều kiện
+- ForOp: iterate tuần tự
+- MapOp: iterate song song (parallel)
+- WhileOp: loop với điều kiện
 - if_(): routing có điều kiện
 - Each(): đánh dấu biến để iterate
 - Soft edge (~): merge sau branch
@@ -15,27 +15,27 @@ Chạy: cd hush-tutorial && uv run python examples/05_loops_and_branches.py
 
 import asyncio
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, ForLoopNode, MapNode, WhileLoopNode, code_node, if_
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import Each, ForOp, MapOp, WhileOp, op, if_
 
 # =============================================================================
-# Code nodes dùng @code_node decorator (gọn hơn CodeNode class)
+# Code ops dùng @op decorator (gọn hơn FuncOp class)
 # =============================================================================
 
 
-@code_node
+@op
 def process_item(item: str, prefix: str):
     """Xử lý 1 item."""
     return {"result": f"{prefix}: {item}"}
 
 
-@code_node
+@op
 def square(x: int):
     """Bình phương số."""
     return {"squared": x * x}
 
 
-@code_node
+@op
 def halve_value(value: int):
     """Chia đôi giá trị."""
     return {"new_value": value // 2}
@@ -47,13 +47,13 @@ def halve_value(value: int):
 
 
 async def example_1_for_loop():
-    """ForLoopNode — Xử lý tuần tự từng item."""
+    """ForOp — Xử lý tuần tự từng item."""
     print("=" * 50)
-    print("Ví dụ 1: ForLoopNode (sequential)")
+    print("Ví dụ 1: ForOp (sequential)")
     print("=" * 50)
 
-    with GraphNode(name="for-loop-demo") as graph:
-        with ForLoopNode.of(
+    with GraphOp(name="for-loop-demo") as graph:
+        with ForOp.of(
             item=Each(PARENT["items"]),  # Iterate qua mỗi item
             prefix=PARENT["prefix"],  # Broadcast cho tất cả iterations
         ) as loop:
@@ -79,18 +79,18 @@ async def example_1_for_loop():
     # ['Fruit: apple', 'Fruit: banana', 'Fruit: cherry']
 
 
-async def example_2_map_node():
-    """MapNode — Xử lý song song, có giới hạn concurrency."""
+async def example_2_map_op():
+    """MapOp — Xử lý song song, có giới hạn concurrency."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: MapNode (parallel)")
+    print("Ví dụ 2: MapOp (parallel)")
     print("=" * 50)
 
-    with GraphNode(name="map-node-demo") as graph:
-        with MapNode.of(
+    with GraphOp(name="map-op-demo") as graph:
+        with MapOp.of(
             x=Each(PARENT["numbers"]),
             max_concurrency=3,  # Tối đa 3 tasks cùng lúc
-        ) as map_node:
+        ) as map_op:
             step = square(
                 name="square",
                 inputs={"x": PARENT["x"]},
@@ -98,8 +98,8 @@ async def example_2_map_node():
             )
             START >> step >> END
 
-        map_node["squared"] >> PARENT["results"]
-        START >> map_node >> END
+        map_op["squared"] >> PARENT["results"]
+        START >> map_op >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"numbers": [1, 2, 3, 4, 5]})
@@ -110,14 +110,14 @@ async def example_2_map_node():
 
 
 async def example_3_while_loop():
-    """WhileLoopNode — Loop cho đến khi điều kiện dừng."""
+    """WhileOp — Loop cho đến khi điều kiện dừng."""
     print()
     print("=" * 50)
-    print("Ví dụ 3: WhileLoopNode (conditional)")
+    print("Ví dụ 3: WhileOp (conditional)")
     print("=" * 50)
 
-    with GraphNode(name="while-loop-demo") as graph:
-        with WhileLoopNode.of(
+    with GraphOp(name="while-loop-demo") as graph:
+        with WhileOp.of(
             value=PARENT["start_value"],
             stop_condition="value < 5",
             max_iterations=20,
@@ -140,30 +140,30 @@ async def example_3_while_loop():
     # 256 → 128 → 64 → 32 → 16 → 8 → 4 (dừng vì < 5)
 
 
-async def example_4_branch_node():
+async def example_4_branch_op():
     """if_() — Routing theo điều kiện."""
     print()
     print("=" * 50)
     print("Ví dụ 4: if_() (conditional routing)")
     print("=" * 50)
 
-    @code_node
+    @op
     def excellent():
         return {"grade": "A", "message": "Xuất sắc!"}
 
-    @code_node
+    @op
     def good():
         return {"grade": "B", "message": "Tốt!"}
 
-    @code_node
+    @op
     def average():
         return {"grade": "C", "message": "Trung bình"}
 
-    @code_node
+    @op
     def fail():
         return {"grade": "F", "message": "Cần cải thiện"}
 
-    with GraphNode(name="grade-workflow") as graph:
+    with GraphOp(name="grade-workflow") as graph:
         grade_router = (
             if_(PARENT["score"] >= 90, "ex")
             .if_(PARENT["score"] >= 70, "gd")
@@ -195,17 +195,17 @@ async def example_5_nested_loops():
     print("Ví dụ 5: Nested Loops")
     print("=" * 50)
 
-    @code_node
+    @op
     def multiply(x: int, y: int):
         return {"product": x * y}
 
-    @code_node
+    @op
     def summarize(products: list):
         return {"total": sum(products) if products else 0}
 
-    with GraphNode(name="nested-loops") as graph:
-        with ForLoopNode.of(x=Each([2, 3, 4])) as outer:
-            with ForLoopNode.of(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
+    with GraphOp(name="nested-loops") as graph:
+        with ForOp.of(x=Each([2, 3, 4])) as outer:
+            with ForOp.of(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
                 mult = multiply(
                     name="multiply",
                     inputs={"x": PARENT["x"], "y": PARENT["y"]},
@@ -233,9 +233,9 @@ async def example_5_nested_loops():
 
 async def main():
     await example_1_for_loop()
-    await example_2_map_node()
+    await example_2_map_op()
     await example_3_while_loop()
-    await example_4_branch_node()
+    await example_4_branch_op()
     await example_5_nested_loops()
 
 

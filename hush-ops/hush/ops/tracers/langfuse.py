@@ -179,7 +179,7 @@ class LangfuseTracer(BaseTracer):
             session_id = flush_data.get("session_id")
             tags = flush_data.get("tags", [])
             execution_order = flush_data["execution_order"]
-            nodes_trace_data = flush_data["nodes_trace_data"]
+            ops_trace_data = flush_data["ops_trace_data"]
 
             LOGGER.info(
                 "Workflow: %s, Request ID: %s, Creating Langfuse trace hierarchy...",
@@ -192,14 +192,14 @@ class LangfuseTracer(BaseTracer):
             root_trace = None
 
             for execution in execution_order:
-                node_id = execution["node"]
+                op_id = execution["op"]
                 parent_id = execution["parent"]
                 context_id = execution.get("context_id")
                 contain_generation = execution.get("contain_generation", False)
 
                 # Get trace data for this node
-                trace_key = f"{node_id}:{context_id}" if context_id else node_id
-                trace_data = nodes_trace_data.get(trace_key)
+                trace_key = f"{op_id}:{context_id}" if context_id else op_id
+                trace_data = ops_trace_data.get(trace_key)
                 if trace_data is None:
                     continue
 
@@ -209,7 +209,7 @@ class LangfuseTracer(BaseTracer):
 
                 # Build unique key for context-aware nodes
                 if context_id:
-                    node_id = f"{node_id}:{context_id}"
+                    op_id = f"{op_id}:{context_id}"
 
                 # Check for context-aware parent
                 # For nested contexts like [0].[1], we need to find the right parent:
@@ -247,7 +247,7 @@ class LangfuseTracer(BaseTracer):
                         output=trace_data.get("output"),
                         metadata=trace_data.get("metadata"),
                     )
-                    langfuse_objects[node_id] = root_trace
+                    langfuse_objects[op_id] = root_trace
                 else:
                     # Child node - create span or generation
                     parent = langfuse_objects.get(parent_id)
@@ -255,7 +255,7 @@ class LangfuseTracer(BaseTracer):
                         LOGGER.warning(
                             "Parent '%s' not found for node '%s'",
                             parent_id,
-                            node_id,
+                            op_id,
                         )
                         continue
 
@@ -288,12 +288,12 @@ class LangfuseTracer(BaseTracer):
                                 trace_data["metadata"] = {}
                             trace_data["metadata"]["cost_usd"] = cost
 
-                        langfuse_objects[node_id] = parent.generation(**trace_data)
+                        langfuse_objects[op_id] = parent.generation(**trace_data)
                     else:
                         # Spans don't use cost or usage, remove them
                         trace_data.pop("cost", None)
                         trace_data.pop("usage", None)
-                        langfuse_objects[node_id] = parent.span(**trace_data)
+                        langfuse_objects[op_id] = parent.span(**trace_data)
 
             # Ensure all traces are sent to Langfuse
             client.flush()

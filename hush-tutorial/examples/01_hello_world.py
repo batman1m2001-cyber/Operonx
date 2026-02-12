@@ -3,10 +3,10 @@
 Không cần API key. Chỉ dùng hush-core.
 
 Học được:
-- GraphNode: container chứa workflow
-- @code_node: decorator tạo node từ Python function
+- GraphOp: container chứa workflow
+- @op: decorator tạo op từ Python function
 - PARENT: truy cập data từ parent state
-- START >> node >> END: kết nối nodes
+- START >> step >> END: kết nối ops
 - Hush engine: chạy workflow
 
 Chạy: cd hush-tutorial && uv run python examples/01_hello_world.py
@@ -14,43 +14,43 @@ Chạy: cd hush-tutorial && uv run python examples/01_hello_world.py
 
 import asyncio
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes.transform.code_node import code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops.transform.func_op import op
 
 # =============================================================================
-# Định nghĩa code nodes với @code_node decorator
+# Định nghĩa code ops với @op decorator
 # =============================================================================
 
 
-@code_node
+@op
 def greet(name: str):
     """Tạo greeting từ tên."""
     return {"greeting": f"Xin chào, {name}!"}
 
 
-@code_node
+@op
 def greet_en(name: str):
     """Tạo greeting tiếng Anh."""
     return {"greeting": f"Hello, {name}!"}
 
 
-@code_node
+@op
 def upper(text: str):
     """Chuyển thành uppercase."""
     return {"result": text.upper()}
 
 
-@code_node
+@op
 def step_a():
     return {"a_result": "Kết quả A"}
 
 
-@code_node
+@op
 def step_b():
     return {"b_result": "Kết quả B"}
 
 
-@code_node
+@op
 def merge(a: str, b: str):
     return {"combined": f"{a} + {b}"}
 
@@ -63,7 +63,7 @@ async def main():
     print("Ví dụ 1: Hello World")
     print("=" * 50)
 
-    with GraphNode(name="hello-world") as graph:
+    with GraphOp(name="hello-world") as graph:
         g = greet(name=PARENT["name"])
         START >> g >> END
 
@@ -74,18 +74,18 @@ async def main():
     # Output: Xin chào, Hush!
 
     # =========================================================================
-    # Ví dụ 2: Hai nodes nối tiếp
+    # Ví dụ 2: Hai ops nối tiếp
     # =========================================================================
     print()
     print("=" * 50)
-    print("Ví dụ 2: Hai nodes nối tiếp")
+    print("Ví dụ 2: Hai ops nối tiếp")
     print("=" * 50)
 
-    with GraphNode(name="two-steps") as graph:
-        # Node 1: Tạo greeting
+    with GraphOp(name="two-steps") as graph:
+        # Op 1: Tạo greeting
         g = greet_en(name=PARENT["name"], outputs={"*": PARENT})
 
-        # Node 2: Chuyển thành uppercase — đọc output từ node g
+        # Op 2: Chuyển thành uppercase — đọc output từ op g
         u = upper(text=g["greeting"])
 
         START >> g >> u >> END
@@ -98,14 +98,14 @@ async def main():
     # Output: HELLO, HUSH USER!
 
     # =========================================================================
-    # Ví dụ 3: Nodes chạy song song
+    # Ví dụ 3: Ops chạy song song
     # =========================================================================
     print()
     print("=" * 50)
-    print("Ví dụ 3: Nodes song song")
+    print("Ví dụ 3: Ops song song")
     print("=" * 50)
 
-    with GraphNode(name="parallel") as graph:
+    with GraphOp(name="parallel") as graph:
         a = step_a()
         b = step_b()
         m = merge(a=a["a_result"], b=b["b_result"])

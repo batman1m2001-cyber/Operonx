@@ -64,11 +64,11 @@ nav:
           - Data Flow: architecture/state/data-flow.md
           - Indexer: architecture/state/indexer.md
       - Nodes:
-          - Base Node: architecture/nodes/base-node.md
-          - Graph Node: architecture/nodes/graph-node.md
-          - Branch Node: architecture/nodes/branch-node.md
-          - Iteration Nodes: architecture/nodes/iteration-nodes.md
-          - Creating Custom Nodes: architecture/nodes/creating-custom-node.md
+          - Base Node: architecture/ops/base-node.md
+          - Graph Node: architecture/ops/graph-node.md
+          - Branch Node: architecture/ops/branch-node.md
+          - Iteration Nodes: architecture/ops/iteration-nodes.md
+          - Creating Custom Nodes: architecture/ops/creating-custom-node.md
       - Providers:
           - LLM Abstraction: architecture/providers/llm-abstraction.md
           - Embedding Provider: architecture/providers/embedding-provider.md

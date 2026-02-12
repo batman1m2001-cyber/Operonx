@@ -1,0 +1,362 @@
+"""Node thực thi code Python trong workflow."""
+
+import ast
+import inspect
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+from hush.core.configs.op_config import OpType
+from hush.core.exceptions import CodeError
+from hush.core.loggings import LOGGER
+from hush.core.ops.base import _BASE_INIT_KEYS, BaseOp, split_shorthand_kwargs
+from hush.core.utils.auto_name import register_skip
+from hush.core.utils.common import Param, ensure_async
+
+if TYPE_CHECKING:
+    from hush.core.states import MemoryState
+
+
+def op(func):
+    """Decorator chuyển function thành factory tạo FuncOp.
+
+    Sử dụng:
+        @op
+        def my_function(arg1, arg2):
+            return {"result": value}
+
+        node = my_function(inputs={"arg1": PARENT, "arg2": "value"})
+    """
+    # Warn at decoration time if function params collide with reserved node keywords
+    sig = inspect.signature(func)
+    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
+    if collisions:
+        LOGGER.warning(
+            "@op function '%s' has parameter(s) %s that collide with reserved node keywords %s. "
+            "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
+            "as node constructor args instead of function inputs. Consider renaming them.",
+            func.__name__,
+            sorted(collisions),
+            sorted(_BASE_INIT_KEYS),
+            func.__name__,
+        )
+
+    @wraps(func)
+    def wrapper(**kwargs):
+        mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
+        return FuncOp(code_fn=func, _mappings=mappings or None, **init_kwargs)
+
+    register_skip(wrapper)
+    wrapper.__wrapped__ = func
+    return wrapper
+
+
+TYPE_MAP = {
+    "str": str,
+    "string": str,
+    "int": int,
+    "integer": int,
+    "float": float,
+    "bool": bool,
+    "boolean": bool,
+    "list": list,
+    "List": list,
+    "dict": dict,
+    "Dict": dict,
+    "any": Any,
+    "Any": Any,
+}
+
+
+def parse_default_value(value_str: str, param_type: type) -> Any:
+    """Parse chuỗi giá trị mặc định thành type phù hợp.
+
+    Trả về None nếu parse thất bại.
+    """
+    value_str = value_str.strip()
+
+    # Xử lý chuỗi rỗng
+    if not value_str:
+        if param_type == list:
+            return []
+        elif param_type == dict:
+            return {}
+        elif param_type == str:
+            return ""
+        return None
+
+    try:
+        if param_type == bool:
+            return value_str.lower() in ("true", "1", "yes")
+        elif param_type == int:
+            return int(value_str)
+        elif param_type == float:
+            return float(value_str)
+        elif param_type == list:
+            return []
+        elif param_type == dict:
+            return {}
+        else:
+            return value_str  # str hoặc Any
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_comment(comment: str) -> tuple:
+    """Parse comment dạng '(type) description' hoặc '(type=default) description'.
+
+    Chỉ nhận diện các type đã biết trong ngoặc đơn ở ĐẦU comment.
+
+    Ví dụ:
+        '(str) greeting message' -> (str, None, 'greeting message')
+        '(int=0) the count' -> (int, 0, 'the count')
+        '(bool=true) enabled flag' -> (bool, True, 'enabled flag')
+        'just a description' -> (Any, None, 'just a description')
+        'use (carefully) here' -> (Any, None, 'use (carefully) here')
+    """
+    comment = comment.strip()
+    default = None
+
+    if comment.startswith("(") and ")" in comment:
+        close_idx = comment.index(")")
+        type_part = comment[1:close_idx].strip()
+
+        # Kiểm tra giá trị mặc định: (type=default)
+        if "=" in type_part:
+            type_str, default_str = type_part.split("=", 1)
+            type_str = type_str.strip()
+        else:
+            type_str = type_part
+            default_str = None
+
+        # Chỉ coi là type nếu thuộc danh sách type đã biết
+        if type_str in TYPE_MAP:
+            param_type = TYPE_MAP[type_str]
+            description = comment[close_idx + 1 :].strip()
+
+            # Parse giá trị mặc định nếu có
+            if default_str is not None:
+                default = parse_default_value(default_str, param_type)
+
+            return param_type, default, description
+
+    # Không tìm thấy type hợp lệ, coi toàn bộ comment là description
+    return Any, None, comment
+
+
+def _extract_dict_keys(dict_node: ast.Dict, source_lines: List[str]) -> Dict[str, Param]:
+    """Trích xuất các key từ AST Dict node."""
+    schema = {}
+    for key_node in dict_node.keys:
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            key_name = key_node.value
+
+            # Trích xuất type, default, và description từ inline comment
+            param_type = Any
+            default = None
+            description = ""
+            for src_line in source_lines:
+                # Kiểm tra cả single và double quotes
+                if "#" in src_line and (f'"{key_name}"' in src_line or f"'{key_name}'" in src_line):
+                    comment = src_line.split("#", 1)[1].strip()
+                    param_type, default, description = parse_comment(comment)
+                    break
+
+            schema[key_name] = Param(type=param_type, default=default, description=description)
+    return schema
+
+
+def extract_return_schema(func: Callable) -> Dict[str, Param]:
+    """Trích xuất return schema từ source code của function sử dụng AST.
+
+    Hỗ trợ:
+        # Function thông thường
+        return {"key": value}
+        return {"key": value,  # description}
+        return {"key": value,  # (type) description}
+
+        # Lambda function
+        lambda x: {"key": value}
+        lambda x: {"key": value,  # (type) description}
+    """
+    try:
+        source = inspect.getsource(func)
+        source_lines = source.splitlines()
+        cleaned_source = inspect.cleandoc(source)
+
+        # Try to parse the source directly
+        tree = None
+        try:
+            tree = ast.parse(cleaned_source)
+        except SyntaxError:
+            # If direct parsing fails (e.g., lambda in function call on single line),
+            # try to extract just the lambda expression with proper brace matching
+            lambda_idx = cleaned_source.find("lambda")
+            if lambda_idx != -1:
+                # Find the opening brace after lambda
+                brace_start = cleaned_source.find("{", lambda_idx)
+                if brace_start != -1:
+                    # Count braces to find matching close
+                    depth = 1
+                    pos = brace_start + 1
+                    while pos < len(cleaned_source) and depth > 0:
+                        if cleaned_source[pos] == "{":
+                            depth += 1
+                        elif cleaned_source[pos] == "}":
+                            depth -= 1
+                        pos += 1
+                    if depth == 0:
+                        lambda_source = cleaned_source[lambda_idx:pos]
+                        try:
+                            tree = ast.parse(lambda_source)
+                        except SyntaxError:
+                            pass
+
+        if tree is None:
+            return {}
+
+        schema = {}
+        for node in ast.walk(tree):
+            # Xử lý câu lệnh return của function thông thường
+            if isinstance(node, ast.Return) and node.value:
+                if isinstance(node.value, ast.Dict):
+                    schema.update(_extract_dict_keys(node.value, source_lines))
+
+            # Xử lý lambda expression (body là giá trị return)
+            elif isinstance(node, ast.Lambda):
+                if isinstance(node.body, ast.Dict):
+                    schema.update(_extract_dict_keys(node.body, source_lines))
+
+        return schema
+    except Exception:
+        return {}
+
+
+class FuncOp(BaseOp):
+    """Node thực thi function Python.
+
+    Tự động trích xuất input/output từ function signature và AST.
+    Hỗ trợ cả sync và async function.
+    """
+
+    type: OpType = "code"
+
+    __slots__ = ["code_fn", "source"]
+
+    def __init__(
+        self,
+        code_fn: Optional[Callable] = None,
+        return_keys: Optional[List[str]] = None,
+        inputs: Dict[str, Any] = None,
+        outputs: Dict[str, Any] = None,
+        _mappings: Dict[str, Any] = None,
+        **kwargs,
+    ):
+        # Parse inputs/outputs từ function signature/AST
+        parsed_inputs, parsed_outputs = self._parse_function(code_fn, return_keys)
+
+        # Split _mappings into inputs/outputs using parsed schema
+        if _mappings:
+            for key, value in _mappings.items():
+                if key in parsed_inputs:
+                    if inputs is None:
+                        inputs = {}
+                    inputs[key] = value
+                elif key in parsed_outputs:
+                    if outputs is None:
+                        outputs = {}
+                    outputs[key] = value
+                else:
+                    raise TypeError(
+                        f"'{key}' is not a known input or output of {code_fn.__name__}(). "
+                        f"Inputs: {set(parsed_inputs)}, Outputs: {set(parsed_outputs)}"
+                    )
+
+        # Gọi super().__init__ không truyền inputs/outputs
+        super().__init__(**kwargs)
+
+        # Normalize user-provided inputs/outputs first (handles {"*": PARENT} wildcard)
+        normalized_inputs = self._normalize_params(inputs)
+        normalized_outputs = self._normalize_params(outputs)
+
+        # Merge parsed schema với normalized inputs/outputs
+        self.inputs = self._merge_params(parsed_inputs, normalized_inputs)
+        self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
+
+        self.code_fn = code_fn
+        self.core = ensure_async(code_fn) if code_fn else None
+
+        # Lấy source code
+        try:
+            self.source = inspect.getsource(code_fn) if code_fn else ""
+        except:
+            self.source = str(code_fn) if code_fn else ""
+
+        # Set description từ docstring nếu chưa có
+        if not self.description and code_fn and code_fn.__doc__:
+            self.description = code_fn.__doc__.strip().split("\n")[0]
+
+    def _parse_function(
+        self, code_fn: Optional[Callable], return_keys: Optional[List[str]]
+    ) -> tuple:
+        """Parse inputs/outputs từ function signature và source.
+
+        Returns:
+            Tuple[Dict[str, Param], Dict[str, Param]]: (inputs, outputs)
+        """
+        if code_fn is None:
+            return {}, {}
+
+        # Parse inputs từ function parameters
+        inputs = {}
+        sig = inspect.signature(code_fn)
+
+        for param_name, param in sig.parameters.items():
+            param_type = param.annotation if param.annotation != inspect.Parameter.empty else None
+            has_default = param.default != inspect.Parameter.empty
+            default_val = param.default if has_default else None
+
+            inputs[param_name] = Param(
+                type=param_type, required=not has_default, default=default_val
+            )
+
+        # Parse outputs: return_keys explicit > AST parsing
+        if return_keys:
+            outputs = {key: Param() for key in return_keys}
+        else:
+            # Parse return schema từ source code (với type hints và descriptions)
+            outputs = extract_return_schema(code_fn)
+
+        return inputs, outputs
+
+    async def run(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str] = None,
+        parent_context: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Thực thi FuncOp với error wrapping.
+
+        Override để wrap exceptions trong CodeError với context đầy đủ.
+        """
+        try:
+            return await super().run(state, context_id, parent_context)
+        except CodeError:
+            raise  # Đã wrapped, không wrap lại
+        except Exception as e:
+            # Lấy inputs để có context cho error
+            _inputs = self.get_inputs(state, context_id, parent_context)
+            raise CodeError(
+                message=f"Function '{self.code_fn.__name__ if self.code_fn else 'unknown'}' raised an exception",
+                function_name=self.code_fn.__name__ if self.code_fn else "unknown",
+                source=self.source,
+                inputs=_inputs,
+                original_error=e,
+            ) from e
+
+    @property
+    def specific_metadata(self) -> Dict[str, Any]:
+        """Trả về metadata riêng của subclass."""
+        return {
+            "code_fn": self.source[:200] + "..." if len(self.source) > 200 else self.source,
+            "function_name": self.code_fn.__name__ if self.code_fn else "unknown",
+        }

@@ -2,31 +2,31 @@
 
 ## Overview
 
-Graph compilation xảy ra trong 2 phases:
+Graph compilation xay ra trong 2 phases:
 1. `graph.build()` - Build graph structure
 2. `StateSchema(graph)` - Build state schema
 
 ## Phase 1: Graph Build
 
-### GraphNode.build()
+### GraphOp.build()
 
 ```python
 def build(self):
-    # 1. Build tất cả child nodes trước (recursive)
-    for node in self._nodes.values():
-        if hasattr(node, 'build'):
-            node.build()
+    # 1. Build tat ca child ops truoc (recursive)
+    for op in self._ops.values():
+        if hasattr(op, 'build'):
+            op.build()
 
-    # 2. Setup inputs/outputs schema từ child nodes
+    # 2. Setup inputs/outputs schema tu child ops
     self._setup_schema()
 
-    # 3. Xác định flow type của mỗi node
+    # 3. Xac dinh flow type cua moi op
     self._build_flow_type()
 
     # 4. Setup entry/exit endpoints
     self._setup_endpoints()
 
-    # 5. Tính ready_count
+    # 5. Tinh ready_count
     self._compute_ready_counts()
 
     self._is_building = False
@@ -35,22 +35,22 @@ def build(self):
 
 ### _setup_schema()
 
-Scan child nodes để tìm PARENT refs:
+Scan child ops de tim PARENT refs:
 
 ```python
 def _setup_schema(self):
     graph_inputs = {}
     graph_outputs = {}
 
-    for _, node in self._nodes.items():
-        # Input refs đến PARENT → graph input
-        for var, param in node.inputs.items():
-            if isinstance(param.value, Ref) and param.value.raw_node is self:
+    for _, op in self._ops.items():
+        # Input refs den PARENT -> graph input
+        for var, param in op.inputs.items():
+            if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_inputs[param.value.var] = Param(...)
 
-        # Output refs đến PARENT → graph output
-        for var, param in node.outputs.items():
-            if isinstance(param.value, Ref) and param.value.raw_node is self:
+        # Output refs den PARENT -> graph output
+        for var, param in op.outputs.items():
+            if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_outputs[param.value.var] = Param(...)
 
     self.inputs = self._merge_params(graph_inputs, self.inputs)
@@ -59,15 +59,15 @@ def _setup_schema(self):
 
 ### _build_flow_type()
 
-Xác định pattern của mỗi node:
+Xac dinh pattern cua moi op:
 
 ```python
 def _build_flow_type(self):
-    for name, node in self._nodes.items():
+    for name, op in self._ops.items():
         prev_count = len(self.prevs[name])
         next_count = len(self.nexts[name])
 
-        if node.type == "branch":
+        if op.type == "branch":
             flow_type = "BRANCH"
         elif prev_count > 1 and next_count > 1:
             flow_type = "BLOOM"
@@ -85,29 +85,29 @@ def _build_flow_type(self):
 
 ```python
 def _setup_endpoints(self):
-    # Entry nodes: không có predecessor
+    # Entry ops: khong co predecessor
     if not self.entries:
-        self.entries = [n for n in self._nodes if not self.prevs[n]]
+        self.entries = [n for n in self._ops if not self.prevs[n]]
 
-    # Exit nodes: không có successor
+    # Exit ops: khong co successor
     if not self.exits:
-        self.exits = [n for n in self._nodes if not self.nexts[n]]
+        self.exits = [n for n in self._ops if not self.nexts[n]]
 
     # Validate
     if not self.entries:
-        raise ValueError("Graph phải có ít nhất một entry node")
+        raise ValueError("Graph phai co it nhat mot entry op")
     if not self.exits:
-        raise ValueError("Graph phải có ít nhất một exit node")
+        raise ValueError("Graph phai co it nhat mot exit op")
 ```
 
 ### Ready Count Calculation
 
 ```python
-# Hard edges: đếm từng predecessor
-# Soft edges: đếm chung tất cả soft predecessors là 1
+# Hard edges: dem tung predecessor
+# Soft edges: dem chung tat ca soft predecessors la 1
 
 self.ready_count = {}
-for name in self._nodes:
+for name in self._ops:
     hard_pred_count = 0
     has_soft = False
 
@@ -130,41 +130,41 @@ for name in self._nodes:
 ### StateSchema.__init__()
 
 ```python
-def __init__(self, node=None):
+def __init__(self, op=None):
     self._var_to_idx = {}
     self._defaults = []
     self._pull_refs = []
     self._push_refs = []
 
-    if node:
-        self._load_from(node)  # Collect variables
+    if op:
+        self._load_from(op)  # Collect variables
         self._build()          # Resolve refs
 ```
 
 ### _load_from() - Recursive Collection
 
 ```python
-def _load_from(self, node):
-    node_name = node.full_name
+def _load_from(self, op):
+    op_name = op.full_name
 
     # Register input variables
-    for var_name, param in node.inputs.items():
-        self._register(node_name, var_name, param.value or param.default)
+    for var_name, param in op.inputs.items():
+        self._register(op_name, var_name, param.value or param.default)
 
     # Register output variables
-    for var_name, param in node.outputs.items():
+    for var_name, param in op.outputs.items():
         if isinstance(param.value, Ref):
-            self._register_push_ref(node_name, var_name, param.value)
+            self._register_push_ref(op_name, var_name, param.value)
         else:
-            self._register(node_name, var_name, param.default)
+            self._register(op_name, var_name, param.default)
 
     # Register metadata
     for meta_var in ("start_time", "end_time", "error"):
-        self._register(node_name, meta_var, None)
+        self._register(op_name, meta_var, None)
 
-    # Recurse into child nodes
-    if hasattr(node, '_nodes'):
-        for child in node._nodes.values():
+    # Recurse into child ops
+    if hasattr(op, '_ops'):
+        for child in op._ops.values():
             self._load_from(child)
 ```
 
@@ -177,7 +177,7 @@ def _build(self):
 
         # Resolve pull refs
         if isinstance(value, Ref):
-            source_key = (value.node, value.var)
+            source_key = (value.source, value.var)
             source_idx = self._var_to_idx.get(source_key, -1)
             value.idx = source_idx
             self._pull_refs[idx] = value
@@ -186,7 +186,7 @@ def _build(self):
         # Resolve push refs
         push_ref = self._push_refs[idx]
         if push_ref:
-            target_key = (push_ref.node, push_ref.var)
+            target_key = (push_ref.source, push_ref.var)
             target_idx = self._var_to_idx.get(target_key, -1)
             push_ref.idx = target_idx
 ```
@@ -196,7 +196,7 @@ def _build(self):
 ### Graph Structure
 
 ```
-graph._nodes: {name: BaseNode}
+graph._ops: {name: BaseOp}
 graph._edges: [EdgeConfig]
 graph._edges_lookup: {(src, dst): EdgeConfig}
 graph.prevs: {name: [predecessors]}
@@ -209,7 +209,7 @@ graph.ready_count: {name: int}
 ### State Structure
 
 ```
-schema._var_to_idx: {(node, var): idx}
+schema._var_to_idx: {(op, var): idx}
 schema._defaults: [default_values]
 schema._pull_refs: [Ref with resolved idx]
 schema._push_refs: [Ref with resolved idx]
@@ -218,12 +218,12 @@ schema._push_refs: [Ref with resolved idx]
 ## Nested Graph Compilation
 
 ```python
-with GraphNode(name="outer") as outer:
-    with GraphNode(name="inner") as inner:
-        a = CodeNode(name="a", ...)
+with GraphOp(name="outer") as outer:
+    with GraphOp(name="inner") as inner:
+        a = FuncOp(name="a", ...)
         START >> a >> END
 
-    b = CodeNode(name="b", ...)
+    b = FuncOp(name="b", ...)
     START >> inner >> b >> END
 
 # Build order:

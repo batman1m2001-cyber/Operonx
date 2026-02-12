@@ -1,6 +1,6 @@
 # Agent Workflow
 
-Xây dựng AI agent với tool calling và WhileLoopNode.
+Xây dựng AI agent với tool calling và WhileOp.
 
 > **Ví dụ chạy được**: `examples/11_agent_workflow.py`
 
@@ -9,15 +9,15 @@ Xây dựng AI agent với tool calling và WhileLoopNode.
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `WhileLoopNode.of()` | `WhileLoopNode` | `WhileLoopNode.of(counter=0, stop_condition="counter >= 5")` |
-> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `@op` | `FuncOp` | `@op` decorator trên function |
+> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, stop_condition="counter >= 5")` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
 
 ## Kiến trúc Agent
 
 ```
-Init → WhileLoopNode.of(not done):
-         → LLMNode.of() → Check tool_calls
+Init → WhileOp.of(not done):
+         → LLMOp.of() → Check tool_calls
            → Nếu có: Execute tools → Update messages → Loop
            → Nếu không: Done → Exit
 ```
@@ -72,14 +72,14 @@ def execute_tools(tool_calls, messages):
     return new_messages
 ```
 
-### Bước 3: Agent workflow với WhileLoopNode.of()
+### Bước 3: Agent workflow với WhileOp.of()
 
 ```python
-from hush.core import Hush, GraphNode, code_node, START, END, PARENT
-from hush.core import WhileLoopNode
-from hush.providers import LLMNode
+from hush.core import Hush, GraphOp, op, START, END, PARENT
+from hush.core import WhileOp
+from hush.providers import LLMOp
 
-@code_node
+@op
 def init_agent(query: str):
     return {
         "messages": [
@@ -91,18 +91,18 @@ def init_agent(query: str):
         "final_answer": ""
     }
 
-@code_node
+@op
 def process(content, tool_calls, messages, iteration):
     return process_response(tool_calls, content, messages, iteration)
 
-with GraphNode(name="agent") as graph:
+with GraphOp(name="agent") as graph:
     init = init_agent(
         query=PARENT["query"],
         outputs={"*": PARENT},  # Forward all init outputs to graph state
     )
 
     # Agent loop
-    with WhileLoopNode.of(
+    with WhileOp.of(
         messages=PARENT["messages"],
         iteration=PARENT["iteration"],
         done=PARENT["done"],
@@ -110,7 +110,7 @@ with GraphNode(name="agent") as graph:
         stop_condition="done == True or iteration >= 5",
         max_iterations=10,
     ) as loop:
-        llm = LLMNode.of(
+        llm = LLMOp.of(
             resource_key="gpt-4o",
             messages=PARENT["messages"],
             tools=tools,

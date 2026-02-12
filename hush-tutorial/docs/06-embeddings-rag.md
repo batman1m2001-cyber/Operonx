@@ -9,10 +9,10 @@ Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `EmbeddingNode.of()` | `EmbeddingNode` | `EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])` |
-> | `RerankNode.of()` | `RerankNode` | `RerankNode.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
-> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
+> | `EmbeddingOp.of()` | `EmbeddingOp` | `EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])` |
+> | `RerankOp.of()` | `RerankOp` | `RerankOp.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
 ## Embedding Providers
 
@@ -58,14 +58,14 @@ embedding:bge-m3-onnx:
   dimensions: 1024
 ```
 
-## EmbeddingNode.of()
+## EmbeddingOp.of()
 
 ```python
-from hush.core import GraphNode, START, END, PARENT
-from hush.providers import EmbeddingNode
+from hush.core import GraphOp, START, END, PARENT
+from hush.providers import EmbeddingOp
 
-with GraphNode(name="embed-workflow") as graph:
-    embed = EmbeddingNode.of(
+with GraphOp(name="embed-workflow") as graph:
+    embed = EmbeddingOp.of(
         resource_key="openai",
         texts=PARENT["documents"],
         outputs={"embeddings": PARENT["vectors"]},  # Rename output
@@ -76,7 +76,7 @@ with GraphNode(name="embed-workflow") as graph:
 # Output: {"vectors": [[0.1, 0.2, ...], [0.3, 0.4, ...]]}
 ```
 
-### EmbeddingNode outputs
+### EmbeddingOp outputs
 
 | Output | Type | Mô tả |
 |--------|------|-------|
@@ -113,12 +113,12 @@ reranking:bge-m3:
   base_url: https://api.pinecone.io/rerank
 ```
 
-## RerankNode.of()
+## RerankOp.of()
 
 ```python
-from hush.providers import RerankNode
+from hush.providers import RerankOp
 
-rr = RerankNode.of(
+rr = RerankOp.of(
     resource_key="bge-m3",
     query=PARENT["query"],
     documents=PARENT["documents"],
@@ -129,7 +129,7 @@ rr = RerankNode.of(
 rr["reranks"] >> PARENT["sources"]  # Map rerank output sang graph output
 ```
 
-### RerankNode outputs
+### RerankOp outputs
 
 | Output | Type | Mô tả |
 |--------|------|-------|
@@ -140,32 +140,32 @@ rr["reranks"] >> PARENT["sources"]  # Map rerank output sang graph output
 ## RAG Pipeline: Embed → Retrieve → Rerank → Generate
 
 ```python
-from hush.providers import EmbeddingNode, RerankNode, PromptNode, LLMNode
+from hush.providers import EmbeddingOp, RerankOp, PromptOp, LLMOp
 
-@code_node
+@op
 def retrieve(query_vec, docs, doc_vecs):
     return {"retrieved": cosine_search(query_vec, doc_vecs, docs, top_k=20)}
 
-with GraphNode(name="rag-pipeline") as graph:
-    embed_query = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
+with GraphOp(name="rag-pipeline") as graph:
+    embed_query = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
     ret = retrieve(
         query_vec=embed_query["embeddings"],
         docs=PARENT["documents"],
         doc_vecs=PARENT["doc_embeddings"],
         outputs={"context_docs": PARENT},
     )
-    rr = RerankNode.of(
+    rr = RerankOp.of(
         resource_key="bge-m3",
         query=PARENT["query"],
         documents=ret["retrieved"],
         top_k=5,
     )
-    p = PromptNode.of(
+    p = PromptOp.of(
         template={"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
         context=rr["reranks"],
         query=PARENT["query"],
     )
-    llm = LLMNode.of(
+    llm = LLMOp.of(
         resource_key="gpt-4o",
         messages=p["messages"],
         outputs={"content": PARENT["answer"]},  # Rename output
@@ -182,21 +182,21 @@ with GraphNode(name="rag-pipeline") as graph:
 Kết hợp keyword search và vector search, merge bằng Reciprocal Rank Fusion.
 
 ```python
-@code_node
+@op
 def kw_search(query, docs):
     return {"results": keyword_search(query, docs, top_k=8)}
 
-@code_node
+@op
 def vec_search(qv, docs, dvs):
     return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
 
-@code_node
+@op
 def merge(kw, vec):
     return {"merged": reciprocal_rank_fusion([kw, vec])[:5]}
 
-with GraphNode(name="hybrid-rag") as graph:
+with GraphOp(name="hybrid-rag") as graph:
     kw = kw_search(query=PARENT["query"], docs=PARENT["documents"])
-    embed_q = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
+    embed_q = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
     vs = vec_search(qv=embed_q["embeddings"], docs=PARENT["documents"], dvs=PARENT["doc_vectors"])
     m = merge(kw=kw["results"], vec=vs["results"])
 
@@ -211,24 +211,24 @@ Xem ví dụ đầy đủ tại `examples/14_rag_advanced.py`.
 ## Batch Embedding
 
 ```python
-from hush.core import MapNode, Each
+from hush.core import MapOp, Each
 
-@code_node
+@op
 def make_batches(docs):
     return {"batches": [docs[i:i+100] for i in range(0, len(docs), 100)]}
 
-@code_node
+@op
 def flatten(batches):
     return {"all_embeddings": [e for b in batches for e in b]}
 
-with GraphNode(name="batch-embed") as graph:
+with GraphOp(name="batch-embed") as graph:
     batch = make_batches(docs=PARENT["documents"])
-    with MapNode.of(batch=Each(batch["batches"]), max_concurrency=5) as map_node:
-        embed = EmbeddingNode.of(resource_key="openai", texts=PARENT["batch"])
+    with MapOp.of(batch=Each(batch["batches"]), max_concurrency=5) as map_op:
+        embed = EmbeddingOp.of(resource_key="openai", texts=PARENT["batch"])
         START >> embed >> END
 
-    flat = flatten(batches=map_node["embeddings"])
-    START >> batch >> map_node >> flat >> END
+    flat = flatten(batches=map_op["embeddings"])
+    START >> batch >> map_op >> flat >> END
 ```
 
 ## Best Practices
@@ -236,7 +236,7 @@ with GraphNode(name="batch-embed") as graph:
 1. **Retrieval top_k > Rerank top_k** — Retrieve 20, rerank to 5
 2. **Chunk size**: 200-500 tokens với 10-20% overlap
 3. **Cache embeddings** — Pre-compute cho knowledge base
-4. **Batch embedding** — Dùng MapNode với max_concurrency cho throughput
+4. **Batch embedding** — Dùng MapOp với max_concurrency cho throughput
 
 ## Tiếp theo
 

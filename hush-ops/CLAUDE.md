@@ -130,8 +130,14 @@ class MyBackendTracer(BaseTracer):
         """Execute in subprocess - create traces from flush_data."""
         # Re-import dependencies (runs in subprocess)
         # Get client from config or ResourceHub
-        # Iterate through execution_order
-        # Create traces/spans with parent-child relationships
+        ops_trace_data = flush_data["ops_trace_data"]
+        for execution in flush_data["execution_order"]:
+            op_id = execution["op"]
+            parent_id = execution["parent"]
+            context_id = execution.get("context_id")
+            trace_key = f"{op_id}:{context_id}" if context_id else op_id
+            trace_data = ops_trace_data.get(trace_key)
+            # Create traces/spans with parent-child relationships
         # Call client.flush()
         pass
 ```
@@ -164,7 +170,71 @@ Tracers use a long-running background process to avoid blocking the main workflo
 - Use only data from `flush_data` dict
 - Not access any shared state
 
+### flush_data Structure
+
+The `flush_data` dict passed to `Tracer.flush()` has this shape:
+
+```python
+{
+    "tracer_type": "LangfuseTracer",       # Registered tracer class name
+    "tracer_config": {...},                 # From _get_tracer_config()
+    "workflow_name": "my_workflow",
+    "request_id": "uuid-...",
+    "user_id": "...",                       # Optional
+    "session_id": "...",                    # Optional
+    "tags": ["prod"],
+    "execution_order": [                    # Topologically sorted (parents first)
+        {
+            "op": "my_workflow",            # Op name (was "node" before rename)
+            "parent": None,                 # Parent op name (None for root)
+            "context_id": None,             # Loop iteration context
+            "contain_generation": False,    # Whether op has LLM generation data
+        },
+        ...
+    ],
+    "ops_trace_data": {                     # Keyed by "op_name" or "op_name:context_id"
+        "my_workflow": {
+            "name": "my_workflow",
+            "start_time": "...",
+            "end_time": "...",
+            "input": {...},
+            "output": {...},
+            "model": None,                  # Set for LLM ops
+            "usage": None,                  # Token counts for LLM ops
+            "cost": None,                   # Cost in USD for LLM ops
+            "metadata": {...},
+        },
+        ...
+    },
+}
+```
+
+Key naming conventions:
+- `execution["op"]` - the op's name (renamed from `execution["node"]`)
+- `ops_trace_data` - trace data keyed by op name (renamed from `nodes_trace_data`)
+- OTEL span attribute: `"op.name"` (renamed from `"node.name"`)
+
 ## Testing
+
+Tests use `MockOp` and `MockIndexer` (see `tests/conftest.py`):
+
+```python
+class MockOp:
+    """Mock op for testing."""
+    def __init__(self, op_id: str, contain_generation: bool = False):
+        self.op_id = op_id
+        self.contain_generation = contain_generation
+        self._trace_data = {"name": op_id, ...}
+
+class MockIndexer:
+    def __init__(self):
+        self._ops = {}
+
+    def add_op(self, op: MockOp):
+        self._ops[op.op_id] = op
+```
+
+Tracer tests mock the backend client:
 
 ```python
 import pytest

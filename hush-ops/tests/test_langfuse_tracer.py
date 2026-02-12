@@ -20,14 +20,14 @@ LANGFUSE_CONFIG = {
 }
 
 
-class MockNode:
+class MockOp:
     """Mock node for testing."""
 
-    def __init__(self, node_id: str, contain_generation: bool = False):
-        self.node_id = node_id
+    def __init__(self, op_id: str, contain_generation: bool = False):
+        self.op_id = op_id
         self.contain_generation = contain_generation
         self._trace_data = {
-            "name": node_id,
+            "name": op_id,
             "start_time": datetime.now(),
             "end_time": datetime.now(),
             "input": {"test": "input"},
@@ -43,10 +43,10 @@ class MockIndexer:
     """Mock indexer for testing."""
 
     def __init__(self):
-        self._nodes = {}
+        self._ops = {}
 
-    def add_node(self, node: MockNode):
-        self._nodes[node.node_id] = node
+    def add_op(self, op: MockOp):
+        self._ops[node.op_id] = node
 
 
 class MockMemoryState:
@@ -59,13 +59,13 @@ class MockMemoryState:
         self.execution_order = []
         self._indexer = MockIndexer()
 
-    def add_execution(self, node_id: str, parent_id: str = None, context_id: str = None):
+    def add_execution(self, op_id: str, parent_id: str = None, context_id: str = None):
         """Add an execution to the order."""
-        node = MockNode(node_id)
-        self._indexer.add_node(node)
+        node = MockOp(op_id)
+        self._indexer.add_op(node)
         self.execution_order.append(
             {
-                "node": node_id,
+                "op": op_id,
                 "parent": parent_id,
                 "context_id": context_id,
             }
@@ -199,25 +199,25 @@ def test_langfuse_tracer_flush_with_resource_hub():
         "session_id": "test-session",
         "execution_order": [
             {
-                "node": "root",
+                "op": "root",
                 "parent": None,
                 "context_id": None,
                 "contain_generation": False,
             },
             {
-                "node": "child-1",
+                "op": "child-1",
                 "parent": "root",
                 "context_id": None,
                 "contain_generation": False,
             },
             {
-                "node": "llm-node",
+                "op": "llm-node",
                 "parent": "root",
                 "context_id": None,
                 "contain_generation": True,
             },
         ],
-        "nodes_trace_data": {
+        "ops_trace_data": {
             "root": {
                 "name": "root",
                 "input": {"workflow": "test"},

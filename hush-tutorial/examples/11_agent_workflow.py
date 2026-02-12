@@ -4,7 +4,7 @@ Cần: OPENAI_API_KEY trong .env + llm:gpt-4o-mini trong resources.yaml
 
 Học được:
 - Tool-calling agent pattern: Query → LLM → Execute Tools → Loop → Final Answer
-- WhileLoopNode cho agent loop (stop khi LLM không gọi tool nữa)
+- WhileOp cho agent loop (stop khi LLM không gọi tool nữa)
 - Tool definitions (OpenAI function calling format)
 - Process tool_calls và feed results back vào messages
 - max_iterations để tránh infinite loops
@@ -20,9 +20,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import WhileLoopNode, code_node
-from hush.providers import LLMNode
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import WhileOp, op
+from hush.providers import LLMOp
 
 # =============================================================================
 # Tool definitions (OpenAI function calling format)
@@ -93,7 +93,7 @@ TOOL_DESCRIPTIONS = [
 # =============================================================================
 
 
-@code_node
+@op
 def init_agent(query: str):
     """Khởi tạo agent state."""
     return {
@@ -110,7 +110,7 @@ def init_agent(query: str):
     }
 
 
-@code_node
+@op
 def process_llm_response(content, tool_calls, messages, iteration):
     """Xử lý response từ LLM: execute tools hoặc return final answer."""
     new_messages = messages.copy()
@@ -173,13 +173,13 @@ async def example_1_simple_agent():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    with GraphNode(name="simple-agent") as graph:
+    with GraphOp(name="simple-agent") as graph:
         init = init_agent(
             query=PARENT["query"],
             outputs={"*": PARENT},
         )
 
-        with WhileLoopNode.of(
+        with WhileOp.of(
             messages=PARENT["messages"],
             iteration=PARENT["iteration"],
             done=PARENT["done"],
@@ -188,7 +188,7 @@ async def example_1_simple_agent():
             max_iterations=10,
         ) as loop:
             # Gọi LLM với tools
-            llm = LLMNode.of(
+            llm = LLMOp.of(
                 resource_key="gpt-4o-mini",
                 messages=PARENT["messages"],
                 tools=TOOL_DESCRIPTIONS,

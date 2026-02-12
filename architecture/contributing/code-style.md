@@ -25,7 +25,7 @@ ignore = ["E501"]  # Line too long - handled by formatter
 
 ```python
 # Classes: PascalCase
-class GraphNode:
+class GraphOp:
     pass
 
 class BaseTracer:
@@ -35,7 +35,7 @@ class BaseTracer:
 def get_current():
     pass
 
-def insert_node_trace():
+def insert_op_trace():
     pass
 
 # Constants: UPPER_SNAKE_CASE
@@ -107,7 +107,7 @@ import pydantic
 from openai import AsyncOpenAI
 
 # Local imports (blank line after third party)
-from hush.core.nodes import BaseNode
+from hush.core.ops import BaseOp
 from hush.core.states import MemoryState
 ```
 
@@ -148,7 +148,7 @@ class MemoryState:
         return self._user_id
 
     # Method: has side effects or complex logic
-    def record_execution(self, node_name: str, parent: str):
+    def record_execution(self, op_name: str, parent: str):
         self._execution_order.append({...})
 ```
 
@@ -186,14 +186,14 @@ async def stream(self, messages: List) -> AsyncGenerator[Chunk, None]:
 class WorkflowError(Exception):
     pass
 
-class NodeExecutionError(WorkflowError):
+class OpExecutionError(WorkflowError):
     pass
 
 # Catching exceptions
 try:
-    result = await node.run()
-except NodeExecutionError as e:
-    self._handle_failure(node, e)
+    result = await op.run()
+except OpExecutionError as e:
+    self._handle_failure(op, e)
 except Exception as e:
     # Log unexpected errors
     logger.error(f"Unexpected error: {e}")
@@ -226,12 +226,12 @@ def stream(self, ...):
 hush/
 ├── core/
 │   ├── __init__.py         # Public exports
-│   ├── nodes/
+│   ├── ops/
 │   │   ├── __init__.py
-│   │   ├── base.py         # BaseNode
-│   │   ├── graph/          # GraphNode related
-│   │   ├── iteration/      # Loop nodes
-│   │   └── transform/      # CodeNode, ParserNode
+│   │   ├── base.py         # BaseOp
+│   │   ├── graph/          # GraphOp related
+│   │   ├── iteration/      # Loop ops
+│   │   └── transform/      # FuncOp, ParserOp
 │   ├── states/
 │   │   ├── __init__.py
 │   │   ├── schema.py

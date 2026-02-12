@@ -101,13 +101,13 @@ class MemoryState:
         """Store value. Push to target if push_ref exists (1 hop only).
 
         Args:
-            key: Tuple (node, var, ctx)
+            key: Tuple (op, var, ctx)
             value: Giá trị cần lưu
         """
-        node, var, ctx = key
-        idx = self.schema.get_index(node, var)
+        op, var, ctx = key
+        idx = self.schema.get_index(op, var)
         if idx < 0:
-            raise KeyError(f"({node}, {var}) không có trong schema")
+            raise KeyError(f"({op}, {var}) không có trong schema")
 
         ctx_key = ctx if ctx is not None else DEFAULT_CONTEXT
         self._cells[idx][ctx_key] = value
@@ -121,13 +121,13 @@ class MemoryState:
         """Get value. Pull from source if pull_ref exists (1 hop only).
 
         Args:
-            key: Tuple (node, var, ctx)
+            key: Tuple (op, var, ctx)
 
         Returns:
-            Giá trị tại (node, var, ctx) hoặc None nếu không tìm thấy
+            Giá trị tại (op, var, ctx) hoặc None nếu không tìm thấy
         """
-        node, var, ctx = key
-        idx = self.schema.get_index(node, var)
+        op, var, ctx = key
+        idx = self.schema.get_index(op, var)
         if idx < 0:
             return None
 
@@ -151,20 +151,20 @@ class MemoryState:
         # No value - return default
         return cell.default_value
 
-    def get(self, node: str, var: str, ctx: Optional[str] = None) -> Any:
+    def get(self, op: str, var: str, ctx: Optional[str] = None) -> Any:
         """Lấy giá trị với tham số explicit."""
-        return self[node, var, ctx]
+        return self[op, var, ctx]
 
-    def get_cell(self, node: str, var: str) -> Cell:
+    def get_cell(self, op: str, var: str) -> Cell:
         """Lấy object Cell cho một biến."""
-        idx = self.schema.get_index(node, var)
+        idx = self.schema.get_index(op, var)
         if idx < 0:
-            raise KeyError(f"({node}, {var}) không có trong schema")
+            raise KeyError(f"({op}, {var}) không có trong schema")
         return self._cells[idx]
 
-    def has(self, node: str, var: str, ctx: Optional[str] = None) -> bool:
+    def has(self, op: str, var: str, ctx: Optional[str] = None) -> bool:
         """Check if value exists (without resolving ref)."""
-        idx = self.schema.get_index(node, var)
+        idx = self.schema.get_index(op, var)
         if idx < 0:
             return False
         ctx_key = ctx if ctx is not None else DEFAULT_CONTEXT
@@ -191,7 +191,7 @@ class MemoryState:
     # Execution Tracking
     # =========================================================================
 
-    def record_execution(self, node_name: str, parent: str, context_id: str) -> None:
+    def record_execution(self, op_name: str, parent: str, context_id: str) -> None:
         """Ghi lại thực thi node cho observability.
 
         In legacy mode (no trace_store), appends to _execution_order list.
@@ -199,17 +199,17 @@ class MemoryState:
         """
         if self._execution_order is not None:
             self._execution_order.append(
-                {"node": node_name, "parent": parent, "context_id": context_id}
+                {"op": op_name, "parent": parent, "context_id": context_id}
             )
 
     def record_trace_metadata(
         self,
-        node_name: str,
+        op_name: str,
         context_id: Optional[str],
         name: str,
         input_vars: List[str],
         output_vars: List[str],
-        node_type: Optional[str] = None,
+        op_type: Optional[str] = None,
         parent_name: Optional[str] = None,
         start_time: Any = None,
         end_time: Any = None,
@@ -226,7 +226,7 @@ class MemoryState:
         Without trace_store: stores in memory (legacy mode).
 
         Args:
-            node_name: Full name of the node
+            op_name: Full name of the node
             context_id: Context ID for the execution
             name: Display name for the trace
             input_vars: List of input variable names
@@ -249,8 +249,8 @@ class MemoryState:
             data = {
                 "request_id": self._request_id,
                 "workflow_name": self.schema.name,
-                "node_name": node_name,
-                "node_type": node_type,
+                "op_name": op_name,
+                "op_type": op_type,
                 "parent_name": parent_name,
                 "context_id": context_id,
                 "execution_order": self._execution_count,
@@ -266,9 +266,9 @@ class MemoryState:
 
             # Build input/output data inline
             if input_vars:
-                data["input_data"] = {v: self.get(node_name, v, context_id) for v in input_vars}
+                data["input_data"] = {v: self.get(op_name, v, context_id) for v in input_vars}
             if output_vars:
-                data["output_data"] = {v: self.get(node_name, v, context_id) for v in output_vars}
+                data["output_data"] = {v: self.get(op_name, v, context_id) for v in output_vars}
 
             # Extract token counts
             if usage:
@@ -287,7 +287,7 @@ class MemoryState:
             self._execution_count += 1
         else:
             # Legacy mode: store in memory
-            key = f"{node_name}:{context_id}" if context_id else node_name
+            key = f"{op_name}:{context_id}" if context_id else op_name
             self._trace_metadata[key] = {
                 "name": name,
                 "input_vars": input_vars,
@@ -382,7 +382,7 @@ class MemoryState:
     # =========================================================================
 
     def __contains__(self, key: Tuple[str, str]) -> bool:
-        """Kiểm tra (node, var) có tồn tại trong schema không."""
+        """Kiểm tra (op, var) có tồn tại trong schema không."""
         return key in self.schema
 
     def __len__(self) -> int:
@@ -390,7 +390,7 @@ class MemoryState:
         return len(self._cells)
 
     def __iter__(self):
-        """Duyệt qua các cặp (node, var)."""
+        """Duyệt qua các cặp (op, var)."""
         return iter(self.schema)
 
     # =========================================================================
@@ -418,26 +418,26 @@ class MemoryState:
         """Hiển thị debug các giá trị state hiện tại."""
         print(f"\n=== {self.__class__.__name__}: {self.name} ===")
 
-        for node, var in self.schema:
-            idx = self.schema.get_index(node, var)
+        for op, var in self.schema:
+            idx = self.schema.get_index(op, var)
             cell = self._cells[idx]
             pull_ref = self.schema._pull_refs[idx]
 
             if not cell.contexts:
                 # Chưa có giá trị
                 if pull_ref:
-                    print(f"{node}.{var} -> pull_ref[{pull_ref.idx}] (chưa có giá trị)")
+                    print(f"{op}.{var} -> pull_ref[{pull_ref.idx}] (chưa có giá trị)")
                 else:
-                    print(f"{node}.{var} -> {cell.default_value}")
+                    print(f"{op}.{var} -> {cell.default_value}")
             elif len(cell.contexts) == 1:
                 # Một context
                 ctx = next(iter(cell.contexts))
                 value = cell.contexts[ctx]
                 value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)
-                print(f"{node}.{var} [{ctx}] = {value_str}")
+                print(f"{op}.{var} [{ctx}] = {value_str}")
             else:
                 # Nhiều context
-                print(f"{node}.{var}:")
+                print(f"{op}.{var}:")
                 for ctx, value in cell.contexts.items():
                     value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)
                     print(f"  [{ctx}] = {value_str}")

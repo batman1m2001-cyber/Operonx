@@ -7,7 +7,7 @@ Strategy: bytecode analysis (primary) → source parsing (fallback) → None.
 
 Example::
 
-    llm = LLMNode.of(resource_key="gpt-4o")
+    llm = LLMOp.of(resource_key="gpt-4o")
     # llm.name == "llm" — auto-detected from the assignment
 
 Public API:
@@ -100,7 +100,7 @@ def _should_skip(frame) -> bool:
     # Skip all __init__ methods (constructor chain)
     if frame.f_code.co_name == "__init__":
         return True
-    # Skip registered code objects (shorthand .of(), @code_node wrapper, etc.)
+    # Skip registered code objects (shorthand .of(), @op wrapper, etc.)
     if frame.f_code in _skip_code_objects:
         return True
     # Backward compat: skip frames with the legacy local variable marker

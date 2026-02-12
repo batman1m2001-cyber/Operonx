@@ -7,7 +7,7 @@ StateSchema sử dụng index-based storage để đạt O(1) access thay vì ha
 ## Index Structure
 
 ```
-_var_to_idx: {(node, var): idx}
+_var_to_idx: {(op, var): idx}
 ┌─────────────────────────────────┐
 │ ("graph.a", "input")  → 0       │
 │ ("graph.a", "result") → 1       │
@@ -27,8 +27,8 @@ _cells: [Cell0, Cell1, Cell2, Cell3, ...]
 Indices được assign tuần tự khi register variables:
 
 ```python
-def _register(self, node, var, value):
-    key = (node, var)
+def _register(self, op, var, value):
+    key = (op, var)
     if key not in self._var_to_idx:
         idx = len(self._defaults)  # Next available index
         self._var_to_idx[key] = idx
@@ -47,7 +47,7 @@ def _build(self):
         value = self._defaults[idx]
         if isinstance(value, Ref):
             # Find source index
-            source_key = (value.node, value.var)
+            source_key = (value.source, value.var)
             source_idx = self._var_to_idx.get(source_key, -1)
 
             # Store index on Ref
@@ -105,14 +105,14 @@ if push_ref:
 
 | Operation | Pre-computed (build) | Runtime |
 |-----------|---------------------|---------|
-| (node, var) → idx | ✓ (_var_to_idx) | O(1) lookup |
+| (op, var) → idx | ✓ (_var_to_idx) | O(1) lookup |
 | pull source idx | ✓ (Ref.idx) | Direct use |
 | push target idx | ✓ (Ref.idx) | Direct use |
 | transform fn | ✓ (Ref._fn) | Direct call |
 
 ## Iteration Context Indexing
 
-Iteration nodes tạo multiple contexts:
+Iteration ops tạo multiple contexts:
 
 ```python
 # Context ID format
@@ -153,18 +153,18 @@ StateSchema:       Cell Array:
 
 ```python
 # String concatenation in hot path
-key = f"{node}.{var}"  # Creates new string
+key = f"{op}.{var}"  # Creates new string
 
 # Repeated hash lookup
 for i in range(1000):
-    value = state[node, var, f"[{i}]"]  # 1000 hash lookups
+    value = state[op, var, f"[{i}]"]  # 1000 hash lookups
 ```
 
 ### Prefer
 
 ```python
 # Pre-lookup index
-idx = schema.get_index(node, var)
+idx = schema.get_index(op, var)
 
 # Direct cell access
 for i in range(1000):

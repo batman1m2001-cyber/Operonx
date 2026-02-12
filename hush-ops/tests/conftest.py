@@ -131,25 +131,25 @@ def sample_flush_data(sample_request_id):
         "tags": ["test", "unit"],
         "execution_order": [
             {
-                "node": "root",
+                "op": "root",
                 "parent": None,
                 "context_id": None,
                 "contain_generation": False,
             },
             {
-                "node": "child-1",
+                "op": "child-1",
                 "parent": "root",
                 "context_id": None,
                 "contain_generation": False,
             },
             {
-                "node": "llm-node",
+                "op": "llm-node",
                 "parent": "root",
                 "context_id": None,
                 "contain_generation": True,
             },
         ],
-        "nodes_trace_data": {
+        "ops_trace_data": {
             "root": {
                 "name": "test-workflow.root",
                 "start_time": "2024-01-15T10:00:00Z",
@@ -186,7 +186,7 @@ def sample_flush_data(sample_request_id):
 
 @pytest.fixture
 def sample_iteration_flush_data(sample_request_id):
-    """Create flush data with iteration context (MapNode, ForLoop)."""
+    """Create flush data with iteration context (MapOp, ForLoop)."""
     return {
         "tracer_type": "LangfuseTracer",
         "tracer_config": {"resource_key": "langfuse:test"},
@@ -196,36 +196,36 @@ def sample_iteration_flush_data(sample_request_id):
         "session_id": "test-session",
         "tags": ["iteration", "test"],
         "execution_order": [
-            {"node": "root", "parent": None, "context_id": None, "contain_generation": False},
-            {"node": "map_node", "parent": "root", "context_id": None, "contain_generation": False},
+            {"op": "root", "parent": None, "context_id": None, "contain_generation": False},
+            {"op": "map_op", "parent": "root", "context_id": None, "contain_generation": False},
             {
-                "node": "process",
-                "parent": "map_node",
+                "op": "process",
+                "parent": "map_op",
                 "context_id": "[0]",
                 "contain_generation": False,
             },
             {
-                "node": "process",
-                "parent": "map_node",
+                "op": "process",
+                "parent": "map_op",
                 "context_id": "[1]",
                 "contain_generation": False,
             },
             {
-                "node": "process",
-                "parent": "map_node",
+                "op": "process",
+                "parent": "map_op",
                 "context_id": "[2]",
                 "contain_generation": False,
             },
             {
-                "node": "aggregate",
+                "op": "aggregate",
                 "parent": "root",
                 "context_id": None,
                 "contain_generation": False,
             },
         ],
-        "nodes_trace_data": {
+        "ops_trace_data": {
             "root": {"name": "root", "input": {"items": [1, 2, 3]}, "output": {"result": 6}},
-            "map_node": {"name": "map_node", "input": {}, "output": {}},
+            "map_op": {"name": "map_op", "input": {}, "output": {}},
             "process:[0]": {"name": "process", "input": {"item": 1}, "output": {"doubled": 2}},
             "process:[1]": {"name": "process", "input": {"item": 2}, "output": {"doubled": 4}},
             "process:[2]": {"name": "process", "input": {"item": 3}, "output": {"doubled": 6}},
@@ -243,14 +243,14 @@ def sample_iteration_flush_data(sample_request_id):
 # ============================================================================
 
 
-class MockNode:
+class MockOp:
     """Mock node for testing."""
 
-    def __init__(self, node_id: str, contain_generation: bool = False):
-        self.node_id = node_id
+    def __init__(self, op_id: str, contain_generation: bool = False):
+        self.op_id = op_id
         self.contain_generation = contain_generation
         self._trace_data = {
-            "name": node_id,
+            "name": op_id,
             "start_time": datetime.now(),
             "end_time": datetime.now(),
             "input": {"test": "input"},
@@ -266,10 +266,10 @@ class MockIndexer:
     """Mock indexer for testing."""
 
     def __init__(self):
-        self._nodes = {}
+        self._ops = {}
 
-    def add_node(self, node: MockNode):
-        self._nodes[node.node_id] = node
+    def add_op(self, op: MockOp):
+        self._ops[node.op_id] = node
 
 
 class MockMemoryState:
@@ -286,13 +286,13 @@ class MockMemoryState:
         self.has_trace_store = False
         self._trace_store = None
 
-    def add_execution(self, node_id: str, parent_id: str = None, context_id: str = None):
+    def add_execution(self, op_id: str, parent_id: str = None, context_id: str = None):
         """Add an execution to the order."""
-        node = MockNode(node_id)
-        self._indexer.add_node(node)
+        node = MockOp(op_id)
+        self._indexer.add_op(node)
         self.execution_order.append(
             {
-                "node": node_id,
+                "op": op_id,
                 "parent": parent_id,
                 "context_id": context_id,
             }
@@ -300,9 +300,9 @@ class MockMemoryState:
 
 
 @pytest.fixture
-def mock_node():
+def mock_op():
     """Create a mock node factory."""
-    return MockNode
+    return MockOp
 
 
 @pytest.fixture

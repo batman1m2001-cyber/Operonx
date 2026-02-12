@@ -3,53 +3,52 @@
 No API key required. Uses hush-core only.
 
 Learn:
-- @code_node decorator: turn function into CodeNode
-- ForLoopNode.of(): ForLoopNode classmethod syntax
-- MapNode.of(): MapNode classmethod syntax
-- WhileLoopNode.of(): WhileLoopNode classmethod syntax
-- if_(): BranchNode fluent syntax
+- @op decorator: turn function into FuncOp
+- ForOp.of(): ForOp classmethod syntax
+- MapOp.of(): MapOp classmethod syntax
+- WhileOp.of(): WhileOp classmethod syntax
+- if_(): BranchOp fluent syntax
 
 Run: cd hush-tutorial && uv run python examples/15_shorthand_syntax.py
 """
 
 import asyncio
 
-from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
+from hush.core import END, PARENT, START, FuncOp, GraphOp, Hush
 
-# Node class imports
-from hush.core.nodes import (
+# Op class imports
+from hush.core.ops import (
     Each,  # Iteration marker
-    ForLoopNode,
-    MapNode,
-    WhileLoopNode,
-    code_node,  # Decorator
+    ForOp,
+    MapOp,
+    WhileOp, op,  # Decorator
     if_,  # Branch shorthand
 )
 
 # =============================================================================
-# @code_node decorator - Turn function into CodeNode
+# @op decorator - Turn function into FuncOp
 # =============================================================================
 
 
-@code_node
+@op
 def add_prefix(text: str, prefix: str):
     """Add prefix to text."""
     return {"result": f"{prefix}: {text}"}
 
 
-@code_node
+@op
 def square(x: int):
     """Square a number."""
     return {"squared": x * x}
 
 
-@code_node
+@op
 def halve(value: int):
     """Halve the value."""
     return {"new_value": value // 2}
 
 
-@code_node
+@op
 def grade_to_message(grade: str):
     """Convert grade to message."""
     messages = {
@@ -66,13 +65,13 @@ def grade_to_message(grade: str):
 # =============================================================================
 
 
-async def example_1_code_node_decorator():
-    """@code_node decorator - Create node from function."""
+async def example_1_func_op_decorator():
+    """@op decorator - Create op from function."""
     print("=" * 60)
-    print("Example 1: @code_node decorator")
+    print("Example 1: @op decorator")
     print("=" * 60)
 
-    with GraphNode(name="decorator-demo") as graph:
+    with GraphOp(name="decorator-demo") as graph:
         # Shorthand: pass inputs directly instead of inputs={}
         step = add_prefix(
             name="add_prefix",
@@ -89,15 +88,15 @@ async def example_1_code_node_decorator():
 
 
 async def example_2_for_shorthand():
-    """ForLoopNode.of() - ForLoopNode shorthand."""
+    """ForOp.of() - ForOp shorthand."""
     print()
     print("=" * 60)
-    print("Example 2: ForLoopNode.of() shorthand (sequential iteration)")
+    print("Example 2: ForOp.of() shorthand (sequential iteration)")
     print("=" * 60)
 
-    with GraphNode(name="for-shorthand") as graph:
+    with GraphOp(name="for-shorthand") as graph:
         # Shorthand: item=Each(...) instead of inputs={"item": Each(...)}
-        with ForLoopNode.of(
+        with ForOp.of(
             item=Each(["apple", "banana", "cherry"]),  # Iterate
             prefix="Fruit",  # Broadcast
         ) as loop:
@@ -120,15 +119,15 @@ async def example_2_for_shorthand():
 
 
 async def example_3_map_shorthand():
-    """MapNode.of() - MapNode shorthand with max_concurrency."""
+    """MapOp.of() - MapOp shorthand with max_concurrency."""
     print()
     print("=" * 60)
-    print("Example 3: MapNode.of() shorthand (parallel iteration)")
+    print("Example 3: MapOp.of() shorthand (parallel iteration)")
     print("=" * 60)
 
-    with GraphNode(name="map-shorthand") as graph:
+    with GraphOp(name="map-shorthand") as graph:
         # Shorthand with config option
-        with MapNode.of(
+        with MapOp.of(
             x=Each([1, 2, 3, 4, 5]),  # Iterate
             max_concurrency=3,  # Config
         ) as loop:
@@ -146,15 +145,15 @@ async def example_3_map_shorthand():
 
 
 async def example_4_while_shorthand():
-    """WhileLoopNode.of() - WhileLoopNode shorthand."""
+    """WhileOp.of() - WhileOp shorthand."""
     print()
     print("=" * 60)
-    print("Example 4: WhileLoopNode.of() shorthand (conditional loop)")
+    print("Example 4: WhileOp.of() shorthand (conditional loop)")
     print("=" * 60)
 
-    with GraphNode(name="while-shorthand") as graph:
+    with GraphOp(name="while-shorthand") as graph:
         # Shorthand: value=256 instead of inputs={"value": 256}
-        with WhileLoopNode.of(
+        with WhileOp.of(
             value=256,
             stop_condition="value < 10",  # Stop when value < 10
             max_iterations=20,
@@ -175,13 +174,13 @@ async def example_4_while_shorthand():
 
 
 async def example_5_if_shorthand():
-    """if_() - BranchNode fluent shorthand."""
+    """if_() - BranchOp fluent shorthand."""
     print()
     print("=" * 60)
     print("Example 5: if_() shorthand (conditional routing)")
     print("=" * 60)
 
-    with GraphNode(name="if-shorthand") as graph:
+    with GraphOp(name="if-shorthand") as graph:
         # Fluent chaining syntax
         grade_router = (
             if_(PARENT["score"] >= 90, "excellent")
@@ -190,14 +189,14 @@ async def example_5_if_shorthand():
             .else_("fail")
         )
 
-        excellent = CodeNode(
+        excellent = FuncOp(
             name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT}
         )
-        good = CodeNode(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
-        average = CodeNode(
+        good = FuncOp(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
+        average = FuncOp(
             name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT}
         )
-        fail = CodeNode(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
+        fail = FuncOp(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
 
         # Add message
         msg = grade_to_message(name="msg", grade=PARENT["grade"], outputs={"*": PARENT})
@@ -219,18 +218,18 @@ async def example_6_combined():
     print("Example 6: Combined shorthand syntax")
     print("=" * 60)
 
-    @code_node
+    @op
     def multiply(x: int, y: int):
         return {"product": x * y}
 
-    @code_node
+    @op
     def sum_list(numbers: list):
         return {"total": sum(numbers) if numbers else 0}
 
-    with GraphNode(name="combined-demo") as graph:
+    with GraphOp(name="combined-demo") as graph:
         # Nested loops with shorthand
-        with ForLoopNode.of(outer=Each([2, 3, 4])) as outer_loop:
-            with MapNode.of(
+        with ForOp.of(outer=Each([2, 3, 4])) as outer_loop:
+            with MapOp.of(
                 inner=Each([10, 20, 30]), multiplier=PARENT["outer"], max_concurrency=3
             ) as inner_loop:
                 calc = multiply(
@@ -266,11 +265,11 @@ async def example_7_comparison():
     print("=" * 60)
 
     # --- Verbose version ---
-    from hush.core.nodes.iteration import ForLoopNode
+    from hush.core.ops.iteration import ForOp
 
-    with GraphNode(name="verbose-style") as graph1:
-        with ForLoopNode(name="loop", inputs={"x": Each([1, 2, 3]), "multiplier": 10}) as loop:
-            step = CodeNode(
+    with GraphOp(name="verbose-style") as graph1:
+        with ForOp(name="loop", inputs={"x": Each([1, 2, 3]), "multiplier": 10}) as loop:
+            step = FuncOp(
                 name="calc",
                 code_fn=lambda x, multiplier: {"result": x * multiplier},
                 inputs={"x": PARENT["x"], "multiplier": PARENT["multiplier"]},
@@ -282,12 +281,12 @@ async def example_7_comparison():
         START >> loop >> END
 
     # --- Shorthand version ---
-    @code_node
+    @op
     def calc(x: int, multiplier: int):
         return {"result": x * multiplier}
 
-    with GraphNode(name="shorthand-style") as graph2:
-        with ForLoopNode.of(x=Each([1, 2, 3]), multiplier=10) as loop:
+    with GraphOp(name="shorthand-style") as graph2:
+        with ForOp.of(x=Each([1, 2, 3]), multiplier=10) as loop:
             step = calc(
                 name="calc",
                 x=PARENT["x"],
@@ -303,8 +302,8 @@ async def example_7_comparison():
     result1 = await Hush(graph1).run(inputs={})
     result2 = await Hush(graph2).run(inputs={})
 
-    print("  Verbose style:   ForLoopNode(name=..., inputs={...})")
-    print("  .of() style:     ForLoopNode.of(x=Each(...), multiplier=10)")
+    print("  Verbose style:   ForOp(name=..., inputs={...})")
+    print("  .of() style:     ForOp.of(x=Each(...), multiplier=10)")
     print()
     print(f"  Verbose result:   {result1['results']}")
     print(f"  Shorthand result: {result2['results']}")
@@ -312,7 +311,7 @@ async def example_7_comparison():
 
 
 async def main():
-    await example_1_code_node_decorator()
+    await example_1_func_op_decorator()
     await example_2_for_shorthand()
     await example_3_map_shorthand()
     await example_4_while_shorthand()
@@ -327,11 +326,11 @@ async def main():
     print("""
   | Full Class        | .of() Syntax          |
   |-------------------|-----------------------|
-  | CodeNode          | @code_node            |
-  | ForLoopNode       | ForLoopNode.of()      |
-  | MapNode           | MapNode.of()          |
-  | WhileLoopNode     | WhileLoopNode.of()    |
-  | BranchNode        | if_().else_()         |
+  | FuncOp          | @op            |
+  | ForOp       | ForOp.of()      |
+  | MapOp           | MapOp.of()          |
+  | WhileOp     | WhileOp.of()    |
+  | BranchOp        | if_().else_()         |
     """)
 
 

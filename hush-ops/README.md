@@ -23,11 +23,11 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 ## Quick Start
 
 ```python
-from hush.core import Hush, GraphNode, START, END
+from hush.core import Hush, GraphOp, START, END
 from hush.ops import LangfuseTracer
 
 # Định nghĩa workflow
-with GraphNode(name="demo") as graph:
+with GraphOp(name="demo") as graph:
     # ... định nghĩa nodes
     pass
 

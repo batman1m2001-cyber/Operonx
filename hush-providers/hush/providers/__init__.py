@@ -42,12 +42,12 @@ from hush.providers.llms import (
 )
 
 # Node exports
-from hush.providers.nodes import (
-    EmbeddingNode,
-    LLMChainNode,
-    LLMNode,
-    PromptNode,
-    RerankNode,
+from hush.providers.ops import (
+    EmbeddingOp,
+    ChainOp,
+    LLMOp,
+    PromptOp,
+    RerankOp,
 )
 
 # Registry plugin exports
@@ -105,11 +105,11 @@ __all__ = [
     "ONNXReranker",
     "PineconeReranker",
     # Nodes
-    "LLMNode",
-    "EmbeddingNode",
-    "RerankNode",
-    "PromptNode",
-    "LLMChainNode",
+    "LLMOp",
+    "EmbeddingOp",
+    "RerankOp",
+    "PromptOp",
+    "ChainOp",
     # Auth
     "KeycloakTokenConfig",
     "KeycloakTokenProvider",

@@ -1,16 +1,16 @@
 """Hush - Workflow execution engine.
 
 This module provides the Hush class, an execution engine that runs
-GraphNode workflows with state management and observability.
+GraphOp workflows with state management and observability.
 
 Example:
     ```python
-    from hush.core import Hush, GraphNode, START, END, PARENT
-    from hush.core.nodes import CodeNode
+    from hush.core import Hush, GraphOp, START, END, PARENT
+    from hush.core.ops import FuncOp
 
     # Define graph
-    with GraphNode(name="my-workflow") as graph:
-        node = CodeNode(name="processor", ...)
+    with GraphOp(name="my-workflow") as graph:
+        node = FuncOp(name="processor", ...)
         START >> node >> END
 
     # Create engine and run
@@ -25,7 +25,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from hush.core.loggings import LOGGER
-from hush.core.nodes.graph.graph_node import GraphNode
+from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
 from hush.core.streams import STREAM_SERVICE
 
@@ -36,23 +36,23 @@ if TYPE_CHECKING:
 class Hush:
     """Workflow execution engine.
 
-    Hush takes a GraphNode and provides execution capabilities:
+    Hush takes a GraphOp and provides execution capabilities:
     - Builds and validates the graph structure
     - Creates state schema for data flow
     - Executes workflows with fresh state per run
     - Integrates with tracers for observability
 
     Attributes:
-        graph: The GraphNode to execute
+        graph: The GraphOp to execute
         name: Workflow name (from graph)
         schema: State schema for the workflow
 
     Example:
         ```python
         # Define graph
-        with GraphNode(name="chatbot") as graph:
-            prompt = PromptNode(name="prompt", ...)
-            llm = LLMNode(name="llm", ...)
+        with GraphOp(name="chatbot") as graph:
+            prompt = PromptOp(name="prompt", ...)
+            llm = LLMOp(name="llm", ...)
             START >> prompt >> llm >> END
 
         # Create engine (builds automatically)
@@ -70,11 +70,11 @@ class Hush:
 
     __slots__ = ["graph", "name", "_schema"]
 
-    def __init__(self, graph: GraphNode):
-        """Initialize Hush engine with a GraphNode.
+    def __init__(self, graph: GraphOp):
+        """Initialize Hush engine with a GraphOp.
 
         Args:
-            graph: The GraphNode workflow to execute.
+            graph: The GraphOp workflow to execute.
                    Must be defined (context manager exited).
         """
         self.graph = graph
@@ -186,4 +186,4 @@ class Hush:
         self._schema.show()
 
     def __repr__(self) -> str:
-        return f"<Hush engine='{self.name}' nodes={len(self.graph._nodes)}>"
+        return f"<Hush engine='{self.name}' ops={len(self.graph._ops)}>"

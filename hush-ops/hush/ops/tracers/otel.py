@@ -135,7 +135,7 @@ class OTELTracer(BaseTracer):
             session_id = flush_data.get("session_id")
             tags = flush_data.get("tags", [])
             execution_order = flush_data["execution_order"]
-            nodes_trace_data = flush_data["nodes_trace_data"]
+            ops_trace_data = flush_data["ops_trace_data"]
 
             LOGGER.info(
                 "Workflow: %s, Request ID: %s, Creating OpenTelemetry trace hierarchy...",
@@ -152,14 +152,14 @@ class OTELTracer(BaseTracer):
             span_end_times: Dict[str, Optional[int]] = {}
 
             for execution in execution_order:
-                node_id = execution["node"]
+                op_id = execution["op"]
                 parent_id = execution["parent"]
                 context_id = execution.get("context_id")
                 contain_generation = execution.get("contain_generation", False)
 
                 # Get trace data for this node
-                trace_key = f"{node_id}:{context_id}" if context_id else node_id
-                trace_data = nodes_trace_data.get(trace_key)
+                trace_key = f"{op_id}:{context_id}" if context_id else op_id
+                trace_data = ops_trace_data.get(trace_key)
                 if trace_data is None:
                     continue
 
@@ -168,7 +168,7 @@ class OTELTracer(BaseTracer):
 
                 # Build unique key for context-aware nodes
                 if context_id:
-                    node_id = f"{node_id}:{context_id}"
+                    op_id = f"{op_id}:{context_id}"
 
                 # Check for context-aware parent
                 # For nested contexts like [0].[1], we need to find the right parent:
@@ -195,14 +195,14 @@ class OTELTracer(BaseTracer):
                 end_time_ns = OTELTracer._datetime_to_ns(trace_data.get("end_time"))
 
                 # Get short name (last part after '.')
-                full_name = trace_data.get("name", node_id)
+                full_name = trace_data.get("name", op_id)
                 short_name = OTELTracer._get_short_name(full_name)
 
                 # Build span attributes
                 attributes = {
                     "workflow.name": workflow_name,
                     "workflow.request_id": req_id,
-                    "node.name": full_name,  # Keep full name in attributes
+                    "op.name": full_name,  # Keep full name in attributes
                 }
 
                 if user_id:
@@ -267,8 +267,8 @@ class OTELTracer(BaseTracer):
                         attributes=attributes,
                         start_time=start_time_ns,
                     )
-                    spans[node_id] = span
-                    span_end_times[node_id] = end_time_ns
+                    spans[op_id] = span
+                    span_end_times[op_id] = end_time_ns
                 else:
                     # Child span - need to use parent context
                     parent_span = spans.get(parent_id)
@@ -276,7 +276,7 @@ class OTELTracer(BaseTracer):
                         LOGGER.warning(
                             "Parent '%s' not found for node '%s'",
                             parent_id,
-                            node_id,
+                            op_id,
                         )
                         continue
 
@@ -288,13 +288,13 @@ class OTELTracer(BaseTracer):
                         attributes=attributes,
                         start_time=start_time_ns,
                     )
-                    spans[node_id] = span
-                    span_end_times[node_id] = end_time_ns
+                    spans[op_id] = span
+                    span_end_times[op_id] = end_time_ns
 
             # End all spans with proper end times (in reverse order - children first)
-            for node_id in reversed(list(spans.keys())):
-                span = spans[node_id]
-                end_time = span_end_times.get(node_id)
+            for op_id in reversed(list(spans.keys())):
+                span = spans[op_id]
+                end_time = span_end_times.get(op_id)
                 span.set_status(Status(StatusCode.OK))
                 span.end(end_time=end_time)
 

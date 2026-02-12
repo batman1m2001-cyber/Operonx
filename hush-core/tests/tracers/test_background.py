@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from hush.core import END, PARENT, START, GraphNode, Hush
+from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.background import BackgroundProcess, shutdown_background
 from hush.core.background.db import init_db
-from hush.core.nodes import CodeNode
+from hush.core.ops import FuncOp
 from hush.core.tracers import LocalTracer
 
 
@@ -64,14 +64,14 @@ class TestSQLiteResilience:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "old.db"
 
-            # Create a DB with old schema (missing tags and node_type)
+            # Create a DB with old schema (missing tags and op_type)
             conn = sqlite3.connect(str(db_path))
             conn.execute("""
                 CREATE TABLE traces (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_id TEXT NOT NULL,
                     workflow_name TEXT NOT NULL,
-                    node_name TEXT,
+                    op_name TEXT,
                     parent_name TEXT,
                     context_id TEXT,
                     execution_order INTEGER,
@@ -106,7 +106,7 @@ class TestSQLiteResilience:
             cursor = conn.execute("PRAGMA table_info(traces)")
             columns = {row[1] for row in cursor.fetchall()}
             assert "tags" in columns
-            assert "node_type" in columns
+            assert "op_type" in columns
             conn.close()
 
 
@@ -148,7 +148,7 @@ class TestSubprocessFallback:
                 bg.write_trace(
                     request_id="subprocess-test-001",
                     workflow_name="test-wf",
-                    node_name="test-node",
+                    op_name="test-node",
                 )
 
                 # Poll until trace appears (subprocess startup can be slow on CI)
@@ -171,7 +171,7 @@ class TestSubprocessFallback:
                         break
 
                 assert len(rows) == 1
-                assert rows[0]["node_name"] == "test-node"
+                assert rows[0]["op_name"] == "test-node"
             finally:
                 bg.shutdown()
 
@@ -190,7 +190,7 @@ class TestSubprocessFallback:
                 bg.write_trace(
                     request_id="sub-complete-001",
                     workflow_name="test-wf",
-                    node_name="node-1",
+                    op_name="node-1",
                     execution_order=0,
                 )
 
@@ -281,7 +281,7 @@ class TestSubprocessFallback:
             bg.write_trace(
                 request_id="disabled-001",
                 workflow_name="test",
-                node_name="test",
+                op_name="test",
             )
 
 
@@ -290,8 +290,8 @@ class TestEngineResilience:
 
     def test_engine_init_survives_background_failure(self):
         """Test Hush.__init__ completes even if background process fails to start."""
-        with GraphNode(name="resilience-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="resilience-test") as graph:
+            node = FuncOp(
                 name="echo",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -306,8 +306,8 @@ class TestEngineResilience:
     @pytest.mark.asyncio
     async def test_engine_runs_without_background(self):
         """Test workflow execution works even when background process is disabled."""
-        with GraphNode(name="no-bg-test") as graph:
-            node = CodeNode(
+        with GraphOp(name="no-bg-test") as graph:
+            node = FuncOp(
                 name="double",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
@@ -399,12 +399,12 @@ class TestBackgroundPerformance:
     """
 
     @staticmethod
-    def _create_pipeline_graph(name: str) -> GraphNode:
+    def _create_pipeline_graph(name: str) -> GraphOp:
         """Create a 12-node pipeline graph for benchmarking."""
-        with GraphNode(name=name) as graph:
+        with GraphOp(name=name) as graph:
             prev = None
             for i in range(12):
-                node = CodeNode(
+                node = FuncOp(
                     name=f"step_{i}",
                     code_fn=lambda x, _i=i: {"x": x + _i},
                     inputs={"x": PARENT["x"] if prev is None else prev["x"]},
@@ -530,7 +530,7 @@ class TestBackgroundPerformance:
             bg_sub.write_trace(
                 request_id=f"warmup-{i}",
                 workflow_name="warmup",
-                node_name=f"warmup-{i}",
+                op_name=f"warmup-{i}",
                 execution_order=0,
             )
 
@@ -541,7 +541,7 @@ class TestBackgroundPerformance:
             bg_sub.write_trace(
                 request_id=f"bench-sub-{i}",
                 workflow_name="bench-subprocess",
-                node_name=f"node-{i}",
+                op_name=f"node-{i}",
                 execution_order=0,
             )
             latencies.append((time.perf_counter() - t0) * 1000)

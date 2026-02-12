@@ -1,35 +1,35 @@
 # Core Concepts
 
-Hiểu các khái niệm cốt lõi của Hush: nodes, edges, data flow, và state management.
+Hiểu các khái niệm cốt lõi của Hush: ops, edges, data flow, và state management.
 
 > **Ví dụ chạy được**: `examples/01_hello_world.py`, `examples/02_data_pipeline.py`
 
-## GraphNode — Container
+## GraphOp — Container
 
-`GraphNode` là container chứa toàn bộ workflow. Tất cả nodes phải được tạo **bên trong** context của GraphNode.
+`GraphOp` là container chứa toàn bộ workflow. Tất cả ops phải được tạo **bên trong** context của GraphOp.
 
 ```python
-from hush.core import GraphNode
+from hush.core import GraphOp
 
-with GraphNode(name="my-workflow") as graph:
-    # Tất cả nodes định nghĩa ở đây
+with GraphOp(name="my-workflow") as graph:
+    # Tất cả ops định nghĩa ở đây
     pass
 ```
 
-**Lưu ý**: Nodes tạo bên ngoài `with GraphNode` sẽ không hoạt động.
+**Lưu ý**: Ops tạo bên ngoài `with GraphOp` sẽ không hoạt động.
 
-## CodeNode — Chạy Python Function
+## FuncOp — Chạy Python Function
 
-`CodeNode` nhận inputs và trả về dict outputs.
+`FuncOp` nhận inputs và trả về dict outputs.
 
 ```python
-from hush.core import CodeNode, PARENT
+from hush.core import FuncOp, PARENT
 
 def clean_text(text: str) -> dict:
     cleaned = " ".join(text.split())
     return {"cleaned_text": cleaned}
 
-preprocess = CodeNode(
+preprocess = FuncOp(
     name="preprocess",
     code_fn=clean_text,
     inputs={"text": PARENT["text"]},       # Lấy 'text' từ parent state
@@ -37,14 +37,14 @@ preprocess = CodeNode(
 )
 ```
 
-### @code_node decorator
+### @op decorator
 
 Cách viết ngắn gọn hơn:
 
 ```python
-from hush.core.nodes.transform.code_node import code_node
+from hush.core.ops.transform.func_op import op
 
-@code_node
+@op
 def clean_text(text: str):
     cleaned = " ".join(text.split())
     return {"cleaned_text": cleaned}
@@ -59,13 +59,13 @@ preprocess = clean_text(
 
 ## Inputs và Outputs
 
-### inputs — Mapping data vào node
+### inputs — Mapping data vào op
 
 ```python
 inputs={
     "text": PARENT["text"],        # Lấy từ parent state
     "prefix": "Hello",             # Giá trị cố định
-    "count": other_node["count"],  # Lấy từ output node khác
+    "count": other_op["count"],  # Lấy từ output op khác
 }
 ```
 
@@ -84,30 +84,30 @@ outputs={"*": PARENT}                       # parent[key] = result[key] cho mọ
 
 ## PARENT — State của Parent Graph
 
-`PARENT` là tham chiếu đến state của GraphNode cha. Dùng để:
+`PARENT` là tham chiếu đến state của GraphOp cha. Dùng để:
 - **Đọc input**: `PARENT["key"]` lấy giá trị từ parent state
 - **Ghi output**: `outputs={"key": PARENT}` ghi lên parent state
 
 ```python
-with GraphNode(name="demo") as graph:
-    node = CodeNode(
-        name="node",
+with GraphOp(name="demo") as graph:
+    step = FuncOp(
+        name="step",
         code_fn=lambda x: {"doubled": x * 2},
         inputs={"x": PARENT["value"]},      # Đọc parent["value"]
         outputs={"doubled": PARENT}          # Ghi parent["doubled"]
     )
-    START >> node >> END
+    START >> step >> END
 
 engine = Hush(graph)
 result = await engine.run(inputs={"value": 5})
 print(result["doubled"])  # 10
 ```
 
-## Edges — Kết nối Nodes
+## Edges — Kết nối Ops
 
 ### >> operator (Hard Edge)
 
-Node đích chờ **tất cả** predecessors hoàn thành.
+Op đích chờ **tất cả** predecessors hoàn thành.
 
 ```python
 from hush.core import START, END
@@ -124,7 +124,7 @@ START >> [node_a, node_b, node_c]
 
 ### ~ operator (Soft Edge)
 
-Node đích chờ **bất kỳ một** soft predecessor hoàn thành. Dùng sau BranchNode khi chỉ 1 nhánh chạy.
+Op đích chờ **bất kỳ một** soft predecessor hoàn thành. Dùng sau BranchOp khi chỉ 1 nhánh chạy.
 
 ```python
 # Sau branch, dùng soft edge
@@ -134,38 +134,38 @@ Node đích chờ **bất kỳ một** soft predecessor hoàn thành. Dùng sau 
 ### Truyền output trực tiếp lên PARENT
 
 ```python
-# Không cần node trung gian
+# Không cần op trung gian
 merge["context_docs"] >> PARENT["sources"]
 ```
 
 ### Tự động forward outputs với >> END
 
-Khi node kết nối trực tiếp đến END mà không có `outputs` định nghĩa sẵn, tất cả output keys sẽ tự động forward lên parent graph.
+Khi op kết nối trực tiếp đến END mà không có `outputs` định nghĩa sẵn, tất cả output keys sẽ tự động forward lên parent graph.
 
 ```python
-with GraphNode(name="auto-forward") as graph:
+with GraphOp(name="auto-forward") as graph:
     # Không cần định nghĩa outputs - tự động forward
-    node = CodeNode(
+    step = FuncOp(
         name="compute",
         code_fn=lambda: {"a": 1, "b": 2, "c": 3}
     )
-    START >> node >> END
+    START >> step >> END
 
 engine = Hush(graph)
 result = await engine.run(inputs={})
 # result["a"] == 1, result["b"] == 2, result["c"] == 3
 ```
 
-**Lưu ý**: Nếu node đã có `outputs` định nghĩa sẵn, `>> END` sẽ không thay đổi outputs.
+**Lưu ý**: Nếu op đã có `outputs` định nghĩa sẵn, `>> END` sẽ không thay đổi outputs.
 
 ```python
 # outputs đã định nghĩa - không bị thay đổi
-node = CodeNode(
+step = FuncOp(
     name="custom",
     code_fn=lambda: {"result": 42},
     outputs={"result": PARENT["answer"]}  # Explicit mapping
 )
-START >> node >> END  # Giữ nguyên outputs={"result": PARENT["answer"]}
+START >> step >> END  # Giữ nguyên outputs={"result": PARENT["answer"]}
 ```
 
 ## Hush Engine — Chạy Workflow
@@ -184,7 +184,7 @@ result = await engine.run(
 
 ## ResourceHub — Quản lý Providers
 
-ResourceHub tự động load cấu hình từ `resources.yaml`. LLMNode, EmbeddingNode, RerankNode tham chiếu qua `resource_key`.
+ResourceHub tự động load cấu hình từ `resources.yaml`. LLMOp, EmbeddingOp, RerankOp tham chiếu qua `resource_key`.
 
 ```yaml
 # resources.yaml
@@ -196,7 +196,7 @@ llm:gpt-4o:
 ```
 
 ```python
-llm = LLMNode(
+llm = LLMOp(
     name="llm",
     resource_key="gpt-4o",  # Tham chiếu llm:gpt-4o
     inputs={"messages": prompt["messages"]}
@@ -231,30 +231,30 @@ state = result["$state"]
 
 # Thông tin debug
 print(state.request_id)       # Unique request ID
-print(state.execution_order)  # Thứ tự thực thi nodes
+print(state.execution_order)  # Thứ tự thực thi ops
 print(state.user_id)          # User ID (nếu set)
 ```
 
-## @subgraph — Modular Workflow
+## @graph — Modular Workflow
 
-`@subgraph` biến một builder function thành factory tạo `GraphNode` có thể tái sử dụng. Các tham số của function tự động trở thành `PARENT` refs.
+`@graph` biến một builder function thành factory tạo `GraphOp` có thể tái sử dụng. Các tham số của function tự động trở thành `PARENT` refs.
 
-> **Ví dụ chạy được**: `examples/16_subgraph.py`
+> **Ví dụ chạy được**: `examples/16_graph.py`
 
 ```python
-from hush.core import subgraph, code_node, START, END, PARENT, GraphNode, Hush
+from hush.core import graph, op, START, END, PARENT, GraphOp, Hush
 
-@code_node
+@op
 def double(x: int):
     return {"result": x * 2}
 
-@subgraph
+@graph
 def double_flow(val):
     step = double(x=val)      # val = PARENT["val"] (injected)
     START >> step >> END
 
 # Sử dụng trong graph
-with GraphNode(name="main") as main:
+with GraphOp(name="main") as main:
     d = double_flow(val=PARENT["input"])  # d.name == "d" (auto-named)
     START >> d >> END
 
@@ -265,10 +265,10 @@ result = await engine.run(inputs={"input": 5})
 
 ### Tái sử dụng
 
-Cùng một subgraph có thể gọi nhiều lần (chain):
+Cùng một graph có thể gọi nhiều lần (chain):
 
 ```python
-with GraphNode(name="chain") as main:
+with GraphOp(name="chain") as main:
     d1 = double_flow(val=PARENT["input"])
     d2 = double_flow(val=d1["result"])
     START >> d1 >> d2 >> END
@@ -279,38 +279,38 @@ with GraphNode(name="chain") as main:
 ### Output renaming
 
 ```python
-@subgraph
+@graph
 def double_flow(val):
     step = double(x=val)
     step["result"] >> PARENT["doubled"]   # rename output
     START >> step >> END
 
-with GraphNode(name="main") as main:
+with GraphOp(name="main") as main:
     d = double_flow(val=PARENT["input"])
     d["doubled"] >> PARENT["answer"]      # map to graph output
     START >> d >> END
 ```
 
-### Khi nào dùng @subgraph?
+### Khi nào dùng @graph?
 
 | Trường hợp | Dùng gì |
 |-------------|---------|
-| Logic dùng lại nhiều nơi | `@subgraph` |
-| Workflow chính | `with GraphNode(name="main") as graph:` |
-| Chỉ chạy 1 function | `@code_node` |
+| Logic dùng lại nhiều nơi | `@graph` |
+| Workflow chính | `with GraphOp(name="main") as graph:` |
+| Chỉ chạy 1 function | `@op` |
 
 ## Tổng kết
 
 | Concept | Mô tả |
 |---------|-------|
-| `GraphNode` | Container chứa workflow |
-| `CodeNode` | Chạy Python function |
-| `@code_node` | Decorator viết CodeNode ngắn gọn |
-| `@subgraph` | Decorator tạo reusable workflow module |
+| `GraphOp` | Container chứa workflow |
+| `FuncOp` | Chạy Python function |
+| `@op` | Decorator viết FuncOp ngắn gọn |
+| `@graph` | Decorator tạo reusable workflow module |
 | `PARENT["key"]` | Đọc/ghi data từ parent state |
-| `inputs` / `outputs` | Mapping data vào/ra nodes |
-| `START >> node >> END` | Hard edge — chờ tất cả |
-| `>> ~node` | Soft edge — chờ bất kỳ một |
+| `inputs` / `outputs` | Mapping data vào/ra ops |
+| `START >> step >> END` | Hard edge — chờ tất cả |
+| `>> ~step` | Soft edge — chờ bất kỳ một |
 | `ResourceHub` | Quản lý providers qua resources.yaml |
 | `Hush(graph)` | Engine chạy workflow |
 

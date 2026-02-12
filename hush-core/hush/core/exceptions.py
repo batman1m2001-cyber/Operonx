@@ -14,18 +14,18 @@ def _truncate(text: str, max_length: int = 200) -> str:
     return text[:max_length] + "..."
 
 
-class NodeError(Exception):
+class OpError(Exception):
     """Base exception cho tất cả các node errors.
 
     Chứa context đầy đủ để debug:
-    - node_type: Loại node (parser, llm, code, ...)
+    - op_type: Loại node (parser, llm, code, ...)
     - original_error: Exception gốc
     - context: Dict chứa thông tin bổ sung tùy theo node type
 
     Example:
-        raise NodeError(
+        raise OpError(
             message="Failed to process",
-            node_type="parser",
+            op_type="parser",
             original_error=json_error,
             context={"input": text, "format": "json"}
         )
@@ -34,11 +34,11 @@ class NodeError(Exception):
     def __init__(
         self,
         message: str,
-        node_type: str,
+        op_type: str,
         original_error: Optional[Exception] = None,
         context: Optional[Dict[str, Any]] = None,
     ):
-        self.node_type = node_type
+        self.op_type = op_type
         self.original_error = original_error
         self.context = context or {}
 
@@ -48,7 +48,7 @@ class NodeError(Exception):
 
     def _format_message(self, message: str) -> str:
         """Format error message với context."""
-        parts = [f"[{self.node_type.upper()}] {message}"]
+        parts = [f"[{self.op_type.upper()}] {message}"]
 
         if self.original_error:
             parts.append(f"  Error: {self.original_error}")
@@ -61,7 +61,7 @@ class NodeError(Exception):
         return "\n".join(parts)
 
 
-class ParserError(NodeError):
+class ParserError(OpError):
     """Exception khi parsing thất bại.
 
     Context tự động bao gồm:
@@ -89,14 +89,14 @@ class ParserError(NodeError):
 
         super().__init__(
             message=message,
-            node_type="parser",
+            op_type="parser",
             original_error=original_error,
             context={"format": format_type, "input": input_text},
         )
 
 
-class CodeError(NodeError):
-    """Exception khi user function trong CodeNode thất bại.
+class CodeError(OpError):
+    """Exception khi user function trong FuncOp thất bại.
 
     Context tự động bao gồm:
     - function_name: Tên function
@@ -127,7 +127,7 @@ class CodeError(NodeError):
 
         super().__init__(
             message=message,
-            node_type="code",
+            op_type="code",
             original_error=original_error,
             context={
                 "function_name": function_name,
@@ -137,7 +137,7 @@ class CodeError(NodeError):
         )
 
 
-class BranchError(NodeError):
+class BranchError(OpError):
     """Exception khi đánh giá điều kiện branch thất bại.
 
     Context tự động bao gồm:
@@ -169,7 +169,7 @@ class BranchError(NodeError):
 
         super().__init__(
             message=message,
-            node_type="branch",
+            op_type="branch",
             original_error=original_error,
             context={
                 "condition": condition,
@@ -179,8 +179,8 @@ class BranchError(NodeError):
         )
 
 
-class ConditionError(NodeError):
-    """Exception khi stop_condition trong WhileLoopNode thất bại.
+class ConditionError(OpError):
+    """Exception khi stop_condition trong WhileOp thất bại.
 
     Context tự động bao gồm:
     - condition: Chuỗi stop_condition
@@ -220,12 +220,12 @@ class ConditionError(NodeError):
             context["iteration"] = iteration
 
         super().__init__(
-            message=message, node_type="while", original_error=original_error, context=context
+            message=message, op_type="while", original_error=original_error, context=context
         )
 
 
-class IterationError(NodeError):
-    """Exception khi một iteration trong ForLoop/MapNode thất bại.
+class IterationError(OpError):
+    """Exception khi một iteration trong ForLoop/MapOp thất bại.
 
     Context tự động bao gồm:
     - iteration_index: Vị trí iteration bị lỗi
@@ -238,7 +238,7 @@ class IterationError(NodeError):
             iteration_index=2,
             loop_data={"item": {"id": 3}},
             total_iterations=10,
-            node_type="for",
+            op_type="for",
             original_error=key_error
         )
     """
@@ -249,7 +249,7 @@ class IterationError(NodeError):
         iteration_index: int,
         loop_data: Dict[str, Any],
         total_iterations: int,
-        node_type: str = "for",
+        op_type: str = "for",
         original_error: Optional[Exception] = None,
     ):
         self.iteration_index = iteration_index
@@ -258,7 +258,7 @@ class IterationError(NodeError):
 
         super().__init__(
             message=message,
-            node_type=node_type,
+            op_type=op_type,
             original_error=original_error,
             context={
                 "iteration_index": f"{iteration_index}/{total_iterations}",
@@ -272,8 +272,8 @@ class IterationError(NodeError):
 # =============================================================================
 
 
-class PromptError(NodeError):
-    """Exception khi PromptNode format template thất bại.
+class PromptError(OpError):
+    """Exception khi PromptOp format template thất bại.
 
     Context tự động bao gồm:
     - template_type: Loại template (str/dict/list)
@@ -307,12 +307,12 @@ class PromptError(NodeError):
             context["missing_vars"] = missing_vars
 
         super().__init__(
-            message=message, node_type="prompt", original_error=original_error, context=context
+            message=message, op_type="prompt", original_error=original_error, context=context
         )
 
 
-class EmbeddingError(NodeError):
-    """Exception khi EmbeddingNode thất bại.
+class EmbeddingError(OpError):
+    """Exception khi EmbeddingOp thất bại.
 
     Context tự động bao gồm:
     - resource_key: Model/resource key
@@ -339,14 +339,14 @@ class EmbeddingError(NodeError):
 
         super().__init__(
             message=message,
-            node_type="embedding",
+            op_type="embedding",
             original_error=original_error,
             context={"resource_key": resource_key, "text_count": text_count},
         )
 
 
-class RerankError(NodeError):
-    """Exception khi RerankNode thất bại.
+class RerankError(OpError):
+    """Exception khi RerankOp thất bại.
 
     Context tự động bao gồm:
     - resource_key: Model/resource key
@@ -377,7 +377,7 @@ class RerankError(NodeError):
 
         super().__init__(
             message=message,
-            node_type="rerank",
+            op_type="rerank",
             original_error=original_error,
             context={
                 "resource_key": resource_key,

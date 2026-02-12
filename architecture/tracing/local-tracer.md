@@ -27,20 +27,20 @@ DEFAULT_DB_PATH = Path(os.getenv("HUSH_TRACES_DB", "~/.hush/traces.db")).expandu
 Tất cả writes được gửi đến background process:
 
 ```python
-def insert_node_trace(self, ...):
+def insert_op_trace(self, ...):
     """Non-blocking write."""
     bg = get_background(self._db_path)
     bg.write_trace(...)
 ```
 
-## insert_node_trace()
+## insert_op_trace()
 
 ```python
-def insert_node_trace(
+def insert_op_trace(
     self,
     request_id: str,
     workflow_name: str,
-    node_name: str,
+    op_name: str,
     parent_name: Optional[str],
     context_id: Optional[str],
     execution_order: int,

@@ -6,8 +6,8 @@ Debug và monitor workflows với LocalTracer, Langfuse, và OpenTelemetry.
 
 ## Tại sao cần Tracing?
 
-- **Debug**: Node nào gây lỗi? Input/output mỗi node là gì?
-- **Monitor**: Workflow chạy bao lâu? Node nào là bottleneck?
+- **Debug**: Op nào gây lỗi? Input/output mỗi op là gì?
+- **Monitor**: Workflow chạy bao lâu? Op nào là bottleneck?
 - **Cost tracking**: Bao nhiêu tokens? Chi phí LLM calls?
 
 ## Kiến trúc
@@ -115,17 +115,17 @@ Xem ví dụ đầy đủ tại `examples/09_otel_tracing.py`.
 
 ## Trace Data
 
-Mỗi node execution được ghi lại:
+Mỗi op execution được ghi lại:
 
 | Field | Mô tả |
 |-------|-------|
-| `node_name` | Tên đầy đủ của node |
+| `op_name` | Tên đầy đủ của op |
 | `start_time` | Thời gian bắt đầu |
 | `end_time` | Thời gian kết thúc |
 | `duration_ms` | Thời gian chạy (ms) |
-| `input_data` | Input của node |
-| `output_data` | Output của node |
-| `model` | Tên model (cho LLM nodes) |
+| `input_data` | Input của op |
+| `output_data` | Output của op |
+| `model` | Tên model (cho LLM ops) |
 | `usage` | Token usage |
 | `cost` | Chi phí USD |
 | `error` | Lỗi nếu có |
@@ -142,7 +142,7 @@ tracer = LocalTracer(tags=["production", "v2.0", "customer-a"])
 
 ### Dynamic tags
 
-Thêm trong runtime từ CodeNode bằng key `$tags`:
+Thêm trong runtime từ FuncOp bằng key `$tags`:
 
 ```python
 def process(data):
@@ -229,7 +229,7 @@ export LANGFUSE_HOST=https://cloud.langfuse.com
 - Cấu hình `resources.yaml` với tất cả providers
 - Set environment variables cho API keys
 - Enable tracing (Langfuse hoặc OTEL)
-- Cấu hình fallback cho LLM nodes
+- Cấu hình fallback cho LLM ops
 - Implement error handling
 - Set up cost tracking
 - Configure logging level

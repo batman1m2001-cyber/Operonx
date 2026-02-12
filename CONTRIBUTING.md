@@ -96,7 +96,7 @@ When making changes, update the appropriate documentation:
 
 | Change Type | Update |
 |-------------|--------|
-| New node type | `hush-core/CLAUDE.md`, `hush-tutorial/docs/03-core-concepts.md` |
+| New op type | `hush-core/CLAUDE.md`, `hush-tutorial/docs/03-core-concepts.md` |
 | New provider | `hush-providers/CLAUDE.md`, `hush-tutorial/docs/04-llm-integration.md` |
 | New tracer | `hush-ops/CLAUDE.md`, `hush-tutorial/docs/09-tracing-observability.md` |
 | API change | Relevant `CLAUDE.md` + tutorial docs |

@@ -21,8 +21,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, ForLoopNode, WhileLoopNode, code_node
+from hush.core import END, PARENT, START, GraphOp, Hush
+from hush.core.ops import Each, ForOp, WhileOp, op
 from hush.core.tracers import BaseTracer
 
 # =============================================================================
@@ -52,17 +52,17 @@ def create_langfuse_otel_config(service_name: str = "hush-tutorial"):
 
 
 # =============================================================================
-# Code nodes
+# Code ops
 # =============================================================================
 
 
-@code_node
+@op
 def validate(x: int):
     """Validate input."""
     return {"validated_x": x, "$tags": ["validated"]}
 
 
-@code_node
+@op
 def multiply(x: int, y: int):
     """Nhân hai số."""
     product = x * y
@@ -72,13 +72,13 @@ def multiply(x: int, y: int):
     return {"product": product, "$tags": tags}
 
 
-@code_node
+@op
 def summarize(products: list):
     """Tổng hợp kết quả."""
     return {"total": sum(products) if products else 0}
 
 
-@code_node
+@op
 def halve_value(value: int):
     """Chia đôi giá trị (cho while loop demo)."""
     new_val = value // 2
@@ -105,13 +105,13 @@ async def example_1_otel_basic():
 
     from hush.ops import OTELTracer
 
-    with GraphNode(name="nested-loop") as graph:
-        with ForLoopNode.of(x=Each([2, 3, 4])) as outer:
+    with GraphOp(name="nested-loop") as graph:
+        with ForOp.of(x=Each([2, 3, 4])) as outer:
             val = validate(
                 name="validate",
                 inputs={"x": PARENT["x"]},
             )
-            with ForLoopNode.of(y=Each([10, 20]), x=val["validated_x"]) as inner:
+            with ForOp.of(y=Each([10, 20]), x=val["validated_x"]) as inner:
                 mult = multiply(
                     name="multiply",
                     inputs={"x": PARENT["x"], "y": PARENT["y"]},
@@ -166,8 +166,8 @@ async def example_2_otel_while():
 
     from hush.ops import OTELTracer
 
-    with GraphNode(name="while-loop") as graph:
-        with WhileLoopNode.of(
+    with GraphOp(name="while-loop") as graph:
+        with WhileOp.of(
             value=PARENT["start_value"],
             stop_condition="value < 5",
             max_iterations=10,

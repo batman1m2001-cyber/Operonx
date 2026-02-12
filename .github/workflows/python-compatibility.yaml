@@ -42,7 +42,7 @@ jobs:
         working-directory: ${{ matrix.package }}
         run: |
           if [ "${{ matrix.package }}" = "hush-core" ]; then
-            uv run python -c "from hush.core import GraphNode, CodeNode, START, END"
+            uv run python -c "from hush.core import GraphOp, FuncOp, START, END"
           elif [ "${{ matrix.package }}" = "hush-providers" ]; then
             uv run python -c "from hush.providers import LLMFactory, EmbeddingFactory"
           elif [ "${{ matrix.package }}" = "hush-ops" ]; then
