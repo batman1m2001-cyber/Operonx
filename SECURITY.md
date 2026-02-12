@@ -60,7 +60,7 @@ This security policy applies to:
 
 - `hush-core`
 - `hush-providers`
-- `hush-observability`
-- `hush-vscode-traceview`
+- `hush-ops`
+- `hush-eyes`
 
 Third-party provider SDKs (OpenAI, Anthropic, etc.) have their own security policies.

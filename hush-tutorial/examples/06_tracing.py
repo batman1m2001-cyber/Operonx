@@ -155,9 +155,9 @@ async def example_3_langfuse_tracer():
     print("=" * 50)
 
     try:
-        from hush.observability import LangfuseTracer
+        from hush.ops import LangfuseTracer
     except ImportError:
-        print("  Skipped — hush-observability[langfuse] chưa cài")
+        print("  Skipped — hush-ops[langfuse] chưa cài")
         return
 
     import os

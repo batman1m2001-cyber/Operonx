@@ -21,14 +21,14 @@ hush-core         (standalone)
     ↑
 hush-providers    (depends on hush-core)
     ↑
-hush-observability (depends on hush-core)
+hush-ops (depends on hush-core)
 ```
 
 ## Release Order
 
 1. `hush-core` (if changed)
 2. `hush-providers` (if changed)
-3. `hush-observability` (if changed)
+3. `hush-ops` (if changed)
 
 ## Pre-release Checklist
 

@@ -50,7 +50,7 @@ asyncio.run(main())
 |---------|-------------|
 | **hush-core** | Core workflow engine — nodes, state, tracing, execution |
 | **hush-providers** | LLM, embedding, reranking provider integrations |
-| **hush-observability** | External tracing backends (Langfuse, OpenTelemetry) |
+| **hush-ops** | External tracing backends (Langfuse, OpenTelemetry) |
 
 ## License
 

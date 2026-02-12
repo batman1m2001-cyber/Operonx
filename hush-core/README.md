@@ -92,7 +92,7 @@ tracer = LocalTracer()  # ~/.hush/traces.db
 engine = Hush(graph)
 await engine.run(inputs={...}, tracer=tracer)
 
-# Xem traces: VS Code extension hush-vscode-traceview
+# Xem traces: VS Code extension hush-eyes
 ```
 
 ## Documentation
@@ -106,8 +106,8 @@ await engine.run(inputs={...}, tracer=tracer)
 ## Related Packages
 
 - [hush-providers](../hush-providers/) - LLM, embedding, reranking
-- [hush-observability](../hush-observability/) - Langfuse, OpenTelemetry
-- [hush-vscode-traceview](../hush-vscode-traceview/) - VS Code extension
+- [hush-ops](../hush-ops/) - Langfuse, OpenTelemetry
+- [hush-eyes](../hush-eyes/) - VS Code extension
 
 ## License
 

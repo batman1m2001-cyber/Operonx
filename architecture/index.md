@@ -45,9 +45,9 @@ Hush sử dụng ba lớp documentation:
 | Root | [/CLAUDE.md](../CLAUDE.md) | Monorepo overview, conventions |
 | hush-core | [/hush-core/CLAUDE.md](../hush-core/CLAUDE.md) | Node patterns, state management |
 | hush-providers | [/hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) | Provider patterns |
-| hush-observability | [/hush-observability/CLAUDE.md](../hush-observability/CLAUDE.md) | Tracer patterns |
+| hush-ops | [/hush-ops/CLAUDE.md](../hush-ops/CLAUDE.md) | Tracer patterns |
 | hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
-| hush-vscode-traceview | [/hush-vscode-traceview/CLAUDE.md](../hush-vscode-traceview/CLAUDE.md) | Extension patterns |
+| hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Extension patterns |
 
 ### Sync Rules
 
@@ -146,7 +146,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 |---------|-------|-----------|-----------|
 | hush-core | Core workflow engine | `engine.py`, `nodes/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
-| hush-observability | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-observability/CLAUDE.md) |
+| hush-ops | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-ops/CLAUDE.md) |
 
 ## Folder Structure
 

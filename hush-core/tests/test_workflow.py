@@ -167,9 +167,9 @@ class TestHushWithTracer:
         import time
 
         try:
-            from hush.observability import LangfuseTracer
+            from hush.ops import LangfuseTracer
         except ImportError:
-            pytest.skip("hush-observability not installed")
+            pytest.skip("hush-ops not installed")
 
         tracer = LangfuseTracer(resource_key="langfuse:default")
 

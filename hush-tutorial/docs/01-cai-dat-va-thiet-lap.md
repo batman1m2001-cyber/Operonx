@@ -35,9 +35,9 @@ Hush là **monorepo** với 3 packages riêng biệt:
 |---------|--------|-------------|
 | `hush-core` | Workflow engine (GraphNode, CodeNode, BranchNode) | **Luôn cần** — đây là nền tảng |
 | `hush-providers` | LLM, embedding, reranking providers | Khi dùng LLM, embedding, hoặc reranking |
-| `hush-observability` | Langfuse, OpenTelemetry tracing | Khi cần tracing với backend bên ngoài |
+| `hush-ops` | Langfuse, OpenTelemetry tracing | Khi cần tracing với backend bên ngoài |
 
-> **Quan trọng:** `hush-providers` và `hush-observability` phụ thuộc vào `hush-core`, nên luôn cài `hush-core` trước.
+> **Quan trọng:** `hush-providers` và `hush-ops` phụ thuộc vào `hush-core`, nên luôn cài `hush-core` trước.
 
 #### Extras — kết hợp tuỳ ý
 
@@ -57,7 +57,7 @@ Hush là **monorepo** với 3 packages riêng biệt:
 
 > OpenAI (bao gồm Azure OpenAI) đã có sẵn trong base dependencies của `hush-providers`, không cần thêm extra.
 
-**hush-observability:**
+**hush-ops:**
 
 | Extra | Backend |
 |-------|---------|
@@ -88,7 +88,7 @@ pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#s
 # Core + LLM providers + Langfuse tracing
 pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
+pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
 ```
 
 #### Hoặc: Dùng requirements.txt
@@ -99,7 +99,7 @@ Tạo file `requirements.txt` trong thư mục project:
 # requirements.txt
 hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core
 hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers
-hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability
+hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops
 ```
 
 Sau đó cài đặt:
@@ -131,7 +131,7 @@ uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.gi
 # Core + LLM providers + Langfuse tracing
 uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
 uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-uv pip install "hush-observability[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-observability"
+uv pip install "hush-ops[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-ops"
 ```
 
 #### Hoặc: Dùng pyproject.toml (khuyến nghị cho dự án thực tế)
@@ -146,13 +146,13 @@ requires-python = ">=3.10"
 dependencies = [
     "hush-core",
     "hush-providers",
-    "hush-observability[langfuse]",
+    "hush-ops[langfuse]",
 ]
 
 [tool.uv.sources]
 hush-core = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-core" }
 hush-providers = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-providers" }
-hush-observability = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-observability" }
+hush-ops = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-ops" }
 ```
 
 Sau đó cài đặt:
@@ -170,7 +170,7 @@ Kết quả mong đợi:
 ```
 Successfully installed hush-core-0.1.0 ...
 Successfully installed hush-providers-0.1.0 ...
-Successfully installed hush-observability-0.1.0 ...
+Successfully installed hush-ops-0.1.0 ...
 ```
 
 ### 2.3 Kiểm tra cài đặt cơ bản
@@ -178,7 +178,7 @@ Successfully installed hush-observability-0.1.0 ...
 ```bash
 python3 -c "from hush.core import Hush, GraphNode; print('hush-core OK')"
 python3 -c "from hush.providers import LLMNode; print('hush-providers OK')"
-python3 -c "from hush.observability import LangfuseTracer; print('hush-observability OK')"
+python3 -c "from hush.ops import LangfuseTracer; print('hush-ops OK')"
 ```
 
 Kết quả mong đợi:
@@ -186,7 +186,7 @@ Kết quả mong đợi:
 ```
 hush-core OK
 hush-providers OK
-hush-observability OK
+hush-ops OK
 ```
 
 Nếu thấy 3 dòng "OK" → cài đặt packages thành công. Tiếp tục thiết lập API keys.
@@ -480,7 +480,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from hush.core import Hush, GraphNode, code_node, START, END, PARENT
-from hush.observability import LangfuseTracer
+from hush.ops import LangfuseTracer
 
 @code_node
 def hello():

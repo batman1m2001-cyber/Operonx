@@ -170,7 +170,7 @@ result = await engine.run(inputs)
 ## Tracing Integration
 
 ```python
-from hush.observability import LangfuseTracer
+from hush.ops import LangfuseTracer
 
 tracer = LangfuseTracer()
 result = await engine.run(inputs, tracer=tracer)

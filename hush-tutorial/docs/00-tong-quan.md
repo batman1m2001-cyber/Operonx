@@ -32,7 +32,7 @@ asyncio.run(main())
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    hush-observability                    │
+│                    hush-ops                    │
 │         (LocalTracer, Langfuse, OpenTelemetry)           │
 ├─────────────────────────────────────────────────────────┤
 │                     hush-providers                       │
@@ -47,7 +47,7 @@ asyncio.run(main())
 |---------|-------|
 | `hush-core` | **Nền tảng** — `@code_node`, `for_()`, `map_()`, `while_()`, `if_()` đủ cho gần như mọi workflow |
 | `hush-providers` | Add-on — `llm_()`, `prompt_()`, `embedding_()`, `rerank_()` (cài khi cần) |
-| `hush-observability` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
+| `hush-ops` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
 > **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (CodeNode, LLMNode, ...). Trong code, hãy dùng **shorthand syntax** (`@code_node`, `llm_()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
 

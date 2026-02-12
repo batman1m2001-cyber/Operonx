@@ -8,9 +8,9 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 Hush-ai/
 ├── hush-core/          # Core workflow engine (nodes, state, tracing)
 ├── hush-providers/     # LLM, embedding, reranking integrations
-├── hush-observability/ # External tracing backends (Langfuse, OTEL)
+├── hush-ops/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
-├── hush-vscode-traceview/ # VS Code extension for trace visualization
+├── hush-eyes/ # VS Code extension for trace visualization
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -29,9 +29,9 @@ Hush-ai/
 │  ├── /CLAUDE.md              → Monorepo overview, conventions   │
 │  ├── /hush-core/CLAUDE.md    → Core patterns, how to extend     │
 │  ├── /hush-providers/CLAUDE.md → Provider patterns              │
-│  ├── /hush-observability/CLAUDE.md → Tracer patterns            │
+│  ├── /hush-ops/CLAUDE.md → Tracer patterns            │
 │  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
-│  └── /hush-vscode-traceview/CLAUDE.md → Extension patterns      │
+│  └── /hush-eyes/CLAUDE.md → Extension patterns      │
 │                                                                  │
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
@@ -95,7 +95,7 @@ When making significant changes:
 | hush-providers/llm/ | 04-llm-integration.md | 03-04 |
 | hush-providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
 | hush-providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
-| hush-observability/tracers/ | 09-tracing-observability.md | 06, 08, 09 |
+| hush-ops/tracers/ | 09-tracing-observability.md | 06, 08, 09 |
 | Control flow (For/While/Branch) | 05-loops-branches.md | 05 |
 | Error handling | 07-error-handling.md | 10 |
 | Parallel patterns | 08-parallel-execution.md | 13 |
@@ -121,7 +121,7 @@ hush-core (foundation - no hush dependencies)
     ↓
 hush-providers (depends on hush-core)
     ↓
-hush-observability (depends on hush-core)
+hush-ops (depends on hush-core)
 ```
 
 ## When to Modify Which Package
@@ -130,13 +130,13 @@ hush-observability (depends on hush-core)
 |------|---------|
 | New node type | hush-core/hush/core/nodes/ |
 | New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
-| New tracing backend | hush-observability/hush/observability/ |
+| New tracing backend | hush-ops/hush/ops/ |
 | Documentation or examples | hush-tutorial/ |
-| VS Code extension features | hush-vscode-traceview/ |
+| VS Code extension features | hush-eyes/ |
 
 ## Global Coding Conventions
 
-### Python (hush-core, hush-providers, hush-observability)
+### Python (hush-core, hush-providers, hush-ops)
 
 - **Python**: 3.10+
 - **Async-first**: All I/O operations use asyncio
@@ -145,7 +145,7 @@ hush-observability (depends on hush-core)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### TypeScript (hush-vscode-traceview)
+### TypeScript (hush-eyes)
 
 - Build with esbuild
 - Follow VS Code extension patterns
@@ -166,11 +166,11 @@ cd hush-core && uv pip install -e ".[dev]" && pytest
 # hush-providers
 cd hush-providers && uv pip install -e ".[dev]" && pytest
 
-# hush-observability
-cd hush-observability && uv pip install -e ".[dev]" && pytest
+# hush-ops
+cd hush-ops && uv pip install -e ".[dev]" && pytest
 
 # VS Code extension
-cd hush-vscode-traceview && npm install && npm run compile
+cd hush-eyes && npm install && npm run compile
 ```
 
 ## Development Workflow

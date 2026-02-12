@@ -21,8 +21,8 @@ cd hush-core && uv sync --all-extras && cd ..
 # Install hush-providers (depends on hush-core)
 cd hush-providers && uv sync --all-extras && cd ..
 
-# Install hush-observability (depends on hush-core)
-cd hush-observability && uv sync --all-extras && cd ..
+# Install hush-ops (depends on hush-core)
+cd hush-ops && uv sync --all-extras && cd ..
 ```
 
 ### Pre-commit Hooks
@@ -98,7 +98,7 @@ When making changes, update the appropriate documentation:
 |-------------|--------|
 | New node type | `hush-core/CLAUDE.md`, `hush-tutorial/docs/03-core-concepts.md` |
 | New provider | `hush-providers/CLAUDE.md`, `hush-tutorial/docs/04-llm-integration.md` |
-| New tracer | `hush-observability/CLAUDE.md`, `hush-tutorial/docs/09-tracing-observability.md` |
+| New tracer | `hush-ops/CLAUDE.md`, `hush-tutorial/docs/09-tracing-observability.md` |
 | API change | Relevant `CLAUDE.md` + tutorial docs |
 | Internal refactor | `architecture/` if algorithm changes |
 
@@ -110,9 +110,9 @@ See [CLAUDE.md](CLAUDE.md) for the complete sync mapping.
 Hush-ai/
 ├── hush-core/          # Core workflow engine
 ├── hush-providers/     # LLM, embedding, reranking
-├── hush-observability/ # Tracing backends
+├── hush-ops/ # Tracing backends
 ├── hush-tutorial/      # Docs (Vietnamese) + examples
-├── hush-vscode-traceview/ # VS Code extension
+├── hush-eyes/ # VS Code extension
 ├── architecture/       # Deep technical docs
 └── CLAUDE.md           # Quick reference
 ```
@@ -124,7 +124,7 @@ hush-core (foundation - no hush dependencies)
     ↓
 hush-providers (depends on hush-core)
     ↓
-hush-observability (depends on hush-core)
+hush-ops (depends on hush-core)
 ```
 
 ## Questions?
