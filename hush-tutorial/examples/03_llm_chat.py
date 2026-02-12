@@ -4,10 +4,10 @@ Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env + resources.yaml
 
 Học được:
 - load_dotenv() để load API keys
-- prompt_(): tạo messages cho LLM
-- llm_(): gọi LLM qua resource_key
-- llmchain_(): kết hợp prompt + LLM trong 1 node
-- @code_node + prompt_() + llm_() pipeline (tiền xử lý → prompt → LLM)
+- PromptNode.of(): tạo messages cho LLM
+- LLMNode.of(): gọi LLM qua resource_key
+- LLMChainNode.of(): kết hợp prompt + LLM trong 1 node
+- @code_node + PromptNode.of() + LLMNode.of() pipeline (tiền xử lý → prompt → LLM)
 
 Chạy: cd hush-tutorial && uv run python examples/03_llm_chat.py
 """
@@ -21,24 +21,24 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes.transform.code_node import code_node
-from hush.providers import llm_, llmchain_, prompt_
+from hush.providers import LLMChainNode, LLMNode, PromptNode
 
 
 async def example_1_basic_chat():
-    """prompt_() + llm_() — Cách cơ bản nhất."""
+    """PromptNode.of() + LLMNode.of() — Cách cơ bản nhất."""
     print("=" * 50)
-    print("Ví dụ 1: Basic Chat (prompt_ + llm_)")
+    print("Ví dụ 1: Basic Chat (PromptNode.of + LLMNode.of)")
     print("=" * 50)
 
     with GraphNode(name="basic-chat") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
                 "user": "{question}",
             },
             question=PARENT["question"],
         )
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -51,14 +51,14 @@ async def example_1_basic_chat():
 
 
 async def example_2_chain_node():
-    """llmchain_() — All-in-one, gọn hơn."""
+    """LLMChainNode.of() — All-in-one, gọn hơn."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: llmchain_ (all-in-one)")
+    print("Ví dụ 2: LLMChainNode.of (all-in-one)")
     print("=" * 50)
 
     with GraphNode(name="chain-chat") as graph:
-        chain = llmchain_(
+        chain = LLMChainNode.of(
             resource_key="gpt-4o-mini",
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
@@ -88,14 +88,14 @@ async def example_3_text_summarization():
 
     with GraphNode(name="summarize-pipeline") as graph:
         preprocess = clean_text(text=PARENT["text"])
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
                 "user": "Tóm tắt:\n\n{text}",
             },
             text=preprocess["cleaned_text"],
         )
-        summarize = llm_(
+        summarize = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["summary"]},

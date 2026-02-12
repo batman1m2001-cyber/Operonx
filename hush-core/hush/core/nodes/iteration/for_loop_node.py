@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from hush.core.configs.node_config import NodeType
 from hush.core.exceptions import IterationError
 from hush.core.loggings import LOGGER
+from hush.core.nodes.base import shorthand
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 
 if TYPE_CHECKING:
@@ -125,20 +126,20 @@ class ForLoopNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @shorthand
+    def of(cls, **kwargs) -> "ForLoopNode":
+        """Create a ForLoopNode with flat kwargs.
+
+        Example::
+
+            with ForLoopNode.of(x=Each([1, 2, 3]), multiplier=10) as loop:
+                node = calc(x=PARENT["x"], multiplier=PARENT["multiplier"])
+                START >> node >> END
+        """
+        inputs, init_kwargs = split_iter_kwargs(kwargs)
+        return cls(inputs=inputs, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
         return {"each": list(self._each.keys()), "inputs": list(self._broadcast_inputs.keys())}
-
-
-def for_(**kwargs) -> ForLoopNode:
-    """Shorthand to create a ForLoopNode with flat kwargs.
-
-    Example:
-        with for_(x=Each([1, 2, 3]), multiplier=10) as loop:
-            node = calc(x=PARENT["x"], multiplier=PARENT["multiplier"])
-            START >> node >> END
-    """
-    _skip_auto_name = True  # noqa: F841
-    inputs, init_kwargs = split_iter_kwargs(kwargs)
-    return ForLoopNode(inputs=inputs, **init_kwargs)

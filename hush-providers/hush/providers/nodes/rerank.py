@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from hush.core.configs import NodeType
 from hush.core.exceptions import RerankError
 from hush.core.nodes import BaseNode
+from hush.core.nodes.base import shorthand, split_shorthand_kwargs
 from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
 
@@ -152,20 +153,18 @@ class RerankNode(BaseNode):
 
         return {"reranks": reranked_docs}
 
+    @shorthand
+    def of(cls, resource_key=None, **kwargs) -> "RerankNode":
+        """Create a RerankNode with flat kwargs.
+
+        Example::
+
+            rerank = RerankNode.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])
+        """
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        return cls(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return rerank-specific metadata dictionary."""
         return {"model": self.resource_key}
-
-
-def rerank_(resource_key=None, **kwargs) -> RerankNode:
-    """Shorthand to create a RerankNode with flat kwargs.
-
-    Example:
-        rerank = rerank_("bge-m3", query=PARENT["q"], documents=PARENT["docs"], outputs={"*": PARENT})
-    """
-    from hush.core.nodes import split_shorthand_kwargs
-
-    _skip_auto_name = True  # noqa: F841
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    return RerankNode(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)

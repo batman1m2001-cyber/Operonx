@@ -31,11 +31,11 @@ hush/providers/
 │   ├── factory.py      # AuthFactory
 │   └── keycloak.py     # Keycloak token provider
 ├── nodes/              # Workflow node wrappers
-│   ├── llm.py          # LLMNode, llm_()
-│   ├── llm_chain.py    # LLMChainNode, llmchain_()
-│   ├── embedding.py    # EmbeddingNode, embedding_()
-│   ├── rerank.py       # RerankNode, rerank_()
-│   └── prompt.py       # PromptNode, prompt_()
+│   ├── llm.py          # LLMNode + LLMNode.of()
+│   ├── llm_chain.py    # LLMChainNode + LLMChainNode.of()
+│   ├── embedding.py    # EmbeddingNode + EmbeddingNode.of()
+│   ├── rerank.py       # RerankNode + RerankNode.of()
+│   └── prompt.py       # PromptNode + PromptNode.of()
 └── registry/           # Plugin registration
     ├── llm_plugin.py
     ├── embedding_plugin.py
@@ -132,26 +132,26 @@ class MyReranker(BaseReranker):
 
 ## Workflow Nodes
 
-All provider nodes have shorthand functions (recommended) and full class equivalents.
+All provider nodes use `Node.of()` classmethods for concise creation (recommended) and full `__init__` for explicit control.
 
-### Shorthand Functions (Recommended)
+### Node.of() Shorthand (Recommended)
 ```python
-from hush.providers import llmchain_, llm_, prompt_, embedding_, rerank_
+from hush.providers import LLMChainNode, LLMNode, PromptNode, EmbeddingNode, RerankNode
 
 # Prompt + LLM all-in-one
-chat = llmchain_(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+chat = LLMChainNode.of(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Separate LLM call
-llm = llm_(resource_key="gpt-4o", messages=PARENT["messages"])
+llm = LLMNode.of(resource_key="gpt-4o", messages=PARENT["messages"])
 
 # Separate prompt formatting
-p = prompt_(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+p = PromptNode.of(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Embeddings
-embed = embedding_(resource_key="bge-m3", texts=PARENT["texts"])
+embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])
 
 # Reranking
-rerank = rerank_(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
+rerank = RerankNode.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
 ```
 
 ### Full Class Equivalents

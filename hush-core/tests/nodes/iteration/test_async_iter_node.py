@@ -6,7 +6,7 @@ import pytest
 
 from hush.core.nodes.base import END, PARENT, START
 from hush.core.nodes.graph.graph_node import GraphNode
-from hush.core.nodes.iteration.async_iter_node import AsyncIterNode, aiter_, batch_by_size
+from hush.core.nodes.iteration.async_iter_node import AsyncIterNode, batch_by_size
 from hush.core.nodes.iteration.base import Each
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.states import MemoryState, StateSchema
@@ -371,16 +371,16 @@ class TestValidation:
 
 
 # ============================================================
-# Test 9: aiter_() Shorthand
+# Test 9: AsyncIterNode.of() Shorthand
 # ============================================================
 
 
 class TestAiterShorthand:
-    """Test aiter_() shorthand function."""
+    """Test AsyncIterNode.of() shorthand classmethod."""
 
     @pytest.mark.asyncio
     async def test_aiter_shorthand_basic(self):
-        """Test basic aiter_() with Each()."""
+        """Test basic AsyncIterNode.of() with Each()."""
 
         async def simple_source():
             for i in range(5):
@@ -391,7 +391,7 @@ class TestAiterShorthand:
         def double_value(value: int):
             return {"result": value * 2}
 
-        with aiter_(value=Each(simple_source())) as stream:
+        with AsyncIterNode.of(value=Each(simple_source())) as stream:
             processor = double_value(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> processor >> END
 
@@ -404,7 +404,7 @@ class TestAiterShorthand:
 
     @pytest.mark.asyncio
     async def test_aiter_shorthand_with_broadcast(self):
-        """Test aiter_() with Each() and broadcast values."""
+        """Test AsyncIterNode.of() with Each() and broadcast values."""
 
         async def number_source():
             for i in range(4):
@@ -415,7 +415,7 @@ class TestAiterShorthand:
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
-        with aiter_(value=Each(number_source()), multiplier=10) as stream:
+        with AsyncIterNode.of(value=Each(number_source()), multiplier=10) as stream:
             processor = multiply(
                 inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
                 outputs={"*": PARENT},
@@ -431,7 +431,7 @@ class TestAiterShorthand:
 
     @pytest.mark.asyncio
     async def test_aiter_shorthand_with_callback(self):
-        """Test aiter_() with callback passthrough."""
+        """Test AsyncIterNode.of() with callback passthrough."""
 
         async def simple_source():
             for i in range(3):
@@ -447,7 +447,7 @@ class TestAiterShorthand:
         def double_value(value: int):
             return {"result": value * 2}
 
-        with aiter_(value=Each(simple_source()), callback=collect) as stream:
+        with AsyncIterNode.of(value=Each(simple_source()), callback=collect) as stream:
             processor = double_value(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> processor >> END
 
@@ -459,19 +459,19 @@ class TestAiterShorthand:
         assert len(results) == 3
 
     def test_aiter_shorthand_auto_name(self):
-        """Test that aiter_() auto-names from variable assignment."""
+        """Test that AsyncIterNode.of() auto-names from variable assignment."""
 
         async def src():
             yield 1
 
-        my_stream = aiter_(value=Each(src()))
+        my_stream = AsyncIterNode.of(value=Each(src()))
         assert my_stream.name == "my_stream"
 
     def test_aiter_shorthand_is_asynciternode(self):
-        """Test that aiter_() returns an AsyncIterNode instance."""
+        """Test that AsyncIterNode.of() returns an AsyncIterNode instance."""
 
         async def src():
             yield 1
 
-        node = aiter_(value=Each(src()))
+        node = AsyncIterNode.of(value=Each(src()))
         assert isinstance(node, AsyncIterNode)

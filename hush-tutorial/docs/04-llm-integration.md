@@ -7,11 +7,11 @@ Cấu hình và sử dụng LLM providers trong Hush workflows.
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
-> | `llmchain_()` | `LLMChainNode` | `llmchain_(resource_key="gpt-4o", template={...}, query=PARENT["q"])` |
-> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
+> | `LLMChainNode.of()` | `LLMChainNode` | `LLMChainNode.of(resource_key="gpt-4o", template={...}, query=PARENT["q"])` |
+> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
 
 ## Cấu hình Providers trong resources.yaml
 
@@ -74,18 +74,18 @@ llm:or-claude-4-sonnet:
   model: anthropic/claude-sonnet-4
 ```
 
-## llmchain_() — Shorthand (khuyến nghị)
+## LLMChainNode.of() — Classmethod (khuyến nghị)
 
 Cách ngắn nhất để gọi LLM. Kết hợp prompt + LLM trong một node, auto-naming từ biến, `>> END` auto-forward outputs.
 
 ```python
-from hush.providers import llmchain_
+from hush.providers import LLMChainNode
 
 # String template
-summarize = llmchain_(resource_key="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
+summarize = LLMChainNode.of(resource_key="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
 
 # Dict với system/user
-chat = llmchain_(
+chat = LLMChainNode.of(
     resource_key="gpt-4o",
     template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
     task="tóm tắt văn bản",
@@ -93,7 +93,7 @@ chat = llmchain_(
 )
 
 # Với conversation history
-chat = llmchain_(
+chat = LLMChainNode.of(
     resource_key="gpt-4o",
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     conversation_history=PARENT["history"],
@@ -106,7 +106,7 @@ START >> chat >> END  # auto-forward: result["content"], result["model_used"], .
 ### Structured output (JSON mode)
 
 ```python
-classifier = llmchain_(
+classifier = LLMChainNode.of(
     resource_key="gpt-4o",
     template={"user": "Phân loại và trả về JSON: {text}"},
     text=PARENT["text"],
@@ -125,14 +125,14 @@ classifier = llmchain_(
 | `tool_calls` | list | Tool calls nếu có |
 | `finish_reason` | str | "stop", "tool_calls", etc. |
 
-## llmchain_() — Config nâng cao
+## LLMChainNode.of() — Config nâng cao
 
 Khi cần config chi tiết hơn (load balancing, fallback, extract, v.v.):
 
 ```python
-from hush.providers import llmchain_
+from hush.providers import LLMChainNode
 
-chain = llmchain_(
+chain = LLMChainNode.of(
     resource_key=["gpt-4o", "gpt-4o-mini"],
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     ratios=[0.7, 0.3],
@@ -143,7 +143,7 @@ chain = llmchain_(
 
 ---
 
-## prompt_() + llm_() — Dùng khi cần linh hoạt
+## PromptNode.of() + LLMNode.of() — Dùng khi cần linh hoạt
 
 Dùng pattern tách riêng khi cần:
 - **Một prompt → nhiều LLMs** (so sánh models, ensemble)
@@ -151,25 +151,25 @@ Dùng pattern tách riêng khi cần:
 - **Pipeline phức tạp** (`@code_node` xen giữa prompt và LLM)
 - **Multimodal prompts** (image, audio)
 
-### prompt_() — Xây dựng Messages
+### PromptNode.of() — Xây dựng Messages
 
 Template hỗ trợ 3 định dạng: string, dict, hoặc list.
 
 ```python
-from hush.providers import prompt_
+from hush.providers import PromptNode
 
 # String → [{"role": "user", "content": "..."}]
-p = prompt_(template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
+p = PromptNode.of(template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
 
 # Dict → system + user messages
-p = prompt_(
+p = PromptNode.of(
     template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
     task="tóm tắt văn bản",
     query=PARENT["query"],
 )
 
 # List → full messages array (multimodal)
-p = prompt_(
+p = PromptNode.of(
     template=[
         {"role": "system", "content": "Bạn là assistant phân tích hình ảnh."},
         {"role": "user", "content": [
@@ -182,18 +182,18 @@ p = prompt_(
 )
 ```
 
-### llm_() — Gọi LLM
+### LLMNode.of() — Gọi LLM
 
 ```python
-from hush.providers import llm_
+from hush.providers import LLMNode
 
-llm = llm_(resource_key="gpt-4o", messages=p["messages"])
+llm = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
 ```
 
 ### Generation Parameters
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     messages=p["messages"],
     temperature=0.7,       # 0.0 = deterministic, 1.0 = creative
@@ -214,7 +214,7 @@ Hướng dẫn chọn temperature:
 ## Streaming
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     stream=True,  # Default
     messages=p["messages"],
@@ -232,7 +232,7 @@ async for chunk in STREAM_SERVICE.subscribe(request_id, channel_name):
 Phân tải requests giữa nhiều models theo tỷ lệ.
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
     seed=42,             # Optional: reproducible selection
@@ -247,7 +247,7 @@ Xem thêm ví dụ tại `examples/12_multi_model.py`.
 Tự động chuyển model khi primary fails.
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     messages=p["messages"],
@@ -278,10 +278,10 @@ tools = [
 ]
 ```
 
-### Sử dụng trong llm_()
+### Sử dụng trong LLMNode.of()
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     messages=p["messages"],
     tools=tools,
@@ -296,7 +296,7 @@ Xem ví dụ agent workflow đầy đủ tại `examples/11_agent_workflow.py`.
 Force LLM trả về JSON theo schema.
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     messages=p["messages"],
     response_format={
@@ -344,7 +344,7 @@ for node_name, metadata in state.trace_metadata.items():
 
 ```python
 from hush.core import code_node
-from hush.providers import prompt_, llm_
+from hush.providers import PromptNode, LLMNode
 
 @code_node
 def update_history(history: list, message: str, response: str):
@@ -354,12 +354,12 @@ def update_history(history: list, message: str, response: str):
     ]}
 
 with GraphNode(name="multi-turn-chat") as graph:
-    p = prompt_(
+    p = PromptNode.of(
         template={"system": "Bạn là assistant hữu ích.", "user": "{message}"},
         conversation_history=PARENT["history"],
         message=PARENT["message"],
     )
-    llm = llm_(
+    llm = LLMNode.of(
         resource_key="gpt-4o",
         messages=p["messages"],
         temperature=0.7,

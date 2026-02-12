@@ -1,34 +1,34 @@
 # Loops và Branches
 
-Sử dụng các node điều khiển luồng: `for_()`, `map_()`, `while_()` và `if_()`.
+Sử dụng các node điều khiển luồng: `ForLoopNode.of()`, `MapNode.of()`, `WhileLoopNode.of()` và `if_()`.
 
 > **Ví dụ chạy được**: `examples/05_loops_and_branches.py`, `examples/15_shorthand_syntax.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
 > | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `for_()` | `ForLoopNode` | `for_(x=Each([1,2,3]))` |
-> | `map_()` | `MapNode` | `map_(x=Each([1,2,3]), max_concurrency=4)` |
-> | `while_()` | `WhileLoopNode` | `while_(counter=0, stop_condition="counter >= 5")` |
+> | `ForLoopNode.of()` | `ForLoopNode` | `ForLoopNode.of(x=Each([1,2,3]))` |
+> | `MapNode.of()` | `MapNode` | `MapNode.of(x=Each([1,2,3]), max_concurrency=4)` |
+> | `WhileLoopNode.of()` | `WhileLoopNode` | `WhileLoopNode.of(counter=0, stop_condition="counter >= 5")` |
 > | `if_().else_()` | `BranchNode` | `if_(PARENT["x"] > 0, "pos").else_("neg")` |
 
-## for_() — Iterate tuần tự
+## ForLoopNode.of() — Iterate tuần tự
 
 Xử lý từng item một cách tuần tự. Dùng khi items có thể phụ thuộc vào nhau.
 
 ```python
 from hush.core import Hush, GraphNode, code_node, START, END, PARENT
-from hush.core.nodes import for_, Each
+from hush.core import ForLoopNode, Each
 
 @code_node
 def process(item: str, prefix: str):
     return {"result": f"{prefix}: {item}"}
 
 with GraphNode(name="sequential-process") as graph:
-    with for_(
+    with ForLoopNode.of(
         item=Each(PARENT["items"]),  # Iterate qua mỗi item
         prefix=PARENT["prefix"],     # Broadcast cho tất cả iterations
     ) as loop:
@@ -53,19 +53,19 @@ result = await engine.run(inputs={"items": ["a", "b", "c"], "prefix": "Item"})
 - Các biến không có `Each()` sẽ được broadcast cho tất cả iterations
 - Output là list kết quả theo thứ tự
 
-## map_() — Iterate song song
+## MapNode.of() — Iterate song song
 
 Xử lý nhiều items cùng lúc (parallel). Dùng cho I/O bound tasks hoặc items độc lập.
 
 ```python
-from hush.core.nodes import map_, Each
+from hush.core import MapNode, Each
 
 @code_node
 def square(x: int):
     return {"squared": x * x}
 
 with GraphNode(name="parallel-map") as graph:
-    with map_(
+    with MapNode.of(
         x=Each(PARENT["numbers"]),
         max_concurrency=3,  # Giới hạn concurrent tasks
     ) as map_node:
@@ -90,21 +90,21 @@ with GraphNode(name="parallel-map") as graph:
 | Dependencies | Items có thể phụ thuộc nhau | Items độc lập |
 | Memory | Thấp hơn | Cao hơn |
 | Use case | Chain processing, stateful | I/O bound, batch processing |
-| Shorthand | `for_(...)` | `map_(...)` |
+| Classmethod | `ForLoopNode.of(...)` | `MapNode.of(...)` |
 
-## while_() — Loop với điều kiện
+## WhileLoopNode.of() — Loop với điều kiện
 
 Chạy cho đến khi điều kiện trả về False.
 
 ```python
-from hush.core.nodes import while_
+from hush.core import WhileLoopNode
 
 @code_node
 def halve_value(value: int):
     return {"new_value": value // 2}
 
 with GraphNode(name="countdown") as graph:
-    with while_(
+    with WhileLoopNode.of(
         value=PARENT["start_value"],
         stop_condition="value < 5",
         max_iterations=20,
@@ -186,8 +186,8 @@ Loops có thể nest bên trong nhau:
 
 ```python
 with GraphNode(name="nested-loops") as graph:
-    with for_(x=Each([2, 3, 4])) as outer:
-        with for_(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
+    with ForLoopNode.of(x=Each([2, 3, 4])) as outer:
+        with ForLoopNode.of(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
             mult = multiply(
                 name="multiply",
                 inputs={"x": PARENT["x"], "y": PARENT["y"]},
@@ -210,11 +210,11 @@ with GraphNode(name="nested-loops") as graph:
 
 ## Tổng kết
 
-| Node | Shorthand | Execution | Use case |
-|------|-----------|-----------|----------|
-| `ForLoopNode` | `for_()` | Sequential | Items phụ thuộc nhau |
-| `MapNode` | `map_()` | Parallel | I/O bound, independent items |
-| `WhileLoopNode` | `while_()` | Conditional | Loop đến khi điều kiện False |
+| Node | Classmethod | Execution | Use case |
+|------|-------------|-----------|----------|
+| `ForLoopNode` | `ForLoopNode.of()` | Sequential | Items phụ thuộc nhau |
+| `MapNode` | `MapNode.of()` | Parallel | I/O bound, independent items |
+| `WhileLoopNode` | `WhileLoopNode.of()` | Conditional | Loop đến khi điều kiện False |
 | `BranchNode` | `if_()` | Conditional | Route dựa trên điều kiện |
 
 | Syntax | Mô tả |

@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, code_node, map_
+from hush.core.nodes import Each, MapNode, code_node
 
 # =============================================================================
 # Ví dụ 1: Fan-out / Fan-in
@@ -149,7 +149,7 @@ async def example_2_concurrency_control():
     print("=" * 50)
 
     with GraphNode(name="concurrency-demo") as graph:
-        with map_(
+        with MapNode.of(
             item=Each(PARENT["items"]),
             max_concurrency=3,  # Max 3 concurrent tasks
         ) as map_node:
@@ -206,7 +206,7 @@ async def example_3_partial_failure():
 
     with GraphNode(name="partial-failure") as graph:
         # Wrap risky logic trong try/catch
-        with map_(item=Each(PARENT["items"])) as map_node:
+        with MapNode.of(item=Each(PARENT["items"])) as map_node:
 
             @code_node
             def safe_op(item: int):
@@ -255,7 +255,7 @@ async def example_4_parallel_llm():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import llm_, prompt_
+    from hush.providers import LLMNode, PromptNode
 
     # --- Part A: Parallel prompts (different tasks, same input) ---
     print("\n  A) Parallel prompts (summary + keywords from same text):")
@@ -265,17 +265,17 @@ async def example_4_parallel_llm():
         return {"summary": s, "keywords": k}
 
     with GraphNode(name="parallel-llm") as graph:
-        p_summary = prompt_(
+        p_summary = PromptNode.of(
             template={"system": "Summarize in one sentence.", "user": "{text}"},
             text=PARENT["text"],
         )
-        p_keywords = prompt_(
+        p_keywords = PromptNode.of(
             template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
             text=PARENT["text"],
         )
 
-        llm_summary = llm_(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-        llm_keywords = llm_(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+        llm_summary = LLMNode.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+        llm_keywords = LLMNode.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
 
         m = merge_results(
             s=llm_summary["content"],
@@ -301,15 +301,15 @@ async def example_4_parallel_llm():
     print("\n  B) Batch LLM (multiple queries via MapNode):")
 
     with GraphNode(name="batch-llm") as graph:
-        with map_(
+        with MapNode.of(
             query=Each(PARENT["queries"]),
             max_concurrency=3,
         ) as map_node:
-            p = prompt_(
+            p = PromptNode.of(
                 template={"system": "Answer in one sentence.", "user": "{query}"},
                 query=PARENT["query"],
             )
-            llm = llm_(
+            llm = LLMNode.of(
                 resource_key="gpt-4o-mini",
                 messages=p["messages"],
                 outputs={"content": PARENT["answer"]},

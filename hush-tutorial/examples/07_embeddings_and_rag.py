@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes import code_node
-from hush.providers import embedding_, llm_, prompt_
+from hush.providers import EmbeddingNode, LLMNode, PromptNode
 
 # =============================================================================
 # Helper: Cosine similarity search
@@ -63,7 +63,7 @@ async def example_1_basic_embedding():
     print("=" * 50)
 
     with GraphNode(name="embed-texts") as graph:
-        embed = embedding_(
+        embed = EmbeddingNode.of(
             resource_key="openai",  # Tham chiếu embedding:openai trong resources.yaml
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -93,7 +93,7 @@ async def example_2_simple_rag():
     # Bước 0: Pre-compute document embeddings
     print("  Đang embed documents...")
     with GraphNode(name="embed-docs") as embed_graph:
-        embed = embedding_(
+        embed = EmbeddingNode.of(
             resource_key="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -112,7 +112,7 @@ async def example_2_simple_rag():
 
     with GraphNode(name="simple-rag") as graph:
         # Step 1: Embed query
-        embed_query = embedding_(
+        embed_query = EmbeddingNode.of(
             resource_key="openai",
             texts=PARENT["query"],
         )
@@ -126,7 +126,7 @@ async def example_2_simple_rag():
         )
 
         # Step 3: Build prompt with context
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": (
                     "Trả lời câu hỏi dựa trên context được cung cấp.\n"
@@ -140,7 +140,7 @@ async def example_2_simple_rag():
         )
 
         # Step 4: Generate answer
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -178,9 +178,9 @@ async def example_3_rag_with_rerank():
     print("=" * 50)
 
     try:
-        from hush.providers import rerank_
+        from hush.providers import RerankNode
     except ImportError:
-        print("  Skipped — rerank_ chưa available")
+        print("  Skipped — RerankNode chưa available")
         return
 
     import os
@@ -192,14 +192,14 @@ async def example_3_rag_with_rerank():
 
     with GraphNode(name="rag-rerank") as graph:
         # Rerank documents theo query
-        rr = rerank_(
+        rr = RerankNode.of(
             resource_key="bge-m3",  # reranking:bge-m3 trong resources.yaml
             query=PARENT["query"],
             documents=PARENT["documents"],
             top_k=3,
         )
 
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Trả lời dựa trên context:\n\n{context}",
                 "user": "{query}",
@@ -208,7 +208,7 @@ async def example_3_rag_with_rerank():
             query=PARENT["query"],
         )
 
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},

@@ -1,12 +1,9 @@
 """Các hàm tiện ích dùng chung cho hush-core."""
 
 import asyncio
-import inspect
-import linecache
 import re
-import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, Type
 
 
 def _infer_type(value: Any) -> Type:
@@ -63,11 +60,6 @@ class Param:
                 self.type = _infer_type(self.default)
             else:
                 self.type = Any
-
-
-def unique_name() -> str:
-    """Tạo tên duy nhất sử dụng UUID."""
-    return uuid.uuid4().hex[:8]
 
 
 def verify_data(data: Any) -> bool:
@@ -142,33 +134,3 @@ def ensure_async(func: Callable) -> Callable:
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
     return async_wrapper
-
-
-def _auto_name() -> Optional[str]:
-    """Extract variable name by walking up frames past all __init__ methods.
-
-    Unlike _caller_name(depth), this automatically finds the
-    correct frame regardless of inheritance depth.
-    """
-    frame = inspect.currentframe()
-    try:
-        frame = frame.f_back  # skip this function
-        while frame and (
-            frame.f_code.co_name == "__init__"
-            or getattr(frame.f_code, "_skip_auto_name", False)
-            or frame.f_locals.get("_skip_auto_name")
-        ):
-            frame = frame.f_back
-        if frame is None:
-            return None
-        filename = frame.f_code.co_filename
-        lineno = frame.f_lineno
-        for offset in range(21):
-            line = linecache.getline(filename, lineno - offset).strip()
-            if "=" in line:
-                candidate = line.split("=")[0].strip()
-                if candidate.isidentifier():
-                    return candidate
-        return None
-    finally:
-        del frame

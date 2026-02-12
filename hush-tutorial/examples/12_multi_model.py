@@ -23,7 +23,7 @@ import os
 
 from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes import code_node, if_
-from hush.providers import llm_, prompt_
+from hush.providers import LLMNode, PromptNode
 
 # =============================================================================
 # Ví dụ 1: Parallel multi-model comparison
@@ -49,14 +49,14 @@ async def example_1_parallel_models():
         }
 
     with GraphNode(name="multi-model-parallel") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={"system": "Answer in one sentence.", "user": "{query}"},
             query=PARENT["query"],
         )
 
         # 2 models chạy song song
-        gpt4o = llm_(resource_key="gpt-4o", messages=p["messages"])
-        gpt4o_mini = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
+        gpt4o = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
+        gpt4o_mini = LLMNode.of(resource_key="gpt-4o-mini", messages=p["messages"])
 
         # So sánh
         cmp = compare(a=gpt4o["content"], b=gpt4o_mini["content"])
@@ -88,14 +88,14 @@ async def example_2_cost_routing():
 
     with GraphNode(name="smart-routing") as graph:
         # Step 1: Classify complexity (cheap model)
-        cls_p = prompt_(
+        cls_p = PromptNode.of(
             template={
                 "system": "Classify if this query is SIMPLE or COMPLEX. Reply with just one word.",
                 "user": "{query}",
             },
             query=PARENT["query"],
         )
-        classifier = llm_(
+        classifier = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=cls_p["messages"],
             outputs={"content": PARENT["classification"]},
@@ -108,22 +108,22 @@ async def example_2_cost_routing():
         ).else_("complex_prompt")
 
         # Simple path — cheap model
-        simple_prompt = prompt_(
+        simple_prompt = PromptNode.of(
             template={"system": "Be concise.", "user": "{query}"},
             query=PARENT["query"],
         )
-        simple_llm = llm_(
+        simple_llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=simple_prompt["messages"],
             outputs={"content": PARENT["answer"]},
         )
 
         # Complex path — powerful model
-        complex_prompt = prompt_(
+        complex_prompt = PromptNode.of(
             template={"system": "Think step by step.", "user": "{query}"},
             query=PARENT["query"],
         )
-        complex_llm = llm_(
+        complex_llm = LLMNode.of(
             resource_key="gpt-4o",
             messages=complex_prompt["messages"],
             outputs={"content": PARENT["answer"]},
@@ -167,13 +167,13 @@ async def example_3_load_balancing():
         return
 
     with GraphNode(name="load-balanced") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={"system": "Answer briefly.", "user": "{query}"},
             query=PARENT["query"],
         )
 
         # 70% gpt-4o-mini, 30% gpt-4o
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key=["gpt-4o-mini", "gpt-4o"],
             ratios=[0.7, 0.3],
             messages=p["messages"],
@@ -214,13 +214,13 @@ async def example_4_fallback():
         return
 
     with GraphNode(name="fallback-demo") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={"system": "Answer briefly.", "user": "{query}"},
             query=PARENT["query"],
         )
 
         # Primary: gpt-4o, fallback: gpt-4o-mini
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o",
             fallback=["gpt-4o-mini"],
             messages=p["messages"],
@@ -260,7 +260,7 @@ async def example_5_ensemble():
         }
 
     with GraphNode(name="ensemble") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Answer the question accurately in 1-2 sentences.",
                 "user": "{query}",
@@ -269,11 +269,11 @@ async def example_5_ensemble():
         )
 
         # 2 models generate answers in parallel
-        model_a = llm_(resource_key="gpt-4o", messages=p["messages"])
-        model_b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
+        model_a = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
+        model_b = LLMNode.of(resource_key="gpt-4o-mini", messages=p["messages"])
 
         # Judge picks the best
-        jp = prompt_(
+        jp = PromptNode.of(
             template={
                 "system": "Given a question and two answers, reply with just '1' or '2' for the better answer.",
                 "user": "Question: {query}\n\nAnswer 1: {a1}\n\nAnswer 2: {a2}",
@@ -283,7 +283,7 @@ async def example_5_ensemble():
             a2=model_b["content"],
         )
 
-        judge = llm_(resource_key="gpt-4o-mini", messages=jp["messages"])
+        judge = LLMNode.of(resource_key="gpt-4o-mini", messages=jp["messages"])
 
         sel = select(
             choice=judge["content"],

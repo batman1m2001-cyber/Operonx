@@ -7,12 +7,12 @@ Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
-> | `embedding_()` | `EmbeddingNode` | `embedding_(resource_key="bge-m3", texts=PARENT["texts"])` |
-> | `rerank_()` | `RerankNode` | `rerank_(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
-> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
+> | `EmbeddingNode.of()` | `EmbeddingNode` | `EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])` |
+> | `RerankNode.of()` | `RerankNode` | `RerankNode.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
+> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
 
 ## Embedding Providers
 
@@ -58,14 +58,14 @@ embedding:bge-m3-onnx:
   dimensions: 1024
 ```
 
-## embedding_()
+## EmbeddingNode.of()
 
 ```python
 from hush.core import GraphNode, START, END, PARENT
-from hush.providers import embedding_
+from hush.providers import EmbeddingNode
 
 with GraphNode(name="embed-workflow") as graph:
-    embed = embedding_(
+    embed = EmbeddingNode.of(
         resource_key="openai",
         texts=PARENT["documents"],
         outputs={"embeddings": PARENT["vectors"]},  # Rename output
@@ -113,12 +113,12 @@ reranking:bge-m3:
   base_url: https://api.pinecone.io/rerank
 ```
 
-## rerank_()
+## RerankNode.of()
 
 ```python
-from hush.providers import rerank_
+from hush.providers import RerankNode
 
-rr = rerank_(
+rr = RerankNode.of(
     resource_key="bge-m3",
     query=PARENT["query"],
     documents=PARENT["documents"],
@@ -140,32 +140,32 @@ rr["reranks"] >> PARENT["sources"]  # Map rerank output sang graph output
 ## RAG Pipeline: Embed → Retrieve → Rerank → Generate
 
 ```python
-from hush.providers import embedding_, rerank_, prompt_, llm_
+from hush.providers import EmbeddingNode, RerankNode, PromptNode, LLMNode
 
 @code_node
 def retrieve(query_vec, docs, doc_vecs):
     return {"retrieved": cosine_search(query_vec, doc_vecs, docs, top_k=20)}
 
 with GraphNode(name="rag-pipeline") as graph:
-    embed_query = embedding_(resource_key="openai", texts=PARENT["query"])
+    embed_query = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
     ret = retrieve(
         query_vec=embed_query["embeddings"],
         docs=PARENT["documents"],
         doc_vecs=PARENT["doc_embeddings"],
         outputs={"context_docs": PARENT},
     )
-    rr = rerank_(
+    rr = RerankNode.of(
         resource_key="bge-m3",
         query=PARENT["query"],
         documents=ret["retrieved"],
         top_k=5,
     )
-    p = prompt_(
+    p = PromptNode.of(
         template={"system": "Trả lời dựa trên context:\n\n{context}", "user": "{query}"},
         context=rr["reranks"],
         query=PARENT["query"],
     )
-    llm = llm_(
+    llm = LLMNode.of(
         resource_key="gpt-4o",
         messages=p["messages"],
         outputs={"content": PARENT["answer"]},  # Rename output
@@ -196,7 +196,7 @@ def merge(kw, vec):
 
 with GraphNode(name="hybrid-rag") as graph:
     kw = kw_search(query=PARENT["query"], docs=PARENT["documents"])
-    embed_q = embedding_(resource_key="openai", texts=PARENT["query"])
+    embed_q = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
     vs = vec_search(qv=embed_q["embeddings"], docs=PARENT["documents"], dvs=PARENT["doc_vectors"])
     m = merge(kw=kw["results"], vec=vs["results"])
 
@@ -211,7 +211,7 @@ Xem ví dụ đầy đủ tại `examples/14_rag_advanced.py`.
 ## Batch Embedding
 
 ```python
-from hush.core.nodes import map_, Each
+from hush.core import MapNode, Each
 
 @code_node
 def make_batches(docs):
@@ -223,8 +223,8 @@ def flatten(batches):
 
 with GraphNode(name="batch-embed") as graph:
     batch = make_batches(docs=PARENT["documents"])
-    with map_(batch=Each(batch["batches"]), max_concurrency=5) as map_node:
-        embed = embedding_(resource_key="openai", texts=PARENT["batch"])
+    with MapNode.of(batch=Each(batch["batches"]), max_concurrency=5) as map_node:
+        embed = EmbeddingNode.of(resource_key="openai", texts=PARENT["batch"])
         START >> embed >> END
 
     flat = flatten(batches=map_node["embeddings"])

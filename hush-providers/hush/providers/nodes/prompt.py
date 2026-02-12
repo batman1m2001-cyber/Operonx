@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Union
 from hush.core.configs import NodeType
 from hush.core.exceptions import PromptError
 from hush.core.nodes import BaseNode
+from hush.core.nodes.base import shorthand, split_shorthand_kwargs
 from hush.core.utils.common import Param
 
 # Reserved keys that are not template variables
@@ -340,6 +341,19 @@ class PromptNode(BaseNode):
 
         return {"messages": messages}
 
+    @shorthand
+    def of(cls, template=None, **kwargs) -> "PromptNode":
+        """Create a PromptNode with flat kwargs.
+
+        Example::
+
+            p = PromptNode.of(template={"system": "You are {role}.", "user": "{query}"}, role="helpful", query=PARENT["q"])
+        """
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        if template is not None:
+            input_mappings["template"] = template
+        return cls(inputs=input_mappings or None, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return prompt-specific metadata."""
@@ -351,18 +365,3 @@ class PromptNode(BaseNode):
                 metadata["template"] = val
 
         return metadata
-
-
-def prompt_(template=None, **kwargs) -> PromptNode:
-    """Shorthand to create a PromptNode with flat kwargs.
-
-    Example:
-        p = prompt_({"system": "You are {role}.", "user": "{query}"}, role="helpful", query=PARENT["q"])
-    """
-    from hush.core.nodes import split_shorthand_kwargs
-
-    _skip_auto_name = True  # noqa: F841
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    if template is not None:
-        input_mappings["template"] = template
-    return PromptNode(inputs=input_mappings or None, **init_kwargs)

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from hush.core.configs import NodeType
 from hush.core.nodes import END, PARENT, START, GraphNode, ParserNode
+from hush.core.nodes.base import shorthand, split_shorthand_kwargs
 from hush.providers.nodes.llm import LLMNode
 from hush.providers.nodes.prompt import PromptNode
 
@@ -238,38 +239,41 @@ class LLMChainNode(GraphNode):
 
         return {k: v for k, v in metadata.items() if v is not None}
 
+    @shorthand
+    def of(
+        cls,
+        resource_key=None,
+        template=None,
+        *,
+        ratios=None,
+        fallback=None,
+        extract=None,
+        parser="xml",
+        response_format=None,
+        enable_thinking=False,
+        **kwargs,
+    ) -> "LLMChainNode":
+        """Create an LLMChainNode with flat kwargs.
 
-def llmchain_(
-    resource_key=None,
-    template=None,
-    *,
-    ratios=None,
-    fallback=None,
-    extract=None,
-    parser="xml",
-    response_format=None,
-    enable_thinking=False,
-    **kwargs,
-) -> LLMChainNode:
-    """Shorthand to create an LLMChainNode with flat kwargs.
+        Example::
 
-    Example:
-        chain = llmchain_("gpt-4", {"system": "You are helpful.", "user": "{query}"}, query="Hi")
-    """
-    from hush.core.nodes import split_shorthand_kwargs
-
-    _skip_auto_name = True  # noqa: F841
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    if template is not None:
-        input_mappings["template"] = template
-    return LLMChainNode(
-        resource_key=resource_key,
-        ratios=ratios,
-        fallback=fallback,
-        extract=extract,
-        parser=parser,
-        response_format=response_format,
-        enable_thinking=enable_thinking,
-        inputs=input_mappings or None,
-        **init_kwargs,
-    )
+            chain = LLMChainNode.of(
+                resource_key="gpt-4",
+                template={"system": "You are helpful.", "user": "{query}"},
+                query="Hi",
+            )
+        """
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        if template is not None:
+            input_mappings["template"] = template
+        return cls(
+            resource_key=resource_key,
+            ratios=ratios,
+            fallback=fallback,
+            extract=extract,
+            parser=parser,
+            response_format=response_format,
+            enable_thinking=enable_thinking,
+            inputs=input_mappings or None,
+            **init_kwargs,
+        )

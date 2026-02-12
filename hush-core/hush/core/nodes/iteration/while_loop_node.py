@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 from hush.core.configs.node_config import NodeType
 from hush.core.exceptions import ConditionError
 from hush.core.loggings import LOGGER
+from hush.core.nodes.base import shorthand
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.utils.common import Param, extract_condition_variables
 
@@ -187,21 +188,21 @@ class WhileLoopNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @shorthand
+    def of(cls, **kwargs) -> "WhileLoopNode":
+        """Create a WhileLoopNode with flat kwargs.
+
+        Example::
+
+            with WhileLoopNode.of(counter=0, stop_condition="counter >= 5") as loop:
+                node = process(counter=PARENT["counter"])
+                node["new_counter"] >> PARENT["counter"]
+                START >> node >> END
+        """
+        inputs, init_kwargs = split_iter_kwargs(kwargs)
+        return cls(inputs=inputs, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
         return {"max_iterations": self._max_iterations, "stop_condition": self._stop_condition}
-
-
-def while_(**kwargs) -> WhileLoopNode:
-    """Shorthand to create a WhileLoopNode with flat kwargs.
-
-    Example:
-        with while_(counter=0, stop_condition="counter >= 5") as loop:
-            node = process(counter=PARENT["counter"])
-            node["new_counter"] >> PARENT["counter"]
-            START >> node >> END
-    """
-    _skip_auto_name = True  # noqa: F841
-    inputs, init_kwargs = split_iter_kwargs(kwargs)
-    return WhileLoopNode(inputs=inputs, **init_kwargs)

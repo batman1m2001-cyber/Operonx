@@ -7,12 +7,12 @@ Thực thi song song trong workflows: fan-out/fan-in, MapNode, partial failure.
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
 > | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `map_()` | `MapNode` | `map_(x=Each([1,2,3]), max_concurrency=4)` |
-> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+> | `MapNode.of()` | `MapNode` | `MapNode.of(x=Each([1,2,3]), max_concurrency=4)` |
+> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
 
 ## Fan-out / Fan-in
 
@@ -48,19 +48,19 @@ with GraphNode(name="fan-out") as graph:
     [a, b, c] >> m >> END  # Fan-in (hard edge: chờ tất cả)
 ```
 
-## map_() với max_concurrency
+## MapNode.of() với max_concurrency
 
 Xử lý list items song song với giới hạn concurrency.
 
 ```python
-from hush.core.nodes import map_, Each
+from hush.core import MapNode, Each
 
 @code_node
 def process(item):
     return {"result": item * 2}
 
 with GraphNode(name="parallel-map") as graph:
-    with map_(
+    with MapNode.of(
         item=Each(PARENT["items"]),
         max_concurrency=3,  # Tối đa 3 tasks cùng lúc
     ) as map_node:
@@ -96,7 +96,7 @@ def summarize(results, errors):
     }
 
 with GraphNode(name="partial-failure") as graph:
-    with map_(item=Each(PARENT["items"])) as map_node:
+    with MapNode.of(item=Each(PARENT["items"])) as map_node:
         proc = safe_process(
             item=PARENT["item"],
             outputs={"result": PARENT, "error": PARENT},
@@ -116,24 +116,24 @@ with GraphNode(name="partial-failure") as graph:
 Gọi nhiều LLMs song song (ví dụ: so sánh models).
 
 ```python
-from hush.providers import prompt_, llm_
+from hush.providers import PromptNode, LLMNode
 
 @code_node
 def merge_results(s, k):
     return {"summary": s, "keywords": k}
 
 with GraphNode(name="parallel-llm") as graph:
-    p_summary = prompt_(
+    p_summary = PromptNode.of(
         template={"system": "Summarize in one sentence.", "user": "{text}"},
         text=PARENT["text"],
     )
-    p_keywords = prompt_(
+    p_keywords = PromptNode.of(
         template={"system": "List 3 keywords, comma-separated.", "user": "{text}"},
         text=PARENT["text"],
     )
 
-    llm_summary = llm_(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-    llm_keywords = llm_(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+    llm_summary = LLMNode.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
+    llm_keywords = LLMNode.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
 
     m = merge_results(
         s=llm_summary["content"],
@@ -153,15 +153,15 @@ Gọi nhiều queries song song qua MapNode:
 
 ```python
 with GraphNode(name="batch-llm") as graph:
-    with map_(
+    with MapNode.of(
         query=Each(PARENT["queries"]),
         max_concurrency=3,
     ) as map_node:
-        p = prompt_(
+        p = PromptNode.of(
             template={"system": "Answer in one sentence.", "user": "{query}"},
             query=PARENT["query"],
         )
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},

@@ -299,6 +299,42 @@ result = await engine.run(g, {"input": "test"})
 
 ---
 
+## Factory Function với Auto-Naming
+
+Nếu bạn tạo factory function (wrapper) để tạo node, hãy dùng `register_skip()` để auto-naming hoạt động:
+
+```python
+from hush.core.utils.auto_name import register_skip
+from hush.core.nodes.base import split_shorthand_kwargs
+
+def my_node_factory(**kwargs):
+    """Factory tạo MyNode với shorthand syntax."""
+    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+    return MyNode(inputs=input_mappings or None, **init_kwargs)
+
+register_skip(my_node_factory)  # auto-naming skip qua factory frame
+
+# Giờ auto-naming hoạt động:
+node = my_node_factory(x=PARENT["input"])  # node.name == "node"
+```
+
+Nếu factory là decorator (như `@code_node`, `@subgraph`), register wrapper bên trong:
+
+```python
+def my_decorator(fn):
+    @wraps(fn)
+    def wrapper(**kwargs):
+        return MyNode(code_fn=fn, **kwargs)
+
+    register_skip(wrapper)  # register AFTER wrapper is defined
+    wrapper.__wrapped__ = fn
+    return wrapper
+```
+
+Chi tiết về auto-naming: [auto-naming.md](auto-naming.md)
+
+---
+
 ## Checklist
 
 - [ ] Define `type: NodeType`
@@ -308,4 +344,5 @@ result = await engine.run(g, {"input": "test"})
 - [ ] Set `self.core` function
 - [ ] Implement `specific_metadata()` nếu cần
 - [ ] Set `contain_generation = True` nếu có LLM calls
+- [ ] `register_skip()` nếu tạo factory function / decorator
 - [ ] Test với direct call và trong workflow

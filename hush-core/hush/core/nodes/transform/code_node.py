@@ -9,6 +9,7 @@ from hush.core.configs.node_config import NodeType
 from hush.core.exceptions import CodeError
 from hush.core.loggings import LOGGER
 from hush.core.nodes.base import _BASE_INIT_KEYS, BaseNode, split_shorthand_kwargs
+from hush.core.utils.auto_name import register_skip
 from hush.core.utils.common import Param, ensure_async
 
 if TYPE_CHECKING:
@@ -41,10 +42,10 @@ def code_node(func):
 
     @wraps(func)
     def wrapper(**kwargs):
-        _skip_auto_name = True  # noqa: F841 - marker for _auto_name
         mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
         return CodeNode(code_fn=func, _mappings=mappings or None, **init_kwargs)
 
+    register_skip(wrapper)
     wrapper.__wrapped__ = func
     return wrapper
 

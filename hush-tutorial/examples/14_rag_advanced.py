@@ -158,12 +158,12 @@ async def example_2_hybrid_rag():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    from hush.providers import embedding_, llm_, prompt_
+    from hush.providers import EmbeddingNode, LLMNode, PromptNode
 
     # Step 0: Pre-compute document embeddings
     print("  Embedding documents...")
     with GraphNode(name="embed-docs") as embed_graph:
-        embed = embedding_(
+        embed = EmbeddingNode.of(
             resource_key="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
@@ -193,7 +193,7 @@ async def example_2_hybrid_rag():
         kw = kw_search_fn(query=PARENT["query"], docs=PARENT["documents"])
 
         # Branch B: Vector search
-        embed_q = embedding_(resource_key="openai", texts=PARENT["query"])
+        embed_q = EmbeddingNode.of(resource_key="openai", texts=PARENT["query"])
         vec = vec_search_fn(
             qv=embed_q["embeddings"],
             docs=PARENT["documents"],
@@ -204,7 +204,7 @@ async def example_2_hybrid_rag():
         mrg = merge_results(kw=kw["results"], vec=vec["results"])
 
         # LLM answer
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": (
                     "Trả lời câu hỏi dựa trên context.\n"
@@ -217,7 +217,7 @@ async def example_2_hybrid_rag():
             query=PARENT["query"],
         )
 
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
@@ -277,7 +277,7 @@ async def example_3_rerank():
         print("      base_url: https://api.pinecone.io/rerank")
         return
 
-    from hush.providers import llm_, prompt_, rerank_
+    from hush.providers import LLMNode, PromptNode, RerankNode
 
     @code_node
     def retrieve(query, docs):
@@ -288,7 +288,7 @@ async def example_3_rerank():
         ret = retrieve(query=PARENT["query"], docs=PARENT["documents"])
 
         # Stage 2: Rerank to top 3
-        rr = rerank_(
+        rr = RerankNode.of(
             resource_key="bge-m3",
             query=PARENT["query"],
             documents=ret["candidates"],
@@ -296,7 +296,7 @@ async def example_3_rerank():
         )
 
         # LLM answer
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Trả lời dựa trên context:\n\n{context}",
                 "user": "{query}",
@@ -305,7 +305,7 @@ async def example_3_rerank():
             query=PARENT["query"],
         )
 
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},

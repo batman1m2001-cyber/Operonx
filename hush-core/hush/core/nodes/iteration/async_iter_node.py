@@ -16,6 +16,7 @@ from typing import (
 
 from hush.core.configs.node_config import NodeType
 from hush.core.loggings import LOGGER
+from hush.core.nodes.base import shorthand
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 from hush.core.states.ref import Ref
 from hush.core.utils.common import Param
@@ -308,6 +309,19 @@ class AsyncIterNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @shorthand
+    def of(cls, **kwargs) -> "AsyncIterNode":
+        """Create an AsyncIterNode with flat kwargs.
+
+        Example::
+
+            with AsyncIterNode.of(item=Each(my_stream()), multiplier=10, callback=handle_result) as stream:
+                processor = process(item=PARENT["item"], multiplier=PARENT["multiplier"])
+                START >> processor >> END
+        """
+        inputs, init_kwargs = split_iter_kwargs(kwargs)
+        return cls(inputs=inputs, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
@@ -318,16 +332,3 @@ class AsyncIterNode(BaseIterationNode):
             "has_callback": self._callback is not None,
             "has_batch_fn": self._batch_fn is not None,
         }
-
-
-def aiter_(**kwargs) -> AsyncIterNode:
-    """Shorthand to create an AsyncIterNode with flat kwargs.
-
-    Example:
-        with aiter_(item=Each(my_stream()), multiplier=10, callback=handle_result) as stream:
-            processor = process(item=PARENT["item"], multiplier=PARENT["multiplier"])
-            START >> processor >> END
-    """
-    _skip_auto_name = True  # noqa: F841
-    inputs, init_kwargs = split_iter_kwargs(kwargs)
-    return AsyncIterNode(inputs=inputs, **init_kwargs)

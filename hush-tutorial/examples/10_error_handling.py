@@ -216,7 +216,7 @@ async def example_4_llm_fallback():
         print()
         print("  Cách dùng LLM fallback:")
         print("  ```python")
-        print("  llm = llm_(")
+        print("  llm = LLMNode.of(")
         print('      resource_key="gpt-4o",')
         print('      fallback=["gpt-4o-mini"],')
         print('      messages=p["messages"],')
@@ -224,10 +224,10 @@ async def example_4_llm_fallback():
         print("  ```")
         return
 
-    from hush.providers import llm_, prompt_
+    from hush.providers import LLMNode, PromptNode
 
     with GraphNode(name="llm-fallback") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Answer briefly.",
                 "user": "{query}",
@@ -236,7 +236,7 @@ async def example_4_llm_fallback():
         )
 
         # fallback: nếu gpt-4o fails → thử gpt-4o-mini
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o",
             fallback=["gpt-4o-mini"],
             messages=p["messages"],

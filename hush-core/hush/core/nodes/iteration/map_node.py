@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 from hush.core.configs.node_config import NodeType
 from hush.core.exceptions import IterationError
 from hush.core.loggings import LOGGER
+from hush.core.nodes.base import shorthand
 from hush.core.nodes.iteration.base import BaseIterationNode, get_iter_context, split_iter_kwargs
 
 if TYPE_CHECKING:
@@ -147,6 +148,19 @@ class MapNode(BaseIterationNode):
 
         return _inputs, _outputs
 
+    @shorthand
+    def of(cls, **kwargs) -> "MapNode":
+        """Create a MapNode with flat kwargs.
+
+        Example::
+
+            with MapNode.of(x=Each([1, 2, 3]), multiplier=10, max_concurrency=4) as loop:
+                node = calc(x=PARENT["x"], multiplier=PARENT["multiplier"])
+                START >> node >> END
+        """
+        inputs, init_kwargs = split_iter_kwargs(kwargs)
+        return cls(inputs=inputs, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
@@ -155,16 +169,3 @@ class MapNode(BaseIterationNode):
             "each": list(self._each.keys()),
             "inputs": list(self._broadcast_inputs.keys()),
         }
-
-
-def map_(**kwargs) -> MapNode:
-    """Shorthand to create a MapNode with flat kwargs.
-
-    Example:
-        with map_(x=Each([1, 2, 3]), multiplier=10, max_concurrency=4) as loop:
-            node = calc(x=PARENT["x"], multiplier=PARENT["multiplier"])
-            START >> node >> END
-    """
-    _skip_auto_name = True  # noqa: F841
-    inputs, init_kwargs = split_iter_kwargs(kwargs)
-    return MapNode(inputs=inputs, **init_kwargs)

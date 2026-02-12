@@ -1,19 +1,29 @@
 """Graph node để quản lý subgraph các node trong workflow."""
 
 import asyncio
+import inspect
 import traceback
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from functools import wraps
 from time import perf_counter
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.node_config import NodeType
 from hush.core.loggings import LOGGER
-from hush.core.nodes.base import END, PARENT, START, BaseNode
+from hush.core.nodes.base import (
+    _BASE_INIT_KEYS,
+    END,
+    PARENT,
+    START,
+    BaseNode,
+    split_shorthand_kwargs,
+)
 from hush.core.states import MemoryState, Ref
+from hush.core.utils.auto_name import register_skip
 from hush.core.utils.bimap import BiMap
 from hush.core.utils.common import Param
 from hush.core.utils.context import _current_graph
@@ -185,6 +195,8 @@ class GraphNode(BaseNode):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Thoát chế độ context manager."""
         _current_graph.reset(self._token)
+        if exc_type is None:
+            self._setup_schema()
 
     def _setup_endpoints(self):
         """Khởi tạo entry/exit node."""
@@ -867,6 +879,49 @@ class GraphNode(BaseNode):
                 metadata=self.metadata,
             )
             return _outputs
+
+
+def subgraph(fn):
+    """Decorator to turn a builder function into a reusable GraphNode factory.
+
+    The function's parameters become graph inputs, injected as PARENT refs.
+    Auto-naming works through the decorator (via register_skip).
+
+    Example::
+
+        @subgraph
+        def verify_card(conversation):
+            check = detect_card(conversation=conversation)
+            START >> check >> END
+
+        g1 = verify_card(conversation=other_node["conv"])
+        # g1.name == "g1"
+    """
+    sig = inspect.signature(fn)
+    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
+    if collisions:
+        LOGGER.warning(
+            "@subgraph function '%s' has parameter(s) %s that collide with reserved node keywords %s. "
+            "Consider renaming them.",
+            fn.__name__,
+            sorted(collisions),
+            sorted(_BASE_INIT_KEYS),
+        )
+
+    param_names = set(sig.parameters.keys())
+
+    @wraps(fn)
+    def wrapper(**kwargs):
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        node = GraphNode(inputs=input_mappings or None, **init_kwargs)
+        with node:
+            parent_refs = {key: PARENT[key] for key in input_mappings if key in param_names}
+            fn(**parent_refs)
+        return node
+
+    register_skip(wrapper)
+    wrapper.__wrapped__ = fn
+    return wrapper
 
 
 # Alias đơn giản cho cú pháp gọn hơn

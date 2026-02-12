@@ -199,10 +199,10 @@ Trước khi thiết lập files, cần hiểu cách Hush kết nối đến LLM
 
 ### Luồng khởi tạo
 
-Khi bạn tạo một node dùng provider (`llm_()`, `embedding_()`, `rerank_()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
+Khi bạn tạo một node dùng provider (`LLMNode.of()`, `EmbeddingNode.of()`, `RerankNode.of()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
 
 ```
-Code: llm_(resource_key="gpt-4o", messages=...)
+Code: LLMNode.of(resource_key="gpt-4o", messages=...)
   ↓
 get_hub()  →  singleton ResourceHub
   ↓
@@ -326,7 +326,7 @@ Xem đầy đủ template: [`env.example`](../../env.example)
 
 File `resources.yaml` là **cấu hình trung tâm** được đọc bởi **ResourceHub** (`get_hub()`). Mọi node dùng provider (LLM, embedding, reranking, tracing) đều tra cứu cấu hình từ file này.
 
-Khi bạn viết `llm_(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
+Khi bạn viết `LLMNode.of(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
 
 ### Copy từ template có sẵn
 
@@ -447,11 +447,11 @@ from dotenv import load_dotenv
 load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo node
 
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import llmchain_
+from hush.providers import LLMChainNode
 
 async def main():
     with GraphNode(name='test-llm') as graph:
-        chat = llmchain_(
+        chat = LLMChainNode.of(
             resource_key='gpt-4o-mini',  # ← tra cứu trong resources.yaml
             template='Say hello in exactly 3 words.',
         )

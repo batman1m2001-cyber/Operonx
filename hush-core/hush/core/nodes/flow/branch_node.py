@@ -7,6 +7,7 @@ from hush.core.exceptions import BranchError
 from hush.core.loggings import LOGGER
 from hush.core.nodes.base import BaseNode
 from hush.core.states.ref import Ref
+from hush.core.utils.auto_name import register_skip
 from hush.core.utils.common import Param
 
 if TYPE_CHECKING:
@@ -207,6 +208,7 @@ class Branch:
         self._cases.append((condition, target_name))
         return self
 
+    @register_skip
     def else_(self, target: Union[str, BaseNode]) -> "BranchNode":
         """Đặt default target và build BranchNode.
 
@@ -216,23 +218,21 @@ class Branch:
         Returns:
             BranchNode đã được tạo
         """
-        _skip_auto_name = True  # noqa: F841
         self._default = target.name if hasattr(target, "name") else target
         return self._build()
 
+    @register_skip
     def build(self) -> "BranchNode":
         """Build BranchNode (dùng khi không có default).
 
         Returns:
             BranchNode đã được tạo
         """
-        _skip_auto_name = True  # noqa: F841
         return self._build()
 
+    @register_skip
     def _build(self) -> "BranchNode":
         """Internal build method."""
-        _skip_auto_name = True  # noqa: F841
-
         all_inputs = {}
 
         for condition_ref, target in self._cases:

@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, code_node, map_
+from hush.core.nodes import Each, MapNode, code_node
 from hush.core.tracers import BaseTracer
 
 # =============================================================================
@@ -94,7 +94,7 @@ def build_text_analysis():
             name="tokenize",
             inputs={"text": prep["cleaned"]},
         )
-        with map_(
+        with MapNode.of(
             token=Each(tok["tokens"]),
             multiplier=PARENT["multiplier"],
         ) as map_node:

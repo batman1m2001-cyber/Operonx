@@ -7,10 +7,10 @@ Sử dụng nhiều LLM models: load balancing, fallback, ensemble, cost routing
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
-> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
-> | `prompt_()` | `PromptNode` | `prompt_(template={...}, var=PARENT["x"])` |
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
+> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `PromptNode.of()` | `PromptNode` | `PromptNode.of(template={...}, var=PARENT["x"])` |
 > | `if_().else_()` | `BranchNode` | `if_(PARENT["x"] > 0, "a").else_("b")` |
 
 ## Parallel Model Comparison
@@ -18,15 +18,15 @@ Sử dụng nhiều LLM models: load balancing, fallback, ensemble, cost routing
 So sánh output từ nhiều models song song.
 
 ```python
-from hush.providers import prompt_, llm_
+from hush.providers import PromptNode, LLMNode
 
 with GraphNode(name="compare") as graph:
-    p = prompt_(
+    p = PromptNode.of(
         template={"system": "Answer briefly.", "user": "{query}"},
         query=PARENT["query"],
     )
-    a = llm_(resource_key="gpt-4o", messages=p["messages"])
-    b = llm_(resource_key="gpt-4o-mini", messages=p["messages"])
+    a = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
+    b = LLMNode.of(resource_key="gpt-4o-mini", messages=p["messages"])
     START >> p >> [a, b] >> END
 ```
 
@@ -46,8 +46,8 @@ with GraphNode(name="cost-routing") as graph:
     router = if_(cls["complexity"] == "complex", "use_gpt4o").else_("use_mini")
 
     # Complex → gpt-4o, Simple → gpt-4o-mini
-    use_gpt4o = llm_(resource_key="gpt-4o", messages=PARENT["messages"])
-    use_mini = llm_(resource_key="gpt-4o-mini", messages=PARENT["messages"])
+    use_gpt4o = LLMNode.of(resource_key="gpt-4o", messages=PARENT["messages"])
+    use_mini = LLMNode.of(resource_key="gpt-4o-mini", messages=PARENT["messages"])
 
     START >> cls >> router
     router >> [use_gpt4o, use_mini]
@@ -59,7 +59,7 @@ with GraphNode(name="cost-routing") as graph:
 Phân tải requests giữa nhiều models theo tỷ lệ. LLMNode dùng weighted random selection.
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
     messages=p["messages"],
@@ -74,7 +74,7 @@ llm = llm_(
 Tự động chuyển sang model khác khi primary fails.
 
 ```python
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     messages=prompt["messages"],
@@ -91,36 +91,36 @@ Nhiều models trả lời → model khác chọn câu trả lời tốt nhất.
 
 ```python
 with GraphNode(name="ensemble") as graph:
-    p = prompt_(
+    p = PromptNode.of(
         template={"system": "Answer the question.", "user": "{query}"},
         query=PARENT["query"],
     )
 
     # 3 models trả lời song song — mỗi model map content → key riêng
-    llm_a = llm_(
+    llm_a = LLMNode.of(
         resource_key="gpt-4o",
         messages=p["messages"],
         outputs={"content": PARENT["answer_a"]},
     )
-    llm_b = llm_(
+    llm_b = LLMNode.of(
         resource_key="gpt-4o-mini",
         messages=p["messages"],
         outputs={"content": PARENT["answer_b"]},
     )
-    llm_c = llm_(
+    llm_c = LLMNode.of(
         resource_key="or-claude-4-sonnet",
         messages=p["messages"],
         outputs={"content": PARENT["answer_c"]},
     )
 
     # Judge chọn câu tốt nhất
-    jp = prompt_(
+    jp = PromptNode.of(
         template={"system": "Chọn câu trả lời tốt nhất.", "user": "{answer_a}\n{answer_b}\n{answer_c}"},
         answer_a=PARENT["answer_a"],
         answer_b=PARENT["answer_b"],
         answer_c=PARENT["answer_c"],
     )
-    judge = llm_(resource_key="gpt-4o", messages=jp["messages"])
+    judge = LLMNode.of(resource_key="gpt-4o", messages=jp["messages"])
 
     START >> p >> [llm_a, llm_b, llm_c]
     [llm_a, llm_b, llm_c] >> jp >> judge >> END

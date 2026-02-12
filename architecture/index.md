@@ -118,7 +118,8 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | Cell & multi-context | [state/memory-state.md](state/memory-state.md) |
 | Index system | [state/indexer.md](state/indexer.md) |
 | Node lifecycle | [nodes/base-node.md](nodes/base-node.md) |
-| Nested graphs | [nodes/graph-node.md](nodes/graph-node.md) |
+| Nested graphs & @subgraph | [nodes/graph-node.md](nodes/graph-node.md) |
+| Auto-naming (bytecode + source) | [nodes/auto-naming.md](nodes/auto-naming.md) |
 | Loops (ForLoop, Map, While) | [nodes/iteration-nodes.md](nodes/iteration-nodes.md) |
 | Conditional routing | [nodes/branch-node.md](nodes/branch-node.md) |
 | LLM provider interface | [providers/llm-abstraction.md](providers/llm-abstraction.md) |
@@ -168,7 +169,8 @@ architecture/
 │
 ├── nodes/                      ← Node system
 │   ├── base-node.md            ← BaseNode anatomy
-│   ├── graph-node.md           ← Nested graphs & scoping
+│   ├── graph-node.md           ← Nested graphs, scoping & @subgraph
+│   ├── auto-naming.md          ← Auto-naming (bytecode + source)
 │   ├── iteration-nodes.md      ← ForLoop, Map, While internals
 │   ├── branch-node.md          ← Conditional routing
 │   └── creating-custom-node.md ← Guide tạo node mới

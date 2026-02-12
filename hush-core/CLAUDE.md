@@ -221,15 +221,71 @@ async def test_workflow():
 
 ## Common Patterns
 
-### Shorthand Functions
+### @subgraph — Reusable GraphNode Factory
 
-For concise node definitions:
+Turn a builder function into a reusable, auto-named GraphNode:
+
 ```python
-from hush.core import code_node, for_, map_, while_
+from hush.core import subgraph, code_node, START, END, PARENT, GraphNode, Hush
+
+@code_node
+def double(x: int):
+    return {"result": x * 2}
+
+@subgraph
+def double_flow(val):
+    step = double(x=val)        # val is injected as PARENT["val"]
+    START >> step >> END
+
+# Use in a parent graph
+with GraphNode(name="main") as main:
+    d1 = double_flow(val=PARENT["input"])       # d1.name == "d1"
+    d2 = double_flow(val=d1["result"])           # reuse the same subgraph
+    START >> d1 >> d2 >> END
+
+result = await Hush(main).run(inputs={"input": 3})
+# result["result"] == 12  (3 * 2 * 2)
+```
+
+Key points:
+- Function params → `PARENT` refs (injected automatically)
+- Supports `name=`, `outputs=`, `description=` kwargs via `split_shorthand_kwargs`
+- `>> END` auto-forwarding works (decorator calls `_setup_schema()` after build)
+- `register_skip(wrapper)` enables auto-naming through the decorator
+
+### Auto-Naming
+
+Nodes automatically infer their name from the assignment variable:
+
+```python
+llm = LLMNode.of(resource_key="gpt-4o", messages=msgs)
+# llm.name == "llm" — extracted via bytecode analysis
+
+router = if_(PARENT["x"] > 0, "pos").else_("neg")
+# router.name == "router"
+```
+
+How it works: `auto_name()` in `utils/auto_name.py` walks the call stack (skipping `__init__`, `register_skip`'d frames), then:
+1. **Bytecode analysis** (primary): finds `STORE_FAST`/`STORE_NAME` after the call site
+2. **AST source parsing** (fallback): parses `var = expr` from source lines
+3. **UUID fallback**: 8-char hex if both fail
+
+Use `register_skip(fn)` to skip your factory function's frame during auto-naming.
+
+### Shorthand via `Node.of()`
+
+For concise node creation, use the `.of()` classmethod:
+```python
+from hush.core import code_node, ForLoopNode, MapNode, WhileLoopNode
 
 @code_node
 def process(x: int) -> dict:
     return {"result": x * 2}
+
+# Iteration nodes use .of()
+with ForLoopNode.of(x=Each([1, 2, 3])) as loop:
+    step = process(x=PARENT["x"])
+    START >> step >> END
 ```
 
 ### Wildcard Forwarding

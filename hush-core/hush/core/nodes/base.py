@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from hush.core.configs.node_config import NodeType
 from hush.core.loggings import LOGGER, format_log_data
 from hush.core.states.ref import Ref
-from hush.core.utils.common import Param, _auto_name, unique_name
+from hush.core.utils.auto_name import auto_name, register_skip, unique_name
+from hush.core.utils.common import Param
 from hush.core.utils.context import get_current
 
 if TYPE_CHECKING:
@@ -152,6 +153,24 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     return inputs, init_kwargs
 
 
+def shorthand(fn):
+    """Decorator for ``Node.of()`` classmethods.
+
+    Registers the function for auto-naming frame skip via ``register_skip()``
+    and wraps as ``classmethod``.
+
+    Usage::
+
+        class MyNode(BaseNode):
+            @shorthand
+            def of(cls, my_param=None, **kwargs):
+                inputs, init_kwargs = split_shorthand_kwargs(kwargs)
+                return cls(my_param=my_param, inputs=inputs or None, **init_kwargs)
+    """
+    register_skip(fn)
+    return classmethod(fn)
+
+
 class BaseNode(ABC):
     """Base class cho tất cả các node trong workflow.
 
@@ -224,7 +243,7 @@ class BaseNode(ABC):
     ):
         self.id = id or uuid.uuid4().hex
         if name is None:
-            name = _auto_name()
+            name = auto_name()
         self.name = name or unique_name()
         self._full_name = None  # Cached at build time by GraphNode.build()
         self.description = description

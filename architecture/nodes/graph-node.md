@@ -300,6 +300,83 @@ with GraphNode(name="outer", inputs={"data": some_source}) as outer:
     inner_node.inputs = {"data": PARENT["data"]}  # Từ outer graph
 ```
 
+## @subgraph Decorator
+
+`@subgraph` biến một builder function thành factory tạo GraphNode có thể tái sử dụng, hỗ trợ auto-naming.
+
+Location: cuối `graph_node.py`, sau class `GraphNode`.
+
+### Cách hoạt động
+
+```python
+from hush.core import subgraph, code_node, START, END, PARENT, GraphNode
+
+@code_node
+def double(x: int):
+    return {"result": x * 2}
+
+@subgraph
+def double_flow(val):
+    step = double(x=val)      # val = PARENT["val"] (injected)
+    START >> step >> END
+
+# Sử dụng:
+with GraphNode(name="main") as main:
+    d = double_flow(val=PARENT["input"])  # d.name == "d"
+    START >> d >> END
+```
+
+### Implementation
+
+```python
+def subgraph(fn):
+    sig = inspect.signature(fn)
+    param_names = set(sig.parameters.keys())
+
+    @wraps(fn)
+    def wrapper(**kwargs):
+        # 1. Tách input mappings và init kwargs (name, outputs, ...)
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+
+        # 2. Tạo GraphNode với inputs
+        node = GraphNode(inputs=input_mappings or None, **init_kwargs)
+
+        # 3. Chạy builder function trong context
+        # __exit__ tự động gọi _setup_schema() → outputs được populate
+        with node:
+            parent_refs = {key: PARENT[key] for key in input_mappings if key in param_names}
+            fn(**parent_refs)
+
+        return node
+
+    register_skip(wrapper)  # auto-naming skip qua wrapper
+    wrapper.__wrapped__ = fn
+    return wrapper
+```
+
+### `__exit__` và `_setup_schema()`
+
+`GraphNode.__exit__` tự động gọi `_setup_schema()` khi thoát context manager. Điều này đảm bảo `node.outputs` được populate trước khi node được dùng trong parent graph (`node >> END` auto-forwarding).
+
+### split_shorthand_kwargs
+
+`wrapper` dùng `split_shorthand_kwargs(kwargs)` để tách:
+- **Init kwargs**: `name`, `outputs`, `description`, ... → truyền vào `GraphNode(**init_kwargs)`
+- **Input mappings**: tất cả còn lại → truyền vào `inputs=input_mappings`
+
+### param_names Filtering
+
+Chỉ các key nằm trong function signature mới được inject thành PARENT refs:
+
+```python
+@subgraph
+def static_flow():       # Không nhận params
+    step = double(x=PARENT["val"])
+    START >> step >> END
+
+g = static_flow(val=10)  # val chỉ là input mapping, không inject vào fn
+```
+
 ## Debug
 
 ```python

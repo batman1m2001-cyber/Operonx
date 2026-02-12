@@ -157,6 +157,10 @@ hush-ops (depends on hush-core)
 - Factory functions go in `factory.py`
 - Each module has `__init__.py` with explicit exports
 
+### Fix Bugs at the Root, Never Patch Around Them
+
+When a core API doesn't work as expected (e.g., `node >> END` not auto-forwarding outputs), **fix the root cause** in the core code. Never add workaround calls like `node._setup_schema()` or other private-method hacks in user-facing code, examples, tests, or decorators. If something that should "just work" doesn't, the fix belongs in the internal implementation (e.g., `__exit__`, `build()`, `__rrshift__`), not in a wrapper that papers over the gap.
+
 ## Build & Test Commands
 
 ```bash
@@ -245,18 +249,44 @@ with GraphNode(name="workflow") as graph:
     START >> step >> END
 ```
 
+### @subgraph — Modular Workflows
+
+Turn a builder function into a reusable GraphNode factory with auto-naming:
+
+```python
+from hush.core import subgraph, code_node, START, END, PARENT
+
+@code_node
+def detect_card(conversation: str):
+    return {"has_card": "card" in conversation}
+
+@subgraph
+def verify_card(conversation):
+    check = detect_card(conversation=conversation)
+    START >> check >> END
+
+# Use like a function call — auto-named from variable
+with GraphNode(name="main") as graph:
+    v = verify_card(conversation=PARENT["conv"])
+    START >> v >> END  # v.name == "v"
+```
+
+- Function params → `PARENT` refs (injected automatically)
+- Supports `name=`, `outputs=`, `description=` kwargs
+- `>> END` auto-forwarding works (outputs pre-populated via `_setup_schema()`)
+
 ### Shorthand Style Rule
 
-**Always use explicit keyword arguments** when calling shorthand functions. Never use positional args:
+**Always use `Node.of()` classmethods** for concise node creation. Use explicit keyword arguments — never positional args:
 
 ```python
 # CORRECT
-chat = llmchain_(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
-llm = llm_(resource_key="gpt-4o", messages=PARENT["msgs"])
-embed = embedding_(resource_key="bge-m3", texts=PARENT["texts"])
+chat = LLMChainNode.of(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])
+embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])
 
 # WRONG — no positional args
-chat = llmchain_("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
+chat = LLMChainNode.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 ```
 
 ### Edge Types
@@ -289,10 +319,10 @@ Use `node["key"] >> PARENT["key"]` to map a node's output to the parent graph st
 
 ```python
 # Style 1: outputs= parameter (inline with node creation)
-llm = llm_(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
+llm = LLMNode.of(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
 
 # Style 2: >> operator (standalone line, equivalent)
-llm = llm_(resource_key="gpt-4o", messages=p["messages"])
+llm = LLMNode.of(resource_key="gpt-4o", messages=p["messages"])
 llm["content"] >> PARENT["answer"]
 
 # Common in loops — forward loop outputs or update loop state
@@ -316,6 +346,7 @@ For detailed explanations, see [architecture/](architecture/):
 | Topic | Quick (CLAUDE.md) | Deep (architecture/) |
 |-------|-------------------|---------------------|
 | Execution flow | - | [engine/execution-flow.md](architecture/engine/execution-flow.md) |
+| Auto-naming | hush-core/CLAUDE.md | [nodes/auto-naming.md](architecture/nodes/auto-naming.md) |
 | State system | hush-core/CLAUDE.md | [state/overview.md](architecture/state/overview.md) |
 | Node internals | hush-core/CLAUDE.md | [nodes/base-node.md](architecture/nodes/base-node.md) |
 | Creating nodes | hush-core/CLAUDE.md | [nodes/creating-custom-node.md](architecture/nodes/creating-custom-node.md) |

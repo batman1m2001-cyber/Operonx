@@ -22,15 +22,16 @@ from .base import (
     BaseNode,
     DummyNode,
     SoftEdge,
+    shorthand,
     split_shorthand_kwargs,
 )
 from .flow.branch_node import Branch, BranchNode, if_
-from .graph.graph_node import GraphNode
-from .iteration.async_iter_node import AsyncIterNode, aiter_
+from .graph.graph_node import GraphNode, subgraph
+from .iteration.async_iter_node import AsyncIterNode
 from .iteration.base import Each
-from .iteration.for_loop_node import ForLoopNode, for_
-from .iteration.map_node import MapNode, map_
-from .iteration.while_loop_node import WhileLoopNode, while_
+from .iteration.for_loop_node import ForLoopNode
+from .iteration.map_node import MapNode
+from .iteration.while_loop_node import WhileLoopNode
 from .transform.code_node import CodeNode, code_node
 from .transform.parser_node import ParserNode, ParserType
 
@@ -45,22 +46,20 @@ __all__ = [
     "END",
     "PARENT",
     # Utilities
+    "shorthand",
     "split_shorthand_kwargs",
     # Graph
     "GraphNode",
+    "subgraph",
     # Flow control
     "BranchNode",
     "Branch",
     "if_",
     "Each",
     "ForLoopNode",
-    "for_",
     "MapNode",
-    "map_",
     "WhileLoopNode",
-    "while_",
     "AsyncIterNode",
-    "aiter_",
     # Transform
     "CodeNode",
     "code_node",

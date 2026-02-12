@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
 from hush.core.nodes.transform.code_node import code_node
-from hush.providers import llm_, prompt_
+from hush.providers import LLMNode, PromptNode
 
 
 async def example_1_structured_output():
@@ -31,14 +31,14 @@ async def example_1_structured_output():
     print("=" * 50)
 
     with GraphNode(name="sentiment-analysis") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Phân tích sentiment của văn bản. Trả về JSON.",
                 "user": "{text}",
             },
             text=PARENT["text"],
         )
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             response_format={
@@ -124,14 +124,14 @@ async def example_2_tool_calling():
         }
 
     with GraphNode(name="tool-calling") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
                 "user": "{query}",
             },
             query=PARENT["query"],
         )
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             tools=tools,
@@ -171,7 +171,7 @@ async def example_3_multi_turn_chat():
         }
 
     with GraphNode(name="multi-turn-chat") as graph:
-        p = prompt_(
+        p = PromptNode.of(
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
                 "user": "{message}",
@@ -179,7 +179,7 @@ async def example_3_multi_turn_chat():
             conversation_history=PARENT["history"],
             message=PARENT["message"],
         )
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o-mini",
             messages=p["messages"],
             temperature=0.7,

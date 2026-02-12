@@ -16,7 +16,7 @@ Chạy: cd hush-tutorial && uv run python examples/05_loops_and_branches.py
 import asyncio
 
 from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, code_node, for_, if_, map_, while_
+from hush.core.nodes import Each, ForLoopNode, MapNode, WhileLoopNode, code_node, if_
 
 # =============================================================================
 # Code nodes dùng @code_node decorator (gọn hơn CodeNode class)
@@ -53,7 +53,7 @@ async def example_1_for_loop():
     print("=" * 50)
 
     with GraphNode(name="for-loop-demo") as graph:
-        with for_(
+        with ForLoopNode.of(
             item=Each(PARENT["items"]),  # Iterate qua mỗi item
             prefix=PARENT["prefix"],  # Broadcast cho tất cả iterations
         ) as loop:
@@ -87,7 +87,7 @@ async def example_2_map_node():
     print("=" * 50)
 
     with GraphNode(name="map-node-demo") as graph:
-        with map_(
+        with MapNode.of(
             x=Each(PARENT["numbers"]),
             max_concurrency=3,  # Tối đa 3 tasks cùng lúc
         ) as map_node:
@@ -117,7 +117,7 @@ async def example_3_while_loop():
     print("=" * 50)
 
     with GraphNode(name="while-loop-demo") as graph:
-        with while_(
+        with WhileLoopNode.of(
             value=PARENT["start_value"],
             stop_condition="value < 5",
             max_iterations=20,
@@ -204,8 +204,8 @@ async def example_5_nested_loops():
         return {"total": sum(products) if products else 0}
 
     with GraphNode(name="nested-loops") as graph:
-        with for_(x=Each([2, 3, 4])) as outer:
-            with for_(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
+        with ForLoopNode.of(x=Each([2, 3, 4])) as outer:
+            with ForLoopNode.of(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
                 mult = multiply(
                     name="multiply",
                     inputs={"x": PARENT["x"], "y": PARENT["y"]},

@@ -21,8 +21,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import code_node, while_
-from hush.providers import llm_
+from hush.core.nodes import WhileLoopNode, code_node
+from hush.providers import LLMNode
 
 # =============================================================================
 # Tool definitions (OpenAI function calling format)
@@ -179,7 +179,7 @@ async def example_1_simple_agent():
             outputs={"*": PARENT},
         )
 
-        with while_(
+        with WhileLoopNode.of(
             messages=PARENT["messages"],
             iteration=PARENT["iteration"],
             done=PARENT["done"],
@@ -188,7 +188,7 @@ async def example_1_simple_agent():
             max_iterations=10,
         ) as loop:
             # Gọi LLM với tools
-            llm = llm_(
+            llm = LLMNode.of(
                 resource_key="gpt-4o-mini",
                 messages=PARENT["messages"],
                 tools=TOOL_DESCRIPTIONS,

@@ -4,9 +4,9 @@ No API key required. Uses hush-core only.
 
 Learn:
 - @code_node decorator: turn function into CodeNode
-- for_(): ForLoopNode shorthand
-- map_(): MapNode shorthand
-- while_(): WhileLoopNode shorthand
+- ForLoopNode.of(): ForLoopNode classmethod syntax
+- MapNode.of(): MapNode classmethod syntax
+- WhileLoopNode.of(): WhileLoopNode classmethod syntax
 - if_(): BranchNode fluent syntax
 
 Run: cd hush-tutorial && uv run python examples/15_shorthand_syntax.py
@@ -16,14 +16,14 @@ import asyncio
 
 from hush.core import END, PARENT, START, CodeNode, GraphNode, Hush
 
-# Shorthand imports
+# Node class imports
 from hush.core.nodes import (
     Each,  # Iteration marker
+    ForLoopNode,
+    MapNode,
+    WhileLoopNode,
     code_node,  # Decorator
-    for_,
     if_,  # Branch shorthand
-    map_,
-    while_,  # Iteration shorthands
 )
 
 # =============================================================================
@@ -89,15 +89,15 @@ async def example_1_code_node_decorator():
 
 
 async def example_2_for_shorthand():
-    """for_() - ForLoopNode shorthand."""
+    """ForLoopNode.of() - ForLoopNode shorthand."""
     print()
     print("=" * 60)
-    print("Example 2: for_() shorthand (sequential iteration)")
+    print("Example 2: ForLoopNode.of() shorthand (sequential iteration)")
     print("=" * 60)
 
     with GraphNode(name="for-shorthand") as graph:
         # Shorthand: item=Each(...) instead of inputs={"item": Each(...)}
-        with for_(
+        with ForLoopNode.of(
             item=Each(["apple", "banana", "cherry"]),  # Iterate
             prefix="Fruit",  # Broadcast
         ) as loop:
@@ -120,15 +120,15 @@ async def example_2_for_shorthand():
 
 
 async def example_3_map_shorthand():
-    """map_() - MapNode shorthand with max_concurrency."""
+    """MapNode.of() - MapNode shorthand with max_concurrency."""
     print()
     print("=" * 60)
-    print("Example 3: map_() shorthand (parallel iteration)")
+    print("Example 3: MapNode.of() shorthand (parallel iteration)")
     print("=" * 60)
 
     with GraphNode(name="map-shorthand") as graph:
         # Shorthand with config option
-        with map_(
+        with MapNode.of(
             x=Each([1, 2, 3, 4, 5]),  # Iterate
             max_concurrency=3,  # Config
         ) as loop:
@@ -146,15 +146,15 @@ async def example_3_map_shorthand():
 
 
 async def example_4_while_shorthand():
-    """while_() - WhileLoopNode shorthand."""
+    """WhileLoopNode.of() - WhileLoopNode shorthand."""
     print()
     print("=" * 60)
-    print("Example 4: while_() shorthand (conditional loop)")
+    print("Example 4: WhileLoopNode.of() shorthand (conditional loop)")
     print("=" * 60)
 
     with GraphNode(name="while-shorthand") as graph:
         # Shorthand: value=256 instead of inputs={"value": 256}
-        with while_(
+        with WhileLoopNode.of(
             value=256,
             stop_condition="value < 10",  # Stop when value < 10
             max_iterations=20,
@@ -229,8 +229,8 @@ async def example_6_combined():
 
     with GraphNode(name="combined-demo") as graph:
         # Nested loops with shorthand
-        with for_(outer=Each([2, 3, 4])) as outer_loop:
-            with map_(
+        with ForLoopNode.of(outer=Each([2, 3, 4])) as outer_loop:
+            with MapNode.of(
                 inner=Each([10, 20, 30]), multiplier=PARENT["outer"], max_concurrency=3
             ) as inner_loop:
                 calc = multiply(
@@ -287,7 +287,7 @@ async def example_7_comparison():
         return {"result": x * multiplier}
 
     with GraphNode(name="shorthand-style") as graph2:
-        with for_(x=Each([1, 2, 3]), multiplier=10) as loop:
+        with ForLoopNode.of(x=Each([1, 2, 3]), multiplier=10) as loop:
             step = calc(
                 name="calc",
                 x=PARENT["x"],
@@ -303,8 +303,8 @@ async def example_7_comparison():
     result1 = await Hush(graph1).run(inputs={})
     result2 = await Hush(graph2).run(inputs={})
 
-    print("  Verbose style:   ForLoopNode(inputs={...})")
-    print("  Shorthand style: for_(x=Each(...), multiplier=10)")
+    print("  Verbose style:   ForLoopNode(name=..., inputs={...})")
+    print("  .of() style:     ForLoopNode.of(x=Each(...), multiplier=10)")
     print()
     print(f"  Verbose result:   {result1['results']}")
     print(f"  Shorthand result: {result2['results']}")
@@ -325,13 +325,13 @@ async def main():
     print("Shorthand Syntax Summary")
     print("=" * 60)
     print("""
-  | Full Class        | Shorthand      |
-  |-------------------|----------------|
-  | CodeNode          | @code_node     |
-  | ForLoopNode       | for_()         |
-  | MapNode           | map_()         |
-  | WhileLoopNode     | while_()       |
-  | BranchNode        | if_().else_()  |
+  | Full Class        | .of() Syntax          |
+  |-------------------|-----------------------|
+  | CodeNode          | @code_node            |
+  | ForLoopNode       | ForLoopNode.of()      |
+  | MapNode           | MapNode.of()          |
+  | WhileLoopNode     | WhileLoopNode.of()    |
+  | BranchNode        | if_().else_()         |
     """)
 
 

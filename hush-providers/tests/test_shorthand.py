@@ -1,4 +1,4 @@
-"""Tests for provider node shorthand functions (llm_, prompt_, embedding_, rerank_, llmchain_)."""
+"""Tests for provider node .of() classmethod shorthand (LLMNode.of, PromptNode.of, etc.)."""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -6,25 +6,25 @@ import pytest
 from hush.core.states import MemoryState, StateSchema
 
 # ============================================================
-# prompt_() shorthand tests
+# PromptNode.of() shorthand tests
 # ============================================================
 
 
 class TestPromptShorthand:
-    """Test prompt_() shorthand function."""
+    """Test PromptNode.of() classmethod shorthand."""
 
     def test_prompt_shorthand_string_template(self):
-        from hush.providers.nodes.prompt import PromptNode, prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_("Hello {user}", user="world")
+        node = PromptNode.of("Hello {user}", user="world")
         assert isinstance(node, PromptNode)
         assert "template" in node.inputs
         assert "user" in node.inputs
 
     def test_prompt_shorthand_dict_template(self):
-        from hush.providers.nodes.prompt import PromptNode, prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_({"system": "You are {role}.", "user": "{query}"}, role="helpful")
+        node = PromptNode.of({"system": "You are {role}.", "user": "{query}"}, role="helpful")
         assert isinstance(node, PromptNode)
         assert "template" in node.inputs
         assert "role" in node.inputs
@@ -32,28 +32,28 @@ class TestPromptShorthand:
     def test_prompt_shorthand_with_outputs(self):
         from hush.core.nodes.base import PARENT
 
-        from hush.providers.nodes.prompt import prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_("Hello", outputs={"*": PARENT})
+        node = PromptNode.of("Hello", outputs={"*": PARENT})
         assert "messages" in node.outputs
 
     def test_prompt_shorthand_auto_name(self):
-        from hush.providers.nodes.prompt import prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        my_prompt = prompt_("Hello")
+        my_prompt = PromptNode.of("Hello")
         assert my_prompt.name == "my_prompt"
 
     def test_prompt_shorthand_explicit_name(self):
-        from hush.providers.nodes.prompt import prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_("Hello", name="chat_prompt")
+        node = PromptNode.of("Hello", name="chat_prompt")
         assert node.name == "chat_prompt"
 
     @pytest.mark.asyncio
     async def test_prompt_shorthand_execution(self):
-        from hush.providers.nodes.prompt import prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_(
+        node = PromptNode.of(
             {"system": "You are {role}.", "user": "Help with {task}."}, role="Claude", task="coding"
         )
 
@@ -67,163 +67,163 @@ class TestPromptShorthand:
         assert messages[1]["content"] == "Help with coding."
 
     def test_prompt_shorthand_no_template(self):
-        from hush.providers.nodes.prompt import prompt_
+        from hush.providers.nodes.prompt import PromptNode
 
-        node = prompt_(conversation_history=[{"role": "user", "content": "Hi"}])
+        node = PromptNode.of(conversation_history=[{"role": "user", "content": "Hi"}])
         assert isinstance(node, type(node))
 
 
 # ============================================================
-# llm_() shorthand tests
+# LLMNode.of() shorthand tests
 # ============================================================
 
 
 class TestLLMShorthand:
-    """Test llm_() shorthand function."""
+    """Test LLMNode.of() classmethod shorthand."""
 
     def test_llm_shorthand_basic(self, hub):
-        from hush.providers.nodes.llm import LLMNode, llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = llm_("gpt-4o", messages=[{"role": "user", "content": "Hi"}])
+        node = LLMNode.of("gpt-4o", messages=[{"role": "user", "content": "Hi"}])
         assert isinstance(node, LLMNode)
         assert node.resource_key == "gpt-4o"
         assert "messages" in node.inputs
 
     def test_llm_shorthand_auto_name(self, hub):
-        from hush.providers.nodes.llm import llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        my_llm = llm_("gpt-4o", messages=[])
+        my_llm = LLMNode.of("gpt-4o", messages=[])
         assert my_llm.name == "my_llm"
 
     def test_llm_shorthand_explicit_name(self, hub):
-        from hush.providers.nodes.llm import llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = llm_("gpt-4o", name="chat_llm", messages=[])
+        node = LLMNode.of("gpt-4o", name="chat_llm", messages=[])
         assert node.name == "chat_llm"
 
     def test_llm_shorthand_with_outputs(self, hub):
         from hush.core.nodes.base import PARENT
 
-        from hush.providers.nodes.llm import llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = llm_("gpt-4o", messages=[], outputs={"*": PARENT})
+        node = LLMNode.of("gpt-4o", messages=[], outputs={"*": PARENT})
         assert "content" in node.outputs
 
     def test_llm_shorthand_load_balancing(self, hub):
-        from hush.providers.nodes.llm import llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = llm_(["gpt-4o", "gpt-4o"], ratios=[0.5, 0.5], messages=[])
+        node = LLMNode.of(["gpt-4o", "gpt-4o"], ratios=[0.5, 0.5], messages=[])
         assert isinstance(node.resource_key, list)
         assert node.ratios == [0.5, 0.5]
 
     def test_llm_shorthand_with_fallback(self, hub):
-        from hush.providers.nodes.llm import llm_
+        from hush.providers.nodes.llm import LLMNode
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = llm_("gpt-4o", fallback=["gpt-4o"], messages=[])
+        node = LLMNode.of("gpt-4o", fallback=["gpt-4o"], messages=[])
         assert node.fallback == ["gpt-4o"]
 
 
 # ============================================================
-# embedding_() shorthand tests
+# EmbeddingNode.of() shorthand tests
 # ============================================================
 
 
 class TestEmbeddingShorthand:
-    """Test embedding_() shorthand function."""
+    """Test EmbeddingNode.of() classmethod shorthand."""
 
     def test_embedding_shorthand_basic(self, hub):
-        from hush.providers.nodes.embedding import EmbeddingNode, embedding_
+        from hush.providers.nodes.embedding import EmbeddingNode
 
         if not hub.has("embedding:bge-m3"):
             pytest.skip("embedding:bge-m3 not configured")
 
-        node = embedding_("bge-m3", texts=["hello"])
+        node = EmbeddingNode.of("bge-m3", texts=["hello"])
         assert isinstance(node, EmbeddingNode)
         assert node.resource_key == "bge-m3"
         assert "texts" in node.inputs
 
     def test_embedding_shorthand_auto_name(self, hub):
-        from hush.providers.nodes.embedding import embedding_
+        from hush.providers.nodes.embedding import EmbeddingNode
 
         if not hub.has("embedding:bge-m3"):
             pytest.skip("embedding:bge-m3 not configured")
 
-        my_embed = embedding_("bge-m3", texts=[])
+        my_embed = EmbeddingNode.of("bge-m3", texts=[])
         assert my_embed.name == "my_embed"
 
     def test_embedding_shorthand_with_outputs(self, hub):
         from hush.core.nodes.base import PARENT
 
-        from hush.providers.nodes.embedding import embedding_
+        from hush.providers.nodes.embedding import EmbeddingNode
 
         if not hub.has("embedding:bge-m3"):
             pytest.skip("embedding:bge-m3 not configured")
 
-        node = embedding_("bge-m3", texts=[], outputs={"*": PARENT})
+        node = EmbeddingNode.of("bge-m3", texts=[], outputs={"*": PARENT})
         assert "embeddings" in node.outputs
 
 
 # ============================================================
-# rerank_() shorthand tests
+# RerankNode.of() shorthand tests
 # ============================================================
 
 
 class TestRerankShorthand:
-    """Test rerank_() shorthand function."""
+    """Test RerankNode.of() classmethod shorthand."""
 
     def test_rerank_shorthand_basic(self, hub):
-        from hush.providers.nodes.rerank import RerankNode, rerank_
+        from hush.providers.nodes.rerank import RerankNode
 
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured")
 
-        node = rerank_("bge-m3-onnx", query="test", documents=["a", "b"])
+        node = RerankNode.of("bge-m3-onnx", query="test", documents=["a", "b"])
         assert isinstance(node, RerankNode)
         assert node.resource_key == "bge-m3-onnx"
         assert "query" in node.inputs
         assert "documents" in node.inputs
 
     def test_rerank_shorthand_auto_name(self, hub):
-        from hush.providers.nodes.rerank import rerank_
+        from hush.providers.nodes.rerank import RerankNode
 
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured")
 
-        my_rerank = rerank_("bge-m3-onnx", query="q", documents=[])
+        my_rerank = RerankNode.of("bge-m3-onnx", query="q", documents=[])
         assert my_rerank.name == "my_rerank"
 
     def test_rerank_shorthand_with_outputs(self, hub):
         from hush.core.nodes.base import PARENT
 
-        from hush.providers.nodes.rerank import rerank_
+        from hush.providers.nodes.rerank import RerankNode
 
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured")
 
-        node = rerank_("bge-m3-onnx", query="q", documents=[], outputs={"*": PARENT})
+        node = RerankNode.of("bge-m3-onnx", query="q", documents=[], outputs={"*": PARENT})
         assert "reranks" in node.outputs
 
 
 # ============================================================
-# llmchain_() shorthand tests
+# LLMChainNode.of() shorthand tests
 # ============================================================
 
 
@@ -235,68 +235,68 @@ def _mock_resource_hub():
 
 
 class TestLLMChainShorthand:
-    """Test llmchain_() shorthand function."""
+    """Test LLMChainNode.of() classmethod shorthand."""
 
     def test_llmchain_shorthand_basic(self):
-        from hush.providers.nodes.llm_chain import LLMChainNode, llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4", "Hello {user}", user="world")
+            node = LLMChainNode.of("gpt-4", "Hello {user}", user="world")
             assert isinstance(node, LLMChainNode)
             assert node.resource_key == "gpt-4"
             assert "prompt" in node._nodes
             assert "llm" in node._nodes
 
     def test_llmchain_shorthand_dict_template(self):
-        from hush.providers.nodes.llm_chain import LLMChainNode, llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_(
+            node = LLMChainNode.of(
                 "gpt-4", {"system": "You are {role}.", "user": "{query}"}, role="helpful"
             )
             assert isinstance(node, LLMChainNode)
             assert "prompt" in node._nodes
 
     def test_llmchain_shorthand_auto_name(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            my_chain = llmchain_("gpt-4", "Hello")
+            my_chain = LLMChainNode.of("gpt-4", "Hello")
             assert my_chain.name == "my_chain"
 
     def test_llmchain_shorthand_explicit_name(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4", "Hello", name="chat_chain")
+            node = LLMChainNode.of("gpt-4", "Hello", name="chat_chain")
             assert node.name == "chat_chain"
 
     def test_llmchain_shorthand_with_outputs(self):
         from hush.core.nodes.base import PARENT
 
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4", "Hello", outputs={"*": PARENT})
+            node = LLMChainNode.of("gpt-4", "Hello", outputs={"*": PARENT})
             assert "content" in node.outputs
 
     def test_llmchain_shorthand_extract(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_(
+            node = LLMChainNode.of(
                 "gpt-4",
                 "Classify: {text}",
                 extract=["category: str", "confidence: float"],
@@ -308,12 +308,12 @@ class TestLLMChainShorthand:
             assert "parser" in node._nodes
 
     def test_llmchain_shorthand_response_format(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_(
+            node = LLMChainNode.of(
                 "gpt-4o",
                 {"user": "Return JSON: {text}"},
                 response_format={"type": "json_object"},
@@ -322,40 +322,40 @@ class TestLLMChainShorthand:
             assert node.response_format == {"type": "json_object"}
 
     def test_llmchain_shorthand_load_balancing(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_(["gpt-4o", "gpt-4o-mini"], "Hello", ratios=[0.7, 0.3])
+            node = LLMChainNode.of(["gpt-4o", "gpt-4o-mini"], "Hello", ratios=[0.7, 0.3])
             assert isinstance(node.resource_key, list)
             assert node.ratios == [0.7, 0.3]
 
     def test_llmchain_shorthand_fallback(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4o", "Hello", fallback=["claude-sonnet", "gpt-3.5-turbo"])
+            node = LLMChainNode.of("gpt-4o", "Hello", fallback=["claude-sonnet", "gpt-3.5-turbo"])
             assert node.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
 
     def test_llmchain_shorthand_enable_thinking(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4o", "Hello", enable_thinking=True)
+            node = LLMChainNode.of("gpt-4o", "Hello", enable_thinking=True)
             assert node.enable_thinking is True
 
     def test_llmchain_shorthand_template_variables(self):
-        from hush.providers.nodes.llm_chain import llmchain_
+        from hush.providers.nodes.llm_chain import LLMChainNode
 
         with patch("hush.providers.nodes.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = llmchain_("gpt-4", "Hello {user}, do {task}", user="Alice", task="coding")
+            node = LLMChainNode.of("gpt-4", "Hello {user}, do {task}", user="Alice", task="coding")
             # template vars should be in the chain's inputs
             assert "user" in node.inputs
             assert "task" in node.inputs

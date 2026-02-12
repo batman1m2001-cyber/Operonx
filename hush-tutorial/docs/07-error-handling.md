@@ -118,9 +118,9 @@ with GraphNode(name="retry-demo") as graph:
 LLMNode hỗ trợ tự động fallback khi model fails.
 
 ```python
-from hush.providers import llm_
+from hush.providers import LLMNode
 
-llm = llm_(
+llm = LLMNode.of(
     resource_key="gpt-4o",
     fallback=["gpt-4o-mini"],  # Nếu gpt-4o fails → thử gpt-4o-mini
     messages=p["messages"],

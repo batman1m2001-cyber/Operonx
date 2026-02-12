@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Union
 from hush.core.configs import NodeType
 from hush.core.exceptions import EmbeddingError
 from hush.core.nodes import BaseNode
+from hush.core.nodes.base import shorthand, split_shorthand_kwargs
 from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
 
@@ -98,20 +99,18 @@ class EmbeddingNode(BaseNode):
                 original_error=e,
             ) from e
 
+    @shorthand
+    def of(cls, resource_key=None, **kwargs) -> "EmbeddingNode":
+        """Create an EmbeddingNode with flat kwargs.
+
+        Example::
+
+            embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"], outputs={"*": PARENT})
+        """
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        return cls(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return embedding-specific metadata dictionary."""
         return {"model": self.resource_key}
-
-
-def embedding_(resource_key=None, **kwargs) -> EmbeddingNode:
-    """Shorthand to create an EmbeddingNode with flat kwargs.
-
-    Example:
-        embed = embedding_("bge-m3", texts=PARENT["texts"], outputs={"*": PARENT})
-    """
-    from hush.core.nodes import split_shorthand_kwargs
-
-    _skip_auto_name = True  # noqa: F841
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    return EmbeddingNode(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)

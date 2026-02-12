@@ -45,11 +45,11 @@ asyncio.run(main())
 
 | Package | Mô tả |
 |---------|-------|
-| `hush-core` | **Nền tảng** — `@code_node`, `for_()`, `map_()`, `while_()`, `if_()` đủ cho gần như mọi workflow |
-| `hush-providers` | Add-on — `llm_()`, `prompt_()`, `embedding_()`, `rerank_()` (cài khi cần) |
+| `hush-core` | **Nền tảng** — `@code_node`, `ForLoopNode.of()`, `MapNode.of()`, `WhileLoopNode.of()`, `if_()` đủ cho gần như mọi workflow |
+| `hush-providers` | Add-on — `LLMNode.of()`, `PromptNode.of()`, `EmbeddingNode.of()`, `RerankNode.of()` (cài khi cần) |
 | `hush-ops` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
-> **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (CodeNode, LLMNode, ...). Trong code, hãy dùng **shorthand syntax** (`@code_node`, `llm_()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
+> **Lưu ý:** Bảng kiến trúc bên trên hiển thị tên class gốc (CodeNode, LLMNode, ...). Trong code, hãy dùng **shorthand syntax** (`@code_node`, `LLMNode.of()`, ...) — xem [Shorthand Reference](12-shorthand-syntax.md).
 
 ## Cài đặt nhanh
 

@@ -48,11 +48,6 @@ from hush.providers.nodes import (
     LLMNode,
     PromptNode,
     RerankNode,
-    embedding_,
-    llm_,
-    llmchain_,
-    prompt_,
-    rerank_,
 )
 
 # Registry plugin exports
@@ -111,15 +106,10 @@ __all__ = [
     "PineconeReranker",
     # Nodes
     "LLMNode",
-    "llm_",
     "EmbeddingNode",
-    "embedding_",
     "RerankNode",
-    "rerank_",
     "PromptNode",
-    "prompt_",
     "LLMChainNode",
-    "llmchain_",
     # Auth
     "KeycloakTokenConfig",
     "KeycloakTokenProvider",

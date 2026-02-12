@@ -5,7 +5,7 @@ import pytest
 from hush.core.nodes.base import END, PARENT, START
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.for_loop_node import ForLoopNode, for_
+from hush.core.nodes.iteration.for_loop_node import ForLoopNode
 from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.states import MemoryState, StateSchema
@@ -415,22 +415,22 @@ class TestAccumulationPattern:
 
 
 # ============================================================
-# Test: for_() Shorthand
+# Test: ForLoopNode.of() Shorthand
 # ============================================================
 
 
 class TestForShorthand:
-    """Test for_() shorthand function."""
+    """Test ForLoopNode.of() shorthand classmethod."""
 
     @pytest.mark.asyncio
     async def test_for_shorthand_basic(self):
-        """Test basic for_() with Each()."""
+        """Test basic ForLoopNode.of() with Each()."""
 
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with for_(value=Each([1, 2, 3])) as loop:
+        with ForLoopNode.of(value=Each([1, 2, 3])) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -443,13 +443,13 @@ class TestForShorthand:
 
     @pytest.mark.asyncio
     async def test_for_shorthand_broadcast(self):
-        """Test for_() with Each() and broadcast values."""
+        """Test ForLoopNode.of() with Each() and broadcast values."""
 
         @code_node
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
-        with for_(value=Each([1, 2, 3]), multiplier=10) as loop:
+        with ForLoopNode.of(value=Each([1, 2, 3]), multiplier=10) as loop:
             node = multiply(
                 inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
                 outputs={"*": PARENT},
@@ -464,11 +464,11 @@ class TestForShorthand:
         assert result["result"] == [10, 20, 30]
 
     def test_for_shorthand_auto_name(self):
-        """Test that for_() auto-names from variable assignment."""
-        my_loop = for_(value=Each([1, 2, 3]))
+        """Test that ForLoopNode.of() auto-names from variable assignment."""
+        my_loop = ForLoopNode.of(value=Each([1, 2, 3]))
         assert my_loop.name == "my_loop"
 
     def test_for_shorthand_is_forloopnode(self):
-        """Test that for_() returns a ForLoopNode instance."""
-        loop = for_(value=Each([1, 2, 3]))
+        """Test that ForLoopNode.of() returns a ForLoopNode instance."""
+        loop = ForLoopNode.of(value=Each([1, 2, 3]))
         assert isinstance(loop, ForLoopNode)

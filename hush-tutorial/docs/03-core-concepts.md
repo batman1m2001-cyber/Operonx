@@ -235,6 +235,70 @@ print(state.execution_order)  # Thứ tự thực thi nodes
 print(state.user_id)          # User ID (nếu set)
 ```
 
+## @subgraph — Modular Workflow
+
+`@subgraph` biến một builder function thành factory tạo `GraphNode` có thể tái sử dụng. Các tham số của function tự động trở thành `PARENT` refs.
+
+> **Ví dụ chạy được**: `examples/16_subgraph.py`
+
+```python
+from hush.core import subgraph, code_node, START, END, PARENT, GraphNode, Hush
+
+@code_node
+def double(x: int):
+    return {"result": x * 2}
+
+@subgraph
+def double_flow(val):
+    step = double(x=val)      # val = PARENT["val"] (injected)
+    START >> step >> END
+
+# Sử dụng trong graph
+with GraphNode(name="main") as main:
+    d = double_flow(val=PARENT["input"])  # d.name == "d" (auto-named)
+    START >> d >> END
+
+engine = Hush(main)
+result = await engine.run(inputs={"input": 5})
+# result["result"] == 10
+```
+
+### Tái sử dụng
+
+Cùng một subgraph có thể gọi nhiều lần (chain):
+
+```python
+with GraphNode(name="chain") as main:
+    d1 = double_flow(val=PARENT["input"])
+    d2 = double_flow(val=d1["result"])
+    START >> d1 >> d2 >> END
+
+# 3 * 2 * 2 = 12
+```
+
+### Output renaming
+
+```python
+@subgraph
+def double_flow(val):
+    step = double(x=val)
+    step["result"] >> PARENT["doubled"]   # rename output
+    START >> step >> END
+
+with GraphNode(name="main") as main:
+    d = double_flow(val=PARENT["input"])
+    d["doubled"] >> PARENT["answer"]      # map to graph output
+    START >> d >> END
+```
+
+### Khi nào dùng @subgraph?
+
+| Trường hợp | Dùng gì |
+|-------------|---------|
+| Logic dùng lại nhiều nơi | `@subgraph` |
+| Workflow chính | `with GraphNode(name="main") as graph:` |
+| Chỉ chạy 1 function | `@code_node` |
+
 ## Tổng kết
 
 | Concept | Mô tả |
@@ -242,6 +306,7 @@ print(state.user_id)          # User ID (nếu set)
 | `GraphNode` | Container chứa workflow |
 | `CodeNode` | Chạy Python function |
 | `@code_node` | Decorator viết CodeNode ngắn gọn |
+| `@subgraph` | Decorator tạo reusable workflow module |
 | `PARENT["key"]` | Đọc/ghi data từ parent state |
 | `inputs` / `outputs` | Mapping data vào/ra nodes |
 | `START >> node >> END` | Hard edge — chờ tất cả |

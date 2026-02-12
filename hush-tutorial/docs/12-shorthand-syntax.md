@@ -1,24 +1,25 @@
 # Shorthand Syntax
 
-Hush cung cấp các hàm shorthand để viết workflow ngắn gọn hơn. Thay vì dùng class đầy đủ với `inputs={}`, bạn có thể truyền trực tiếp các tham số.
+Hush cung cấp các `.of()` classmethod và decorator để viết workflow ngắn gọn hơn. Thay vì dùng class đầy đủ với `inputs={}`, bạn có thể truyền trực tiếp các tham số.
 
-> **Ví dụ chạy được**: `examples/15_shorthand_syntax.py`
+> **Ví dụ chạy được**: `examples/15_shorthand_syntax.py`, `examples/16_subgraph.py`
 
 ## Tổng quan
 
 | Full Class | Shorthand | Mô tả |
 |------------|-----------|-------|
 | `CodeNode(...)` | `@code_node` | Decorator tạo CodeNode từ function |
-| `ForLoopNode(inputs={...})` | `for_(item=Each(...), ...)` | Iterate tuần tự |
-| `MapNode(inputs={...})` | `map_(item=Each(...), ...)` | Iterate song song |
-| `WhileLoopNode(inputs={...})` | `while_(counter=0, stop_condition=...)` | Loop với điều kiện |
-| `AsyncIterNode(inputs={...})` | `aiter_(chunk=Each(stream), ...)` | Xử lý async streaming |
+| `GraphNode(...)` + manual setup | `@subgraph` | Decorator tạo reusable workflow module |
+| `ForLoopNode(inputs={...})` | `ForLoopNode.of(item=Each(...), ...)` | Iterate tuần tự |
+| `MapNode(inputs={...})` | `MapNode.of(item=Each(...), ...)` | Iterate song song |
+| `WhileLoopNode(inputs={...})` | `WhileLoopNode.of(counter=0, stop_condition=...)` | Loop với điều kiện |
+| `AsyncIterNode(inputs={...})` | `AsyncIterNode.of(chunk=Each(stream), ...)` | Xử lý async streaming |
 | `BranchNode(...)` | `if_(...).else_(...)` | Routing có điều kiện |
-| `LLMChainNode(inputs={...})` | `llmchain_("gpt-4o", template, ...)` | Prompt + LLM all-in-one |
-| `LLMNode(inputs={...})` | `llm_("gpt-4o", messages=...)` | Gọi LLM |
-| `PromptNode(inputs={...})` | `prompt_(template, ...)` | Tạo messages từ template |
-| `EmbeddingNode(inputs={...})` | `embedding_("model", texts=...)` | Tạo embeddings |
-| `RerankNode(inputs={...})` | `rerank_("model", query=..., documents=...)` | Rerank documents |
+| `LLMChainNode(inputs={...})` | `LLMChainNode.of(resource_key="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
+| `LLMNode(inputs={...})` | `LLMNode.of(resource_key="gpt-4o", messages=...)` | Gọi LLM |
+| `PromptNode(inputs={...})` | `PromptNode.of(template=..., ...)` | Tạo messages từ template |
+| `EmbeddingNode(inputs={...})` | `EmbeddingNode.of(resource_key="model", texts=...)` | Tạo embeddings |
+| `RerankNode(inputs={...})` | `RerankNode.of(resource_key="model", query=..., documents=...)` | Rerank documents |
 
 ## @code_node — Decorator
 
@@ -63,14 +64,14 @@ def process(x: int):
 node = process(name="proc", x=PARENT["value"], outputs={"*": PARENT})
 ```
 
-## for_() — ForLoopNode Shorthand
+## ForLoopNode.of() — ForLoopNode Classmethod
 
 Iterate tuần tự qua collection.
 
 ### So sánh
 
 ```python
-from hush.core.nodes import ForLoopNode, Each, for_
+from hush.core import ForLoopNode, Each
 
 # ❌ Verbose
 with ForLoopNode(
@@ -82,8 +83,8 @@ with ForLoopNode(
 ) as loop:
     ...
 
-# ✅ Shorthand
-with for_(
+# ✅ Classmethod
+with ForLoopNode.of(
     name="loop",
     item=Each(PARENT["items"]),   # Each() = iterate
     prefix=PARENT["prefix"]        # Không có Each() = broadcast
@@ -94,14 +95,14 @@ with for_(
 ### Ví dụ đầy đủ
 
 ```python
-from hush.core.nodes import for_, Each, code_node
+from hush.core import ForLoopNode, Each, code_node
 
 @code_node
 def double(x: int):
     return {"result": x * 2}
 
 with GraphNode(name="demo") as graph:
-    with for_(item=Each([1, 2, 3, 4, 5])) as loop:
+    with ForLoopNode.of(item=Each([1, 2, 3, 4, 5])) as loop:
         step = double(name="double", x=PARENT["item"], outputs={"*": PARENT})
         START >> step >> END
 
@@ -111,14 +112,14 @@ with GraphNode(name="demo") as graph:
 # result["results"] = [2, 4, 6, 8, 10]
 ```
 
-## map_() — MapNode Shorthand
+## MapNode.of() — MapNode Classmethod
 
 Iterate song song với giới hạn concurrency.
 
 ### So sánh
 
 ```python
-from hush.core.nodes import MapNode, Each, map_
+from hush.core import MapNode, Each
 
 # ❌ Verbose
 with MapNode(
@@ -128,8 +129,8 @@ with MapNode(
 ) as map_node:
     ...
 
-# ✅ Shorthand
-with map_(
+# ✅ Classmethod
+with MapNode.of(
     name="parallel",
     url=Each(PARENT["urls"]),
     timeout=30,                    # Broadcast
@@ -146,7 +147,7 @@ def square(x: int):
     return {"squared": x * x}
 
 with GraphNode(name="parallel-demo") as graph:
-    with map_(x=Each([1, 2, 3, 4, 5]), max_concurrency=3) as loop:
+    with MapNode.of(x=Each([1, 2, 3, 4, 5]), max_concurrency=3) as loop:
         step = square(name="square", x=PARENT["x"], outputs={"*": PARENT})
         START >> step >> END
 
@@ -156,14 +157,14 @@ with GraphNode(name="parallel-demo") as graph:
 # result["results"] = [1, 4, 9, 16, 25]
 ```
 
-## while_() — WhileLoopNode Shorthand
+## WhileLoopNode.of() — WhileLoopNode Classmethod
 
 Loop cho đến khi điều kiện dừng.
 
 ### So sánh
 
 ```python
-from hush.core.nodes import WhileLoopNode, while_
+from hush.core import WhileLoopNode
 
 # ❌ Verbose
 with WhileLoopNode(
@@ -174,8 +175,8 @@ with WhileLoopNode(
 ) as loop:
     ...
 
-# ✅ Shorthand
-with while_(
+# ✅ Classmethod
+with WhileLoopNode.of(
     name="countdown",
     count=PARENT["start"],          # Input variable
     stop_condition="count <= 0",    # Điều kiện dừng (string expression)
@@ -192,7 +193,7 @@ def halve(value: int):
     return {"new_value": value // 2}
 
 with GraphNode(name="halve-demo") as graph:
-    with while_(value=256, stop_condition="value < 10", max_iterations=20) as loop:
+    with WhileLoopNode.of(value=256, stop_condition="value < 10", max_iterations=20) as loop:
         step = halve(name="halve", value=PARENT["value"])
         step["new_value"] >> PARENT["value"]
         START >> step >> END
@@ -203,14 +204,14 @@ with GraphNode(name="halve-demo") as graph:
 # 256 → 128 → 64 → 32 → 16 → 8 (dừng vì < 10)
 ```
 
-## aiter_() — AsyncIterNode Shorthand
+## AsyncIterNode.of() — AsyncIterNode Classmethod
 
 Xử lý async streaming data với concurrent processing.
 
 ### So sánh
 
 ```python
-from hush.core.nodes import AsyncIterNode, Each, aiter_
+from hush.core import AsyncIterNode, Each
 
 # ❌ Verbose
 with AsyncIterNode(
@@ -221,8 +222,8 @@ with AsyncIterNode(
 ) as stream:
     ...
 
-# ✅ Shorthand
-with aiter_(
+# ✅ Classmethod
+with AsyncIterNode.of(
     name="stream_processor",
     chunk=Each(async_stream),
     callback=handle_result,
@@ -236,7 +237,7 @@ with aiter_(
 ```python
 async def process_llm_stream():
     with GraphNode(name="stream-demo") as graph:
-        with aiter_(
+        with AsyncIterNode.of(
             chunk=Each(llm_stream),
             callback=lambda r: print(r["text"], end=""),
             max_concurrency=1
@@ -291,14 +292,14 @@ with GraphNode(name="grade-workflow") as graph:
     [excellent, good, average, fail] >> ~END  # Soft edge vì chỉ 1 nhánh chạy
 ```
 
-## llm_() — LLMNode Shorthand
+## LLMNode.of() — LLMNode Classmethod
 
 Gọi LLM với syntax ngắn gọn.
 
 ### So sánh
 
 ```python
-from hush.providers import LLMNode, llm_
+from hush.providers import LLMNode
 
 # ❌ Verbose
 llm = LLMNode(
@@ -312,9 +313,9 @@ llm = LLMNode(
     outputs={"content": PARENT["response"]}
 )
 
-# ✅ Shorthand
-llm = llm_(
-    "gpt-4o",
+# ✅ Classmethod
+llm = LLMNode.of(
+    resource_key="gpt-4o",
     name="chat",
     messages=PARENT["messages"],   # Input trực tiếp
     temperature=0.7,
@@ -327,8 +328,8 @@ llm = llm_(
 
 ```python
 # Multiple models với weight ratios
-llm = llm_(
-    ["gpt-4o", "gpt-4o-mini"],
+llm = LLMNode.of(
+    resource_key=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],
     name="balanced",
     messages=PARENT["messages"],
@@ -340,8 +341,8 @@ llm = llm_(
 
 ```python
 # Tự động fallback khi primary fails
-llm = llm_(
-    "gpt-4o",
+llm = LLMNode.of(
+    resource_key="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     name="resilient",
     messages=PARENT["messages"]
@@ -352,22 +353,22 @@ llm = llm_(
 
 ```python
 # OpenAI Batch API (50% cheaper)
-llm = llm_(
-    "gpt-4o",
+llm = LLMNode.of(
+    resource_key="gpt-4o",
     batch_mode=True,
     name="batch_llm",
     messages=PARENT["messages"]
 )
 ```
 
-## llmchain_() — LLMChainNode Shorthand
+## LLMChainNode.of() — LLMChainNode Classmethod
 
 Prompt + LLM all-in-one. Ngắn nhất có thể.
 
 ### So sánh
 
 ```python
-from hush.providers import LLMChainNode, llmchain_
+from hush.providers import LLMChainNode
 
 # ❌ Verbose
 chain = LLMChainNode(
@@ -381,10 +382,10 @@ chain = LLMChainNode(
     outputs={"content": PARENT["response"]},
 )
 
-# ✅ Shorthand (auto-name + >> END auto-forward)
-chat = llmchain_(
-    "gpt-4o",
-    {"system": "Bạn là assistant.", "user": "{query}"},
+# ✅ Classmethod (auto-name + >> END auto-forward)
+chat = LLMChainNode.of(
+    resource_key="gpt-4o",
+    template={"system": "Bạn là assistant.", "user": "{query}"},
     query=PARENT["query"],
 )
 START >> chat >> END  # result["content"], result["model_used"], ...
@@ -393,15 +394,15 @@ START >> chat >> END  # result["content"], result["model_used"], ...
 ### String template
 
 ```python
-summarize = llmchain_("gpt-4o", "Tóm tắt: {text}", text=PARENT["text"])
+summarize = LLMChainNode.of(resource_key="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
 ```
 
 ### Structured output
 
 ```python
-classifier = llmchain_(
-    "gpt-4o",
-    {"user": "Phân loại: {text}"},
+classifier = LLMChainNode.of(
+    resource_key="gpt-4o",
+    template={"user": "Phân loại: {text}"},
     text=PARENT["text"],
     response_format={"type": "json_object"},
 )
@@ -410,62 +411,139 @@ classifier = llmchain_(
 ### Load Balancing + Fallback
 
 ```python
-chat = llmchain_(
-    ["gpt-4o", "gpt-4o-mini"],
-    {"system": "Help.", "user": "{query}"},
+chat = LLMChainNode.of(
+    resource_key=["gpt-4o", "gpt-4o-mini"],
+    template={"system": "Help.", "user": "{query}"},
     ratios=[0.7, 0.3],
     fallback=["or-claude-4-sonnet"],
     query=PARENT["query"],
 )
 ```
 
-## prompt_() — PromptNode Shorthand
+## PromptNode.of() — PromptNode Classmethod
 
 Tạo messages từ template, dùng khi cần tách riêng prompt và LLM.
 
 ```python
-from hush.providers import prompt_
+from hush.providers import PromptNode
 
 # String → [{"role": "user", "content": "..."}]
-p = prompt_("Tóm tắt: {text}", text=PARENT["text"])
+p = PromptNode.of(template="Tóm tắt: {text}", text=PARENT["text"])
 
 # Dict → system + user messages
-p = prompt_(
-    {"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
+p = PromptNode.of(
+    template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
     task="tóm tắt",
     query=PARENT["query"],
 )
 ```
 
-## embedding_() — EmbeddingNode Shorthand
+## EmbeddingNode.of() — EmbeddingNode Classmethod
 
 Tạo embeddings từ text.
 
 ```python
-from hush.providers import embedding_
+from hush.providers import EmbeddingNode
 
-embed = embedding_("bge-m3", texts=PARENT["texts"])
+embed = EmbeddingNode.of(resource_key="bge-m3", texts=PARENT["texts"])
 START >> embed >> END  # result["embeddings"]
 ```
 
-## rerank_() — RerankNode Shorthand
+## RerankNode.of() — RerankNode Classmethod
 
 Rerank documents theo query.
 
 ```python
-from hush.providers import rerank_
+from hush.providers import RerankNode
 
-rerank = rerank_("bge-m3", query=PARENT["query"], documents=PARENT["docs"], top_k=5)
+rerank = RerankNode.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"], top_k=5)
 START >> rerank >> END  # result["reranked_documents"]
+```
+
+## @subgraph — Modular Workflow
+
+`@subgraph` biến builder function thành factory tạo `GraphNode` tái sử dụng. Tham số function tự động trở thành `PARENT` refs.
+
+### So sánh
+
+```python
+from hush.core import subgraph, code_node, GraphNode, START, END, PARENT
+
+@code_node
+def double(x: int):
+    return {"result": x * 2}
+
+# ❌ Verbose: tạo GraphNode thủ công
+with GraphNode(name="main") as main:
+    with GraphNode(name="double_flow", inputs={"val": PARENT["input"]}) as sub:
+        step = double(x=PARENT["val"])
+        START >> step >> END
+    START >> sub >> END
+
+# ✅ Shorthand: @subgraph decorator
+@subgraph
+def double_flow(val):
+    step = double(x=val)        # val = PARENT["val"] (injected)
+    START >> step >> END
+
+with GraphNode(name="main") as main:
+    d = double_flow(val=PARENT["input"])  # auto-named "d"
+    START >> d >> END
+```
+
+### Tái sử dụng — Chuỗi subgraphs
+
+```python
+with GraphNode(name="chain") as main:
+    d1 = double_flow(val=PARENT["input"])
+    d2 = double_flow(val=d1["result"])      # chain output
+    START >> d1 >> d2 >> END
+
+# input=3 → 3*2=6 → 6*2=12
+```
+
+### Output renaming
+
+```python
+@subgraph
+def double_flow(val):
+    step = double(x=val)
+    step["result"] >> PARENT["doubled"]     # rename output key
+    START >> step >> END
+
+with GraphNode(name="main") as main:
+    d = double_flow(val=PARENT["input"])
+    d["doubled"] >> PARENT["answer"]        # map to graph output
+    START >> d >> END
+
+# result["answer"] == 14 (input=7)
+```
+
+### Zero-param subgraph
+
+```python
+@subgraph
+def static_flow():
+    step = double(x=PARENT["val"])          # manual PARENT reference
+    START >> step >> END
+
+g = static_flow(val=10)                     # val là input mapping
+```
+
+### Explicit name và config
+
+```python
+d = double_flow(val=PARENT["input"], name="custom_name")
+d = double_flow(val=PARENT["input"], outputs={"result": PARENT["answer"]})
 ```
 
 ## Best Practices
 
-### 1. Khi nào dùng Shorthand
+### 1. Khi nào dùng .of() classmethod
 
 ```python
-# ✅ Dùng shorthand cho cases đơn giản
-with for_(item=Each(items), multiplier=10) as loop:
+# ✅ Dùng .of() classmethod cho cases đơn giản
+with ForLoopNode.of(item=Each(items), multiplier=10) as loop:
     ...
 
 # ✅ Dùng class đầy đủ khi cần nhiều config
@@ -484,13 +562,13 @@ with ForLoopNode(
     ...
 ```
 
-### 2. Mix shorthand và verbose
+### 2. Mix .of() classmethod và verbose
 
 ```python
 # OK: mix trong cùng workflow
 with GraphNode(name="mixed") as graph:
-    # Shorthand cho simple nodes
-    with for_(item=Each(PARENT["items"])) as loop:
+    # Classmethod cho simple nodes
+    with ForLoopNode.of(item=Each(PARENT["items"])) as loop:
         step = process(name="step", x=PARENT["item"], outputs={"*": PARENT})
         START >> step >> END
 
@@ -514,7 +592,7 @@ with GraphNode(name="mixed") as graph:
 
 ### 3. Auto-naming
 
-Shorthand functions sử dụng variable name làm node name khi không chỉ định:
+`.of()` classmethods sử dụng variable name làm node name khi không chỉ định:
 
 ```python
 # Tên node sẽ là "grade_router" (từ variable name)
@@ -558,16 +636,17 @@ START >> step >> END         # Auto-forward
 | Shorthand | Config Options | Khi nào dùng |
 |-----------|----------------|--------------|
 | `@code_node` | - | Tạo node từ function |
-| `for_(...)` | - | Sequential iteration |
-| `map_(...)` | `max_concurrency` | Parallel iteration |
-| `while_(...)` | `stop_condition`, `max_iterations` | Conditional loop |
-| `aiter_(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
+| `@subgraph` | `name`, `outputs`, `description` | Tạo reusable workflow module |
+| `ForLoopNode.of(...)` | - | Sequential iteration |
+| `MapNode.of(...)` | `max_concurrency` | Parallel iteration |
+| `WhileLoopNode.of(...)` | `stop_condition`, `max_iterations` | Conditional loop |
+| `AsyncIterNode.of(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
 | `if_(...).else_(...)` | - | Conditional routing |
-| `llmchain_(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
-| `llm_(...)` | `ratios`, `fallback`, `batch_mode`, `seed` | LLM calls |
-| `prompt_(...)` | - | Tạo messages từ template |
-| `embedding_(...)` | - | Tạo embeddings |
-| `rerank_(...)` | - | Rerank documents |
+| `LLMChainNode.of(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
+| `LLMNode.of(...)` | `ratios`, `fallback`, `batch_mode`, `seed` | LLM calls |
+| `PromptNode.of(...)` | - | Tạo messages từ template |
+| `EmbeddingNode.of(...)` | - | Tạo embeddings |
+| `RerankNode.of(...)` | - | Rerank documents |
 
 ## Tiếp theo
 

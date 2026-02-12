@@ -4,7 +4,7 @@ import pytest
 
 from hush.core.nodes.base import END, PARENT, START
 from hush.core.nodes.graph.graph_node import GraphNode
-from hush.core.nodes.iteration.while_loop_node import WhileLoopNode, while_
+from hush.core.nodes.iteration.while_loop_node import WhileLoopNode
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.states import MemoryState, StateSchema
 
@@ -475,22 +475,22 @@ class TestWhileLoopInitialFromUpstream:
 
 
 # ============================================================
-# Test: while_() Shorthand
+# Test: WhileLoopNode.of() Shorthand
 # ============================================================
 
 
 class TestWhileShorthand:
-    """Test while_() shorthand function."""
+    """Test WhileLoopNode.of() shorthand classmethod."""
 
     @pytest.mark.asyncio
     async def test_while_shorthand_basic(self):
-        """Test basic while_() with stop_condition."""
+        """Test basic WhileLoopNode.of() with stop_condition."""
 
         @code_node
         def increment(counter: int):
             return {"counter": counter + 1}
 
-        with while_(counter=0, stop_condition="counter >= 5") as loop:
+        with WhileLoopNode.of(counter=0, stop_condition="counter >= 5") as loop:
             node = increment(inputs={"counter": PARENT["counter"]})
             node["counter"] >> PARENT["counter"]
             START >> node >> END
@@ -504,11 +504,11 @@ class TestWhileShorthand:
         assert result["iteration_metrics"]["stopped_by_condition"] is True
 
     def test_while_shorthand_auto_name(self):
-        """Test that while_() auto-names from variable assignment."""
-        my_while = while_(counter=0, stop_condition="counter >= 5")
+        """Test that WhileLoopNode.of() auto-names from variable assignment."""
+        my_while = WhileLoopNode.of(counter=0, stop_condition="counter >= 5")
         assert my_while.name == "my_while"
 
     def test_while_shorthand_is_whileloopnode(self):
-        """Test that while_() returns a WhileLoopNode instance."""
-        loop = while_(counter=0, stop_condition="counter >= 5")
+        """Test that WhileLoopNode.of() returns a WhileLoopNode instance."""
+        loop = WhileLoopNode.of(counter=0, stop_condition="counter >= 5")
         assert isinstance(loop, WhileLoopNode)

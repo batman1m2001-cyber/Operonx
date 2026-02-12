@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from hush.core import LOGGER, STREAM_SERVICE
 from hush.core.configs import NodeType
 from hush.core.nodes import BaseNode
+from hush.core.nodes.base import shorthand, split_shorthand_kwargs
 from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
 
@@ -580,6 +581,28 @@ class LLMNode(BaseNode):
 
         return _outputs
 
+    @shorthand
+    def of(
+        cls, resource_key=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
+    ) -> "LLMNode":
+        """Create an LLMNode with flat kwargs.
+
+        Example::
+
+            llm = LLMNode.of(resource_key="gpt-4", messages=PARENT["messages"], outputs={"*": PARENT})
+            llm = LLMNode.of(resource_key=["gpt-4", "claude-3"], ratios=[0.7, 0.3], messages=PARENT["messages"])
+        """
+        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        return cls(
+            resource_key=resource_key,
+            ratios=ratios,
+            fallback=fallback,
+            batch_mode=batch_mode,
+            seed=seed,
+            inputs=input_mappings or None,
+            **init_kwargs,
+        )
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLM-specific metadata dictionary."""
@@ -593,28 +616,3 @@ class LLMNode(BaseNode):
         if self.fallback:
             metadata["fallback"] = self.fallback
         return metadata
-
-
-def llm_(
-    resource_key=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
-) -> LLMNode:
-    """Shorthand to create an LLMNode with flat kwargs.
-
-    Example:
-        llm = llm_("gpt-4", messages=PARENT["messages"], outputs={"*": PARENT})
-        llm = llm_(["gpt-4", "claude-3"], ratios=[0.7, 0.3], messages=PARENT["messages"])
-        llm = llm_(["gpt-4", "claude-3"], seed=42)  # reproducible load balancing
-    """
-    from hush.core.nodes import split_shorthand_kwargs
-
-    _skip_auto_name = True  # noqa: F841
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    return LLMNode(
-        resource_key=resource_key,
-        ratios=ratios,
-        fallback=fallback,
-        batch_mode=batch_mode,
-        seed=seed,
-        inputs=input_mappings or None,
-        **init_kwargs,
-    )

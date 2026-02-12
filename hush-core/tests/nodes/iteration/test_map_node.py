@@ -7,7 +7,7 @@ import pytest
 from hush.core.nodes.base import END, PARENT, START
 from hush.core.nodes.graph.graph_node import GraphNode
 from hush.core.nodes.iteration.base import Each
-from hush.core.nodes.iteration.map_node import MapNode, map_
+from hush.core.nodes.iteration.map_node import MapNode
 from hush.core.nodes.transform.code_node import code_node
 from hush.core.states import MemoryState, StateSchema
 
@@ -564,22 +564,22 @@ class TestNestedIteration:
 
 
 # ============================================================
-# Test: map_() Shorthand
+# Test: MapNode.of() Shorthand
 # ============================================================
 
 
 class TestMapShorthand:
-    """Test map_() shorthand function."""
+    """Test MapNode.of() shorthand classmethod."""
 
     @pytest.mark.asyncio
     async def test_map_shorthand_basic(self):
-        """Test basic map_() with Each()."""
+        """Test basic MapNode.of() with Each()."""
 
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with map_(value=Each([1, 2, 3])) as loop:
+        with MapNode.of(value=Each([1, 2, 3])) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -592,13 +592,13 @@ class TestMapShorthand:
 
     @pytest.mark.asyncio
     async def test_map_shorthand_concurrency(self):
-        """Test map_() with max_concurrency."""
+        """Test MapNode.of() with max_concurrency."""
 
         @code_node
         def double(value: int):
             return {"result": value * 2}
 
-        with map_(value=Each([1, 2, 3, 4]), max_concurrency=2) as loop:
+        with MapNode.of(value=Each([1, 2, 3, 4]), max_concurrency=2) as loop:
             node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
             START >> node >> END
 
@@ -610,11 +610,11 @@ class TestMapShorthand:
         assert sorted(result["result"]) == [2, 4, 6, 8]
 
     def test_map_shorthand_auto_name(self):
-        """Test that map_() auto-names from variable assignment."""
-        my_map = map_(value=Each([1, 2, 3]))
+        """Test that MapNode.of() auto-names from variable assignment."""
+        my_map = MapNode.of(value=Each([1, 2, 3]))
         assert my_map.name == "my_map"
 
     def test_map_shorthand_is_mapnode(self):
-        """Test that map_() returns a MapNode instance."""
-        loop = map_(value=Each([1, 2, 3]))
+        """Test that MapNode.of() returns a MapNode instance."""
+        loop = MapNode.of(value=Each([1, 2, 3]))
         assert isinstance(loop, MapNode)

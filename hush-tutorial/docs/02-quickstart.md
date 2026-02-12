@@ -90,11 +90,11 @@ export HUSH_CONFIG=/path/to/resources.yaml
 ```python
 import asyncio
 from hush.core import Hush, GraphNode, START, END, PARENT
-from hush.providers import llmchain_
+from hush.providers import LLMChainNode
 
 async def main():
     with GraphNode(name="chat-workflow") as graph:
-        chat = llmchain_(
+        chat = LLMChainNode.of(
             resource_key="gpt-4o",
             template={"system": "Bạn là trợ lý AI thân thiện.", "user": "{question}"},
             question=PARENT["question"],
@@ -120,7 +120,7 @@ asyncio.run(main())
 | `node["key"]` | Lấy output từ node anh em (sibling) |
 | `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
 | `node["key"] >> PARENT["key"]` | Output mapping via `>>` operator |
-| `llmchain_()` | Gọi LLM — **add-on** (cài `hush-providers`) |
+| `LLMChainNode.of()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 
 ## Tiếp theo
 

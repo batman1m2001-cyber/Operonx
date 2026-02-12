@@ -7,17 +7,17 @@ Xây dựng AI agent với tool calling và WhileLoopNode.
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Viết tắt | Class gốc | Ví dụ |
-> |----------|-----------|-------|
+> | Syntax | Class | Ví dụ |
+> |--------|-------|-------|
 > | `@code_node` | `CodeNode` | `@code_node` decorator trên function |
-> | `while_()` | `WhileLoopNode` | `while_(counter=0, stop_condition="counter >= 5")` |
-> | `llm_()` | `LLMNode` | `llm_(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `WhileLoopNode.of()` | `WhileLoopNode` | `WhileLoopNode.of(counter=0, stop_condition="counter >= 5")` |
+> | `LLMNode.of()` | `LLMNode` | `LLMNode.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
 
 ## Kiến trúc Agent
 
 ```
-Init → while_(not done):
-         → llm_() → Check tool_calls
+Init → WhileLoopNode.of(not done):
+         → LLMNode.of() → Check tool_calls
            → Nếu có: Execute tools → Update messages → Loop
            → Nếu không: Done → Exit
 ```
@@ -72,12 +72,12 @@ def execute_tools(tool_calls, messages):
     return new_messages
 ```
 
-### Bước 3: Agent workflow với while_()
+### Bước 3: Agent workflow với WhileLoopNode.of()
 
 ```python
 from hush.core import Hush, GraphNode, code_node, START, END, PARENT
-from hush.core.nodes import while_
-from hush.providers import llm_
+from hush.core import WhileLoopNode
+from hush.providers import LLMNode
 
 @code_node
 def init_agent(query: str):
@@ -102,7 +102,7 @@ with GraphNode(name="agent") as graph:
     )
 
     # Agent loop
-    with while_(
+    with WhileLoopNode.of(
         messages=PARENT["messages"],
         iteration=PARENT["iteration"],
         done=PARENT["done"],
@@ -110,7 +110,7 @@ with GraphNode(name="agent") as graph:
         stop_condition="done == True or iteration >= 5",
         max_iterations=10,
     ) as loop:
-        llm = llm_(
+        llm = LLMNode.of(
             resource_key="gpt-4o",
             messages=PARENT["messages"],
             tools=tools,

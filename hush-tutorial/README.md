@@ -87,19 +87,19 @@ hush-tutorial/
 with ForLoopNode(name="loop", inputs={"item": Each(items), "prefix": "Hello"}) as loop:
     ...
 
-# ✅ Shorthand
-with for_(item=Each(items), prefix="Hello") as loop:
+# ✅ Classmethod
+with ForLoopNode.of(item=Each(items), prefix="Hello") as loop:
     ...
 ```
 
-| Full Class | Shorthand | Example |
-|------------|-----------|---------|
+| Full Class | Classmethod | Example |
+|------------|-------------|---------|
 | `CodeNode` | `@code_node` | `@code_node def fn(x): return {"y": x*2}` |
-| `ForLoopNode` | `for_()` | `for_(item=Each(items), config=10)` |
-| `MapNode` | `map_()` | `map_(x=Each(items), max_concurrency=5)` |
-| `WhileLoopNode` | `while_()` | `while_(count=0, stop_condition="count >= 10")` |
+| `ForLoopNode` | `ForLoopNode.of()` | `ForLoopNode.of(item=Each(items), config=10)` |
+| `MapNode` | `MapNode.of()` | `MapNode.of(x=Each(items), max_concurrency=5)` |
+| `WhileLoopNode` | `WhileLoopNode.of()` | `WhileLoopNode.of(count=0, stop_condition="count >= 10")` |
 | `BranchNode` | `if_()` | `if_(score >= 90, "a").else_("b")` |
-| `LLMNode` | `llm_()` | `llm_("gpt-4o", messages=..., temperature=0.7)` |
+| `LLMNode` | `LLMNode.of()` | `LLMNode.of(resource_key="gpt-4o", messages=..., temperature=0.7)` |
 
 See [docs/12-shorthand-syntax.md](docs/12-shorthand-syntax.md) for details.
 

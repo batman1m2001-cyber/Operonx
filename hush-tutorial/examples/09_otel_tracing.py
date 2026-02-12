@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphNode, Hush
-from hush.core.nodes import Each, code_node, for_, while_
+from hush.core.nodes import Each, ForLoopNode, WhileLoopNode, code_node
 from hush.core.tracers import BaseTracer
 
 # =============================================================================
@@ -106,12 +106,12 @@ async def example_1_otel_basic():
     from hush.ops import OTELTracer
 
     with GraphNode(name="nested-loop") as graph:
-        with for_(x=Each([2, 3, 4])) as outer:
+        with ForLoopNode.of(x=Each([2, 3, 4])) as outer:
             val = validate(
                 name="validate",
                 inputs={"x": PARENT["x"]},
             )
-            with for_(y=Each([10, 20]), x=val["validated_x"]) as inner:
+            with ForLoopNode.of(y=Each([10, 20]), x=val["validated_x"]) as inner:
                 mult = multiply(
                     name="multiply",
                     inputs={"x": PARENT["x"], "y": PARENT["y"]},
@@ -167,7 +167,7 @@ async def example_2_otel_while():
     from hush.ops import OTELTracer
 
     with GraphNode(name="while-loop") as graph:
-        with while_(
+        with WhileLoopNode.of(
             value=PARENT["start_value"],
             stop_condition="value < 5",
             max_iterations=10,
