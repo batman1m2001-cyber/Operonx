@@ -2,7 +2,7 @@
 
 ## Overview
 
-Graph compilation xay ra trong 2 phases:
+Graph compilation xảy ra trong 2 phases:
 1. `graph.build()` - Build graph structure
 2. `StateSchema(graph)` - Build state schema
 
@@ -12,21 +12,21 @@ Graph compilation xay ra trong 2 phases:
 
 ```python
 def build(self):
-    # 1. Build tat ca child ops truoc (recursive)
+    # 1. Build tất cả child ops trước (recursive)
     for op in self._ops.values():
         if hasattr(op, 'build'):
             op.build()
 
-    # 2. Setup inputs/outputs schema tu child ops
+    # 2. Setup inputs/outputs schema từ child ops
     self._setup_schema()
 
-    # 3. Xac dinh flow type cua moi op
+    # 3. Xác định flow type của mỗi op
     self._build_flow_type()
 
     # 4. Setup entry/exit endpoints
     self._setup_endpoints()
 
-    # 5. Tinh ready_count
+    # 5. Tính ready_count
     self._compute_ready_counts()
 
     self._is_building = False
@@ -35,7 +35,7 @@ def build(self):
 
 ### _setup_schema()
 
-Scan child ops de tim PARENT refs:
+Scan child ops để tìm PARENT refs:
 
 ```python
 def _setup_schema(self):
@@ -43,12 +43,12 @@ def _setup_schema(self):
     graph_outputs = {}
 
     for _, op in self._ops.items():
-        # Input refs den PARENT -> graph input
+        # Input refs đến PARENT -> graph input
         for var, param in op.inputs.items():
             if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_inputs[param.value.var] = Param(...)
 
-        # Output refs den PARENT -> graph output
+        # Output refs đến PARENT -> graph output
         for var, param in op.outputs.items():
             if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_outputs[param.value.var] = Param(...)
@@ -59,7 +59,7 @@ def _setup_schema(self):
 
 ### _build_flow_type()
 
-Xac dinh pattern cua moi op:
+Xác định pattern của mỗi op:
 
 ```python
 def _build_flow_type(self):
@@ -85,26 +85,26 @@ def _build_flow_type(self):
 
 ```python
 def _setup_endpoints(self):
-    # Entry ops: khong co predecessor
+    # Entry ops: không có predecessor
     if not self.entries:
         self.entries = [n for n in self._ops if not self.prevs[n]]
 
-    # Exit ops: khong co successor
+    # Exit ops: không có successor
     if not self.exits:
         self.exits = [n for n in self._ops if not self.nexts[n]]
 
     # Validate
     if not self.entries:
-        raise ValueError("Graph phai co it nhat mot entry op")
+        raise ValueError("Graph phải có ít nhất một entry op")
     if not self.exits:
-        raise ValueError("Graph phai co it nhat mot exit op")
+        raise ValueError("Graph phải có ít nhất một exit op")
 ```
 
 ### Ready Count Calculation
 
 ```python
-# Hard edges: dem tung predecessor
-# Soft edges: dem chung tat ca soft predecessors la 1
+# Hard edges: đếm từng predecessor
+# Soft edges: đếm chung tất cả soft predecessors là 1
 
 self.ready_count = {}
 for name in self._ops:
@@ -227,7 +227,7 @@ with GraphOp(name="outer") as outer:
     START >> inner >> b >> END
 
 # Build order:
-# 1. inner.build() (recursive from outer.build())
+# 1. inner.build() (recursive từ outer.build())
 #    - inner._setup_schema()
 #    - inner.ready_count computed
 # 2. outer.build()

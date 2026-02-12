@@ -1,10 +1,10 @@
 # Hush Architecture
 
-> Tai lieu nay danh cho core developers va AI assistants de hieu cach Hush hoat dong ben trong.
+> Tài liệu này dành cho core developers và AI assistants để hiểu cách Hush hoạt động bên trong.
 
 ## Documentation System
 
-Hush su dung ba lop documentation:
+Hush sử dụng ba lớp documentation:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -25,22 +25,22 @@ Hush su dung ba lop documentation:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Khi nao dung gi?
+### Khi nào dùng gì?
 
-| Can gi | Doc o dau |
+| Cần gì | Đọc ở đâu |
 |--------|-----------|
-| Quick reference khi coding | `CLAUDE.md` trong package tuong ung |
-| "Lam sao de them X?" | `CLAUDE.md` |
-| "Tai sao X hoat dong nhu vay?" | `architecture/` (ban dang o day) |
+| Quick reference khi coding | `CLAUDE.md` trong package tương ứng |
+| "Làm sao để thêm X?" | `CLAUDE.md` |
+| "Tại sao X hoạt động như vậy?" | `architecture/` (bạn đang ở đây) |
 | Deep dive internals | `architecture/` |
-| Learning tu dau | `architecture/index.md` → reading order |
+| Learning từ đầu | `architecture/index.md` → reading order |
 | User documentation (Vietnamese) | `hush-tutorial/docs/` |
 | Runnable examples | `hush-tutorial/examples/` |
-| Day nguoi khac dung Hush | `hush-tutorial/docs/00-tong-quan.md` → reading order |
+| Dạy người khác dùng Hush | `hush-tutorial/docs/00-tong-quan.md` → reading order |
 
 ### CLAUDE.md Files
 
-| Package | CLAUDE.md | Noi dung |
+| Package | CLAUDE.md | Nội dung |
 |---------|-----------|----------|
 | Root | [/CLAUDE.md](../CLAUDE.md) | Monorepo overview, conventions |
 | hush-core | [/hush-core/CLAUDE.md](../hush-core/CLAUDE.md) | Op patterns, state management |
@@ -51,18 +51,18 @@ Hush su dung ba lop documentation:
 
 ### Sync Rules
 
-Khi thay doi code:
+Khi thay đổi code:
 
-| Loai thay doi | CLAUDE.md | architecture/ | hush-tutorial/ |
+| Loại thay đổi | CLAUDE.md | architecture/ | hush-tutorial/ |
 |---------------|-----------|---------------|----------------|
 | New op/provider/tracer | ✓ Usage pattern | ✓ Internals | ✓ docs/ + examples/ |
 | API change | ✓ Update examples | ✓ Update explanations | ✓ Update docs + examples |
 | Internal refactor (same API) | - | ✓ If algorithm changes | - |
 | Bug fix | - | - | - |
 
-Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mapping).
+Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mapping).
 
-## Tong quan he thong
+## Tổng quan hệ thống
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -89,14 +89,14 @@ Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mappi
 
 ### Level 1: Core Concepts
 
-1. [Execution Flow](engine/execution-flow.md) - Workflow chay nhu the nao
+1. [Execution Flow](engine/execution-flow.md) - Workflow chạy như thế nào
 2. [State Overview](state/overview.md) - State system basics
-3. [BaseOp Anatomy](ops/base-op.md) - Cau truc mot op
+3. [BaseOp Anatomy](ops/base-op.md) - Cấu trúc một op
 
 ### Level 2: Deep Dive
 
-4. [Data Flow](state/data-flow.md) - Cach data di chuyen qua ops
-5. [StateSchema](state/state-schema.md) - Schema design va indexing
+4. [Data Flow](state/data-flow.md) - Cách data di chuyển qua ops
+5. [StateSchema](state/state-schema.md) - Schema design và indexing
 6. [Graph Compilation](engine/compilation.md) - Build process
 7. [Iteration Ops](ops/iteration-ops.md) - ForLoop, Map, While
 
@@ -105,10 +105,13 @@ Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mappi
 8. [ResourceHub](resources/resource-hub.md) - Resource management
 9. [Plugin System](resources/plugin-system.md) - Plugin architecture
 10. [Tracer System](tracing/tracer-interface.md) - Observability
+11. [Streaming System](streams/streaming-system.md) - Real-time data streaming
+12. [External Backends](tracing/external-backends.md) - Langfuse & OTEL
+13. [VS Code Extension](hush-eyes/overview.md) - Trace visualization
 
 ## Quick Reference
 
-### Muon hieu X hoat dong nhu the nao?
+### Muốn hiểu X hoạt động như thế nào?
 
 | Topic | File |
 |-------|------|
@@ -122,20 +125,29 @@ Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mappi
 | Auto-naming (bytecode + source) | [ops/auto-naming.md](ops/auto-naming.md) |
 | Loops (ForLoop, Map, While) | [ops/iteration-ops.md](ops/iteration-ops.md) |
 | Conditional routing | [ops/branch-op.md](ops/branch-op.md) |
+| ParserOp (LLM output parsing) | [ops/parser-op.md](ops/parser-op.md) |
+| Exception hierarchy | [ops/exception-hierarchy.md](ops/exception-hierarchy.md) |
+| Streaming system | [streams/streaming-system.md](streams/streaming-system.md) |
 | LLM provider interface | [providers/llm-abstraction.md](providers/llm-abstraction.md) |
 | Embedding provider | [providers/embedding-provider.md](providers/embedding-provider.md) |
 | Reranker provider | [providers/reranker-provider.md](providers/reranker-provider.md) |
+| Provider workflow ops | [providers/workflow-ops.md](providers/workflow-ops.md) |
+| Authentication | [providers/authentication.md](providers/authentication.md) |
 | Tracing system | [tracing/tracer-interface.md](tracing/tracer-interface.md) |
 | SQLite storage | [tracing/local-tracer.md](tracing/local-tracer.md) |
 | Database schema | [tracing/trace-data-model.md](tracing/trace-data-model.md) |
 | Async buffer | [tracing/async-buffer.md](tracing/async-buffer.md) |
+| External tracing backends | [tracing/external-backends.md](tracing/external-backends.md) |
+| VS Code extension | [hush-eyes/overview.md](hush-eyes/overview.md) |
+| Extension database layer | [hush-eyes/database-layer.md](hush-eyes/database-layer.md) |
+| Extension WebView | [hush-eyes/webview-providers.md](hush-eyes/webview-providers.md) |
 
-### Muon contribute/extend?
+### Muốn contribute/extend?
 
 | Task | File |
 |------|------|
-| Tao custom op | [ops/creating-custom-op.md](ops/creating-custom-op.md) |
-| Them LLM provider | [providers/adding-new-provider.md](providers/adding-new-provider.md) |
+| Tạo custom op | [ops/creating-custom-op.md](ops/creating-custom-op.md) |
+| Thêm LLM provider | [providers/adding-new-provider.md](providers/adding-new-provider.md) |
 | Setup dev environment | [contributing/development-setup.md](contributing/development-setup.md) |
 | Code style | [contributing/code-style.md](contributing/code-style.md) |
 | Testing | [contributing/testing.md](contributing/testing.md) |
@@ -143,20 +155,21 @@ Chi tiet sync mapping xem tai [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mappi
 
 ## Packages
 
-| Package | Mo ta | Key Files | Quick Ref |
+| Package | Mô tả | Key Files | Quick Ref |
 |---------|-------|-----------|-----------|
 | hush-core | Core workflow engine | `engine.py`, `ops/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
 | hush-telemetry | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-telemetry/CLAUDE.md) |
+| hush-eyes | VS Code trace viewer | `src/extension.ts`, `src/database.ts` | [CLAUDE.md](../hush-eyes/CLAUDE.md) |
 
 ## Folder Structure
 
 ```
 architecture/
-├── index.md                    ← Ban dang o day
+├── index.md                    ← Bạn đang ở đây
 │
 ├── engine/                     ← Core execution engine
-│   ├── execution-flow.md       ← Workflow chay nhu the nao
+│   ├── execution-flow.md       ← Workflow chạy như thế nào
 │   ├── compilation.md          ← Graph compilation process
 │   └── scheduling.md           ← Op scheduling & dependency
 │
@@ -167,13 +180,18 @@ architecture/
 │   ├── indexer.md              ← Index system internals
 │   └── data-flow.md            ← Data flow through ops
 │
-├── ops/                      ← Op system
+├── streams/                    ← Real-time data streaming
+│   └── streaming-system.md     ← BaseStreamingService, InMemoryStreamService
+│
+├── ops/                        ← Op system
 │   ├── base-op.md              ← BaseOp anatomy
 │   ├── graph-op.md             ← Nested graphs, scoping & @graph
 │   ├── auto-naming.md          ← Auto-naming (bytecode + source)
 │   ├── iteration-ops.md        ← ForLoop, Map, While internals
 │   ├── branch-op.md            ← Conditional routing
-│   └── creating-custom-op.md   ← Guide tao op moi
+│   ├── parser-op.md            ← ParserOp (LLM output → structured data)
+│   ├── exception-hierarchy.md  ← OpError exception system
+│   └── creating-custom-op.md   ← Guide tạo op mới
 │
 ├── resources/                  ← Resource management
 │   ├── resource-hub.md         ← ResourceHub design
@@ -184,13 +202,21 @@ architecture/
 │   ├── tracer-interface.md     ← BaseTracer abstract design
 │   ├── local-tracer.md         ← SQLite implementation
 │   ├── trace-data-model.md     ← Database schema
-│   └── async-buffer.md         ← AsyncTraceBuffer design
+│   ├── async-buffer.md         ← AsyncTraceBuffer design
+│   └── external-backends.md    ← Langfuse & OTEL integration
 │
 ├── providers/                  ← Provider system
 │   ├── llm-abstraction.md      ← LLM provider interface
 │   ├── embedding-provider.md   ← Embedding provider design
 │   ├── reranker-provider.md    ← Reranker design
-│   └── adding-new-provider.md  ← Guide them provider moi
+│   ├── workflow-ops.md         ← LLMOp, ChainOp, PromptOp, EmbeddingOp, RerankOp
+│   ├── authentication.md       ← Keycloak auth provider
+│   └── adding-new-provider.md  ← Guide thêm provider mới
+│
+├── hush-eyes/                  ← VS Code trace viewer extension
+│   ├── overview.md             ← Extension architecture
+│   ├── database-layer.md       ← sql.js, data models, queries
+│   └── webview-providers.md    ← WebView providers, UI, message protocol
 │
 └── contributing/               ← Contribution guides
     ├── development-setup.md    ← Setup dev environment
@@ -203,14 +229,14 @@ architecture/
 
 ### Op Registration
 
-Ops tu dong register voi parent graph qua `contextvars.ContextVar`:
+Ops tự động register với parent graph qua `contextvars.ContextVar`:
 
 ```python
 _current_graph: ContextVar[GraphOp] = ContextVar("current_graph")
 
 class BaseOp:
     def __init__(self, ...):
-        self.father = get_current()  # Auto-register voi parent
+        self.father = get_current()  # Auto-register với parent
         if self.father:
             self.father._add_child(self)
 ```
@@ -232,10 +258,10 @@ value = state._cells[5][context]
 Single-hop resolution cho data flow:
 
 ```python
-# Pull ref: read tu source
+# Pull ref: đọc từ source
 inputs={"x": other_op["output"]}  # Pull 1 hop
 
-# Push ref: write to target
+# Push ref: ghi đến target
 outputs={"result": PARENT["output"]}  # Push 1 hop
 ```
 

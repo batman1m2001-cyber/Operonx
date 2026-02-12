@@ -22,15 +22,15 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-ca
 
 ## Quick Start
 
-### LLM Node
+### LLM Op
 
 ```python
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import llmchain_
+from hush.providers import ChainOp
 
 async def main():
     with GraphOp(name="chat") as graph:
-        chat = llmchain_(
+        chat = ChainOp.of(
             resource_key="gpt-4o",
             template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
             question=PARENT["question"],
@@ -41,30 +41,20 @@ async def main():
     result = await engine.run(inputs={"question": "Hello!"})
 ```
 
-### Embedding Node
+### Embedding Op
 
 ```python
 from hush.providers import EmbeddingOp
 
-embed = EmbeddingOp(
-    name="embed",
-    resource_key="bge-m3",
-    inputs={"texts": PARENT["documents"]},
-    outputs={"embeddings": PARENT}
-)
+embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["documents"])
 ```
 
-### Rerank Node
+### Rerank Op
 
 ```python
 from hush.providers import RerankOp
 
-rerank = RerankOp(
-    name="rerank",
-    resource_key="bge-reranker",
-    inputs={"query": PARENT["query"], "documents": PARENT["docs"]},
-    outputs={"ranked_docs": PARENT}
-)
+rerank = RerankOp.of(resource_key="bge-reranker", query=PARENT["query"], documents=PARENT["docs"])
 ```
 
 ## Supported Providers

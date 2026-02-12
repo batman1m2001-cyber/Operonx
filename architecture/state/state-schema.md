@@ -48,7 +48,7 @@ schema.set("node_a", "var", default_value)
 
 ### _load_from()
 
-Recursive traversal cua op tree:
+Recursive traversal của op tree:
 
 ```python
 def _load_from(self, op):

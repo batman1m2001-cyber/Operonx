@@ -2,7 +2,7 @@
 
 ## Overview
 
-`Hush` la execution engine chinh, dieu phoi viec thuc thi workflows.
+`Hush` là execution engine chính, điều phối việc thực thi workflows.
 
 Location: `hush-core/hush/core/engine.py`
 
@@ -16,7 +16,7 @@ class Hush:
         self.graph = graph
         self.name = graph.name
 
-        # Build graph va tao schema
+        # Build graph và tạo schema
         self.graph.build()
         self._schema = StateSchema(self.graph)
 ```
@@ -30,7 +30,7 @@ engine = Hush(graph)
 ```
 
 - Build graph structure
-- Create StateSchema tu graph
+- Create StateSchema từ graph
 - Validate graph (entries, exits, edges)
 - Background process is **not** started here (lazy — only spawned on first traced request)
 
@@ -49,7 +49,7 @@ result = await engine.run(
 ### 3. State Creation
 
 ```python
-# Create fresh state cho moi run
+# Tạo fresh state cho mỗi run
 state = self._schema.create_state(
     inputs=inputs,
     user_id=user_id,
@@ -65,7 +65,7 @@ state = self._schema.create_state(
 result = await self.graph.run(state)
 ```
 
-GraphOp.run() thuc thi tat ca child ops theo dependency order.
+GraphOp.run() thực thi tất cả child ops theo dependency order.
 
 ### 5. Cleanup
 
@@ -116,7 +116,7 @@ result["$state"] = state
 
 ## Multiple Runs
 
-Engine co the run nhieu lan voi fresh state:
+Engine có thể run nhiều lần với fresh state:
 
 ```python
 engine = Hush(graph)
@@ -124,7 +124,7 @@ engine = Hush(graph)
 # Each run creates new state
 result1 = await engine.run({"query": "first"})
 result2 = await engine.run({"query": "second"})
-# state1 va state2 doc lap
+# state1 và state2 độc lập
 ```
 
 ## Callable Syntax
@@ -175,5 +175,5 @@ from hush.telemetry import LangfuseTracer
 tracer = LangfuseTracer()
 result = await engine.run(inputs, tracer=tracer)
 
-# Traces duoc flush non-blocking sau khi run hoan thanh
+# Traces được flush non-blocking sau khi run hoàn thành
 ```

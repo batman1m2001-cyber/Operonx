@@ -2,13 +2,13 @@
 
 ## Overview
 
-Hush su dung topological-order scheduling voi parallel execution cho independent ops.
+Hush sử dụng topological-order scheduling với parallel execution cho independent ops.
 
 ## Ready Count
 
 ### Concept
 
-Moi op co `ready_count` = so predecessors can cho hoan thanh.
+Mỗi op có `ready_count` = số predecessors cần chờ hoàn thành.
 
 ```python
 # Example graph
@@ -25,14 +25,14 @@ D: 2  (waits for B AND C)
 ### Hard vs Soft Edges
 
 ```python
-# Hard edge (>>): dem tung predecessor
+# Hard edge (>>): đếm từng predecessor
 A >> B  # B.ready_count += 1
 
-# Soft edge (>>~): tat ca soft predecessors dem chung la 1
+# Soft edge (>>~): tất cả soft predecessors đếm chung là 1
 A >> ~D
 B >> ~D
 C >> ~D
-# D.ready_count = 1 (chi can 1 trong A,B,C hoan thanh)
+# D.ready_count = 1 (chỉ cần 1 trong A,B,C hoàn thành)
 ```
 
 ### Calculation
@@ -149,7 +149,7 @@ Execution order (if branch -> case_a):
 1. branch
 2. case_a (soft edge, ready_count=1)
 3. merge (ready_count=0 after case_a satisfies soft group)
-   - case_b khong chay
+   - case_b không chạy
 ```
 
 ### Diamond
@@ -178,24 +178,24 @@ Execution order:
 if op.type == "branch":
     branch_target = op.get_target(state, context_id)
     if branch_target != END.name:
-        next_ops = [branch_target]  # Chi 1 target
+        next_ops = [branch_target]  # Chỉ 1 target
     else:
         next_ops = []
 else:
-    next_ops = self.nexts[op_name]  # Tat ca successors
+    next_ops = self.nexts[op_name]  # Tất cả successors
 ```
 
 ## Soft Edge Handling
 
 ### Purpose
 
-Soft edges dung cho merge sau branch - chi can 1 predecessor hoan thanh:
+Soft edges dùng cho merge sau branch - chỉ cần 1 predecessor hoàn thành:
 
 ```python
 # Branch outputs use soft edges
 branch >> ~case_a >> merge
 branch >> ~case_b >> merge
-# merge cho BAT KY MOT trong case_a, case_b
+# merge chờ BẤT KỲ MỘT trong case_a, case_b
 ```
 
 ### Tracking
@@ -209,7 +209,7 @@ for next_op in next_ops:
 
     if is_soft:
         if next_op in soft_satisfied:
-            continue  # Da co soft predecessor hoan thanh
+            continue  # Đã có soft predecessor hoàn thành
         soft_satisfied.add(next_op)  # Mark as satisfied
 
     ready_count[next_op] -= 1
@@ -217,7 +217,7 @@ for next_op in next_ops:
 
 ## Error Handling
 
-Errors trong op khong stop graph execution:
+Errors trong op không stop graph execution:
 
 ```python
 # In BaseOp.run()
@@ -225,19 +225,19 @@ try:
     _outputs = await self.core(**_inputs)
 except Exception as e:
     state[self.full_name, "error", context_id] = traceback.format_exc()
-    # Op van "hoan thanh", successors co the chay
+    # Op vẫn "hoàn thành", successors có thể chạy
 ```
 
 ## Iteration Op Scheduling
 
-Iteration ops tu quan ly scheduling cho child graph:
+Iteration ops tự quản lý scheduling cho child graph:
 
 ```python
 # ForOp - sequential
 for i, data in enumerate(iteration_data):
     result = await self._run_graph(state, f"[{i}]", ...)
 
-# MapOp - parallel voi semaphore
+# MapOp - parallel với semaphore
 semaphore = asyncio.Semaphore(max_concurrency)
 await asyncio.gather(*[
     execute_iteration(f"[{i}]", data)

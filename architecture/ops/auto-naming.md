@@ -2,7 +2,7 @@
 
 ## Overview
 
-Khi tao op ma khong truyen `name=`, Hush tu dong lay ten bien tu assignment statement:
+Khi tạo op mà không truyền `name=`, Hush tự động lấy tên biến từ assignment statement:
 
 ```python
 llm = LLMOp.of(resource_key="gpt-4o", messages=msgs)
@@ -13,13 +13,13 @@ Module: `hush-core/hush/core/utils/auto_name.py`
 
 ## Public API
 
-| Function | Mo ta |
+| Function | Mô tả |
 |----------|-------|
-| `auto_name()` | Trich xuat variable name tu caller frame |
-| `unique_name()` | Tao 8-char hex UUID fallback |
-| `register_skip(fn)` | Dang ky function de skip frame khi walking |
+| `auto_name()` | Trích xuất variable name từ caller frame |
+| `unique_name()` | Tạo 8-char hex UUID fallback |
+| `register_skip(fn)` | Đăng ký function để skip frame khi walking |
 
-## Chien luoc: Bytecode -> Source -> None
+## Chiến lược: Bytecode -> Source -> None
 
 ```
 auto_name() called from BaseOp.__init__
@@ -34,12 +34,12 @@ _name_from_bytecode(frame)    <- Primary
 _name_from_source(filename, lineno)  <- Fallback
     | success? return name
     v fail?
-return None  -> BaseOp dung unique_name()
+return None  -> BaseOp dùng unique_name()
 ```
 
 ## Frame Walking
 
-`auto_name()` goi `inspect.currentframe()`, roi walk nguoc call stack:
+`auto_name()` gọi `inspect.currentframe()`, rồi walk ngược call stack:
 
 ```python
 frame = inspect.currentframe()
@@ -48,11 +48,11 @@ while frame and _should_skip(frame):
     frame = frame.f_back
 ```
 
-### Frames duoc skip
+### Frames được skip
 
 1. **`__init__` methods**: Constructor chain (`BaseOp.__init__` -> `GraphOp.__init__` -> ...)
-2. **Registered code objects**: Functions dang ky qua `register_skip()` — bao gom `.of()` classmethods, `@op` wrapper, `@graph` wrapper
-3. **Legacy marker**: Frames co `_skip_auto_name = True` (backward compat)
+2. **Registered code objects**: Functions đăng ký qua `register_skip()` — bao gồm `.of()` classmethods, `@op` wrapper, `@graph` wrapper
+3. **Legacy marker**: Frames có `_skip_auto_name = True` (backward compat)
 
 ```python
 _skip_code_objects: Set[CodeType] = set()
@@ -69,15 +69,15 @@ def _should_skip(frame) -> bool:
 
 ## Bytecode Analysis (Primary)
 
-Phan tich bytecode cua caller frame de tim `STORE_FAST`/`STORE_NAME` instruction ngay sau call site.
+Phân tích bytecode của caller frame để tìm `STORE_FAST`/`STORE_NAME` instruction ngay sau call site.
 
-### Tai sao bytecode?
+### Tại sao bytecode?
 
-- Khong can source code (hoat dong trong REPL, `exec()`, no-source environments)
-- Xu ly multi-line expressions tu nhien (bytecode da flattened)
-- Nhanh hon source parsing
+- Không cần source code (hoạt động trong REPL, `exec()`, no-source environments)
+- Xử lý multi-line expressions tự nhiên (bytecode đã flattened)
+- Nhanh hơn source parsing
 
-### Cach hoat dong
+### Cách hoạt động
 
 ```python
 _STORE_OPS = frozenset({"STORE_NAME", "STORE_FAST", "STORE_DEREF", "STORE_GLOBAL"})
@@ -87,24 +87,24 @@ def _name_from_bytecode(frame) -> Optional[str]:
     instructions = list(dis.get_instructions(frame.f_code))
     offset = frame.f_lasti  # current instruction offset
 
-    # Tim instruction dau tien SAU call site
+    # Tìm instruction đầu tiên SAU call site
     i = 0
     while i < len(instructions) and instructions[i].offset <= offset:
         i += 1
 
-    # Scan 4 instructions tiep theo
+    # Scan 4 instructions tiếp theo
     for j in range(i, min(i + 4, len(instructions))):
         opname = instructions[j].opname
         if opname in _STORE_OPS:
-            return instructions[j].argval  # <- ten bien
+            return instructions[j].argval  # <- tên biến
         if opname in _BENIGN_OPS:
             continue
-        break  # non-trivial instruction -> khong phai simple assignment
+        break  # non-trivial instruction -> không phải simple assignment
 
     return None
 ```
 
-### Vi du bytecode
+### Ví dụ bytecode
 
 ```python
 # Source: llm = LLMOp.of(resource_key="gpt-4o")
@@ -115,16 +115,16 @@ def _name_from_bytecode(frame) -> Optional[str]:
 #   LOAD_CONST     'gpt-4o'
 #   KW_NAMES       ('resource_key',)
 #   CALL           1
-#   STORE_FAST     llm        <- auto_name tra ve "llm"
+#   STORE_FAST     llm        <- auto_name trả về "llm"
 ```
 
 ## Source Parsing (Fallback)
 
-Khi bytecode that bai, parse source code bang AST:
+Khi bytecode thất bại, parse source code bằng AST:
 
 ```python
 def _name_from_source(filename: str, lineno: int) -> Optional[str]:
-    # Thu len den 6 dong tren (multi-line assignment)
+    # Thử lên đến 6 dòng trên (multi-line assignment)
     for offset in range(6):
         line = linecache.getline(filename, lineno - offset)
         name = _parse_assignment(line.strip())
@@ -163,7 +163,7 @@ def _parse_assignment(line: str) -> Optional[str]:
 
 ## register_skip()
 
-Dang ky code object cua function de frame walking skip qua:
+Đăng ký code object của function để frame walking skip qua:
 
 ```python
 def register_skip(fn):
@@ -171,7 +171,7 @@ def register_skip(fn):
     return fn
 ```
 
-### Ai dung register_skip?
+### Ai dùng register_skip?
 
 | Location | Registered function |
 |----------|-------------------|
@@ -182,20 +182,20 @@ def register_skip(fn):
 | `Branch.build()` | method |
 | `Branch._build()` | method |
 
-### Tai sao can skip?
+### Tại sao cần skip?
 
 ```python
-# Khong skip: auto_name tim thay "wrapper" ben trong func_op wrapper
+# Không skip: auto_name tìm thấy "wrapper" bên trong func_op wrapper
 @op
 def greet(name: str):
     return {"greeting": f"Hello, {name}!"}
 
-g = greet(name="world")  # Muon name == "g"
+g = greet(name="world")  # Muốn name == "g"
 # Call stack: BaseOp.__init__ -> wrapper -> caller (g = ...)
-#                                 ^ skip nay!
+#                                 ^ skip này!
 ```
 
-## Integration voi BaseOp
+## Integration với BaseOp
 
 ```python
 class BaseOp:
@@ -207,17 +207,17 @@ class BaseOp:
 
 ## Edge Cases
 
-| Case | Ket qua |
+| Case | Kết quả |
 |------|---------|
 | `g = greet(name="world")` | `g.name == "g"` (bytecode) |
 | `ops = [BaseOp()]` | `name == "ops"` (bytecode sees list store) |
 | `BaseOp()` (no assignment) | UUID fallback |
-| `a = b = BaseOp()` | Bytecode thay store dau tien |
-| REPL / exec | Bytecode van hoat dong |
+| `a = b = BaseOp()` | Bytecode thấy store đầu tiên |
+| REPL / exec | Bytecode vẫn hoạt động |
 
-## Tao custom factory voi auto-naming
+## Tạo custom factory với auto-naming
 
-Neu ban tao factory function cho op:
+Nếu bạn tạo factory function cho op:
 
 ```python
 from hush.core.utils.auto_name import register_skip
@@ -227,8 +227,8 @@ def my_factory(**kwargs):
 
 register_skip(my_factory)  # <- auto-naming skip qua factory frame
 
-# Gio auto-naming hoat dong:
+# Giờ auto-naming hoạt động:
 my_op = my_factory(x=10)  # my_op.name == "my_op"
 ```
 
-Xem them: [creating-custom-op.md](creating-custom-op.md) cho chi tiet ve custom op patterns.
+Xem thêm: [creating-custom-op.md](creating-custom-op.md) cho chi tiết về custom op patterns.

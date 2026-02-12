@@ -2,13 +2,13 @@
 
 ## Overview
 
-Iteration ops cho phep lap qua collections trong workflow. Tat ca deu ke thua tu `BaseIterationOp`.
+Iteration ops cho phép lặp qua collections trong workflow. Tất cả đều kế thừa từ `BaseIterationOp`.
 
 Location: `hush-core/hush/core/ops/iteration/`
 
 ## BaseIterationOp
 
-Base class chung cho tat ca iteration ops, ke thua tu GraphOp.
+Base class chung cho tất cả iteration ops, kế thừa từ GraphOp.
 
 ```python
 class BaseIterationOp(GraphOp):
@@ -23,24 +23,24 @@ class BaseIterationOp(GraphOp):
 
 ### Each() Marker
 
-`Each()` danh dau input se duoc iterate:
+`Each()` đánh dấu input sẽ được iterate:
 
 ```python
 class Each:
-    """Marker de danh dau iteration source."""
+    """Marker để đánh dấu iteration source."""
     def __init__(self, source: Any):
         self.source = source
 
 # Usage
 inputs = {
-    "item": Each(items_op["items"]),  # Iterate qua list nay
-    "multiplier": PARENT["multiplier"]   # Broadcast - gia tri giong nhau cho moi iteration
+    "item": Each(items_op["items"]),  # Iterate qua list này
+    "multiplier": PARENT["multiplier"]   # Broadcast - giá trị giống nhau cho mỗi iteration
 }
 ```
 
 ### Input Separation
 
-Constructor tu dong tach Each() tu broadcast:
+Constructor tự động tách Each() từ broadcast:
 
 ```python
 def __init__(self, inputs=None, **kwargs):
@@ -58,7 +58,7 @@ def __init__(self, inputs=None, **kwargs):
 
 ```python
 def _build_iteration_data(self, each_values, broadcast_values) -> List[Dict]:
-    """Tao list data cho moi iteration."""
+    """Tạo list data cho mỗi iteration."""
     # Validate lengths match
     lengths = {var: len(lst) for var, lst in each_values.items()}
     if len(set(lengths.values())) > 1:
@@ -82,30 +82,30 @@ def _build_iteration_data(self, each_values, broadcast_values) -> List[Dict]:
 _CTX_SUFFIXES = tuple("[" + str(i) + "]" for i in range(1000))
 
 def get_iter_context(prefix: str, i: int) -> str:
-    """Tao context ID cho iteration."""
+    """Tạo context ID cho iteration."""
     if i < 1000:
         return prefix + _CTX_SUFFIXES[i]
     return prefix + "[" + str(i) + "]"
 
-# Vi du: "main.[0]", "main.[1]", ...
+# Ví dụ: "main.[0]", "main.[1]", ...
 ```
 
 ---
 
 ## ForOp
 
-**Sequential iteration** - xu ly tung item mot, theo thu tu.
+**Sequential iteration** - xử lý từng item một, theo thứ tự.
 
 ```python
 class ForOp(BaseIterationOp):
     type: OpType = "for"
 ```
 
-### Khi nao dung
+### Khi nào dùng
 
-- Iterations co the phu thuoc vao ket qua cua iteration truoc
-- Can thu tu thuc thi nhat quan
-- Memory constraints - chi xu ly 1 item tai mot thoi diem
+- Iterations có thể phụ thuộc vào kết quả của iteration trước
+- Cần thứ tự thực thi nhất quán
+- Memory constraints - chỉ xử lý 1 item tại một thời điểm
 
 ### Example
 
@@ -167,7 +167,7 @@ async def run(self, state, context_id=None, parent_context=None):
 
 ## MapOp
 
-**Parallel iteration** - xu ly tat ca items dong thoi voi concurrency limit.
+**Parallel iteration** - xử lý tất cả items đồng thời với concurrency limit.
 
 ```python
 class MapOp(BaseIterationOp):
@@ -180,11 +180,11 @@ class MapOp(BaseIterationOp):
         self._max_concurrency = max_concurrency or os.cpu_count()
 ```
 
-### Khi nao dung
+### Khi nào dùng
 
-- Items doc lap, co the xu ly song song
-- Thu tu thuc thi khong quan trong (ket qua van theo thu tu)
-- I/O-bound operations can throughput cao
+- Items độc lập, có thể xử lý song song
+- Thứ tự thực thi không quan trọng (kết quả vẫn theo thứ tự)
+- I/O-bound operations cần throughput cao
 
 ### Example
 
@@ -214,7 +214,7 @@ async def run(self, state, context_id=None, parent_context=None):
     broadcast_values = self._resolve_values(self._broadcast_inputs, state, parent_context)
     iteration_data = self._build_iteration_data(each_values, broadcast_values)
 
-    # Semaphore de limit concurrency
+    # Semaphore để limit concurrency
     semaphore = asyncio.Semaphore(self._max_concurrency)
 
     async def execute_iteration(iter_context, loop_data):
@@ -231,7 +231,7 @@ async def run(self, state, context_id=None, parent_context=None):
         for i, data in enumerate(iteration_data)
     ])
 
-    # Collect results (da theo dung thu tu nho asyncio.gather)
+    # Collect results (đã theo đúng thứ tự nhờ asyncio.gather)
     return self._format_outputs(raw_results)
 ```
 
@@ -239,7 +239,7 @@ async def run(self, state, context_id=None, parent_context=None):
 
 ## WhileOp
 
-**Conditional iteration** - lap cho den khi dieu kien thoa man.
+**Conditional iteration** - lặp cho đến khi điều kiện thỏa mãn.
 
 ```python
 class WhileOp(BaseIterationOp):
@@ -257,11 +257,11 @@ class WhileOp(BaseIterationOp):
         self._max_iterations = max_iterations
 ```
 
-### Khi nao dung
+### Khi nào dùng
 
-- So lan lap khong biet truoc
-- Can dung khi dat dieu kien
-- Agentic workflows voi iteration loops
+- Số lần lặp không biết trước
+- Cần dừng khi đạt điều kiện
+- Agentic workflows với iteration loops
 
 ### Example
 
@@ -307,24 +307,24 @@ async def run(self, state, context_id=None, parent_context=None):
 
 ## AIterOp
 
-**Async iteration** - xu ly async iterator/generator.
+**Async iteration** - xử lý async iterator/generator.
 
 ```python
 class AIterOp(BaseIterationOp):
     type: OpType = "async_iter"
 ```
 
-### Khi nao dung
+### Khi nào dùng
 
-- Streaming data tu external source
-- Data khong available toan bo ngay tu dau
+- Streaming data từ external source
+- Data không available toàn bộ ngay từ đầu
 - Event-driven processing
 
 ---
 
 ## Output Format
 
-Tat ca iteration ops output theo dang column-oriented:
+Tất cả iteration ops output theo dạng column-oriented:
 
 ```python
 # Input data: [{"x": 1}, {"x": 2}, {"x": 3}]
@@ -343,7 +343,7 @@ Tat ca iteration ops output theo dang column-oriented:
 
 ## Error Handling
 
-Errors trong iteration duoc capture, khong crash toan bo loop:
+Errors trong iteration được capture, không crash toàn bộ loop:
 
 ```python
 for i, loop_data in enumerate(iteration_data):
@@ -353,9 +353,9 @@ for i, loop_data in enumerate(iteration_data):
         success_count += 1
     except Exception as e:
         final_results.append({"error": str(e), "error_type": type(e).__name__})
-        # Tiep tuc voi iteration tiep theo
+        # Tiếp tục với iteration tiếp theo
 
-# Log warning neu error rate > 10%
+# Log warning nếu error rate > 10%
 if error_count / len(iteration_data) > 0.1:
     LOGGER.warning("High error rate: %.1f%%", error_count / len(iteration_data) * 100)
 ```

@@ -2,11 +2,11 @@
 
 ## Overview
 
-Huong dan tao custom op moi trong Hush.
+Hướng dẫn tạo custom op mới trong Hush.
 
-## Cach don gian: FuncOp + @op
+## Cách đơn giản: FuncOp + @op
 
-Da so truong hop, ban chi can wrap function voi `@op`:
+Đa số trường hợp, bạn chỉ cần wrap function với `@op`:
 
 ```python
 from hush.core.ops.transform import op
@@ -17,7 +17,7 @@ def process_data(text: str, max_length: int = 100) -> dict:
     result = text[:max_length].upper()
     return {"processed": result}
 
-# Su dung
+# Sử dụng
 my_op = process_data(
     inputs={"text": PARENT["input"], "max_length": 50}
 )
@@ -25,11 +25,11 @@ my_op = process_data(
 
 ### Automatic Features
 
-`@op` tu dong:
-- Parse input schema tu function signature
-- Parse output schema tu return dict
-- Wrap sync function thanh async
-- Set description tu docstring
+`@op` tự động:
+- Parse input schema từ function signature
+- Parse output schema từ return dict
+- Wrap sync function thành async
+- Set description từ docstring
 
 ### Return Dict Format
 
@@ -46,7 +46,7 @@ def my_func(x: int) -> dict:
 
 ## Custom Op Class
 
-Khi can control nhieu hon, tao class ke thua tu BaseOp:
+Khi cần control nhiều hơn, tạo class kế thừa từ BaseOp:
 
 ### Basic Structure
 
@@ -60,9 +60,9 @@ class MyCustomOp(BaseOp):
     """Custom op description."""
 
     # 1. Define op type
-    type: OpType = "custom"  # hoac "code", "llm", etc.
+    type: OpType = "custom"  # hoặc "code", "llm", etc.
 
-    # 2. Additional slots neu can
+    # 2. Additional slots nếu cần
     __slots__ = ['my_attribute']
 
     def __init__(
@@ -79,7 +79,7 @@ class MyCustomOp(BaseOp):
         # 4. Call super().__init__
         super().__init__(**kwargs)
 
-        # 5. Merge parsed voi user-provided
+        # 5. Merge parsed với user-provided
         self.inputs = self._merge_params(parsed_inputs, inputs)
         self.outputs = self._merge_params(parsed_outputs, outputs)
 
@@ -123,13 +123,13 @@ class MyCustomOp(BaseOp):
 
 ```python
 def __init__(self, **kwargs):
-    # Parse inputs/outputs truoc super().__init__
+    # Parse inputs/outputs trước super().__init__
     parsed_inputs = {...}
     parsed_outputs = {...}
 
     super().__init__(**kwargs)
 
-    # Merge voi user-provided
+    # Merge với user-provided
     self.inputs = self._merge_params(parsed_inputs, self._normalize_params(inputs))
     self.outputs = self._merge_params(parsed_outputs, self._normalize_params(outputs))
 
@@ -139,7 +139,7 @@ def __init__(self, **kwargs):
 
 ### 2. `core` Function
 
-Core function nhan inputs va tra ve outputs dict:
+Core function nhận inputs và trả về outputs dict:
 
 ```python
 # Sync
@@ -167,7 +167,7 @@ def specific_metadata(self) -> Dict[str, Any]:
 
 ### 4. `run()` (Optional)
 
-Override neu can custom execution flow:
+Override nếu cần custom execution flow:
 
 ```python
 async def run(
@@ -192,7 +192,7 @@ async def run(
 
 ## Container Op (GraphOp-based)
 
-Neu op chua graph, ke thua tu GraphOp:
+Nếu op chứa graph, kế thừa từ GraphOp:
 
 ```python
 from hush.core.ops.graph import GraphOp
@@ -204,13 +204,13 @@ class MyContainerOp(GraphOp):
         super().__init__(**kwargs)
 
     def _post_build(self):
-        """Hook sau khi build() hoan thanh."""
-        # Setup inputs/outputs tu child ops
+        """Hook sau khi build() hoàn thành."""
+        # Setup inputs/outputs từ child ops
         self._setup_my_schema()
 
     async def run(self, state, context_id=None, parent_context=None):
         # Custom container execution
-        # Co the goi self._run_graph() cho child ops
+        # Có thể gọi self._run_graph() cho child ops
         pass
 ```
 
@@ -218,7 +218,7 @@ class MyContainerOp(GraphOp):
 
 ## Provider Op (LLM, Embedding, etc.)
 
-Cho AI/ML ops, pattern thuong la:
+Cho AI/ML ops, pattern thường là:
 
 ```python
 class LLMOp(BaseOp):
@@ -279,7 +279,7 @@ class LLMOp(BaseOp):
 ## Testing Your Op
 
 ```python
-# Direct call (khong can workflow)
+# Direct call (không cần workflow)
 my_op = MyCustomOp(name="test", my_param="value")
 result = my_op(data="hello", option=True)
 print(result)  # {"result": "HELLO"}
@@ -299,26 +299,26 @@ result = await engine.run(g, {"input": "test"})
 
 ---
 
-## Factory Function voi Auto-Naming
+## Factory Function với Auto-Naming
 
-Neu ban tao factory function (wrapper) de tao op, hay dung `register_skip()` de auto-naming hoat dong:
+Nếu bạn tạo factory function (wrapper) để tạo op, hãy dùng `register_skip()` để auto-naming hoạt động:
 
 ```python
 from hush.core.utils.auto_name import register_skip
 from hush.core.ops.base import split_shorthand_kwargs
 
 def my_op_factory(**kwargs):
-    """Factory tao MyOp voi shorthand syntax."""
+    """Factory tạo MyOp với shorthand syntax."""
     input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
     return MyOp(inputs=input_mappings or None, **init_kwargs)
 
 register_skip(my_op_factory)  # auto-naming skip qua factory frame
 
-# Gio auto-naming hoat dong:
+# Giờ auto-naming hoạt động:
 my_op = my_op_factory(x=PARENT["input"])  # my_op.name == "my_op"
 ```
 
-Neu factory la decorator (nhu `@op`, `@graph`), register wrapper ben trong:
+Nếu factory là decorator (như `@op`, `@graph`), register wrapper bên trong:
 
 ```python
 def my_decorator(fn):
@@ -331,7 +331,7 @@ def my_decorator(fn):
     return wrapper
 ```
 
-Chi tiet ve auto-naming: [auto-naming.md](auto-naming.md)
+Chi tiết về auto-naming: [auto-naming.md](auto-naming.md)
 
 ---
 
@@ -339,10 +339,10 @@ Chi tiet ve auto-naming: [auto-naming.md](auto-naming.md)
 
 - [ ] Define `type: OpType`
 - [ ] Parse inputs/outputs trong `__init__`
-- [ ] Goi `super().__init__(**kwargs)`
-- [ ] Merge parsed voi user-provided params
+- [ ] Gọi `super().__init__(**kwargs)`
+- [ ] Merge parsed với user-provided params
 - [ ] Set `self.core` function
-- [ ] Implement `specific_metadata()` neu can
-- [ ] Set `contain_generation = True` neu co LLM calls
-- [ ] `register_skip()` neu tao factory function / decorator
-- [ ] Test voi direct call va trong workflow
+- [ ] Implement `specific_metadata()` nếu cần
+- [ ] Set `contain_generation = True` nếu có LLM calls
+- [ ] `register_skip()` nếu tạo factory function / decorator
+- [ ] Test với direct call và trong workflow

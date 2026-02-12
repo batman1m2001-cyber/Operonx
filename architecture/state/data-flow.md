@@ -2,7 +2,7 @@
 
 ## Overview
 
-Data flows qua ops thong qua Pull va Push refs. Document nay giai thich cach data di chuyen trong workflow.
+Data flows qua ops thông qua Pull và Push refs. Document này giải thích cách data di chuyển trong workflow.
 
 ## Ref Class
 

@@ -11,8 +11,8 @@ class TestNodeIntegration:
     def test_all_nodes_importable(self):
         """Test all nodes can be imported from hush.providers."""
         from hush.providers import (
-            EmbeddingOp,
             ChainOp,
+            EmbeddingOp,
             LLMOp,
             PromptOp,
             RerankOp,

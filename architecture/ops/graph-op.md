@@ -2,7 +2,7 @@
 
 ## Overview
 
-`GraphOp` la container op chua mot graph cac ops. No cho phep to chuc workflow thanh cac module co the tai su dung.
+`GraphOp` là container op chứa một graph các ops. Nó cho phép tổ chức workflow thành các module có thể tái sử dụng.
 
 Location: `hush-core/hush/core/ops/graph/graph_op.py`
 
@@ -13,42 +13,42 @@ class GraphOp(BaseOp):
     type: OpType = "graph"
 
     __slots__ = [
-        '_token',           # Context token de restore
+        '_token',           # Context token để restore
         '_ops',             # Dict[str, BaseOp] - child ops
         'entries',          # List entry op names
         'exits',            # List exit op names
         'prevs',            # Dict[op_name, List[predecessor_names]]
         'nexts',            # Dict[op_name, List[successor_names]]
-        'ready_count',      # Dict[op_name, int] - so predecessors can cho
-        'has_soft_preds',   # Set cac ops co soft predecessor
+        'ready_count',      # Dict[op_name, int] - số predecessors cần chờ
+        'has_soft_preds',   # Set các ops có soft predecessor
         'flowtype_map',     # BiMap[op_name, OpFlowType]
         '_edges',           # List[EdgeConfig]
         '_edges_lookup',    # Dict[(source, target), EdgeConfig]
-        '_is_building',     # Flag dang trong qua trinh build
+        '_is_building',     # Flag đang trong quá trình build
         '_compiled_adj'     # Compiled adjacency data for fast execution
     ]
 ```
 
 ## Context Manager
 
-GraphOp su dung context manager de tu dong dang ky child ops:
+GraphOp sử dụng context manager để tự động đăng ký child ops:
 
 ```python
 def __enter__(self):
-    """Vao context - set graph nay lam current."""
+    """Vào context - set graph này làm current."""
     self._token = _current_graph.set(self)
     return self
 
 def __exit__(self, exc_type, exc_val, exc_tb):
-    """Thoat context - restore graph truoc do."""
+    """Thoát context - restore graph trước đó."""
     _current_graph.reset(self._token)
 ```
 
-Su dung:
+Sử dụng:
 
 ```python
 with GraphOp(name="my_graph") as graph:
-    # Tat ca ops tao trong block nay tu dong dang ky vao graph
+    # Tất cả ops tạo trong block này tự động đăng ký vào graph
     op_a = FuncOp(name="a", ...)
     op_b = FuncOp(name="b", ...)
     START >> op_a >> op_b >> END
@@ -60,9 +60,9 @@ with GraphOp(name="my_graph") as graph:
 
 ```python
 def add_op(self, op: BaseOp) -> BaseOp:
-    """Them op vao graph."""
+    """Thêm op vào graph."""
     if not self._is_building:
-        raise RuntimeError("Khong the them op sau khi graph da build")
+        raise RuntimeError("Không thể thêm op sau khi graph đã build")
 
     if op in [START, END]:
         return op
@@ -82,9 +82,9 @@ def add_op(self, op: BaseOp) -> BaseOp:
 
 ```python
 def add_edge(self, source: str, target: str, type: EdgeType = "normal", soft: bool = False):
-    """Them edge giua hai ops."""
+    """Thêm edge giữa hai ops."""
     if not self._is_building:
-        raise RuntimeError("Khong the them edge sau khi graph da build")
+        raise RuntimeError("Không thể thêm edge sau khi graph đã build")
 
     # Handle START edge
     if source == START.name:
@@ -112,22 +112,22 @@ def add_edge(self, source: str, target: str, type: EdgeType = "normal", soft: bo
 
 ```python
 def build(self):
-    """Build graph - phai goi truoc khi execute."""
-    # 1. Build tat ca child ops truoc
+    """Build graph - phải gọi trước khi execute."""
+    # 1. Build tất cả child ops trước
     for op in self._ops.values():
         if hasattr(op, 'build'):
             op.build()
 
-    # 2. Setup schema tu child ops
+    # 2. Setup schema từ child ops
     self._setup_schema()
 
-    # 3. Xac dinh flow type cua moi op
+    # 3. Xác định flow type của mỗi op
     self._build_flow_type()
 
     # 4. Setup entry/exit endpoints
     self._setup_endpoints()
 
-    # 5. Tinh ready_count cho moi op
+    # 5. Tính ready_count cho mỗi op
     self._compute_ready_counts()
 
     self._is_building = False
@@ -136,7 +136,7 @@ def build(self):
 
 ### _setup_schema()
 
-Scan child ops de tim PARENT refs - do chinh la inputs/outputs cua graph:
+Scan child ops để tìm PARENT refs - đó chính là inputs/outputs của graph:
 
 ```python
 def _setup_schema(self):
@@ -144,12 +144,12 @@ def _setup_schema(self):
     graph_outputs = {}
 
     for _, op in self._ops.items():
-        # Input refs den PARENT -> graph input
+        # Input refs đến PARENT -> graph input
         for var, param in op.inputs.items():
             if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_inputs[param.value.var] = Param(...)
 
-        # Output refs den PARENT -> graph output
+        # Output refs đến PARENT -> graph output
         for var, param in op.outputs.items():
             if isinstance(param.value, Ref) and param.value.raw_source is self:
                 graph_outputs[param.value.var] = Param(...)
@@ -161,8 +161,8 @@ def _setup_schema(self):
 ### Ready Count
 
 ```python
-# Hard edges: dem tung predecessor
-# Soft edges: dem chung tat ca soft predecessors la 1
+# Hard edges: đếm từng predecessor
+# Soft edges: đếm chung tất cả soft predecessors là 1
 
 ready_count = {}
 for name in self._ops:
@@ -176,7 +176,7 @@ for name in self._ops:
         else:
             hard_pred_count += 1
 
-    # Soft edges dem chung la 1
+    # Soft edges đếm chung là 1
     if has_soft:
         self.has_soft_preds.add(name)
         hard_pred_count += 1
@@ -190,10 +190,10 @@ for name in self._ops:
 
 ```python
 async def run(self, state, context_id=None, parent_context=None):
-    # 1. Lay inputs
+    # 1. Lấy inputs
     _inputs = self.get_inputs(state, context_id, parent_context)
 
-    # 2. Khoi tao tasks cho entry ops
+    # 2. Khởi tạo tasks cho entry ops
     active_tasks = {}
     ready_count = self.ready_count.copy()
     soft_satisfied = set()
@@ -217,21 +217,21 @@ async def run(self, state, context_id=None, parent_context=None):
             active_tasks.pop(op_name)
             op = self._ops[op_name]
 
-            # Xac dinh next ops (branch co logic rieng)
+            # Xác định next ops (branch có logic riêng)
             if op.type == "branch":
                 branch_target = op.get_target(state, context_id)
                 next_ops = [branch_target] if branch_target != END.name else []
             else:
                 next_ops = self.nexts[op_name]
 
-            # Update ready counts va schedule next ops
+            # Update ready counts và schedule next ops
             for next_op in next_ops:
                 edge = self._edges_lookup.get((op_name, next_op))
                 is_soft = edge and edge.soft
 
                 if is_soft:
                     if next_op in soft_satisfied:
-                        continue  # Da co soft pred hoan thanh
+                        continue  # Đã có soft pred hoàn thành
                     soft_satisfied.add(next_op)
 
                 ready_count[next_op] -= 1
@@ -254,9 +254,9 @@ async def run(self, state, context_id=None, parent_context=None):
 ```python
 OpFlowType = Literal["MERGE", "FORK", "BLOOM", "BRANCH", "NORMAL", "OTHER"]
 
-# MERGE: nhieu inputs, 1 output (prev > 1, next = 1)
-# FORK: 1 input, nhieu outputs (prev = 1, next > 1)
-# BLOOM: nhieu inputs, nhieu outputs (prev > 1, next > 1)
+# MERGE: nhiều inputs, 1 output (prev > 1, next = 1)
+# FORK: 1 input, nhiều outputs (prev = 1, next > 1)
+# BLOOM: nhiều inputs, nhiều outputs (prev > 1, next > 1)
 # BRANCH: BranchOp
 # NORMAL: 1 input, 1 output
 # OTHER: entry/exit ops
@@ -266,7 +266,7 @@ OpFlowType = Literal["MERGE", "FORK", "BLOOM", "BRANCH", "NORMAL", "OTHER"]
 
 ### Nested Graphs
 
-GraphOp co the nest trong GraphOp khac:
+GraphOp có thể nest trong GraphOp khác:
 
 ```python
 with GraphOp(name="outer") as outer:
@@ -284,29 +284,29 @@ with GraphOp(name="outer") as outer:
 
 ### PARENT Reference
 
-Ops trong nested graph truy cap parent qua PARENT:
+Ops trong nested graph truy cập parent qua PARENT:
 
 ```python
 with GraphOp(name="outer", inputs={"data": some_source}) as outer:
     with GraphOp(name="inner") as inner:
         process = FuncOp(
             name="process",
-            inputs={"x": PARENT["data"]}  # Lay tu inner graph
+            inputs={"x": PARENT["data"]}  # Lấy từ inner graph
         )
         START >> process >> END
 
-    # inner graph nhan data tu outer
-    inner_op = inner  # inner graph nhu mot op
-    inner_op.inputs = {"data": PARENT["data"]}  # Tu outer graph
+    # inner graph nhận data từ outer
+    inner_op = inner  # inner graph như một op
+    inner_op.inputs = {"data": PARENT["data"]}  # Từ outer graph
 ```
 
 ## @graph Decorator
 
-`@graph` bien mot builder function thanh factory tao GraphOp co the tai su dung, ho tro auto-naming.
+`@graph` biến một builder function thành factory tạo GraphOp có thể tái sử dụng, hỗ trợ auto-naming.
 
-Location: cuoi `graph_op.py`, sau class `GraphOp`.
+Location: cuối `graph_op.py`, sau class `GraphOp`.
 
-### Cach hoat dong
+### Cách hoạt động
 
 ```python
 from hush.core import graph, op, START, END, PARENT, GraphOp
@@ -320,7 +320,7 @@ def double_flow(val):
     step = double(x=val)      # val = PARENT["val"] (injected)
     START >> step >> END
 
-# Su dung:
+# Sử dụng:
 with GraphOp(name="main") as main:
     d = double_flow(val=PARENT["input"])  # d.name == "d"
     START >> d >> END
@@ -335,14 +335,14 @@ def graph(fn):
 
     @wraps(fn)
     def wrapper(**kwargs):
-        # 1. Tach input mappings va init kwargs (name, outputs, ...)
+        # 1. Tách input mappings và init kwargs (name, outputs, ...)
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
 
-        # 2. Tao GraphOp voi inputs
+        # 2. Tạo GraphOp với inputs
         op = GraphOp(inputs=input_mappings or None, **init_kwargs)
 
-        # 3. Chay builder function trong context
-        # __exit__ tu dong goi _setup_schema() -> outputs duoc populate
+        # 3. Chạy builder function trong context
+        # __exit__ tự động gọi _setup_schema() -> outputs được populate
         with op:
             parent_refs = {key: PARENT[key] for key in input_mappings if key in param_names}
             fn(**parent_refs)
@@ -354,34 +354,34 @@ def graph(fn):
     return wrapper
 ```
 
-### `__exit__` va `_setup_schema()`
+### `__exit__` và `_setup_schema()`
 
-`GraphOp.__exit__` tu dong goi `_setup_schema()` khi thoat context manager. Dieu nay dam bao `op.outputs` duoc populate truoc khi op duoc dung trong parent graph (`op >> END` auto-forwarding).
+`GraphOp.__exit__` tự động gọi `_setup_schema()` khi thoát context manager. Điều này đảm bảo `op.outputs` được populate trước khi op được dùng trong parent graph (`op >> END` auto-forwarding).
 
 ### split_shorthand_kwargs
 
-`wrapper` dung `split_shorthand_kwargs(kwargs)` de tach:
-- **Init kwargs**: `name`, `outputs`, `description`, ... -> truyen vao `GraphOp(**init_kwargs)`
-- **Input mappings**: tat ca con lai -> truyen vao `inputs=input_mappings`
+`wrapper` dùng `split_shorthand_kwargs(kwargs)` để tách:
+- **Init kwargs**: `name`, `outputs`, `description`, ... -> truyền vào `GraphOp(**init_kwargs)`
+- **Input mappings**: tất cả còn lại -> truyền vào `inputs=input_mappings`
 
 ### param_names Filtering
 
-Chi cac key nam trong function signature moi duoc inject thanh PARENT refs:
+Chỉ các key nằm trong function signature mới được inject thành PARENT refs:
 
 ```python
 @graph
-def static_flow():       # Khong nhan params
+def static_flow():       # Không nhận params
     step = double(x=PARENT["val"])
     START >> step >> END
 
-g = static_flow(val=10)  # val chi la input mapping, khong inject vao fn
+g = static_flow(val=10)  # val chỉ là input mapping, không inject vào fn
 ```
 
 ## Debug
 
 ```python
 def show(self, indent=0):
-    """In cau truc graph (debug)."""
+    """In cấu trúc graph (debug)."""
     prefix = "  " * indent
     print(f"{prefix}Graph: {self.name}")
     print(f"{prefix}Ops:", list(self._ops.keys()))

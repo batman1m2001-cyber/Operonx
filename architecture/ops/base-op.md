@@ -2,7 +2,7 @@
 
 ## Overview
 
-`BaseOp` la base class cho tat ca ops trong Hush. Moi op deu ke thua tu class nay.
+`BaseOp` là base class cho tất cả ops trong Hush. Mọi op đều kế thừa từ class này.
 
 Location: `hush-core/hush/core/ops/base.py`
 
@@ -11,22 +11,22 @@ Location: `hush-core/hush/core/ops/base.py`
 ```python
 class BaseOp(ABC):
     __slots__ = [
-        'id',           # UUID cua op
-        'name',         # Ten op (unique trong graph)
-        'description',  # Mo ta
+        'id',           # UUID của op
+        'name',         # Tên op (unique trong graph)
+        'description',  # Mô tả
         'type',         # OpType (code, graph, branch, for, map, while, ...)
-        'stream',       # Co stream output khong
-        'start',        # La entry op cua graph
-        'end',          # La exit op cua graph
+        'stream',       # Có stream output không
+        'start',        # Là entry op của graph
+        'end',          # Là exit op của graph
         'verbose',      # Log execution
-        'sources',      # Ten cac predecessor ops
-        'targets',      # Ten cac successor ops
+        'sources',      # Tên các predecessor ops
+        'targets',      # Tên các successor ops
         'inputs',       # Dict[str, Param] - input parameters
         'outputs',      # Dict[str, Param] - output parameters
-        'core',         # Callable - function thuc thi logic chinh
+        'core',         # Callable - function thực thi logic chính
         'father',       # Parent GraphOp
-        'contain_generation',  # Co chua LLM generation khong
-        'enabled',      # Op co duoc thuc thi hay khong (default True)
+        'contain_generation',  # Có chứa LLM generation không
+        'enabled',      # Op có được thực thi hay không (default True)
     ]
 ```
 
@@ -47,23 +47,23 @@ def __init__(
     end: bool = False,
     contain_generation: bool = False,
     verbose: bool = True,
-    enabled: bool = True  # Co thuc thi op hay khong
+    enabled: bool = True  # Có thực thi op hay không
 ):
 ```
 
 ### Auto-registration
 
-Khi mot op duoc khoi tao, no tu dong dang ky voi parent graph hien tai:
+Khi một op được khởi tạo, nó tự động đăng ký với parent graph hiện tại:
 
 ```python
 # Trong __init__
-self.father = get_current()  # Lay graph hien tai tu context
+self.father = get_current()  # Lấy graph hiện tại từ context
 add_op = getattr(self.father, "add_op", None)
 if add_op is not None:
     add_op(self)
 ```
 
-`get_current()` su dung `contextvars.ContextVar` de luu tru graph hien tai:
+`get_current()` sử dụng `contextvars.ContextVar` để lưu trữ graph hiện tại:
 
 ```python
 # hush/core/utils/context.py
@@ -84,35 +84,35 @@ def get_current():
 # hush/core/utils/common.py
 @dataclass
 class Param:
-    type: Type = None        # Kieu du lieu (auto-inferred neu None)
-    required: bool = False   # Co bat buoc khong
-    default: Any = None      # Gia tri mac dinh
-    description: str = ""    # Mo ta
-    value: Any = None        # Ref hoac literal value
+    type: Type = None        # Kiểu dữ liệu (auto-inferred nếu None)
+    required: bool = False   # Có bắt buộc không
+    default: Any = None      # Giá trị mặc định
+    description: str = ""    # Mô tả
+    value: Any = None        # Ref hoặc literal value
 ```
 
 ### Normalize Parameters
 
-Inputs/outputs duoc chuan hoa tu Dict[str, Any] thanh Dict[str, Param]:
+Inputs/outputs được chuẩn hóa từ Dict[str, Any] thành Dict[str, Param]:
 
 ```python
-# Cac format duoc ho tro:
+# Các format được hỗ trợ:
 inputs = {
     "x": 10,                    # Literal -> Param(value=10, type=int)
     "y": other_op,              # Op ref -> Param(value=Ref(other_op, "y"))
     "z": other_op["result"],    # Op["var"] -> Param(value=Ref(other_op, "result"))
     "w": PARENT["input"],       # PARENT["var"] -> Param(value=Ref(father, "input"))
-    "*": PARENT,                # Wildcard -> forward tat ca keys tu PARENT
+    "*": PARENT,                # Wildcard -> forward tất cả keys từ PARENT
 }
 ```
 
 ### Wildcard Forwarding
 
 ```python
-# Forward tat ca inputs tu PARENT, tru nhung key da specify
+# Forward tất cả inputs từ PARENT, trừ những key đã specify
 inputs = {
     "custom": 10,   # Override
-    "*": PARENT     # Forward con lai
+    "*": PARENT     # Forward còn lại
 }
 ```
 
@@ -122,7 +122,7 @@ inputs = {
 
 ```python
 def __rshift__(self, other):
-    """op >> other: ket noi hard edge."""
+    """op >> other: kết nối hard edge."""
     edge_type = "condition" if self.type == "branch" else "normal"
     add_edge = getattr(self.father, "add_edge", None)
 
@@ -148,7 +148,7 @@ def __rshift__(self, other):
 
 ```python
 def __invert__(self) -> 'SoftEdge':
-    """~op: Danh dau soft edge."""
+    """~op: Đánh dấu soft edge."""
     return SoftEdge(self)
 
 class SoftEdge:
@@ -157,13 +157,13 @@ class SoftEdge:
         self.op = op
 ```
 
-Su dung:
+Sử dụng:
 ```python
-# Soft edge (chi can 1 predecessor hoan thanh)
+# Soft edge (chỉ cần 1 predecessor hoàn thành)
 branch >> ~case_a >> merge
 branch >> ~case_b >> merge
 
-# Hoac voi list
+# Hoặc với list
 [case_a, case_b] >> ~merge
 ```
 
@@ -181,12 +181,12 @@ async def run(
 ```
 
 Flow:
-1. Record execution voi state
-2. **Skip neu `enabled=False`** (return {} ngay)
-3. Lay inputs tu state qua `get_inputs()`
-4. Thuc thi `self.core(**inputs)`
-5. Luu outputs vao state qua `store_result()`
-6. Log va record trace metadata
+1. Record execution với state
+2. **Skip nếu `enabled=False`** (return {} ngay)
+3. Lấy inputs từ state qua `get_inputs()`
+4. Thực thi `self.core(**inputs)`
+5. Lưu outputs vào state qua `store_result()`
+6. Log và record trace metadata
 
 ### get_inputs()
 
@@ -194,13 +194,13 @@ Flow:
 def get_inputs(self, state, context_id, parent_context=None):
     result = {}
     for var_name, param in self.inputs.items():
-        # Xac dinh context de lookup
+        # Xác định context để lookup
         if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.father:
             lookup_ctx = parent_context  # PARENT ref
         else:
             lookup_ctx = context_id
 
-        # Doc tu state (tu dong resolve Ref)
+        # Đọc từ state (tự động resolve Ref)
         value = state[self.full_name, var_name, lookup_ctx]
 
         if value is not None:
@@ -220,12 +220,12 @@ def store_result(self, state, result, context_id):
     if not result:
         return
 
-    # Extract $tags neu co
+    # Extract $tags nếu có
     tags = result.pop("$tags", None)
     if tags:
         state.add_tags(tags)
 
-    # Luu tung key vao state
+    # Lưu từng key vào state
     for key, value in result.items():
         state[self.full_name, key, context_id] = value
 ```
@@ -237,7 +237,7 @@ def store_result(self, state, result, context_id):
 ```python
 @property
 def full_name(self) -> str:
-    """Duong dan phan cap day du: parent.child.op"""
+    """Đường dẫn phân cấp đầy đủ: parent.child.op"""
     if self.father:
         return f"{self.father.full_name}.{self.name}"
     return self.name
@@ -247,7 +247,7 @@ def full_name(self) -> str:
 
 ```python
 def __getitem__(self, item) -> 'Ref':
-    """op["var"] -> Ref den output cua op."""
+    """op["var"] -> Ref đến output của op."""
     return Ref(self, item)
 ```
 
@@ -257,7 +257,7 @@ def __getitem__(self, item) -> 'Ref':
 
 ```python
 class DummyOp(BaseOp):
-    """Dummy op cho cac marker."""
+    """Dummy op cho các marker."""
     type: OpType = "dummy"
 
 START = DummyOp("__START__")
@@ -265,7 +265,7 @@ END = DummyOp("__END__")
 PARENT = DummyOp("__PARENT__")
 ```
 
-Su dung:
+Sử dụng:
 ```python
 START >> op_a >> op_b >> END
 
@@ -273,22 +273,22 @@ START >> op_a >> op_b >> END
 inputs = {"data": PARENT["input_data"]}
 ```
 
-### Auto-Output Mapping voi >> END
+### Auto-Output Mapping với >> END
 
-Khi mot op ket noi truc tiep den END ma khong co outputs dinh nghia san, tat ca auto-parsed output keys se tu dong forward len parent graph.
+Khi một op kết nối trực tiếp đến END mà không có outputs định nghĩa sẵn, tất cả auto-parsed output keys sẽ tự động forward lên parent graph.
 
-**Helper function** kiem tra op co outputs explicit:
+**Helper function** kiểm tra op có outputs explicit:
 
 ```python
 def _has_explicit_outputs(op) -> bool:
-    """Kiem tra op co outputs duoc user dinh nghia explicit hay khong.
+    """Kiểm tra op có outputs được user định nghĩa explicit hay không.
 
-    Returns False neu:
-    - outputs la None
-    - outputs rong
-    - outputs chi co cac Param voi value=None (auto-parsed tu function)
+    Returns False nếu:
+    - outputs là None
+    - outputs rỗng
+    - outputs chỉ có các Param với value=None (auto-parsed từ function)
 
-    Returns True neu co bat ky output nao co value != None (user set).
+    Returns True nếu có bất kỳ output nào có value != None (user set).
     """
     if not hasattr(op, "outputs") or op.outputs is None:
         return False
@@ -319,25 +319,25 @@ def __rshift__(self, other):
     # ... continue with edge creation ...
 ```
 
-**Vi du**:
+**Ví dụ**:
 
 ```python
 with GraphOp(name="demo") as graph:
-    # Khong can dinh nghia outputs
+    # Không cần định nghĩa outputs
     op = FuncOp(
         name="compute",
         code_fn=lambda: {"a": 1, "b": 2}
     )
-    START >> op >> END  # Tu dong: outputs = {"a": PARENT, "b": PARENT}
+    START >> op >> END  # Tự động: outputs = {"a": PARENT, "b": PARENT}
 
 result = await engine.run(inputs={})
 # result["a"] == 1, result["b"] == 2
 ```
 
-**Luu y quan trong**:
-- Chi ap dung khi op khong co explicit outputs
-- Ops voi `outputs={"key": PARENT}` da dinh nghia san se khong bi thay doi
-- Hoat dong voi ca `[op1, op2] >> END`
+**Lưu ý quan trọng**:
+- Chỉ áp dụng khi op không có explicit outputs
+- Ops với `outputs={"key": PARENT}` đã định nghĩa sẵn sẽ không bị thay đổi
+- Hoạt động với cả `[op1, op2] >> END`
 
 ## Metadata
 

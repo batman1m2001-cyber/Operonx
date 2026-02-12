@@ -269,7 +269,7 @@ class MockIndexer:
         self._ops = {}
 
     def add_op(self, op: MockOp):
-        self._ops[node.op_id] = node
+        self._ops[op.op_id] = op
 
 
 class MockMemoryState:

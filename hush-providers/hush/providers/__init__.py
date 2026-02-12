@@ -43,8 +43,8 @@ from hush.providers.llms import (
 
 # Node exports
 from hush.providers.ops import (
-    EmbeddingOp,
     ChainOp,
+    EmbeddingOp,
     LLMOp,
     PromptOp,
     RerankOp,

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`BranchOp` danh gia cac dieu kien va dinh tuyen workflow den cac ops khac nhau.
+`BranchOp` đánh giá các điều kiện và định tuyến workflow đến các ops khác nhau.
 
 Location: `hush-core/hush/core/ops/flow/branch_op.py`
 
@@ -19,9 +19,9 @@ class BranchOp(BaseOp):
     ]
 ```
 
-## Hai cach tao BranchOp
+## Hai cách tạo BranchOp
 
-### 1. Truc tiep voi Ref conditions
+### 1. Trực tiếp với Ref conditions
 
 ```python
 branch = BranchOp(
@@ -47,14 +47,14 @@ branch = (Branch("router")
 
 ## Input Parsing
 
-BranchOp tu dong parse inputs tu dieu kien:
+BranchOp tự động parse inputs từ điều kiện:
 
 ```python
 def _parse_cases(self, cases) -> tuple:
-    # Luon co anchor input de override routing
+    # Luôn có anchor input để override routing
     inputs = {"anchor": Param(type=str, default=None)}
 
-    # Parse bien tu Ref conditions
+    # Parse biến từ Ref conditions
     for ref, target in cases:
         inputs[ref.var] = Param(required=True)
 
@@ -73,7 +73,7 @@ def _parse_cases(self, cases) -> tuple:
 ```python
 def _create_core_function(self):
     def core(**inputs) -> Dict[str, str]:
-        # 1. Check anchor override truoc
+        # 1. Check anchor override trước
         anchor = inputs.get('anchor')
         if anchor:
             return {"target": anchor, "matched": "anchor"}
@@ -109,7 +109,7 @@ def _evaluate_conditions(self, inputs) -> tuple:
 
 ## Anchor Override
 
-Anchor cho phep override routing dynamically:
+Anchor cho phép override routing dynamically:
 
 ```python
 # Trong workflow
@@ -118,19 +118,19 @@ branch = BranchOp(
     cases=[(PARENT["score"] >= 90, "excellent")],
     default="average",
     inputs={
-        "anchor": PARENT.get("force_route", None)  # Override neu co
+        "anchor": PARENT.get("force_route", None)  # Override nếu có
     }
 )
 
-# Runtime: neu force_route = "excellent", se route den excellent
-# bat ke score la bao nhieu
+# Runtime: nếu force_route = "excellent", sẽ route đến excellent
+# bất kể score là bao nhiêu
 ```
 
 ## Graph Integration
 
-### Soft Edges voi Branch
+### Soft Edges với Branch
 
-Branch outputs thuong dung soft edges vi chi 1 nhanh duoc thuc thi:
+Branch outputs thường dùng soft edges vì chỉ 1 nhánh được thực thi:
 
 ```python
 with GraphOp(name="workflow") as g:
@@ -152,18 +152,18 @@ with GraphOp(name="workflow") as g:
 
 ### GraphOp Execution
 
-GraphOp xu ly branch dac biet:
+GraphOp xử lý branch đặc biệt:
 
 ```python
 # Trong GraphOp.run()
 if op.type == "branch":
     branch_target = op.get_target(state, context_id)
     if branch_target != END.name:
-        next_ops = [branch_target]  # Chi 1 target
+        next_ops = [branch_target]  # Chỉ 1 target
     else:
         next_ops = []
 else:
-    next_ops = self.nexts[op_name]  # Tat ca successors
+    next_ops = self.nexts[op_name]  # Tất cả successors
 ```
 
 ## Fluent Builder
@@ -172,7 +172,7 @@ else:
 
 ```python
 class Branch:
-    """Fluent builder de tao BranchOp."""
+    """Fluent builder để tạo BranchOp."""
 
     def __init__(self, name: str, **kwargs):
         self._name = name
@@ -181,28 +181,28 @@ class Branch:
         self._kwargs = kwargs
 
     def if_(self, condition: Ref, target) -> 'Branch':
-        """Them case voi Ref condition."""
+        """Thêm case với Ref condition."""
         target_name = target.name if hasattr(target, 'name') else target
         self._cases.append((condition, target_name))
         return self
 
     def else_(self, target) -> 'BranchOp':
-        """Set default va build op."""
+        """Set default và build op."""
         self._default = target.name if hasattr(target, 'name') else target
         return self._build()
 ```
 
 ### Ref Conditions
 
-Ref ho tro comparison operators:
+Ref hỗ trợ comparison operators:
 
 ```python
-# Tao Ref voi comparison
-PARENT["score"] >= 90    # Ref voi op: ('>=', 90)
-PARENT["status"] == "ok" # Ref voi op: ('==', "ok")
-PARENT["items"].apply(len) > 0  # Ref voi apply() va comparison
+# Tạo Ref với comparison
+PARENT["score"] >= 90    # Ref với op: ('>=', 90)
+PARENT["status"] == "ok" # Ref với op: ('==', "ok")
+PARENT["items"].apply(len) > 0  # Ref với apply() và comparison
 
-# Fluent API su dung
+# Fluent API sử dụng
 (Branch("router")
     .if_(PARENT["score"] >= 90, "excellent")
     .if_(PARENT["items"].apply(len) > 0, "has_items")
@@ -226,7 +226,7 @@ def specific_metadata(self) -> Dict[str, Any]:
 ```python
 @property
 def candidates(self) -> List[str]:
-    """Danh sach tat ca possible targets."""
+    """Danh sách tất cả possible targets."""
     if self.given_candidates:
         return self.given_candidates
 
