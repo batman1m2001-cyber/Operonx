@@ -78,7 +78,7 @@ from hush.providers import ChainOp
 async def main():
     with GraphOp(name="chat") as graph:
         chat = ChainOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             template={"system": "You are a helpful assistant.", "user": "{question}"},
             question=PARENT["question"],
         )

@@ -23,7 +23,7 @@ Exception
         ├── ParserError          # ParserOp: parsing thất bại (JSON/XML/YAML)
         ├── CodeError            # FuncOp: user function thất bại
         ├── BranchError          # BranchOp: đánh giá điều kiện thất bại
-        ├── ConditionError       # WhileOp: stop_condition thất bại
+        ├── ConditionError       # WhileOp: until thất bại
         ├── IterationError       # ForOp/MapOp: iteration thất bại
         ├── PromptError          # PromptOp: template formatting thất bại
         ├── EmbeddingError       # EmbeddingOp: embedding provider thất bại
@@ -127,7 +127,7 @@ raise BranchError(
 
 ### ConditionError
 
-**Khi nào**: WhileOp stop_condition thất bại (lúc compile hoặc eval)
+**Khi nào**: WhileOp until thất bại (lúc compile hoặc eval)
 
 ```python
 raise ConditionError(
@@ -181,13 +181,13 @@ raise PromptError(
 ```python
 raise EmbeddingError(
     message="Embedding backend failed",
-    resource_key="bge-m3",
+    resource="bge-m3",
     text_count=100,
     original_error=connection_error
 )
 ```
 
-**Context**: `resource_key`, `text_count`
+**Context**: `resource`, `text_count`
 
 ### RerankError
 
@@ -196,14 +196,14 @@ raise EmbeddingError(
 ```python
 raise RerankError(
     message="Invalid document type",
-    resource_key="bge-m3",
+    resource="bge-m3",
     query="search query",
     document_count=50,
     original_error=type_error
 )
 ```
 
-**Context**: `resource_key`, `query` (truncated 100), `document_count`
+**Context**: `resource`, `query` (truncated 100), `document_count`
 
 ## Op-to-Exception Mapping
 

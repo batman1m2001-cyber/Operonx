@@ -1,4 +1,4 @@
-"""Async iteration node for processing async streaming data."""
+"""AIterOp — async iteration op for processing streaming data."""
 
 import asyncio
 import os
@@ -31,28 +31,29 @@ def batch_by_size(n: int) -> Callable[[List, Any], bool]:
 
 
 class AIterOp(BaseIterationOp):
-    """Streaming node for async iterable data with optional batching.
+    """Async iteration op for processing streaming / async-iterable data.
 
-    Features:
-    - Concurrent processing with ordered output emission
-    - Optional batching before processing
-    - Optional callback for streaming results
-    - Semaphore-limited concurrency
+    Consumes an async iterable and processes each item through the child
+    graph with semaphore-limited concurrency. Supports optional batching
+    and a per-result callback for real-time streaming.
 
-    Example:
-        async def my_stream():
+    Inputs:
+        Exactly one ``Each(async_iterable)`` source, plus optional broadcast
+        inputs. ``callback``, ``batch_fn``, and ``max_concurrency`` are
+        constructor parameters (not graph inputs).
+
+    Outputs:
+        Column-oriented lists plus ``iteration_metrics``.
+
+    Example::
+
+        async def events():
             for i in range(10):
                 yield {"value": i}
 
-        with AIterOp(
-            inputs={
-                "item": Each(my_stream()),    # async iterable source
-                "multiplier": 10               # broadcast
-            },
-            callback=handle_result
-        ) as stream_node:
-            processor = process(inputs={"item": PARENT["item"]})
-            START >> processor >> END
+        with AIterOp(inputs={"item": Each(events())}, callback=on_result) as s:
+            step = process(item=PARENT["item"])
+            START >> step >> END
     """
 
     type: OpType = "stream"

@@ -1,4 +1,4 @@
-"""MapOp - parallel iteration node applying function to each item in a collection."""
+"""MapOp — parallel iteration op that processes items concurrently."""
 
 import asyncio
 import os
@@ -15,24 +15,25 @@ if TYPE_CHECKING:
 
 
 class MapOp(BaseIterationOp):
-    """Parallel iteration node - applies function to each item concurrently.
+    """Parallel iteration op — processes all items concurrently with a semaphore.
 
-    Use MapOp when:
-        - Items are independent and can be processed in parallel
-        - Order of execution doesn't matter (results are collected in order)
-        - You want maximum throughput for I/O-bound operations
+    Use when items are independent, execution order doesn't matter, and you
+    want maximum throughput for I/O-bound work. Results are always returned
+    in the original input order.
 
-    Example:
-        with MapOp(
-            name="process_map",
-            inputs={
-                "x": Each([1, 2, 3]),           # iterate
-                "multiplier": 10                 # broadcast
-            },
-            max_concurrency=4
-        ) as map_op:
-            node = calc(inputs={"x": PARENT["x"], "multiplier": PARENT["multiplier"]})
-            START >> node >> END
+    Inputs:
+        Wrap iterable sources with ``Each()``; all other inputs are broadcast.
+        ``max_concurrency`` (int, optional): Concurrency limit. Default: CPU count.
+
+    Outputs:
+        Column-oriented lists (one list per output key) plus
+        ``iteration_metrics`` with counts and timing.
+
+    Example::
+
+        with MapOp(inputs={"url": Each(urls), "timeout": 30}, max_concurrency=10) as m:
+            fetch = download(url=PARENT["url"], timeout=PARENT["timeout"])
+            START >> fetch >> END
     """
 
     type: OpType = "map"

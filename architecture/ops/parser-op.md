@@ -173,7 +173,7 @@ parser = ParserOp(
 from hush.providers import ChainOp
 
 chain = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"user": "Classify this text: {text}"},
     extract=["category: str", "confidence: float"],
     parser="xml",                # Format cho parser (mặc định "xml")

@@ -95,7 +95,7 @@ from hush.providers import ChainOp
 async def main():
     with GraphOp(name="chat-workflow") as graph:
         chat = ChainOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             template={"system": "Bạn là trợ lý AI thân thiện.", "user": "{question}"},
             question=PARENT["question"],
         )

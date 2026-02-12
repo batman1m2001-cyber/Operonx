@@ -5,7 +5,7 @@ Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env + resources.yaml
 Học được:
 - load_dotenv() để load API keys
 - PromptOp.of(): tạo messages cho LLM
-- LLMOp.of(): gọi LLM qua resource_key
+- LLMOp.of(): gọi LLM qua resource
 - ChainOp.of(): kết hợp prompt + LLM trong 1 op
 - @op + PromptOp.of() + LLMOp.of() pipeline (tiền xử lý → prompt → LLM)
 
@@ -39,7 +39,7 @@ async def example_1_basic_chat():
             question=PARENT["question"],
         )
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
@@ -59,7 +59,7 @@ async def example_2_chain_node():
 
     with GraphOp(name="chain-chat") as graph:
         chain = ChainOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
                 "user": "{query}",
@@ -96,7 +96,7 @@ async def example_3_text_summarization():
             text=preprocess["cleaned_text"],
         )
         summarize = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["summary"]},
         )

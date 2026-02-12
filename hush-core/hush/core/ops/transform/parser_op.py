@@ -1,4 +1,4 @@
-"""Node parser để trích xuất dữ liệu có cấu trúc từ text."""
+"""ParserOp — extract structured data from text."""
 
 import json
 import xml.etree.ElementTree as ET
@@ -104,10 +104,26 @@ _PARSER_MAP = {
 
 
 class ParserOp(BaseOp):
-    """Node parse text thành dữ liệu có cấu trúc.
+    """Op that parses text into structured data.
 
-    Hỗ trợ nhiều format: JSON, XML, YAML, regex, key-value.
-    Trích xuất các field theo chain path (ví dụ: 'user.address.city').
+    Supports multiple formats (JSON, XML, YAML) and extracts fields using
+    dot-separated chain paths (e.g. ``"user.address.city: str"``). Commonly
+    used as the final stage inside a ``ChainOp`` pipeline.
+
+    Inputs:
+        text (str): Raw text to parse (e.g. LLM output).
+
+    Outputs:
+        Dynamically generated from the ``extract`` list — one output key
+        per extracted field.
+
+    Example::
+
+        parser = ParserOp(
+            format="json",
+            extract=["user.name: str", "user.age: int"],
+            inputs={"text": llm["content"]},
+        )
     """
 
     type: OpType = "parser"

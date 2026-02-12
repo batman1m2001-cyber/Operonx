@@ -9,8 +9,8 @@ Cấu hình và sử dụng LLM providers trong Hush workflows.
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `ChainOp.of()` | `ChainOp` | `ChainOp.of(resource_key="gpt-4o", template={...}, query=PARENT["q"])` |
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `ChainOp.of()` | `ChainOp` | `ChainOp.of(resource="gpt-4o", template={...}, query=PARENT["q"])` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 > | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
 ## Cấu hình Providers trong resources.yaml
@@ -82,11 +82,11 @@ Cách ngắn nhất để gọi LLM. Kết hợp prompt + LLM trong một op, au
 from hush.providers import ChainOp
 
 # String template
-summarize = ChainOp.of(resource_key="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
+summarize = ChainOp.of(resource="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
 
 # Dict với system/user
 chat = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
     task="tóm tắt văn bản",
     query=PARENT["query"],
@@ -94,7 +94,7 @@ chat = ChainOp.of(
 
 # Với conversation history
 chat = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     conversation_history=PARENT["history"],
     query=PARENT["query"],
@@ -107,7 +107,7 @@ START >> chat >> END  # auto-forward: result["content"], result["model_used"], .
 
 ```python
 classifier = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"user": "Phân loại và trả về JSON: {text}"},
     text=PARENT["text"],
     response_format={"type": "json_object"},
@@ -133,7 +133,7 @@ Khi cần config chi tiết hơn (load balancing, fallback, extract, v.v.):
 from hush.providers import ChainOp
 
 chain = ChainOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     ratios=[0.7, 0.3],
     fallback=["or-claude-4-sonnet"],
@@ -187,14 +187,14 @@ p = PromptOp.of(
 ```python
 from hush.providers import LLMOp
 
-llm = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
 ```
 
 ### Generation Parameters
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     messages=p["messages"],
     temperature=0.7,       # 0.0 = deterministic, 1.0 = creative
     max_tokens=1000,
@@ -215,7 +215,7 @@ Hướng dẫn chọn temperature:
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     stream=True,  # Default
     messages=p["messages"],
 )
@@ -233,7 +233,7 @@ Phân tải requests giữa nhiều models theo tỷ lệ.
 
 ```python
 llm = LLMOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
     seed=42,             # Optional: reproducible selection
     messages=p["messages"],
@@ -248,7 +248,7 @@ Tự động chuyển model khi primary fails.
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     messages=p["messages"],
 )
@@ -282,7 +282,7 @@ tools = [
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     messages=p["messages"],
     tools=tools,
     tool_choice="auto",
@@ -297,7 +297,7 @@ Force LLM trả về JSON theo schema.
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     messages=p["messages"],
     response_format={
         "type": "json_schema",
@@ -360,7 +360,7 @@ with GraphOp(name="multi-turn-chat") as graph:
         message=PARENT["message"],
     )
     llm = LLMOp.of(
-        resource_key="gpt-4o",
+        resource="gpt-4o",
         messages=p["messages"],
         temperature=0.7,
         max_tokens=500,

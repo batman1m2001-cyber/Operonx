@@ -33,7 +33,7 @@ with GraphOp(name="demo") as graph:
 
 # Tạo tracer
 tracer = LangfuseTracer(
-    resource_key="langfuse:default",
+    resource="langfuse:default",
     tags=["production"]
 )
 

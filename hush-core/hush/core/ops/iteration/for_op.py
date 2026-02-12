@@ -1,4 +1,4 @@
-"""ForOp - sequential iteration node for processing items one at a time."""
+"""ForOp — sequential iteration op that processes items one at a time."""
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -13,23 +13,24 @@ if TYPE_CHECKING:
 
 
 class ForOp(BaseIterationOp):
-    """Sequential iteration node - processes items one at a time in order.
+    """Sequential iteration op — processes items one at a time, in order.
 
-    Use ForOp when:
-        - Iterations may depend on results from previous iterations
-        - You need predictable sequential execution
-        - Memory constraints require processing one item at a time
+    Use when iterations depend on prior results, execution order matters,
+    or memory constraints require one-at-a-time processing.
 
-    Example:
-        with ForOp(
-            name="process_loop",
-            inputs={
-                "x": Each([1, 2, 3]),           # iterate
-                "multiplier": 10                 # broadcast
-            }
-        ) as loop:
-            node = calc(inputs={"x": PARENT["x"], "multiplier": PARENT["multiplier"]})
-            START >> node >> END
+    Inputs:
+        Wrap iterable sources with ``Each()``; all other inputs are broadcast.
+
+    Outputs:
+        Column-oriented lists (one list per output key) plus
+        ``iteration_metrics`` with counts and timing.
+
+    Example::
+
+        with ForOp(inputs={"x": Each([1, 2, 3]), "m": 10}) as loop:
+            step = calc(x=PARENT["x"], m=PARENT["m"])
+            START >> step >> END
+        # results: {"result": [10, 20, 30], "iteration_metrics": {...}}
     """
 
     type: OpType = "for"

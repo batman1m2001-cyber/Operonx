@@ -31,7 +31,7 @@ from hush.providers import ChainOp
 async def main():
     with GraphOp(name="chat") as graph:
         chat = ChainOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
             question=PARENT["question"],
         )
@@ -46,7 +46,7 @@ async def main():
 ```python
 from hush.providers import EmbeddingOp
 
-embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["documents"])
+embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["documents"])
 ```
 
 ### Rerank Op
@@ -54,7 +54,7 @@ embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["documents"])
 ```python
 from hush.providers import RerankOp
 
-rerank = RerankOp.of(resource_key="bge-reranker", query=PARENT["query"], documents=PARENT["docs"])
+rerank = RerankOp.of(resource="bge-reranker", query=PARENT["query"], documents=PARENT["docs"])
 ```
 
 ## Supported Providers

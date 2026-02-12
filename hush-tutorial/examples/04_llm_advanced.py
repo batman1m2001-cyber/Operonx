@@ -39,7 +39,7 @@ async def example_1_structured_output():
             text=PARENT["text"],
         )
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             response_format={
                 "type": "json_schema",
@@ -132,7 +132,7 @@ async def example_2_tool_calling():
             query=PARENT["query"],
         )
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             tools=tools,
             tool_choice="auto",
@@ -180,7 +180,7 @@ async def example_3_multi_turn_chat():
             message=PARENT["message"],
         )
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             temperature=0.7,
             max_tokens=200,

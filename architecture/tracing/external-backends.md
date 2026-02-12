@@ -71,7 +71,7 @@ Dict được truyền cho `flush()` static method trong subprocess:
 flush_data = {
     "tracer_type": "LangfuseTracer",      # Class name
     "tracer_config": {                     # Từ _get_tracer_config()
-        "config": {...}                    # Hoặc "resource_key": "..."
+        "config": {...}                    # Hoặc "resource": "..."
     },
     "workflow_name": "my_workflow",
     "request_id": "uuid-...",
@@ -280,7 +280,7 @@ def _datetime_to_ns(dt) -> Optional[int]:
 from hush.core import Hush, GraphOp
 from hush.telemetry import LangfuseTracer
 
-tracer = LangfuseTracer(resource_key="langfuse:default")
+tracer = LangfuseTracer(resource="langfuse:default")
 # hoặc: LangfuseTracer(config=LangfuseConfig.from_env())
 
 engine = Hush(graph, tracers=[tracer])
@@ -292,7 +292,7 @@ await engine.run(inputs={...})
 ```python
 from hush.telemetry import OTELTracer
 
-tracer = OTELTracer(resource_key="otel:jaeger")
+tracer = OTELTracer(resource="otel:jaeger")
 # hoặc: OTELTracer(config=OTELConfig.jaeger())
 
 engine = Hush(graph, tracers=[tracer])
@@ -338,23 +338,23 @@ from hush.core.tracers import BaseTracer, register_tracer
 
 @register_tracer
 class MyBackendTracer(BaseTracer):
-    def __init__(self, resource_key=None, config=None, tags=None):
+    def __init__(self, resource=None, config=None, tags=None):
         super().__init__(tags=tags)
-        self._resource_key = resource_key
+        self._resource = resource
         self._config = config
 
     def _get_tracer_config(self) -> dict:
         if self._config:
             return {"config": self._config.model_dump()}
-        return {"resource_key": self._resource_key}
+        return {"resource": self._resource}
 
     @staticmethod
     def flush(flush_data: dict) -> None:
         from hush.core.registry import get_hub
         # Re-import dependencies trong subprocess
         config = flush_data["tracer_config"]
-        if "resource_key" in config:
-            client = get_hub().mybackend(config["resource_key"])
+        if "resource" in config:
+            client = get_hub().mybackend(config["resource"])
         else:
             client = MyBackendClient(MyBackendConfig(**config["config"]))
 

@@ -1,8 +1,7 @@
-"""Các node transform cho workflow.
+"""Transform ops for data processing.
 
-Bao gồm:
-- FuncOp: Thực thi function Python
-- ParserOp: Parse và trích xuất dữ liệu từ text (JSON, XML, YAML, regex, key-value)
+- FuncOp: Execute a Python function as an op.
+- ParserOp: Parse and extract structured data from text.
 """
 
 from .func_op import FuncOp, op

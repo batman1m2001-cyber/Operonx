@@ -1,8 +1,4 @@
-"""Graph node cho workflow.
-
-Bao gồm:
-- GraphOp: Container quản lý graph các node với thực thi song song
-"""
+"""GraphOp — container op that manages a graph of child ops."""
 
 from .graph_op import GraphOp, OpFlowType
 

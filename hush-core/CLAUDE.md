@@ -168,13 +168,13 @@ from hush.core.tracers import BaseTracer, register_tracer
 
 @register_tracer
 class MyTracer(BaseTracer):
-    def __init__(self, resource_key=None, tags=None):
+    def __init__(self, resource=None, tags=None):
         super().__init__(tags=tags)
-        self._resource_key = resource_key
+        self._resource = resource
 
     def _get_tracer_config(self) -> dict:
         """Return config for serialization (passed to flush())."""
-        return {"resource_key": self._resource_key}
+        return {"resource": self._resource}
 
     @staticmethod
     def flush(flush_data: dict) -> None:
@@ -258,7 +258,7 @@ Key points:
 Ops automatically infer their name from the assignment variable:
 
 ```python
-llm = LLMOp.of(resource_key="gpt-4o", messages=msgs)
+llm = LLMOp.of(resource="gpt-4o", messages=msgs)
 # llm.name == "llm" — extracted via bytecode analysis
 
 router = if_(PARENT["x"] > 0, "pos").else_("neg")
@@ -285,6 +285,12 @@ def process(x: int) -> dict:
 # Iteration ops use .of()
 with ForOp.of(x=Each([1, 2, 3])) as loop:
     step = process(x=PARENT["x"])
+    START >> step >> END
+
+# WhileOp — loop until condition is met
+with WhileOp.of(counter=0, until="counter >= 5") as loop:
+    step = increment(counter=PARENT["counter"])
+    step["new_counter"] >> PARENT["counter"]
     START >> step >> END
 ```
 

@@ -1,4 +1,4 @@
-"""Node branch cho định tuyến có điều kiện trong workflow."""
+"""BranchOp — conditional routing op for workflow control flow."""
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -15,9 +15,25 @@ if TYPE_CHECKING:
 
 
 class BranchOp(BaseOp):
-    """Node đánh giá các điều kiện và định tuyến luồng đến các node đích khác nhau.
+    """Op that evaluates conditions and routes execution to different targets.
 
-    Hỗ trợ anchor để override định tuyến.
+    Conditions are ``Ref`` objects with comparison operators. The first matching
+    condition determines the target. An optional ``anchor`` input overrides all
+    conditions. Use soft edges (``>>~``) to connect branch targets to a merge op.
+
+    Inputs:
+        anchor (str, optional): Hard-coded target name that overrides conditions.
+        <var> (any): Variables referenced in condition Refs (auto-extracted).
+
+    Outputs:
+        target (str): Name of the selected target op.
+        matched (str): Description of which condition matched.
+
+    Example::
+
+        router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
+        START >> router >> ~excellent >> merge >> END
+        router >> ~fail >> merge
     """
 
     type: OpType = "branch"
@@ -37,13 +53,13 @@ class BranchOp(BaseOp):
         outputs: Dict[str, Any] = None,
         **kwargs,
     ):
-        # Parse inputs/outputs từ cases
+        # Parse inputs/outputs from cases
         parsed_inputs, parsed_outputs = self._parse_cases(cases or [])
 
-        # Gọi super().__init__ không truyền inputs/outputs
+        # Call super().__init__ without inputs/outputs
         super().__init__(**kwargs)
 
-        # Merge parsed với user-provided
+        # Merge parsed with user-provided
         self.inputs = self._merge_params(parsed_inputs, inputs)
         self.outputs = self._merge_params(parsed_outputs, outputs)
 
@@ -54,7 +70,7 @@ class BranchOp(BaseOp):
         self.core = self._create_core_function()
 
     def _parse_cases(self, cases: List[Tuple[Ref, str]]) -> tuple:
-        """Parse inputs/outputs từ cases.
+        """Parse inputs/outputs from cases.
 
         Args:
             cases: List of (condition_ref, target) tuples
@@ -62,7 +78,7 @@ class BranchOp(BaseOp):
         Returns:
             Tuple[Dict[str, Param], Dict[str, Param]]: (inputs, outputs)
         """
-        # Inputs: anchor + các biến trong điều kiện
+        # Inputs: anchor + variables from conditions
         inputs = {"anchor": Param(type=str, default=None)}
 
         for ref, target in cases:
@@ -81,7 +97,7 @@ class BranchOp(BaseOp):
 
     @property
     def candidates(self) -> List[str]:
-        """Danh sách các node đích có thể."""
+        """List of possible target op names."""
         if self.given_candidates:
             return self.given_candidates
 
@@ -93,7 +109,7 @@ class BranchOp(BaseOp):
             return targets
 
     def _create_core_function(self):
-        """Tạo function đánh giá core đã tối ưu."""
+        """Create the optimised core evaluation function."""
 
         def core(**inputs) -> Dict[str, str]:
             anchor = inputs.get("anchor")
@@ -106,7 +122,7 @@ class BranchOp(BaseOp):
         return core
 
     def _evaluate_conditions(self, inputs: Dict[str, Any]) -> tuple:
-        """Đánh giá tất cả điều kiện và trả về điều kiện khớp đầu tiên."""
+        """Evaluate all conditions and return the first match."""
         safe_inputs = dict(inputs)
 
         for ref, target in self.cases:
@@ -146,12 +162,12 @@ class BranchOp(BaseOp):
             return None, None
 
     def get_target(self, state: "MemoryState", context_id: Optional[str] = None) -> Optional[str]:
-        """Lấy target đã định tuyến từ state."""
+        """Get the routed target from state."""
         return state[self.full_name, "target", context_id]
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:
-        """Trả về metadata riêng của subclass."""
+        """Return subclass-specific metadata."""
         return {
             "cases": [(str(ref), target) for ref, target in self.cases],
             "default_target": self.default,
@@ -161,28 +177,23 @@ class BranchOp(BaseOp):
 
 
 class Branch:
-    """Fluent builder để tạo BranchOp.
+    """Fluent builder for creating a BranchOp.
 
-    Ví dụ:
-        # Auto name from variable
-        router = Branch().if_(PARENT["score"] >= 90, "excellent").else_("fail")
+    Example::
 
-        # Explicit name
-        router = Branch("score_router").if_(PARENT["score"] >= 90, "excellent").else_("fail")
-
-        # Hoặc dùng if_() shorthand
-        router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
+        router = (if_(PARENT["score"] >= 90, "excellent")
+                  .if_(PARENT["score"] >= 70, "good")
+                  .else_("fail"))
     """
 
     __slots__ = ("_name", "_cases", "_default", "_inputs", "_kwargs")
     _is_hush_builder = True
 
     def __init__(self, name: Optional[str] = None, **kwargs):
-        """Khởi tạo Branch builder.
+        """Initialise the builder.
 
         Args:
-            name: Tên của BranchOp. Nếu None, tự suy ra từ tên biến.
-            **kwargs: Các tham số khác cho BranchOp
+            name: Op name. If None, auto-inferred from the variable name.
         """
         self._name = name
         self._cases: List[Tuple[Ref, str]] = []
@@ -191,18 +202,14 @@ class Branch:
         self._kwargs = kwargs
 
     def if_(self, condition: Ref, target: Union[str, BaseOp]) -> "Branch":
-        """Thêm một case với điều kiện từ Ref.
+        """Add a condition–target case.
 
         Args:
-            condition: Ref với comparison operation (e.g., PARENT["score"] >= 90)
-            target: Node đích hoặc tên node đích
+            condition: Ref with comparison (e.g., ``PARENT["score"] >= 90``).
+            target: Target op or op name.
 
         Returns:
-            self để chain tiếp
-
-        Example:
-            .if_(PARENT["score"] >= 90, "excellent")
-            .if_(PARENT["score"] >= 70, good_node)
+            self for chaining.
         """
         target_name = target.name if hasattr(target, "name") else target
         self._cases.append((condition, target_name))
@@ -210,23 +217,23 @@ class Branch:
 
     @register_skip
     def else_(self, target: Union[str, BaseOp]) -> "BranchOp":
-        """Đặt default target và build BranchOp.
+        """Set default target and build the BranchOp.
 
         Args:
-            target: Node đích mặc định khi không có điều kiện nào khớp
+            target: Fallback target when no condition matches.
 
         Returns:
-            BranchOp đã được tạo
+            The constructed BranchOp.
         """
         self._default = target.name if hasattr(target, "name") else target
         return self._build()
 
     @register_skip
     def build(self) -> "BranchOp":
-        """Build BranchOp (dùng khi không có default).
+        """Build the BranchOp without a default target.
 
         Returns:
-            BranchOp đã được tạo
+            The constructed BranchOp.
         """
         return self._build()
 
@@ -251,13 +258,10 @@ class Branch:
 
 
 def if_(condition: Ref, target: Union[str, BaseOp]) -> Branch:
-    """Start a branch declaration.
+    """Start a branch declaration with the first condition.
 
-    Ví dụ:
+    Example::
+
         router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
-
-        router = (if_(PARENT["score"] >= 90, "excellent")
-                  .if_(PARENT["score"] >= 70, "good")
-                  .else_("fail"))
     """
     return Branch().if_(condition, target)

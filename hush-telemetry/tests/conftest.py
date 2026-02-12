@@ -123,7 +123,7 @@ def sample_flush_data(sample_request_id):
     """Create sample flush data structure for tracer tests."""
     return {
         "tracer_type": "LangfuseTracer",
-        "tracer_config": {"resource_key": "langfuse:test"},
+        "tracer_config": {"resource": "langfuse:test"},
         "workflow_name": "test-workflow",
         "request_id": sample_request_id,
         "user_id": "test-user",
@@ -189,7 +189,7 @@ def sample_iteration_flush_data(sample_request_id):
     """Create flush data with iteration context (MapOp, ForLoop)."""
     return {
         "tracer_type": "LangfuseTracer",
-        "tracer_config": {"resource_key": "langfuse:test"},
+        "tracer_config": {"resource": "langfuse:test"},
         "workflow_name": "iteration-workflow",
         "request_id": sample_request_id,
         "user_id": "test-user",
@@ -321,7 +321,7 @@ def langfuse_tracer():
     """Create LangfuseTracer with test resource key."""
     from hush.telemetry import LangfuseTracer
 
-    return LangfuseTracer(resource_key="langfuse:default")
+    return LangfuseTracer(resource="langfuse:default")
 
 
 @pytest.fixture
@@ -329,7 +329,7 @@ def langfuse_tracer_with_tags():
     """Create LangfuseTracer with static tags."""
     from hush.telemetry import LangfuseTracer
 
-    return LangfuseTracer(resource_key="langfuse:default", tags=["test", "unit"])
+    return LangfuseTracer(resource="langfuse:default", tags=["test", "unit"])
 
 
 @pytest.fixture
@@ -337,7 +337,7 @@ def otel_tracer():
     """Create OTELTracer with test resource key."""
     from hush.telemetry import OTELTracer
 
-    return OTELTracer(resource_key="otel:jaeger")
+    return OTELTracer(resource="otel:jaeger")
 
 
 @pytest.fixture

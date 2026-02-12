@@ -1,8 +1,4 @@
-"""Embedding Node for hush-providers.
-
-This module provides EmbeddingOp that uses ResourceHub to access embedding resources.
-Follows hush-core design patterns with Param-based schema.
-"""
+"""EmbeddingOp — converts text to vector embeddings via ResourceHub."""
 
 from typing import Any, Dict, List, Optional, Union
 
@@ -15,35 +11,29 @@ from hush.core.utils.common import Param
 
 
 class EmbeddingOp(BaseOp):
-    """Embedding node for converting text to vector embeddings in workflows.
+    """Op that converts texts to vector embeddings via ResourceHub.
 
-    Uses ResourceHub to access embedding resources by resource_key.
+    Wraps an embedding backend (e.g. BGE-M3, OpenAI, TEI) and returns
+    a list of embedding vectors matching the input order.
 
-    Example:
-        ```python
-        from hush.core import GraphOp, START, END, PARENT
-        from hush.providers import EmbeddingOp
+    Inputs:
+        texts (list[str]): Texts to embed. Required.
 
-        with GraphOp(name="embed") as workflow:
-            embed = EmbeddingOp(
-                name="embed",
-                resource_key="bge-m3",
-                inputs={"texts": PARENT["texts"]},
-                outputs={"*": PARENT}
-            )
-            START >> embed >> END
+    Outputs:
+        embeddings (list[list[float]]): Embedding vectors.
 
-        workflow.build()
-        ```
+    Example::
+
+        embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
     """
 
-    __slots__ = ["resource_key", "backend"]
+    __slots__ = ["resource", "backend"]
 
     type: OpType = "embedding"
 
     def __init__(
         self,
-        resource_key: Optional[str] = None,
+        resource: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs,
@@ -51,14 +41,14 @@ class EmbeddingOp(BaseOp):
         """Initialize EmbeddingOp.
 
         Args:
-            resource_key: Resource key for embedding model in ResourceHub (e.g., "bge-m3")
+            resource: Resource key for embedding model in ResourceHub (e.g., "bge-m3")
             inputs: Input variable mappings
             outputs: Output variable mappings
             **kwargs: Additional keyword arguments for BaseOp
         """
         super().__init__(**kwargs)
 
-        self.resource_key = resource_key
+        self.resource = resource
 
         # Define input/output schema
         input_schema = {
@@ -79,7 +69,7 @@ class EmbeddingOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        self.backend = hub.embedding(self.resource_key)
+        self.backend = hub.embedding(self.resource)
         self.core = self._process
 
     async def _process(self, texts: Union[str, List[str]]) -> Dict[str, Any]:
@@ -94,23 +84,23 @@ class EmbeddingOp(BaseOp):
         except Exception as e:
             raise EmbeddingError(
                 message="Embedding backend failed",
-                resource_key=self.resource_key or "unknown",
+                resource=self.resource or "unknown",
                 text_count=len(text_list),
                 original_error=e,
             ) from e
 
     @shorthand
-    def of(cls, resource_key=None, **kwargs) -> "EmbeddingOp":
+    def of(cls, resource=None, **kwargs) -> "EmbeddingOp":
         """Create an EmbeddingOp with flat kwargs.
 
         Example::
 
-            embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"], outputs={"*": PARENT})
+            embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"], outputs={"*": PARENT})
         """
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        return cls(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)
+        return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return embedding-specific metadata dictionary."""
-        return {"model": self.resource_key}
+        return {"model": self.resource}

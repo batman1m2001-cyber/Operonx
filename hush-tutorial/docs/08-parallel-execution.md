@@ -11,7 +11,7 @@ Thực thi song song trong workflows: fan-out/fan-in, MapOp, partial failure.
 > |--------|-------|-------|
 > | `@op` | `FuncOp` | `@op` decorator trên function |
 > | `MapOp.of()` | `MapOp` | `MapOp.of(x=Each([1,2,3]), max_concurrency=4)` |
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 > | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
 ## Fan-out / Fan-in
@@ -132,8 +132,8 @@ with GraphOp(name="parallel-llm") as graph:
         text=PARENT["text"],
     )
 
-    llm_summary = LLMOp.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-    llm_keywords = LLMOp.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+    llm_summary = LLMOp.of(resource="gpt-4o-mini", messages=p_summary["messages"])
+    llm_keywords = LLMOp.of(resource="gpt-4o-mini", messages=p_keywords["messages"])
 
     m = merge_results(
         s=llm_summary["content"],
@@ -162,7 +162,7 @@ with GraphOp(name="batch-llm") as graph:
             query=PARENT["query"],
         )
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )

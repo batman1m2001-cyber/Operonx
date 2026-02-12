@@ -64,7 +64,7 @@ async def example_1_basic_embedding():
 
     with GraphOp(name="embed-texts") as graph:
         embed = EmbeddingOp.of(
-            resource_key="openai",  # Tham chiếu embedding:openai trong resources.yaml
+            resource="openai",  # Tham chiếu embedding:openai trong resources.yaml
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
@@ -94,7 +94,7 @@ async def example_2_simple_rag():
     print("  Đang embed documents...")
     with GraphOp(name="embed-docs") as embed_graph:
         embed = EmbeddingOp.of(
-            resource_key="openai",
+            resource="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
@@ -113,7 +113,7 @@ async def example_2_simple_rag():
     with GraphOp(name="simple-rag") as graph:
         # Step 1: Embed query
         embed_query = EmbeddingOp.of(
-            resource_key="openai",
+            resource="openai",
             texts=PARENT["query"],
         )
 
@@ -141,7 +141,7 @@ async def example_2_simple_rag():
 
         # Step 4: Generate answer
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
@@ -193,7 +193,7 @@ async def example_3_rag_with_rerank():
     with GraphOp(name="rag-rerank") as graph:
         # Rerank documents theo query
         rr = RerankOp.of(
-            resource_key="bge-m3",  # reranking:bge-m3 trong resources.yaml
+            resource="bge-m3",  # reranking:bge-m3 trong resources.yaml
             query=PARENT["query"],
             documents=PARENT["documents"],
             top_k=3,
@@ -209,7 +209,7 @@ async def example_3_rag_with_rerank():
         )
 
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )

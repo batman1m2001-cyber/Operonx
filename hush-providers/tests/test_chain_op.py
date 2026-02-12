@@ -25,7 +25,7 @@ class TestChainOp:
 
             node = ChainOp(
                 name="simple_chain",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={
                     "template": {"system": "You are helpful.", "user": "Help with: {task}"},
                     "task": "coding",
@@ -34,7 +34,7 @@ class TestChainOp:
 
             assert node.name == "simple_chain"
             assert node.type == "graph"  # ChainOp is a GraphOp
-            assert node.resource_key == "gpt-4"
+            assert node.resource == "gpt-4"
 
     def test_structured_chain_creation(self):
         """Test creating ChainOp with structured output (parser mode)."""
@@ -47,7 +47,7 @@ class TestChainOp:
 
             node = ChainOp(
                 name="structured_chain",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={"template": "Classify: {text}\n<category>...</category>", "text": "sample"},
                 extract=["category: str", "confidence: float"],
                 parser="xml",
@@ -67,7 +67,7 @@ class TestChainOp:
 
             node = ChainOp(
                 name="vision_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 inputs={
                     "template": [
                         {"role": "system", "content": "You are a vision expert."},
@@ -97,7 +97,7 @@ class TestChainOp:
 
             node = ChainOp(
                 name="internal_test",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={"template": "Test {var}", "var": "value"},
             )
 
@@ -116,7 +116,7 @@ class TestChainOp:
 
             node = ChainOp(
                 name="parser_test",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={"template": "Extract: {text}", "text": "sample"},
                 extract=["result: str"],
             )
@@ -135,14 +135,14 @@ class TestChainOp:
 
             node = ChainOp(
                 name="metadata_test",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={"template": {"system": "System", "user": "User {var}"}, "var": "value"},
                 extract=["field: str"],
                 parser="json",
             )
 
             metadata = node.specific_metadata
-            assert metadata["resource_key"] == "gpt-4"
+            assert metadata["resource"] == "gpt-4"
             assert metadata["extract"] == ["field: str"]
             assert metadata["parser"] == "json"
 
@@ -161,7 +161,7 @@ class TestChainOpLoadBalancing:
 
             node = ChainOp(
                 name="lb_chain",
-                resource_key=["gpt-4o", "gpt-4o-mini"],
+                resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
                 inputs={
                     "template": {"system": "You are helpful.", "user": "Hello {name}"},
@@ -169,7 +169,7 @@ class TestChainOpLoadBalancing:
                 },
             )
 
-            assert node.resource_key == ["gpt-4o", "gpt-4o-mini"]
+            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
             assert node.ratios == [0.7, 0.3]
 
     def test_load_balancing_metadata(self):
@@ -183,13 +183,13 @@ class TestChainOpLoadBalancing:
 
             node = ChainOp(
                 name="lb_metadata_test",
-                resource_key=["gpt-4o", "claude-sonnet"],
+                resource=["gpt-4o", "claude-sonnet"],
                 ratios=[0.6, 0.4],
                 inputs={"template": "Test"},
             )
 
             metadata = node.specific_metadata
-            assert metadata["resource_key"] == ["gpt-4o", "claude-sonnet"]
+            assert metadata["resource"] == ["gpt-4o", "claude-sonnet"]
             assert metadata["load_balancing"] is True
             assert metadata["ratios"] == [0.6, 0.4]
 
@@ -208,12 +208,12 @@ class TestChainOpFallback:
 
             node = ChainOp(
                 name="fallback_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 fallback=["claude-sonnet", "gpt-3.5-turbo"],
                 inputs={"template": "Hello {name}", "name": "Alice"},
             )
 
-            assert node.resource_key == "gpt-4o"
+            assert node.resource == "gpt-4o"
             assert node.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
 
     def test_fallback_metadata(self):
@@ -227,7 +227,7 @@ class TestChainOpFallback:
 
             node = ChainOp(
                 name="fallback_metadata_test",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 fallback=["claude-sonnet"],
                 inputs={"template": "Test"},
             )
@@ -250,7 +250,7 @@ class TestChainOpResponseFormat:
 
             node = ChainOp(
                 name="json_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 response_format={"type": "json_object"},
                 inputs={
                     "template": {"system": "Return JSON.", "user": "Extract entities from: {text}"},
@@ -287,7 +287,7 @@ class TestChainOpResponseFormat:
 
             node = ChainOp(
                 name="schema_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 response_format=json_schema,
                 inputs={"template": "Classify: {text}", "text": "sample"},
             )
@@ -305,7 +305,7 @@ class TestChainOpResponseFormat:
 
             node = ChainOp(
                 name="rf_metadata_test",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 response_format={"type": "json_object"},
                 inputs={"template": "Test"},
             )
@@ -328,13 +328,13 @@ class TestChainOpCombined:
 
             node = ChainOp(
                 name="combined_chain",
-                resource_key=["gpt-4o", "gpt-4o-mini"],
+                resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.8, 0.2],
                 fallback=["claude-sonnet"],
                 inputs={"template": "Hello {name}", "name": "Alice"},
             )
 
-            assert node.resource_key == ["gpt-4o", "gpt-4o-mini"]
+            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
             assert node.ratios == [0.8, 0.2]
             assert node.fallback == ["claude-sonnet"]
 
@@ -354,7 +354,7 @@ class TestChainOpCombined:
 
             node = ChainOp(
                 name="full_chain",
-                resource_key=["gpt-4o", "gpt-4o-mini"],
+                resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
                 fallback=["claude-sonnet"],
                 response_format={"type": "json_object"},
@@ -367,7 +367,7 @@ class TestChainOpCombined:
             )
 
             metadata = node.specific_metadata
-            assert metadata["resource_key"] == ["gpt-4o", "gpt-4o-mini"]
+            assert metadata["resource"] == ["gpt-4o", "gpt-4o-mini"]
             assert metadata["load_balancing"] is True
             assert metadata["ratios"] == [0.7, 0.3]
             assert metadata["fallback"] == ["claude-sonnet"]
@@ -390,7 +390,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="string_prompt_chain",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={
                     "template": "Hello {name}, help me with {task}.",
                     "name": "Alice",
@@ -399,7 +399,7 @@ class TestChainOpUnifiedPrompt:
             )
 
             assert node.name == "string_prompt_chain"
-            assert node.resource_key == "gpt-4"
+            assert node.resource == "gpt-4"
 
     def test_dict_prompt_with_system_user(self):
         """Test ChainOp with dict prompt containing system/user keys."""
@@ -412,7 +412,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="dict_prompt_chain",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={
                     "template": {"system": "You are a {role}.", "user": "Help with: {task}"},
                     "role": "helpful assistant",
@@ -434,7 +434,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="list_prompt_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 inputs={
                     "template": [
                         {"role": "system", "content": "You are a vision expert."},
@@ -464,7 +464,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="unified_lb_chain",
-                resource_key=["gpt-4o", "gpt-4o-mini"],
+                resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
                 fallback=["claude-sonnet"],
                 inputs={
@@ -473,7 +473,7 @@ class TestChainOpUnifiedPrompt:
                 },
             )
 
-            assert node.resource_key == ["gpt-4o", "gpt-4o-mini"]
+            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
             assert node.ratios == [0.7, 0.3]
             assert node.fallback == ["claude-sonnet"]
 
@@ -488,7 +488,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="unified_json_chain",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 response_format={"type": "json_object"},
                 inputs={"template": {"user": "Classify and return JSON: {text}"}, "text": "sample"},
             )
@@ -506,7 +506,7 @@ class TestChainOpUnifiedPrompt:
 
             node = ChainOp(
                 name="unified_parser_chain",
-                resource_key="gpt-4",
+                resource="gpt-4",
                 inputs={
                     "template": {"user": "Classify: {text}\n<category>...</category>"},
                     "text": "sample",
@@ -534,7 +534,7 @@ class TestChainOpIntegration:
 
         node = ChainOp(
             name="simple_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             inputs={
                 "template": {
                     "system": "You are a helpful assistant.",
@@ -564,7 +564,7 @@ class TestChainOpIntegration:
 
         node = ChainOp(
             name="structured_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             inputs={
                 "template": """Classify the sentiment of this text: "{text}"
 
@@ -600,7 +600,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="json_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             response_format={"type": "json_object"},
             inputs={
                 "template": {
@@ -635,7 +635,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="schema_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -681,7 +681,7 @@ Output your response in XML format:
         # Use same model twice to test load balancing mechanism
         node = ChainOp(
             name="lb_chain",
-            resource_key=["gpt-4o", "gpt-4o"],  # Same model for testing
+            resource=["gpt-4o", "gpt-4o"],  # Same model for testing
             ratios=[0.5, 0.5],
             inputs={"template": {"system": "You are helpful.", "user": "Say 'hello' in one word."}},
         )
@@ -709,7 +709,7 @@ Output your response in XML format:
         # Primary should work, fallback shouldn't be needed
         node = ChainOp(
             name="fallback_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             fallback=["gpt-4o"],  # Same as fallback for testing
             inputs={"template": {"system": "You are helpful.", "user": "Say 'test' in one word."}},
         )
@@ -736,7 +736,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="combined_chain",
-            resource_key=["gpt-4o", "gpt-4o"],
+            resource=["gpt-4o", "gpt-4o"],
             ratios=[0.5, 0.5],
             response_format={"type": "json_object"},
             inputs={
@@ -769,7 +769,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="string_prompt_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             inputs={"template": "Say hello to {name} in one sentence.", "name": "Bob"},
         )
 
@@ -793,7 +793,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="dict_prompt_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             inputs={
                 "template": {
                     "system": "You are a friendly assistant who speaks like a {style}.",
@@ -826,7 +826,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="unified_json_chain",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             response_format={"type": "json_object"},
             inputs={
                 "template": {
@@ -859,7 +859,7 @@ Output your response in XML format:
 
         node = ChainOp(
             name="unified_lb_chain",
-            resource_key=["gpt-4o", "gpt-4o"],
+            resource=["gpt-4o", "gpt-4o"],
             ratios=[0.5, 0.5],
             inputs={
                 "template": {"system": "You are helpful.", "user": "Say '{word}' in one word."},

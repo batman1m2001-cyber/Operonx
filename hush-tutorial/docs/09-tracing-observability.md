@@ -68,7 +68,7 @@ from hush.telemetry import LangfuseTracer
 
 # Cách 1: Dùng ResourceHub
 tracer = LangfuseTracer(
-    resource_key="langfuse:default",
+    resource="langfuse:default",
     tags=["production", "v1.0"]
 )
 
@@ -107,7 +107,7 @@ otel:default:
 ```python
 from hush.telemetry import OTelTracer
 
-tracer = OTelTracer(resource_key="otel:default")
+tracer = OTelTracer(resource="otel:default")
 result = await engine.run(inputs={...}, tracer=tracer)
 ```
 
@@ -173,7 +173,7 @@ result = await engine.run(
 import os
 
 if os.getenv("ENABLE_TRACING") == "true":
-    tracer = LangfuseTracer(resource_key="langfuse:default")
+    tracer = LangfuseTracer(resource="langfuse:default")
 else:
     tracer = None
 
@@ -186,7 +186,7 @@ result = await engine.run(inputs={...}, tracer=tracer)
 import random
 
 # Trace 10% of requests
-tracer = LangfuseTracer(resource_key="langfuse:default") if random.random() < 0.1 else None
+tracer = LangfuseTracer(resource="langfuse:default") if random.random() < 0.1 else None
 ```
 
 ## Cost Tracking

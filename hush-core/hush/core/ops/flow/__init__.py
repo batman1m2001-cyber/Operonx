@@ -1,9 +1,8 @@
-"""Các node điều khiển luồng workflow.
+"""Control-flow ops for conditional routing.
 
-Bao gồm:
-- BranchOp: Định tuyến có điều kiện dựa trên đánh giá expression
-- Branch: Fluent builder để tạo BranchOp với cú pháp tự nhiên hơn
-- if_: Shorthand để bắt đầu branch declaration
+- BranchOp: Evaluates conditions and routes to a target op.
+- Branch: Fluent builder for creating BranchOp instances.
+- if_: Shorthand to start a branch declaration.
 """
 
 from .branch_op import Branch, BranchOp, if_

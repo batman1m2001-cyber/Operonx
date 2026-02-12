@@ -94,23 +94,23 @@ def test_langfuse_client_creation():
 
 
 def test_langfuse_tracer_creation():
-    """Test LangfuseTracer can be created with resource_key."""
+    """Test LangfuseTracer can be created with resource."""
     from hush.telemetry import LangfuseTracer
 
-    tracer = LangfuseTracer(resource_key="langfuse:default")
+    tracer = LangfuseTracer(resource="langfuse:default")
 
-    assert tracer.resource_key == "langfuse:default"
-    assert repr(tracer) == "<LangfuseTracer resource_key=langfuse:default>"
+    assert tracer.resource == "langfuse:default"
+    assert repr(tracer) == "<LangfuseTracer resource=langfuse:default>"
 
 
 def test_tracer_config_serialization():
-    """Test tracer config returns resource_key for subprocess."""
+    """Test tracer config returns resource for subprocess."""
     from hush.telemetry import LangfuseTracer
 
-    tracer = LangfuseTracer(resource_key="langfuse:default")
+    tracer = LangfuseTracer(resource="langfuse:default")
 
     tracer_config = tracer._get_tracer_config()
-    assert tracer_config["resource_key"] == "langfuse:default"
+    assert tracer_config["resource"] == "langfuse:default"
 
 
 def test_langfuse_tracer_registered():
@@ -192,7 +192,7 @@ def test_langfuse_tracer_flush_with_resource_hub():
     request_id = str(uuid.uuid4())
     flush_data = {
         "tracer_type": "LangfuseTracer",
-        "tracer_config": {"resource_key": "langfuse:test"},
+        "tracer_config": {"resource": "langfuse:test"},
         "workflow_name": "test-workflow",
         "request_id": request_id,
         "user_id": "test-user",

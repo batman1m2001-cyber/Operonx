@@ -1,8 +1,4 @@
-"""Prompt Node for hush-providers.
-
-This module provides PromptOp for building chat messages from templates.
-Unified design: single `template` input that accepts multiple formats.
-"""
+"""PromptOp — builds chat messages from templates for hush-providers."""
 
 import re
 from typing import Any, Dict, List, Union
@@ -24,78 +20,32 @@ RESERVED_KEYS = frozenset(
 
 
 class PromptOp(BaseOp):
-    """Node for building chat messages from templates.
+    """Op that formats a template into chat messages (OpenAI format).
 
-    Single `template` input that accepts 3 formats:
+    Accepts three template formats:
 
-    1. **String** → Simple user message
-       ```python
-       template = "Hello {name}"  # → [{"role": "user", "content": "Hello Alice"}]
-       ```
+    * **str** — becomes a single user message: ``"Hello {name}"``.
+    * **dict** — ``{"system": "...", "user": "..."}`` with ``{var}`` placeholders.
+    * **list** — full messages array for multimodal / complex prompts.
 
-    2. **Dict with system/user keys** → System + user messages
-       ```python
-       template = {
-           "system": "You are {role}.",
-           "user": "Help with: {task}"
-       }
-       ```
+    All non-reserved input keys are substituted as template variables.
 
-    3. **List** → Full messages array (for multimodal, complex cases)
-       ```python
-       template = [
-           {"role": "system", "content": "You are helpful."},
-           {"role": "user", "content": [
-               {"type": "text", "text": "Describe: {query}"},
-               {"type": "image_url", "image_url": {"url": "{image_url}"}}
-           ]}
-       ]
-       ```
+    Inputs:
+        template (str | dict | list): Message template. Default: None.
+        conversation_history (list): Prior messages to prepend. Default: [].
+        tool_results (list): Tool-call results to append. Default: [].
+        <var> (any): Template variables (``{var}`` placeholders).
 
-    All other input keys are used as template variables for formatting.
+    Outputs:
+        messages (list): Formatted chat messages ready for an LLM.
 
-    Example:
-        ```python
-        # Simple usage - string template
-        prompt = PromptOp(
-            name="chat_prompt",
-            inputs={
-                "template": "Help me with: {task}",
-                "task": "coding"
-            }
+    Example::
+
+        p = PromptOp.of(
+            template={"system": "You are {role}.", "user": "{query}"},
+            role="helpful",
+            query=PARENT["query"],
         )
-
-        # Dict template with system/user
-        prompt = PromptOp(
-            name="chat_prompt",
-            inputs={
-                "template": {"system": "You are {role}.", "user": "{query}"},
-                "role": "helpful",
-                "query": "Hello"
-            }
-        )
-
-        # Dynamic template from parent node
-        prompt = PromptOp(
-            name="prompt",
-            inputs={
-                "template": PARENT["generated_template"],
-                "query": PARENT["query"],
-                "*": PARENT
-            }
-        )
-
-        # With conversation history and tool results
-        prompt = PromptOp(
-            name="prompt",
-            inputs={
-                "template": {"system": "You are helpful.", "user": "{query}"},
-                "conversation_history": PARENT["history"],
-                "tool_results": PARENT["tool_results"],
-                "*": PARENT
-            }
-        )
-        ```
     """
 
     __slots__ = []
@@ -140,9 +90,9 @@ class PromptOp(BaseOp):
 
         # Special wildcard handling: extract template variables from wildcard source
         if "__FORWARD_WILDCARD__" in normalized_inputs:
-            wildcard_node = normalized_inputs["__FORWARD_WILDCARD__"]
+            wildcard_source = normalized_inputs["__FORWARD_WILDCARD__"]
             # Try to get template from the wildcard source to infer variable names
-            template_value = self._extract_template_from_wildcard(wildcard_node)
+            template_value = self._extract_template_from_wildcard(wildcard_source)
             if template_value:
                 # Parse template to find variable names
                 template_vars = self._extract_template_variables(template_value)
@@ -162,22 +112,22 @@ class PromptOp(BaseOp):
         # Set core function
         self.core = self._format
 
-    def _extract_template_from_wildcard(self, wildcard_node) -> Any:
-        """Extract template value from wildcard source node.
+    def _extract_template_from_wildcard(self, wildcard_source) -> Any:
+        """Extract template value from wildcard source op.
 
         Args:
-            wildcard_node: The node reference from wildcard forwarding
+            wildcard_source: The op reference from wildcard forwarding.
 
         Returns:
-            Template value if found, None otherwise
+            Template value if found, None otherwise.
         """
         from hush.core.states.ref import Ref
 
-        # Resolve PARENT sentinel to actual father node
-        if hasattr(wildcard_node, "name") and wildcard_node.name == "__PARENT__":
+        # Resolve PARENT sentinel to actual father op
+        if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
             actual_node = self.father
         else:
-            actual_node = wildcard_node
+            actual_node = wildcard_source
 
         # If actual_node is None, can't extract
         if actual_node is None:

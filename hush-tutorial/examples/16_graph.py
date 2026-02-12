@@ -70,7 +70,7 @@ async def example_1_basic():
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 5})
 
-    print(f"  Input:  5")
+    print("  Input:  5")
     print(f"  Output: {result['result']}")  # 10
     print(f"  Op name: '{d.name}' (auto-named tu variable)")
 
@@ -88,16 +88,16 @@ async def example_2_chained():
     print("=" * 60)
 
     with GraphOp(name="chain-demo") as graph:
-        d1 = double_flow(val=PARENT["input"])       # 3 * 2 = 6
-        d2 = double_flow(val=d1["result"])           # 6 * 2 = 12
-        d3 = double_flow(val=d2["result"])           # 12 * 2 = 24
+        d1 = double_flow(val=PARENT["input"])  # 3 * 2 = 6
+        d2 = double_flow(val=d1["result"])  # 6 * 2 = 12
+        d3 = double_flow(val=d2["result"])  # 12 * 2 = 24
         START >> d1 >> d2 >> d3 >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 3})
 
-    print(f"  Input:  3")
-    print(f"  Chain:  3 -> 6 -> 12 -> 24")
+    print("  Input:  3")
+    print("  Chain:  3 -> 6 -> 12 -> 24")
     print(f"  Output: {result['result']}")  # 24
 
 
@@ -129,8 +129,8 @@ async def example_3_renamed_outputs():
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 7})
 
-    print(f"  Input:  7")
-    print(f"  Mapping: step['result'] -> PARENT['doubled'] -> PARENT['answer']")
+    print("  Input:  7")
+    print("  Mapping: step['result'] -> PARENT['doubled'] -> PARENT['answer']")
     print(f"  Output: result['answer'] = {result['answer']}")  # 14
 
 
@@ -161,8 +161,8 @@ async def example_4_multi_params():
     engine = Hush(graph)
     result = await engine.run(inputs={"x": 3, "y": 7})
 
-    print(f"  Input:  x=3, y=7")
-    print(f"  Logic:  (3 + 7) * 2 = 20")
+    print("  Input:  x=3, y=7")
+    print("  Logic:  (3 + 7) * 2 = 20")
     print(f"  Output: {result['result']}")  # 20
 
 
@@ -193,9 +193,9 @@ async def example_5_nested():
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 5})
 
-    print(f"  Input:  5")
-    print(f"  Logic:  quad_flow = double_flow(double_flow(5))")
-    print(f"  Chain:  5 -> 10 -> 20")
+    print("  Input:  5")
+    print("  Logic:  quad_flow = double_flow(double_flow(5))")
+    print("  Chain:  5 -> 10 -> 20")
     print(f"  Output: {result['result']}")  # 20
 
 
@@ -219,7 +219,7 @@ async def example_6_explicit_config():
     engine = Hush(graph)
     result = await engine.run(inputs={"input": 8})
 
-    print(f"  Input:  8")
+    print("  Input:  8")
     print(f"  Op name: '{d.name}' (explicit, khong auto-named)")
     print(f"  Output: {result['result']}")  # 16
 

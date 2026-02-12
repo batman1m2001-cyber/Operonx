@@ -89,7 +89,7 @@ class TestLLMShorthand:
 
         node = LLMOp.of("gpt-4o", messages=[{"role": "user", "content": "Hi"}])
         assert isinstance(node, LLMOp)
-        assert node.resource_key == "gpt-4o"
+        assert node.resource == "gpt-4o"
         assert "messages" in node.inputs
 
     def test_llm_shorthand_auto_name(self, hub):
@@ -128,7 +128,7 @@ class TestLLMShorthand:
             pytest.skip("llm:gpt-4o not configured")
 
         node = LLMOp.of(["gpt-4o", "gpt-4o"], ratios=[0.5, 0.5], messages=[])
-        assert isinstance(node.resource_key, list)
+        assert isinstance(node.resource, list)
         assert node.ratios == [0.5, 0.5]
 
     def test_llm_shorthand_with_fallback(self, hub):
@@ -157,7 +157,7 @@ class TestEmbeddingShorthand:
 
         node = EmbeddingOp.of("bge-m3", texts=["hello"])
         assert isinstance(node, EmbeddingOp)
-        assert node.resource_key == "bge-m3"
+        assert node.resource == "bge-m3"
         assert "texts" in node.inputs
 
     def test_embedding_shorthand_auto_name(self, hub):
@@ -197,7 +197,7 @@ class TestRerankShorthand:
 
         node = RerankOp.of("bge-m3-onnx", query="test", documents=["a", "b"])
         assert isinstance(node, RerankOp)
-        assert node.resource_key == "bge-m3-onnx"
+        assert node.resource == "bge-m3-onnx"
         assert "query" in node.inputs
         assert "documents" in node.inputs
 
@@ -245,7 +245,7 @@ class TestLLMChainShorthand:
 
             node = ChainOp.of("gpt-4", "Hello {user}", user="world")
             assert isinstance(node, ChainOp)
-            assert node.resource_key == "gpt-4"
+            assert node.resource == "gpt-4"
             assert "prompt" in node._ops
             assert "llm" in node._ops
 
@@ -328,7 +328,7 @@ class TestLLMChainShorthand:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = ChainOp.of(["gpt-4o", "gpt-4o-mini"], "Hello", ratios=[0.7, 0.3])
-            assert isinstance(node.resource_key, list)
+            assert isinstance(node.resource, list)
             assert node.ratios == [0.7, 0.3]
 
     def test_llmchain_shorthand_fallback(self):

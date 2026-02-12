@@ -184,7 +184,7 @@ result = await engine.run(
 
 ## ResourceHub — Quản lý Providers
 
-ResourceHub tự động load cấu hình từ `resources.yaml`. LLMOp, EmbeddingOp, RerankOp tham chiếu qua `resource_key`.
+ResourceHub tự động load cấu hình từ `resources.yaml`. LLMOp, EmbeddingOp, RerankOp tham chiếu qua `resource`.
 
 ```yaml
 # resources.yaml
@@ -198,7 +198,7 @@ llm:gpt-4o:
 ```python
 llm = LLMOp(
     name="llm",
-    resource_key="gpt-4o",  # Tham chiếu llm:gpt-4o
+    resource="gpt-4o",  # Tham chiếu llm:gpt-4o
     inputs={"messages": prompt["messages"]}
 )
 ```

@@ -1,7 +1,7 @@
 """Test OTELTracer with OpenTelemetry backend.
 
 This module tests the OTELTracer implementation including:
-- Tracer creation with direct config and resource_key
+- Tracer creation with direct config and resource
 - Config serialization for subprocess
 - Tracer registration
 - Flush method with mocked OTEL client
@@ -152,14 +152,14 @@ class TestOTELClient:
 class TestOTELTracer:
     """Test OTELTracer creation and configuration."""
 
-    def test_tracer_creation_with_resource_key(self):
-        """Test OTELTracer creation with resource_key."""
+    def test_tracer_creation_with_resource(self):
+        """Test OTELTracer creation with resource."""
         from hush.telemetry import OTELTracer
 
-        tracer = OTELTracer(resource_key="otel:jaeger")
+        tracer = OTELTracer(resource="otel:jaeger")
 
-        assert tracer.resource_key == "otel:jaeger"
-        assert repr(tracer) == "<OTELTracer resource_key=otel:jaeger>"
+        assert tracer.resource == "otel:jaeger"
+        assert repr(tracer) == "<OTELTracer resource=otel:jaeger>"
 
     def test_tracer_creation_with_config(self):
         """Test OTELTracer creation with direct config."""
@@ -169,41 +169,41 @@ class TestOTELTracer:
         tracer = OTELTracer(config=config)
 
         assert tracer._config == config
-        assert tracer.resource_key is None
+        assert tracer.resource is None
         assert "endpoint=" in repr(tracer)
 
     def test_tracer_creation_with_tags(self):
         """Test OTELTracer creation with static tags."""
         from hush.telemetry import OTELTracer
 
-        tracer = OTELTracer(resource_key="otel:jaeger", tags=["prod", "ml-team"])
+        tracer = OTELTracer(resource="otel:jaeger", tags=["prod", "ml-team"])
 
         assert tracer.tags == ["prod", "ml-team"]
 
-    def test_tracer_requires_config_or_resource_key(self):
-        """Test OTELTracer raises error if neither config nor resource_key provided."""
+    def test_tracer_requires_config_or_resource(self):
+        """Test OTELTracer raises error if neither config nor resource provided."""
         from hush.telemetry import OTELTracer
 
         with pytest.raises(ValueError, match="Must provide either"):
             OTELTracer()
 
-    def test_tracer_rejects_both_config_and_resource_key(self):
-        """Test OTELTracer raises error if both config and resource_key provided."""
+    def test_tracer_rejects_both_config_and_resource(self):
+        """Test OTELTracer raises error if both config and resource provided."""
         from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig.jaeger()
 
         with pytest.raises(ValueError, match="Cannot provide both"):
-            OTELTracer(config=config, resource_key="otel:jaeger")
+            OTELTracer(config=config, resource="otel:jaeger")
 
-    def test_tracer_config_serialization_resource_key(self):
-        """Test tracer config returns resource_key for subprocess."""
+    def test_tracer_config_serialization_resource(self):
+        """Test tracer config returns resource for subprocess."""
         from hush.telemetry import OTELTracer
 
-        tracer = OTELTracer(resource_key="otel:jaeger")
+        tracer = OTELTracer(resource="otel:jaeger")
 
         tracer_config = tracer._get_tracer_config()
-        assert tracer_config["resource_key"] == "otel:jaeger"
+        assert tracer_config["resource"] == "otel:jaeger"
         assert "config" not in tracer_config
 
     def test_tracer_config_serialization_direct_config(self):
@@ -220,7 +220,7 @@ class TestOTELTracer:
         tracer_config = tracer._get_tracer_config()
         assert "config" in tracer_config
         assert tracer_config["config"]["endpoint"] == "http://localhost:4317"
-        assert "resource_key" not in tracer_config
+        assert "resource" not in tracer_config
 
     def test_tracer_registered(self):
         """Test OTELTracer is registered in tracer registry."""
@@ -307,7 +307,7 @@ class TestOTELTracerFlush:
         """Create mock flush data structure."""
         return {
             "tracer_type": "OTELTracer",
-            "tracer_config": {"resource_key": "otel:test"},
+            "tracer_config": {"resource": "otel:test"},
             "workflow_name": "test-workflow",
             "request_id": str(uuid.uuid4()),
             "user_id": "test-user",
@@ -410,8 +410,8 @@ class TestOTELTracerFlush:
             },
         }
 
-    def test_flush_with_resource_key(self, mock_flush_data):
-        """Test flush with resource_key creates spans correctly."""
+    def test_flush_with_resource(self, mock_flush_data):
+        """Test flush with resource creates spans correctly."""
         from hush.telemetry import OTELTracer
 
         # Mock the OTEL dependencies
@@ -500,7 +500,7 @@ class TestOTELTracerFlush:
 
         flush_data = {
             "tracer_type": "OTELTracer",
-            "tracer_config": {"resource_key": "otel:test"},
+            "tracer_config": {"resource": "otel:test"},
             "workflow_name": "iteration-workflow",
             "request_id": str(uuid.uuid4()),
             "user_id": None,
@@ -609,8 +609,8 @@ if __name__ == "__main__":
     TestOTELClient().test_client_creation()
     print("   PASSED")
 
-    print("\n6. Testing OTELTracer creation with resource_key...")
-    TestOTELTracer().test_tracer_creation_with_resource_key()
+    print("\n6. Testing OTELTracer creation with resource...")
+    TestOTELTracer().test_tracer_creation_with_resource()
     print("   PASSED")
 
     print("\n7. Testing OTELTracer creation with config...")

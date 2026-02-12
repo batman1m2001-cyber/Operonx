@@ -23,10 +23,10 @@ class TestRerankOp:
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="test_rerank", resource_key="bge-m3")
+            node = RerankOp(name="test_rerank", resource="bge-m3")
 
             assert node.type == "rerank"
-            assert node.resource_key == "bge-m3"
+            assert node.resource == "bge-m3"
 
     def test_input_schema(self):
         """Test RerankOp has query and documents inputs."""
@@ -37,7 +37,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="input_test", resource_key="bge-m3")
+            node = RerankOp(name="input_test", resource="bge-m3")
 
             assert "query" in node.inputs
             assert "documents" in node.inputs
@@ -53,7 +53,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="output_test", resource_key="bge-m3")
+            node = RerankOp(name="output_test", resource="bge-m3")
 
             assert "reranks" in node.outputs
 
@@ -66,7 +66,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="metadata_test", resource_key="bge-m3")
+            node = RerankOp(name="metadata_test", resource="bge-m3")
 
             metadata = node.specific_metadata
             assert metadata["model"] == "bge-m3"
@@ -85,7 +85,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="process_test", resource_key="bge-m3")
+            node = RerankOp(name="process_test", resource="bge-m3")
 
             result = await node._process(
                 query="test query", documents=["doc1", "doc2"], top_k=2, threshold=0.0
@@ -107,7 +107,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="dict_test", resource_key="bge-m3")
+            node = RerankOp(name="dict_test", resource="bge-m3")
 
             result = await node._process(
                 query="test",
@@ -130,7 +130,7 @@ class TestRerankOp:
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = RerankOp(name="empty_test", resource_key="bge-m3")
+            node = RerankOp(name="empty_test", resource="bge-m3")
 
             result = await node._process(query="test", documents=[], top_k=5, threshold=0.0)
 
@@ -151,7 +151,7 @@ class TestRerankOpIntegration:
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured in resources.yaml")
 
-        node = RerankOp(name="rerank", resource_key="bge-m3-onnx")
+        node = RerankOp(name="rerank", resource="bge-m3-onnx")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -186,7 +186,7 @@ class TestRerankOpIntegration:
         if not hub.has("reranking:bge-m3"):
             pytest.skip("reranking:bge-m3 not configured in resources.yaml")
 
-        node = RerankOp(name="rerank_pinecone", resource_key="bge-m3")
+        node = RerankOp(name="rerank_pinecone", resource="bge-m3")
 
         schema = StateSchema(op=node)
         state = MemoryState(

@@ -7,7 +7,7 @@ Strategy: bytecode analysis (primary) → source parsing (fallback) → None.
 
 Example::
 
-    llm = LLMOp.of(resource_key="gpt-4o")
+    llm = LLMOp.of(resource="gpt-4o")
     # llm.name == "llm" — auto-detected from the assignment
 
 Public API:

@@ -52,7 +52,7 @@ async def test_batch_llm_node():
         with GraphOp(name=f"batch_chat_{i}") as workflow:
             llm = LLMOp(
                 name="chat",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 batch_mode=True,
                 inputs={"messages": PARENT["messages"]},
                 outputs={"*": PARENT},
@@ -115,7 +115,7 @@ async def test_normal_llm_node():
         with GraphOp(name=f"normal_chat_{i}") as workflow:
             llm = LLMOp(
                 name="chat",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 batch_mode=False,  # Normal mode
                 inputs={"messages": PARENT["messages"]},
                 outputs={"*": PARENT},

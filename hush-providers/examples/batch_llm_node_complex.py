@@ -61,7 +61,7 @@ async def test_mixed_batch_async():
         # Fast async LLM (normal mode)
         async_llm = LLMOp(
             name="fast_llm",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             batch_mode=False,
             inputs={"messages": PARENT["messages"]},
             outputs={"content": PARENT["fast_response"], "tokens_used": PARENT["fast_tokens"]},
@@ -71,7 +71,7 @@ async def test_mixed_batch_async():
         # In real use case, you'd use this for non-time-sensitive tasks
         batch_llm = LLMOp(
             name="batch_llm",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             batch_mode=True,
             inputs={"messages": PARENT["messages"]},
             outputs={"content": PARENT["batch_response"], "tokens_used": PARENT["batch_tokens"]},
@@ -117,7 +117,7 @@ async def test_load_balancing_with_fallback():
         llm = LLMOp(
             name="chat",
             # Load balance between gpt-4o (70%) and claude (30%)
-            resource_key=["gpt-4o", "or-claude-4-sonnet"],
+            resource=["gpt-4o", "or-claude-4-sonnet"],
             ratios=[0.7, 0.3],
             # Fallback to the other model if primary fails
             fallback=["or-claude-4-sonnet", "gpt-4o"],
@@ -176,7 +176,7 @@ async def test_parallel_async_execution():
         with GraphOp(name=f"workflow_{i}") as workflow:
             llm = LLMOp(
                 name="chat",
-                resource_key="gpt-4o",
+                resource="gpt-4o",
                 batch_mode=False,  # Fast async mode
                 inputs={"messages": PARENT["messages"]},
                 outputs={"*": PARENT},

@@ -266,7 +266,7 @@ class TestConditionError:
     def test_compile_phase_error(self):
         """Test condition error during compile phase."""
         error = ConditionError(
-            message="Invalid stop_condition syntax",
+            message="Invalid until syntax",
             condition="x >= = 5",  # Invalid syntax
             phase="compile",
         )
@@ -496,18 +496,18 @@ class TestEmbeddingError:
     def test_basic_embedding_error(self):
         """Test basic embedding error creation."""
         error = EmbeddingError(
-            message="Embedding backend failed", resource_key="bge-m3", text_count=100
+            message="Embedding backend failed", resource="bge-m3", text_count=100
         )
         msg = str(error)
         assert "[EMBEDDING]" in msg
-        assert "resource_key:" in msg and "bge-m3" in msg
+        assert "resource:" in msg and "bge-m3" in msg
         assert "text_count:" in msg and "100" in msg
 
     def test_with_connection_error(self):
         """Test embedding error with connection error."""
         error = EmbeddingError(
             message="Failed to connect to embedding service",
-            resource_key="text-embedding-ada-002",
+            resource="text-embedding-ada-002",
             text_count=50,
             original_error=ConnectionError("Connection refused"),
         )
@@ -516,8 +516,8 @@ class TestEmbeddingError:
 
     def test_attributes_stored(self):
         """Test that attributes are stored."""
-        error = EmbeddingError(message="Test", resource_key="model-key", text_count=25)
-        assert error.resource_key == "model-key"
+        error = EmbeddingError(message="Test", resource="model-key", text_count=25)
+        assert error.resource == "model-key"
         assert error.text_count == 25
 
 
@@ -533,13 +533,13 @@ class TestRerankError:
         """Test basic rerank error creation."""
         error = RerankError(
             message="Invalid document type",
-            resource_key="bge-m3",
+            resource="bge-m3",
             query="search query",
             document_count=50,
         )
         msg = str(error)
         assert "[RERANK]" in msg
-        assert "resource_key:" in msg and "bge-m3" in msg
+        assert "resource:" in msg and "bge-m3" in msg
         assert "query:" in msg
         assert "document_count:" in msg and "50" in msg
 
@@ -547,7 +547,7 @@ class TestRerankError:
         """Test rerank error with type error."""
         error = RerankError(
             message="Invalid document type",
-            resource_key="bge-m3",
+            resource="bge-m3",
             query="test query",
             document_count=10,
             original_error=TypeError("Expected List[str] or List[Dict]"),
@@ -558,9 +558,7 @@ class TestRerankError:
     def test_long_query_truncated(self):
         """Test that long query is truncated."""
         long_query = "search " * 100
-        error = RerankError(
-            message="Error", resource_key="model", query=long_query, document_count=10
-        )
+        error = RerankError(message="Error", resource="model", query=long_query, document_count=10)
         msg = str(error)
         # Query truncated at 100 chars
         assert "..." in msg
@@ -568,9 +566,9 @@ class TestRerankError:
     def test_attributes_stored(self):
         """Test that attributes are stored."""
         error = RerankError(
-            message="Test", resource_key="rerank-model", query="my query", document_count=30
+            message="Test", resource="rerank-model", query="my query", document_count=30
         )
-        assert error.resource_key == "rerank-model"
+        assert error.resource == "rerank-model"
         assert error.query == "my query"
         assert error.document_count == 30
 
@@ -595,10 +593,10 @@ class TestErrorInheritance:
                 {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
             ),
             (PromptError, {"message": "test", "template": "x"}),
-            (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
+            (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
                 RerankError,
-                {"message": "test", "resource_key": "k", "query": "q", "document_count": 1},
+                {"message": "test", "resource": "k", "query": "q", "document_count": 1},
             ),
         ],
     )
@@ -620,10 +618,10 @@ class TestErrorInheritance:
                 {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
             ),
             (PromptError, {"message": "test", "template": "x"}),
-            (EmbeddingError, {"message": "test", "resource_key": "k", "text_count": 1}),
+            (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
                 RerankError,
-                {"message": "test", "resource_key": "k", "query": "q", "document_count": 1},
+                {"message": "test", "resource": "k", "query": "q", "document_count": 1},
             ),
         ],
     )

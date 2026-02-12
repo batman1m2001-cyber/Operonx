@@ -139,19 +139,19 @@ All provider ops use `Op.of()` classmethods for concise creation (recommended) a
 from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
 
 # Prompt + LLM all-in-one
-chat = ChainOp.of(resource_key="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+chat = ChainOp.of(resource="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Separate LLM call
-llm = LLMOp.of(resource_key="gpt-4o", messages=PARENT["messages"])
+llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
 
 # Separate prompt formatting
 p = PromptOp.of(template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Embeddings
-embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
+embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
 # Reranking
-rerank = RerankOp.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
+rerank = RerankOp.of(resource="bge-m3", query=PARENT["query"], documents=PARENT["docs"])
 ```
 
 ### Full Class Equivalents
@@ -161,7 +161,7 @@ from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
 # ChainOp = Prompt + LLM combined
 chain = ChainOp(
     name="chat",
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     inputs={"template": {"system": "...", "user": "{input}"}, "input": PARENT["query"]},
     outputs={"content": PARENT["answer"]}
 )
@@ -169,7 +169,7 @@ chain = ChainOp(
 # LLMOp = Raw LLM call
 llm = LLMOp(
     name="generate",
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     inputs={"messages": PARENT["messages"]},
     outputs={"content": PARENT["response"]},
 )
@@ -247,7 +247,7 @@ from hush.core.exceptions import EmbeddingError
 
 raise EmbeddingError(
     message="Connection failed",
-    resource_key="bge-m3",
+    resource="bge-m3",
     text_count=100,
     original_error=e
 )

@@ -1,4 +1,4 @@
-"""While loop node to iterate while condition is true."""
+"""WhileOp — conditional loop that repeats until a condition is met."""
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -14,64 +14,65 @@ if TYPE_CHECKING:
 
 
 class WhileOp(BaseIterationOp):
-    """Node that iterates while condition is true.
+    """Conditional loop op — repeats until ``until`` expression evaluates to True.
 
-    Loop continues while `stop_condition` evaluates to False.
-    When `stop_condition` becomes True, loop stops.
+    Use when the number of iterations is unknown upfront (e.g. retry loops,
+    agentic reasoning). A ``max_iterations`` safety limit prevents runaway loops.
 
-    Example:
-        with WhileOp(
-            name="loop",
-            inputs={"counter": 0},
-            stop_condition="counter >= 5"
-        ) as loop:
-            node = process(
-                inputs={"counter": PARENT["counter"]},
-                outputs={"new_counter": PARENT["counter"]}
-            )
-            START >> node >> END
+    Inputs:
+        Initial loop state variables (e.g. ``counter=0``). Child ops update
+        these via output mappings to ``PARENT``.
+        ``until`` (str): Python expression evaluated each iteration.
+        ``max_iterations`` (int): Safety limit. Default: 100.
+
+    Outputs:
+        Final loop state plus ``iteration_metrics`` with
+        ``max_iterations_reached`` and ``stopped_by_condition`` flags.
+
+    Example::
+
+        with WhileOp(inputs={"counter": 0}, until="counter >= 5") as loop:
+            step = increment(counter=PARENT["counter"])
+            step["new_counter"] >> PARENT["counter"]
+            START >> step >> END
     """
 
     type: OpType = "while"
 
-    __slots__ = ["_max_iterations", "_stop_condition", "_compiled_condition"]
+    __slots__ = ["_max_iterations", "_until", "_compiled_condition"]
 
-    def __init__(self, stop_condition: Optional[str] = None, max_iterations: int = 100, **kwargs):
+    def __init__(self, until: Optional[str] = None, max_iterations: int = 100, **kwargs):
         """Initialize WhileOp.
 
         Args:
-            stop_condition: String expression evaluated each iteration.
+            until: String expression evaluated each iteration.
                 When evaluates to True, loop stops.
             max_iterations: Max iterations to prevent infinite loops. Default 100.
         """
         super().__init__(**kwargs)
 
         self._max_iterations = max_iterations
-        self._stop_condition = stop_condition
-        self._compiled_condition = (
-            self._compile_condition(stop_condition) if stop_condition else None
-        )
+        self._until = until
+        self._compiled_condition = self._compile_condition(until) if until else None
 
     def _compile_condition(self, condition: str):
-        """Compile stop condition for performance."""
+        """Compile until condition for performance."""
         try:
-            return compile(condition, f"<stop_condition: {condition}>", "eval")
+            return compile(condition, f"<until: {condition}>", "eval")
         except SyntaxError as e:
             raise ConditionError(
-                message="Invalid stop_condition syntax",
+                message="Invalid until expression syntax",
                 condition=condition,
                 phase="compile",
                 original_error=e,
             ) from e
 
-    def _evaluate_stop_condition(
-        self, inputs: Dict[str, Any], iteration: Optional[int] = None
-    ) -> bool:
-        """Evaluate stop condition with current inputs.
+    def _evaluate_until(self, inputs: Dict[str, Any], iteration: Optional[int] = None) -> bool:
+        """Evaluate until condition with current inputs.
 
         Args:
-            inputs: Current input values
-            iteration: Current iteration number (for error context)
+            inputs: Current input values.
+            iteration: Current iteration number (for error context).
 
         Returns:
             True if loop should stop, False to continue.
@@ -84,8 +85,8 @@ class WhileOp(BaseIterationOp):
             return bool(result)
         except Exception as e:
             error = ConditionError(
-                message="Stop condition evaluation failed",
-                condition=self._stop_condition,
+                message="Until condition evaluation failed",
+                condition=self._until,
                 inputs=inputs,
                 iteration=iteration,
                 phase="eval",
@@ -124,9 +125,9 @@ class WhileOp(BaseIterationOp):
             for k, v in (self.outputs or {}).items()
         }
 
-        # Add variables from stop_condition to inputs
-        if self._stop_condition:
-            for var_name in extract_condition_variables(self._stop_condition):
+        # Add variables from until expression to inputs
+        if self._until:
+            for var_name in extract_condition_variables(self._until):
                 if var_name not in parsed_inputs:
                     parsed_inputs[var_name] = Param(type=Any, required=False)
 
@@ -147,12 +148,12 @@ class WhileOp(BaseIterationOp):
         parent_context: Optional[str],
         request_id: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Execute while loop until stop_condition is True or max_iterations reached."""
+        """Execute while loop until condition is True or max_iterations reached."""
         _inputs = self.get_inputs(state, context_id, parent_context)
         step_inputs = _inputs
         step_count = 0
 
-        should_stop = self._evaluate_stop_condition(step_inputs, iteration=0)
+        should_stop = self._evaluate_until(step_inputs, iteration=0)
 
         ctx_prefix = (context_id + ".") if context_id else ""
         while not should_stop and step_count < self._max_iterations:
@@ -166,7 +167,7 @@ class WhileOp(BaseIterationOp):
             step_inputs = {**step_inputs, **_outputs}
             step_count += 1
 
-            should_stop = self._evaluate_stop_condition(step_inputs, iteration=step_count)
+            should_stop = self._evaluate_until(step_inputs, iteration=step_count)
 
         if step_count >= self._max_iterations and not should_stop:
             LOGGER.warning(
@@ -194,10 +195,10 @@ class WhileOp(BaseIterationOp):
 
         Example::
 
-            with WhileOp.of(counter=0, stop_condition="counter >= 5") as loop:
-                node = process(counter=PARENT["counter"])
-                node["new_counter"] >> PARENT["counter"]
-                START >> node >> END
+            with WhileOp.of(counter=0, until="counter >= 5") as loop:
+                step = process(counter=PARENT["counter"])
+                step["new_counter"] >> PARENT["counter"]
+                START >> step >> END
         """
         inputs, init_kwargs = split_iter_kwargs(kwargs)
         return cls(inputs=inputs, **init_kwargs)
@@ -205,4 +206,4 @@ class WhileOp(BaseIterationOp):
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
-        return {"max_iterations": self._max_iterations, "stop_condition": self._stop_condition}
+        return {"max_iterations": self._max_iterations, "until": self._until}

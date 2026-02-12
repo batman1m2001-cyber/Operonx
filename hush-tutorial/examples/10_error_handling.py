@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import op, if_
+from hush.core.ops import if_, op
 
 # =============================================================================
 # Ví dụ 1: Error capture trong state
@@ -217,7 +217,7 @@ async def example_4_llm_fallback():
         print("  Cách dùng LLM fallback:")
         print("  ```python")
         print("  llm = LLMOp.of(")
-        print('      resource_key="gpt-4o",')
+        print('      resource="gpt-4o",')
         print('      fallback=["gpt-4o-mini"],')
         print('      messages=p["messages"],')
         print("  )")
@@ -237,7 +237,7 @@ async def example_4_llm_fallback():
 
         # fallback: nếu gpt-4o fails → thử gpt-4o-mini
         llm = LLMOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             fallback=["gpt-4o-mini"],
             messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},

@@ -274,8 +274,8 @@ async def example_4_parallel_llm():
             text=PARENT["text"],
         )
 
-        llm_summary = LLMOp.of(resource_key="gpt-4o-mini", messages=p_summary["messages"])
-        llm_keywords = LLMOp.of(resource_key="gpt-4o-mini", messages=p_keywords["messages"])
+        llm_summary = LLMOp.of(resource="gpt-4o-mini", messages=p_summary["messages"])
+        llm_keywords = LLMOp.of(resource="gpt-4o-mini", messages=p_keywords["messages"])
 
         m = merge_results(
             s=llm_summary["content"],
@@ -310,7 +310,7 @@ async def example_4_parallel_llm():
                 query=PARENT["query"],
             )
             llm = LLMOp.of(
-                resource_key="gpt-4o-mini",
+                resource="gpt-4o-mini",
                 messages=p["messages"],
                 outputs={"content": PARENT["answer"]},
             )

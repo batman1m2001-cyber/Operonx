@@ -1,4 +1,4 @@
-"""Node thực thi code Python trong workflow."""
+"""FuncOp — execute a Python function as a workflow op."""
 
 import ast
 import inspect
@@ -17,23 +17,27 @@ if TYPE_CHECKING:
 
 
 def op(func):
-    """Decorator chuyển function thành factory tạo FuncOp.
+    """Decorator that turns a plain function into a FuncOp factory.
 
-    Sử dụng:
+    The decorated function can be called with keyword arguments to create
+    a ``FuncOp`` instance. Auto-naming is supported.
+
+    Example::
+
         @op
-        def my_function(arg1, arg2):
-            return {"result": value}
+        def double(x: int):
+            return {"result": x * 2}
 
-        node = my_function(inputs={"arg1": PARENT, "arg2": "value"})
+        step = double(x=PARENT["x"])   # creates FuncOp, step.name == "step"
     """
-    # Warn at decoration time if function params collide with reserved node keywords
+    # Warn at decoration time if function params collide with reserved op keywords
     sig = inspect.signature(func)
     collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
     if collisions:
         LOGGER.warning(
-            "@op function '%s' has parameter(s) %s that collide with reserved node keywords %s. "
+            "@op function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
             "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
-            "as node constructor args instead of function inputs. Consider renaming them.",
+            "as op constructor args instead of function inputs. Consider renaming them.",
             func.__name__,
             sorted(collisions),
             sorted(_BASE_INIT_KEYS),
@@ -144,7 +148,7 @@ def parse_comment(comment: str) -> tuple:
 
 
 def _extract_dict_keys(dict_node: ast.Dict, source_lines: List[str]) -> Dict[str, Param]:
-    """Trích xuất các key từ AST Dict node."""
+    """Extract keys from an AST Dict node."""
     schema = {}
     for key_node in dict_node.keys:
         if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
@@ -232,10 +236,28 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
 
 
 class FuncOp(BaseOp):
-    """Node thực thi function Python.
+    """Op that executes a Python function.
 
-    Tự động trích xuất input/output từ function signature và AST.
-    Hỗ trợ cả sync và async function.
+    Inputs and outputs are auto-extracted from the function's signature and
+    return-statement AST. Both sync and async functions are supported.
+    Prefer the ``@op`` decorator over instantiating ``FuncOp`` directly.
+
+    Inputs:
+        Auto-parsed from the function's parameter list.
+
+    Outputs:
+        Auto-parsed from ``return {"key": ...}`` via AST, or from
+        explicit ``return_keys``.
+
+    Example::
+
+        @op
+        def add(a: int, b: int):
+            return {"sum": a + b}
+
+        with GraphOp(name="main") as graph:
+            result = add(a=PARENT["x"], b=PARENT["y"])
+            START >> result >> END
     """
 
     type: OpType = "code"

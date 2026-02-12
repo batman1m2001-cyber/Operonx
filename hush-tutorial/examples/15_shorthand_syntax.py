@@ -21,8 +21,9 @@ from hush.core.ops import (
     Each,  # Iteration marker
     ForOp,
     MapOp,
-    WhileOp, op,  # Decorator
+    WhileOp,  # Decorator
     if_,  # Branch shorthand
+    op,
 )
 
 # =============================================================================
@@ -155,7 +156,7 @@ async def example_4_while_shorthand():
         # Shorthand: value=256 instead of inputs={"value": 256}
         with WhileOp.of(
             value=256,
-            stop_condition="value < 10",  # Stop when value < 10
+            until="value < 10",  # Stop when value < 10
             max_iterations=20,
         ) as loop:
             step = halve(name="halve", value=PARENT["value"])
@@ -193,9 +194,7 @@ async def example_5_if_shorthand():
             name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT}
         )
         good = FuncOp(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
-        average = FuncOp(
-            name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT}
-        )
+        average = FuncOp(name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT})
         fail = FuncOp(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
 
         # Add message

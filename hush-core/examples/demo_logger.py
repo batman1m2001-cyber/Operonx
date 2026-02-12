@@ -225,25 +225,25 @@ def demo_all_project_logs():
 
     # while_op.py:65 - Invalid condition syntax (ERROR)
     condition = "counter >== 5"
-    logger.error("Invalid stop_condition syntax [str]'%s'[/str]: %s", condition, "invalid syntax")
+    logger.error("Invalid until syntax [str]'%s'[/str]: %s", condition, "invalid syntax")
 
     # while_op.py:81 - Condition evaluation error (ERROR)
     logger.error(
-        "Error evaluating stop_condition [str]'%s'[/str]: %s",
+        "Error evaluating until [str]'%s'[/str]: %s",
         "counter >= max",
         "name 'max' is not defined",
     )
 
     # while_op.py:168-172 - Max iterations reached (WARNING)
     max_iterations = 100
-    stop_condition = "done == True"
+    until = "done == True"
     logger.warning(
         "[title]\\[%s][/title] WhileOp [highlight]%s[/highlight]: max_iterations [muted](%s)[/muted] reached. "
         "Condition [str]'%s'[/str] never evaluated to True. This may indicate an infinite loop or incorrect stop condition.",
         request_id,
         full_name,
         max_iterations,
-        stop_condition,
+        until,
     )
 
     # while_op.py:191-192 - Op error (ERROR)

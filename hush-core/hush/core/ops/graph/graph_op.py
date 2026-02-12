@@ -1,4 +1,4 @@
-"""Graph node để quản lý graph các node trong workflow."""
+"""GraphOp — container op that manages a graph of child ops."""
 
 import asyncio
 import inspect
@@ -141,16 +141,27 @@ class GraphValidationError(Exception):
 
 
 class GraphOp(BaseOp):
-    """Node chứa và quản lý một graph các node.
+    """Container op that holds and executes a directed graph of child ops.
 
-    Cho phép tổ chức các node thành graph tái sử dụng với thực thi
-    song song các nhánh và điều khiển luồng phù hợp.
+    Used to organise ops into reusable sub-workflows. Independent branches
+    execute in parallel; dependencies are resolved via ready-count scheduling.
+    Use as a context manager — ops created inside the ``with`` block are
+    automatically registered.
 
-    Hỗ trợ:
-    - Context manager (with GraphOp() as graph)
-    - Entry/exit node tự động
-    - Thực thi song song các node độc lập
-    - Soft/hard edge cho branch merging
+    Inputs:
+        Auto-discovered from child ops that reference ``PARENT["key"]``
+        in their inputs.
+
+    Outputs:
+        Auto-discovered from child ops that write to ``PARENT["key"]``
+        in their outputs, or auto-forwarded by ``>> END``.
+
+    Example::
+
+        with GraphOp(name="pipeline") as graph:
+            a = double(x=PARENT["x"])
+            b = add(a=a["result"], b=PARENT["y"])
+            START >> a >> b >> END
     """
 
     __slots__ = [
@@ -161,7 +172,7 @@ class GraphOp(BaseOp):
         "prevs",
         "nexts",
         "ready_count",
-        "has_soft_preds",  # Set of nodes that have soft predecessors
+        "has_soft_preds",  # Set of ops that have soft predecessors
         "flowtype_map",
         "_edges",
         "_edges_lookup",
@@ -184,59 +195,58 @@ class GraphOp(BaseOp):
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
         self.flowtype_map = BiMap[str, OpFlowType]()
-        self.has_soft_preds = set()  # Các node có soft predecessor
+        self.has_soft_preds = set()  # Ops with soft predecessors
         self._compiled_adj = {}
 
     def __enter__(self):
-        """Vào chế độ context manager."""
+        """Enter context manager mode."""
         self._token = _current_graph.set(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Thoát chế độ context manager."""
+        """Exit context manager mode."""
         _current_graph.reset(self._token)
         if exc_type is None:
             self._setup_schema()
 
     def _setup_endpoints(self):
-        """Khởi tạo entry/exit node."""
-        LOGGER.debug("Graph [highlight]%s[/highlight]: đang khởi tạo endpoints...", self.name)
+        """Discover entry/exit ops from the graph topology."""
+        LOGGER.debug("Graph [highlight]%s[/highlight]: setting up endpoints...", self.name)
 
         if not self.entries:
-            self.entries = [node for node in self._ops if not self.prevs[node]]
+            self.entries = [name for name in self._ops if not self.prevs[name]]
 
         if not self.exits:
-            self.exits = [node for node in self._ops if not self.nexts[node]]
+            self.exits = [name for name in self._ops if not self.nexts[name]]
 
         if not self.entries:
             LOGGER.error(
-                "Graph [highlight]%s[/highlight]: không tìm thấy entry node. Kiểm tra kết nối START >> node.",
+                "Graph [highlight]%s[/highlight]: no entry op found. Check START >> op connections.",
                 self.name,
             )
-            raise ValueError("Graph phải có ít nhất một entry node.")
+            raise ValueError("Graph must have at least one entry op.")
         if not self.exits:
             LOGGER.error(
-                "Graph [highlight]%s[/highlight]: không tìm thấy exit node. Kiểm tra kết nối node >> END.",
+                "Graph [highlight]%s[/highlight]: no exit op found. Check op >> END connections.",
                 self.name,
             )
-            raise ValueError("Graph phải có ít nhất một exit node.")
+            raise ValueError("Graph must have at least one exit op.")
 
     def _setup_schema(self):
-        """Khởi tạo inputs/outputs từ các node con.
+        """Discover inputs/outputs from child ops.
 
-        Scan các node con để tìm các ref trỏ đến PARENT (self) -
-        đó chính là inputs/outputs của graph.
+        Scans child ops for Ref references pointing to PARENT (self) —
+        those become the graph's inputs/outputs.
         """
-        LOGGER.debug("Graph [highlight]%s[/highlight]: đang tạo schema...", self.name)
+        LOGGER.debug("Graph [highlight]%s[/highlight]: building schema...", self.name)
         graph_inputs = {}
         graph_outputs = {}
 
-        for _, node in self._ops.items():
-            # Kiểm tra inputs: nếu ref trỏ đến self (father), đó là graph input
-            for var, param in node.inputs.items():
+        for _, child in self._ops.items():
+            # Check inputs: if ref points to self (father), it's a graph input
+            for var, param in child.inputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
-                    # PARENT["x"] resolve thành father - đây là graph input
-                    # Copy Param từ node con, giữ nguyên type/required/default/description
+                    # PARENT["x"] resolves to father — this is a graph input
                     graph_inputs[param.value.var] = Param(
                         type=param.type,
                         required=param.required,
@@ -244,11 +254,10 @@ class GraphOp(BaseOp):
                         description=param.description,
                     )
 
-            # Kiểm tra outputs: nếu ref trỏ đến self (father), đó là graph output
-            for var, param in node.outputs.items():
+            # Check outputs: if ref points to self (father), it's a graph output
+            for var, param in child.outputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
-                    # PARENT["x"] resolve thành father - đây là graph output
-                    # Copy Param từ node con
+                    # PARENT["x"] resolves to father — this is a graph output
                     graph_outputs[param.value.var] = Param(
                         type=param.type,
                         required=param.required,
@@ -256,39 +265,37 @@ class GraphOp(BaseOp):
                         description=param.description,
                     )
 
-        # Merge với user-provided inputs/outputs (nếu có)
+        # Merge with user-provided inputs/outputs (if any)
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)
 
     def _build_flow_type(self):
-        """Xác định flow type của mỗi node dựa trên pattern kết nối."""
-        LOGGER.debug(
-            "Graph [highlight]%s[/highlight]: đang xác định flow type của các node...", self.name
-        )
+        """Determine the flow type of each op based on its connectivity pattern."""
+        LOGGER.debug("Graph [highlight]%s[/highlight]: determining flow types...", self.name)
         self.flowtype_map = BiMap[str, OpFlowType]()
 
-        # Phát hiện orphan node (không có kết nối nào)
-        orphan_nodes = []
+        # Detect orphan ops (no connections at all)
+        orphan_ops = []
 
-        for name, node in self._ops.items():
+        for name, child in self._ops.items():
             prev_count = len(self.prevs[name])
             next_count = len(self.nexts[name])
 
-            # Kiểm tra orphan node (không phải start/end, không phải inner graph, và không có kết nối)
+            # Check orphan op (not start/end, not inner graph, and no connections)
             if (
                 prev_count == 0
                 and next_count == 0
-                and not node.start
-                and not node.end
+                and not child.start
+                and not child.end
                 and name != BaseOp.INNER_PROCESS
             ):
-                orphan_nodes.append(name)
+                orphan_ops.append(name)
 
             flow_type: OpFlowType = "OTHER"
 
-            if node.type == "branch":
+            if child.type == "branch":
                 flow_type = "BRANCH"
-                for target in node.candidates:
+                for target in child.candidates:
                     if target in self._ops and len(self.nexts[target]) == 1:
                         self.flowtype_map[target] = "NORMAL"
 
@@ -303,28 +310,28 @@ class GraphOp(BaseOp):
 
             self.flowtype_map[name] = flow_type
 
-        # Cảnh báo về orphan node
-        if orphan_nodes:
+        # Warn about orphan ops
+        if orphan_ops:
             LOGGER.warning(
-                "Graph [highlight]%s[/highlight]: phát hiện orphan node [muted](không có edge)[/muted]: %s. Các node này sẽ không bao giờ được thực thi.",
+                "Graph [highlight]%s[/highlight]: detected orphan ops [muted](no edges)[/muted]: %s. These ops will never be executed.",
                 self.full_name,
-                orphan_nodes,
+                orphan_ops,
             )
 
     def build(self):
-        """Build graph bằng cách build các node con trước, sau đó graph này."""
-        for node in self._ops.values():
-            if hasattr(node, "build"):
-                node.build()
+        """Build graph by building child ops first, then this graph."""
+        for child in self._ops.values():
+            if hasattr(child, "build"):
+                child.build()
 
         self._setup_schema()
         self._build_flow_type()
         self._setup_endpoints()
 
-        # Tính ready_count:
-        # - Hard edge (>>) đếm từng cái một
-        # - Soft edge (>) của cùng node đích đếm chung là 1 (chờ BẤT KỲ một soft pred hoàn thành)
-        # Ví dụ: A >> D, B > D, C > D => ready_count[D] = 2 (1 hard + 1 soft group)
+        # Compute ready_count:
+        # - Hard edge (>>) counts individually
+        # - Soft edges (>) to the same target count as 1 (wait for ANY soft pred to complete)
+        # Example: A >> D, B > D, C > D => ready_count[D] = 2 (1 hard + 1 soft group)
         self.ready_count = {}
         self.has_soft_preds = set()
         for name in self._ops:
@@ -337,9 +344,9 @@ class GraphOp(BaseOp):
                 elif edge and not edge.soft:
                     hard_pred_count += 1
                 elif edge is None:
-                    # Edge không tìm thấy trong lookup (không nên xảy ra, nhưng vẫn đếm)
+                    # Edge not found in lookup (shouldn't happen, but still count)
                     hard_pred_count += 1
-            # Soft edges đếm chung là 1 nếu có
+            # Soft edges count as 1 if present
             if has_soft:
                 self.has_soft_preds.add(name)
                 hard_pred_count += 1
@@ -353,10 +360,10 @@ class GraphOp(BaseOp):
         self._compiled_adj = {}
         for name in self._ops:
             adj = []
-            for next_node in self.nexts[name]:
-                edge = self._edges_lookup.get((name, next_node))
+            for successor in self.nexts[name]:
+                edge = self._edges_lookup.get((name, successor))
                 is_soft = bool(edge and edge.soft)
-                adj.append((next_node, is_soft))
+                adj.append((successor, is_soft))
             self._compiled_adj[name] = adj
 
         self._is_building = False
@@ -364,12 +371,12 @@ class GraphOp(BaseOp):
         self._cache_full_names()
 
     def _cache_full_names(self) -> None:
-        """Cache full_name for this node and all descendants after build."""
+        """Cache full_name for this op and all descendants after build."""
         self._cache_full_name()
-        for node in self._ops.values():
-            node._cache_full_name()
-            if hasattr(node, "_cache_full_names"):
-                node._cache_full_names()
+        for child in self._ops.values():
+            child._cache_full_name()
+            if hasattr(child, "_cache_full_names"):
+                child._cache_full_names()
 
     def _post_build(self):
         """Hook for subclasses to run after build. Override in subclasses."""
@@ -383,10 +390,10 @@ class GraphOp(BaseOp):
         """Run all validations and return result.
 
         This method runs comprehensive validation checks on the graph:
-        - Branch targets: All if_() targets must match actual node names
+        - Branch targets: All if_() targets must match actual op names
         - Cycles: Detect circular dependencies (non-lookback)
-        - Reachability: Warn about unreachable or dead-end nodes
-        - Refs: Validate all Ref references point to existing nodes
+        - Reachability: Warn about unreachable or dead-end ops
+        - Refs: Validate all Ref references point to existing ops
 
         Returns:
             ValidationResult with all issues found
@@ -421,16 +428,16 @@ class GraphOp(BaseOp):
             raise GraphValidationError(result)
 
     def _validate_branch_targets_detailed(self) -> List[ValidationIssue]:
-        """Check all branch node targets exist in graph."""
+        """Check all branch op targets exist in graph."""
         issues = []
         available = sorted(self._ops.keys())
 
-        for name, node in self._ops.items():
-            if node.type != "branch":
+        for name, child in self._ops.items():
+            if child.type != "branch":
                 continue
 
-            # Get all possible targets from branch node
-            candidates = getattr(node, "candidates", [])
+            # Get all possible targets from branch op
+            candidates = getattr(child, "candidates", [])
 
             for target in candidates:
                 if target == END.name:
@@ -441,14 +448,14 @@ class GraphOp(BaseOp):
                         ValidationIssue(
                             level=ValidationLevel.ERROR,
                             category="Invalid branch target",
-                            message=f"Branch node '{name}' references target '{target}' which doesn't exist",
+                            message=f"Branch op '{name}' references target '{target}' which doesn't exist",
                             op_name=name,
                             target_name=target,
                             available_nodes=available,
                             suggestions=[
-                                f"Check if '{target}' matches the 'name' parameter of the target node",
-                                f'Use the node variable directly: if_(condition, my_node) instead of if_(condition, "{target}")',
-                                f"Available nodes: {available}",
+                                f"Check if '{target}' matches the 'name' parameter of the target op",
+                                f'Use the op variable directly: if_(condition, my_op) instead of if_(condition, "{target}")',
+                                f"Available ops: {available}",
                             ],
                         )
                     )
@@ -513,7 +520,7 @@ class GraphOp(BaseOp):
         return issues
 
     def _validate_reachability(self) -> List[ValidationIssue]:
-        """Check for unreachable nodes and dead-ends."""
+        """Check for unreachable ops and dead-ends."""
         issues = []
 
         if not self.entries or not self.exits:
@@ -550,18 +557,18 @@ class GraphOp(BaseOp):
         for exit_node in self.exits:
             backward_dfs(exit_node)
 
-        # Find unreachable nodes
+        # Find unreachable ops
         for name in self._ops:
             if name not in reachable_from_start:
                 issues.append(
                     ValidationIssue(
                         level=ValidationLevel.WARNING,
-                        category="Unreachable node",
-                        message=f"Node '{name}' is not reachable from any entry point",
+                        category="Unreachable op",
+                        message=f"Op '{name}' is not reachable from any entry point",
                         op_name=name,
                         suggestions=[
-                            f"Connect START >> {name} or connect from another reachable node",
-                            "Remove this node if it's not needed",
+                            f"Connect START >> {name} or connect from another reachable op",
+                            "Remove this op if it's not needed",
                         ],
                     )
                 )
@@ -572,12 +579,12 @@ class GraphOp(BaseOp):
                     issues.append(
                         ValidationIssue(
                             level=ValidationLevel.WARNING,
-                            category="Dead-end node",
-                            message=f"Node '{name}' cannot reach any exit point",
+                            category="Dead-end op",
+                            message=f"Op '{name}' cannot reach any exit point",
                             op_name=name,
                             suggestions=[
-                                f"Connect {name} >> END or connect to another node leading to END",
-                                "Mark this node as an exit: node.end = True",
+                                f"Connect {name} >> END or connect to another op leading to END",
+                                "Mark this op as an exit: op.end = True",
                             ],
                         )
                     )
@@ -585,39 +592,39 @@ class GraphOp(BaseOp):
         return issues
 
     def _validate_refs(self) -> List[ValidationIssue]:
-        """Validate all Ref references point to existing nodes."""
+        """Validate all Ref references point to existing ops."""
         issues = []
 
-        for name, node in self._ops.items():
+        for name, child in self._ops.items():
             # Check input refs
-            for var, param in node.inputs.items():
+            for var, param in child.inputs.items():
                 if not isinstance(param.value, Ref):
                     continue
 
                 ref = param.value
-                ref_node = ref.raw_source
+                ref_source = ref.raw_source
 
                 # Skip PARENT refs (they refer to the graph itself)
-                if ref_node is self or (
-                    hasattr(ref_node, "name") and ref_node.name == "__PARENT__"
+                if ref_source is self or (
+                    hasattr(ref_source, "name") and ref_source.name == "__PARENT__"
                 ):
                     continue
 
-                # Check if referenced node exists
-                if hasattr(ref_node, "name"):
-                    ref_node_name = ref_node.name
-                    if ref_node_name not in self._ops and ref_node_name != self.name:
+                # Check if referenced op exists
+                if hasattr(ref_source, "name"):
+                    ref_op_name = ref_source.name
+                    if ref_op_name not in self._ops and ref_op_name != self.name:
                         issues.append(
                             ValidationIssue(
                                 level=ValidationLevel.ERROR,
                                 category="Invalid Ref",
-                                message=f"Node '{name}' input '{var}' references non-existent node '{ref_node_name}'",
+                                message=f"Op '{name}' input '{var}' references non-existent op '{ref_op_name}'",
                                 op_name=name,
-                                target_name=ref_node_name,
+                                target_name=ref_op_name,
                                 available_nodes=sorted(self._ops.keys()),
                                 suggestions=[
-                                    f"Check if node '{ref_node_name}' is defined in the graph",
-                                    "Ensure the referenced node is created before this node",
+                                    f"Check if op '{ref_op_name}' is defined in the graph",
+                                    "Ensure the referenced op is created before this op",
                                 ],
                             )
                         )
@@ -626,36 +633,36 @@ class GraphOp(BaseOp):
 
     @staticmethod
     def get_current_graph() -> Optional["GraphOp"]:
-        """Lấy graph hiện tại từ context."""
+        """Return the current graph from context."""
         try:
             return _current_graph.get()
         except LookupError:
             return None
 
     def add_op(self, op: BaseOp) -> BaseOp:
-        """Thêm một node vào graph."""
+        """Add an op to the graph."""
         if not self._is_building:
-            raise RuntimeError("Không thể thêm node sau khi graph đã được build")
+            raise RuntimeError("Cannot add op after graph has been built")
 
         if getattr(op, "_is_hush_builder", False):
             name = getattr(op, "_name", None) or type(op).__name__
             LOGGER.error(
-                "%s '%s' chưa được build. Hãy gọi .build() hoặc .else_() trước khi thêm vào graph.",
+                "%s '%s' is not built. Call .build() or .else_() before adding to graph.",
                 type(op).__name__,
                 name,
             )
             raise TypeError(
-                f"{type(op).__name__} '{name}' chưa được build. "
-                f"Hãy gọi .build() hoặc .else_() để tạo node."
+                f"{type(op).__name__} '{name}' is not built. "
+                f"Call .build() or .else_() to create the op."
             )
 
         if op in [START, END]:
             return op
 
-        # Cảnh báo nếu node cùng tên đã tồn tại (sẽ bị ghi đè)
+        # Warn if an op with the same name already exists (will be overwritten)
         if op.name in self._ops:
             LOGGER.warning(
-                "Graph [highlight]%s[/highlight]: node [highlight]%s[/highlight] đã tồn tại và sẽ bị ghi đè",
+                "Graph [highlight]%s[/highlight]: op [highlight]%s[/highlight] already exists and will be overwritten",
                 self.name,
                 op.name,
             )
@@ -673,22 +680,22 @@ class GraphOp(BaseOp):
         return op
 
     def add_edge(self, source: str, target: str, type: EdgeType = "normal", soft: bool = False):
-        """Thêm một edge giữa hai node.
+        """Add an edge between two ops.
 
         Args:
-            source: Tên node nguồn
-            target: Tên node đích
-            type: Loại edge (normal, lookback, condition)
-            soft: Nếu True, edge không tính vào ready_count.
-                  Dùng cho branch output khi chỉ một nhánh được thực thi.
-                  Tạo bằng toán tử >: case_a > merge_node
+            source: Source op name.
+            target: Target op name.
+            type: Edge type (normal, lookback, condition).
+            soft: If True, edge does not count toward ready_count.
+                  Used for branch outputs when only one branch executes.
+                  Created via the > operator: case_a > merge_op
         """
         if not self._is_building:
-            raise RuntimeError("Không thể thêm edge sau khi graph đã được build!")
+            raise RuntimeError("Cannot add edge after graph has been built!")
 
         if source == START.name:
             if target not in self._ops:
-                raise ValueError(f"Node đích '{target}' không tìm thấy")
+                raise ValueError(f"Target op '{target}' not found")
 
             target_node = self._ops[target]
             target_node.start = True
@@ -700,7 +707,7 @@ class GraphOp(BaseOp):
 
         if target == END.name:
             if source not in self._ops:
-                raise ValueError(f"Node nguồn '{source}' không tìm thấy")
+                raise ValueError(f"Source op '{source}' not found")
 
             source_node = self._ops[source]
             source_node.end = True
@@ -714,9 +721,9 @@ class GraphOp(BaseOp):
             return
 
         if source not in self._ops:
-            raise ValueError(f"Node nguồn '{source}' không tìm thấy")
+            raise ValueError(f"Source op '{source}' not found")
         if target not in self._ops:
-            raise ValueError(f"Node đích '{target}' không tìm thấy")
+            raise ValueError(f"Target op '{target}' not found")
 
         new_edge = EdgeConfig(from_node=source, to_node=target, type=type, soft=soft)
         if (source, target) not in self._edges_lookup:
@@ -726,10 +733,10 @@ class GraphOp(BaseOp):
             self.prevs[target].append(source)
 
     def show(self, indent=0):
-        """Hiển thị cấu trúc graph (debug)."""
+        """Display graph structure (debug)."""
         prefix = "  " * indent
         LOGGER.debug("%sGraph: %s", prefix, self.name)
-        LOGGER.debug("%sNodes: %s", prefix, list(self._ops.keys()))
+        LOGGER.debug("%sOps: %s", prefix, list(self._ops.keys()))
         LOGGER.debug("%sEdges:", prefix)
         for edge in self._edges:
             soft_marker = " (soft)" if edge.soft else ""
@@ -738,9 +745,9 @@ class GraphOp(BaseOp):
             )
         LOGGER.debug("%sReady count: %s", prefix, dict(self.ready_count))
 
-        for node in self._ops.values():
-            if isinstance(node, GraphOp):
-                node.show(indent + 1)
+        for child in self._ops.values():
+            if isinstance(child, GraphOp):
+                child.show(indent + 1)
 
     async def run(
         self,
@@ -748,12 +755,12 @@ class GraphOp(BaseOp):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Thực thi graph bằng cách chạy tất cả node theo thứ tự dependency.
+        """Execute graph by running all ops in dependency order.
 
         Args:
-            state: Workflow state
-            context_id: Context của graph này
-            parent_context: Context của PARENT để truyền cho child nodes
+            state: Workflow state.
+            context_id: Context of this graph.
+            parent_context: Context of PARENT, passed to child ops.
         """
 
         parent_name = self.father.full_name if self.father else None
@@ -776,7 +783,7 @@ class GraphOp(BaseOp):
             active_tasks: Dict[str, asyncio.Task] = {}
 
             ready_count: Dict[str, int] = self.ready_count.copy()
-            # Track nodes đã nhận soft edge completion (chỉ đếm 1 lần)
+            # Track ops that have received soft edge completion (count once only)
             soft_satisfied: set = set()
 
             for entry in self.entries:
@@ -798,10 +805,10 @@ class GraphOp(BaseOp):
                     op_name = task.get_name()
                     active_tasks.pop(op_name)
 
-                    node = nodes[op_name]
+                    current_op = nodes[op_name]
 
-                    if node.type == "branch":
-                        branch_target = node.get_target(state, context_id)
+                    if current_op.type == "branch":
+                        branch_target = current_op.get_target(state, context_id)
                         if branch_target != END.name:
                             # Find the selected target in compiled adjacency
                             targets = []
@@ -811,38 +818,38 @@ class GraphOp(BaseOp):
                                     break
                             else:
                                 # Target not in connections — detailed error
-                                available_nodes = sorted(ready_count.keys())
+                                available_ops = sorted(ready_count.keys())
                                 raise KeyError(
                                     f"\n"
-                                    f"Node '{branch_target}' not found in graph '{self.name}'.\n"
+                                    f"Op '{branch_target}' not found in graph '{self.name}'.\n"
                                     f"\n"
-                                    f"  Source: Branch node '{op_name}' routed to '{branch_target}'\n"
-                                    f"  Available nodes: {available_nodes}\n"
+                                    f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
+                                    f"  Available ops: {available_ops}\n"
                                     f"\n"
                                     f'  This usually means the target string in if_(..., "{branch_target}") '
-                                    f"doesn't match any node's actual name.\n"
-                                    f"  Check that your branch targets match the 'name' parameter of the target nodes."
+                                    f"doesn't match any op's actual name.\n"
+                                    f"  Check that your branch targets match the 'name' parameter of the target ops."
                                 )
                         else:
                             targets = []
                     else:
                         targets = compiled_adj[op_name]
 
-                    for next_node, is_soft in targets:
+                    for next_op, is_soft in targets:
                         if is_soft:
-                            # Soft edge: chỉ đếm 1 lần cho tất cả soft predecessors
-                            if next_node in soft_satisfied:
-                                continue  # Đã có soft pred khác hoàn thành
-                            soft_satisfied.add(next_node)
+                            # Soft edge: count once for all soft predecessors
+                            if next_op in soft_satisfied:
+                                continue  # Another soft pred already completed
+                            soft_satisfied.add(next_op)
 
-                        ready_count[next_node] -= 1
+                        ready_count[next_op] -= 1
 
-                        if ready_count[next_node] == 0:
+                        if ready_count[next_op] == 0:
                             task = asyncio.create_task(
-                                name=next_node,
-                                coro=nodes[next_node].run(state, context_id, parent_context),
+                                name=next_op,
+                                coro=nodes[next_op].run(state, context_id, parent_context),
                             )
-                            active_tasks[next_node] = task
+                            active_tasks[next_op] = task
 
             _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
             self.store_result(state, _outputs, context_id)
@@ -850,7 +857,7 @@ class GraphOp(BaseOp):
         except Exception:
             error_msg = traceback.format_exc()
             LOGGER.error(
-                "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]:\n%s",
+                "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
                 self.name,
                 error_msg.rstrip(),
@@ -894,14 +901,14 @@ def graph(fn):
             check = detect_card(conversation=conversation)
             START >> check >> END
 
-        g1 = verify_card(conversation=other_node["conv"])
+        g1 = verify_card(conversation=other_op["conv"])
         # g1.name == "g1"
     """
     sig = inspect.signature(fn)
     collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
     if collisions:
         LOGGER.warning(
-            "@graph function '%s' has parameter(s) %s that collide with reserved node keywords %s. "
+            "@graph function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
             "Consider renaming them.",
             fn.__name__,
             sorted(collisions),
@@ -913,11 +920,11 @@ def graph(fn):
     @wraps(fn)
     def wrapper(**kwargs):
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        node = GraphOp(inputs=input_mappings or None, **init_kwargs)
-        with node:
+        g = GraphOp(inputs=input_mappings or None, **init_kwargs)
+        with g:
             parent_refs = {key: PARENT[key] for key in input_mappings if key in param_names}
             fn(**parent_refs)
-        return node
+        return g
 
     register_skip(wrapper)
     wrapper.__wrapped__ = fn

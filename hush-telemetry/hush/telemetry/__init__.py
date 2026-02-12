@@ -12,10 +12,10 @@ Example:
     from hush.telemetry import LangfuseTracer, OTELTracer
 
     # Langfuse tracer
-    tracer = LangfuseTracer(resource_key="langfuse:default")
+    tracer = LangfuseTracer(resource="langfuse:default")
 
     # OpenTelemetry tracer (exports to Jaeger, Zipkin, etc.)
-    tracer = OTELTracer(resource_key="otel:jaeger")
+    tracer = OTELTracer(resource="otel:jaeger")
 
     # Use with workflow
     workflow = MyWorkflow(tracer=tracer)

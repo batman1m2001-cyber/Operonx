@@ -12,14 +12,14 @@ Hush cung cấp các `.of()` classmethod và decorator để viết workflow ng�
 | `GraphOp(...)` + manual setup | `@graph` | Decorator tạo reusable workflow module |
 | `ForOp(inputs={...})` | `ForOp.of(item=Each(...), ...)` | Iterate tuần tự |
 | `MapOp(inputs={...})` | `MapOp.of(item=Each(...), ...)` | Iterate song song |
-| `WhileOp(inputs={...})` | `WhileOp.of(counter=0, stop_condition=...)` | Loop với điều kiện |
+| `WhileOp(inputs={...})` | `WhileOp.of(counter=0, until=...)` | Loop với điều kiện |
 | `AIterOp(inputs={...})` | `AIterOp.of(chunk=Each(stream), ...)` | Xử lý async streaming |
 | `BranchOp(...)` | `if_(...).else_(...)` | Routing có điều kiện |
-| `ChainOp(inputs={...})` | `ChainOp.of(resource_key="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
-| `LLMOp(inputs={...})` | `LLMOp.of(resource_key="gpt-4o", messages=...)` | Gọi LLM |
+| `ChainOp(inputs={...})` | `ChainOp.of(resource="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
+| `LLMOp(inputs={...})` | `LLMOp.of(resource="gpt-4o", messages=...)` | Gọi LLM |
 | `PromptOp(inputs={...})` | `PromptOp.of(template=..., ...)` | Tạo messages từ template |
-| `EmbeddingOp(inputs={...})` | `EmbeddingOp.of(resource_key="model", texts=...)` | Tạo embeddings |
-| `RerankOp(inputs={...})` | `RerankOp.of(resource_key="model", query=..., documents=...)` | Rerank documents |
+| `EmbeddingOp(inputs={...})` | `EmbeddingOp.of(resource="model", texts=...)` | Tạo embeddings |
+| `RerankOp(inputs={...})` | `RerankOp.of(resource="model", query=..., documents=...)` | Rerank documents |
 
 ## @op — Decorator
 
@@ -170,7 +170,7 @@ from hush.core import WhileOp
 with WhileOp(
     name="countdown",
     inputs={"count": PARENT["start"]},
-    stop_condition="count <= 0",
+    until="count <= 0",
     max_iterations=100
 ) as loop:
     ...
@@ -179,7 +179,7 @@ with WhileOp(
 with WhileOp.of(
     name="countdown",
     count=PARENT["start"],          # Input variable
-    stop_condition="count <= 0",    # Điều kiện dừng (string expression)
+    until="count <= 0",    # Điều kiện dừng (string expression)
     max_iterations=100
 ) as loop:
     ...
@@ -193,7 +193,7 @@ def halve(value: int):
     return {"new_value": value // 2}
 
 with GraphOp(name="halve-demo") as graph:
-    with WhileOp.of(value=256, stop_condition="value < 10", max_iterations=20) as loop:
+    with WhileOp.of(value=256, until="value < 10", max_iterations=20) as loop:
         step = halve(name="halve", value=PARENT["value"])
         step["new_value"] >> PARENT["value"]
         START >> step >> END
@@ -304,7 +304,7 @@ from hush.providers import LLMOp
 # ❌ Verbose
 llm = LLMOp(
     name="chat",
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     inputs={
         "messages": PARENT["messages"],
         "temperature": 0.7,
@@ -315,7 +315,7 @@ llm = LLMOp(
 
 # ✅ Classmethod
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     name="chat",
     messages=PARENT["messages"],   # Input trực tiếp
     temperature=0.7,
@@ -329,7 +329,7 @@ llm = LLMOp.of(
 ```python
 # Multiple models với weight ratios
 llm = LLMOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],
     name="balanced",
     messages=PARENT["messages"],
@@ -342,7 +342,7 @@ llm = LLMOp.of(
 ```python
 # Tự động fallback khi primary fails
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     name="resilient",
     messages=PARENT["messages"]
@@ -354,7 +354,7 @@ llm = LLMOp.of(
 ```python
 # OpenAI Batch API (50% cheaper)
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     batch_mode=True,
     name="batch_llm",
     messages=PARENT["messages"]
@@ -373,7 +373,7 @@ from hush.providers import ChainOp
 # ❌ Verbose
 chain = ChainOp(
     name="chat",
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     inputs={
         "template": {"system": "Bạn là assistant.", "user": "{query}"},
         "query": PARENT["query"],
@@ -384,7 +384,7 @@ chain = ChainOp(
 
 # ✅ Classmethod (auto-name + >> END auto-forward)
 chat = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"system": "Bạn là assistant.", "user": "{query}"},
     query=PARENT["query"],
 )
@@ -394,14 +394,14 @@ START >> chat >> END  # result["content"], result["model_used"], ...
 ### String template
 
 ```python
-summarize = ChainOp.of(resource_key="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
+summarize = ChainOp.of(resource="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
 ```
 
 ### Structured output
 
 ```python
 classifier = ChainOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     template={"user": "Phân loại: {text}"},
     text=PARENT["text"],
     response_format={"type": "json_object"},
@@ -412,7 +412,7 @@ classifier = ChainOp.of(
 
 ```python
 chat = ChainOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     template={"system": "Help.", "user": "{query}"},
     ratios=[0.7, 0.3],
     fallback=["or-claude-4-sonnet"],
@@ -445,7 +445,7 @@ Tạo embeddings từ text.
 ```python
 from hush.providers import EmbeddingOp
 
-embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
+embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 START >> embed >> END  # result["embeddings"]
 ```
 
@@ -456,7 +456,7 @@ Rerank documents theo query.
 ```python
 from hush.providers import RerankOp
 
-rerank = RerankOp.of(resource_key="bge-m3", query=PARENT["query"], documents=PARENT["docs"], top_k=5)
+rerank = RerankOp.of(resource="bge-m3", query=PARENT["query"], documents=PARENT["docs"], top_k=5)
 START >> rerank >> END  # result["reranked_documents"]
 ```
 
@@ -639,7 +639,7 @@ START >> step >> END         # Auto-forward
 | `@graph` | `name`, `outputs`, `description` | Tạo reusable workflow module |
 | `ForOp.of(...)` | - | Sequential iteration |
 | `MapOp.of(...)` | `max_concurrency` | Parallel iteration |
-| `WhileOp.of(...)` | `stop_condition`, `max_iterations` | Conditional loop |
+| `WhileOp.of(...)` | `until`, `max_iterations` | Conditional loop |
 | `AIterOp.of(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
 | `if_(...).else_(...)` | - | Conditional routing |
 | `ChainOp.of(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |

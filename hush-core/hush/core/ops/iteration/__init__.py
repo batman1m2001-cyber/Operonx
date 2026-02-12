@@ -1,12 +1,11 @@
-"""Các node iteration cho loop và streaming.
+"""Iteration ops for loops and streaming.
 
-Bao gồm:
-- ForOp: Lặp qua collection tuần tự (sequential)
-- MapOp: Lặp qua collection song song (parallel)
-- WhileOp: Lặp khi điều kiện còn đúng
-- AIterOp: Xử lý streaming data theo thứ tự
-- Each: Marker wrapper để đánh dấu nguồn iteration
-- BaseIterationOp: Base class cho các iteration nodes
+- ForOp: Sequential iteration over a collection.
+- MapOp: Parallel iteration with concurrency control.
+- WhileOp: Conditional loop until a stop condition is met.
+- AIterOp: Async-iterable / streaming data processing.
+- Each: Marker that designates an iteration source.
+- BaseIterationOp: Shared base class for all iteration ops.
 """
 
 from hush.core.ops.iteration.aiter_op import AIterOp

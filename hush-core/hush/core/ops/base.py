@@ -1,4 +1,4 @@
-"""Base class cho tất cả các node trong workflow."""
+"""BaseOp — base class for all ops in a workflow."""
 
 import asyncio
 import traceback
@@ -20,16 +20,17 @@ if TYPE_CHECKING:
 
 
 class SoftEdge:
-    """Marker wrapper cho soft edge connection.
+    """Marker wrapper for a soft-edge connection.
 
-    Sử dụng với cú pháp ~node để đánh dấu soft edge:
-        a >> ~b  # soft edge từ a đến b
-        a >> b   # hard edge từ a đến b
-        [a, b] >> ~c  # soft edges từ nhiều nodes
-        ~a >> b  # soft edge, rồi tiếp tục chain
+    Use with ``~op`` syntax to mark a soft edge::
 
-    Soft edge không tính vào ready_count, dùng cho branch outputs
-    khi chỉ một nhánh được thực thi.
+        a >> ~b       # soft edge from a to b
+        a >> b        # hard edge from a to b
+        [a, b] >> ~c  # soft edges from multiple ops
+        ~a >> b       # soft edge, then continue chaining
+
+    Soft edges do not count toward ready_count; used for branch outputs
+    when only one branch executes.
     """
 
     __slots__ = ["op"]
@@ -42,17 +43,17 @@ class SoftEdge:
         return self.op.name
 
     def __rrshift__(self, other):
-        """[a, b] >> ~self: soft edges từ list ops đến self.op."""
+        """[a, b] >> ~self: soft edges from a list of ops to self.op."""
         add_edge = getattr(self.op.father, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
-                for node in other:
-                    edge_type = "condition" if getattr(node, "type", None) == "branch" else "normal"
-                    add_edge(node.name, self.op.name, edge_type, soft=True)
+                for item in other:
+                    edge_type = "condition" if getattr(item, "type", None) == "branch" else "normal"
+                    add_edge(item.name, self.op.name, edge_type, soft=True)
             return self.op  # Return unwrapped for chaining
         elif getattr(other, "name", None) is not None:
-            # single_node >> ~self
+            # single_op >> ~self
             edge_type = "condition" if getattr(other, "type", None) == "branch" else "normal"
             if add_edge is not None:
                 add_edge(other.name, self.op.name, edge_type, soft=True)
@@ -60,30 +61,25 @@ class SoftEdge:
         return NotImplemented
 
     def __rshift__(self, other):
-        """~a >> b: sau soft edge marker, tiếp tục với hard edge.
+        """~a >> b: after soft edge marker, continue with a hard edge.
 
-        Cho phép chaining: source >> ~a >> b >> c
-        Sau khi ~a được xử lý, cần tiếp tục chain với b.
+        Allows chaining: source >> ~a >> b >> c
+        After ~a is processed, continue the chain with b.
         """
         return self.op.__rshift__(other)
 
 
-def _has_explicit_outputs(node) -> bool:
-    """Kiểm tra node có outputs được user định nghĩa explicit hay không.
+def _has_explicit_outputs(op) -> bool:
+    """Check whether the op has user-defined explicit output mappings.
 
-    Returns True nếu:
-    - outputs là None (chưa set)
-    - outputs rỗng
-    - outputs chỉ có các Param với value=None (auto-parsed từ function)
-
-    Returns False nếu có bất kỳ output nào có value != None (user set).
+    Returns True if any output Param has a non-None value (user-set).
+    Returns False if outputs are absent, empty, or all auto-parsed.
     """
-    if not hasattr(node, "outputs") or node.outputs is None:
+    if not hasattr(op, "outputs") or op.outputs is None:
         return False
-    if len(node.outputs) == 0:
+    if len(op.outputs) == 0:
         return False
-    # Kiểm tra nếu có output nào có value (user đã set explicit)
-    for param in node.outputs.values():
+    for param in op.outputs.values():
         if hasattr(param, "value") and param.value is not None:
             return True
     return False
@@ -109,26 +105,26 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     """Split flat kwargs into (inputs, init_kwargs).
 
     Used by shorthand functions (llm_, for_, op, etc.) to separate
-    node constructor kwargs from input mappings.
+    op constructor kwargs from input mappings.
 
     Args:
-        kwargs: Flat keyword arguments from shorthand function
-        extra_init_keys: Additional node-specific init keys beyond base keys
-            (e.g., {'max_concurrency', 'callback'} for iteration nodes)
+        kwargs: Flat keyword arguments from shorthand function.
+        extra_init_keys: Additional op-specific init keys beyond base keys
+            (e.g., {'max_concurrency', 'callback'} for iteration ops).
 
     Returns:
         (inputs, init_kwargs) tuple where:
         - inputs: Dict of input variable mappings
-        - init_kwargs: Dict of node constructor arguments
+        - init_kwargs: Dict of op constructor arguments
 
     Example:
-        # Provider nodes - just base keys
+        # Provider ops - just base keys
         inputs, init_kwargs = split_shorthand_kwargs(kwargs)
 
-        # Iteration nodes - with extra keys
+        # Iteration ops - with extra keys
         inputs, init_kwargs = split_shorthand_kwargs(
             kwargs,
-            {'max_concurrency', 'stop_condition', 'callback'}
+            {'max_concurrency', 'until', 'callback'}
         )
     """
     init_keys = _BASE_INIT_KEYS | (extra_init_keys or set())
@@ -142,8 +138,8 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
         else:
             if key in init_keys:
                 LOGGER.warning(
-                    "Keyword '%s' is a reserved node parameter (one of %s) but received a Ref value. "
-                    "It will be treated as an input mapping instead of a node constructor arg. "
+                    "Keyword '%s' is a reserved op parameter (one of %s) but received a Ref value. "
+                    "It will be treated as an input mapping instead of an op constructor arg. "
                     "Consider renaming this parameter to avoid ambiguity.",
                     key,
                     sorted(init_keys),
@@ -154,14 +150,14 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
 
 
 def shorthand(fn):
-    """Decorator for ``Node.of()`` classmethods.
+    """Decorator for ``Op.of()`` classmethods.
 
     Registers the function for auto-naming frame skip via ``register_skip()``
     and wraps as ``classmethod``.
 
     Usage::
 
-        class MyNode(BaseOp):
+        class MyOp(BaseOp):
             @shorthand
             def of(cls, my_param=None, **kwargs):
                 inputs, init_kwargs = split_shorthand_kwargs(kwargs)
@@ -172,35 +168,35 @@ def shorthand(fn):
 
 
 class BaseOp(ABC):
-    """Base class cho tất cả các node trong workflow.
+    """Base class for all ops in a workflow.
 
-    Node là đơn vị xử lý cơ bản trong workflow. Mỗi node có:
-    - inputs: Dict[str, Param] - định nghĩa và kết nối biến đầu vào
-    - outputs: Dict[str, Param] - định nghĩa và kết nối biến đầu ra
-    - core: Function thực thi logic chính
+    An op is the fundamental processing unit. Each op declares typed inputs
+    and outputs (via ``Param``), and implements a ``core()`` method that
+    contains the execution logic. Ops are wired together inside a ``GraphOp``
+    using edge operators.
 
-    Mỗi Param chứa:
-    - type: Kiểu dữ liệu (tự động infer nếu không chỉ định)
-    - required: Có bắt buộc hay không
-    - default: Giá trị mặc định
-    - description: Mô tả
-    - value: Ref hoặc literal value
+    Inputs:
+        Defined per subclass via ``self.inputs: Dict[str, Param]``.
 
-    Hỗ trợ kết nối node bằng operators:
-    - >>  : Hard edge (kết nối tuần tự, tính vào ready_count)
-    - >>~ : Soft edge (kết nối điều kiện, không tính vào ready_count)
+    Outputs:
+        Defined per subclass via ``self.outputs: Dict[str, Param]``.
 
-    Ví dụ:
-        # Hard edges (normal flow)
-        START >> a >> b >> c >> END
+    Edge operators:
+        - ``>>``  : Hard edge (sequential dependency, counts toward ready_count).
+        - ``>>~`` : Soft edge (conditional, for branch merging — only one
+          predecessor needs to complete).
 
-        # Soft edges (branch outputs) - dùng ~node
-        branch >> ~case1 >> merge
-        branch >> ~case2 >> merge
+    Example::
 
-        # Mixed chain
-        a >> ~b >> c >> ~d >> e
-        # a->b soft, b->c hard, c->d soft, d->e hard
+        from hush.core import GraphOp, op, START, END, PARENT
+
+        @op
+        def double(x: int):
+            return {"result": x * 2}
+
+        with GraphOp(name="main") as graph:
+            d = double(x=PARENT["x"])
+            START >> d >> END
     """
 
     INNER_PROCESS = "__inner__"
@@ -266,67 +262,67 @@ class BaseOp(ABC):
         if add_op is not None:
             add_op(self)
 
-        # Validate tên node
+        # Validate op name
         if self.name and not self.name.replace("_", "").replace("-", "").isalnum():
             raise ValueError(
-                f"Tên node '{self.name}' chỉ được chứa ký tự alphanumeric, underscore và hyphen"
+                f"Op name '{self.name}' may only contain alphanumeric characters, underscores, and hyphens"
             )
 
-        # Chuẩn hóa inputs/outputs thành Dict[str, Param]
+        # Normalize inputs/outputs to Dict[str, Param]
         self.inputs: Dict[str, Param] = self._normalize_params(inputs)
         self.outputs: Dict[str, Param] = self._normalize_params(outputs)
 
-        # Lỗi nếu có key trùng trong cả inputs và outputs
+        # Error if there are overlapping keys between inputs and outputs
         if self.inputs and self.outputs:
             overlapping_keys = set(self.inputs.keys()) & set(self.outputs.keys())
             if overlapping_keys:
                 raise ValueError(
-                    f"Node '{self.name}' có key trùng giữa input/output: {overlapping_keys}. "
-                    "Tên biến input và output phải khác nhau."
+                    f"Op '{self.name}' has overlapping input/output keys: {overlapping_keys}. "
+                    "Input and output variable names must be different."
                 )
 
     def _resolve_value(self, key: str, value: Any) -> Any:
-        """Chuyển đổi value thành Ref hoặc giữ nguyên literal.
+        """Convert value to a Ref or keep as a literal.
 
-        Các format được hỗ trợ:
-            - some_node → Ref(some_node, key)
-            - some_node["other"] → Ref(some_node, "other")
-            - Ref(node, "var") → giữ nguyên
+        Supported formats:
+            - some_op → Ref(some_op, key)
+            - some_op["other"] → Ref(some_op, "other")
+            - Ref(op, "var") → kept as-is
             - PARENT["x"] → Ref(father, "x")
-            - literal → giữ nguyên
+            - literal → kept as-is
         """
 
-        def resolve_node(node):
-            """Resolve PARENT thành father node."""
-            if hasattr(node, "name") and node.name == "__PARENT__":
-                return self.father if self.father else node
-            return node
+        def resolve_parent(source):
+            """Resolve PARENT marker to the actual father op."""
+            if hasattr(source, "name") and source.name == "__PARENT__":
+                return self.father if self.father else source
+            return source
 
-        # Xử lý Ref trực tiếp - giữ nguyên operations
+        # Handle Ref directly — keep operations intact
         if isinstance(value, Ref):
-            resolved = resolve_node(value.raw_source)
+            resolved = resolve_parent(value.raw_source)
             return Ref(resolved, value.var, value.ops)
 
-        # Xử lý node reference: some_node → Ref(some_node, key)
+        # Handle op reference: some_op → Ref(some_op, key)
         if hasattr(value, "name"):
-            resolved = resolve_node(value)
+            resolved = resolve_parent(value)
             return Ref(resolved, key)
 
-        # Giá trị literal
+        # Literal value
         return value
 
     def _normalize_params(self, params: Any) -> Dict[str, Param]:
-        """Chuẩn hóa inputs/outputs thành Dict[str, Param].
+        """Normalize inputs/outputs to Dict[str, Param].
 
-        Các format được hỗ trợ:
+        Supported formats:
             - params=None → {}
-            - params={"*": PARENT} → forward tất cả keys từ PARENT
-            - params={"x": 1, "*": PARENT} → x=1, còn lại từ PARENT
-            - params={"var": Param(...)} → giữ nguyên, resolve value
-            - params={"var": some_node} → {"var": Param(value=Ref(some_node, "var"))}
-            - params={"var": some_node["other"]} → {"var": Param(value=Ref(some_node, "other"))}
+            - params={"*": PARENT} → forward all keys from PARENT
+            - params={"x": 1, "*": PARENT} → x=1, rest from PARENT
+            - params={"var": Param(...)} → kept as-is, resolve value
+            - params={"var": some_op} → {"var": Param(value=Ref(some_op, "var"))}
+            - params={"var": some_op["other"]} → {"var": Param(value=Ref(some_op, "other"))}
             - params={"var": literal} → {"var": Param(value=literal)}
-            - params={("a", "b"): some_node} → mở rộng thành cả hai keys
+            - params={("a", "b"): some_op} → expanded to both keys
         """
         if params is None:
             return {}
@@ -335,31 +331,31 @@ class BaseOp(ABC):
 
         if isinstance(params, dict):
             for key, value in params.items():
-                # Xử lý wildcard "*" key - store for later processing in _merge_params
+                # Handle wildcard "*" key - store for later processing in _merge_params
                 if key == "*":
-                    # Validate that value is a node reference (PARENT or another node)
+                    # Validate that value is an op reference (PARENT or another op)
                     if hasattr(value, "name"):
                         result["__FORWARD_WILDCARD__"] = value
                     else:
                         raise ValueError(
-                            f"Wildcard '*' key phải có value là node reference (như PARENT), "
-                            f"nhận được: {type(value)}"
+                            f"Wildcard '*' key must have an op reference as value (e.g. PARENT), "
+                            f"got: {type(value)}"
                         )
                     continue
 
-                # Xử lý tuple keys: {("a", "b"): node} → mở rộng thành cả hai
+                # Handle tuple keys: {("a", "b"): op} → expand to both
                 if isinstance(key, tuple):
                     for k in key:
                         resolved_value = self._resolve_value(k, value)
                         result[k] = Param(value=resolved_value)
-                # Xử lý Param trực tiếp
+                # Handle Param directly
                 elif isinstance(value, Param):
-                    # Resolve value trong Param nếu có
+                    # Resolve value inside Param if present
                     if value.value is not None:
                         value.value = self._resolve_value(key, value.value)
                     result[key] = value
                 else:
-                    # Tạo Param mới với value đã resolve (type auto-inferred)
+                    # Create new Param with resolved value (type auto-inferred)
                     resolved_value = self._resolve_value(key, value)
                     result[key] = Param(value=resolved_value)
 
@@ -368,21 +364,21 @@ class BaseOp(ABC):
     def _merge_params(
         self, schema: Dict[str, Param], user_provided: Dict[str, Any]
     ) -> Dict[str, Param]:
-        """Merge schema (từ parsing) với user-provided inputs/outputs.
+        """Merge schema (from parsing) with user-provided inputs/outputs.
 
-        - Nếu key đã tồn tại trong schema → chỉ gán value
-        - Nếu key mới → tạo Param mới (type auto-inferred)
-        - Nếu user_provided có marker __FORWARD_WILDCARD__ → forward các keys
-          chưa được định nghĩa explicitly đến node reference (PARENT)
+        - If key already exists in schema → assign value only
+        - If key is new → create new Param (type auto-inferred)
+        - If user_provided has __FORWARD_WILDCARD__ marker → forward keys
+          not explicitly defined to the op reference (PARENT)
 
         Args:
-            schema: Dict[str, Param] từ parsing (ví dụ: từ function signature)
-            user_provided: Dict từ user (Ref | literal | Param)
+            schema: Dict[str, Param] from parsing (e.g. from function signature).
+            user_provided: Dict from user (Ref | literal | Param).
 
         Returns:
-            Dict[str, Param] đã merge
+            Merged Dict[str, Param].
         """
-        # Copy schema để không mutate original
+        # Copy schema to avoid mutating original
         result = {
             k: Param(
                 type=v.type,
@@ -405,13 +401,13 @@ class BaseOp(ABC):
         # Make a copy to avoid mutating the original dict
         user_provided = dict(user_provided)
 
-        # Extract wildcard node if present
-        wildcard_node = user_provided.pop("__FORWARD_WILDCARD__", None)
+        # Extract wildcard source if present
+        wildcard_source = user_provided.pop("__FORWARD_WILDCARD__", None)
 
         # First, process explicitly provided keys
         explicitly_set = set()
         for key, value in user_provided.items():
-            # Xử lý tuple keys
+            # Handle tuple keys
             if isinstance(key, tuple):
                 for k in key:
                     self._merge_single_param(result, k, value)
@@ -421,24 +417,24 @@ class BaseOp(ABC):
                 explicitly_set.add(key)
 
         # Then, apply wildcard forwarding for remaining keys
-        if wildcard_node is not None:
-            # Resolve PARENT thành father
-            if hasattr(wildcard_node, "name") and wildcard_node.name == "__PARENT__":
-                resolved_node = self.father if self.father else wildcard_node
+        if wildcard_source is not None:
+            # Resolve PARENT to father
+            if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
+                resolved_source = self.father if self.father else wildcard_source
             else:
-                resolved_node = wildcard_node
+                resolved_source = wildcard_source
 
             # Forward schema keys that weren't explicitly set
             for key in result:
                 if key not in explicitly_set:
-                    result[key].value = Ref(resolved_node, key)
+                    result[key].value = Ref(resolved_source, key)
 
         return result
 
     def _merge_single_param(self, result: Dict[str, Param], key: str, value: Any) -> None:
-        """Merge một param vào result dict."""
+        """Merge a single param into the result dict."""
         if key in result:
-            # Key đã tồn tại → chỉ gán value
+            # Key already exists → assign value only
             if isinstance(value, Param):
                 result[key].value = (
                     self._resolve_value(key, value.value) if value.value is not None else None
@@ -446,7 +442,7 @@ class BaseOp(ABC):
             else:
                 result[key].value = self._resolve_value(key, value)
         else:
-            # Key mới → tạo Param mới (type auto-inferred in Param.__post_init__)
+            # New key → create new Param (type auto-inferred in Param.__post_init__)
             if isinstance(value, Param):
                 if value.value is not None:
                     value.value = self._resolve_value(key, value.value)
@@ -457,7 +453,7 @@ class BaseOp(ABC):
 
     @property
     def full_name(self) -> str:
-        """Đường dẫn phân cấp đầy đủ của node. Cached after build()."""
+        """Fully-qualified hierarchical path of this op. Cached after build()."""
         if self._full_name is not None:
             return self._full_name
         if self.father:
@@ -469,37 +465,19 @@ class BaseOp(ABC):
         self._full_name = self.full_name
 
     def identity(self, context_id: str) -> str:
-        """Đường dẫn đầy đủ kèm context_id."""
+        """Fully-qualified path with context_id."""
         return f"{self.full_name}[{context_id or 'main'}]"
 
     def __getitem__(self, item) -> "Ref":
-        """Cho phép cú pháp node["var"] để tham chiếu output.
-
-        - node["var"] → Ref đến output cụ thể
-        """
+        """Allow ``op["var"]`` syntax to reference an output as a Ref."""
         return Ref(self, item)
 
     def __invert__(self) -> "SoftEdge":
-        """~node: Đánh dấu node này cho soft edge connection.
-
-        Sử dụng:
-            a >> ~b  # soft edge từ a đến b
-            a >> b   # hard edge từ a đến b
-
-        Returns:
-            SoftEdge wrapper chứa node này
-        """
+        """``~op``: mark this op for a soft-edge connection."""
         return SoftEdge(self)
 
     def __rshift__(self, other):
-        """node >> other: kết nối node này đến other.
-
-        Hỗ trợ:
-            a >> b      # hard edge
-            a >> ~b     # soft edge (b wrapped trong SoftEdge)
-            a >> [b, c] # hard edges đến nhiều nodes
-            a >> END    # auto-set outputs wildcard
-        """
+        """``op >> other``: connect this op to *other* with a hard edge."""
         edge_type = "condition" if self.type == "branch" else "normal"
         add_edge = getattr(self.father, "add_edge", None)
 
@@ -511,12 +489,12 @@ class BaseOp(ABC):
 
         if isinstance(other, list):
             if add_edge is not None:
-                for node in other:
+                for item in other:
                     # Check if item is SoftEdge
-                    if isinstance(node, SoftEdge):
-                        add_edge(self.name, node.op.name, edge_type, soft=True)
+                    if isinstance(item, SoftEdge):
+                        add_edge(self.name, item.op.name, edge_type, soft=True)
                     else:
-                        add_edge(self.name, node.name, edge_type)
+                        add_edge(self.name, item.name, edge_type)
             return other
         elif getattr(other, "name", None) is not None:
             # Check if other is END - auto-set wildcard outputs
@@ -536,36 +514,30 @@ class BaseOp(ABC):
         return NotImplemented
 
     def __rrshift__(self, other):
-        """[n1, n2] >> self: kết nối list nodes đến self."""
+        """``[op1, op2] >> self``: connect a list of ops to this op."""
         edge_type = "condition" if self.type == "branch" else "normal"
         add_edge = getattr(self.father, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
-                for node in other:
-                    add_edge(node.name, self.name, edge_type)
+                for item in other:
+                    add_edge(item.name, self.name, edge_type)
         return self
 
     def __gt__(self, other):
-        """node > other: soft edge (không tính vào ready_count).
+        """``op > other``: soft edge (does not count toward ready_count).
 
-        Dùng cho output của branch khi chỉ một nhánh được thực thi.
-        Ví dụ: case_a > merge_node (merge chờ BẤT KỲ MỘT predecessor)
-
-        LƯU Ý: Python xử lý so sánh chuỗi đặc biệt!
-        `a > b > c` được hiểu là `(a > b) and (b > c)`, KHÔNG PHẢI `(a > b) > c`.
-        Do đó KHÔNG THỂ viết: `branch > [node1, node2] > merge >> END`
-        Phải tách ra:
-            branch > [node1, node2] > merge
-            merge >> END
+        Used after a branch — only one predecessor needs to complete.
+        Note: Python's chained comparison means ``a > b > c`` is
+        ``(a > b) and (b > c)``, so split into separate statements.
         """
         edge_type = "condition" if self.type == "branch" else "normal"
         add_edge = getattr(self.father, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
-                for node in other:
-                    add_edge(self.name, node.name, edge_type, soft=True)
+                for item in other:
+                    add_edge(self.name, item.name, edge_type, soft=True)
             return other
         elif getattr(other, "name", None) is not None:
             if add_edge is not None:
@@ -574,22 +546,19 @@ class BaseOp(ABC):
         return NotImplemented
 
     def __lt__(self, other):
-        """node < other: soft edge ngược.
+        """``op < other``: reverse soft edge.
 
-        Dùng cho output của branch khi chỉ một nhánh được thực thi.
-        Ví dụ: merge_node < case_a (merge chờ BẤT KỲ MỘT predecessor)
-
-        Cũng được gọi bởi Python khi: [n1, n2] > self
-        (list.__gt__ returns NotImplemented, Python tries self.__lt__(list))
+        Also invoked by Python when ``[a, b] > self`` (list.__gt__
+        returns NotImplemented, so Python falls back to self.__lt__).
         """
         edge_type = "condition" if self.type == "branch" else "normal"
         add_edge = getattr(self.father, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
-                for node in other:
-                    add_edge(node.name, self.name, edge_type, soft=True)
-            return self  # Return self để chain tiếp: [a, b] > self > next
+                for item in other:
+                    add_edge(item.name, self.name, edge_type, soft=True)
+            return self  # Return self to continue chaining: [a, b] > self > next
         elif getattr(other, "name", None) is not None:
             if add_edge is not None:
                 add_edge(other.name, self.name, edge_type, soft=True)
@@ -597,47 +566,37 @@ class BaseOp(ABC):
         return NotImplemented
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
-        """Test nhanh: gọi node trực tiếp với inputs.
-
-        Sử dụng:
-            node = SomeNode(name="test", ...)
-            result = node(a=1, b=2)
-            # hoặc
-            result = node(**{"a": 1, "b": 2})
+        """Quick-test: call the op directly with keyword inputs.
 
         Returns:
-            Dict các output từ việc thực thi node.
-
-        Note:
-            If this node is a GraphOp that hasn't been built yet,
-            it will be automatically built before execution.
+            Dict of outputs from executing the op.
         """
         from hush.core.states import MemoryState, StateSchema
 
         # Auto-build if this is an unbuilt GraphOp
         self._auto_build_if_needed()
 
-        # Tạo schema từ node này
+        # Build schema from this op
         schema = StateSchema(op=self)
-        # Truyền kwargs vào MemoryState để override inputs
+        # Pass kwargs into MemoryState to override inputs
         state = MemoryState(schema, inputs=kwargs)
 
-        # Chạy đồng bộ
+        # Run synchronously
         try:
             loop = asyncio.get_running_loop()
-            # Nếu đã trong async context, chạy trong thread pool
+            # If already in async context, run in thread pool
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = pool.submit(asyncio.run, self.run(state)).result()
         except RuntimeError:
-            # Không có running loop, dùng asyncio.run()
+            # No running loop, use asyncio.run()
             result = asyncio.run(self.run(state))
 
         return result
 
     def _auto_build_if_needed(self):
-        """Auto-build this node if it's a GraphOp that hasn't been built.
+        """Auto-build this op if it's a GraphOp that hasn't been built.
 
         This enables convenient testing: graph() will auto-build before execution.
         """
@@ -653,26 +612,18 @@ class BaseOp(ABC):
     def get_inputs(
         self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Lấy giá trị input từ state dựa trên ánh xạ kết nối.
-
-        Sử dụng state[this_node, var_name, ctx] để:
-        1. Resolve đến vị trí lưu trữ canonical qua schema index
-        2. Tự động áp dụng các Ref operation (như ['key'].apply(len))
-
-        Schema đã resolve Ref chain tại thời điểm build, nên ta đọc
-        từ tên biến của chính node này - index và ops đã được tính trước.
+        """Retrieve input values from state based on connection mappings.
 
         Args:
-            state: Workflow state
-            context_id: Context của node này
-            parent_context: Context của PARENT để resolve PARENT refs.
-                           Dùng cho iteration nodes khi child cần đọc từ parent.
+            state: Workflow state.
+            context_id: Context of this op.
+            parent_context: Context used to resolve PARENT refs (for iteration ops).
         """
         result = {}
 
         for var_name, param in self.inputs.items():
-            # Xác định context dựa trên ref target
-            # PARENT ref → dùng parent_context (nếu có), sibling/other → dùng context_id
+            # Determine context based on ref target
+            # PARENT ref → use parent_context (if available), sibling/other → use context_id
             if (
                 parent_context is not None
                 and isinstance(param.value, Ref)
@@ -682,16 +633,16 @@ class BaseOp(ABC):
             else:
                 lookup_ctx = context_id
 
-            # Luôn đọc từ state trước (có thể có giá trị từ MemoryState inputs hoặc Ref)
+            # Always read from state first (may have value from MemoryState inputs or Ref)
             value = state[self.full_name, var_name, lookup_ctx]
 
             if value is not None:
                 result[var_name] = value
             elif param.value is not None and not isinstance(param.value, Ref):
-                # Fallback: giá trị literal trong Param.value
+                # Fallback: literal value in Param.value
                 result[var_name] = param.value
             elif param.default is not None:
-                # Fallback: giá trị default
+                # Fallback: default value
                 result[var_name] = param.default
 
         return result
@@ -699,16 +650,16 @@ class BaseOp(ABC):
     def get_outputs(
         self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Lấy giá trị output từ state.
+        """Read output values from state.
 
-        Đọc trực tiếp từ các biến output của node này. Output connections
-        (outputs={...}) đã được schema resolve tại thời điểm build -
-        chúng tạo ref ở vị trí đích, không phải ở node này.
+        Reads directly from this op's output variables. Output connections
+        (outputs={...}) are resolved by the schema at build time —
+        they create refs at the destination, not at this op.
 
         Args:
-            state: Workflow state
-            context_id: Context của node này
-            parent_context: Context của PARENT (để giữ API consistency)
+            state: Workflow state.
+            context_id: Context of this op.
+            parent_context: Context of PARENT (for API consistency).
         """
         result = {}
         for var_name in self.outputs:
@@ -716,9 +667,9 @@ class BaseOp(ABC):
         return result
 
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
-        """Lưu dict kết quả vào state.
+        """Store result dict into state.
 
-        Sử dụng state[op, var, ctx] = value cho lưu trữ O(1) dựa trên index.
+        Uses state[op, var, ctx] = value for O(1) index-based storage.
         Extracts $tags special key for dynamic tagging.
         """
         if not result:
@@ -740,7 +691,7 @@ class BaseOp(ABC):
         outputs: Dict[str, Any],
         duration_ms: float,
     ) -> None:
-        """Log tóm tắt thực thi node với inputs, outputs và duration."""
+        """Log execution summary with inputs, outputs, and duration."""
         # Check both verbose flag and logger level before formatting
         if self.verbose and LOGGER.isEnabledFor(20):  # 20 = INFO level
             LOGGER.info(
@@ -760,19 +711,19 @@ class BaseOp(ABC):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Thực thi node.
+        """Execute this op.
 
         Args:
-            state: Workflow state
-            context_id: Context của node này cho biến của chính nó
-            parent_context: Context của PARENT để resolve PARENT refs
+            state: Workflow state.
+            context_id: Context for this op's own variables.
+            parent_context: Context used to resolve PARENT refs.
         """
         parent_name = self.father.full_name if self.father else None
         state.record_execution(self.full_name, parent_name, context_id)
 
-        # Skip disabled nodes
+        # Skip disabled ops
         if not self.enabled:
-            LOGGER.debug("Skipped disabled node: %s", self.full_name)
+            LOGGER.debug("Skipped disabled op: %s", self.full_name)
             return {}
 
         request_id = state.request_id
@@ -796,7 +747,7 @@ class BaseOp(ABC):
         except Exception:
             error_msg = traceback.format_exc()
             LOGGER.error(
-                "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]:\n%s",
+                "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
                 self.name,
                 error_msg.rstrip(),
@@ -810,10 +761,10 @@ class BaseOp(ABC):
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
 
-            # Performance monitoring: log slow nodes (>100ms)
+            # Performance monitoring: log slow ops (>100ms)
             if duration_ms > 100:
                 LOGGER.warning(
-                    "[title]\\[%s][/title] Slow node [highlight]%s[/highlight]: [red]%.1fms[/red]",
+                    "[title]\\[%s][/title] Slow op [highlight]%s[/highlight]: [red]%.1fms[/red]",
                     request_id,
                     self.full_name,
                     duration_ms,
@@ -845,12 +796,12 @@ class BaseOp(ABC):
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:
-        """Trả về metadata riêng của subclass. Override ở các subclass."""
+        """Return subclass-specific metadata. Override in subclasses."""
         return {}
 
     @property
     def metadata(self) -> Dict[str, Any]:
-        """Tạo dictionary metadata cho node."""
+        """Build a metadata dictionary for this op."""
 
         def get_connect_key(param: Param):
             if isinstance(param.value, Ref):
@@ -888,7 +839,7 @@ class BaseOp(ABC):
 
 
 class DummyOp(BaseOp):
-    """Dummy node cho các marker START/END/PARENT."""
+    """Dummy op used as a marker for START, END, and PARENT."""
 
     type: OpType = "dummy"
 
@@ -896,21 +847,21 @@ class DummyOp(BaseOp):
         super().__init__(name=name)
 
     def __rshift__(self, other):
-        """START >> node hoặc node >> END"""
-        # Không hỗ trợ soft edge với START/END
+        """START >> op or op >> END."""
+        # Soft edges are not supported with START/END
         if isinstance(other, SoftEdge):
             raise TypeError(
-                f"Không thể dùng soft edge (~) với {self.name}.\n"
-                f"  Sai: {self.name} >> ~node\n"
-                f"  Đúng: {self.name} >> node"
+                f"Cannot use soft edge (~) with {self.name}.\n"
+                f"  Wrong: {self.name} >> ~op\n"
+                f"  Right: {self.name} >> op"
             )
 
         if self == START:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):
                 if isinstance(other, list):
-                    for node in other:
-                        current_graph.add_edge(self.name, node.name)
+                    for item in other:
+                        current_graph.add_edge(self.name, item.name)
                     return other
                 elif hasattr(other, "name"):
                     current_graph.add_edge(self.name, other.name)
@@ -918,36 +869,36 @@ class DummyOp(BaseOp):
         return super().__rshift__(other)
 
     def __rrshift__(self, other):
-        """[nodes] >> START or [nodes] >> END
+        """[ops] >> START or [ops] >> END.
 
-        Khi node >> END, tự động set outputs = {"*": PARENT} nếu chưa có.
+        When op >> END, auto-sets outputs = {"*": PARENT} if not already set.
         """
         current_graph = get_current()
         if current_graph and hasattr(current_graph, "add_edge"):
             if self == START:
                 if isinstance(other, list):
-                    for node in other:
-                        current_graph.add_edge(self.name, node.name)
+                    for item in other:
+                        current_graph.add_edge(self.name, item.name)
                 elif hasattr(other, "name"):
                     current_graph.add_edge(self.name, other.name)
                 return self
 
             elif self == END:
-                # Auto-set outputs: mỗi output key -> father[key]
-                def _set_wildcard_outputs(node):
-                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
-                        if node.outputs is None:
-                            node.outputs = {}
-                        father = getattr(node, "father", None) or PARENT
-                        for key in node.outputs:
-                            param = node.outputs[key]
+                # Auto-set outputs: each output key -> father[key]
+                def _set_wildcard_outputs(target_op):
+                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
+                        if target_op.outputs is None:
+                            target_op.outputs = {}
+                        father = getattr(target_op, "father", None) or PARENT
+                        for key in target_op.outputs:
+                            param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
                                 param.value = Ref(father, key)
 
                 if isinstance(other, list):
-                    for node in other:
-                        _set_wildcard_outputs(node)
-                        current_graph.add_edge(node.name, self.name)
+                    for item in other:
+                        _set_wildcard_outputs(item)
+                        current_graph.add_edge(item.name, self.name)
                 elif hasattr(other, "name"):
                     _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name)
@@ -956,25 +907,25 @@ class DummyOp(BaseOp):
         return self
 
     def __rlshift__(self, other):
-        """node >> END (deprecated path, __rrshift__ handles this)"""
+        """op >> END (deprecated path, __rrshift__ handles this)."""
         if self == END:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):
-                # Auto-set outputs: mỗi output key -> father[key]
-                def _set_wildcard_outputs(node):
-                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
-                        if node.outputs is None:
-                            node.outputs = {}
-                        father = getattr(node, "father", None) or PARENT
-                        for key in node.outputs:
-                            param = node.outputs[key]
+                # Auto-set outputs: each output key -> father[key]
+                def _set_wildcard_outputs(target_op):
+                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
+                        if target_op.outputs is None:
+                            target_op.outputs = {}
+                        father = getattr(target_op, "father", None) or PARENT
+                        for key in target_op.outputs:
+                            param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
                                 param.value = Ref(father, key)
 
                 if isinstance(other, list):
-                    for node in other:
-                        _set_wildcard_outputs(node)
-                        current_graph.add_edge(node.name, self.name)
+                    for item in other:
+                        _set_wildcard_outputs(item)
+                        current_graph.add_edge(item.name, self.name)
                     return self
                 elif hasattr(other, "name"):
                     _set_wildcard_outputs(other)
@@ -983,13 +934,13 @@ class DummyOp(BaseOp):
         return self
 
     def __gt__(self, other):
-        """START > node or node > END (soft edge)"""
+        """START > op or op > END (soft edge)."""
         if self == START:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):
                 if isinstance(other, list):
-                    for node in other:
-                        current_graph.add_edge(self.name, node.name, soft=True)
+                    for item in other:
+                        current_graph.add_edge(self.name, item.name, soft=True)
                     return other
                 elif hasattr(other, "name"):
                     current_graph.add_edge(self.name, other.name, soft=True)
@@ -997,25 +948,25 @@ class DummyOp(BaseOp):
         return super().__gt__(other)
 
     def __rgt__(self, other):
-        """[nodes] > END (soft edge)"""
+        """[ops] > END (soft edge)."""
         current_graph = get_current()
         if current_graph and hasattr(current_graph, "add_edge"):
             if self == END:
-                # Auto-set outputs: mỗi output key -> father[key]
-                def _set_wildcard_outputs(node):
-                    if hasattr(node, "outputs") and not _has_explicit_outputs(node):
-                        if node.outputs is None:
-                            node.outputs = {}
-                        father = getattr(node, "father", None) or PARENT
-                        for key in node.outputs:
-                            param = node.outputs[key]
+                # Auto-set outputs: each output key -> father[key]
+                def _set_wildcard_outputs(target_op):
+                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
+                        if target_op.outputs is None:
+                            target_op.outputs = {}
+                        father = getattr(target_op, "father", None) or PARENT
+                        for key in target_op.outputs:
+                            param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
                                 param.value = Ref(father, key)
 
                 if isinstance(other, list):
-                    for node in other:
-                        _set_wildcard_outputs(node)
-                        current_graph.add_edge(node.name, self.name, soft=True)
+                    for item in other:
+                        _set_wildcard_outputs(item)
+                        current_graph.add_edge(item.name, self.name, soft=True)
                 elif hasattr(other, "name"):
                     _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name, soft=True)
@@ -1023,7 +974,7 @@ class DummyOp(BaseOp):
         return self
 
 
-# Các dummy node toàn cục
+# Global dummy ops
 START = DummyOp("__START__")
 END = DummyOp("__END__")
 PARENT = DummyOp("__PARENT__")

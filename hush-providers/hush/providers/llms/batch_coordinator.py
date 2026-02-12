@@ -109,7 +109,7 @@ class BatchCoordinator:
     @classmethod
     def get_coordinator(
         cls,
-        resource_key: str,
+        resource: str,
         llm: "BaseLLM",
         max_batch_size: int = 50000,
         flush_interval: float = 60.0,
@@ -119,7 +119,7 @@ class BatchCoordinator:
         """Get or create a coordinator for a specific resource key.
 
         Args:
-            resource_key: The LLM resource key
+            resource: The LLM resource key
             llm: The LLM backend
             max_batch_size: Maximum requests per batch (OpenAI limit: 50000)
             flush_interval: Seconds before auto-flushing pending requests
@@ -129,15 +129,15 @@ class BatchCoordinator:
         Returns:
             BatchCoordinator instance for this resource
         """
-        if resource_key not in cls._coordinators:
-            cls._coordinators[resource_key] = BatchCoordinator(
+        if resource not in cls._coordinators:
+            cls._coordinators[resource] = BatchCoordinator(
                 llm=llm,
                 max_batch_size=max_batch_size,
                 flush_interval=flush_interval,
                 poll_interval=poll_interval,
                 timeout=timeout,
             )
-        return cls._coordinators[resource_key]
+        return cls._coordinators[resource]
 
     async def submit(self, messages: List[dict], **params) -> Any:
         """Submit a request for batch processing.

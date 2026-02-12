@@ -19,10 +19,10 @@ class TestLLMOp:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="test_llm", resource_key="gpt-4o")
+        node = LLMOp(name="test_llm", resource="gpt-4o")
 
         assert node.type == "llm"
-        assert node.resource_key == "gpt-4o"
+        assert node.resource == "gpt-4o"
 
     def test_input_schema(self, hub):
         """Test LLMOp has required input schema."""
@@ -31,7 +31,7 @@ class TestLLMOp:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="schema_test", resource_key="gpt-4o")
+        node = LLMOp(name="schema_test", resource="gpt-4o")
 
         assert "messages" in node.inputs
 
@@ -42,7 +42,7 @@ class TestLLMOp:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="output_test", resource_key="gpt-4o")
+        node = LLMOp(name="output_test", resource="gpt-4o")
 
         assert "content" in node.outputs
         assert "role" in node.outputs
@@ -55,7 +55,7 @@ class TestLLMOp:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="stream_test", resource_key="gpt-4o", stream=True)
+        node = LLMOp(name="stream_test", resource="gpt-4o", stream=True)
 
         assert node.stream is True
 
@@ -66,7 +66,7 @@ class TestLLMOp:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="metadata_test", resource_key="gpt-4o")
+        node = LLMOp(name="metadata_test", resource="gpt-4o")
 
         metadata = node.specific_metadata
         assert metadata["model"] == "gpt-4o"
@@ -86,7 +86,7 @@ class TestLLMOpIntegration:
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured in resources.yaml")
 
-        node = LLMOp(name="chat", resource_key="or-claude-4-sonnet")
+        node = LLMOp(name="chat", resource="or-claude-4-sonnet")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -114,7 +114,7 @@ class TestLLMOpIntegration:
         if not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("llm:or-claude-4-sonnet not configured in resources.yaml")
 
-        node = LLMOp(name="stream_chat", resource_key="or-claude-4-sonnet", stream=True)
+        node = LLMOp(name="stream_chat", resource="or-claude-4-sonnet", stream=True)
 
         schema = StateSchema(op=node)
         request_id = "test-stream-request-001"
@@ -174,19 +174,17 @@ class TestLLMOpLoadBalancing:
     """Tests for LLMOp load balancing feature."""
 
     def test_load_balancing_init_with_list(self, hub):
-        """Test LLMOp initialization with multiple resource_keys."""
+        """Test LLMOp initialization with multiple resources."""
         from hush.providers.ops import LLMOp
 
         # Check if required resources are available
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(
-            name="lb_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.7, 0.3]
-        )
+        node = LLMOp(name="lb_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.7, 0.3])
 
-        assert isinstance(node.resource_key, list)
-        assert len(node.resource_key) == 2
+        assert isinstance(node.resource, list)
+        assert len(node.resource) == 2
         assert node.ratios == [0.7, 0.3]
         assert len(node._llms) == 2
 
@@ -197,7 +195,7 @@ class TestLLMOpLoadBalancing:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(name="lb_default_test", resource_key=["gpt-4o", "or-claude-4-sonnet"])
+        node = LLMOp(name="lb_default_test", resource=["gpt-4o", "or-claude-4-sonnet"])
 
         assert node.ratios == [0.5, 0.5]
 
@@ -211,7 +209,7 @@ class TestLLMOpLoadBalancing:
         with pytest.raises(ValueError) as exc_info:
             LLMOp(
                 name="lb_error_test",
-                resource_key=["gpt-4o", "or-claude-4-sonnet"],
+                resource=["gpt-4o", "or-claude-4-sonnet"],
                 ratios=[0.5],  # Wrong length
             )
 
@@ -227,7 +225,7 @@ class TestLLMOpLoadBalancing:
         with pytest.raises(ValueError) as exc_info:
             LLMOp(
                 name="lb_sum_test",
-                resource_key=["gpt-4o", "or-claude-4-sonnet"],
+                resource=["gpt-4o", "or-claude-4-sonnet"],
                 ratios=[0.3, 0.3],  # Sums to 0.6, not 1.0
             )
 
@@ -242,15 +240,13 @@ class TestLLMOpLoadBalancing:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(
-            name="dist_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.8, 0.2]
-        )
+        node = LLMOp(name="dist_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.8, 0.2])
 
         # Run selection 1000 times
         selections = Counter()
         for _ in range(1000):
             llm = node._select_llm()
-            key = node._get_selected_resource_key(llm)
+            key = node._get_selected_resource(llm)
             selections[key] += 1
 
         # Check distribution is roughly correct (with tolerance)
@@ -267,9 +263,7 @@ class TestLLMOpLoadBalancing:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(
-            name="meta_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.6, 0.4]
-        )
+        node = LLMOp(name="meta_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.6, 0.4])
 
         metadata = node.specific_metadata
         assert metadata["load_balancing"] is True
@@ -286,7 +280,7 @@ class TestLLMOpLoadBalancing:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMOp(
-            name="lb_exec_test", resource_key=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.5, 0.5]
+            name="lb_exec_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.5, 0.5]
         )
 
         schema = StateSchema(op=node)
@@ -313,7 +307,7 @@ class TestLLMOpBatchMode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="batch_test", resource_key="gpt-4o", batch_mode=True)
+        node = LLMOp(name="batch_test", resource="gpt-4o", batch_mode=True)
 
         assert node.batch_mode is True
         assert node._batch_coordinator is not None
@@ -325,21 +319,21 @@ class TestLLMOpBatchMode:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="batch_meta_test", resource_key="gpt-4o", batch_mode=True)
+        node = LLMOp(name="batch_meta_test", resource="gpt-4o", batch_mode=True)
 
         metadata = node.specific_metadata
         assert metadata["batch_mode"] is True
 
     def test_batch_mode_coordinator_singleton(self, hub):
-        """Test BatchCoordinator is shared for same resource_key."""
+        """Test BatchCoordinator is shared for same resource."""
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node1 = LLMOp(name="batch_node_1", resource_key="gpt-4o", batch_mode=True)
+        node1 = LLMOp(name="batch_node_1", resource="gpt-4o", batch_mode=True)
 
-        node2 = LLMOp(name="batch_node_2", resource_key="gpt-4o", batch_mode=True)
+        node2 = LLMOp(name="batch_node_2", resource="gpt-4o", batch_mode=True)
 
         # Should share the same coordinator
         assert node1._batch_coordinator is node2._batch_coordinator
@@ -379,7 +373,7 @@ class TestLLMOpAdvancedParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="advanced_test", resource_key="gpt-4o")
+        node = LLMOp(name="advanced_test", resource="gpt-4o")
 
         # Check all advanced parameters are in the input schema
         assert "tools" in node.inputs
@@ -402,7 +396,7 @@ class TestLLMOpAdvancedParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="output_test", resource_key="gpt-4o")
+        node = LLMOp(name="output_test", resource="gpt-4o")
 
         assert "refusal" in node.outputs
         assert "logprobs" in node.outputs
@@ -418,7 +412,7 @@ class TestLLMOpFallback:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(name="fallback_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"])
+        node = LLMOp(name="fallback_test", resource="gpt-4o", fallback=["or-claude-4-sonnet"])
 
         assert node.fallback == ["or-claude-4-sonnet"]
         assert len(node._fallback_llms) == 1
@@ -432,7 +426,7 @@ class TestLLMOpFallback:
 
         node = LLMOp(
             name="multi_fallback_test",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             fallback=["or-claude-4-sonnet", "gpt-4o"],
         )
 
@@ -446,9 +440,7 @@ class TestLLMOpFallback:
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(
-            name="meta_fallback_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"]
-        )
+        node = LLMOp(name="meta_fallback_test", resource="gpt-4o", fallback=["or-claude-4-sonnet"])
 
         metadata = node.specific_metadata
         assert "fallback" in metadata
@@ -461,7 +453,7 @@ class TestLLMOpFallback:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="no_fallback_test", resource_key="gpt-4o")
+        node = LLMOp(name="no_fallback_test", resource="gpt-4o")
 
         metadata = node.specific_metadata
         assert "fallback" not in metadata
@@ -477,9 +469,7 @@ class TestLLMOpFallback:
             pytest.skip("Required LLM resources not configured")
 
         # Primary should work, fallback should not be needed
-        node = LLMOp(
-            name="fallback_exec_test", resource_key="gpt-4o", fallback=["or-claude-4-sonnet"]
-        )
+        node = LLMOp(name="fallback_exec_test", resource="gpt-4o", fallback=["or-claude-4-sonnet"])
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -535,7 +525,7 @@ class TestLLMOpTools:
 
         node = LLMOp(
             name="tool_test",
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             inputs={"messages": None, "tools": None, "tool_choice": None},
         )
 
@@ -586,7 +576,7 @@ class TestLLMOpTools:
             }
         ]
 
-        node = LLMOp(name="force_tool_test", resource_key="gpt-4o")
+        node = LLMOp(name="force_tool_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -621,7 +611,7 @@ class TestLLMOpResponseFormat:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="json_test", resource_key="gpt-4o")
+        node = LLMOp(name="json_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -664,7 +654,7 @@ class TestLLMOpResponseFormat:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="structured_test", resource_key="gpt-4o")
+        node = LLMOp(name="structured_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -716,7 +706,7 @@ class TestLLMOpVision:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="vision_test", resource_key="gpt-4o")
+        node = LLMOp(name="vision_test", resource="gpt-4o")
 
         # Use a reliable test image URL (raw image, not wiki page)
         image_url = (
@@ -767,7 +757,7 @@ class TestLLMOpVision:
         )
         base64_image = base64.b64encode(png_bytes).decode("utf-8")
 
-        node = LLMOp(name="vision_base64_test", resource_key="gpt-4o")
+        node = LLMOp(name="vision_base64_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -810,7 +800,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="temp_test", resource_key="gpt-4o")
+        node = LLMOp(name="temp_test", resource="gpt-4o")
 
         # Low temperature (deterministic)
         schema = StateSchema(op=node)
@@ -836,7 +826,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="max_tokens_test", resource_key="gpt-4o")
+        node = LLMOp(name="max_tokens_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -869,7 +859,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="stop_test", resource_key="gpt-4o")
+        node = LLMOp(name="stop_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -899,7 +889,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="top_p_test", resource_key="gpt-4o")
+        node = LLMOp(name="top_p_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -925,7 +915,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="penalty_test", resource_key="gpt-4o")
+        node = LLMOp(name="penalty_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -952,7 +942,7 @@ class TestLLMOpGenerationParams:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="seed_test", resource_key="gpt-4o")
+        node = LLMOp(name="seed_test", resource="gpt-4o")
 
         # Run twice with same seed
         results = []
@@ -991,7 +981,7 @@ class TestLLMOpLogprobs:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="logprobs_test", resource_key="gpt-4o")
+        node = LLMOp(name="logprobs_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -1030,7 +1020,7 @@ class TestLLMOpMultipleCompletions:
         # Note: n > 1 typically returns multiple choices, but our LLMOp
         # currently only extracts the first choice. This test verifies
         # the parameter is passed correctly.
-        node = LLMOp(name="multi_completion_test", resource_key="gpt-4o")
+        node = LLMOp(name="multi_completion_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -1061,7 +1051,7 @@ class TestLLMOpUserTracking:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="user_test", resource_key="gpt-4o")
+        node = LLMOp(name="user_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -1145,7 +1135,7 @@ class TestLLMOpAudio:
         wav_data = wav_header + bytes([0x80] * 1600)  # silence
         base64_audio = base64.b64encode(wav_data).decode("utf-8")
 
-        node = LLMOp(name="audio_test", resource_key="gpt-4o-audio")
+        node = LLMOp(name="audio_test", resource="gpt-4o-audio")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -1191,7 +1181,7 @@ class TestLLMOpComplexWorkflow:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="multi_turn_test", resource_key="gpt-4o")
+        node = LLMOp(name="multi_turn_test", resource="gpt-4o")
 
         # First turn
         schema = StateSchema(op=node)
@@ -1234,7 +1224,7 @@ class TestLLMOpComplexWorkflow:
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = LLMOp(name="system_test", resource_key="gpt-4o")
+        node = LLMOp(name="system_test", resource="gpt-4o")
 
         schema = StateSchema(op=node)
         state = MemoryState(

@@ -31,7 +31,7 @@ class OTELTracer(BaseTracer):
         tracer = OTELTracer(config=OTELConfig.jaeger())
 
         # Production: Use ResourceHub for centralized config
-        tracer = OTELTracer(resource_key="otel:jaeger", tags=["prod"])
+        tracer = OTELTracer(resource="otel:jaeger", tags=["prod"])
 
         # Use with workflow engine
         result = await engine.run(inputs={...}, tracer=tracer)
@@ -45,37 +45,37 @@ class OTELTracer(BaseTracer):
     def __init__(
         self,
         config: Optional["OTELConfig"] = None,
-        resource_key: Optional[str] = None,
+        resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ):
         """Initialize the OpenTelemetry tracer.
 
         Args:
             config: Direct OTELConfig (simple usage, no ResourceHub needed)
-            resource_key: ResourceHub key for OTELClient (e.g., "otel:jaeger")
+            resource: ResourceHub key for OTELClient (e.g., "otel:jaeger")
             tags: Optional list of static tags for filtering/grouping traces
 
         Raises:
-            ValueError: If neither config nor resource_key is provided, or both are provided
+            ValueError: If neither config nor resource is provided, or both are provided
         """
         super().__init__(tags=tags)
-        if config is None and resource_key is None:
-            raise ValueError("Must provide either 'config' or 'resource_key'")
-        if config is not None and resource_key is not None:
-            raise ValueError("Cannot provide both 'config' and 'resource_key'")
+        if config is None and resource is None:
+            raise ValueError("Must provide either 'config' or 'resource'")
+        if config is not None and resource is not None:
+            raise ValueError("Cannot provide both 'config' and 'resource'")
         self._config = config
-        self._resource_key = resource_key
+        self._resource = resource
 
     @property
-    def resource_key(self) -> Optional[str]:
+    def resource(self) -> Optional[str]:
         """Get the resource key (for backward compatibility)."""
-        return self._resource_key
+        return self._resource
 
     def _get_tracer_config(self) -> Dict[str, Any]:
         """Return configuration for subprocess."""
         if self._config is not None:
             return {"config": self._config.model_dump()}
-        return {"resource_key": self._resource_key}
+        return {"resource": self._resource}
 
     @staticmethod
     def _datetime_to_ns(dt) -> Optional[int]:
@@ -127,7 +127,7 @@ class OTELTracer(BaseTracer):
             else:
                 from hush.core.registry import get_hub
 
-                client = get_hub().otel(tracer_config["resource_key"])
+                client = get_hub().otel(tracer_config["resource"])
 
             workflow_name = flush_data["workflow_name"]
             req_id = flush_data["request_id"]
@@ -330,6 +330,6 @@ class OTELTracer(BaseTracer):
 
     def __repr__(self) -> str:
         """String representation."""
-        if self._resource_key:
-            return f"<OTELTracer resource_key={self._resource_key}>"
+        if self._resource:
+            return f"<OTELTracer resource={self._resource}>"
         return f"<OTELTracer endpoint={self._config.endpoint}>"

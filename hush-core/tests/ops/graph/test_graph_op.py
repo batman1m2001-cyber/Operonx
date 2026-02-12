@@ -1506,7 +1506,7 @@ class TestComplexGraphWithAllOpTypes:
             with WhileOp(
                 name="main_loop",
                 inputs={"counter": 0, "total": 0},
-                stop_condition="total >= 50",
+                until="total >= 50",
                 max_iterations=20,
             ) as loop:
                 # Increment counter first
@@ -1576,7 +1576,7 @@ class TestComplexGraphWithAllOpTypes:
                 with WhileOp(
                     name="inner_while",
                     inputs={"value": PARENT["item"]},
-                    stop_condition="value < 5",
+                    until="value < 5",
                     max_iterations=20,
                 ) as while_loop:
                     halve_node = halve(inputs={"value": PARENT["value"]})
@@ -1666,7 +1666,7 @@ class TestComplexGraphWithAllOpTypes:
             with WhileOp(
                 name="iterative_process",
                 inputs={"current": 0, "step": 10, "target": parser["target"]},
-                stop_condition="current >= target",
+                until="current >= target",
                 max_iterations=50,
             ) as iter_loop:
                 iter_node = iterative_accumulate(
@@ -1741,7 +1741,7 @@ class TestComplexGraphWithAllOpTypes:
             with WhileOp(
                 name="count_loop",
                 inputs={"counter": 0, "target": PARENT["target"]},
-                stop_condition="counter >= target",
+                until="counter >= target",
                 max_iterations=20,
             ) as while_loop:
                 count_node = count_step(inputs={"counter": PARENT["counter"]})
@@ -1816,7 +1816,7 @@ class TestComplexGraphWithAllOpTypes:
                 with WhileOp(
                     name="while_process",
                     inputs={"counter": 0, "limit": prep["limit"]},
-                    stop_condition="counter >= limit",
+                    until="counter >= limit",
                     max_iterations=50,
                 ) as while_loop:
                     inc = increment(inputs={"counter": PARENT["counter"]})

@@ -180,13 +180,13 @@ class BranchError(OpError):
 
 
 class ConditionError(OpError):
-    """Exception khi stop_condition trong WhileOp thất bại.
+    """Exception when WhileOp ``until`` condition fails.
 
-    Context tự động bao gồm:
-    - condition: Chuỗi stop_condition
-    - phase: 'compile' hoặc 'eval'
-    - iteration: Số iteration hiện tại (nếu có)
-    - inputs: Dict các input values (truncated)
+    Context includes:
+    - condition: The ``until`` expression string.
+    - phase: 'compile' or 'eval'.
+    - iteration: Current iteration number (if available).
+    - inputs: Dict of input values (truncated).
 
     Example:
         raise ConditionError(
@@ -315,13 +315,13 @@ class EmbeddingError(OpError):
     """Exception khi EmbeddingOp thất bại.
 
     Context tự động bao gồm:
-    - resource_key: Model/resource key
+    - resource: Model/resource key
     - text_count: Số lượng texts cần embed
 
     Example:
         raise EmbeddingError(
             message="Embedding backend failed",
-            resource_key="bge-m3",
+            resource="bge-m3",
             text_count=100,
             original_error=connection_error
         )
@@ -330,18 +330,18 @@ class EmbeddingError(OpError):
     def __init__(
         self,
         message: str,
-        resource_key: str,
+        resource: str,
         text_count: int,
         original_error: Optional[Exception] = None,
     ):
-        self.resource_key = resource_key
+        self.resource = resource
         self.text_count = text_count
 
         super().__init__(
             message=message,
             op_type="embedding",
             original_error=original_error,
-            context={"resource_key": resource_key, "text_count": text_count},
+            context={"resource": resource, "text_count": text_count},
         )
 
 
@@ -349,14 +349,14 @@ class RerankError(OpError):
     """Exception khi RerankOp thất bại.
 
     Context tự động bao gồm:
-    - resource_key: Model/resource key
+    - resource: Model/resource key
     - query: Query string (truncated)
     - document_count: Số lượng documents
 
     Example:
         raise RerankError(
             message="Invalid document type",
-            resource_key="bge-m3",
+            resource="bge-m3",
             query="search query",
             document_count=50,
             original_error=type_error
@@ -366,12 +366,12 @@ class RerankError(OpError):
     def __init__(
         self,
         message: str,
-        resource_key: str,
+        resource: str,
         query: str,
         document_count: int,
         original_error: Optional[Exception] = None,
     ):
-        self.resource_key = resource_key
+        self.resource = resource
         self.query = query
         self.document_count = document_count
 
@@ -380,7 +380,7 @@ class RerankError(OpError):
             op_type="rerank",
             original_error=original_error,
             context={
-                "resource_key": resource_key,
+                "resource": resource,
                 "query": _truncate(query, 100),
                 "document_count": document_count,
             },

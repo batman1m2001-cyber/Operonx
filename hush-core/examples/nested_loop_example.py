@@ -62,7 +62,7 @@ async def run_mapnode_whileloop_example():
             with WhileOp(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
-                stop_condition="value < 5",
+                until="value < 5",
                 max_iterations=5,
             ) as while_loop:
                 halve_node = halve(inputs={"value": PARENT["value"]})

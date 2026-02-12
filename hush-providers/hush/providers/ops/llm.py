@@ -1,12 +1,7 @@
-"""LLM Node for hush-providers.
+"""LLMOp — language-model op for hush-providers.
 
-This module provides LLMOp that uses ResourceHub to access LLM resources.
-Follows hush-core design patterns with Param-based schema.
-
-Features:
-- Load balancing: Use multiple resource_keys with weighted ratios
-- Batch mode: Submit requests to OpenAI Batch API (50% cheaper, async processing)
-- Token usage: Always returns token usage in both streaming and non-streaming modes
+Uses ResourceHub to access LLM resources. Supports streaming, load balancing,
+fallback chains, and OpenAI Batch API mode.
 """
 
 import asyncio
@@ -28,48 +23,34 @@ if TYPE_CHECKING:
 
 
 class LLMOp(BaseOp):
-    """LLM node for executing language model operations in workflows.
+    """Op that calls a language model via ResourceHub.
 
-    Uses ResourceHub to access LLM resources by resource_key.
-    Supports streaming, load balancing, fallback, and batch modes.
+    Supports streaming, weighted load balancing across multiple models,
+    fallback chains with retry, and OpenAI Batch API mode (50 % cheaper).
 
-    Example:
-        ```python
-        from hush.core import GraphOp, START, END, PARENT
-        from hush.providers import LLMOp
+    Inputs:
+        messages (list): Chat messages in OpenAI format. Required.
+        temperature (float): Sampling temperature. Default: 0.0.
+        max_tokens (int): Max output tokens. Default: None (model default).
+        tools (list): Tool/function definitions. Default: None.
+        tool_choice (str | dict): Tool selection strategy. Default: None.
+        response_format (dict): Structured output format. Default: None.
 
-        # Simple usage
-        with GraphOp(name="chat") as workflow:
-            llm = LLMOp(
-                name="chat",
-                resource_key="gpt-4",
-                inputs={"messages": PARENT["messages"]},
-                outputs={"*": PARENT}
-            )
-            START >> llm >> END
+    Outputs:
+        content (str): Generated text.
+        role (str): Message role (usually ``"assistant"``).
+        model_used (str): Actual model that served the request.
+        tokens_used (dict): ``{prompt, completion, total}`` token counts.
+        tool_calls (list): Tool-call objects (if any).
+        finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, etc.).
 
-        # Load balancing (70% gpt-4, 30% claude-3)
-        llm = LLMOp(
-            name="chat",
-            resource_key=["gpt-4", "claude-3"],
-            ratios=[0.7, 0.3],
-            inputs={"messages": PARENT["messages"]}
-        )
+    Example::
 
-        # Batch mode (uses OpenAI Batch API, 50% cheaper)
-        llm = LLMOp(
-            name="batch_chat",
-            resource_key="gpt-4",
-            batch_mode=True,
-            inputs={"messages": PARENT["messages"]}
-        )
-
-        workflow.build()
-        ```
+        llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
     """
 
     __slots__ = [
-        "resource_key",
+        "resource",
         "batch_mode",
         "ratios",
         "_llms",
@@ -84,7 +65,7 @@ class LLMOp(BaseOp):
 
     def __init__(
         self,
-        resource_key: Optional[Union[str, List[str]]] = None,
+        resource: Optional[Union[str, List[str]]] = None,
         ratios: Optional[List[float]] = None,
         fallback: Optional[List[str]] = None,
         batch_mode: bool = False,
@@ -96,11 +77,11 @@ class LLMOp(BaseOp):
         """Initialize LLMOp.
 
         Args:
-            resource_key: Resource key(s) for LLM in ResourceHub.
+            resource: Resource key(s) for LLM in ResourceHub.
                 - Single string: "gpt-4"
                 - List for load balancing: ["gpt-4", "claude-3"]
             ratios: Weight ratios for load balancing. Must sum to 1.0.
-                Only used when resource_key is a list.
+                Only used when resource is a list.
             fallback: Fallback resource key(s) to use when primary model fails.
                 List of resource keys from ResourceHub, tried in order.
             batch_mode: Whether to use OpenAI Batch API (50% cheaper, async processing)
@@ -124,21 +105,21 @@ class LLMOp(BaseOp):
         self._fallback_llms: List["BaseLLM"] = []
         self._batch_coordinator = None
 
-        if isinstance(resource_key, list):
-            self.resource_key = resource_key
-            self.ratios = ratios or [1.0 / len(resource_key)] * len(resource_key)
+        if isinstance(resource, list):
+            self.resource = resource
+            self.ratios = ratios or [1.0 / len(resource)] * len(resource)
 
             # Validate ratios
-            if len(self.ratios) != len(self.resource_key):
+            if len(self.ratios) != len(self.resource):
                 raise ValueError(
                     f"ratios length ({len(self.ratios)}) must match "
-                    f"resource_key length ({len(self.resource_key)})"
+                    f"resource length ({len(self.resource)})"
                 )
             if abs(sum(self.ratios) - 1.0) > 0.01:
                 raise ValueError(f"ratios must sum to 1.0, got {sum(self.ratios)}")
         else:
-            self.resource_key = resource_key
-            self.ratios = [1.0] if resource_key else None
+            self.resource = resource
+            self.ratios = [1.0] if resource else None
 
         # Define input/output schema
         input_schema = {
@@ -187,12 +168,12 @@ class LLMOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        # Initialize LLM(s) based on resource_key type
-        if isinstance(self.resource_key, list):
-            self._llms = [hub.llm(key) for key in self.resource_key]
+        # Initialize LLM(s) based on resource type
+        if isinstance(self.resource, list):
+            self._llms = [hub.llm(key) for key in self.resource]
             self._llm = self._llms[0]  # Default to first
         else:
-            self._llm = hub.llm(self.resource_key)
+            self._llm = hub.llm(self.resource)
             self._llms = [self._llm] if self._llm else []
 
         # Initialize fallback LLMs
@@ -217,9 +198,7 @@ class LLMOp(BaseOp):
                 batch_kwargs["timeout"] = config.batch_timeout
 
             self._batch_coordinator = BatchCoordinator.get_coordinator(
-                resource_key=self.resource_key
-                if isinstance(self.resource_key, str)
-                else self.resource_key[0],
+                resource=self.resource if isinstance(self.resource, str) else self.resource[0],
                 llm=self._llm,
                 **batch_kwargs,
             )
@@ -243,7 +222,7 @@ class LLMOp(BaseOp):
         # Weighted random selection using dedicated RNG
         return self._rng.choices(self._llms, weights=self.ratios, k=1)[0]
 
-    def _get_selected_resource_key(self, llm: "BaseLLM") -> str:
+    def _get_selected_resource(self, llm: "BaseLLM") -> str:
         """Get the resource key for the selected LLM.
 
         Args:
@@ -252,10 +231,10 @@ class LLMOp(BaseOp):
         Returns:
             str: The resource key
         """
-        if isinstance(self.resource_key, list):
+        if isinstance(self.resource, list):
             idx = self._llms.index(llm)
-            return self.resource_key[idx]
-        return self.resource_key
+            return self.resource[idx]
+        return self.resource
 
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Build parameters dict for LLM backend call.
@@ -293,14 +272,14 @@ class LLMOp(BaseOp):
         return params
 
     def _extract_completion_data(
-        self, completion: Any, _inputs: Dict[str, Any], selected_resource_key: str
+        self, completion: Any, _inputs: Dict[str, Any], selected_resource: str
     ) -> Dict[str, Any]:
         """Extract data from a completion response.
 
         Args:
             completion: The ChatCompletion response
             _inputs: The input parameters
-            selected_resource_key: The resource key used
+            selected_resource: The resource key used
 
         Returns:
             Dict with extracted output data
@@ -342,7 +321,7 @@ class LLMOp(BaseOp):
             "role": "assistant",
             "content": response,
             "finish_reason": finish_reason,
-            "model_used": selected_resource_key or completion.model,
+            "model_used": selected_resource or completion.model,
             "tokens_used": tokens_used,
             "tool_calls": tool_calls,
             "thinking_content": thinking_content if thinking_content else None,
@@ -359,7 +338,7 @@ class LLMOp(BaseOp):
         self,
         llm: "BaseLLM",
         llm_params: Dict[str, Any],
-        resource_key: str,
+        resource: str,
         request_id: str,
         channel_name: str,
         _inputs: Dict[str, Any],
@@ -418,7 +397,7 @@ class LLMOp(BaseOp):
             "role": "assistant",
             "content": response,
             "finish_reason": finish_reason,
-            "model_used": resource_key,
+            "model_used": resource,
             "tokens_used": tokens_used,
             "tool_calls": tool_calls,
             "thinking_content": thinking_content if thinking_content else None,
@@ -433,7 +412,7 @@ class LLMOp(BaseOp):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the LLM node with streaming support via STREAM_SERVICE.
+        """Run the LLM op with streaming support via STREAM_SERVICE.
 
         Handles streaming internally with STREAM_SERVICE.push() for each chunk.
         Supports load balancing and batch mode.
@@ -449,8 +428,8 @@ class LLMOp(BaseOp):
 
         # Select LLM for this request (load balancing)
         selected_llm = self._select_llm() if self._llms else None
-        selected_resource_key = (
-            self._get_selected_resource_key(selected_llm) if selected_llm else self.resource_key
+        selected_resource = (
+            self._get_selected_resource(selected_llm) if selected_llm else self.resource
         )
 
         try:
@@ -461,7 +440,7 @@ class LLMOp(BaseOp):
                 # Batch mode: submit to BatchCoordinator
                 LOGGER.info(f"Batch mode for {self.name}...")
                 completion = await self._batch_coordinator.submit(**llm_params)
-                _outputs = self._extract_completion_data(completion, _inputs, selected_resource_key)
+                _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
 
             elif self.stream:
                 # Streaming mode with STREAM_SERVICE
@@ -470,7 +449,7 @@ class LLMOp(BaseOp):
                 _outputs = await self._handle_streaming(
                     llm=stream_llm,
                     llm_params=llm_params,
-                    resource_key=selected_resource_key,
+                    resource=selected_resource,
                     request_id=request_id,
                     channel_name=self.identity(context_id),
                     _inputs=_inputs,
@@ -482,7 +461,7 @@ class LLMOp(BaseOp):
                 # Use selected LLM's generate method for load balancing
                 generate_fn = selected_llm.generate if selected_llm else self.core
                 completion = await generate_fn(**llm_params)
-                _outputs = self._extract_completion_data(completion, _inputs, selected_resource_key)
+                _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
 
             self.store_result(state, _outputs, context_id)
 
@@ -503,7 +482,7 @@ class LLMOp(BaseOp):
                             _outputs = await self._handle_streaming(
                                 llm=fallback_llm,
                                 llm_params=llm_params,
-                                resource_key=fallback_key,
+                                resource=fallback_key,
                                 request_id=request_id,
                                 channel_name=self.identity(context_id),
                                 _inputs=_inputs,
@@ -516,7 +495,7 @@ class LLMOp(BaseOp):
                             )
 
                         selected_llm = fallback_llm
-                        selected_resource_key = fallback_key
+                        selected_resource = fallback_key
                         self.store_result(state, _outputs, context_id)
                         LOGGER.info(f"Fallback to {fallback_key} succeeded")
                         break  # Success, exit fallback loop
@@ -573,7 +552,7 @@ class LLMOp(BaseOp):
                 input_vars=list(self.inputs.keys()) if self.inputs else [],
                 output_vars=list(self.outputs.keys()) if self.outputs else [],
                 contain_generation=self.contain_generation,
-                model=_outputs.get("model_used") or selected_resource_key,
+                model=_outputs.get("model_used") or selected_resource,
                 usage=_outputs.get("tokens_used"),
                 cost=cost,
                 metadata=self.metadata,
@@ -583,18 +562,18 @@ class LLMOp(BaseOp):
 
     @shorthand
     def of(
-        cls, resource_key=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
+        cls, resource=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
     ) -> "LLMOp":
         """Create an LLMOp with flat kwargs.
 
         Example::
 
-            llm = LLMOp.of(resource_key="gpt-4", messages=PARENT["messages"], outputs={"*": PARENT})
-            llm = LLMOp.of(resource_key=["gpt-4", "claude-3"], ratios=[0.7, 0.3], messages=PARENT["messages"])
+            llm = LLMOp.of(resource="gpt-4", messages=PARENT["messages"], outputs={"*": PARENT})
+            llm = LLMOp.of(resource=["gpt-4", "claude-3"], ratios=[0.7, 0.3], messages=PARENT["messages"])
         """
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
         return cls(
-            resource_key=resource_key,
+            resource=resource,
             ratios=ratios,
             fallback=fallback,
             batch_mode=batch_mode,
@@ -607,10 +586,10 @@ class LLMOp(BaseOp):
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLM-specific metadata dictionary."""
         metadata = {
-            "model": self.resource_key,
+            "model": self.resource,
             "batch_mode": self.batch_mode,
         }
-        if isinstance(self.resource_key, list):
+        if isinstance(self.resource, list):
             metadata["load_balancing"] = True
             metadata["ratios"] = self.ratios
         if self.fallback:

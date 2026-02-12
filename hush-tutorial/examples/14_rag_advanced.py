@@ -164,7 +164,7 @@ async def example_2_hybrid_rag():
     print("  Embedding documents...")
     with GraphOp(name="embed-docs") as embed_graph:
         embed = EmbeddingOp.of(
-            resource_key="openai",
+            resource="openai",
             texts=PARENT["texts"],
             outputs={"embeddings": PARENT["vectors"]},
         )
@@ -193,7 +193,7 @@ async def example_2_hybrid_rag():
         kw = kw_search_fn(query=PARENT["query"], docs=PARENT["documents"])
 
         # Branch B: Vector search
-        embed_q = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
+        embed_q = EmbeddingOp.of(resource="openai", texts=PARENT["query"])
         vec = vec_search_fn(
             qv=embed_q["embeddings"],
             docs=PARENT["documents"],
@@ -218,7 +218,7 @@ async def example_2_hybrid_rag():
         )
 
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )
@@ -289,7 +289,7 @@ async def example_3_rerank():
 
         # Stage 2: Rerank to top 3
         rr = RerankOp.of(
-            resource_key="bge-m3",
+            resource="bge-m3",
             query=PARENT["query"],
             documents=ret["candidates"],
             top_k=3,
@@ -306,7 +306,7 @@ async def example_3_rerank():
         )
 
         llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=p["messages"],
             outputs={"content": PARENT["answer"]},
         )

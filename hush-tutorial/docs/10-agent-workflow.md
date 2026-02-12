@@ -10,8 +10,8 @@ Xây dựng AI agent với tool calling và WhileOp.
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
 > | `@op` | `FuncOp` | `@op` decorator trên function |
-> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, stop_condition="counter >= 5")` |
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, until="counter >= 5")` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 
 ## Kiến trúc Agent
 
@@ -107,11 +107,11 @@ with GraphOp(name="agent") as graph:
         iteration=PARENT["iteration"],
         done=PARENT["done"],
         final_answer=PARENT["final_answer"],
-        stop_condition="done == True or iteration >= 5",
+        until="done == True or iteration >= 5",
         max_iterations=10,
     ) as loop:
         llm = LLMOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             messages=PARENT["messages"],
             tools=tools,
         )

@@ -23,10 +23,10 @@ class TestEmbeddingOp:
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = EmbeddingOp(name="test_embed", resource_key="bge-m3")
+            node = EmbeddingOp(name="test_embed", resource="bge-m3")
 
             assert node.type == "embedding"
-            assert node.resource_key == "bge-m3"
+            assert node.resource == "bge-m3"
 
     def test_input_schema(self):
         """Test EmbeddingOp has texts input."""
@@ -37,7 +37,7 @@ class TestEmbeddingOp:
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = EmbeddingOp(name="input_test", resource_key="bge-m3")
+            node = EmbeddingOp(name="input_test", resource="bge-m3")
 
             assert "texts" in node.inputs
 
@@ -50,7 +50,7 @@ class TestEmbeddingOp:
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = EmbeddingOp(name="output_test", resource_key="bge-m3")
+            node = EmbeddingOp(name="output_test", resource="bge-m3")
 
             assert "embeddings" in node.outputs
 
@@ -63,7 +63,7 @@ class TestEmbeddingOp:
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = EmbeddingOp(name="metadata_test", resource_key="bge-m3")
+            node = EmbeddingOp(name="metadata_test", resource="bge-m3")
 
             metadata = node.specific_metadata
             assert metadata["model"] == "bge-m3"
@@ -83,7 +83,7 @@ class TestEmbeddingOpIntegration:
         if not hub.has("embedding:bge-m3"):
             pytest.skip("embedding:bge-m3 not configured in resources.yaml")
 
-        node = EmbeddingOp(name="embed", resource_key="bge-m3")
+        node = EmbeddingOp(name="embed", resource="bge-m3")
 
         schema = StateSchema(op=node)
         state = MemoryState(schema, inputs={"texts": ["Hello world", "How are you?"]})

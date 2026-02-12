@@ -171,7 +171,7 @@ class TestHushWithTracer:
         except ImportError:
             pytest.skip("hush-telemetry not installed")
 
-        tracer = LangfuseTracer(resource_key="langfuse:default")
+        tracer = LangfuseTracer(resource="langfuse:default")
 
         # Create a multi-step workflow
         with GraphOp(name="hush-integration-test") as graph:

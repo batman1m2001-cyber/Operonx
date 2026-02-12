@@ -88,7 +88,7 @@ class TestTildeSoftEdge:
 
     def test_start_soft_edge_raises_error(self):
         """Test that START >> ~node raises error"""
-        with pytest.raises(TypeError, match="Không thể dùng soft edge"):
+        with pytest.raises(TypeError, match="Cannot use soft edge"):
             with GraphOp(name="test") as graph:
                 a = FuncOp(name="a", code_fn=lambda: {"x": 1}, inputs={})
                 START >> ~a  # Should raise

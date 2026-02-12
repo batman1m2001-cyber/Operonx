@@ -121,7 +121,7 @@ LLMOp hỗ trợ tự động fallback khi model fails.
 from hush.providers import LLMOp
 
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     fallback=["gpt-4o-mini"],  # Nếu gpt-4o fails → thử gpt-4o-mini
     messages=p["messages"],
 )

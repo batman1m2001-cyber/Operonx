@@ -504,7 +504,7 @@ class TestNestedIteration:
             with WhileOp(
                 name="inner_while",
                 inputs={"value": PARENT["item"]},
-                stop_condition="value < 5",
+                until="value < 5",
                 max_iterations=10,
             ) as while_loop:
                 node = halve(inputs={"value": PARENT["value"]})

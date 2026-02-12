@@ -1,4 +1,4 @@
-"""Base class for iteration nodes with common infrastructure."""
+"""Base class for iteration ops with common infrastructure."""
 
 import asyncio
 import traceback
@@ -28,18 +28,17 @@ def get_iter_context(prefix: str, i: int) -> str:
 
 
 class Each:
-    """Marker wrapper to mark iteration source in unified inputs.
+    """Marker that designates an input as the iteration source.
 
-    Used to mark which input will be iterated (each iteration receives one value),
-    distinguishing from broadcast inputs (same value for all iterations).
+    Inputs wrapped in ``Each()`` are iterated — each iteration receives one
+    element. Unwrapped inputs are broadcast (same value every iteration).
 
-    Example:
-        with ForOp(
-            inputs={
-                "item": Each(items_node["items"]),  # iterate through this list
-                "multiplier": PARENT["multiplier"]   # broadcast to all iterations
-            }
-        ) as loop:
+    Example::
+
+        with ForOp(inputs={
+            "item": Each(items_op["items"]),      # iterated
+            "multiplier": PARENT["multiplier"],   # broadcast
+        }) as loop:
             ...
     """
 
@@ -55,7 +54,7 @@ class Each:
 # Iteration-specific init keys (beyond base keys)
 _ITER_EXTRA_KEYS = {
     "max_concurrency",
-    "stop_condition",
+    "until",
     "max_iterations",
     "callback",
     "batch_fn",
@@ -64,7 +63,7 @@ _ITER_EXTRA_KEYS = {
 
 
 def split_iter_kwargs(kwargs: dict) -> tuple:
-    """Split flat kwargs for iteration nodes.
+    """Split flat kwargs for iteration ops.
 
     Wrapper around split_shorthand_kwargs that:
     - Adds iteration-specific init keys
@@ -84,19 +83,15 @@ def split_iter_kwargs(kwargs: dict) -> tuple:
 
 
 class BaseIterationOp(GraphOp):
-    """Base class for iteration nodes (ForLoop, Map, While, AsyncIter).
+    """Base class for iteration ops (ForOp, MapOp, WhileOp, AIterOp).
 
-    Extracts common boilerplate:
-    - _run_graph() for executing child nodes
-    - _resolve_values() for resolving Ref objects
-    - _build_iteration_data() for building iteration data
-    - _normalize_iteration_io() for normalizing inputs/outputs
+    Provides shared infrastructure: child-graph execution, Ref resolution,
+    iteration-data construction, and input/output normalisation. Subclasses
+    only need to implement ``run()`` with their specific scheduling strategy
+    (sequential, parallel, conditional, or streaming).
 
-    Inherits build() from GraphOp which calls _post_build() hook.
-
-    Performance optimization:
-    - _var_indices: Pre-computed indices for iteration variables to avoid
-      repeated schema.get_index() calls in hot loops
+    Performance: ``_var_indices`` pre-computes state indices to avoid repeated
+    lookups in hot loops.
     """
 
     __slots__ = ["_each", "_broadcast_inputs", "_raw_inputs", "_raw_outputs", "_var_indices"]
@@ -152,10 +147,10 @@ class BaseIterationOp(GraphOp):
             for task in done_tasks:
                 op_name = task.get_name()
                 active_tasks.pop(op_name)
-                node = nodes[op_name]
+                current_op = nodes[op_name]
 
-                if node.type == "branch":
-                    branch_target = node.get_target(state, context_id)
+                if current_op.type == "branch":
+                    branch_target = current_op.get_target(state, context_id)
                     from hush.core.ops.base import END
 
                     if branch_target != END.name:
@@ -279,7 +274,7 @@ class BaseIterationOp(GraphOp):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Template method for iteration node execution.
+        """Template method for iteration op execution.
 
         Handles common boilerplate:
         - State recording and timing
@@ -304,7 +299,7 @@ class BaseIterationOp(GraphOp):
         except Exception as e:
             error_msg = traceback.format_exc()
             LOGGER.error(
-                "[title]\\[%s][/title] Error in node [highlight]%s[/highlight]: %s",
+                "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]: %s",
                 request_id,
                 self.full_name,
                 str(e),

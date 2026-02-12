@@ -97,9 +97,9 @@ with ForOp.of(item=Each(items), prefix="Hello") as loop:
 | `FuncOp` | `@op` | `@op def fn(x): return {"y": x*2}` |
 | `ForOp` | `ForOp.of()` | `ForOp.of(item=Each(items), config=10)` |
 | `MapOp` | `MapOp.of()` | `MapOp.of(x=Each(items), max_concurrency=5)` |
-| `WhileOp` | `WhileOp.of()` | `WhileOp.of(count=0, stop_condition="count >= 10")` |
+| `WhileOp` | `WhileOp.of()` | `WhileOp.of(count=0, until="count >= 10")` |
 | `BranchOp` | `if_()` | `if_(score >= 90, "a").else_("b")` |
-| `LLMOp` | `LLMOp.of()` | `LLMOp.of(resource_key="gpt-4o", messages=..., temperature=0.7)` |
+| `LLMOp` | `LLMOp.of()` | `LLMOp.of(resource="gpt-4o", messages=..., temperature=0.7)` |
 
 See [docs/12-shorthand-syntax.md](docs/12-shorthand-syntax.md) for details.
 

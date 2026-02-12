@@ -1,8 +1,4 @@
-"""LLM Chain Node for hush-providers.
-
-This module provides ChainOp - a composite node that combines
-PromptOp, LLMOp, and optionally ParserOp into a single reusable chain.
-"""
+"""ChainOp — composite op combining PromptOp + LLMOp + optional ParserOp."""
 
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,97 +10,34 @@ from hush.providers.ops.prompt import PromptOp
 
 
 class ChainOp(GraphOp):
-    """A composite node combining prompt formatting, LLM generation, and optional parsing.
+    """Composite op: PromptOp → LLMOp → (optional) ParserOp.
 
-    This is a fundamental building block for LLM workflows, providing two modes:
+    The most common building block for LLM workflows. Operates in two modes:
 
-    1. **Text Generation Mode** (when extract is empty):
-       ```
-       Input -> PromptOp -> LLMOp -> Output
-       ```
-       - Takes input variables and formats them into prompts
-       - Generates text using the specified LLM model
-       - Returns raw LLM output (content, role, etc.)
+    * **Text mode** (no ``extract``): returns raw LLM output (content, role, …).
+    * **Structured mode** (``extract`` provided): parses the LLM output into
+      typed fields via ParserOp.
 
-    2. **Structured Output Mode** (when extract is provided):
-       ```
-       Input -> PromptOp -> LLMOp -> ParserOp -> Output
-       ```
-       - Takes input variables and formats them into prompts
-       - Generates text using the specified LLM model
-       - Parses the LLM output into structured data based on extract
-       - Returns parsed structured data
+    Inputs:
+        template (str | dict | list): Prompt template (see ``PromptOp``).
+        <var> (any): Template variables (``{var}`` placeholders).
+        conversation_history (list, optional): Prior messages to prepend.
 
-    Example:
-        ```python
-        from hush.core import WorkflowEngine, START, END, INPUT, OUTPUT
-        from hush.providers.ops import ChainOp
+    Outputs:
+        Text mode — all LLMOp outputs (content, role, model_used, …).
+        Structured mode — extracted fields defined by ``extract``.
 
-        # Simple text generation with new unified prompt
-        with WorkflowEngine(name="chat") as workflow:
-            chain = ChainOp(
-                name="summarizer",
-                resource_key="gpt-4",
-                inputs={
-                    "template": {
-                        "system": "You are a helpful summarization assistant.",
-                        "user": "Summarize: {text}"
-                    },
-                    "text": INPUT,
-                    "*": PARENT
-                },
-                outputs={"content": OUTPUT}
-            )
-            START >> chain >> END
+    Example::
 
-        # String prompt (user message only)
-        with WorkflowEngine(name="chat") as workflow:
-            chain = ChainOp(
-                name="chat",
-                resource_key="gpt-4",
-                inputs={
-                    "template": "Hello {name}, how can I help?",
-                    "name": INPUT["name"],
-                    "*": PARENT
-                },
-                outputs={"content": OUTPUT}
-            )
-            START >> chain >> END
-
-        # Load balanced with fallback
-        with WorkflowEngine(name="chat") as workflow:
-            chain = ChainOp(
-                name="chat",
-                resource_key=["gpt-4o", "gpt-4o-mini"],
-                ratios=[0.7, 0.3],  # 70% gpt-4o, 30% gpt-4o-mini
-                fallback=["claude-sonnet"],  # Fallback if all primary fail
-                inputs={
-                    "template": {"system": "You are helpful.", "user": "{query}"},
-                    "*": PARENT
-                },
-                outputs={"content": OUTPUT}
-            )
-            START >> chain >> END
-
-        # Structured output with JSON mode
-        with WorkflowEngine(name="classifier") as workflow:
-            chain = ChainOp(
-                name="classifier",
-                resource_key="gpt-4",
-                response_format={"type": "json_object"},
-                inputs={
-                    "template": {"user": "Classify and return JSON: {text}"},
-                    "*": PARENT
-                },
-                outputs=OUTPUT
-            )
-            START >> chain >> END
-
-        ```
+        chat = ChainOp.of(
+            resource="gpt-4o",
+            template={"system": "You are helpful.", "user": "{query}"},
+            query=PARENT["query"],
+        )
     """
 
     __slots__ = [
-        "resource_key",
+        "resource",
         "ratios",
         "fallback",
         "extract",
@@ -117,7 +50,7 @@ class ChainOp(GraphOp):
 
     def __init__(
         self,
-        resource_key: Optional[Union[str, List[str]]] = None,
+        resource: Optional[Union[str, List[str]]] = None,
         ratios: Optional[List[float]] = None,
         fallback: Optional[List[str]] = None,
         extract: Optional[List[str]] = None,
@@ -129,11 +62,11 @@ class ChainOp(GraphOp):
         """Initialize ChainOp.
 
         Args:
-            resource_key: Resource key(s) for LLM in ResourceHub.
+            resource: Resource key(s) for LLM in ResourceHub.
                 - Single string: "gpt-4"
                 - List for load balancing: ["gpt-4", "claude-3"]
             ratios: Weight ratios for load balancing. Must sum to 1.0.
-                Only used when resource_key is a list.
+                Only used when resource is a list.
                 Example: [0.7, 0.3] for 70%/30% distribution
             fallback: Fallback resource key(s) to use when primary model fails.
                 List of resource keys from ResourceHub, tried in order.
@@ -150,7 +83,7 @@ class ChainOp(GraphOp):
         """
         super().__init__(**kwargs)
 
-        self.resource_key = resource_key
+        self.resource = resource
         self.ratios = ratios
         self.fallback = fallback
         self.extract = extract
@@ -178,7 +111,7 @@ class ChainOp(GraphOp):
                 # Mode 1: Structured output pipeline (Prompt -> LLM -> Parser)
                 _llm = LLMOp(
                     name="llm",
-                    resource_key=self.resource_key,
+                    resource=self.resource,
                     ratios=self.ratios,
                     fallback=self.fallback,
                     inputs=llm_inputs,
@@ -198,7 +131,7 @@ class ChainOp(GraphOp):
                 # Mode 2: Simple text generation pipeline (Prompt -> LLM)
                 _llm = LLMOp(
                     name="llm",
-                    resource_key=self.resource_key,
+                    resource=self.resource,
                     ratios=self.ratios,
                     fallback=self.fallback,
                     inputs=llm_inputs,
@@ -215,11 +148,11 @@ class ChainOp(GraphOp):
     def specific_metadata(self) -> Dict[str, Any]:
         """Return ChainOp-specific metadata."""
         metadata = {
-            "resource_key": self.resource_key,
+            "resource": self.resource,
         }
 
         # Load balancing info
-        if isinstance(self.resource_key, list):
+        if isinstance(self.resource, list):
             metadata["load_balancing"] = True
             if self.ratios:
                 metadata["ratios"] = self.ratios
@@ -242,7 +175,7 @@ class ChainOp(GraphOp):
     @shorthand
     def of(
         cls,
-        resource_key=None,
+        resource=None,
         template=None,
         *,
         ratios=None,
@@ -258,7 +191,7 @@ class ChainOp(GraphOp):
         Example::
 
             chain = ChainOp.of(
-                resource_key="gpt-4",
+                resource="gpt-4",
                 template={"system": "You are helpful.", "user": "{query}"},
                 query="Hi",
             )
@@ -267,7 +200,7 @@ class ChainOp(GraphOp):
         if template is not None:
             input_mappings["template"] = template
         return cls(
-            resource_key=resource_key,
+            resource=resource,
             ratios=ratios,
             fallback=fallback,
             extract=extract,

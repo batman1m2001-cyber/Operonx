@@ -9,9 +9,9 @@ Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `EmbeddingOp.of()` | `EmbeddingOp` | `EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])` |
-> | `RerankOp.of()` | `RerankOp` | `RerankOp.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `EmbeddingOp.of()` | `EmbeddingOp` | `EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])` |
+> | `RerankOp.of()` | `RerankOp` | `RerankOp.of(resource="bge-m3", query=PARENT["q"], documents=PARENT["docs"])` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 > | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
 ## Embedding Providers
@@ -66,7 +66,7 @@ from hush.providers import EmbeddingOp
 
 with GraphOp(name="embed-workflow") as graph:
     embed = EmbeddingOp.of(
-        resource_key="openai",
+        resource="openai",
         texts=PARENT["documents"],
         outputs={"embeddings": PARENT["vectors"]},  # Rename output
     )
@@ -119,7 +119,7 @@ reranking:bge-m3:
 from hush.providers import RerankOp
 
 rr = RerankOp.of(
-    resource_key="bge-m3",
+    resource="bge-m3",
     query=PARENT["query"],
     documents=PARENT["documents"],
     top_k=5,
@@ -147,7 +147,7 @@ def retrieve(query_vec, docs, doc_vecs):
     return {"retrieved": cosine_search(query_vec, doc_vecs, docs, top_k=20)}
 
 with GraphOp(name="rag-pipeline") as graph:
-    embed_query = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
+    embed_query = EmbeddingOp.of(resource="openai", texts=PARENT["query"])
     ret = retrieve(
         query_vec=embed_query["embeddings"],
         docs=PARENT["documents"],
@@ -155,7 +155,7 @@ with GraphOp(name="rag-pipeline") as graph:
         outputs={"context_docs": PARENT},
     )
     rr = RerankOp.of(
-        resource_key="bge-m3",
+        resource="bge-m3",
         query=PARENT["query"],
         documents=ret["retrieved"],
         top_k=5,
@@ -166,7 +166,7 @@ with GraphOp(name="rag-pipeline") as graph:
         query=PARENT["query"],
     )
     llm = LLMOp.of(
-        resource_key="gpt-4o",
+        resource="gpt-4o",
         messages=p["messages"],
         outputs={"content": PARENT["answer"]},  # Rename output
     )
@@ -196,7 +196,7 @@ def merge(kw, vec):
 
 with GraphOp(name="hybrid-rag") as graph:
     kw = kw_search(query=PARENT["query"], docs=PARENT["documents"])
-    embed_q = EmbeddingOp.of(resource_key="openai", texts=PARENT["query"])
+    embed_q = EmbeddingOp.of(resource="openai", texts=PARENT["query"])
     vs = vec_search(qv=embed_q["embeddings"], docs=PARENT["documents"], dvs=PARENT["doc_vectors"])
     m = merge(kw=kw["results"], vec=vs["results"])
 
@@ -224,7 +224,7 @@ def flatten(batches):
 with GraphOp(name="batch-embed") as graph:
     batch = make_batches(docs=PARENT["documents"])
     with MapOp.of(batch=Each(batch["batches"]), max_concurrency=5) as map_op:
-        embed = EmbeddingOp.of(resource_key="openai", texts=PARENT["batch"])
+        embed = EmbeddingOp.of(resource="openai", texts=PARENT["batch"])
         START >> embed >> END
 
     flat = flatten(batches=map_op["embeddings"])

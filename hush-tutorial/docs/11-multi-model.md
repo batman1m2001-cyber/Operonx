@@ -9,7 +9,7 @@ Sử dụng nhiều LLM models: load balancing, fallback, ensemble, cost routing
 >
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 > | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 > | `if_().else_()` | `BranchOp` | `if_(PARENT["x"] > 0, "a").else_("b")` |
 
@@ -25,8 +25,8 @@ with GraphOp(name="compare") as graph:
         template={"system": "Answer briefly.", "user": "{query}"},
         query=PARENT["query"],
     )
-    a = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
-    b = LLMOp.of(resource_key="gpt-4o-mini", messages=p["messages"])
+    a = LLMOp.of(resource="gpt-4o", messages=p["messages"])
+    b = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
     START >> p >> [a, b] >> END
 ```
 
@@ -46,8 +46,8 @@ with GraphOp(name="cost-routing") as graph:
     router = if_(cls["complexity"] == "complex", "use_gpt4o").else_("use_mini")
 
     # Complex → gpt-4o, Simple → gpt-4o-mini
-    use_gpt4o = LLMOp.of(resource_key="gpt-4o", messages=PARENT["messages"])
-    use_mini = LLMOp.of(resource_key="gpt-4o-mini", messages=PARENT["messages"])
+    use_gpt4o = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
+    use_mini = LLMOp.of(resource="gpt-4o-mini", messages=PARENT["messages"])
 
     START >> cls >> router
     router >> [use_gpt4o, use_mini]
@@ -60,7 +60,7 @@ Phân tải requests giữa nhiều models theo tỷ lệ. LLMOp dùng weighted 
 
 ```python
 llm = LLMOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],  # 30% gpt-4o, 70% gpt-4o-mini
     messages=p["messages"],
 )
@@ -75,7 +75,7 @@ Tự động chuyển sang model khác khi primary fails.
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
     messages=prompt["messages"],
 )
@@ -98,17 +98,17 @@ with GraphOp(name="ensemble") as graph:
 
     # 3 models trả lời song song — mỗi model map content → key riêng
     llm_a = LLMOp.of(
-        resource_key="gpt-4o",
+        resource="gpt-4o",
         messages=p["messages"],
         outputs={"content": PARENT["answer_a"]},
     )
     llm_b = LLMOp.of(
-        resource_key="gpt-4o-mini",
+        resource="gpt-4o-mini",
         messages=p["messages"],
         outputs={"content": PARENT["answer_b"]},
     )
     llm_c = LLMOp.of(
-        resource_key="or-claude-4-sonnet",
+        resource="or-claude-4-sonnet",
         messages=p["messages"],
         outputs={"content": PARENT["answer_c"]},
     )
@@ -120,7 +120,7 @@ with GraphOp(name="ensemble") as graph:
         answer_b=PARENT["answer_b"],
         answer_c=PARENT["answer_c"],
     )
-    judge = LLMOp.of(resource_key="gpt-4o", messages=jp["messages"])
+    judge = LLMOp.of(resource="gpt-4o", messages=jp["messages"])
 
     START >> p >> [llm_a, llm_b, llm_c]
     [llm_a, llm_b, llm_c] >> jp >> judge >> END

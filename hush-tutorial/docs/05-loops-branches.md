@@ -12,7 +12,7 @@ Sử dụng các op điều khiển luồng: `ForOp.of()`, `MapOp.of()`, `WhileO
 > | `@op` | `FuncOp` | `@op` decorator trên function |
 > | `ForOp.of()` | `ForOp` | `ForOp.of(x=Each([1,2,3]))` |
 > | `MapOp.of()` | `MapOp` | `MapOp.of(x=Each([1,2,3]), max_concurrency=4)` |
-> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, stop_condition="counter >= 5")` |
+> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, until="counter >= 5")` |
 > | `if_().else_()` | `BranchOp` | `if_(PARENT["x"] > 0, "pos").else_("neg")` |
 
 ## ForOp.of() — Iterate tuần tự
@@ -106,7 +106,7 @@ def halve_value(value: int):
 with GraphOp(name="countdown") as graph:
     with WhileOp.of(
         value=PARENT["start_value"],
-        stop_condition="value < 5",
+        until="value < 5",
         max_iterations=20,
     ) as while_loop:
         step = halve_value(

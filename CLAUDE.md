@@ -281,9 +281,9 @@ with GraphOp(name="main") as graph:
 
 ```python
 # CORRECT
-chat = ChainOp.of(resource_key="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
-llm = LLMOp.of(resource_key="gpt-4o", messages=PARENT["msgs"])
-embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
+chat = ChainOp.of(resource="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])
+embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
 # WRONG — no positional args
 chat = ChainOp.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
@@ -319,10 +319,10 @@ Use `op["key"] >> PARENT["key"]` to map an op's output to the parent graph state
 
 ```python
 # Style 1: outputs= parameter (inline with op creation)
-llm = LLMOp.of(resource_key="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"], outputs={"content": PARENT["answer"]})
 
 # Style 2: >> operator (standalone line, equivalent)
-llm = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
 llm["content"] >> PARENT["answer"]
 
 # Common in loops — forward loop outputs or update loop state

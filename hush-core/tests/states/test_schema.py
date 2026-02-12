@@ -301,7 +301,7 @@ class TestIterationNode:
         with WhileOp(
             name="counter_loop",
             inputs={"counter": 0},
-            stop_condition="counter >= 5",
+            until="counter >= 5",
             max_iterations=10,
         ) as loop:
             inc = FuncOp(

@@ -245,15 +245,15 @@ async def run(self, state, context_id=None, parent_context=None):
 class WhileOp(BaseIterationOp):
     type: OpType = "while"
 
-    __slots__ = ['_stop_condition', '_max_iterations']
+    __slots__ = ['_until', '_max_iterations']
 
     def __init__(
         self,
-        stop_condition: str,
+        until: str,
         max_iterations: int = 100,
         **kwargs
     ):
-        self._stop_condition = stop_condition
+        self._until = until
         self._max_iterations = max_iterations
 ```
 
@@ -268,7 +268,7 @@ class WhileOp(BaseIterationOp):
 ```python
 with WhileOp(
     name="retry_loop",
-    stop_condition="success == True or attempts >= 3",
+    until="success == True or attempts >= 3",
     max_iterations=10,
     inputs={"attempts": 0}
 ) as while_op:

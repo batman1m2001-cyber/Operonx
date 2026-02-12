@@ -1,8 +1,4 @@
-"""Rerank Node for hush-providers.
-
-This module provides RerankOp that uses ResourceHub to access reranker resources.
-Follows hush-core design patterns with Param-based schema.
-"""
+"""RerankOp — scores and re-orders documents via ResourceHub."""
 
 from typing import Any, Dict, List, Optional
 
@@ -15,35 +11,38 @@ from hush.core.utils.common import Param
 
 
 class RerankOp(BaseOp):
-    """Reranking node for scoring and re-ordering documents in workflows.
+    """Op that scores and re-orders documents by relevance to a query.
 
-    Uses ResourceHub to access reranker resources by resource_key.
+    Wraps a reranker backend (e.g. BGE-M3, Pinecone, TEI) accessed via
+    ResourceHub. Returns documents sorted by relevance score.
 
-    Example:
-        ```python
-        from hush.core import GraphOp, START, END, PARENT
-        from hush.providers import RerankOp
+    Inputs:
+        query (str): The query to rank against. Required.
+        documents (list[str]): Documents to rerank. Required.
+        top_k (int): Max results to return. Default: -1 (all).
+        threshold (float): Min score cutoff. Default: 0.0.
 
-        with GraphOp(name="rerank") as workflow:
-            rerank = RerankOp(
-                name="rerank",
-                resource_key="bge-m3",
-                inputs={"query": PARENT["query"], "documents": PARENT["documents"]},
-                outputs={"*": PARENT}
-            )
-            START >> rerank >> END
+    Outputs:
+        reranks (list[dict]): Reranked results with ``index``, ``score``,
+            and ``document`` fields.
 
-        workflow.build()
-        ```
+    Example::
+
+        rerank = RerankOp.of(
+            resource="bge-m3",
+            query=PARENT["query"],
+            documents=PARENT["docs"],
+            top_k=5,
+        )
     """
 
-    __slots__ = ["resource_key", "backend"]
+    __slots__ = ["resource", "backend"]
 
     type: OpType = "rerank"
 
     def __init__(
         self,
-        resource_key: Optional[str] = None,
+        resource: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs,
@@ -51,14 +50,14 @@ class RerankOp(BaseOp):
         """Initialize RerankOp.
 
         Args:
-            resource_key: Resource key for reranker in ResourceHub (e.g., "bge-m3")
+            resource: Resource key for reranker in ResourceHub (e.g., "bge-m3")
             inputs: Input variable mappings
             outputs: Output variable mappings
             **kwargs: Additional keyword arguments for BaseOp
         """
         super().__init__(**kwargs)
 
-        self.resource_key = resource_key
+        self.resource = resource
 
         # Define input/output schema
         input_schema = {
@@ -82,7 +81,7 @@ class RerankOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        self.backend = hub.reranker(self.resource_key)
+        self.backend = hub.reranker(self.resource)
         self.core = self._process
 
     async def _process(
@@ -117,7 +116,7 @@ class RerankOp(BaseOp):
             # Handle unexpected type
             raise RerankError(
                 message="Invalid document type",
-                resource_key=self.resource_key or "unknown",
+                resource=self.resource or "unknown",
                 query=query,
                 document_count=len(documents),
                 original_error=TypeError(
@@ -137,7 +136,7 @@ class RerankOp(BaseOp):
         except Exception as e:
             raise RerankError(
                 message="Rerank backend failed",
-                resource_key=self.resource_key or "unknown",
+                resource=self.resource or "unknown",
                 query=query,
                 document_count=len(documents),
                 original_error=e,
@@ -154,17 +153,17 @@ class RerankOp(BaseOp):
         return {"reranks": reranked_docs}
 
     @shorthand
-    def of(cls, resource_key=None, **kwargs) -> "RerankOp":
+    def of(cls, resource=None, **kwargs) -> "RerankOp":
         """Create a RerankOp with flat kwargs.
 
         Example::
 
-            rerank = RerankOp.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])
+            rerank = RerankOp.of(resource="bge-m3", query=PARENT["q"], documents=PARENT["docs"])
         """
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        return cls(resource_key=resource_key, inputs=input_mappings or None, **init_kwargs)
+        return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return rerank-specific metadata dictionary."""
-        return {"model": self.resource_key}
+        return {"model": self.resource}

@@ -39,11 +39,11 @@ Tất cả provider ops sử dụng `@shorthand` decorator để tạo `Op.of()`
 
 ```python
 # Shorthand (khuyên dùng)
-chat = ChainOp.of(resource_key="gpt-4o", template={"user": "{q}"}, q=PARENT["q"])
+chat = ChainOp.of(resource="gpt-4o", template={"user": "{q}"}, q=PARENT["q"])
 
 # Tương đương với full constructor:
 chat = ChainOp(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     inputs={"template": {"user": "{q}"}, "q": PARENT["q"]},
 )
 ```
@@ -75,7 +75,7 @@ self.outputs = self._merge_params(output_schema, normalized_outputs)
 
 ### ResourceHub Integration
 
-Tất cả ops resolve `resource_key` thành provider instance qua ResourceHub:
+Tất cả ops resolve `resource` thành provider instance qua ResourceHub:
 
 ```python
 try:
@@ -83,9 +83,9 @@ try:
 except RuntimeError:
     hub = get_hub()
 
-self._llm = hub.llm(self.resource_key)       # LLMOp
-self.backend = hub.embedding(self.resource_key)  # EmbeddingOp
-self.backend = hub.reranker(self.resource_key)   # RerankOp
+self._llm = hub.llm(self.resource)       # LLMOp
+self.backend = hub.embedding(self.resource)  # EmbeddingOp
+self.backend = hub.reranker(self.resource)   # RerankOp
 ```
 
 ### Trace Metadata
@@ -97,7 +97,7 @@ state.record_trace_metadata(
     op_name=self.full_name,
     context_id=context_id,
     contain_generation=True,     # Có LLM generation?
-    model=selected_resource_key, # Model đã dùng
+    model=selected_resource, # Model đã dùng
     usage=tokens_used,           # Token counts
     cost=cost,                   # Chi phí (nếu có)
     metadata=self.metadata,      # Op-specific metadata
@@ -197,7 +197,7 @@ Phân phối request giữa nhiều models:
 
 ```python
 llm = LLMOp.of(
-    resource_key=["gpt-4o", "gpt-4o-mini"],
+    resource=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.7, 0.3],  # 70% gpt-4o, 30% gpt-4o-mini
     messages=PARENT["messages"],
 )
@@ -225,7 +225,7 @@ Consumer (API/WebSocket) đọc từ `STREAM_SERVICE.get()`.
 Sử dụng OpenAI Batch API (50% rẻ hơn):
 
 ```python
-llm = LLMOp.of(resource_key="gpt-4o", batch_mode=True, messages=PARENT["msgs"])
+llm = LLMOp.of(resource="gpt-4o", batch_mode=True, messages=PARENT["msgs"])
 ```
 
 Batch mode sử dụng `BatchCoordinator` từ `llms/batch_coordinator.py`.
@@ -236,7 +236,7 @@ Khi primary model thất bại, thử fallback theo thứ tự:
 
 ```python
 llm = LLMOp.of(
-    resource_key="gpt-4o",
+    resource="gpt-4o",
     fallback=["claude-3-sonnet", "gpt-4o-mini"],  # Thử lần lượt
     messages=PARENT["messages"],
 )
@@ -291,12 +291,12 @@ def _build_graph(self):
         llm_inputs = {"messages": _prompt["messages"]}
 
         if self.extract:
-            _llm = LLMOp(name="llm", resource_key=..., inputs=llm_inputs)
+            _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs)
             _parser = ParserOp(name="parser", format=..., extract=...,
                               inputs={"text": _llm["content"]}, outputs={"*": PARENT})
             START >> _prompt >> _llm >> _parser >> END
         else:
-            _llm = LLMOp(name="llm", resource_key=..., inputs=llm_inputs,
+            _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs,
                          outputs={"*": PARENT})
             START >> _prompt >> _llm >> END
 
@@ -317,7 +317,7 @@ def _build_graph(self):
 Wrapper đơn giản cho embedding provider:
 
 ```python
-embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
+embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 # Output: embed["embeddings"]  → List[List[float]]
 ```
 
@@ -331,7 +331,7 @@ embed = EmbeddingOp.of(resource_key="bge-m3", texts=PARENT["texts"])
 Wrapper cho reranking provider với xử lý linh hoạt:
 
 ```python
-rerank = RerankOp.of(resource_key="bge-m3", query=PARENT["q"], documents=PARENT["docs"])
+rerank = RerankOp.of(resource="bge-m3", query=PARENT["q"], documents=PARENT["docs"])
 # Output: rerank["reranks"]  → List[Dict] with score
 ```
 
@@ -350,8 +350,8 @@ Tất cả provider ops wrap exception thành OpError subclass:
 |----|-----------|---------|
 | PromptOp | PromptError | template_type, template, missing_vars |
 | LLMOp | (ghi error vào state) | error_code, error_message |
-| EmbeddingOp | EmbeddingError | resource_key, text_count |
-| RerankOp | RerankError | resource_key, query, document_count |
+| EmbeddingOp | EmbeddingError | resource, text_count |
+| RerankOp | RerankError | resource, query, document_count |
 
 ## Xem thêm
 

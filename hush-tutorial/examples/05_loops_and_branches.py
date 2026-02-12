@@ -16,7 +16,7 @@ Chạy: cd hush-tutorial && uv run python examples/05_loops_and_branches.py
 import asyncio
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import Each, ForOp, MapOp, WhileOp, op, if_
+from hush.core.ops import Each, ForOp, MapOp, WhileOp, if_, op
 
 # =============================================================================
 # Code ops dùng @op decorator (gọn hơn FuncOp class)
@@ -119,7 +119,7 @@ async def example_3_while_loop():
     with GraphOp(name="while-loop-demo") as graph:
         with WhileOp.of(
             value=PARENT["start_value"],
-            stop_condition="value < 5",
+            until="value < 5",
             max_iterations=20,
         ) as while_loop:
             step = halve_value(

@@ -147,7 +147,7 @@ class TestEndToEndPipeline:
 
             llm = LLMOp(
                 name="llm",
-                resource_key="or-claude-4-sonnet",
+                resource="or-claude-4-sonnet",
                 inputs={"messages": prompt["messages"]},
                 outputs={"*": PARENT},
             )

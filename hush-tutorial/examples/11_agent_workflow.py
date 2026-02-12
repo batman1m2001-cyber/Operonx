@@ -184,12 +184,12 @@ async def example_1_simple_agent():
             iteration=PARENT["iteration"],
             done=PARENT["done"],
             final_answer=PARENT["final_answer"],
-            stop_condition="done == True or iteration >= 5",
+            until="done == True or iteration >= 5",
             max_iterations=10,
         ) as loop:
             # Gọi LLM với tools
             llm = LLMOp.of(
-                resource_key="gpt-4o-mini",
+                resource="gpt-4o-mini",
                 messages=PARENT["messages"],
                 tools=TOOL_DESCRIPTIONS,
             )

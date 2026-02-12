@@ -4,7 +4,7 @@ Cần: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST trong .env
      + langfuse:default trong resources.yaml
 
 Học được:
-- LangfuseTracer qua ResourceHub (resource_key)
+- LangfuseTracer qua ResourceHub (resource)
 - LangfuseTracer qua direct config (LangfuseConfig.from_env)
 - Static tags (set on tracer) vs dynamic tags ($tags từ @op)
 - user_id, session_id, request_id: correlation trong Langfuse UI
@@ -127,7 +127,7 @@ def build_text_analysis():
 
 
 async def example_1_resource_hub():
-    """Dùng resource_key để load config từ resources.yaml."""
+    """Dùng resource để load config từ resources.yaml."""
     print("=" * 50)
     print("Ví dụ 1: LangfuseTracer via ResourceHub")
     print("=" * 50)
@@ -142,7 +142,7 @@ async def example_1_resource_hub():
 
     # Tạo tracer với static tags
     tracer = LangfuseTracer(
-        resource_key="langfuse:default",
+        resource="langfuse:default",
         tags=["tutorial", "resource-hub"],
     )
 
@@ -238,7 +238,7 @@ async def example_3_multi_user():
 
     for u in users:
         tracer = LangfuseTracer(
-            resource_key="langfuse:default",
+            resource="langfuse:default",
             tags=["tutorial", "multi-user"],
         )
         result = await engine.run(

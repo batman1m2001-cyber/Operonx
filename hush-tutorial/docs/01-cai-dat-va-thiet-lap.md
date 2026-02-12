@@ -202,7 +202,7 @@ Trước khi thiết lập files, cần hiểu cách Hush kết nối đến LLM
 Khi bạn tạo một op dùng provider (`LLMOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
 
 ```
-Code: LLMOp.of(resource_key="gpt-4o", messages=...)
+Code: LLMOp.of(resource="gpt-4o", messages=...)
   ↓
 get_hub()  →  singleton ResourceHub
   ↓
@@ -326,7 +326,7 @@ Xem đầy đủ template: [`env.example`](../../env.example)
 
 File `resources.yaml` là **cấu hình trung tâm** được đọc bởi **ResourceHub** (`get_hub()`). Mọi op dùng provider (LLM, embedding, reranking, tracing) đều tra cứu cấu hình từ file này.
 
-Khi bạn viết `LLMOp.of(resource_key="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
+Khi bạn viết `LLMOp.of(resource="gpt-4o", ...)`, ResourceHub tìm key `llm:gpt-4o` trong file này.
 
 ### Copy từ template có sẵn
 
@@ -452,7 +452,7 @@ from hush.providers import ChainOp
 async def main():
     with GraphOp(name='test-llm') as graph:
         chat = ChainOp.of(
-            resource_key='gpt-4o-mini',  # ← tra cứu trong resources.yaml
+            resource='gpt-4o-mini',  # ← tra cứu trong resources.yaml
             template='Say hello in exactly 3 words.',
         )
         START >> chat >> END
@@ -491,7 +491,7 @@ async def main():
         step = hello()
         START >> step >> END
 
-    tracer = LangfuseTracer(resource_key='langfuse:default')
+    tracer = LangfuseTracer(resource='langfuse:default')
     engine = Hush(graph)
     result = await engine.run(inputs={}, tracer=tracer)
     print(f'Result: {result[\"message\"]}')

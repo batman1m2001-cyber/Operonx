@@ -247,7 +247,7 @@ def build_while_loop_workflow():
         with WhileOp(
             name="halve_loop",
             inputs={"value": PARENT["start_value"]},
-            stop_condition="value < 5",
+            until="value < 5",
             max_iterations=10,
         ) as while_loop:
             halve_node = halve_value(

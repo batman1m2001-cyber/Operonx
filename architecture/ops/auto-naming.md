@@ -5,7 +5,7 @@
 Khi tạo op mà không truyền `name=`, Hush tự động lấy tên biến từ assignment statement:
 
 ```python
-llm = LLMOp.of(resource_key="gpt-4o", messages=msgs)
+llm = LLMOp.of(resource="gpt-4o", messages=msgs)
 # llm.name == "llm"
 ```
 
@@ -107,13 +107,13 @@ def _name_from_bytecode(frame) -> Optional[str]:
 ### Ví dụ bytecode
 
 ```python
-# Source: llm = LLMOp.of(resource_key="gpt-4o")
+# Source: llm = LLMOp.of(resource="gpt-4o")
 #
 # Bytecode:
 #   LOAD_GLOBAL    LLMOp
 #   LOAD_ATTR      of
 #   LOAD_CONST     'gpt-4o'
-#   KW_NAMES       ('resource_key',)
+#   KW_NAMES       ('resource',)
 #   CALL           1
 #   STORE_FAST     llm        <- auto_name trả về "llm"
 ```

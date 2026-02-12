@@ -169,7 +169,7 @@ async def example_2_otel_while():
     with GraphOp(name="while-loop") as graph:
         with WhileOp.of(
             value=PARENT["start_value"],
-            stop_condition="value < 5",
+            until="value < 5",
             max_iterations=10,
         ) as while_loop:
             halve = halve_value(

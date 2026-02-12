@@ -175,7 +175,7 @@ async def example_3_langfuse_tracer():
         START >> step >> END
 
     tracer = LangfuseTracer(
-        resource_key="langfuse:default",
+        resource="langfuse:default",
         tags=["tutorial", "langfuse-demo"],
     )
 

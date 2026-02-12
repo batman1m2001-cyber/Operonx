@@ -43,7 +43,7 @@ from hush.telemetry import LangfuseTracer
 #       secret_key: ${LANGFUSE_SECRET_KEY}
 #       host: https://cloud.langfuse.com
 
-tracer = LangfuseTracer(resource_key="langfuse:default", tags=["prod"])
+tracer = LangfuseTracer(resource="langfuse:default", tags=["prod"])
 result = await engine.run(inputs={...}, tracer=tracer)
 ```
 
@@ -110,20 +110,20 @@ class MyBackendTracer(BaseTracer):
     def __init__(
         self,
         config: Optional["MyBackendConfig"] = None,
-        resource_key: Optional[str] = None,
+        resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ):
         super().__init__(tags=tags)
-        if config is None and resource_key is None:
-            raise ValueError("Must provide either 'config' or 'resource_key'")
+        if config is None and resource is None:
+            raise ValueError("Must provide either 'config' or 'resource'")
         self._config = config
-        self._resource_key = resource_key
+        self._resource = resource
 
     def _get_tracer_config(self) -> Dict[str, Any]:
         """Return config for subprocess."""
         if self._config is not None:
             return {"config": self._config.model_dump()}
-        return {"resource_key": self._resource_key}
+        return {"resource": self._resource}
 
     @staticmethod
     def flush(flush_data: Dict[str, Any]) -> None:

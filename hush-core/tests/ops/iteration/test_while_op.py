@@ -28,7 +28,7 @@ class TestSimpleCounterLoop:
         with WhileOp(
             name="counter_loop",
             inputs={"counter": 0},
-            stop_condition="counter >= 5",
+            until="counter >= 5",
             max_iterations=10,
         ) as loop:
             node = increment(
@@ -67,7 +67,7 @@ class TestAccumulatorLoop:
             name="accumulator_loop",
             inputs={"total": 0, "step": 15},
             max_iterations=10,
-            stop_condition="total >= 100",
+            until="total >= 100",
         ) as loop:
             node = accumulate(
                 inputs={"total": PARENT["total"], "step": PARENT["step"]},
@@ -95,7 +95,7 @@ class TestMaxIterationsSafety:
 
     @pytest.mark.asyncio
     async def test_max_iterations_reached(self):
-        """Test that loop stops at max_iterations when no stop_condition."""
+        """Test that loop stops at max_iterations when no until."""
 
         @op
         def infinite_loop(value: int):
@@ -137,7 +137,7 @@ class TestComplexCondition:
             return {"new_x": new_x, "new_done": new_done}
 
         with WhileOp(
-            name="complex_loop", inputs={"x": 0, "done": False}, stop_condition="x >= 10 or done"
+            name="complex_loop", inputs={"x": 0, "done": False}, until="x >= 10 or done"
         ) as loop:
             node = complex_step(
                 inputs={"x": PARENT["x"], "done": PARENT["done"]},
@@ -185,7 +185,7 @@ class TestWhileLoopWithRef:
                     "counter": config_node["config"]["settings"]["start_value"],
                     "step": config_node["config"]["settings"]["increment"],
                 },
-                stop_condition="counter >= 10",
+                until="counter >= 10",
             ) as loop:
                 node = increment_by(
                     inputs={"counter": PARENT["counter"], "step": PARENT["step"]},
@@ -216,7 +216,7 @@ class TestSchemaExtraction:
     """Test that WhileOp extracts inputs/outputs schema correctly."""
 
     def test_inputs_include_condition_vars(self):
-        """Test that inputs include variables from stop_condition."""
+        """Test that inputs include variables from until."""
 
         @op
         def increment(counter: int):
@@ -225,7 +225,7 @@ class TestSchemaExtraction:
         with WhileOp(
             name="schema_test_loop",
             inputs={"counter": 0},
-            stop_condition="counter >= 5",
+            until="counter >= 5",
             max_iterations=10,
         ) as loop:
             node = increment(
@@ -264,7 +264,7 @@ class TestWhileLoopNewOutputSyntax:
         with WhileOp(
             name="fibonacci_while_loop",
             inputs={"a": 0, "b": 1},
-            stop_condition="b >= 21",
+            until="b >= 21",
             max_iterations=20,
         ) as loop:
             node = fibonacci_step(inputs={"a": PARENT["a"], "b": PARENT["b"]})
@@ -298,7 +298,7 @@ class TestWhileLoopNewOutputSyntax:
         with WhileOp(
             name="new_syntax_loop",
             inputs={"value": 1},
-            stop_condition="value >= 16",
+            until="value >= 16",
             max_iterations=10,
         ) as loop:
             node = double_step(inputs={"value": PARENT["value"]})
@@ -349,7 +349,7 @@ class TestWhileLoopInitialFromUpstream:
             with WhileOp(
                 name="counter_loop",
                 inputs={"counter": start_node["start_value"]},
-                stop_condition="counter >= 7",
+                until="counter >= 7",
                 max_iterations=10,
             ) as loop:
                 inc_node = increment(inputs={"counter": PARENT["counter"]})
@@ -401,7 +401,7 @@ class TestWhileLoopInitialFromUpstream:
                     "step": config["step_size"],
                     "limit": config["target_limit"],
                 },
-                stop_condition="counter >= limit",
+                until="counter >= limit",
                 max_iterations=20,
             ) as loop:
                 inc = increment_by(inputs={"counter": PARENT["counter"], "step": PARENT["step"]})
@@ -429,7 +429,7 @@ class TestWhileLoopInitialFromUpstream:
         """Test WhileLoop where stop threshold is computed dynamically.
 
         The 'threshold' variable is computed by an upstream node and used
-        in the stop_condition.
+        in the until.
         """
 
         @op
@@ -448,7 +448,7 @@ class TestWhileLoopInitialFromUpstream:
             with WhileOp(
                 name="dynamic_loop",
                 inputs={"value": 0, "threshold": calc["threshold"]},
-                stop_condition="value >= threshold",
+                until="value >= threshold",
                 max_iterations=20,
             ) as loop:
                 inc = increment(inputs={"value": PARENT["value"]})
@@ -484,13 +484,13 @@ class TestWhileShorthand:
 
     @pytest.mark.asyncio
     async def test_while_shorthand_basic(self):
-        """Test basic WhileOp.of() with stop_condition."""
+        """Test basic WhileOp.of() with until."""
 
         @op
         def increment(counter: int):
             return {"counter": counter + 1}
 
-        with WhileOp.of(counter=0, stop_condition="counter >= 5") as loop:
+        with WhileOp.of(counter=0, until="counter >= 5") as loop:
             node = increment(inputs={"counter": PARENT["counter"]})
             node["counter"] >> PARENT["counter"]
             START >> node >> END
@@ -505,10 +505,10 @@ class TestWhileShorthand:
 
     def test_while_shorthand_auto_name(self):
         """Test that WhileOp.of() auto-names from variable assignment."""
-        my_while = WhileOp.of(counter=0, stop_condition="counter >= 5")
+        my_while = WhileOp.of(counter=0, until="counter >= 5")
         assert my_while.name == "my_while"
 
     def test_while_shorthand_is_whileloopnode(self):
         """Test that WhileOp.of() returns a WhileOp instance."""
-        loop = WhileOp.of(counter=0, stop_condition="counter >= 5")
+        loop = WhileOp.of(counter=0, until="counter >= 5")
         assert isinstance(loop, WhileOp)

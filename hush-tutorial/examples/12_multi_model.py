@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 import os
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import op, if_
+from hush.core.ops import if_, op
 from hush.providers import LLMOp, PromptOp
 
 # =============================================================================
@@ -55,8 +55,8 @@ async def example_1_parallel_models():
         )
 
         # 2 models chạy song song
-        gpt4o = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
-        gpt4o_mini = LLMOp.of(resource_key="gpt-4o-mini", messages=p["messages"])
+        gpt4o = LLMOp.of(resource="gpt-4o", messages=p["messages"])
+        gpt4o_mini = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
 
         # So sánh
         cmp = compare(a=gpt4o["content"], b=gpt4o_mini["content"])
@@ -96,7 +96,7 @@ async def example_2_cost_routing():
             query=PARENT["query"],
         )
         classifier = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=cls_p["messages"],
             outputs={"content": PARENT["classification"]},
         )
@@ -113,7 +113,7 @@ async def example_2_cost_routing():
             query=PARENT["query"],
         )
         simple_llm = LLMOp.of(
-            resource_key="gpt-4o-mini",
+            resource="gpt-4o-mini",
             messages=simple_prompt["messages"],
             outputs={"content": PARENT["answer"]},
         )
@@ -124,7 +124,7 @@ async def example_2_cost_routing():
             query=PARENT["query"],
         )
         complex_llm = LLMOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             messages=complex_prompt["messages"],
             outputs={"content": PARENT["answer"]},
         )
@@ -174,7 +174,7 @@ async def example_3_load_balancing():
 
         # 70% gpt-4o-mini, 30% gpt-4o
         llm = LLMOp.of(
-            resource_key=["gpt-4o-mini", "gpt-4o"],
+            resource=["gpt-4o-mini", "gpt-4o"],
             ratios=[0.7, 0.3],
             messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},
@@ -221,7 +221,7 @@ async def example_4_fallback():
 
         # Primary: gpt-4o, fallback: gpt-4o-mini
         llm = LLMOp.of(
-            resource_key="gpt-4o",
+            resource="gpt-4o",
             fallback=["gpt-4o-mini"],
             messages=p["messages"],
             outputs={"content": PARENT["answer"], "model_used": PARENT["model"]},
@@ -269,8 +269,8 @@ async def example_5_ensemble():
         )
 
         # 2 models generate answers in parallel
-        model_a = LLMOp.of(resource_key="gpt-4o", messages=p["messages"])
-        model_b = LLMOp.of(resource_key="gpt-4o-mini", messages=p["messages"])
+        model_a = LLMOp.of(resource="gpt-4o", messages=p["messages"])
+        model_b = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
 
         # Judge picks the best
         jp = PromptOp.of(
@@ -283,7 +283,7 @@ async def example_5_ensemble():
             a2=model_b["content"],
         )
 
-        judge = LLMOp.of(resource_key="gpt-4o-mini", messages=jp["messages"])
+        judge = LLMOp.of(resource="gpt-4o-mini", messages=jp["messages"])
 
         sel = select(
             choice=judge["content"],
