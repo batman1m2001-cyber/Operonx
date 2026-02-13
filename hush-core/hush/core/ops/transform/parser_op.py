@@ -184,6 +184,59 @@ class ParserOp(BaseOp):
                 return None
         return current
 
+    def _convert_type(self, value: Any, type_hint: str) -> Any:
+        """Convert extracted value to the specified type.
+
+        Handles type conversion for common type hints, especially boolean
+        strings from XML parsing ("true"/"false" → True/False).
+
+        Args:
+            value: The raw extracted value
+            type_hint: Type hint string (e.g., "bool", "int", "str", "float")
+
+        Returns:
+            Converted value, or original value if type hint is not recognized
+        """
+        type_hint = type_hint.lower().strip()
+
+        # Boolean conversion - handles XML string "true"/"false"
+        if type_hint in ("bool", "boolean"):
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                value_lower = value.lower().strip()
+                if value_lower in ("true", "1", "yes"):
+                    return True
+                if value_lower in ("false", "0", "no", ""):
+                    return False
+            return bool(value)
+
+        # For non-boolean types, None stays None
+        if value is None:
+            return None
+
+        # Numeric conversions
+        if type_hint == "int":
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return value
+
+        if type_hint in ("float", "number"):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return value
+
+        # String - return as-is or convert to string
+        if type_hint in ("str", "string"):
+            return str(value) if value is not None else ""
+
+        # For dict, list, any, or unknown types, return as-is
+        return value
+
     async def _process(self, text: str) -> Dict[str, Any]:
         """Parse text và trích xuất các field."""
         if not text:
@@ -201,7 +254,9 @@ class ParserOp(BaseOp):
 
         result = {}
         for field in self.extract_fields:
-            result[field.output_key] = self._extract_value_by_path(parsed_data, field.chain_path)
+            raw_value = self._extract_value_by_path(parsed_data, field.chain_path)
+            # Convert type based on hint (e.g., "true" string → True boolean)
+            result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
         return result
 

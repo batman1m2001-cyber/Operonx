@@ -174,3 +174,132 @@ class TestParserErrors:
         error = state["invalid_json_graph.test_parser", "error", None]
         assert error is not None
         assert "JSON" in error or "json" in error.lower()
+
+
+# ============================================================
+# Test 4: Type Conversion
+# ============================================================
+
+
+class TestTypeConversion:
+    """Test automatic type conversion based on type hints."""
+
+    def test_boolean_string_to_bool_xml(self):
+        """Test XML boolean strings ("true"/"false") are converted to bool."""
+        parser = ParserOp(
+            name="bool_parser",
+            format="xml",
+            extract=["verified: bool", "active: bool", "reason: str"],
+        )
+
+        # XML always returns text as strings
+        xml_text = "<verified>true</verified><active>false</active><reason>Test</reason>"
+        result = parser(text=xml_text)
+
+        # Should be converted to actual booleans
+        assert result["verified"] is True
+        assert isinstance(result["verified"], bool)
+        assert result["active"] is False
+        assert isinstance(result["active"], bool)
+        assert result["reason"] == "Test"
+        assert isinstance(result["reason"], str)
+
+    def test_boolean_variations_xml(self):
+        """Test various boolean string representations."""
+        parser = ParserOp(name="bool_parser", format="xml", extract=["flag: bool"])
+
+        # Test "true" variations
+        for true_val in ["true", "True", "TRUE", "1", "yes", "Yes"]:
+            result = parser(text=f"<flag>{true_val}</flag>")
+            assert result["flag"] is True, f"Failed for '{true_val}'"
+
+        # Test "false" variations (empty elements return None, not empty string)
+        for false_val in ["false", "False", "FALSE", "0", "no", "No"]:
+            result = parser(text=f"<flag>{false_val}</flag>")
+            assert result["flag"] is False, f"Failed for '{false_val}'"
+
+    def test_boolean_with_json_already_bool(self):
+        """Test JSON booleans (already bool type) pass through correctly."""
+        parser = ParserOp(name="json_parser", format="json", extract=["enabled: bool"])
+
+        # JSON parses booleans natively, should preserve them
+        result = parser(text='{"enabled": true}')
+        assert result["enabled"] is True
+        assert isinstance(result["enabled"], bool)
+
+        result = parser(text='{"enabled": false}')
+        assert result["enabled"] is False
+
+    def test_int_conversion(self):
+        """Test integer type conversion."""
+        parser = ParserOp(name="int_parser", format="xml", extract=["count: int", "score: int"])
+
+        result = parser(text="<count>42</count><score>100</score>")
+        assert result["count"] == 42
+        assert isinstance(result["count"], int)
+        assert result["score"] == 100
+
+    def test_float_conversion(self):
+        """Test float type conversion."""
+        parser = ParserOp(name="float_parser", format="xml", extract=["price: float", "rate: float"])
+
+        result = parser(text="<price>19.99</price><rate>0.05</rate>")
+        assert result["price"] == 19.99
+        assert isinstance(result["price"], float)
+        assert result["rate"] == 0.05
+
+    def test_none_value_handling(self):
+        """Test that None values are handled correctly."""
+        parser = ParserOp(name="none_parser", format="xml", extract=["missing: bool"])
+
+        # Missing field returns None
+        result = parser(text="<other>value</other>")
+        assert result["missing"] is None
+
+    @pytest.mark.asyncio
+    async def test_boolean_in_branch_condition(self):
+        """Test boolean extraction works with BranchOp (the original issue)."""
+        from hush.core.ops.flow.branch_op import if_
+        from hush.core.ops.transform.func_op import FuncOp
+
+        with GraphOp(name="branch_test") as graph:
+            # Simulate LLM extraction returning XML with boolean
+            extractor = ParserOp(
+                name="extractor",
+                format="xml",
+                extract=["verified: bool"],
+                inputs={"text": PARENT["text"]},
+            )
+
+            # Use plain boolean ref (no == True comparison)
+            router = if_(extractor["verified"], "success").else_("failure")
+
+            success_node = FuncOp(
+                name="success",
+                code_fn=lambda: {"result": "Verified!"},
+                inputs={},
+                outputs={"*": PARENT},
+            )
+            failure_node = FuncOp(
+                name="failure",
+                code_fn=lambda: {"result": "Not verified!"},
+                inputs={},
+                outputs={"*": PARENT},
+            )
+
+            START >> extractor >> router
+            router >> [success_node, failure_node]
+            [success_node, failure_node] >> END
+
+        graph.build()
+        schema = StateSchema(graph)
+
+        # Test with verified=true
+        state = MemoryState(schema, inputs={"text": "<verified>true</verified>"})
+        result = await graph.run(state)
+        assert result["result"] == "Verified!"
+
+        # Test with verified=false
+        state = MemoryState(schema, inputs={"text": "<verified>false</verified>"})
+        result = await graph.run(state)
+        assert result["result"] == "Not verified!"

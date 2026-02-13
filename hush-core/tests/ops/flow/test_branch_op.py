@@ -884,3 +884,89 @@ class TestCompoundBooleanInBranch:
         # Check that all variables are extracted as inputs
         input_vars = set(router.inputs.keys()) - {"anchor"}
         assert input_vars == {"a", "b", "c"}
+
+
+# ============================================================
+# Test: Plain Boolean Ref (Issue Reproduction)
+# ============================================================
+
+
+class TestPlainBooleanRef:
+    """Test using plain boolean Ref directly as condition (without operations)."""
+
+    def test_plain_boolean_ref_true(self):
+        """Test plain boolean ref with True value."""
+        mock_op = type("MockOp", (), {"full_name": "extract_identity"})()
+        verified = Ref(mock_op, "verified")
+
+        # Plain boolean ref - should route to "implicit_result" when True
+        router = if_(verified, "implicit_result").else_("extract_disclosure")
+
+        result = router(verified=True)
+        assert result["target"] == "implicit_result"
+
+    def test_plain_boolean_ref_false(self):
+        """Test plain boolean ref with False value."""
+        mock_op = type("MockOp", (), {"full_name": "extract_identity"})()
+        verified = Ref(mock_op, "verified")
+
+        # Plain boolean ref - should route to else when False
+        router = if_(verified, "implicit_result").else_("extract_disclosure")
+
+        result = router(verified=False)
+        assert result["target"] == "extract_disclosure"
+
+    def test_comparison_vs_plain_boolean(self):
+        """Compare behavior: plain boolean vs explicit == True comparison."""
+        mock_op = type("MockOp", (), {"full_name": "data"})()
+        flag = Ref(mock_op, "flag")
+
+        # Plain boolean
+        router1 = if_(flag, "yes").else_("no")
+
+        # Explicit comparison
+        router2 = if_(flag == True, "yes").else_("no")
+
+        # Both should behave identically
+        assert router1(flag=True)["target"] == "yes"
+        assert router1(flag=False)["target"] == "no"
+
+        assert router2(flag=True)["target"] == "yes"
+        assert router2(flag=False)["target"] == "no"
+
+    @pytest.mark.asyncio
+    async def test_plain_boolean_in_graph(self):
+        """Test plain boolean ref in full graph execution."""
+        with GraphOp(name="boolean_workflow") as graph:
+            checker = FuncOp(
+                name="checker",
+                code_fn=lambda: {"verified": True, "score": 85},
+                inputs={},
+            )
+
+            # Use plain boolean ref from checker
+            router = if_(checker["verified"], "verified_path").else_("unverified_path")
+
+            verified_node = FuncOp(
+                name="verified_path",
+                code_fn=lambda: {"result": "Verified!"},
+                inputs={},
+                outputs={"*": PARENT},
+            )
+            unverified_node = FuncOp(
+                name="unverified_path",
+                code_fn=lambda: {"result": "Not verified!"},
+                inputs={},
+                outputs={"*": PARENT},
+            )
+
+            START >> checker >> router
+            router >> [verified_node, unverified_node]
+            [verified_node, unverified_node] >> END
+
+        graph.build()
+        schema = StateSchema(graph)
+
+        state = schema.create_state(inputs={})
+        result = await graph.run(state)
+        assert result["result"] == "Verified!"
