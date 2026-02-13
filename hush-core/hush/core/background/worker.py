@@ -161,6 +161,28 @@ def worker_loop(
             print(f"[BackgroundWorker] Unexpected error: {e}\n{traceback.format_exc()}")
             sleep(1)
 
+    # Final flush before shutdown — ensure pending traces get sent
+    try:
+        pending = fetch_pending(conn, limit=batch_size)
+        for request_id, rows in pending.items():
+            try:
+                conn.execute(
+                    "UPDATE traces SET status = 'flushing' WHERE request_id = ? AND status = 'pending'",
+                    (request_id,),
+                )
+                conn.commit()
+                flush_data = rebuild_flush_data(rows)
+                dispatch_flush(flush_data)
+                conn.execute(
+                    "UPDATE traces SET status = 'flushed', flushed_at = ? WHERE request_id = ?",
+                    (time(), request_id),
+                )
+                conn.commit()
+            except Exception as e:
+                print(f"[BackgroundWorker] Error in final flush {request_id}: {e}")
+    except Exception as e:
+        print(f"[BackgroundWorker] Error in final flush: {e}")
+
     # Cleanup
     conn.close()
     print("[BackgroundWorker] Stopped")
