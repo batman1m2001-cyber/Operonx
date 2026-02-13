@@ -551,6 +551,7 @@ class LLMOp(BaseOp):
                 name=self.name,
                 input_vars=list(self.inputs.keys()) if self.inputs else [],
                 output_vars=list(self.outputs.keys()) if self.outputs else [],
+                parent_name=parent_name,
                 contain_generation=self.contain_generation,
                 model=_outputs.get("model_used") or selected_resource,
                 usage=_outputs.get("tokens_used"),
