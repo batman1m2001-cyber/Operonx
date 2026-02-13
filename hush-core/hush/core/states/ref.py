@@ -457,6 +457,53 @@ class Ref:
     # =========================================================================
     # Tiện ích
     # =========================================================================
+    _OP_SYMBOLS: dict = {
+        "eq": "==",
+        "ne": "!=",
+        "lt": "<",
+        "le": "<=",
+        "gt": ">",
+        "ge": ">=",
+        "contains": "in",
+        "add": "+",
+        "sub": "-",
+        "mul": "*",
+        "truediv": "/",
+        "floordiv": "//",
+        "mod": "%",
+        "and_": "and",
+        "or_": "or",
+        "not_": "not",
+    }
+
+    def describe(self) -> str:
+        """Human-readable description of this Ref and its operations.
+
+        Examples:
+            Ref(PARENT, "score") with ops [("ge", (90,))]
+            → "score >= 90"
+
+            Ref(PARENT, "call_code") with ops [("eq", ("Hua_tra",))]
+            → "call_code == 'Hua_tra'"
+        """
+        result = self.var
+        for op, args in self._ops:
+            symbol = self._OP_SYMBOLS.get(op)
+            if symbol and args:
+                arg = args[0]
+                result = f"{result} {symbol} {arg!r}"
+            elif symbol and not args:
+                result = f"{symbol} {result}"
+            elif op == "getitem":
+                result = f"{result}[{args[0]!r}]"
+            elif op == "getattr":
+                result = f"{result}.{args[0]}"
+            elif op == "apply":
+                func = args[0]
+                fname = getattr(func, "__name__", str(func))
+                result = f"{fname}({result})"
+        return result
+
     def __repr__(self) -> str:
         if not self._ops:
             return f"Ref({self.source!r}, {self.var!r})"

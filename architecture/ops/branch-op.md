@@ -13,9 +13,10 @@ class BranchOp(BaseOp):
     type: OpType = "branch"
 
     __slots__ = [
-        'given_candidates',  # List explicit candidates
-        'default',          # Default target name
-        'cases',            # List[(Ref, target_name)]
+        'given_candidates',    # List explicit candidates
+        'default',             # Default target name
+        'cases',               # List[(Ref, target_name)]
+        '_case_descriptions',  # Precomputed human-readable condition strings
     ]
 ```
 
@@ -87,20 +88,25 @@ def _create_core_function(self):
 
 ### Condition Evaluation
 
+Condition descriptions are precomputed at init time via `Ref.describe()` and stored in `_case_descriptions`:
+
 ```python
+# In __init__:
+self._case_descriptions = [ref.describe() for ref, _ in self.cases]
+
 def _evaluate_conditions(self, inputs) -> tuple:
     safe_inputs = dict(inputs)
 
-    for ref, target in self.cases:
+    for i, (ref, target) in enumerate(self.cases):
         try:
             value = safe_inputs.get(ref.var)
-            result = ref.execute(value)  # Execute all ops
+            result = ref.execute(value, context=safe_inputs)
             if result:
-                return target, f"ref:{ref.var}"
+                return target, self._case_descriptions[i]
+                # e.g. "score >= 90", "call_code == 'Hua_tra'"
         except Exception:
             continue
 
-    # Default target
     if self.default:
         return self.default, "default"
 
@@ -198,8 +204,8 @@ Ref hỗ trợ comparison operators:
 
 ```python
 # Tạo Ref với comparison
-PARENT["score"] >= 90    # Ref với op: ('>=', 90)
-PARENT["status"] == "ok" # Ref với op: ('==', "ok")
+PARENT["score"] >= 90    # Ref với op: ('ge', (90,))
+PARENT["status"] == "ok" # Ref với op: ('eq', ("ok",))
 PARENT["items"].apply(len) > 0  # Ref với apply() và comparison
 
 # Fluent API sử dụng
@@ -208,6 +214,18 @@ PARENT["items"].apply(len) > 0  # Ref với apply() và comparison
     .if_(PARENT["items"].apply(len) > 0, "has_items")
     .else_("default"))
 ```
+
+### Ref.describe()
+
+`Ref.describe()` renders a human-readable condition string from the Ref's ops:
+
+```python
+PARENT["score"] >= 90       → "score >= 90"
+PARENT["call_code"] == "X"  → "call_code == 'X'"
+PARENT["count"] > 0         → "count > 0"
+```
+
+Used by BranchOp to produce meaningful `matched` output in logs instead of `ref:var_name`.
 
 ## Metadata
 

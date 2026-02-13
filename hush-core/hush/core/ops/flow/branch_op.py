@@ -42,6 +42,7 @@ class BranchOp(BaseOp):
         "given_candidates",
         "default",
         "cases",
+        "_case_descriptions",
     ]
 
     def __init__(
@@ -66,6 +67,7 @@ class BranchOp(BaseOp):
         self.default = default.name if hasattr(default, "is_base_op") else default
         self.given_candidates = candidates
         self.cases = cases or []
+        self._case_descriptions = [ref.describe() for ref, _ in self.cases]
 
         self.core = self._create_core_function()
 
@@ -125,14 +127,14 @@ class BranchOp(BaseOp):
         """Evaluate all conditions and return the first match."""
         safe_inputs = dict(inputs)
 
-        for ref, target in self.cases:
+        for i, (ref, target) in enumerate(self.cases):
             try:
                 value = safe_inputs.get(ref.var)
                 # Pass context for compound boolean operations (& and |)
                 result = ref.execute(value, context=safe_inputs)
 
                 if result:
-                    condition_desc = f"ref:{ref.var}"
+                    condition_desc = self._case_descriptions[i]
                     LOGGER.debug(
                         "Điều kiện [str]'%s'[/str] khớp, định tuyến đến [highlight]%s[/highlight]",
                         condition_desc,
