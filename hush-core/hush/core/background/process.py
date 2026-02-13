@@ -397,6 +397,13 @@ class BackgroundProcess:
                 self._queue.put({"task_type": TaskType.SHUTDOWN.value, "data": {}})
             except Exception:
                 pass
+            # Ensure Queue's feeder thread delivers all data to the pipe
+            # before waiting for the worker (prevents lost messages at exit)
+            try:
+                self._queue.close()
+                self._queue.join_thread()
+            except Exception:
+                pass
             self._process.join(timeout=timeout)
             if self._process.is_alive():
                 self._process.terminate()
