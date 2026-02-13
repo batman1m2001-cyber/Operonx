@@ -95,7 +95,7 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
         visited.add(key)
         data = node_data_map.get(key)
         if data:
-            parent_key = get_parent_key(data["node"], data["parent"], data["context_id"])
+            parent_key = get_parent_key(data["op"], data["parent"], data["context_id"])
             if parent_key and parent_key in node_data_map:
                 visit(parent_key)
         ordered_keys.append(key)
@@ -108,7 +108,7 @@ def rebuild_flush_data(rows: List[sqlite3.Row]) -> Dict[str, Any]:
         data = node_data_map[key]
         flush_data["execution_order"].append(
             {
-                "node": data["node"],
+                "op": data["op"],
                 "parent": data["parent"],
                 "context_id": data["context_id"],
                 "contain_generation": data["contain_generation"],
