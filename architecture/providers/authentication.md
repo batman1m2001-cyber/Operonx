@@ -191,6 +191,34 @@ AuthFactory.register("my_auth", MyAuthProvider)
 
 4. Register plugin trong `registry/auth_plugin.py`
 
+## Keycloak Failure trong ResourceHub
+
+Khi Keycloak provider thất bại (network error, DNS failure, endpoint unavailable), ResourceHub xử lý gracefully:
+
+```python
+# resources.yaml
+llm:claude-4-sonnet:
+  type: openai
+  api_key: keycloak:myapp    # ← Reference đến keycloak config
+
+keycloak:myapp:
+  url: https://identity.example.com/client/connect
+  name: my_app
+  secret: ${KC_SECRET}
+```
+
+Nếu keycloak endpoint unreachable:
+
+```python
+hub.llm("claude-4-sonnet")
+# → KeyError("Resource 'llm:claude-4-sonnet' unavailable:
+#             keycloak 'myapp' failed (ConnectionError: getaddrinfo failed)")
+```
+
+- `KeyError` được raise thay vì crash unhandled
+- Các resource khác (LLM với static api_key, embedding, redis, ...) không bị ảnh hưởng
+- Log warning giúp debug: `"Failed to resolve keycloak token for 'llm:claude-4-sonnet'"`
+
 ## Xem thêm
 
 - [ResourceHub](../resources/resource-hub.md) - Config loading và management

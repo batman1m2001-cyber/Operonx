@@ -100,6 +100,38 @@ class CacheEntry:
     instance: Any = None # Lazy loaded instance
 ```
 
+## Error Handling
+
+`get()` và `llm()` wrap factory/init failures thành `KeyError` với message mô tả rõ nguyên nhân:
+
+```python
+def get(self, key: str) -> Any:
+    config = self._load_config(key)
+    if not config:
+        raise KeyError(f"Resource '{key}' not found in registry")
+
+    try:
+        instance = REGISTRY.create(config)
+    except Exception as e:
+        LOGGER.warning("Failed to create resource '%s': %s", key, e)
+        raise KeyError(f"Resource '{key}' failed to initialize: {e}") from e
+    ...
+```
+
+Điều này đảm bảo:
+- Một resource lỗi (ví dụ: Keycloak unreachable, DB connection refused) không crash toàn bộ hub
+- Caller nhận `KeyError` rõ ràng, có thể catch hoặc để propagate
+- Các resource khác không bị ảnh hưởng
+
+### LLM với Keycloak token failure
+
+Khi LLM config sử dụng `api_key: keycloak:<name>`, nếu keycloak provider thất bại (network error, DNS failure), `llm()` raise `KeyError` thay vì crash:
+
+```python
+# api_key: keycloak:myapp → resolve token → network error
+# → KeyError("Resource 'llm:model' unavailable: keycloak 'myapp' failed (ConnectionError: ...)")
+```
+
 ## Health Check
 
 ```python

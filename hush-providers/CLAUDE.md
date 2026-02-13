@@ -182,6 +182,18 @@ prompt = PromptOp(
 )
 ```
 
+### PromptOp Wildcard with Ref Templates
+
+When ChainOp is used inside `@graph` where `template` is a PARENT ref, PromptOp's wildcard forwarding (`{"*": PARENT}`) automatically discovers template variables by falling back to the source op's non-reserved input keys. This means template variables like `transcript` are correctly forwarded even when the template itself is dynamic.
+
+```python
+@graph
+def my_flow(template, transcript):
+    chain = ChainOp.of(resource="gpt-4o", template=template, transcript=transcript)
+    START >> chain >> END
+# Works: PromptOp detects "transcript" from ChainOp's inputs
+```
+
 ## Plugin Registration
 
 Plugins auto-register resource types from YAML:

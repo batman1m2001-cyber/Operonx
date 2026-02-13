@@ -149,13 +149,38 @@ Tất cả key khác → template variables.
 
 ### Wildcard Variable Detection
 
-Khi dùng `{"*": PARENT}`, PromptOp tự động phân tích template để tìm các biến cần thiết:
+Khi dùng `{"*": PARENT}`, PromptOp cần biết những biến nào sẽ được forward từ parent. Logic này nằm trong method `_infer_wildcard_vars()`:
+
+**Strategy 1: Static template** — Template là literal (str/dict/list), parse `{var}` placeholders:
 
 ```python
-# Với template = {"user": "Hello {name}, age {age}"}
-# PromptOp tự động thêm "name" và "age" vào input schema
-# Để wildcard forwarding có thể pick up chúng từ parent
+# ChainOp._build_graph() tạo PromptOp(inputs={"*": PARENT})
+# ChainOp.inputs có template = {"user": "Hello {name}, age {age}"}
+# → _infer_wildcard_vars parse template → {"name", "age"}
+# → Thêm "name", "age" vào input schema
 ```
+
+**Strategy 2: Ref template** — Template là `PARENT` ref (ví dụ trong `@graph`), dùng source op's input keys:
+
+```python
+@graph
+def my_flow(template, transcript):
+    # template và transcript là PARENT refs
+    chain = ChainOp.of(resource="gpt-4o", template=template, transcript=transcript)
+    START >> chain >> END
+
+# Bên trong ChainOp._build_graph():
+#   PromptOp(inputs={"*": PARENT})
+#   PARENT (= ChainOp) có inputs: template (Ref), transcript (Ref)
+#   → template là Ref → không parse placeholders
+#   → Fallback: lấy tất cả non-reserved keys từ source → {"transcript"}
+#   → Thêm "transcript" vào schema
+```
+
+Helper methods:
+- `_resolve_wildcard_source()`: Resolve PARENT sentinel → actual father op
+- `_infer_wildcard_vars()`: Trả về set of variable names cần thêm vào schema
+- `_extract_template_variables()`: Parse `{var}` từ template (recursive cho str/dict/list)
 
 ### Error Handling
 

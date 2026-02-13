@@ -877,5 +877,150 @@ Output your response in XML format:
         print(f"Unified LB response: {result['content']}")
 
 
+class TestChainOpRefTemplate:
+    """Tests for ChainOp when template is a Ref (e.g. inside @graph).
+
+    Regression tests for the bug where PromptOp's wildcard forwarding
+    failed to discover template variables when the template itself was
+    a PARENT ref instead of a static value.
+    """
+
+    def test_prompt_schema_includes_vars_when_template_is_ref(self):
+        """When template is a Ref, PromptOp should still have template vars in its schema."""
+        from hush.core import PARENT, START, END
+        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.providers.ops import ChainOp
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+            mock_instance = Mock()
+            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
+            mock_hub.instance.return_value = mock_instance
+
+            @graph
+            def detect(template: str, transcript: str):
+                chain = ChainOp.of(
+                    resource="gpt-4",
+                    template=template,
+                    transcript=transcript,
+                    extract=["result: str"],
+                    parser="json",
+                )
+                START >> chain >> END
+
+            node = detect(
+                template="Analyze this: {transcript}",
+                transcript="Hello world",
+            )
+
+            # The internal PromptOp must know about 'transcript'
+            chain_op = node._ops["chain"]
+            prompt_op = chain_op._ops["prompt"]
+            assert "transcript" in prompt_op.inputs, (
+                "PromptOp should discover 'transcript' from ChainOp's inputs "
+                "even when template is a Ref"
+            )
+
+    def test_prompt_schema_with_multiple_vars_and_ref_template(self):
+        """Multiple template vars should all be discovered when template is a Ref."""
+        from hush.core import PARENT, START, END
+        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.providers.ops import ChainOp
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+            mock_instance = Mock()
+            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
+            mock_hub.instance.return_value = mock_instance
+
+            @graph
+            def detect(template: str, transcript: str, call_type: str, context: str):
+                chain = ChainOp.of(
+                    resource="gpt-4",
+                    template=template,
+                    transcript=transcript,
+                    call_type=call_type,
+                    context=context,
+                    extract=["result: str"],
+                    parser="json",
+                )
+                START >> chain >> END
+
+            node = detect(
+                template="Type: {call_type}\nContext: {context}\nTranscript: {transcript}",
+                transcript="Hello",
+                call_type="OVERDUE",
+                context="debt collection",
+            )
+
+            prompt_op = node._ops["chain"]._ops["prompt"]
+            assert "transcript" in prompt_op.inputs
+            assert "call_type" in prompt_op.inputs
+            assert "context" in prompt_op.inputs
+
+    def test_static_template_still_works(self):
+        """Existing behavior: static template should still discover vars from template text."""
+        from hush.core import PARENT, START, END
+        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.providers.ops import ChainOp
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+            mock_instance = Mock()
+            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
+            mock_hub.instance.return_value = mock_instance
+
+            @graph
+            def detect(transcript: str):
+                chain = ChainOp.of(
+                    resource="gpt-4",
+                    template="Analyze: {transcript}",
+                    transcript=transcript,
+                    extract=["result: str"],
+                    parser="json",
+                )
+                START >> chain >> END
+
+            node = detect(transcript="Hello world")
+
+            prompt_op = node._ops["chain"]._ops["prompt"]
+            assert "transcript" in prompt_op.inputs
+
+    def test_nested_graph_with_ref_template(self):
+        """End-to-end: nested @graph passes Ref template to ChainOp, vars must propagate."""
+        from hush.core import PARENT, START, END
+        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.providers.ops import ChainOp
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+            mock_instance = Mock()
+            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
+            mock_hub.instance.return_value = mock_instance
+
+            @graph
+            def inner(template: str, transcript: str):
+                chain = ChainOp.of(
+                    resource="gpt-4",
+                    template=template,
+                    transcript=transcript,
+                    extract=["result: str"],
+                    parser="json",
+                )
+                START >> chain >> END
+
+            @graph
+            def outer(transcript: str):
+                sub = inner(
+                    template="Analyze: {transcript}",
+                    transcript=transcript,
+                )
+                START >> sub >> END
+
+            node = outer(transcript="Hello world")
+
+            # Navigate: outer → inner → chain → prompt
+            inner_op = node._ops["sub"]
+            chain_op = inner_op._ops["chain"]
+            prompt_op = chain_op._ops["prompt"]
+            assert "transcript" in prompt_op.inputs
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

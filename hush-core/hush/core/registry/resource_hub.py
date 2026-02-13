@@ -220,7 +220,7 @@ class ResourceHub:
             Initialized resource instance
 
         Raises:
-            KeyError: If key not found
+            KeyError: If key not found or resource failed to initialize
         """
         # Return cached instance if available
         if key in self._cache and self._cache[key].instance is not None:
@@ -232,9 +232,14 @@ class ResourceHub:
             raise KeyError(f"Resource '{key}' not found in registry")
 
         # Lazy initialize resource
-        instance = REGISTRY.create(config)
+        try:
+            instance = REGISTRY.create(config)
+        except Exception as e:
+            LOGGER.warning("Failed to create resource '%s': %s", key, e)
+            raise KeyError(f"Resource '{key}' failed to initialize: {e}") from e
+
         if instance is None:
-            raise RuntimeError(f"Cannot create resource for '{key}'")
+            raise KeyError(f"Cannot create resource for '{key}': factory returned None")
 
         self._cache[key].instance = instance
         LOGGER.debug("Lazy loaded resource: %s", key)
@@ -378,21 +383,42 @@ class ResourceHub:
         # Check for keycloak reference in api_key
         if hasattr(config, "api_key") and isinstance(config.api_key, str):
             if config.api_key.startswith("keycloak:"):
-                # Resolve token from keycloak provider
-                resolved_token = self._resolve_api_key(config.api_key)
+                keycloak_name = config.api_key[9:]
+
+                try:
+                    # Resolve token from keycloak provider
+                    resolved_token = self._resolve_api_key(config.api_key)
+                except Exception as e:
+                    LOGGER.warning(
+                        "Failed to resolve keycloak token for '%s' (keycloak:%s): %s. "
+                        "Skipping this resource.",
+                        full_key,
+                        keycloak_name,
+                        e,
+                    )
+                    raise KeyError(
+                        f"Resource '{full_key}' unavailable: "
+                        f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})"
+                    ) from e
 
                 # Create modified config with resolved token
                 config_dict = config.model_dump()
                 config_dict["api_key"] = resolved_token
                 resolved_config = type(config).model_validate(config_dict)
 
-                # Create instance (don't cache - token may refresh)
-                instance = REGISTRY.create(resolved_config)
+                # Create instance
+                try:
+                    instance = REGISTRY.create(resolved_config)
+                except Exception as e:
+                    LOGGER.warning("Failed to create LLM '%s': %s", full_key, e)
+                    raise KeyError(
+                        f"Resource '{full_key}' failed to initialize: {e}"
+                    ) from e
+
                 if instance is None:
-                    raise RuntimeError(f"Cannot create resource for '{full_key}'")
+                    raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
 
                 # Store keycloak provider reference on instance for potential refresh
-                keycloak_name = config.api_key[9:]
                 instance._keycloak_provider = self.keycloak(keycloak_name)
                 instance._original_config = config
 
@@ -402,9 +428,14 @@ class ResourceHub:
                 return instance
 
         # Standard path for static api_key
-        instance = REGISTRY.create(config)
+        try:
+            instance = REGISTRY.create(config)
+        except Exception as e:
+            LOGGER.warning("Failed to create LLM '%s': %s", full_key, e)
+            raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
+
         if instance is None:
-            raise RuntimeError(f"Cannot create resource for '{full_key}'")
+            raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
 
         self._cache[full_key].instance = instance
         LOGGER.debug("Lazy loaded resource: %s", full_key)

@@ -88,18 +88,11 @@ class PromptOp(BaseOp):
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
 
-        # Special wildcard handling: extract template variables from wildcard source
+        # Wildcard handling: infer template variable names from the source op
         if "__FORWARD_WILDCARD__" in normalized_inputs:
-            wildcard_source = normalized_inputs["__FORWARD_WILDCARD__"]
-            # Try to get template from the wildcard source to infer variable names
-            template_value = self._extract_template_from_wildcard(wildcard_source)
-            if template_value:
-                # Parse template to find variable names
-                template_vars = self._extract_template_variables(template_value)
-                # Add them to schema so wildcard forwarding can pick them up
-                for var in template_vars:
-                    if var not in RESERVED_KEYS:
-                        parsed_inputs[var] = Param(type=Any, required=False, default=None)
+            for var in self._infer_wildcard_vars(normalized_inputs["__FORWARD_WILDCARD__"]):
+                if var not in parsed_inputs:
+                    parsed_inputs[var] = Param(type=Any, required=False, default=None)
 
         # Add non-reserved keys from user inputs to schema (template variables)
         for key, param in normalized_inputs.items():
@@ -112,76 +105,50 @@ class PromptOp(BaseOp):
         # Set core function
         self.core = self._format
 
-    def _extract_template_from_wildcard(self, wildcard_source) -> Any:
-        """Extract template value from wildcard source op.
+    def _resolve_wildcard_source(self, wildcard_source):
+        """Resolve PARENT sentinel to actual father op."""
+        if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
+            return self.father
+        return wildcard_source
 
-        Args:
-            wildcard_source: The op reference from wildcard forwarding.
+    def _infer_wildcard_vars(self, wildcard_source) -> set:
+        """Infer template variable names from the wildcard source op.
 
-        Returns:
-            Template value if found, None otherwise.
+        Strategy:
+          1. If source has a static template → parse ``{var}`` placeholders from it.
+          2. Otherwise (Ref or missing) → use source's non-reserved input keys.
         """
         from hush.core.states.ref import Ref
 
-        # Resolve PARENT sentinel to actual father op
-        if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
-            actual_node = self.father
-        else:
-            actual_node = wildcard_source
+        source = self._resolve_wildcard_source(wildcard_source)
+        if source is None or not hasattr(source, "inputs"):
+            return set()
 
-        # If actual_node is None, can't extract
-        if actual_node is None:
-            return None
+        # Try static template first
+        if "template" in source.inputs:
+            param = source.inputs["template"]
+            value = param.value if hasattr(param, "value") else param
+            if value is not None and not isinstance(value, Ref):
+                return self._extract_template_variables(value) - RESERVED_KEYS
 
-        # If actual_node has inputs attribute, try to get template from it
-        if hasattr(actual_node, "inputs") and "template" in actual_node.inputs:
-            template_param = actual_node.inputs["template"]
-            # If it's a Param with a value
-            if hasattr(template_param, "value"):
-                value = template_param.value
-                # If it's a Ref, we can't resolve it yet (circular), return None
-                if isinstance(value, Ref):
-                    return None
-                return value
-            # If it's a direct value
-            return template_param
-
-        return None
+        # Fallback: all non-reserved input keys from source
+        return set(source.inputs) - RESERVED_KEYS
 
     def _extract_template_variables(self, template: Any) -> set:
-        """Extract variable names from template.
-
-        Args:
-            template: Template in str, dict, or list format
-
-        Returns:
-            Set of variable names found in template
-        """
-        import re
-
-        vars_found = set()
-
-        def find_vars_in_string(s: str):
-            """Find all {variable} patterns in a string."""
-            if not isinstance(s, str):
-                return
-            # Match {variable_name} patterns
-            for match in re.finditer(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", s):
-                vars_found.add(match.group(1))
-
-        def traverse(obj):
-            """Recursively traverse template structure."""
-            if isinstance(obj, str):
-                find_vars_in_string(obj)
-            elif isinstance(obj, dict):
-                for value in obj.values():
-                    traverse(value)
-            elif isinstance(obj, list):
-                for item in obj:
-                    traverse(item)
-
-        traverse(template)
-        return vars_found
+        """Find all ``{variable}`` names in a template (str, dict, or list)."""
+        if isinstance(template, str):
+            return set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", template))
+        if isinstance(template, dict):
+            result = set()
+            for v in template.values():
+                result |= self._extract_template_variables(v)
+            return result
+        if isinstance(template, list):
+            result = set()
+            for item in template:
+                result |= self._extract_template_variables(item)
+            return result
+        return set()
 
     def _format_value(self, value: Any, vars: Dict[str, Any], template: Any = None) -> Any:
         """Recursively format template variables in a value.

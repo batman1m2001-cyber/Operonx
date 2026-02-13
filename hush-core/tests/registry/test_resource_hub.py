@@ -600,3 +600,129 @@ class TestCacheEntry:
 
         assert entry.config == mock_config
         assert entry.instance == service
+
+
+# ============================================================================
+# Tests: Graceful Error Handling on Resource Init Failure
+# ============================================================================
+
+
+class FailingConfig(YamlModel):
+    """Config whose factory always raises (simulates network error)."""
+
+    _category: ClassVar[str] = "failing"
+
+    name: str = "bad"
+
+
+def failing_factory(config: FailingConfig):
+    raise OSError("[Errno -2] Name or service not known")
+
+
+class MockLLMWithKeyConfig(YamlModel):
+    """Mock LLM config with api_key field for keycloak tests."""
+
+    _category: ClassVar[str] = "llm"
+
+    model: str = "gpt-4"
+    api_key: str = "sk-test"
+
+
+class TestGracefulErrorHandling:
+    """Test that resource init failures raise KeyError, not raw exceptions."""
+
+    def _fresh_registry(self):
+        """Clear REGISTRY entries and return it, avoiding stale category conflicts."""
+        REGISTRY.clear()
+        return REGISTRY
+
+    def test_get_raises_keyerror_on_factory_failure(self, tmp_path):
+        """get() should wrap factory exceptions in KeyError."""
+        registry = self._fresh_registry()
+        registry.register(FailingConfig, failing_factory)
+
+        config_file = tmp_path / "resources.yaml"
+        config_file.write_text(
+            "failing:bad:\n"
+            "  name: bad\n"
+        )
+        hub = ResourceHub.from_yaml(config_file)
+
+        with pytest.raises(KeyError, match="failed to initialize"):
+            hub.get("failing:bad")
+
+        hub.close()
+
+    def test_other_resources_unaffected_by_failing_one(self, tmp_path):
+        """A failing resource should not prevent other resources from loading."""
+        registry = self._fresh_registry()
+        registry.register(FailingConfig, failing_factory)
+        registry.register(MockServiceConfig, mock_service_factory)
+
+        config_file = tmp_path / "resources.yaml"
+        config_file.write_text(
+            "failing:bad:\n"
+            "  name: bad\n"
+            "\n"
+            "service:good:\n"
+            "  name: good-service\n"
+            "  host: localhost\n"
+            "  port: 8080\n"
+        )
+        hub = ResourceHub.from_yaml(config_file)
+
+        # Failing resource raises KeyError
+        with pytest.raises(KeyError, match="failed to initialize"):
+            hub.get("failing:bad")
+
+        # Good resource still works
+        service = hub.get("service:good")
+        assert isinstance(service, MockService)
+        assert service.name == "good-service"
+
+        hub.close()
+
+    def test_llm_keycloak_network_failure_raises_keyerror(self, tmp_path):
+        """llm() should raise KeyError when keycloak token resolution fails."""
+        registry = self._fresh_registry()
+        registry.register(MockLLMWithKeyConfig, lambda c: c)
+
+        config_file = tmp_path / "resources.yaml"
+        config_file.write_text(
+            "llm:my-model:\n"
+            "  model: gpt-4\n"
+            "  api_key: keycloak:nonexistent\n"
+        )
+        hub = ResourceHub.from_yaml(config_file)
+
+        with pytest.raises(KeyError, match="keycloak.*failed"):
+            hub.llm("my-model")
+
+        hub.close()
+
+    def test_llm_keycloak_failure_preserves_other_llms(self, tmp_path):
+        """A keycloak LLM failure should not affect static-key LLMs."""
+        registry = self._fresh_registry()
+        registry.register(MockLLMWithKeyConfig, lambda c: c)
+
+        config_file = tmp_path / "resources.yaml"
+        config_file.write_text(
+            "llm:keycloak-model:\n"
+            "  model: gpt-4\n"
+            "  api_key: keycloak:nonexistent\n"
+            "\n"
+            "llm:static-model:\n"
+            "  model: gpt-4o\n"
+            "  api_key: sk-static-key\n"
+        )
+        hub = ResourceHub.from_yaml(config_file)
+
+        # Keycloak model fails
+        with pytest.raises(KeyError, match="keycloak.*failed"):
+            hub.llm("keycloak-model")
+
+        # Static model still works
+        result = hub.llm("static-model")
+        assert result.api_key == "sk-static-key"
+
+        hub.close()

@@ -145,6 +145,8 @@ hub = get_hub()
 config = hub.get("llm", "gpt-4o")  # Get LLM config by key
 ```
 
+**Error handling**: `get()` and `llm()` wrap factory/init failures in `KeyError` with descriptive messages. A failing resource (e.g., unreachable Keycloak) won't crash the entire hub — callers get a clear `KeyError` they can catch or let propagate.
+
 ### Plugin Pattern
 
 Plugins register handlers for resource types:
