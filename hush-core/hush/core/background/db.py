@@ -37,7 +37,7 @@ def _json_dumps(obj: Any) -> Optional[str]:
 
 
 # Default database path - can be overridden via HUSH_TRACES_DB env var
-DEFAULT_DB_PATH = Path(os.environ.get("HUSH_TRACES_DB", Path.home() / ".hush" / "traces.db"))
+DEFAULT_DB_PATH = Path(os.environ.get("HUSH_TRACES_DB", Path.home() / ".hush" / "traces.db")).expanduser()
 
 _SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS traces (
