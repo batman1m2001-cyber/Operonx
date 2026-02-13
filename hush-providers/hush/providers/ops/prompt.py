@@ -279,6 +279,11 @@ class PromptOp(BaseOp):
         if "template" in self.inputs:
             val = self.inputs["template"].value
             if val is not None:
-                metadata["template"] = val
+                # Convert Ref to string to avoid pickle issues with
+                # background trace process (Ref._source can hold GraphOp
+                # with unpicklable _contextvars.Token)
+                from hush.core.states.ref import Ref
+
+                metadata["template"] = repr(val) if isinstance(val, Ref) else val
 
         return metadata
