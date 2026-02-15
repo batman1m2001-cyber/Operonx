@@ -43,9 +43,7 @@ class FlushWorker:
         """
         self._executor.submit(self._safe_collect_and_flush, tracers, graph, state)
 
-    def _safe_collect_and_flush(
-        self, tracers: List[Tracer], graph: Any, state: Any
-    ) -> None:
+    def _safe_collect_and_flush(self, tracers: List[Tracer], graph: Any, state: Any) -> None:
         """Collect trace data and flush to all tracers, with error handling."""
         try:
             # 1. Collect trace data (CPU-bound, microseconds)
@@ -61,9 +59,7 @@ class FlushWorker:
                     data = {**trace_data, "tags": merged if merged else None}
                     tracer.flush(data)
                 except Exception:
-                    LOGGER.exception(
-                        "Failed to flush traces to %s", type(tracer).__name__
-                    )
+                    LOGGER.exception("Failed to flush traces to %s", type(tracer).__name__)
         except Exception:
             LOGGER.exception("Failed to collect trace data")
 

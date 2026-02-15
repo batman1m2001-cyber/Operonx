@@ -642,10 +642,7 @@ class TestGracefulErrorHandling:
         registry.register(FailingConfig, failing_factory)
 
         config_file = tmp_path / "resources.yaml"
-        config_file.write_text(
-            "failing:bad:\n"
-            "  name: bad\n"
-        )
+        config_file.write_text("failing:bad:\n  name: bad\n")
         hub = ResourceHub.from_yaml(config_file)
 
         with pytest.raises(KeyError, match="failed to initialize"):
@@ -688,11 +685,7 @@ class TestGracefulErrorHandling:
         registry.register(MockLLMWithKeyConfig, lambda c: c)
 
         config_file = tmp_path / "resources.yaml"
-        config_file.write_text(
-            "llm:my-model:\n"
-            "  model: gpt-4\n"
-            "  api_key: keycloak:nonexistent\n"
-        )
+        config_file.write_text("llm:my-model:\n  model: gpt-4\n  api_key: keycloak:nonexistent\n")
         hub = ResourceHub.from_yaml(config_file)
 
         with pytest.raises(KeyError, match="keycloak.*failed"):

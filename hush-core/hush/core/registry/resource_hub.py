@@ -411,12 +411,12 @@ class ResourceHub:
                     instance = REGISTRY.create(resolved_config)
                 except Exception as e:
                     LOGGER.warning("Failed to create LLM '%s': %s", full_key, e)
-                    raise KeyError(
-                        f"Resource '{full_key}' failed to initialize: {e}"
-                    ) from e
+                    raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
 
                 if instance is None:
-                    raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
+                    raise KeyError(
+                        f"Cannot create resource for '{full_key}': factory returned None"
+                    )
 
                 # Store keycloak provider reference on instance for potential refresh
                 instance._keycloak_provider = self.keycloak(keycloak_name)

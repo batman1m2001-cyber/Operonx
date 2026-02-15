@@ -55,6 +55,7 @@ def test_langfuse_tracer_creation():
 def test_langfuse_tracer_inherits_from_new_tracer():
     """Test LangfuseTracer inherits from hush.core.tracing.Tracer."""
     from hush.core.tracing import Tracer
+
     from hush.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default", tags=["test"])
@@ -234,9 +235,24 @@ def test_langfuse_tracer_flush_integration():
         "session_id": "test-session",
         "tags": ["integration", "test"],
         "graph_structure": [
-            {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
-            {"op_name": "root.child-1", "op_type": "code", "parent_name": "root", "contain_generation": False},
-            {"op_name": "root.llm-node", "op_type": "llm", "parent_name": "root", "contain_generation": True},
+            {
+                "op_name": "root",
+                "op_type": "graph",
+                "parent_name": None,
+                "contain_generation": False,
+            },
+            {
+                "op_name": "root.child-1",
+                "op_type": "code",
+                "parent_name": "root",
+                "contain_generation": False,
+            },
+            {
+                "op_name": "root.llm-node",
+                "op_type": "llm",
+                "parent_name": "root",
+                "contain_generation": True,
+            },
         ],
         "records": [
             {

@@ -192,9 +192,7 @@ class LangfuseTracer(Tracer):
                     # Child — span or generation
                     parent = langfuse_objects.get(parent_key)
                     if parent is None:
-                        LOGGER.warning(
-                            "Parent '%s' not found for op '%s'", parent_key, op_name
-                        )
+                        LOGGER.warning("Parent '%s' not found for op '%s'", parent_key, op_name)
                         continue
 
                     kwargs = {

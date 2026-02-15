@@ -241,7 +241,9 @@ class TestTypeConversion:
 
     def test_float_conversion(self):
         """Test float type conversion."""
-        parser = ParserOp(name="float_parser", format="xml", extract=["price: float", "rate: float"])
+        parser = ParserOp(
+            name="float_parser", format="xml", extract=["price: float", "rate: float"]
+        )
 
         result = parser(text="<price>19.99</price><rate>0.05</rate>")
         assert result["price"] == 19.99
