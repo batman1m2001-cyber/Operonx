@@ -887,8 +887,9 @@ class TestChainOpRefTemplate:
 
     def test_prompt_schema_includes_vars_when_template_is_ref(self):
         """When template is a Ref, PromptOp should still have template vars in its schema."""
-        from hush.core import PARENT, START, END
-        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.core import END, START
+        from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -922,8 +923,9 @@ class TestChainOpRefTemplate:
 
     def test_prompt_schema_with_multiple_vars_and_ref_template(self):
         """Multiple template vars should all be discovered when template is a Ref."""
-        from hush.core import PARENT, START, END
-        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.core import END, START
+        from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -958,8 +960,9 @@ class TestChainOpRefTemplate:
 
     def test_static_template_still_works(self):
         """Existing behavior: static template should still discover vars from template text."""
-        from hush.core import PARENT, START, END
-        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.core import END, START
+        from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -985,8 +988,9 @@ class TestChainOpRefTemplate:
 
     def test_nested_graph_with_ref_template(self):
         """End-to-end: nested @graph passes Ref template to ChainOp, vars must propagate."""
-        from hush.core import PARENT, START, END
-        from hush.core.ops.graph.graph_op import GraphOp, graph
+        from hush.core import END, START
+        from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
