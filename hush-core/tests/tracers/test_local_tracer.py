@@ -11,7 +11,7 @@ import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops import FuncOp
-from hush.core.tracing import HushEyesTracer, Tracer, TraceCollector
+from hush.core.tracing import HushEyesTracer, TraceCollector, Tracer
 from hush.core.tracing.flush_worker import FlushWorker, _merge_tags
 
 

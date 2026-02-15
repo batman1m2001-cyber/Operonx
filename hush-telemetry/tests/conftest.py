@@ -1,7 +1,6 @@
 """Pytest configuration and shared fixtures for hush-telemetry tests."""
 
 import os
-import sys
 import uuid
 from pathlib import Path
 
@@ -82,9 +81,7 @@ def pytest_collection_modifyitems(config, items):
     """Skip integration tests if HUSH_CONFIG is not set."""
     has_config = os.environ.get("HUSH_CONFIG") and CONFIGS_PATH.exists()
     if not has_config:
-        skip_marker = pytest.mark.skip(
-            reason="HUSH_CONFIG not set or config file not found"
-        )
+        skip_marker = pytest.mark.skip(reason="HUSH_CONFIG not set or config file not found")
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_marker)

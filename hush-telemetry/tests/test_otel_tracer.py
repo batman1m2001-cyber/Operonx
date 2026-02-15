@@ -156,6 +156,7 @@ class TestOTELTracer:
 
     def test_tracer_inherits_from_new_tracer(self):
         from hush.core.tracing import Tracer
+
         from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource="otel:jaeger", tags=["test"])
@@ -279,7 +280,12 @@ class TestOTELTracerFlush:
             "session_id": "test-session",
             "tags": ["otel-test"],
             "graph_structure": [
-                {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
+                {
+                    "op_name": "root",
+                    "op_type": "graph",
+                    "parent_name": None,
+                    "contain_generation": False,
+                },
             ],
             "records": [
                 {
@@ -355,15 +361,62 @@ class TestOTELTracerFlush:
             "session_id": None,
             "tags": [],
             "graph_structure": [
-                {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
-                {"op_name": "root.loop", "op_type": "for", "parent_name": "root", "contain_generation": False},
-                {"op_name": "root.loop.process", "op_type": "code", "parent_name": "root.loop", "contain_generation": False},
+                {
+                    "op_name": "root",
+                    "op_type": "graph",
+                    "parent_name": None,
+                    "contain_generation": False,
+                },
+                {
+                    "op_name": "root.loop",
+                    "op_type": "for",
+                    "parent_name": "root",
+                    "contain_generation": False,
+                },
+                {
+                    "op_name": "root.loop.process",
+                    "op_type": "code",
+                    "parent_name": "root.loop",
+                    "contain_generation": False,
+                },
             ],
             "records": [
-                {"op_name": "root", "context_id": None, "inputs": {}, "outputs": {}, "start_time": None, "end_time": None, "duration_ms": None},
-                {"op_name": "root.loop", "context_id": None, "inputs": {}, "outputs": {}, "start_time": None, "end_time": None, "duration_ms": None},
-                {"op_name": "root.loop.process", "context_id": "[0]", "inputs": {"i": 0}, "outputs": {"r": 0}, "start_time": None, "end_time": None, "duration_ms": None},
-                {"op_name": "root.loop.process", "context_id": "[1]", "inputs": {"i": 1}, "outputs": {"r": 1}, "start_time": None, "end_time": None, "duration_ms": None},
+                {
+                    "op_name": "root",
+                    "context_id": None,
+                    "inputs": {},
+                    "outputs": {},
+                    "start_time": None,
+                    "end_time": None,
+                    "duration_ms": None,
+                },
+                {
+                    "op_name": "root.loop",
+                    "context_id": None,
+                    "inputs": {},
+                    "outputs": {},
+                    "start_time": None,
+                    "end_time": None,
+                    "duration_ms": None,
+                },
+                {
+                    "op_name": "root.loop.process",
+                    "context_id": "[0]",
+                    "inputs": {"i": 0},
+                    "outputs": {"r": 0},
+                    "start_time": None,
+                    "end_time": None,
+                    "duration_ms": None,
+                },
+                {
+                    "op_name": "root.loop.process",
+                    "context_id": "[1]",
+                    "inputs": {"i": 1},
+                    "outputs": {"r": 1},
+                    "start_time": None,
+                    "end_time": None,
+                    "duration_ms": None,
+                },
             ],
         }
 
