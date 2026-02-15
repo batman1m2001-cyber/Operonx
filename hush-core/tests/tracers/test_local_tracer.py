@@ -1,814 +1,643 @@
-"""Tests for LocalTracer and background tracing infrastructure."""
+"""Tests for the new tracing system (collector, flush_worker, tracers).
 
-import sqlite3
-import tempfile
-from pathlib import Path
-from time import sleep
+Uses CaptureTracer (in-memory) for unit tests.
+HushEyesTracer integration tests are marked @pytest.mark.integration.
+"""
+
+import threading
+import time
 
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.background import BackgroundProcess, shutdown_background
 from hush.core.ops import FuncOp
-from hush.core.tracers import LocalTracer, get_registered_tracers
+from hush.core.tracing import HushEyesTracer, Tracer, TraceCollector
+from hush.core.tracing.flush_worker import FlushWorker, _merge_tags
 
 
-class TestLocalTracerBasic:
-    """Test basic LocalTracer functionality."""
+# ---------------------------------------------------------------------------
+# CaptureTracer — test helper that stores flush data in memory
+# ---------------------------------------------------------------------------
+class CaptureTracer(Tracer):
+    """Tracer that captures flush data for test assertions."""
 
-    def test_local_tracer_creation(self):
-        """Test LocalTracer can be created."""
-        tracer = LocalTracer()
-        assert tracer.name == "local"
+    def __init__(self, tags=None):
+        super().__init__(tags=tags)
+        self.flush_calls = []
+        self._flush_event = threading.Event()
 
-    def test_local_tracer_with_custom_name(self):
-        """Test LocalTracer with custom name."""
-        tracer = LocalTracer(name="test-tracer")
-        assert tracer.name == "test-tracer"
+    def flush(self, trace_data):
+        self.flush_calls.append(trace_data)
+        self._flush_event.set()
 
-    def test_local_tracer_config(self):
-        """Test _get_tracer_config returns correct config."""
-        tracer = LocalTracer(name="my-tracer")
-        config = tracer._get_tracer_config()
-        assert config == {"name": "my-tracer"}
+    def wait_for_flush(self, timeout=5.0):
+        """Block until flush() is called (from background thread)."""
+        self._flush_event.wait(timeout=timeout)
 
-    def test_local_tracer_repr(self):
-        """Test string representation."""
-        tracer = LocalTracer(name="test")
-        assert repr(tracer) == "<LocalTracer name=test>"
 
-    def test_local_tracer_registered(self):
-        """Test LocalTracer is registered in tracer registry."""
-        tracers = get_registered_tracers()
-        assert "LocalTracer" in tracers
-        assert tracers["LocalTracer"] is LocalTracer
+# ---------------------------------------------------------------------------
+# Test: Tracer base class
+# ---------------------------------------------------------------------------
+class TestTracerBase:
+    def test_tracer_creation(self):
+        tracer = Tracer(tags=["prod", "ml"])
+        assert tracer.tags == ["prod", "ml"]
 
-    def test_flush_does_nothing(self):
-        """Test flush() is a no-op."""
-        # Should not raise any errors
-        LocalTracer.flush(
-            {
-                "request_id": "test-123",
-                "workflow_name": "test-workflow",
-                "tracer_config": {"name": "test"},
-            }
-        )
-
-    def test_local_tracer_with_static_tags(self):
-        """Test LocalTracer can be created with static tags."""
-        tracer = LocalTracer(name="tagged-tracer", tags=["prod", "ml-team"])
-        assert tracer.name == "tagged-tracer"
-        assert tracer.tags == ["prod", "ml-team"]
-
-    def test_local_tracer_tags_are_copied(self):
-        """Test that tags property returns a copy, not the original list."""
-        original_tags = ["tag1", "tag2"]
-        tracer = LocalTracer(tags=original_tags)
-        returned_tags = tracer.tags
-        returned_tags.append("tag3")
-        # Original should not be modified
-        assert tracer.tags == ["tag1", "tag2"]
-
-    def test_local_tracer_empty_tags(self):
-        """Test LocalTracer with no tags defaults to empty list."""
-        tracer = LocalTracer()
+    def test_tracer_empty_tags(self):
+        tracer = Tracer()
         assert tracer.tags == []
 
+    def test_tracer_tags_are_copied(self):
+        original = ["a", "b"]
+        tracer = Tracer(tags=original)
+        returned = tracer.tags
+        returned.append("c")
+        assert tracer.tags == ["a", "b"]
 
-class TestBackgroundProcess:
-    """Test BackgroundProcess functionality."""
+    def test_tracer_flush_raises(self):
+        with pytest.raises(NotImplementedError):
+            Tracer().flush({})
 
-    def test_background_process_creation(self):
-        """Test BackgroundProcess can be created."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
-            bg = BackgroundProcess(db_path)
-            assert bg.db_path == db_path
-            assert not bg.is_running
 
-    def test_background_process_starts_on_submit(self):
-        """Test background process starts lazily on first submit."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
-            bg = BackgroundProcess(db_path)
+class TestHushEyesTracerBasic:
+    def test_creation(self):
+        tracer = HushEyesTracer()
+        assert tracer._url == "http://127.0.0.1:8420/api/ingest"
+        assert tracer.tags == []
 
-            # Not running yet
-            assert not bg.is_running
+    def test_creation_with_tags(self):
+        tracer = HushEyesTracer(tags=["prod", "v2"])
+        assert tracer.tags == ["prod", "v2"]
 
-            # Submit a trace write
-            bg.write_trace(
-                request_id="test-123",
-                workflow_name="test-wf",
-                op_name="test-node",
+    def test_custom_host_port(self):
+        tracer = HushEyesTracer(host="10.0.0.1", port=9999)
+        assert tracer._url == "http://10.0.0.1:9999/api/ingest"
+
+    def test_repr(self):
+        tracer = HushEyesTracer()
+        assert "HushEyesTracer" in repr(tracer)
+        assert "8420" in repr(tracer)
+
+    def test_flush_no_server_does_not_raise(self):
+        """flush() should not raise even when server is not running."""
+        tracer = HushEyesTracer(port=19999)  # unlikely to have server here
+        tracer.flush({"request_id": "test", "records": []})
+
+
+# ---------------------------------------------------------------------------
+# Test: TraceCollector
+# ---------------------------------------------------------------------------
+class TestTraceCollector:
+    @pytest.mark.asyncio
+    async def test_collector_extracts_graph_structure(self):
+        """Collector extracts static metadata (op_type, parent_name) from graph."""
+        with GraphOp(name="test-wf") as graph:
+            node = FuncOp(
+                name="double",
+                code_fn=lambda x: {"result": x * 2},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
             )
+            START >> node >> END
 
-            # Should be running now
-            assert bg.is_running
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 5}, request_id="col-001")
+        state = result["$state"]
 
-            # Cleanup
-            bg.shutdown()
-            assert not bg.is_running
+        collector = TraceCollector()
+        trace_data = collector.collect(graph, state)
 
-    def test_background_process_writes_to_db(self):
-        """Test traces are written to SQLite."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
-            bg = BackgroundProcess(db_path)
+        # Check graph_structure
+        gs = {n["op_name"]: n for n in trace_data["graph_structure"]}
+        assert "test-wf" in gs
+        assert gs["test-wf"]["op_type"] == "graph"
+        assert gs["test-wf"]["parent_name"] is None
 
-            # Write a trace
-            bg.write_trace(
-                request_id="req-001",
-                workflow_name="test-workflow",
-                op_name="node-a",
-                parent_name=None,
-                context_id=None,
-                execution_order=0,
-                user_id="user-1",
-                session_id="session-1",
+        assert "test-wf.double" in gs
+        assert gs["test-wf.double"]["op_type"] == "code"
+        assert gs["test-wf.double"]["parent_name"] == "test-wf"
+
+    @pytest.mark.asyncio
+    async def test_collector_extracts_records(self):
+        """Collector extracts dynamic data (inputs, outputs, timing) from state."""
+        with GraphOp(name="rec-wf") as graph:
+            node = FuncOp(
+                name="add_ten",
+                code_fn=lambda x: {"result": x + 10},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
             )
+            START >> node >> END
 
-            # Give background process time to write
-            sleep(0.5)
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 5}, request_id="col-002")
+        state = result["$state"]
 
-            # Check database
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT * FROM traces WHERE request_id = ?", ("req-001",))
-            rows = cursor.fetchall()
-            conn.close()
+        collector = TraceCollector()
+        trace_data = collector.collect(graph, state)
 
-            assert len(rows) == 1
-            assert rows[0]["workflow_name"] == "test-workflow"
-            assert rows[0]["op_name"] == "node-a"
-            assert rows[0]["status"] == "writing"
+        assert trace_data["request_id"] == "col-002"
+        assert trace_data["workflow_name"] == "rec-wf"
 
-            # Cleanup
-            bg.shutdown()
+        # Find the add_ten record
+        records = {r["op_name"]: r for r in trace_data["records"]}
+        assert "rec-wf.add_ten" in records
 
-    def test_mark_complete_changes_status(self):
-        """Test mark_complete changes status from writing to flushed for LocalTracer."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
-            bg = BackgroundProcess(db_path)
+        rec = records["rec-wf.add_ten"]
+        assert rec["inputs"]["x"] == 5
+        assert rec["outputs"]["result"] == 15
+        assert rec["duration_ms"] is not None
+        assert rec["duration_ms"] > 0
+        assert rec["start_time"] is not None
+        assert rec["end_time"] is not None
 
-            # Write traces
-            bg.write_trace(
-                request_id="req-002",
-                workflow_name="test-wf",
-                op_name="node-1",
-                execution_order=0,
+    @pytest.mark.asyncio
+    async def test_collector_preserves_execution_order(self):
+        """Records are in execution order (graph first, then children)."""
+        with GraphOp(name="order-wf") as graph:
+            a = FuncOp(
+                name="step_a",
+                code_fn=lambda x: {"mid": x + 1},
+                inputs={"x": PARENT["x"]},
             )
-            bg.write_trace(
-                request_id="req-002",
-                workflow_name="test-wf",
-                op_name="node-2",
-                execution_order=1,
+            b = FuncOp(
+                name="step_b",
+                code_fn=lambda mid: {"result": mid * 2},
+                inputs={"mid": a["mid"]},
+                outputs={"result": PARENT},
             )
+            START >> a >> b >> END
 
-            # Give time to write
-            sleep(0.5)
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 0}, request_id="col-003")
+        state = result["$state"]
 
-            # Mark complete
-            bg.mark_complete(
-                request_id="req-002",
-                tracer_type="LocalTracer",
-                tracer_config={"name": "test"},
+        collector = TraceCollector()
+        trace_data = collector.collect(graph, state)
+
+        op_names = [r["op_name"] for r in trace_data["records"]]
+        # graph records execution, then step_a, then step_b, then graph end
+        assert "order-wf.step_a" in op_names
+        assert "order-wf.step_b" in op_names
+        idx_a = op_names.index("order-wf.step_a")
+        idx_b = op_names.index("order-wf.step_b")
+        assert idx_a < idx_b, "step_a should execute before step_b"
+
+    @pytest.mark.asyncio
+    async def test_collector_with_dynamic_tags(self):
+        """Dynamic tags from $tags are captured in trace_data.tags."""
+
+        def tagged_fn(x):
+            return {"result": x, "$tags": ["dynamic-one", "dynamic-two"]}
+
+        with GraphOp(name="tag-wf") as graph:
+            node = FuncOp(
+                name="tagger",
+                code_fn=tagged_fn,
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
             )
+            START >> node >> END
 
-            # Give time to process
-            sleep(0.5)
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 42}, request_id="col-004")
+        state = result["$state"]
 
-            # Check status changed
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT status, tracer_type FROM traces WHERE request_id = ?", ("req-002",)
+        collector = TraceCollector()
+        trace_data = collector.collect(graph, state)
+
+        assert "dynamic-one" in trace_data["tags"]
+        assert "dynamic-two" in trace_data["tags"]
+
+    @pytest.mark.asyncio
+    async def test_collector_metadata_fields(self):
+        """Collector populates user_id, session_id, request_id."""
+        with GraphOp(name="meta-wf") as graph:
+            node = FuncOp(
+                name="noop",
+                code_fn=lambda x: {"result": x},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
             )
-            rows = cursor.fetchall()
-            conn.close()
+            START >> node >> END
 
-            assert len(rows) == 2
-            for row in rows:
-                # LocalTracer marks as 'flushed' directly since it doesn't need external flushing
-                assert row["status"] == "flushed"
-                assert row["tracer_type"] == "LocalTracer"
+        engine = Hush(graph)
+        result = await engine.run(
+            inputs={"x": 1},
+            request_id="req-abc",
+            user_id="user-123",
+            session_id="sess-456",
+        )
+        state = result["$state"]
 
-            # Cleanup
-            bg.shutdown()
+        collector = TraceCollector()
+        trace_data = collector.collect(graph, state)
+
+        assert trace_data["request_id"] == "req-abc"
+        assert trace_data["user_id"] == "user-123"
+        assert trace_data["session_id"] == "sess-456"
 
 
-class TestTracerWithWorkflow:
-    """Test tracer integration with workflow execution."""
+# ---------------------------------------------------------------------------
+# Test: FlushWorker + tag merging
+# ---------------------------------------------------------------------------
+class TestFlushWorker:
+    def test_merge_tags_static_first(self):
+        merged = _merge_tags(["dynamic"], ["static"])
+        assert merged == ["static", "dynamic"]
 
-    @pytest.fixture
-    def simple_graph(self):
-        """Create a simple test graph."""
-        with GraphOp(name="test-workflow") as graph:
-            node1 = FuncOp(
+    def test_merge_tags_dedup(self):
+        merged = _merge_tags(["shared", "dynamic"], ["shared", "static"])
+        assert merged == ["shared", "static", "dynamic"]
+        assert merged.count("shared") == 1
+
+    def test_merge_tags_empty(self):
+        assert _merge_tags([], []) == []
+        assert _merge_tags(["a"], []) == ["a"]
+        assert _merge_tags([], ["b"]) == ["b"]
+
+    @pytest.mark.asyncio
+    async def test_flush_worker_submits_to_tracer(self):
+        """FlushWorker runs collect + flush in background thread."""
+        with GraphOp(name="fw-wf") as graph:
+            node = FuncOp(
+                name="double",
+                code_fn=lambda x: {"result": x * 2},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
+
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 7}, request_id="fw-001")
+        state = result["$state"]
+
+        tracer = CaptureTracer(tags=["static-tag"])
+        worker = FlushWorker(max_workers=1)
+        try:
+            worker.submit([tracer], graph, state)
+            tracer.wait_for_flush(timeout=5)
+
+            assert len(tracer.flush_calls) == 1
+            data = tracer.flush_calls[0]
+            assert data["request_id"] == "fw-001"
+            assert data["workflow_name"] == "fw-wf"
+            # Static tags should be merged
+            assert "static-tag" in data["tags"]
+        finally:
+            worker.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_flush_worker_merges_dynamic_and_static_tags(self):
+        """FlushWorker merges dynamic ($tags) + static (tracer) tags."""
+
+        def tagged_fn(x):
+            return {"result": x, "$tags": ["dynamic-tag"]}
+
+        with GraphOp(name="merge-wf") as graph:
+            node = FuncOp(
+                name="proc",
+                code_fn=tagged_fn,
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
+
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 1}, request_id="fw-002")
+        state = result["$state"]
+
+        tracer = CaptureTracer(tags=["static-tag"])
+        worker = FlushWorker(max_workers=1)
+        try:
+            worker.submit([tracer], graph, state)
+            tracer.wait_for_flush(timeout=5)
+
+            tags = tracer.flush_calls[0]["tags"]
+            assert "static-tag" in tags
+            assert "dynamic-tag" in tags
+            # Static first, then dynamic
+            assert tags.index("static-tag") < tags.index("dynamic-tag")
+        finally:
+            worker.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_flush_worker_multiple_tracers(self):
+        """FlushWorker flushes to all tracers in the list."""
+        with GraphOp(name="multi-wf") as graph:
+            node = FuncOp(
+                name="noop",
+                code_fn=lambda x: {"result": x},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
+
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 1}, request_id="fw-003")
+        state = result["$state"]
+
+        t1 = CaptureTracer(tags=["tracer-1"])
+        t2 = CaptureTracer(tags=["tracer-2"])
+
+        worker = FlushWorker(max_workers=1)
+        try:
+            worker.submit([t1, t2], graph, state)
+            t1.wait_for_flush(timeout=5)
+            t2.wait_for_flush(timeout=5)
+
+            assert len(t1.flush_calls) == 1
+            assert len(t2.flush_calls) == 1
+            assert "tracer-1" in t1.flush_calls[0]["tags"]
+            assert "tracer-2" in t2.flush_calls[0]["tags"]
+        finally:
+            worker.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Test: Engine integration with tracers= parameter
+# ---------------------------------------------------------------------------
+class TestEngineWithTracers:
+    @pytest.mark.asyncio
+    async def test_engine_runs_with_tracers(self):
+        """Engine accepts tracers= and workflow result is correct."""
+        with GraphOp(name="engine-wf") as graph:
+            node = FuncOp(
                 name="add",
                 code_fn=lambda x: {"result": x + 10},
                 inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
             )
-            node2 = FuncOp(
-                name="multiply",
-                code_fn=lambda value: {"final": value * 2},
-                inputs={"value": node1["result"]},
-                outputs={"final": PARENT},
-            )
-            START >> node1 >> node2 >> END
-        return graph
+            START >> node >> END
 
-    @pytest.mark.asyncio
-    async def test_workflow_with_local_tracer(self, simple_graph):
-        """Test workflow execution with LocalTracer produces correct results."""
-        # Create tracer
-        tracer = LocalTracer(name="test")
+        tracer = CaptureTracer()
+        engine = Hush(graph)
 
-        # Create engine
-        engine = Hush(simple_graph)
-
-        # Run workflow with tracer
         result = await engine.run(
             inputs={"x": 5},
-            request_id="wf-test-001",
-            tracer=tracer,
+            request_id="eng-001",
+            tracers=[tracer],
         )
 
-        # Check result - tracer shouldn't affect workflow execution
-        assert result["final"] == 30  # (5 + 10) * 2
+        # Workflow result is correct
+        assert result["result"] == 15
 
-        # Cleanup
-        shutdown_background()
+        # Wait for background flush
+        tracer.wait_for_flush(timeout=5)
+
+        # Trace data was captured
+        assert len(tracer.flush_calls) == 1
+        data = tracer.flush_calls[0]
+        assert data["request_id"] == "eng-001"
+        assert data["workflow_name"] == "engine-wf"
+        assert len(data["graph_structure"]) >= 2  # graph + node
+        assert len(data["records"]) >= 2  # graph + node
 
     @pytest.mark.asyncio
-    async def test_multiple_workflow_runs(self, simple_graph):
-        """Test multiple workflow runs with tracer produce correct results."""
-        tracer = LocalTracer()
-        engine = Hush(simple_graph)
+    async def test_engine_multiple_runs(self):
+        """Multiple engine.run() calls each produce separate trace data."""
+        with GraphOp(name="multi-run-wf") as graph:
+            node = FuncOp(
+                name="double",
+                code_fn=lambda x: {"result": x * 2},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
 
-        # Run multiple times - tracer should handle multiple runs
+        tracer = CaptureTracer()
+        engine = Hush(graph)
+
         for i in range(3):
-            req_id = f"multi-run-{i}"
             result = await engine.run(
                 inputs={"x": i},
-                request_id=req_id,
-                tracer=tracer,
+                request_id=f"multi-{i}",
+                tracers=[tracer],
             )
-            assert result["final"] == (i + 10) * 2
+            assert result["result"] == i * 2
 
-        # Cleanup
-        shutdown_background()
+        # Wait for all flushes
+        time.sleep(1.0)
+
+        assert len(tracer.flush_calls) == 3
+        req_ids = {d["request_id"] for d in tracer.flush_calls}
+        assert req_ids == {"multi-0", "multi-1", "multi-2"}
 
     @pytest.mark.asyncio
-    async def test_tracer_with_user_session_ids(self):
-        """Test workflow with tracer and user/session IDs."""
-        with GraphOp(name="metadata-test") as graph:
-            node = FuncOp(
-                name="processor",
-                inputs={"data": PARENT["data"]},
-                outputs={"processed": PARENT},
-                code_fn=lambda data: {"processed": data.upper()},
-            )
-            START >> node >> END
-
-        tracer = LocalTracer()
-        engine = Hush(graph)
-
-        result = await engine.run(
-            inputs={"data": "hello"},
-            request_id="meta-test-001",
-            user_id="user-123",
-            session_id="session-456",
-            tracer=tracer,
-        )
-
-        # Workflow should complete successfully
-        assert result["processed"] == "HELLO"
-
-        # Cleanup
-        shutdown_background()
-
-
-@pytest.mark.integration
-class TestWorkflowTracesWrittenToDb:
-    """Test that workflow execution with tracer writes traces to database."""
-
-    @pytest.mark.asyncio
-    async def test_workflow_traces_written_to_default_db(self):
-        """Test workflow execution with tracer writes traces to default db."""
-        from hush.core.background import DEFAULT_DB_PATH
-
-        # Create a simple workflow
-        with GraphOp(name="db-test-workflow") as graph:
-            node = FuncOp(
-                name="processor",
-                inputs={"x": PARENT["x"]},
-                outputs={"result": PARENT},
-                code_fn=lambda x: {"result": x * 2},
-            )
-            START >> node >> END
-
-        tracer = LocalTracer(name="db-test")
-        engine = Hush(graph)
-
-        # Use a unique request_id to identify this test's traces
-        request_id = "db-write-test-001"
-
-        result = await engine.run(
-            inputs={"x": 21},
-            request_id=request_id,
-            tracer=tracer,
-        )
-
-        # Verify workflow executed correctly
-        assert result["result"] == 42
-
-        # Give background process time to write
-        sleep(1.0)
-
-        # Verify traces were written to default database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT * FROM traces WHERE request_id = ? ORDER BY execution_order", (request_id,)
-        )
-        rows = cursor.fetchall()
-        conn.close()
-
-        # Should have at least 1 trace (the workflow graph node)
-        assert len(rows) >= 1, f"Expected traces in db, but found {len(rows)}"
-
-        # Verify trace data
-        found_workflow = False
-        for row in rows:
-            assert row["request_id"] == request_id
-            assert row["workflow_name"] == "db-test-workflow"
-            if row["op_name"] == "db-test-workflow":
-                found_workflow = True
-
-        assert found_workflow, "Should have trace for workflow graph node"
-
-        # Cleanup
-        shutdown_background()
-
-    @pytest.mark.asyncio
-    async def test_workflow_traces_contain_correct_metadata(self):
-        """Test workflow traces contain user_id, session_id correctly."""
-        from hush.core.background import DEFAULT_DB_PATH
-
-        with GraphOp(name="metadata-db-test") as graph:
+    async def test_engine_with_user_session_ids(self):
+        """Engine passes user_id, session_id through to trace data."""
+        with GraphOp(name="ids-wf") as graph:
             node = FuncOp(
                 name="echo",
-                inputs={"msg": PARENT["msg"]},
+                code_fn=lambda data: {"out": data},
+                inputs={"data": PARENT["data"]},
                 outputs={"out": PARENT},
-                code_fn=lambda msg: {"out": msg},
             )
             START >> node >> END
 
-        tracer = LocalTracer()
+        tracer = CaptureTracer()
         engine = Hush(graph)
 
-        request_id = "metadata-db-test-001"
-        user_id = "test-user-abc"
-        session_id = "test-session-xyz"
-
         await engine.run(
-            inputs={"msg": "hello"},
-            request_id=request_id,
-            user_id=user_id,
-            session_id=session_id,
-            tracer=tracer,
+            inputs={"data": "hello"},
+            request_id="ids-001",
+            user_id="user-abc",
+            session_id="sess-xyz",
+            tracers=[tracer],
         )
 
-        # Give background process time to write
-        sleep(1.0)
+        tracer.wait_for_flush(timeout=5)
 
-        # Check database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT user_id, session_id, workflow_name FROM traces WHERE request_id = ?",
-            (request_id,),
-        )
-        rows = cursor.fetchall()
-        conn.close()
-
-        assert len(rows) >= 1, "Expected traces in database"
-
-        for row in rows:
-            assert row["user_id"] == user_id, f"Expected user_id={user_id}, got {row['user_id']}"
-            assert row["session_id"] == session_id, (
-                f"Expected session_id={session_id}, got {row['session_id']}"
-            )
-            assert row["workflow_name"] == "metadata-db-test"
-
-        # Cleanup
-        shutdown_background()
-
-
-class TestTracerTags:
-    """Test static and dynamic tagging functionality."""
-
-    def test_mark_complete_with_static_tags(self):
-        """Test mark_complete stores static tags in database."""
-        import json
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "tags_test.db"
-            bg = BackgroundProcess(db_path)
-
-            # Write a trace
-            bg.write_trace(
-                request_id="tags-test-001",
-                workflow_name="test-wf",
-                op_name="test-node",
-                execution_order=0,
-            )
-
-            # Give time to write
-            sleep(0.5)
-
-            # Mark complete with static tags
-            bg.mark_complete(
-                request_id="tags-test-001",
-                tracer_type="LocalTracer",
-                tracer_config={"name": "test"},
-                tags=["prod", "ml-team", "experiment-v1"],
-            )
-
-            # Give time to process
-            sleep(0.5)
-
-            # Check tags were stored
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT tags FROM traces WHERE request_id = ?", ("tags-test-001",)
-            )
-            row = cursor.fetchone()
-            conn.close()
-
-            # Tags should be stored as JSON array
-            tags = json.loads(row["tags"])
-            assert tags == ["prod", "ml-team", "experiment-v1"]
-
-            # Cleanup
-            bg.shutdown()
+        data = tracer.flush_calls[0]
+        assert data["user_id"] == "user-abc"
+        assert data["session_id"] == "sess-xyz"
 
     @pytest.mark.asyncio
-    async def test_workflow_with_static_tags(self):
-        """Test workflow execution with static tracer tags."""
-        import json
-
-        from hush.core.background import DEFAULT_DB_PATH
-
-        with GraphOp(name="static-tags-test") as graph:
+    async def test_engine_without_tracers_still_works(self):
+        """Engine works normally when no tracers are provided."""
+        with GraphOp(name="no-trace-wf") as graph:
             node = FuncOp(
-                name="processor",
+                name="add",
+                code_fn=lambda x: {"result": x + 1},
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=lambda x: {"result": x * 2},
             )
             START >> node >> END
 
-        # Create tracer with static tags
-        tracer = LocalTracer(name="tagged", tags=["production", "critical"])
+        engine = Hush(graph)
+        result = await engine.run(inputs={"x": 99})
+        assert result["result"] == 100
+
+
+# ---------------------------------------------------------------------------
+# Test: Tags end-to-end
+# ---------------------------------------------------------------------------
+class TestTracerTags:
+    @pytest.mark.asyncio
+    async def test_static_tags_only(self):
+        """Static tags from tracer appear in flushed data."""
+        with GraphOp(name="static-wf") as graph:
+            node = FuncOp(
+                name="noop",
+                code_fn=lambda x: {"result": x},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
+
+        tracer = CaptureTracer(tags=["prod", "critical"])
         engine = Hush(graph)
 
-        request_id = "static-tags-wf-001"
+        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        tracer.wait_for_flush(timeout=5)
 
-        await engine.run(
-            inputs={"x": 5},
-            request_id=request_id,
-            tracer=tracer,
-        )
-
-        # Give background process time to write
-        sleep(1.0)
-
-        # Verify tags in database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        assert len(rows) >= 1, "Expected traces in database"
-
-        for row in rows:
-            if row["tags"]:
-                tags = json.loads(row["tags"])
-                assert "production" in tags
-                assert "critical" in tags
-
-        # Cleanup
-        shutdown_background()
+        tags = tracer.flush_calls[0]["tags"]
+        assert "prod" in tags
+        assert "critical" in tags
 
     @pytest.mark.asyncio
-    async def test_workflow_with_dynamic_tags(self):
-        """Test workflow execution with dynamic tags via $tags in node output."""
-        import json
+    async def test_dynamic_tags_only(self):
+        """Dynamic tags from $tags in op output appear in flushed data."""
 
-        from hush.core.background import DEFAULT_DB_PATH
-
-        # Node that returns dynamic tags
         def process_with_tags(x):
             result = x * 2
-            # Add dynamic tags based on result
             tags = ["computed"]
             if result > 10:
                 tags.append("high-value")
             return {"result": result, "$tags": tags}
 
-        with GraphOp(name="dynamic-tags-test") as graph:
+        with GraphOp(name="dynamic-wf") as graph:
             node = FuncOp(
-                name="processor",
-                inputs={"x": PARENT["x"]},
-                outputs={"result": PARENT},
+                name="proc",
                 code_fn=process_with_tags,
-            )
-            START >> node >> END
-
-        # Create tracer without static tags
-        tracer = LocalTracer(name="dynamic-test")
-        engine = Hush(graph)
-
-        request_id = "dynamic-tags-wf-001"
-
-        await engine.run(
-            inputs={"x": 10},  # result will be 20, so "high-value" tag added
-            request_id=request_id,
-            tracer=tracer,
-        )
-
-        # Shutdown flushes all pending background work before we query
-        shutdown_background()
-
-        # Verify tags in database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        assert len(rows) >= 1, "Expected traces in database"
-
-        # Find row with tags
-        found_tags = False
-        for row in rows:
-            if row["tags"]:
-                tags = json.loads(row["tags"])
-                if "computed" in tags:
-                    found_tags = True
-                    assert "high-value" in tags, "Expected high-value tag for result > 10"
-
-        assert found_tags, "Expected dynamic tags to be stored"
-
-    @pytest.mark.asyncio
-    async def test_workflow_with_merged_tags(self):
-        """Test workflow with both static and dynamic tags merged."""
-        import json
-
-        from hush.core.background import DEFAULT_DB_PATH
-
-        # Node that returns dynamic tags
-        def process_with_dynamic_tags(x):
-            return {"result": x * 2, "$tags": ["dynamic-tag", "runtime"]}
-
-        with GraphOp(name="merged-tags-test") as graph:
-            node = FuncOp(
-                name="processor",
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=process_with_dynamic_tags,
             )
             START >> node >> END
 
-        # Create tracer with static tags
-        tracer = LocalTracer(name="merged", tags=["static-tag", "env:test"])
+        tracer = CaptureTracer()
         engine = Hush(graph)
 
-        request_id = "merged-tags-wf-001"
+        await engine.run(inputs={"x": 10}, tracers=[tracer])
+        tracer.wait_for_flush(timeout=5)
 
-        await engine.run(
-            inputs={"x": 5},
-            request_id=request_id,
-            tracer=tracer,
-        )
-
-        # Shutdown flushes all pending background work before we query
-        shutdown_background()
-
-        # Verify merged tags in database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        assert len(rows) >= 1, "Expected traces in database"
-
-        # Find row with tags
-        found_merged = False
-        for row in rows:
-            if row["tags"]:
-                tags = json.loads(row["tags"])
-                # Check both static and dynamic tags are present
-                has_static = "static-tag" in tags and "env:test" in tags
-                has_dynamic = "dynamic-tag" in tags and "runtime" in tags
-                if has_static and has_dynamic:
-                    found_merged = True
-
-        assert found_merged, "Expected both static and dynamic tags to be merged"
+        tags = tracer.flush_calls[0]["tags"]
+        assert "computed" in tags
+        assert "high-value" in tags
 
     @pytest.mark.asyncio
-    async def test_duplicate_tags_are_deduplicated(self):
-        """Test that duplicate tags (static + dynamic) are deduplicated."""
-        import json
+    async def test_merged_tags(self):
+        """Static + dynamic tags are merged, static first."""
 
-        from hush.core.background import DEFAULT_DB_PATH
+        def tagged_fn(x):
+            return {"result": x, "$tags": ["dynamic-tag", "runtime"]}
 
-        # Node that returns a tag that's also in static tags
-        def process_with_duplicate_tag(x):
+        with GraphOp(name="merged-wf") as graph:
+            node = FuncOp(
+                name="proc",
+                code_fn=tagged_fn,
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
+            START >> node >> END
+
+        tracer = CaptureTracer(tags=["static-tag", "env:test"])
+        engine = Hush(graph)
+
+        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        tracer.wait_for_flush(timeout=5)
+
+        tags = tracer.flush_calls[0]["tags"]
+        assert "static-tag" in tags
+        assert "env:test" in tags
+        assert "dynamic-tag" in tags
+        assert "runtime" in tags
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tags_deduplicated(self):
+        """Duplicate tags between static and dynamic are deduplicated."""
+
+        def tagged_fn(x):
             return {"result": x, "$tags": ["shared-tag", "unique-dynamic"]}
 
-        with GraphOp(name="dedup-tags-test") as graph:
+        with GraphOp(name="dedup-wf") as graph:
             node = FuncOp(
-                name="processor",
+                name="proc",
+                code_fn=tagged_fn,
                 inputs={"x": PARENT["x"]},
                 outputs={"result": PARENT},
-                code_fn=process_with_duplicate_tag,
             )
             START >> node >> END
 
-        # Create tracer with static tags including one that will be duplicated
-        tracer = LocalTracer(name="dedup", tags=["shared-tag", "unique-static"])
+        tracer = CaptureTracer(tags=["shared-tag", "unique-static"])
         engine = Hush(graph)
 
-        request_id = "dedup-tags-wf-001"
+        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        tracer.wait_for_flush(timeout=5)
 
-        await engine.run(
-            inputs={"x": 1},
-            request_id=request_id,
-            tracer=tracer,
-        )
-
-        # Give background process time to write
-        sleep(1.0)
-
-        # Verify tags in database
-        conn = sqlite3.connect(str(DEFAULT_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("SELECT tags FROM traces WHERE request_id = ?", (request_id,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        # Find row with tags and verify no duplicates
-        for row in rows:
-            if row["tags"]:
-                tags = json.loads(row["tags"])
-                # shared-tag should appear only once
-                assert tags.count("shared-tag") == 1, "Duplicate tags should be deduplicated"
-                # All unique tags should be present
-                assert "unique-static" in tags
-                assert "unique-dynamic" in tags
-
-        # Cleanup
-        shutdown_background()
+        tags = tracer.flush_calls[0]["tags"]
+        assert tags.count("shared-tag") == 1
+        assert "unique-static" in tags
+        assert "unique-dynamic" in tags
 
 
-class TestTracerFlushCycle:
-    """Test the complete trace write -> flush cycle."""
-
-    @pytest.mark.asyncio
-    async def test_traces_get_flushed(self):
-        """Test that traces go through the complete flush cycle."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "flush_test.db"
-            bg = BackgroundProcess(db_path)
-
-            # Write trace
-            bg.write_trace(
-                request_id="flush-test-001",
-                workflow_name="test-wf",
-                op_name="test-node",
-                execution_order=0,
-            )
-
-            # Wait for write
-            sleep(0.3)
-
-            # Mark complete
-            bg.mark_complete(
-                request_id="flush-test-001",
-                tracer_type="LocalTracer",
-                tracer_config={"name": "test"},
-            )
-
-            # Wait for flush cycle (poll_interval is 2s by default)
-            # But we can check the status transitions
-            sleep(3.0)
-
-            # Check status should be flushed (LocalTracer.flush does nothing but succeeds)
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT status FROM traces WHERE request_id = ?", ("flush-test-001",)
-            )
-            row = cursor.fetchone()
-            conn.close()
-
-            # Should be flushed
-            assert row["status"] == "flushed"
-
-            # Cleanup
-            bg.shutdown()
-
-
+# ---------------------------------------------------------------------------
+# Test: Non-blocking behavior
+# ---------------------------------------------------------------------------
 class TestTracerNonBlocking:
-    """Test that tracer doesn't block the main workflow execution."""
-
     @pytest.mark.asyncio
-    async def test_tracer_does_not_block_workflow(self):
-        """Stress test: run many requests with and without tracer.
+    async def test_tracers_do_not_block_workflow(self):
+        """Verify tracers= path doesn't add significant latency."""
+        NUM_REQUESTS = 50
 
-        Compare total execution time to verify tracer doesn't block main flow.
-        """
-        import time
-
-        NUM_REQUESTS = 50  # Run 50 requests to stress test
-
-        # Create a simple workflow
         def create_graph():
             with GraphOp(name="stress-test") as graph:
                 node = FuncOp(
-                    name="processor",
+                    name="double",
+                    code_fn=lambda x: {"result": x * 2},
                     inputs={"x": PARENT["x"]},
                     outputs={"result": PARENT},
-                    code_fn=lambda x: {"result": x * 2},
                 )
                 START >> node >> END
             return graph
 
-        # Run WITHOUT tracer
-        graph_no_tracer = create_graph()
-        engine_no_tracer = Hush(graph_no_tracer)
-
-        start_no_tracer = time.perf_counter()
+        # Without tracers
+        g1 = create_graph()
+        e1 = Hush(g1)
+        t0 = time.perf_counter()
         for i in range(NUM_REQUESTS):
-            result = await engine_no_tracer.run(
-                inputs={"x": i},
-                request_id=f"no-tracer-{i}",
-            )
-            assert result["result"] == i * 2
-        time_no_tracer = time.perf_counter() - start_no_tracer
+            r = await e1.run(inputs={"x": i}, request_id=f"no-{i}")
+            assert r["result"] == i * 2
+        time_without = time.perf_counter() - t0
 
-        # Run WITH tracer
-        graph_with_tracer = create_graph()
-        engine_with_tracer = Hush(graph_with_tracer)
-        tracer = LocalTracer()
-
-        start_with_tracer = time.perf_counter()
+        # With tracers
+        g2 = create_graph()
+        e2 = Hush(g2)
+        tracer = CaptureTracer()
+        t0 = time.perf_counter()
         for i in range(NUM_REQUESTS):
-            result = await engine_with_tracer.run(
-                inputs={"x": i},
-                request_id=f"with-tracer-{i}",
-                tracer=tracer,
-            )
-            assert result["result"] == i * 2
-        time_with_tracer = time.perf_counter() - start_with_tracer
+            r = await e2.run(inputs={"x": i}, request_id=f"yes-{i}", tracers=[tracer])
+            assert r["result"] == i * 2
+        time_with = time.perf_counter() - t0
 
-        # Calculate metrics
-        avg_no_tracer = (time_no_tracer / NUM_REQUESTS) * 1000
-        avg_with_tracer = (time_with_tracer / NUM_REQUESTS) * 1000
-        overhead_per_request = avg_with_tracer - avg_no_tracer
-        overhead_percent = (overhead_per_request / avg_no_tracer) * 100 if avg_no_tracer > 0 else 0
+        avg_no = (time_without / NUM_REQUESTS) * 1000
+        avg_yes = (time_with / NUM_REQUESTS) * 1000
+        overhead = avg_yes - avg_no
 
-        print(f"\n=== Stress Test Results ({NUM_REQUESTS} requests) ===")
-        print(
-            f"Without tracer: {time_no_tracer * 1000:.2f}ms total, {avg_no_tracer:.3f}ms avg/request"
-        )
-        print(
-            f"With tracer:    {time_with_tracer * 1000:.2f}ms total, {avg_with_tracer:.3f}ms avg/request"
-        )
-        print(f"Overhead:       {overhead_per_request:.3f}ms/request ({overhead_percent:.1f}%)")
+        print(f"\n  Without tracers: {avg_no:.3f}ms/req")
+        print(f"  With tracers:    {avg_yes:.3f}ms/req")
+        print(f"  Overhead:        {overhead:.3f}ms/req")
 
-        # Tracer overhead should be minimal (< 5ms per request on average)
-        # since writes happen in background process
-        assert overhead_per_request < 5, (
-            f"Tracer added {overhead_per_request:.3f}ms overhead per request, expected < 5ms"
-        )
-
-        # Cleanup
-        shutdown_background()
+        assert overhead < 5, f"Overhead {overhead:.3f}ms exceeds 5ms threshold"
 
 
+# ---------------------------------------------------------------------------
+# Test: Iteration nodes
+# ---------------------------------------------------------------------------
 class TestTracerWithIterationNodes:
-    """Test tracer with iteration nodes (ForLoop, Map, etc.)."""
-
     @pytest.mark.asyncio
     async def test_tracer_with_forloop(self):
-        """Test tracer works with ForOp iteration."""
+        """Tracers work with ForOp iteration nodes."""
         from hush.core.ops import ForOp
         from hush.core.ops.iteration import Each
         from hush.core.ops.transform.func_op import op
@@ -817,23 +646,55 @@ class TestTracerWithIterationNodes:
         def double(value: int):
             return {"result": value * 2}
 
-        with ForOp(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
+        with GraphOp(name="loop-wf") as outer:
+            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}) as loop:
+                node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
+                START >> node >> END
+            START >> loop >> END
+
+        tracer = CaptureTracer()
+        engine = Hush(outer)
+        await engine.run(inputs={}, tracers=[tracer])
+
+        tracer.wait_for_flush(timeout=5)
+
+        data = tracer.flush_calls[0]
+        # Should have records for graph, loop, and iterations
+        assert len(data["records"]) >= 2
+
+        # Check graph structure includes the loop
+        gs_names = {n["op_name"] for n in data["graph_structure"]}
+        assert "loop-wf.loop" in gs_names
+
+
+# ---------------------------------------------------------------------------
+# Integration: HushEyesTracer (requires running hush-eyes server)
+# ---------------------------------------------------------------------------
+@pytest.mark.integration
+class TestHushEyesIntegration:
+    @pytest.mark.asyncio
+    async def test_hush_eyes_tracer_end_to_end(self):
+        """End-to-end test: workflow -> HushEyesTracer -> hush-eyes server."""
+        with GraphOp(name="eyes-test") as graph:
+            node = FuncOp(
+                name="double",
+                code_fn=lambda x: {"result": x * 2},
+                inputs={"x": PARENT["x"]},
+                outputs={"result": PARENT},
+            )
             START >> node >> END
 
-        # Run directly without workflow engine
-        from hush.core.states import MemoryState, StateSchema
+        tracer = HushEyesTracer(tags=["integration-test"])
+        engine = Hush(graph)
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        result = await engine.run(
+            inputs={"x": 21},
+            request_id="eyes-integration-001",
+            tracers=[tracer],
+        )
 
-        result = await loop.run(state)
-        assert result["result"] == [2, 4, 6, 8, 10]
+        assert result["result"] == 42
 
-        # NOTE: This test verifies ForOp works. Tracer integration
-        # with iteration nodes is tested implicitly by the workflow tests
-        # since the engine handles tracer registration.
-
-        # Cleanup
-        shutdown_background()
+        # Give background thread time to POST
+        time.sleep(1.0)
+        # Manual verification: open http://localhost:8420 and check trace

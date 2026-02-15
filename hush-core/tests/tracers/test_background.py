@@ -14,7 +14,7 @@ from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.background import BackgroundProcess, shutdown_background
 from hush.core.background.db import init_db
 from hush.core.ops import FuncOp
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import Tracer
 
 
 class TestSQLiteResilience:
@@ -431,17 +431,22 @@ class TestBackgroundPerformance:
         NUM_REQUESTS = 500
         WARMUP = 10
 
-        # --- Run WITH tracer FIRST (takes the cold-start penalty) ---
+        # --- Run WITH tracers FIRST (takes the cold-start penalty) ---
         graph_with_tracer = self._create_pipeline_graph("bench-with-tracer")
         engine_with_tracer = Hush(graph_with_tracer)
-        tracer = LocalTracer(name="bench")
 
-        # Warmup: process spawn + drain thread + cache warmup
+        class NoopTracer(Tracer):
+            def flush(self, trace_data):
+                pass
+
+        tracers = [NoopTracer()]
+
+        # Warmup: thread pool + cache warmup
         for i in range(WARMUP):
             await engine_with_tracer.run(
                 inputs={"x": 0},
                 request_id=f"bench-warmup-yes-{i}",
-                tracer=tracer,
+                tracers=tracers,
             )
 
         latencies_with_tracer = []
@@ -450,7 +455,7 @@ class TestBackgroundPerformance:
             result = await engine_with_tracer.run(
                 inputs={"x": 0},
                 request_id=f"bench-yes-{i}",
-                tracer=tracer,
+                tracers=tracers,
             )
             latencies_with_tracer.append((time.perf_counter() - t0) * 1000)
             assert result["x"] == 66

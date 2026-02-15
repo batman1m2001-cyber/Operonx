@@ -1,11 +1,11 @@
-"""Test OTELTracer with OpenTelemetry backend.
+"""Test OTELTracer with the new tracing API.
 
-This module tests the OTELTracer implementation including:
-- Tracer creation with direct config and resource
-- Config serialization for subprocess
-- Tracer registration
-- Flush method with mocked OTEL client
+Tests cover:
+- OTELConfig/Client creation
+- OTELTracer creation and validation
+- Inheritance from hush.core.tracing.Tracer
 - Helper methods (datetime conversion, short name extraction)
+- flush() with new trace_data format (graph_structure + records)
 """
 
 import uuid
@@ -23,7 +23,6 @@ class TestOTELConfig:
     """Test OTELConfig creation and methods."""
 
     def test_config_creation_basic(self):
-        """Test basic OTELConfig creation."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig(
@@ -31,7 +30,6 @@ class TestOTELConfig:
             protocol="grpc",
             service_name="test-service",
         )
-
         assert config.endpoint == "http://localhost:4317"
         assert config.protocol == "grpc"
         assert config.service_name == "test-service"
@@ -39,7 +37,6 @@ class TestOTELConfig:
         assert config.timeout == 30
 
     def test_config_creation_with_headers(self):
-        """Test OTELConfig creation with custom headers."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig(
@@ -48,11 +45,9 @@ class TestOTELConfig:
             headers={"Authorization": "Bearer test-token"},
             service_name="my-service",
         )
-
         assert config.headers == {"Authorization": "Bearer test-token"}
 
     def test_config_http_protocol(self):
-        """Test OTELConfig with HTTP protocol."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig(
@@ -60,41 +55,33 @@ class TestOTELConfig:
             protocol="http",
             service_name="http-service",
         )
-
         assert config.protocol == "http"
 
     def test_config_jaeger_factory(self):
-        """Test OTELConfig.jaeger() factory method."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig.jaeger()
-
         assert config.endpoint == "http://localhost:4317"
         assert config.protocol == "grpc"
         assert config.insecure is True
 
     def test_config_jaeger_custom_host(self):
-        """Test OTELConfig.jaeger() with custom host and port."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig.jaeger(host="jaeger.local", port=14250)
-
         assert config.endpoint == "http://jaeger.local:14250"
 
     def test_config_tempo_factory(self):
-        """Test OTELConfig.tempo() factory method."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig.tempo(
             endpoint="https://tempo.grafana.net",
             api_key="test-api-key",
         )
-
         assert config.endpoint == "https://tempo.grafana.net"
         assert config.headers == {"Authorization": "Bearer test-api-key"}
 
     def test_config_model_dump(self):
-        """Test OTELConfig serialization via model_dump."""
         from hush.telemetry import OTELConfig
 
         config = OTELConfig(
@@ -103,9 +90,7 @@ class TestOTELConfig:
             service_name="test-service",
             headers={"X-Custom": "value"},
         )
-
         dumped = config.model_dump()
-
         assert dumped["endpoint"] == "http://localhost:4317"
         assert dumped["protocol"] == "grpc"
         assert dumped["service_name"] == "test-service"
@@ -116,7 +101,6 @@ class TestOTELClient:
     """Test OTELClient creation and methods."""
 
     def test_client_creation(self):
-        """Test OTELClient can be created."""
         from hush.telemetry import OTELClient, OTELConfig
 
         config = OTELConfig(
@@ -125,12 +109,10 @@ class TestOTELClient:
             service_name="test-service",
         )
         client = OTELClient(config)
-
         assert client.config == config
         assert repr(client) == "<OTELClient endpoint=http://localhost:4317 protocol=grpc>"
 
     def test_client_lazy_initialization(self):
-        """Test OTELClient uses lazy initialization."""
         from hush.telemetry import OTELClient, OTELConfig
 
         config = OTELConfig(
@@ -139,8 +121,6 @@ class TestOTELClient:
             service_name="test-service",
         )
         client = OTELClient(config)
-
-        # Should not be initialized until accessed
         assert client._initialized is False
 
 
@@ -153,83 +133,47 @@ class TestOTELTracer:
     """Test OTELTracer creation and configuration."""
 
     def test_tracer_creation_with_resource(self):
-        """Test OTELTracer creation with resource."""
         from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource="otel:jaeger")
-
         assert tracer.resource == "otel:jaeger"
         assert repr(tracer) == "<OTELTracer resource=otel:jaeger>"
 
     def test_tracer_creation_with_config(self):
-        """Test OTELTracer creation with direct config."""
         from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig.jaeger()
         tracer = OTELTracer(config=config)
-
         assert tracer._config == config
         assert tracer.resource is None
         assert "endpoint=" in repr(tracer)
 
     def test_tracer_creation_with_tags(self):
-        """Test OTELTracer creation with static tags."""
         from hush.telemetry import OTELTracer
 
         tracer = OTELTracer(resource="otel:jaeger", tags=["prod", "ml-team"])
-
         assert tracer.tags == ["prod", "ml-team"]
 
+    def test_tracer_inherits_from_new_tracer(self):
+        from hush.core.tracing import Tracer
+        from hush.telemetry import OTELTracer
+
+        tracer = OTELTracer(resource="otel:jaeger", tags=["test"])
+        assert isinstance(tracer, Tracer)
+        assert tracer.tags == ["test"]
+
     def test_tracer_requires_config_or_resource(self):
-        """Test OTELTracer raises error if neither config nor resource provided."""
         from hush.telemetry import OTELTracer
 
         with pytest.raises(ValueError, match="Must provide either"):
             OTELTracer()
 
     def test_tracer_rejects_both_config_and_resource(self):
-        """Test OTELTracer raises error if both config and resource provided."""
         from hush.telemetry import OTELConfig, OTELTracer
 
         config = OTELConfig.jaeger()
-
         with pytest.raises(ValueError, match="Cannot provide both"):
             OTELTracer(config=config, resource="otel:jaeger")
-
-    def test_tracer_config_serialization_resource(self):
-        """Test tracer config returns resource for subprocess."""
-        from hush.telemetry import OTELTracer
-
-        tracer = OTELTracer(resource="otel:jaeger")
-
-        tracer_config = tracer._get_tracer_config()
-        assert tracer_config["resource"] == "otel:jaeger"
-        assert "config" not in tracer_config
-
-    def test_tracer_config_serialization_direct_config(self):
-        """Test tracer config returns serialized config for subprocess."""
-        from hush.telemetry import OTELConfig, OTELTracer
-
-        config = OTELConfig(
-            endpoint="http://localhost:4317",
-            protocol="grpc",
-            service_name="test-service",
-        )
-        tracer = OTELTracer(config=config)
-
-        tracer_config = tracer._get_tracer_config()
-        assert "config" in tracer_config
-        assert tracer_config["config"]["endpoint"] == "http://localhost:4317"
-        assert "resource" not in tracer_config
-
-    def test_tracer_registered(self):
-        """Test OTELTracer is registered in tracer registry."""
-        from hush.core.tracers import get_registered_tracers
-
-        from hush.telemetry import OTELTracer  # noqa: F401
-
-        tracers = get_registered_tracers()
-        assert "OTELTracer" in tracers
 
 
 # ============================================================================
@@ -241,56 +185,45 @@ class TestOTELTracerHelpers:
     """Test OTELTracer helper methods."""
 
     def test_datetime_to_ns_with_datetime(self):
-        """Test _datetime_to_ns with datetime object."""
         from hush.telemetry.tracers.otel import OTELTracer
 
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         ns = OTELTracer._datetime_to_ns(dt)
-
         assert ns is not None
         assert isinstance(ns, int)
-        # Should be nanoseconds (10^9 * seconds since epoch)
         assert ns == int(dt.timestamp() * 1_000_000_000)
 
     def test_datetime_to_ns_with_iso_string(self):
-        """Test _datetime_to_ns with ISO format string."""
         from hush.telemetry.tracers.otel import OTELTracer
 
         iso_str = "2024-01-15T10:30:00+00:00"
         ns = OTELTracer._datetime_to_ns(iso_str)
-
         assert ns is not None
         assert isinstance(ns, int)
 
     def test_datetime_to_ns_with_z_suffix(self):
-        """Test _datetime_to_ns with Z suffix for UTC."""
         from hush.telemetry.tracers.otel import OTELTracer
 
         iso_str = "2024-01-15T10:30:00Z"
         ns = OTELTracer._datetime_to_ns(iso_str)
-
         assert ns is not None
         assert isinstance(ns, int)
 
     def test_datetime_to_ns_with_none(self):
-        """Test _datetime_to_ns returns None for None input."""
         from hush.telemetry.tracers.otel import OTELTracer
 
         assert OTELTracer._datetime_to_ns(None) is None
 
     def test_get_short_name(self):
-        """Test _get_short_name extracts last part after dot."""
         from hush.telemetry.tracers.otel import OTELTracer
 
         assert OTELTracer._get_short_name("workflow.node.child") == "child"
         assert OTELTracer._get_short_name("simple") == "simple"
         assert OTELTracer._get_short_name("") == ""
 
-    def test_get_short_name_with_empty(self):
-        """Test _get_short_name with empty string."""
+    def test_get_short_name_with_none(self):
         from hush.telemetry.tracers.otel import OTELTracer
 
-        assert OTELTracer._get_short_name("") == ""
         assert OTELTracer._get_short_name(None) is None
 
 
@@ -302,119 +235,12 @@ class TestOTELTracerHelpers:
 class TestOTELTracerFlush:
     """Test OTELTracer.flush() method with mocked backend."""
 
-    @pytest.fixture
-    def mock_flush_data(self):
-        """Create mock flush data structure."""
-        return {
-            "tracer_type": "OTELTracer",
-            "tracer_config": {"resource": "otel:test"},
-            "workflow_name": "test-workflow",
-            "request_id": str(uuid.uuid4()),
-            "user_id": "test-user",
-            "session_id": "test-session",
-            "tags": ["test", "unit"],
-            "execution_order": [
-                {
-                    "op": "root",
-                    "parent": None,
-                    "context_id": None,
-                    "contain_generation": False,
-                },
-                {
-                    "op": "child-1",
-                    "parent": "root",
-                    "context_id": None,
-                    "contain_generation": False,
-                },
-                {
-                    "op": "llm-node",
-                    "parent": "root",
-                    "context_id": None,
-                    "contain_generation": True,
-                },
-            ],
-            "ops_trace_data": {
-                "root": {
-                    "name": "test-workflow.root",
-                    "start_time": "2024-01-15T10:00:00Z",
-                    "end_time": "2024-01-15T10:00:01Z",
-                    "input": {"workflow": "test"},
-                    "output": {"status": "completed"},
-                    "metadata": {"version": "1.0"},
-                },
-                "child-1": {
-                    "name": "test-workflow.child-1",
-                    "start_time": "2024-01-15T10:00:00.100Z",
-                    "end_time": "2024-01-15T10:00:00.500Z",
-                    "input": {"step": 1},
-                    "output": {"processed": True},
-                    "metadata": {},
-                },
-                "llm-node": {
-                    "name": "test-workflow.llm-node",
-                    "start_time": "2024-01-15T10:00:00.500Z",
-                    "end_time": "2024-01-15T10:00:00.900Z",
-                    "model": "gpt-4",
-                    "input": {"prompt": "Test prompt"},
-                    "output": {"completion": "Test response"},
-                    "metadata": {"temperature": 0.7},
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 20,
-                        "total_tokens": 30,
-                    },
-                },
-            },
-        }
-
-    @pytest.fixture
-    def mock_flush_data_with_direct_config(self):
-        """Create mock flush data with direct config."""
-        return {
-            "tracer_type": "OTELTracer",
-            "tracer_config": {
-                "config": {
-                    "endpoint": "http://localhost:4317",
-                    "protocol": "grpc",
-                    "service_name": "test-service",
-                    "headers": None,
-                    "service_version": None,
-                    "insecure": True,
-                    "timeout": 30,
-                    "enabled": True,
-                    "sample_rate": 1.0,
-                }
-            },
-            "workflow_name": "test-workflow",
-            "request_id": str(uuid.uuid4()),
-            "user_id": "test-user",
-            "session_id": "test-session",
-            "tags": ["otel-test"],
-            "execution_order": [
-                {
-                    "op": "root",
-                    "parent": None,
-                    "context_id": None,
-                    "contain_generation": False,
-                },
-            ],
-            "ops_trace_data": {
-                "root": {
-                    "name": "test-workflow.root",
-                    "start_time": "2024-01-15T10:00:00Z",
-                    "end_time": "2024-01-15T10:00:01Z",
-                    "input": {"test": True},
-                    "output": {"success": True},
-                    "metadata": {},
-                },
-            },
-        }
-
-    def test_flush_with_resource(self, mock_flush_data):
+    def test_flush_with_resource(self, sample_trace_data):
         """Test flush with resource creates spans correctly."""
         from hush.telemetry import OTELTracer
 
-        # Mock the OTEL dependencies
+        tracer = OTELTracer(resource="otel:jaeger")
+
         mock_tracer = MagicMock()
         mock_span = MagicMock()
         mock_tracer.start_span.return_value = mock_span
@@ -428,22 +254,47 @@ class TestOTELTracerFlush:
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
                 mock_set_ctx.return_value = MagicMock()
-                OTELTracer.flush(mock_flush_data)
+                tracer.flush(sample_trace_data)
 
-        # Verify client was obtained from hub
-        mock_hub.otel.assert_called_once_with("otel:test")
-
-        # Verify spans were created
+        mock_hub.otel.assert_called_once_with("otel:jaeger")
         assert mock_tracer.start_span.called
-
-        # Verify flush was called
         mock_client.flush.assert_called_once()
 
-    def test_flush_with_direct_config(self, mock_flush_data_with_direct_config):
+    def test_flush_with_direct_config(self):
         """Test flush with direct config creates client correctly."""
-        from hush.telemetry import OTELTracer
+        from hush.telemetry import OTELConfig, OTELTracer
 
-        # Mock the OTEL client
+        config = OTELConfig(
+            endpoint="http://localhost:4317",
+            protocol="grpc",
+            service_name="test-service",
+            insecure=True,
+        )
+        tracer = OTELTracer(config=config)
+
+        trace_data = {
+            "workflow_name": "test-workflow",
+            "request_id": str(uuid.uuid4()),
+            "user_id": "test-user",
+            "session_id": "test-session",
+            "tags": ["otel-test"],
+            "graph_structure": [
+                {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
+            ],
+            "records": [
+                {
+                    "op_name": "root",
+                    "context_id": None,
+                    "inputs": {"test": True},
+                    "outputs": {"success": True},
+                    "start_time": "2024-01-15T10:00:00Z",
+                    "end_time": "2024-01-15T10:00:01Z",
+                    "duration_ms": 1000.0,
+                    "metadata": {},
+                },
+            ],
+        }
+
         mock_tracer = MagicMock()
         mock_span = MagicMock()
         mock_tracer.start_span.return_value = mock_span
@@ -455,17 +306,16 @@ class TestOTELTracerFlush:
 
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
                 mock_set_ctx.return_value = MagicMock()
-                OTELTracer.flush(mock_flush_data_with_direct_config)
+                tracer.flush(trace_data)
 
-        # Verify client was created with config
         MockClient.assert_called_once()
-
-        # Verify flush was called
         mock_client.flush.assert_called_once()
 
-    def test_flush_creates_correct_attributes(self, mock_flush_data):
+    def test_flush_creates_correct_attributes(self, sample_trace_data):
         """Test flush creates correct span attributes."""
         from hush.telemetry import OTELTracer
+
+        tracer = OTELTracer(resource="otel:jaeger")
 
         captured_attributes = {}
 
@@ -474,8 +324,7 @@ class TestOTELTracerFlush:
         def capture_span(*args, **kwargs):
             if "attributes" in kwargs:
                 captured_attributes.update(kwargs["attributes"])
-            mock_span = MagicMock()
-            return mock_span
+            return MagicMock()
 
         mock_tracer.start_span.side_effect = capture_span
 
@@ -488,9 +337,8 @@ class TestOTELTracerFlush:
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
                 mock_set_ctx.return_value = MagicMock()
-                OTELTracer.flush(mock_flush_data)
+                tracer.flush(sample_trace_data)
 
-        # Check that workflow attributes are set
         assert "workflow.name" in captured_attributes
         assert captured_attributes["workflow.name"] == "test-workflow"
 
@@ -498,36 +346,25 @@ class TestOTELTracerFlush:
         """Test flush correctly handles context-aware nodes (from iteration)."""
         from hush.telemetry import OTELTracer
 
-        flush_data = {
-            "tracer_type": "OTELTracer",
-            "tracer_config": {"resource": "otel:test"},
+        tracer = OTELTracer(resource="otel:jaeger")
+
+        trace_data = {
             "workflow_name": "iteration-workflow",
             "request_id": str(uuid.uuid4()),
             "user_id": None,
             "session_id": None,
             "tags": [],
-            "execution_order": [
-                {"op": "root", "parent": None, "context_id": None, "contain_generation": False},
-                {"op": "loop", "parent": "root", "context_id": None, "contain_generation": False},
-                {
-                    "op": "process",
-                    "parent": "loop",
-                    "context_id": "[0]",
-                    "contain_generation": False,
-                },
-                {
-                    "op": "process",
-                    "parent": "loop",
-                    "context_id": "[1]",
-                    "contain_generation": False,
-                },
+            "graph_structure": [
+                {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
+                {"op_name": "root.loop", "op_type": "for", "parent_name": "root", "contain_generation": False},
+                {"op_name": "root.loop.process", "op_type": "code", "parent_name": "root.loop", "contain_generation": False},
             ],
-            "ops_trace_data": {
-                "root": {"name": "root", "input": {}, "output": {}},
-                "loop": {"name": "loop", "input": {}, "output": {}},
-                "process:[0]": {"name": "process", "input": {"i": 0}, "output": {"r": 0}},
-                "process:[1]": {"name": "process", "input": {"i": 1}, "output": {"r": 1}},
-            },
+            "records": [
+                {"op_name": "root", "context_id": None, "inputs": {}, "outputs": {}, "start_time": None, "end_time": None, "duration_ms": None},
+                {"op_name": "root.loop", "context_id": None, "inputs": {}, "outputs": {}, "start_time": None, "end_time": None, "duration_ms": None},
+                {"op_name": "root.loop.process", "context_id": "[0]", "inputs": {"i": 0}, "outputs": {"r": 0}, "start_time": None, "end_time": None, "duration_ms": None},
+                {"op_name": "root.loop.process", "context_id": "[1]", "inputs": {"i": 1}, "outputs": {"r": 1}, "start_time": None, "end_time": None, "duration_ms": None},
+            ],
         }
 
         mock_tracer = MagicMock()
@@ -543,7 +380,7 @@ class TestOTELTracerFlush:
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
                 mock_set_ctx.return_value = MagicMock()
-                OTELTracer.flush(flush_data)
+                tracer.flush(trace_data)
 
         # Should have created 4 spans (root, loop, process:[0], process:[1])
         assert mock_tracer.start_span.call_count == 4
@@ -558,12 +395,10 @@ class TestOTELToLangfuse:
     """Test OTEL tracer sending to Langfuse OTEL endpoint."""
 
     def test_create_langfuse_otel_config(self):
-        """Test creating OTELConfig for Langfuse endpoint."""
         import base64
 
         from hush.telemetry import OTELConfig
 
-        # Create config for Langfuse OTEL endpoint
         public_key = "pk-test"
         secret_key = "sk-test"
         host = "https://cloud.langfuse.com"
@@ -579,55 +414,3 @@ class TestOTELToLangfuse:
         assert config.protocol == "http"
         assert "/api/public/otel/v1/traces" in config.endpoint
         assert "Authorization" in config.headers
-
-
-# ============================================================================
-# Run tests directly
-# ============================================================================
-
-if __name__ == "__main__":
-    print("Running OTELTracer unit tests...")
-    print("=" * 60)
-
-    print("\n1. Testing OTELConfig creation...")
-    TestOTELConfig().test_config_creation_basic()
-    print("   PASSED")
-
-    print("\n2. Testing OTELConfig with headers...")
-    TestOTELConfig().test_config_creation_with_headers()
-    print("   PASSED")
-
-    print("\n3. Testing OTELConfig.jaeger() factory...")
-    TestOTELConfig().test_config_jaeger_factory()
-    print("   PASSED")
-
-    print("\n4. Testing OTELConfig.tempo() factory...")
-    TestOTELConfig().test_config_tempo_factory()
-    print("   PASSED")
-
-    print("\n5. Testing OTELClient creation...")
-    TestOTELClient().test_client_creation()
-    print("   PASSED")
-
-    print("\n6. Testing OTELTracer creation with resource...")
-    TestOTELTracer().test_tracer_creation_with_resource()
-    print("   PASSED")
-
-    print("\n7. Testing OTELTracer creation with config...")
-    TestOTELTracer().test_tracer_creation_with_config()
-    print("   PASSED")
-
-    print("\n8. Testing OTELTracer registration...")
-    TestOTELTracer().test_tracer_registered()
-    print("   PASSED")
-
-    print("\n9. Testing datetime_to_ns helper...")
-    TestOTELTracerHelpers().test_datetime_to_ns_with_datetime()
-    print("   PASSED")
-
-    print("\n10. Testing get_short_name helper...")
-    TestOTELTracerHelpers().test_get_short_name()
-    print("   PASSED")
-
-    print("\n" + "=" * 60)
-    print("All OTELTracer unit tests completed!")

@@ -112,7 +112,7 @@ class BaseTracer(ABC):
         """Mark trace as complete and trigger background flushing.
 
         With incremental writes, trace data is already in SQLite (written during
-        node execution via state.record_trace_metadata()). This method:
+        node execution via state.record_trace()). This method:
         1. Merges static (tracer) and dynamic (state) tags
         2. Marks the request as complete (status: writing -> pending)
         3. Background process will pick up and flush automatically

@@ -5,7 +5,7 @@ Backend-agnostic observability with support for multiple tracing frameworks.
 
 This package provides:
 - Backend clients (LangfuseClient, OTELClient) registered to ResourceHub
-- Tracers (LangfuseTracer, OTELTracer) that use ResourceHub to get clients
+- Tracers (LangfuseTracer, OTELTracer) that extend hush.core.tracing.Tracer
 
 Example:
     ```python
@@ -17,9 +17,8 @@ Example:
     # OpenTelemetry tracer (exports to Jaeger, Zipkin, etc.)
     tracer = OTELTracer(resource="otel:jaeger")
 
-    # Use with workflow
-    workflow = MyWorkflow(tracer=tracer)
-    await workflow.run(inputs={...})
+    # Use with workflow engine
+    result = await engine.run(inputs={...}, tracers=[tracer])
     ```
 
     ```python
@@ -38,15 +37,7 @@ Example:
 """
 
 # Auto-register backends to ResourceHub on import
-# Re-export core utilities for convenience
-from hush.core.tracers import (
-    MEDIA_KEY,
-    BaseTracer,
-    MediaAttachment,
-    get_registered_tracers,
-    register_tracer,
-    serialize_media_attachments,
-)
+from hush.core.tracing import Tracer
 
 # Backends (configs + clients)
 from hush.telemetry.backends import (
@@ -75,11 +66,6 @@ __all__ = [
     # Tracers
     "LangfuseTracer",
     "OTELTracer",
-    # Core utilities (re-exported)
-    "BaseTracer",
-    "register_tracer",
-    "get_registered_tracers",
-    "MEDIA_KEY",
-    "MediaAttachment",
-    "serialize_media_attachments",
+    # Base class (from hush.core.tracing)
+    "Tracer",
 ]

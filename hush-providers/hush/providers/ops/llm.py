@@ -525,9 +525,10 @@ class LLMOp(BaseOp):
             # Store timing to state (critical for tracing)
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
+            state[self.full_name, "duration_ms", context_id] = latency_ms
 
             # Calculate cost from LLM config if cost_per_token is configured
-            cost = None
+            cost_usd = None
             if selected_llm and hasattr(selected_llm, "config"):
                 config = selected_llm.config
                 cost_input = getattr(config, "cost_per_input_token", None)
@@ -538,24 +539,24 @@ class LLMOp(BaseOp):
                     output_tokens = tokens.get("completion_tokens", 0)
                     input_cost = input_tokens * (cost_input or 0)
                     output_cost = output_tokens * (cost_output or 0)
-                    cost = {
-                        "input": input_cost,
-                        "output": output_cost,
-                        "total": input_cost + output_cost,
-                    }
+                    cost_usd = input_cost + output_cost
+            state[self.full_name, "cost_usd", context_id] = cost_usd
 
-            # Record trace metadata for observability (with model/usage/cost)
-            state.record_trace_metadata(
+            # Record trace data for observability (with model/usage/cost)
+            state.record_trace(
                 op_name=self.full_name,
                 context_id=context_id,
                 name=self.name,
                 input_vars=list(self.inputs.keys()) if self.inputs else [],
                 output_vars=list(self.outputs.keys()) if self.outputs else [],
                 parent_name=parent_name,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=latency_ms,
                 contain_generation=self.contain_generation,
                 model=_outputs.get("model_used") or selected_resource,
                 usage=_outputs.get("tokens_used"),
-                cost=cost,
+                cost=cost_usd,
                 metadata=self.metadata,
             )
 

@@ -82,7 +82,7 @@ class StateSchema:
                 self._register(op_name, var_name, param.default)
 
         # Đăng ký các biến metadata
-        for meta_var in ("start_time", "end_time", "error"):
+        for meta_var in ("start_time", "end_time", "duration_ms", "cost_usd", "error"):
             self._register(op_name, meta_var, None)
 
         # Load đệ quy các op con

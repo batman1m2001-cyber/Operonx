@@ -1,37 +1,33 @@
-"""Langfuse tracer implementation using subprocess-based flushing.
+"""Langfuse tracer — sends workflow traces to Langfuse.
 
-This tracer inherits from hush.core.tracers.BaseTracer and uses
-ResourceHub to get the LangfuseClient in the subprocess.
+Inherits from hush.core.tracing.Tracer. Flush runs in FlushWorker's
+thread pool, never blocking the main async thread.
 """
 
 import base64
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from hush.core.tracers import BaseTracer, register_tracer
+from hush.core.tracing import Tracer
 
 if TYPE_CHECKING:
     from hush.telemetry.backends.langfuse import LangfuseConfig
 
 
-@register_tracer
-class LangfuseTracer(BaseTracer):
+class LangfuseTracer(Tracer):
     """Tracer that sends workflow traces to Langfuse.
-
-    This tracer uses subprocess-based flushing to avoid blocking
-    the main workflow execution.
 
     Example:
         ```python
         from hush.telemetry import LangfuseTracer, LangfuseConfig
 
-        # Simple: Direct config (no ResourceHub needed)
+        # Simple: Direct config
         tracer = LangfuseTracer(config=LangfuseConfig.from_env())
 
-        # Production: Use ResourceHub for centralized config
+        # Production: Use ResourceHub
         tracer = LangfuseTracer(resource="langfuse:default", tags=["prod"])
 
         # Use with workflow engine
-        result = await engine.run(inputs={...}, tracer=tracer)
+        result = await engine.run(inputs={...}, tracers=[tracer])
         ```
     """
 
@@ -41,16 +37,6 @@ class LangfuseTracer(BaseTracer):
         resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ):
-        """Initialize the Langfuse tracer.
-
-        Args:
-            config: Direct LangfuseConfig (simple usage, no ResourceHub needed)
-            resource: ResourceHub key for LangfuseClient (e.g., "langfuse:default")
-            tags: Optional list of static tags for filtering/grouping traces
-
-        Raises:
-            ValueError: If neither config nor resource is provided, or both are provided
-        """
         super().__init__(tags=tags)
         if config is None and resource is None:
             raise ValueError("Must provide either 'config' or 'resource'")
@@ -61,49 +47,39 @@ class LangfuseTracer(BaseTracer):
 
     @property
     def resource(self) -> Optional[str]:
-        """Get the resource key (for backward compatibility)."""
         return self._resource
 
-    def _get_tracer_config(self) -> Dict[str, Any]:
-        """Return configuration for subprocess."""
+    def _get_client(self):
+        """Get LangfuseClient from config or ResourceHub."""
         if self._config is not None:
-            return {"config": self._config.model_dump()}
-        return {"resource": self._resource}
+            from hush.telemetry.backends.langfuse import LangfuseClient
+
+            return LangfuseClient(self._config)
+
+        from hush.core.registry import get_hub
+
+        return get_hub().langfuse(self._resource)
 
     @staticmethod
     def _resolve_media(
-        trace_data: Dict[str, Any],
+        data: Dict[str, Any],
         media_attachments: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Resolve media attachments to LangfuseMedia objects.
-
-        Args:
-            trace_data: Trace data dict (input, output, metadata)
-            media_attachments: Serialized media attachments
-
-        Returns:
-            Modified trace_data with LangfuseMedia objects injected
-        """
+        """Resolve media attachments to LangfuseMedia objects."""
         if not media_attachments:
-            return trace_data
+            return data
 
         try:
             from langfuse.media import LangfuseMedia
         except ImportError:
-            return trace_data
+            return data
 
-        # Group attachments by target location
-        by_location: Dict[str, Dict[str, Any]] = {
-            "input": {},
-            "output": {},
-            "metadata": {},
-        }
+        by_location: Dict[str, Dict[str, Any]] = {"input": {}, "output": {}, "metadata": {}}
 
         for key, attachment in media_attachments.items():
             attach_to = attachment.get("attach_to", "metadata")
             content_type = attachment["content_type"]
 
-            # Get content bytes
             if "base64" in attachment:
                 content_bytes = base64.b64decode(attachment["base64"])
             elif "path" in attachment:
@@ -112,30 +88,22 @@ class LangfuseTracer(BaseTracer):
             else:
                 continue
 
-            # Create LangfuseMedia object
             media_obj = LangfuseMedia(content_bytes=content_bytes, content_type=content_type)
             by_location[attach_to][key] = media_obj
 
-        # Inject into trace_data
-        result = trace_data.copy()
+        result = data.copy()
 
         if by_location["input"]:
             if isinstance(result.get("input"), dict):
                 result["input"] = {**result["input"], **by_location["input"]}
             else:
-                result["input"] = {
-                    "_original": result.get("input"),
-                    **by_location["input"],
-                }
+                result["input"] = {"_original": result.get("input"), **by_location["input"]}
 
         if by_location["output"]:
             if isinstance(result.get("output"), dict):
                 result["output"] = {**result["output"], **by_location["output"]}
             else:
-                result["output"] = {
-                    "_original": result.get("output"),
-                    **by_location["output"],
-                }
+                result["output"] = {"_original": result.get("output"), **by_location["output"]}
 
         if by_location["metadata"]:
             if isinstance(result.get("metadata"), dict):
@@ -145,41 +113,28 @@ class LangfuseTracer(BaseTracer):
 
         return result
 
-    @staticmethod
-    def flush(flush_data: Dict[str, Any]) -> None:
-        """Execute flush logic in a separate process.
+    def flush(self, trace_data: Dict[str, Any]) -> None:
+        """Send trace data to Langfuse.
 
-        This method runs in a subprocess, so it must:
-        - Re-import all dependencies
-        - Use only the data provided in flush_data
-        - Load LangfuseClient from ResourceHub
+        Called by FlushWorker in a background thread.
 
         Args:
-            flush_data: Dictionary containing all data needed for flushing
+            trace_data: {request_id, workflow_name, user_id, session_id,
+                        tags, graph_structure, records}
         """
         from hush.core.loggings import LOGGER
 
         try:
-            tracer_config = flush_data["tracer_config"]
+            client = self._get_client()
 
-            # Get client: direct config or ResourceHub
-            if "config" in tracer_config:
-                from hush.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig
+            workflow_name = trace_data["workflow_name"]
+            req_id = trace_data["request_id"]
+            user_id = trace_data.get("user_id")
+            session_id = trace_data.get("session_id")
+            tags = trace_data.get("tags") or []
 
-                config = LangfuseConfig(**tracer_config["config"])
-                client = LangfuseClient(config)
-            else:
-                from hush.core.registry import get_hub
-
-                client = get_hub().langfuse(tracer_config["resource"])
-
-            workflow_name = flush_data["workflow_name"]
-            req_id = flush_data["request_id"]
-            user_id = flush_data.get("user_id")
-            session_id = flush_data.get("session_id")
-            tags = flush_data.get("tags", [])
-            execution_order = flush_data["execution_order"]
-            ops_trace_data = flush_data["ops_trace_data"]
+            # Build structure lookup: op_name → {parent_name, contain_generation, ...}
+            structure_map = {s["op_name"]: s for s in trace_data.get("graph_structure", [])}
 
             LOGGER.info(
                 "Workflow: %s, Request ID: %s, Creating Langfuse trace hierarchy...",
@@ -187,53 +142,38 @@ class LangfuseTracer(BaseTracer):
                 req_id,
             )
 
-            # Track created Langfuse objects for parent-child linking
             langfuse_objects = {}
             root_trace = None
 
-            for execution in execution_order:
-                op_id = execution["op"]
-                parent_id = execution["parent"]
-                context_id = execution.get("context_id")
-                contain_generation = execution.get("contain_generation", False)
-
-                # Get trace data for this node
-                trace_key = f"{op_id}:{context_id}" if context_id else op_id
-                trace_data = ops_trace_data.get(trace_key)
-                if trace_data is None:
-                    continue
-
-                # Resolve media attachments to LangfuseMedia objects
-                media_attachments = trace_data.pop("media_attachments", None)
-                trace_data = LangfuseTracer._resolve_media(trace_data, media_attachments)
+            for record in trace_data.get("records", []):
+                op_name = record["op_name"]
+                context_id = record.get("context_id")
+                structure = structure_map.get(op_name, {})
+                parent_name = structure.get("parent_name")
+                contain_generation = structure.get("contain_generation", False)
 
                 # Build unique key for context-aware nodes
-                if context_id:
-                    op_id = f"{op_id}:{context_id}"
+                trace_key = f"{op_name}:{context_id}" if context_id else op_name
 
-                # Check for context-aware parent
-                # For nested contexts like [0].[1], we need to find the right parent:
-                # - First try exact context match: parent:[0].[1]
-                # - Then try parent context (strip last .[N]): parent:[0]
-                # - Finally fall back to parent without context
-                if parent_id and context_id:
-                    # Try exact context match first
-                    context_parent_id = f"{parent_id}:{context_id}"
-                    if context_parent_id in langfuse_objects:
-                        parent_id = context_parent_id
+                # Resolve parent key with context awareness
+                parent_key = parent_name
+                if parent_name and context_id:
+                    context_parent_key = f"{parent_name}:{context_id}"
+                    if context_parent_key in langfuse_objects:
+                        parent_key = context_parent_key
                     else:
-                        # Try parent context (strip last .[N] or [N])
-                        # e.g., [0].[1] -> [0], [0] -> None
                         last_dot = context_id.rfind(".")
                         if last_dot > 0:
                             parent_context = context_id[:last_dot]
-                            parent_with_parent_ctx = f"{parent_id}:{parent_context}"
+                            parent_with_parent_ctx = f"{parent_name}:{parent_context}"
                             if parent_with_parent_ctx in langfuse_objects:
-                                parent_id = parent_with_parent_ctx
+                                parent_key = parent_with_parent_ctx
 
-                if parent_id is None:
-                    # Root node - create trace
-                    # Filter out None values from tags
+                # Short name for display
+                short_name = op_name.rsplit(".", 1)[-1] if "." in op_name else op_name
+
+                if parent_name is None:
+                    # Root — create trace
                     clean_tags = [t for t in tags if t is not None] if tags else None
                     root_trace = client.trace(
                         id=req_id,
@@ -241,34 +181,33 @@ class LangfuseTracer(BaseTracer):
                         user_id=user_id,
                         session_id=session_id,
                         tags=clean_tags if clean_tags else None,
-                        start_time=trace_data.get("start_time"),
-                        end_time=trace_data.get("end_time"),
-                        input=trace_data.get("input"),
-                        output=trace_data.get("output"),
-                        metadata=trace_data.get("metadata"),
+                        start_time=record.get("start_time"),
+                        end_time=record.get("end_time"),
+                        input=record.get("inputs"),
+                        output=record.get("outputs"),
+                        metadata=record.get("metadata"),
                     )
-                    langfuse_objects[op_id] = root_trace
+                    langfuse_objects[trace_key] = root_trace
                 else:
-                    # Child node - create span or generation
-                    parent = langfuse_objects.get(parent_id)
+                    # Child — span or generation
+                    parent = langfuse_objects.get(parent_key)
                     if parent is None:
                         LOGGER.warning(
-                            "Parent '%s' not found for node '%s'",
-                            parent_id,
-                            op_id,
+                            "Parent '%s' not found for op '%s'", parent_key, op_name
                         )
                         continue
 
-                        # Use short name (last part after .) for display
-                    full_name = trace_data.get("name", "")
-                    short_name = full_name.rsplit(".", 1)[-1] if "." in full_name else full_name
-                    trace_data["name"] = short_name
+                    kwargs = {
+                        "name": short_name,
+                        "start_time": record.get("start_time"),
+                        "end_time": record.get("end_time"),
+                        "input": record.get("inputs"),
+                        "output": record.get("outputs"),
+                        "metadata": record.get("metadata"),
+                    }
 
                     if contain_generation:
-                        # Transform usage to Langfuse format
-                        # OpenAI format: prompt_tokens, completion_tokens, total_tokens
-                        # Langfuse format: input, output, total
-                        usage = trace_data.pop("usage", None)
+                        usage = record.get("usage")
                         if usage:
                             langfuse_usage = {}
                             if "prompt_tokens" in usage:
@@ -278,31 +217,24 @@ class LangfuseTracer(BaseTracer):
                             if "total_tokens" in usage:
                                 langfuse_usage["total"] = usage["total_tokens"]
                             if langfuse_usage:
-                                trace_data["usage"] = langfuse_usage
+                                kwargs["usage"] = langfuse_usage
 
-                        # Extract cost - pass as metadata since SDK v2 doesn't support cost_details
-                        cost = trace_data.pop("cost", None)
+                        if record.get("model"):
+                            kwargs["model"] = record["model"]
+
+                        cost = record.get("cost")
                         if cost:
-                            # Add cost to metadata for visibility
-                            if "metadata" not in trace_data or trace_data["metadata"] is None:
-                                trace_data["metadata"] = {}
-                            trace_data["metadata"]["cost_usd"] = cost
+                            if kwargs["metadata"] is None:
+                                kwargs["metadata"] = {}
+                            kwargs["metadata"]["cost_usd"] = cost
 
-                        langfuse_objects[op_id] = parent.generation(**trace_data)
+                        langfuse_objects[trace_key] = parent.generation(**kwargs)
                     else:
-                        # Spans don't use cost or usage, remove them
-                        trace_data.pop("cost", None)
-                        trace_data.pop("usage", None)
-                        langfuse_objects[op_id] = parent.span(**trace_data)
+                        langfuse_objects[trace_key] = parent.span(**kwargs)
 
-            # Ensure all traces are sent to Langfuse
             client.flush()
 
-            # Generate and log trace URL
-            trace_url = None
-            if root_trace:
-                trace_url = root_trace.get_trace_url()
-
+            trace_url = root_trace.get_trace_url() if root_trace else None
             if trace_url:
                 LOGGER.info(
                     "Workflow: %s, Request ID: %s, Langfuse trace created. View: %s",
@@ -338,7 +270,6 @@ class LangfuseTracer(BaseTracer):
             )
 
     def __repr__(self) -> str:
-        """String representation."""
         if self._resource:
             return f"<LangfuseTracer resource={self._resource}>"
         return f"<LangfuseTracer host={self._config.host}>"

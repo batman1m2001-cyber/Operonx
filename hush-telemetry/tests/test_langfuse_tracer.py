@@ -1,13 +1,14 @@
-"""Test LangfuseTracer with Langfuse cloud instance.
+"""Test LangfuseTracer with the new tracing API.
 
-This test verifies that the LangfuseTracer can successfully connect
-to Langfuse cloud and create traces.
+Tests cover:
+- LangfuseConfig/Client creation
+- LangfuseTracer creation and validation
+- Inheritance from hush.core.tracing.Tracer
+- flush() with new trace_data format (graph_structure + records)
 """
 
 import os
 import uuid
-from datetime import datetime
-from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,58 +19,6 @@ LANGFUSE_CONFIG = {
     "secret_key": os.environ.get("LANGFUSE_SECRET_KEY", ""),
     "host": os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 }
-
-
-class MockOp:
-    """Mock node for testing."""
-
-    def __init__(self, op_id: str, contain_generation: bool = False):
-        self.op_id = op_id
-        self.contain_generation = contain_generation
-        self._trace_data = {
-            "name": op_id,
-            "start_time": datetime.now(),
-            "end_time": datetime.now(),
-            "input": {"test": "input"},
-            "output": {"test": "output"},
-            "metadata": {"source": "test"},
-        }
-
-    def trace_data(self, state: Any, context_id: str = None) -> Dict[str, Any]:
-        return self._trace_data
-
-
-class MockIndexer:
-    """Mock indexer for testing."""
-
-    def __init__(self):
-        self._ops = {}
-
-    def add_op(self, op: MockOp):
-        self._ops[op.op_id] = op
-
-
-class MockMemoryState:
-    """Mock MemoryState for testing."""
-
-    def __init__(self):
-        self.request_id = str(uuid.uuid4())
-        self.user_id = "test-user"
-        self.session_id = "test-session"
-        self.execution_order = []
-        self._indexer = MockIndexer()
-
-    def add_execution(self, op_id: str, parent_id: str = None, context_id: str = None):
-        """Add an execution to the order."""
-        node = MockOp(op_id)
-        self._indexer.add_op(node)
-        self.execution_order.append(
-            {
-                "op": op_id,
-                "parent": parent_id,
-                "context_id": context_id,
-            }
-        )
 
 
 def test_langfuse_config_creation():
@@ -103,33 +52,132 @@ def test_langfuse_tracer_creation():
     assert repr(tracer) == "<LangfuseTracer resource=langfuse:default>"
 
 
-def test_tracer_config_serialization():
-    """Test tracer config returns resource for subprocess."""
+def test_langfuse_tracer_inherits_from_new_tracer():
+    """Test LangfuseTracer inherits from hush.core.tracing.Tracer."""
+    from hush.core.tracing import Tracer
+    from hush.telemetry import LangfuseTracer
+
+    tracer = LangfuseTracer(resource="langfuse:default", tags=["test"])
+    assert isinstance(tracer, Tracer)
+    assert tracer.tags == ["test"]
+
+
+def test_langfuse_tracer_requires_config_or_resource():
+    """Test LangfuseTracer raises error if neither config nor resource provided."""
+    from hush.telemetry import LangfuseTracer
+
+    with pytest.raises(ValueError, match="Must provide either"):
+        LangfuseTracer()
+
+
+def test_langfuse_tracer_rejects_both_config_and_resource():
+    """Test LangfuseTracer raises error if both config and resource provided."""
+    from hush.telemetry import LangfuseConfig, LangfuseTracer
+
+    config = LangfuseConfig(**LANGFUSE_CONFIG)
+    with pytest.raises(ValueError, match="Cannot provide both"):
+        LangfuseTracer(config=config, resource="langfuse:default")
+
+
+def test_langfuse_tracer_flush_with_mock(sample_trace_data):
+    """Test flush() creates Langfuse trace/span/generation hierarchy."""
     from hush.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default")
 
-    tracer_config = tracer._get_tracer_config()
-    assert tracer_config["resource"] == "langfuse:default"
+    mock_trace = MagicMock()
+    mock_span = MagicMock()
+    mock_generation = MagicMock()
+    mock_trace.span.return_value = mock_span
+    mock_trace.generation.return_value = mock_generation
+
+    mock_client = MagicMock()
+    mock_client.trace.return_value = mock_trace
+
+    mock_hub = MagicMock()
+    mock_hub.langfuse.return_value = mock_client
+
+    with patch("hush.core.registry.get_hub", return_value=mock_hub):
+        tracer.flush(sample_trace_data)
+
+    # Verify root trace created
+    mock_client.trace.assert_called_once()
+    call_kwargs = mock_client.trace.call_args[1]
+    assert call_kwargs["name"] == "test-workflow"
+    assert call_kwargs["user_id"] == "test-user"
+    assert call_kwargs["session_id"] == "test-session"
+
+    # Verify child span created (child-1)
+    mock_trace.span.assert_called_once()
+    span_kwargs = mock_trace.span.call_args[1]
+    assert span_kwargs["name"] == "child-1"
+
+    # Verify generation created (llm-node)
+    mock_trace.generation.assert_called_once()
+    gen_kwargs = mock_trace.generation.call_args[1]
+    assert gen_kwargs["name"] == "llm-node"
+    assert gen_kwargs["model"] == "gpt-4"
+    assert gen_kwargs["usage"] == {"input": 10, "output": 20, "total": 30}
+
+    # Verify flush called on client
+    mock_client.flush.assert_called_once()
 
 
-def test_langfuse_tracer_registered():
-    """Test LangfuseTracer is registered in tracer registry."""
-    from hush.core.tracers import get_registered_tracers
+def test_langfuse_tracer_flush_with_direct_config(sample_trace_data):
+    """Test flush() with direct config (no ResourceHub)."""
+    from hush.telemetry import LangfuseConfig, LangfuseTracer
 
-    from hush.telemetry import LangfuseTracer  # noqa: F401
+    config = LangfuseConfig(**LANGFUSE_CONFIG)
+    tracer = LangfuseTracer(config=config)
 
-    tracers = get_registered_tracers()
-    assert "LangfuseTracer" in tracers
+    mock_trace = MagicMock()
+    mock_trace.span.return_value = MagicMock()
+    mock_trace.generation.return_value = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.trace.return_value = mock_trace
+
+    with patch(
+        "hush.telemetry.backends.langfuse.LangfuseClient", return_value=mock_client
+    ) as MockClient:
+        tracer.flush(sample_trace_data)
+
+    MockClient.assert_called_once_with(config)
+    mock_client.flush.assert_called_once()
+
+
+def test_langfuse_tracer_flush_with_iteration(sample_iteration_trace_data):
+    """Test flush() handles context-aware nodes (iteration/map)."""
+    from hush.telemetry import LangfuseTracer
+
+    tracer = LangfuseTracer(resource="langfuse:default")
+
+    mock_trace = MagicMock()
+    mock_span = MagicMock()
+    mock_trace.span.return_value = mock_span
+    mock_span.span.return_value = mock_span
+
+    mock_client = MagicMock()
+    mock_client.trace.return_value = mock_trace
+
+    mock_hub = MagicMock()
+    mock_hub.langfuse.return_value = mock_client
+
+    with patch("hush.core.registry.get_hub", return_value=mock_hub):
+        tracer.flush(sample_iteration_trace_data)
+
+    # Root + map_op + 3 process iterations + aggregate = 6 total
+    # Root → trace, rest → spans
+    mock_client.trace.assert_called_once()
+    # map_op + 3 process + aggregate = 5 spans
+    total_spans = mock_trace.span.call_count + mock_span.span.call_count
+    assert total_spans == 5
+    mock_client.flush.assert_called_once()
 
 
 @pytest.mark.integration
 def test_langfuse_cloud_connection():
-    """Test actual connection to Langfuse cloud.
-
-    This test creates a real trace in Langfuse cloud.
-    Run with: pytest -m integration
-    """
+    """Test actual connection to Langfuse cloud."""
     from hush.telemetry import LangfuseClient, LangfuseConfig
 
     try:
@@ -140,7 +188,6 @@ def test_langfuse_cloud_connection():
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     client = LangfuseClient(config)
 
-    # Create a test trace
     trace = client.trace(
         name="hush-telemetry-test",
         user_id="test-user",
@@ -150,7 +197,6 @@ def test_langfuse_cloud_connection():
         output={"status": "success"},
     )
 
-    # Create a span
     trace.span(
         name="test-span",
         input={"operation": "test"},
@@ -158,7 +204,6 @@ def test_langfuse_cloud_connection():
         metadata={"step": 1},
     )
 
-    # Flush to ensure trace is sent
     client.flush()
 
     trace_url = trace.get_trace_url()
@@ -169,132 +214,75 @@ def test_langfuse_cloud_connection():
 
 
 @pytest.mark.integration
-def test_langfuse_tracer_flush_with_resource_hub():
-    """Test LangfuseTracer.flush() method with ResourceHub.
-
-    This test calls the static flush method with mock data.
-    Requires ResourceHub to be configured with langfuse:test key.
-    """
-    from hush.telemetry import LangfuseTracer
+def test_langfuse_tracer_flush_integration():
+    """Test LangfuseTracer.flush() end-to-end with real Langfuse cloud."""
+    from hush.telemetry import LangfuseClient, LangfuseConfig, LangfuseTracer
 
     try:
         import langfuse  # noqa: F401
     except ImportError:
         pytest.skip("langfuse package not installed")
 
-    # Mock ResourceHub to return a LangfuseClient
-    from hush.telemetry import LangfuseClient, LangfuseConfig
-
     mock_config = LangfuseConfig(**LANGFUSE_CONFIG)
     mock_client = LangfuseClient(mock_config)
 
-    # Prepare mock flush data
     request_id = str(uuid.uuid4())
-    flush_data = {
-        "tracer_type": "LangfuseTracer",
-        "tracer_config": {"resource": "langfuse:test"},
+    trace_data = {
         "workflow_name": "test-workflow",
         "request_id": request_id,
         "user_id": "test-user",
         "session_id": "test-session",
-        "execution_order": [
-            {
-                "op": "root",
-                "parent": None,
-                "context_id": None,
-                "contain_generation": False,
-            },
-            {
-                "op": "child-1",
-                "parent": "root",
-                "context_id": None,
-                "contain_generation": False,
-            },
-            {
-                "op": "llm-node",
-                "parent": "root",
-                "context_id": None,
-                "contain_generation": True,
-            },
+        "tags": ["integration", "test"],
+        "graph_structure": [
+            {"op_name": "root", "op_type": "graph", "parent_name": None, "contain_generation": False},
+            {"op_name": "root.child-1", "op_type": "code", "parent_name": "root", "contain_generation": False},
+            {"op_name": "root.llm-node", "op_type": "llm", "parent_name": "root", "contain_generation": True},
         ],
-        "ops_trace_data": {
-            "root": {
-                "name": "root",
-                "input": {"workflow": "test"},
-                "output": {"status": "completed"},
+        "records": [
+            {
+                "op_name": "root",
+                "context_id": None,
+                "inputs": {"workflow": "test"},
+                "outputs": {"status": "completed"},
+                "start_time": None,
+                "end_time": None,
+                "duration_ms": None,
                 "metadata": {"version": "1.0"},
             },
-            "child-1": {
-                "name": "child-1",
-                "input": {"step": 1},
-                "output": {"processed": True},
+            {
+                "op_name": "root.child-1",
+                "context_id": None,
+                "inputs": {"step": 1},
+                "outputs": {"processed": True},
+                "start_time": None,
+                "end_time": None,
+                "duration_ms": None,
                 "metadata": {},
             },
-            "llm-node": {
-                "name": "llm-node",
+            {
+                "op_name": "root.llm-node",
+                "context_id": None,
+                "inputs": {"prompt": "Test prompt"},
+                "outputs": {"completion": "Test response"},
+                "start_time": None,
+                "end_time": None,
+                "duration_ms": None,
                 "model": "gpt-4",
-                "input": {"prompt": "Test prompt"},
-                "output": {"completion": "Test response"},
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                "cost": 0.0015,
                 "metadata": {"temperature": 0.7},
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 20,
-                    "total_tokens": 30,
-                },
             },
-        },
+        ],
     }
 
-    # Mock get_hub to return our mock client
+    # Mock get_hub to return our actual client
     mock_hub = MagicMock()
     mock_hub.langfuse.return_value = mock_client
 
+    tracer = LangfuseTracer(resource="langfuse:test")
+
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
-        # Call flush directly (this runs synchronously for testing)
-        LangfuseTracer.flush(flush_data)
+        tracer.flush(trace_data)
 
     print(f"\nTrace created with request_id: {request_id}")
     print("Check Langfuse dashboard: https://cloud.langfuse.com")
-
-
-if __name__ == "__main__":
-    # Run integration tests directly
-    print("Running LangfuseTracer integration tests...")
-    print("=" * 60)
-
-    print("\n1. Testing LangfuseConfig creation...")
-    test_langfuse_config_creation()
-    print("   PASSED")
-
-    print("\n2. Testing LangfuseClient creation...")
-    test_langfuse_client_creation()
-    print("   PASSED")
-
-    print("\n3. Testing LangfuseTracer creation...")
-    test_langfuse_tracer_creation()
-    print("   PASSED")
-
-    print("\n4. Testing tracer config serialization...")
-    test_tracer_config_serialization()
-    print("   PASSED")
-
-    print("\n5. Testing LangfuseTracer registration...")
-    test_langfuse_tracer_registered()
-    print("   PASSED")
-
-    print("\n6. Testing Langfuse cloud connection...")
-    try:
-        test_langfuse_cloud_connection()
-        print("   PASSED")
-    except Exception as e:
-        print(f"   FAILED: {e}")
-
-    print("\n7. Testing LangfuseTracer.flush() with ResourceHub...")
-    try:
-        test_langfuse_tracer_flush_with_resource_hub()
-        print("   PASSED")
-    except Exception as e:
-        print(f"   FAILED: {e}")
-
-    print("\n" + "=" * 60)
-    print("All tests completed!")
