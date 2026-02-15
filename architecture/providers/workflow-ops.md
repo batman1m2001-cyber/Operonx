@@ -93,7 +93,7 @@ self.backend = hub.reranker(self.resource)   # RerankOp
 Mỗi op ghi metadata vào state để observability:
 
 ```python
-state.record_trace_metadata(
+state.record_trace(
     op_name=self.full_name,
     context_id=context_id,
     contain_generation=True,     # Có LLM generation?

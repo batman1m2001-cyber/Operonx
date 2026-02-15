@@ -22,7 +22,7 @@ Example:
 """
 
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from hush.core.loggings import LOGGER
 from hush.core.ops.graph.graph_op import GraphOp
@@ -30,7 +30,7 @@ from hush.core.states import StateSchema
 from hush.core.streams import STREAM_SERVICE
 
 if TYPE_CHECKING:
-    from hush.core.tracers import BaseTracer, TraceStore
+    from hush.core.tracing import Tracer
 
 
 class Hush:
@@ -98,7 +98,7 @@ class Hush:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracer: Optional["BaseTracer"] = None,
+        tracers: Optional[List["Tracer"]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -110,7 +110,7 @@ class Hush:
             user_id: Optional user identifier (auto-generated if not provided)
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
-            tracer: Optional tracer for observability (e.g., LangfuseTracer)
+            tracers: Optional list of tracers (e.g., [HushEyesTracer()])
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -127,20 +127,12 @@ class Hush:
             self.name,
         )
 
-        # Create trace store for incremental writes if tracer is provided
-        trace_store: Optional["TraceStore"] = None
-        if tracer is not None:
-            from hush.core.tracers import get_store
-
-            trace_store = get_store()
-
         # Create fresh state for this run
         state = self._schema.create_state(
             inputs=inputs,
             user_id=user_id,
             session_id=session_id,
             request_id=request_id,
-            trace_store=trace_store,
         )
 
         # Execute the graph
@@ -149,9 +141,11 @@ class Hush:
         # End stream for this request
         await STREAM_SERVICE.end_request(request_id, session_id=session_id)
 
-        # Fire-and-forget flush to tracer in separate process (non-blocking)
-        if tracer is not None:
-            tracer.flush_in_background(self.name, state)
+        # Collect + flush in background thread (non-blocking)
+        if tracers:
+            from hush.core.tracing import get_flush_worker
+
+            get_flush_worker().submit(tracers, self.graph, state)
 
         LOGGER.info(
             "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed",

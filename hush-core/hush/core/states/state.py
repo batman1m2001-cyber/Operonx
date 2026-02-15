@@ -195,14 +195,14 @@ class MemoryState:
         """Ghi lại thực thi node cho observability.
 
         In legacy mode (no trace_store), appends to _execution_order list.
-        With trace_store, this is a no-op as tracing happens in record_trace_metadata.
+        With trace_store, this is a no-op as tracing happens in record_trace.
         """
         if self._execution_order is not None:
             self._execution_order.append(
                 {"op": op_name, "parent": parent, "context_id": context_id}
             )
 
-    def record_trace_metadata(
+    def record_trace(
         self,
         op_name: str,
         context_id: Optional[str],
@@ -220,7 +220,7 @@ class MemoryState:
         cost: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Store trace metadata for a node execution.
+        """Store trace data for a node execution.
 
         With trace_store: writes directly to SQLite (incremental).
         Without trace_store: stores in memory (legacy mode).

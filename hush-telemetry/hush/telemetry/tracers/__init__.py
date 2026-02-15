@@ -1,7 +1,7 @@
 """Tracers for various observability backends.
 
-Each tracer extends hush.core.tracers.BaseTracer and uses
-ResourceHub to get the backend client in the subprocess.
+Each tracer extends hush.core.tracing.Tracer. Flush runs in
+FlushWorker's thread pool, never blocking the main async thread.
 
 Available tracers:
 - LangfuseTracer: Langfuse observability platform

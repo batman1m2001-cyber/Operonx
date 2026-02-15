@@ -870,9 +870,10 @@ class GraphOp(BaseOp):
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             state[self.full_name, "start_time", context_id] = start_time
             state[self.full_name, "end_time", context_id] = end_time
+            state[self.full_name, "duration_ms", context_id] = duration_ms
 
-            # Record trace metadata for observability
-            state.record_trace_metadata(
+            # Record trace data for observability
+            state.record_trace(
                 op_name=self.full_name,
                 context_id=context_id,
                 name=self.name,

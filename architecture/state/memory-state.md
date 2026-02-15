@@ -129,10 +129,10 @@ def record_execution(self, op_name, parent, context_id):
         })
 ```
 
-### record_trace_metadata()
+### record_trace()
 
 ```python
-def record_trace_metadata(
+def record_trace(
     self,
     op_name: str,
     context_id: Optional[str],
