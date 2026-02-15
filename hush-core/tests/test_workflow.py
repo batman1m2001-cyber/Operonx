@@ -242,28 +242,6 @@ class TestHushStateAccess:
         assert len(execution_order) >= 2
 
     @pytest.mark.asyncio
-    async def test_state_contains_trace_metadata(self):
-        """Test $state contains trace metadata."""
-        with GraphOp(name="test") as graph:
-            node = FuncOp(
-                name="processor",
-                code_fn=lambda x: {"y": x * 2},
-                inputs={"x": PARENT["x"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
-
-        engine = Hush(graph)
-        result = await engine.run(inputs={"x": 5})
-
-        state = result["$state"]
-        trace_metadata = state.trace_metadata
-
-        # Should have trace metadata for processor node
-        processor_found = any("processor" in key for key in trace_metadata.keys())
-        assert processor_found
-
-    @pytest.mark.asyncio
     async def test_state_metadata_contains_ids(self):
         """Test state metadata contains user/session/request IDs."""
         with GraphOp(name="test") as graph:

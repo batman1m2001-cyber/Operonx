@@ -542,24 +542,6 @@ class LLMOp(BaseOp):
                     cost_usd = input_cost + output_cost
             state[self.full_name, "cost_usd", context_id] = cost_usd
 
-            # Record trace data for observability (with model/usage/cost)
-            state.record_trace(
-                op_name=self.full_name,
-                context_id=context_id,
-                name=self.name,
-                input_vars=list(self.inputs.keys()) if self.inputs else [],
-                output_vars=list(self.outputs.keys()) if self.outputs else [],
-                parent_name=parent_name,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=latency_ms,
-                contain_generation=self.contain_generation,
-                model=_outputs.get("model_used") or selected_resource,
-                usage=_outputs.get("tokens_used"),
-                cost=cost_usd,
-                metadata=self.metadata,
-            )
-
         return _outputs
 
     @shorthand
