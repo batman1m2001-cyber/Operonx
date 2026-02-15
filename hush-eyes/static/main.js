@@ -1,6 +1,4 @@
-// @ts-check
-
-const vscode = acquireVsCodeApi();
+// Hush Traces — standalone browser UI
 
 let currentTraces = [];
 let currentNodes = [];
@@ -18,6 +16,7 @@ let currentTimeFilter = undefined; // seconds ago, undefined = all
 let currentPage = 1;
 let totalTraces = 0;
 const PAGE_SIZE = 50;
+let _refreshTimer = null;
 
 // Instant tooltip for data-tooltip elements
 (function initTooltip() {
@@ -45,39 +44,59 @@ const PAGE_SIZE = 50;
     });
 })();
 
-// Request initial data
-vscode.postMessage({ type: 'getTraceList' });
-vscode.postMessage({ type: 'getDbInfo' });
+// Fetch initial data
+fetchTraceList();
+fetchDbInfo();
+startAutoRefresh();
 
-// Handle messages from extension
-window.addEventListener('message', event => {
-    const message = event.data;
-    switch (message.type) {
-        case 'traceList':
-            currentTraces = message.traces || [];
-            totalTraces = message.total || 0;
-            currentPage = message.page || 1;
-            if (currentView === 'list') {
-                renderTraceList(message.traces, message.error);
-            }
-            break;
-        case 'traceDetail':
-            currentNodes = message.nodes || [];
-            renderTraceDetail(message.requestId, message.nodes, message.error);
-            break;
-        case 'dbInfo':
-            renderDbInfo(message);
-            break;
+async function fetchDbInfo() {
+    try {
+        const res = await fetch('/api/db-info');
+        const info = await res.json();
+        renderDbInfo(info);
+    } catch (e) {
+        console.error('fetchDbInfo failed:', e);
     }
-});
+}
 
 function refresh() {
     fetchTraceList();
-    vscode.postMessage({ type: 'getDbInfo' });
+    fetchDbInfo();
 }
 
-function fetchTraceList() {
-    vscode.postMessage({ type: 'getTraceList', timeFilter: currentTimeFilter, page: currentPage });
+async function fetchTraceList() {
+    try {
+        const params = new URLSearchParams();
+        params.set('limit', String(PAGE_SIZE));
+        const offset = (currentPage - 1) * PAGE_SIZE;
+        params.set('offset', String(offset));
+        if (currentTimeFilter !== undefined) {
+            params.set('time_filter', String(currentTimeFilter));
+        }
+        const res = await fetch('/api/traces?' + params.toString());
+        const data = await res.json();
+        currentTraces = data.traces || [];
+        totalTraces = data.total || 0;
+        currentPage = data.page || 1;
+        if (currentView === 'list') {
+            renderTraceList(data.traces, null);
+        }
+    } catch (e) {
+        console.error('fetchTraceList failed:', e);
+        if (currentView === 'list') {
+            renderTraceList([], e.message);
+        }
+    }
+}
+
+function startAutoRefresh() {
+    if (_refreshTimer) clearInterval(_refreshTimer);
+    _refreshTimer = setInterval(() => {
+        if (currentView === 'list') {
+            fetchTraceList();
+            fetchDbInfo();
+        }
+    }, 3000);
 }
 
 function setTimeFilter(seconds) {
@@ -93,8 +112,13 @@ function goToPage(page) {
     fetchTraceList();
 }
 
-function clearTraces() {
-    vscode.postMessage({ type: 'clearTraces' });
+async function clearTraces() {
+    try {
+        await fetch('/api/traces', { method: 'DELETE' });
+        refresh();
+    } catch (e) {
+        console.error('clearTraces failed:', e);
+    }
 }
 
 function renderDbInfo(info) {
@@ -329,8 +353,16 @@ function clearTagFilter() {
     renderTraceList(currentTraces, null);
 }
 
-function showTrace(requestId) {
-    vscode.postMessage({ type: 'getTraceDetail', requestId });
+async function showTrace(requestId) {
+    try {
+        const res = await fetch('/api/traces/' + encodeURIComponent(requestId));
+        const data = await res.json();
+        currentNodes = data.nodes || [];
+        renderTraceDetail(data.request_id, data.nodes, null);
+    } catch (e) {
+        console.error('showTrace failed:', e);
+        renderTraceDetail(requestId, [], e.message);
+    }
 }
 
 function renderTraceDetail(requestId, nodes, error) {
@@ -677,7 +709,7 @@ function renderGraph(nodes) {
     for (const [id, pos] of positions) {
         const node = pos.node;
         const nodeType = getNodeType(node);
-        const shortName = getShortName(node.node_name);
+        const shortName = getShortName(node.op_name);
         const icon = getNodeIcon(node);
         const duration = node.duration_ms ? formatDuration(node.duration_ms) : '';
         const isSelected = selectedNode && selectedNode.id === id;
@@ -784,7 +816,7 @@ function renderTimelineNodes(nodes, minTime, totalRange, trackWidth, tracks) {
                 <div class="timeline-row" data-id="${node.id}" onclick="selectNodeById(${node.id})">
                     <div class="timeline-label">
                         <span class="tree-icon ${nodeType}">${getNodeIcon(node)}</span>
-                        <span class="timeline-name">${escapeHtml(getShortName(node.node_name))}</span>
+                        <span class="timeline-name">${escapeHtml(getShortName(node.op_name))}</span>
                     </div>
                     ${hasChildren ? `<span class="tree-toggle has-children" onclick="event.stopPropagation(); toggleNode(${node.id})">${isExpanded ? chevronDown : chevronRight}</span>` : '<span class="tree-toggle"></span>'}
                 </div>
@@ -872,7 +904,7 @@ function renderTreeNode(node, isLast = false) {
             <div class="tree-item ${nodeType}" data-id="${node.id}" onclick="selectNodeById(${node.id})">
                 <span class="tree-icon ${nodeType}">${getNodeIcon(node)}</span>
                 <span class="tree-node-content">
-                    <span class="tree-name">${escapeHtml(getShortName(node.node_name))}</span>
+                    <span class="tree-name">${escapeHtml(getShortName(node.op_name))}</span>
                 </span>
                 ${duration ? `<span class="tree-duration">${duration}</span>` : ''}
                 ${hasChildren ? `<span class="tree-toggle has-children" onclick="event.stopPropagation(); toggleNode(${node.id})">${isExpanded ? chevronDown : chevronRight}</span>` : '<span class="tree-toggle"></span>'}
@@ -893,9 +925,9 @@ function renderTreeNode(node, isLast = false) {
 }
 
 function getNodeType(node) {
-    // Use actual node_type from database if available
-    if (node.node_type) {
-        return node.node_type;
+    // Use actual op_type from database if available
+    if (node.op_type) {
+        return node.op_type;
     }
     // Fallback to metadata.type
     if (node.metadata && node.metadata.type) {
@@ -903,8 +935,8 @@ function getNodeType(node) {
     }
     // Fallback to inference for legacy data
     if (node.contain_generation) return 'llm';
-    if (node.node_name && node.node_name.includes('iteration[')) return 'iteration';
-    if (node.node_name && (node.node_name.includes('_loop') || node.node_name.includes('map_'))) return 'for';
+    if (node.op_name && node.op_name.includes('iteration[')) return 'iteration';
+    if (node.op_name && (node.op_name.includes('_loop') || node.op_name.includes('map_'))) return 'for';
     if (node.children && node.children.length > 0) return 'graph';
     return 'default';
 }
@@ -938,7 +970,7 @@ function toggleNode(id) {
 }
 
 function getNodeIcon(node) {
-    const nodeType = node.node_type || getNodeType(node);
+    const nodeType = node.op_type || getNodeType(node);
 
     // Icons/symbols for each node type
     const icons = {
@@ -1091,10 +1123,10 @@ function renderNodeDetail(node) {
             <button class="detail-close-btn" onclick="backToList()" title="Close">×</button>
             <div class="node-title-row">
                 <span class="node-type-icon ${nodeType}">${getNodeIcon(node)}</span>
-                <span class="node-title">${escapeHtml(getShortName(node.node_name))}</span>
+                <span class="node-title">${escapeHtml(getShortName(node.op_name))}</span>
                 <span class="node-type-badge">${nodeType}</span>
             </div>
-            <div class="node-fullname">${escapeHtml(node.node_name)}</div>
+            <div class="node-fullname">${escapeHtml(node.op_name)}</div>
             <div class="detail-id-buttons">
                 <button class="detail-id-btn">Trace: ${escapeHtml(traceId)}</button>
                 ${sessionId ? `<button class="detail-id-btn">Session: ${escapeHtml(sessionId)}</button>` : ''}
@@ -1302,7 +1334,7 @@ function renderKeyValueTable(obj, options = {}) {
             // Special rendering for type - colored badge with icon
             if (key === 'type' && typeof val === 'string') {
                 const typeClass = val.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-                const icon = getNodeIcon({ node_type: val });
+                const icon = getNodeIcon({ op_type: val });
                 html += `<div class="kv-row">${keyHtml}<div class="kv-value"><span class="meta-type-badge ${typeClass}"><span class="meta-type-icon ${typeClass}">${icon}</span>${escapeHtml(val)}</span></div></div>`;
                 continue;
             }
@@ -1470,7 +1502,7 @@ function selectNodeByName(nodeName, highlightKey) {
 
 function findNodeByName(nodes, name) {
     for (const node of nodes) {
-        if (node.node_name === name) return node;
+        if (node.op_name === name) return node;
         if (node.children) {
             const found = findNodeByName(node.children, name);
             if (found) return found;

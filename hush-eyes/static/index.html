@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src {{cspSource}} 'unsafe-inline'; img-src {{cspSource}};">
     <title>Hush Traces</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{cssUri}}">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <script>
         window.hushIcons = {
-            icon16: '{{hushIcon16Uri}}',
-            icon20: '{{hushIcon20Uri}}'
+            icon16: 'hush-icon-16.png',
+            icon20: 'hush-icon-20.png'
         };
     </script>
     <div id="app">
@@ -33,6 +32,6 @@
             <div id="trace-detail" style="display: none;"></div>
         </div>
     </div>
-    <script src="{{jsUri}}"></script>
+    <script src="main.js"></script>
 </body>
 </html>
