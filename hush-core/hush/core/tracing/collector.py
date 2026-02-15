@@ -90,7 +90,7 @@ class TraceCollector:
             if not op:
                 continue
 
-            # Read I/O from state (same source as old record_trace)
+            # Read I/O from state
             inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
             outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
 

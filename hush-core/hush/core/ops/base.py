@@ -771,20 +771,6 @@ class BaseOp(ABC):
                     duration_ms,
                 )
 
-            # Record trace data for observability
-            state.record_trace(
-                op_name=self.full_name,
-                context_id=context_id,
-                name=self.name,
-                input_vars=list(self.inputs.keys()) if self.inputs else [],
-                output_vars=list(self.outputs.keys()) if self.outputs else [],
-                parent_name=parent_name,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=duration_ms,
-                contain_generation=self.contain_generation,
-                metadata=self.metadata,
-            )
             return _outputs
 
     def get_input_variables(self) -> List[str]:

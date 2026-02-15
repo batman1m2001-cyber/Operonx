@@ -872,20 +872,6 @@ class GraphOp(BaseOp):
             state[self.full_name, "end_time", context_id] = end_time
             state[self.full_name, "duration_ms", context_id] = duration_ms
 
-            # Record trace data for observability
-            state.record_trace(
-                op_name=self.full_name,
-                context_id=context_id,
-                name=self.name,
-                input_vars=list(self.inputs.keys()) if self.inputs else [],
-                output_vars=list(self.outputs.keys()) if self.outputs else [],
-                parent_name=parent_name,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=duration_ms,
-                contain_generation=False,
-                metadata=self.metadata,
-            )
             return _outputs
 
 
