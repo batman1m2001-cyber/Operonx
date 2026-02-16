@@ -786,70 +786,101 @@ class GraphOp(BaseOp):
             # Track ops that have received soft edge completion (count once only)
             soft_satisfied: set = set()
 
-            for entry in self.entries:
-                task = asyncio.create_task(
-                    name=entry, coro=self._ops[entry].run(state, context_id, parent_context)
+            # Cache dict lookups for performance
+            nodes = self._ops
+            compiled_adj = self._compiled_adj
+
+            def _can_inline(op_obj: BaseOp) -> bool:
+                """Sync leaf op — no await in run(), safe to call directly."""
+                return (
+                    not isinstance(op_obj, GraphOp)
+                    and not asyncio.iscoroutinefunction(getattr(op_obj, "core", None))
+                    and getattr(op_obj, "executor", None) is None
                 )
-                active_tasks[entry] = task
+
+            def _get_successors(op_name: str) -> list:
+                """Get successor targets for a completed op (handles branch)."""
+                current_op = nodes[op_name]
+                if current_op.type == "branch":
+                    branch_target = current_op.get_target(state, context_id)
+                    if branch_target == END.name:
+                        return []
+                    for tgt, soft in compiled_adj[op_name]:
+                        if tgt == branch_target:
+                            return [(tgt, soft)]
+                    available_ops = sorted(ready_count.keys())
+                    raise KeyError(
+                        f"\n"
+                        f"Op '{branch_target}' not found in graph '{self.name}'.\n"
+                        f"\n"
+                        f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
+                        f"  Available ops: {available_ops}\n"
+                        f"\n"
+                        f'  This usually means the target string in if_(..., "{branch_target}") '
+                        f"doesn't match any op's actual name.\n"
+                        f"  Check that your branch targets match the 'name' parameter of the target ops."
+                    )
+                return compiled_adj[op_name]
+
+            def _activate_successors(op_name: str) -> list:
+                """Decrement ready counts and return newly-ready op names."""
+                newly_ready = []
+                for next_op, is_soft in _get_successors(op_name):
+                    if is_soft:
+                        if next_op in soft_satisfied:
+                            continue
+                        soft_satisfied.add(next_op)
+                    ready_count[next_op] -= 1
+                    if ready_count[next_op] == 0:
+                        newly_ready.append(next_op)
+                return newly_ready
+
+            # Start entry ops — inline sync leaves, create tasks for async/graph
+            for entry in self.entries:
+                entry_op = nodes[entry]
+                if _can_inline(entry_op):
+                    await entry_op.run(state, context_id, parent_context)
+                    # Process inline completions without yielding
+                    inline_queue = _activate_successors(entry)
+                    while inline_queue:
+                        nxt = inline_queue.pop(0)
+                        nxt_op = nodes[nxt]
+                        if _can_inline(nxt_op):
+                            await nxt_op.run(state, context_id, parent_context)
+                            inline_queue.extend(_activate_successors(nxt))
+                        else:
+                            task = asyncio.create_task(
+                                name=nxt, coro=nxt_op.run(state, context_id, parent_context)
+                            )
+                            active_tasks[nxt] = task
+                else:
+                    task = asyncio.create_task(
+                        name=entry, coro=entry_op.run(state, context_id, parent_context)
+                    )
+                    active_tasks[entry] = task
 
             while active_tasks:
                 done_tasks, _ = await asyncio.wait(
                     active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
                 )
 
-                # Cache dict lookups for performance
-                nodes = self._ops
-                compiled_adj = self._compiled_adj
-
                 for task in done_tasks:
                     op_name = task.get_name()
                     active_tasks.pop(op_name)
 
-                    current_op = nodes[op_name]
-
-                    if current_op.type == "branch":
-                        branch_target = current_op.get_target(state, context_id)
-                        if branch_target != END.name:
-                            # Find the selected target in compiled adjacency
-                            targets = []
-                            for tgt, soft in compiled_adj[op_name]:
-                                if tgt == branch_target:
-                                    targets.append((tgt, soft))
-                                    break
-                            else:
-                                # Target not in connections — detailed error
-                                available_ops = sorted(ready_count.keys())
-                                raise KeyError(
-                                    f"\n"
-                                    f"Op '{branch_target}' not found in graph '{self.name}'.\n"
-                                    f"\n"
-                                    f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
-                                    f"  Available ops: {available_ops}\n"
-                                    f"\n"
-                                    f'  This usually means the target string in if_(..., "{branch_target}") '
-                                    f"doesn't match any op's actual name.\n"
-                                    f"  Check that your branch targets match the 'name' parameter of the target ops."
-                                )
+                    # Process completions — inline sync leaves without yielding
+                    inline_queue = _activate_successors(op_name)
+                    while inline_queue:
+                        nxt = inline_queue.pop(0)
+                        nxt_op = nodes[nxt]
+                        if _can_inline(nxt_op):
+                            await nxt_op.run(state, context_id, parent_context)
+                            inline_queue.extend(_activate_successors(nxt))
                         else:
-                            targets = []
-                    else:
-                        targets = compiled_adj[op_name]
-
-                    for next_op, is_soft in targets:
-                        if is_soft:
-                            # Soft edge: count once for all soft predecessors
-                            if next_op in soft_satisfied:
-                                continue  # Another soft pred already completed
-                            soft_satisfied.add(next_op)
-
-                        ready_count[next_op] -= 1
-
-                        if ready_count[next_op] == 0:
                             task = asyncio.create_task(
-                                name=next_op,
-                                coro=nodes[next_op].run(state, context_id, parent_context),
+                                name=nxt, coro=nxt_op.run(state, context_id, parent_context)
                             )
-                            active_tasks[next_op] = task
+                            active_tasks[nxt] = task
 
             _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
             self.store_result(state, _outputs, context_id)
