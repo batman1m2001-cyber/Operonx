@@ -22,7 +22,6 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops import Each, MapOp, op
-from hush.core.tracers import BaseTracer
 
 # =============================================================================
 # Code ops với dynamic tags
@@ -253,7 +252,7 @@ async def example_3_multi_user():
 
 
 # =============================================================================
-# Cleanup & main
+# Main
 # =============================================================================
 
 
@@ -261,12 +260,6 @@ async def main():
     await example_1_resource_hub()
     await example_2_direct_config()
     await example_3_multi_user()
-
-    # Flush traces
-    print()
-    print("Flushing traces to Langfuse...")
-    BaseTracer.shutdown_executor()
-    print("Done!")
 
 
 if __name__ == "__main__":

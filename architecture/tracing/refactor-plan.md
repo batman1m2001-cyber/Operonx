@@ -1,5 +1,8 @@
 # Tracing Refactor Plan
 
+> **Status: COMPLETED** — All phases implemented. This document is kept as historical reference.
+> See [overview.md](overview.md) and [data-model.md](data-model.md) for the current architecture.
+
 ## Problem
 
 The current tracing architecture has three issues:

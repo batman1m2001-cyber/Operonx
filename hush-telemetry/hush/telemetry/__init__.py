@@ -18,7 +18,7 @@ Example:
     tracer = OTELTracer(resource="otel:jaeger")
 
     # Use with workflow engine
-    result = await engine.run(inputs={...}, tracers=[tracer])
+    result = await engine.run(inputs={...}, tracer=tracer)
     ```
 
     ```python

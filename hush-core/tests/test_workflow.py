@@ -145,14 +145,14 @@ class TestHushWithTracer:
     """Test Hush with tracer integration."""
 
     @pytest.mark.asyncio
-    async def test_run_with_none_tracers(self):
-        """Test run with tracers=None works."""
+    async def test_run_with_none_tracer(self):
+        """Test run with tracer=None works."""
         with GraphOp(name="test") as graph:
             node = FuncOp(name="node", code_fn=lambda: {"ok": True})
             START >> node >> END
 
         engine = Hush(graph)
-        result = await engine.run(inputs={}, tracers=None)
+        result = await engine.run(inputs={}, tracer=None)
 
         assert "$state" in result
 
@@ -194,7 +194,7 @@ class TestHushWithTracer:
         engine = Hush(graph)
 
         result = await engine.run(
-            inputs={}, tracers=[tracer], user_id="test-user", session_id="test-session"
+            inputs={}, tracer=tracer, user_id="test-user", session_id="test-session"
         )
 
         # Wait for background flush to complete

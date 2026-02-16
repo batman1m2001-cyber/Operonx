@@ -1,16 +1,17 @@
 """Tutorial 06: Tracing — Theo dõi và debug workflows.
 
-Ví dụ 1-2: Không cần API key (LocalTracer)
+Ví dụ 1-2: Không cần API key (HushEyesTracer → gửi đến hush-eyes server)
 Ví dụ 3: Cần LANGFUSE keys trong .env
 
 Học được:
-- LocalTracer: lưu traces vào SQLite, debug offline
+- HushEyesTracer: gửi traces đến hush-eyes server (Rust, web UI)
 - Dynamic tags ($tags): phân loại traces
 - user_id, session_id: correlation
 - LangfuseTracer: gửi traces lên cloud
 - Truy cập $state sau khi run
 
 Chạy: cd hush-tutorial && uv run python examples/06_tracing.py
+Trước khi chạy: cd hush-eyes && cargo run  (khởi chạy hush-eyes server)
 """
 
 import asyncio
@@ -22,7 +23,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops.transform.func_op import op
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import HushEyesTracer
 
 # =============================================================================
 # Code ops với dynamic tags
@@ -64,10 +65,10 @@ def classify(word_count: int):
     }
 
 
-async def example_1_local_tracer():
-    """LocalTracer — Debug offline với SQLite."""
+async def example_1_hush_eyes_tracer():
+    """HushEyesTracer — Gửi traces đến hush-eyes server."""
     print("=" * 50)
-    print("Ví dụ 1: LocalTracer (offline debug)")
+    print("Ví dụ 1: HushEyesTracer (hush-eyes server)")
     print("=" * 50)
 
     with GraphOp(name="text-analyzer") as graph:
@@ -83,11 +84,8 @@ async def example_1_local_tracer():
         )
         START >> analyze >> categorize >> END
 
-    # Tạo LocalTracer với static tags
-    tracer = LocalTracer(
-        name="tutorial-tracer",
-        tags=["tutorial", "tracing-demo"],
-    )
+    # Tạo HushEyesTracer với static tags
+    tracer = HushEyesTracer(tags=["tutorial", "tracing-demo"])
 
     engine = Hush(graph)
     result = await engine.run(
@@ -105,7 +103,8 @@ async def example_1_local_tracer():
     print(f"  User ID:    {state.user_id}")
     print(f"  Exec order: {state.execution_order}")
     print(f"  Tags:       {state.tags}")
-    # Tags sẽ gồm: ['tutorial', 'tracing-demo', 'analyzed', 'short-text', 'category:sentence']
+    # Tags sẽ gồm: ['analyzed', 'short-text', 'category:sentence']
+    print("  → Mở http://localhost:8420 để xem trace")
 
 
 async def example_2_multiple_traces():
@@ -136,7 +135,7 @@ async def example_2_multiple_traces():
     ]
 
     for tc in test_cases:
-        tracer = LocalTracer(name="multi-trace", tags=["batch-test"])
+        tracer = HushEyesTracer(tags=["batch-test"])
         result = await engine.run(
             inputs={"text": tc["text"]},
             tracer=tracer,
@@ -192,7 +191,7 @@ async def example_3_langfuse_tracer():
 
 
 async def main():
-    await example_1_local_tracer()
+    await example_1_hush_eyes_tracer()
     await example_2_multiple_traces()
     await example_3_langfuse_tracer()
 

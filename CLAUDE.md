@@ -10,7 +10,7 @@ Hush-ai/
 ├── hush-providers/     # LLM, embedding, reranking integrations
 ├── hush-telemetry/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
-├── hush-eyes/ # VS Code extension for trace visualization
+├── hush-eyes/ # Standalone Rust server for trace visualization (Axum + SQLite)
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -31,7 +31,7 @@ Hush-ai/
 │  ├── /hush-providers/CLAUDE.md → Provider patterns              │
 │  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
 │  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
-│  └── /hush-eyes/CLAUDE.md → Extension patterns      │
+│  └── /hush-eyes/CLAUDE.md → Rust server patterns     │
 │                                                                  │
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
@@ -95,7 +95,8 @@ When making significant changes:
 | hush-providers/llm/ | 04-llm-integration.md | 03-04 |
 | hush-providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
 | hush-providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
-| hush-telemetry/tracers/ | 09-tracing-observability.md | 06, 08, 09 |
+| hush-core/tracing/ | 09-tracing-observability.md | 06 |
+| hush-telemetry/tracers/ | 09-tracing-observability.md | 08, 09 |
 | Control flow (For/While/Branch) | 05-loops-branches.md | 05 |
 | Error handling | 07-error-handling.md | 10 |
 | Parallel patterns | 08-parallel-execution.md | 13 |
@@ -132,7 +133,7 @@ hush-telemetry (depends on hush-core)
 | New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
 | New tracing backend | hush-telemetry/hush/telemetry/ |
 | Documentation or examples | hush-tutorial/ |
-| VS Code extension features | hush-eyes/ |
+| Trace visualization server | hush-eyes/ |
 
 ## Global Coding Conventions
 
@@ -145,10 +146,11 @@ hush-telemetry (depends on hush-core)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### TypeScript (hush-eyes)
+### Rust (hush-eyes)
 
-- Build with esbuild
-- Follow VS Code extension patterns
+- Build with cargo (`cargo build --release`)
+- Axum HTTP framework, rusqlite for SQLite storage
+- CLI via clap (--host, --port, --db-path)
 
 ### Code Style
 
@@ -173,8 +175,8 @@ cd hush-providers && uv pip install -e ".[dev]" && pytest
 # hush-telemetry
 cd hush-telemetry && uv pip install -e ".[dev]" && pytest
 
-# VS Code extension
-cd hush-eyes && npm install && npm run compile
+# hush-eyes (Rust trace server)
+cd hush-eyes && cargo build --release
 ```
 
 ## Development Workflow

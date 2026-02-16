@@ -333,11 +333,8 @@ llm:gpt-4o:
 
 ```python
 result = await engine.run(inputs={...}, tracer=tracer)
-state = result["$state"]
-
-for op_name, metadata in state.trace_metadata.items():
-    if "cost" in metadata:
-        print(f"{op_name}: ${metadata['cost']:.6f}")
+# Cost is tracked automatically in trace data sent to tracers
+# View costs in hush-eyes web UI or Langfuse dashboard
 ```
 
 ## Multi-turn Chat

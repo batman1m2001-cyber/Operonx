@@ -355,12 +355,12 @@ class TestFlushWorker:
 
 
 # ---------------------------------------------------------------------------
-# Test: Engine integration with tracers= parameter
+# Test: Engine integration with tracer= parameter
 # ---------------------------------------------------------------------------
 class TestEngineWithTracers:
     @pytest.mark.asyncio
     async def test_engine_runs_with_tracers(self):
-        """Engine accepts tracers= and workflow result is correct."""
+        """Engine accepts tracer= and workflow result is correct."""
         with GraphOp(name="engine-wf") as graph:
             node = FuncOp(
                 name="add",
@@ -376,7 +376,7 @@ class TestEngineWithTracers:
         result = await engine.run(
             inputs={"x": 5},
             request_id="eng-001",
-            tracers=[tracer],
+            tracer=tracer,
         )
 
         # Workflow result is correct
@@ -412,7 +412,7 @@ class TestEngineWithTracers:
             result = await engine.run(
                 inputs={"x": i},
                 request_id=f"multi-{i}",
-                tracers=[tracer],
+                tracer=tracer,
             )
             assert result["result"] == i * 2
 
@@ -443,7 +443,7 @@ class TestEngineWithTracers:
             request_id="ids-001",
             user_id="user-abc",
             session_id="sess-xyz",
-            tracers=[tracer],
+            tracer=tracer,
         )
 
         tracer.wait_for_flush(timeout=5)
@@ -488,7 +488,7 @@ class TestTracerTags:
         tracer = CaptureTracer(tags=["prod", "critical"])
         engine = Hush(graph)
 
-        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        await engine.run(inputs={"x": 1}, tracer=tracer)
         tracer.wait_for_flush(timeout=5)
 
         tags = tracer.flush_calls[0]["tags"]
@@ -518,7 +518,7 @@ class TestTracerTags:
         tracer = CaptureTracer()
         engine = Hush(graph)
 
-        await engine.run(inputs={"x": 10}, tracers=[tracer])
+        await engine.run(inputs={"x": 10}, tracer=tracer)
         tracer.wait_for_flush(timeout=5)
 
         tags = tracer.flush_calls[0]["tags"]
@@ -544,7 +544,7 @@ class TestTracerTags:
         tracer = CaptureTracer(tags=["static-tag", "env:test"])
         engine = Hush(graph)
 
-        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        await engine.run(inputs={"x": 1}, tracer=tracer)
         tracer.wait_for_flush(timeout=5)
 
         tags = tracer.flush_calls[0]["tags"]
@@ -572,7 +572,7 @@ class TestTracerTags:
         tracer = CaptureTracer(tags=["shared-tag", "unique-static"])
         engine = Hush(graph)
 
-        await engine.run(inputs={"x": 1}, tracers=[tracer])
+        await engine.run(inputs={"x": 1}, tracer=tracer)
         tracer.wait_for_flush(timeout=5)
 
         tags = tracer.flush_calls[0]["tags"]
@@ -587,7 +587,7 @@ class TestTracerTags:
 class TestTracerNonBlocking:
     @pytest.mark.asyncio
     async def test_tracers_do_not_block_workflow(self):
-        """Verify tracers= path doesn't add significant latency."""
+        """Verify tracer= path doesn't add significant latency."""
         NUM_REQUESTS = 50
 
         def create_graph():
@@ -616,7 +616,7 @@ class TestTracerNonBlocking:
         tracer = CaptureTracer()
         t0 = time.perf_counter()
         for i in range(NUM_REQUESTS):
-            r = await e2.run(inputs={"x": i}, request_id=f"yes-{i}", tracers=[tracer])
+            r = await e2.run(inputs={"x": i}, request_id=f"yes-{i}", tracer=tracer)
             assert r["result"] == i * 2
         time_with = time.perf_counter() - t0
 
@@ -654,7 +654,7 @@ class TestTracerWithIterationNodes:
 
         tracer = CaptureTracer()
         engine = Hush(outer)
-        await engine.run(inputs={}, tracers=[tracer])
+        await engine.run(inputs={}, tracer=tracer)
 
         tracer.wait_for_flush(timeout=5)
 
@@ -690,7 +690,7 @@ class TestHushEyesIntegration:
         result = await engine.run(
             inputs={"x": 21},
             request_id="eyes-integration-001",
-            tracers=[tracer],
+            tracer=tracer,
         )
 
         assert result["result"] == 42

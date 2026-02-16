@@ -7,18 +7,20 @@ Core workflow engine providing ops, state management, tracing, and the execution
 ```
 hush/core/
 ├── engine.py           # Hush engine - compiles and runs workflows
-├── background/         # Background trace process (SQLite writes + flush)
-│   ├── __init__.py     # Re-exports public API
-│   ├── db.py           # SQLite operations with fallback chain
-│   ├── flush.py        # Trace reconstruction and dispatch
-│   ├── process.py      # BackgroundProcess, subprocess fallback, _PipeQueue
-│   └── worker.py       # Worker loop + subprocess entry point
+├── tracing/            # New tracing system (Tracer, TraceCollector, FlushWorker)
+│   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, HushEyesTracer
+│   ├── base.py         # Tracer base class (tags + flush interface)
+│   ├── collector.py    # TraceCollector — reads state directly after execution
+│   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, singleton
+│   ├── hush_eyes.py    # HushEyesTracer — HTTP POST to hush-eyes server
+│   └── models.py       # NodeStructure, TraceRecord, TracePayload dataclasses
 ├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
 ├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
 ├── configs/            # Configuration classes (OpConfig, EdgeConfig)
 ├── registry/           # Resource management (ResourceHub, plugins)
-├── tracers/            # Local tracing (BaseTracer, SQLite storage)
+├── background/         # (legacy — pending removal)
+├── tracers/            # (legacy — pending removal)
 ├── streams/            # Data streaming
 ├── loggings/           # Logging configuration with Rich
 └── utils/              # Utilities (context vars, common helpers)
@@ -158,46 +160,63 @@ def llm_plugin(config: dict) -> LLMConfig:
     return LLMConfig(**config)
 ```
 
-## Tracer System
+## Tracing System
 
-### BaseTracer Interface
+### Overview
 
-Tracers use subprocess-based flushing — traces are written to SQLite during execution,
-then flushed to external services in the background.
+Ops do **not** know about tracing. After `engine.run()` completes, `TraceCollector` reads
+all data directly from state, then `FlushWorker` sends it to tracers in background threads.
+
+```
+Op.run() → stores I/O, timing, cost to state (no tracing awareness)
+engine.run() completes
+  → FlushWorker.submit(tracers, graph, state)     ← returns immediately
+    → ThreadPoolExecutor thread:
+      → TraceCollector.collect(graph, state)        ← CPU-bound, microseconds
+      → tracer.flush(trace_data)                    ← I/O-bound (HTTP, SDK calls)
+```
+
+### Tracer Base Class
 
 ```python
-from hush.core.tracers import BaseTracer, register_tracer
+from hush.core.tracing import Tracer
 
-@register_tracer
-class MyTracer(BaseTracer):
-    def __init__(self, resource=None, tags=None):
+class MyTracer(Tracer):
+    def __init__(self, endpoint: str, tags=None):
         super().__init__(tags=tags)
-        self._resource = resource
+        self._endpoint = endpoint
 
-    def _get_tracer_config(self) -> dict:
-        """Return config for serialization (passed to flush())."""
-        return {"resource": self._resource}
-
-    @staticmethod
-    def flush(flush_data: dict) -> None:
-        """Called by background process. Re-import deps here."""
-        # flush_data contains: ops, tracer_config, tags, etc.
-        config = flush_data["tracer_config"]
-        # Send traces to your platform
-        pass
+    def flush(self, trace_data: dict) -> None:
+        """Called by FlushWorker in a background thread."""
+        # trace_data has: graph_structure, records, tags, request_id, etc.
+        import requests
+        requests.post(self._endpoint, json=trace_data)
 ```
 
-### Registration
-
-`@register_tracer` is a **decorator** that registers tracer classes for subprocess dispatch:
+### Engine API
 
 ```python
-from hush.core.tracers import register_tracer
+from hush.core.tracing import HushEyesTracer
 
-@register_tracer
-class MyTracer(BaseTracer):
-    ...
+engine = Hush(graph)
+result = await engine.run(
+    inputs={"x": 5},
+    tracer=HushEyesTracer(tags=["dev"]),  # single tracer or list
+)
 ```
+
+### Key Components
+
+- **`Tracer`** (`tracing/base.py`): Base class — just `__init__(tags)` + `flush(trace_data)`
+- **`TraceCollector`** (`tracing/collector.py`): Walks graph for static data + state for dynamic data
+- **`FlushWorker`** (`tracing/flush_worker.py`): `ThreadPoolExecutor(4)`, merges tags, calls `flush()`
+- **`HushEyesTracer`** (`tracing/hush_eyes.py`): HTTP POST to `localhost:8420/api/ingest`
+
+### Tags
+
+Two sources, merged at flush time:
+- **Static**: `Tracer(tags=["prod"])` — set at construction
+- **Dynamic**: `return {"result": x, "$tags": ["cache-hit"]}` — from op outputs via `state._tags`
 
 ## Testing Patterns
 

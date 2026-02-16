@@ -104,10 +104,11 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 
 8. [ResourceHub](resources/resource-hub.md) - Resource management
 9. [Plugin System](resources/plugin-system.md) - Plugin architecture
-10. [Tracer System](tracing/tracer-interface.md) - Observability
+10. [Tracer System](tracing/overview.md) - Observability
 11. [Streaming System](streams/streaming-system.md) - Real-time data streaming
-12. [External Backends](tracing/external-backends.md) - Langfuse & OTEL
-13. [VS Code Extension](hush-eyes/overview.md) - Trace visualization
+12. [Trace Data Model](tracing/data-model.md) - Trace data structures
+13. [External Backends](tracing/external-backends.md) - Langfuse & OTEL
+14. [Hush Eyes Server](hush-eyes/overview.md) - Standalone Rust server for trace visualization
 
 ## Quick Reference
 
@@ -133,14 +134,11 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | Reranker provider | [providers/reranker-provider.md](providers/reranker-provider.md) |
 | Provider workflow ops | [providers/workflow-ops.md](providers/workflow-ops.md) |
 | Authentication | [providers/authentication.md](providers/authentication.md) |
-| Tracing system | [tracing/tracer-interface.md](tracing/tracer-interface.md) |
-| SQLite storage | [tracing/local-tracer.md](tracing/local-tracer.md) |
-| Database schema | [tracing/trace-data-model.md](tracing/trace-data-model.md) |
-| Async buffer | [tracing/async-buffer.md](tracing/async-buffer.md) |
+| Tracing system | [tracing/overview.md](tracing/overview.md) |
+| Trace data model | [tracing/data-model.md](tracing/data-model.md) |
 | External tracing backends | [tracing/external-backends.md](tracing/external-backends.md) |
-| VS Code extension | [hush-eyes/overview.md](hush-eyes/overview.md) |
-| Extension database layer | [hush-eyes/database-layer.md](hush-eyes/database-layer.md) |
-| Extension WebView | [hush-eyes/webview-providers.md](hush-eyes/webview-providers.md) |
+| Hush Eyes server | [hush-eyes/overview.md](hush-eyes/overview.md) |
+| Hush Eyes API & storage | [hush-eyes/api-and-storage.md](hush-eyes/api-and-storage.md) |
 
 ### Muốn contribute/extend?
 
@@ -160,7 +158,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | hush-core | Core workflow engine | `engine.py`, `ops/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
 | hush-telemetry | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-telemetry/CLAUDE.md) |
-| hush-eyes | VS Code trace viewer | `src/extension.ts`, `src/database.ts` | [CLAUDE.md](../hush-eyes/CLAUDE.md) |
+| hush-eyes | Standalone Rust server for trace visualization | `src/main.rs`, `src/api/`, `src/db/` | [CLAUDE.md](../hush-eyes/CLAUDE.md) |
 
 ## Folder Structure
 
@@ -199,11 +197,10 @@ architecture/
 │   └── config-loading.md       ← YAML parsing & env interpolation
 │
 ├── tracing/                    ← Observability internals
-│   ├── tracer-interface.md     ← BaseTracer abstract design
-│   ├── local-tracer.md         ← SQLite implementation
-│   ├── trace-data-model.md     ← Database schema
-│   ├── async-buffer.md         ← AsyncTraceBuffer design
-│   └── external-backends.md    ← Langfuse & OTEL integration
+│   ├── overview.md             ← Tracer, TraceCollector, FlushWorker
+│   ├── data-model.md           ← Trace data structures
+│   ├── external-backends.md    ← Langfuse & OTEL integration
+│   └── refactor-plan.md        ← Migration notes
 │
 ├── providers/                  ← Provider system
 │   ├── llm-abstraction.md      ← LLM provider interface
@@ -213,10 +210,9 @@ architecture/
 │   ├── authentication.md       ← Keycloak auth provider
 │   └── adding-new-provider.md  ← Guide thêm provider mới
 │
-├── hush-eyes/                  ← VS Code trace viewer extension
-│   ├── overview.md             ← Extension architecture
-│   ├── database-layer.md       ← sql.js, data models, queries
-│   └── webview-providers.md    ← WebView providers, UI, message protocol
+├── hush-eyes/                  ← Standalone Rust server for trace visualization
+│   ├── overview.md             ← Server architecture, CLI, module structure
+│   └── api-and-storage.md      ← REST API endpoints, SQLite schema, data models
 │
 └── contributing/               ← Contribution guides
     ├── development-setup.md    ← Setup dev environment
@@ -267,14 +263,13 @@ outputs={"result": PARENT["output"]}  # Push 1 hop
 
 ### Non-blocking Tracing
 
-Background process cho zero-latency impact:
+FlushWorker chạy trong ThreadPoolExecutor, không block main thread:
 
 ```python
-# Main thread: non-blocking enqueue
-bg.write_trace(data)  # Returns immediately
+# After engine.run() completes:
+FlushWorker.submit(tracers, graph, state)  # Returns immediately
 
-# Background thread: actual write
-def _worker_loop():
-    msg = queue.get()
-    self._insert_to_sqlite(msg)
+# In background thread:
+trace_data = TraceCollector.collect(graph, state)
+tracer.flush(trace_data)  # HTTP POST, SDK calls, etc.
 ```

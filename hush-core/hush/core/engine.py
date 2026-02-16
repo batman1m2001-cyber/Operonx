@@ -22,7 +22,7 @@ Example:
 """
 
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
 from hush.core.ops.graph.graph_op import GraphOp
@@ -98,7 +98,7 @@ class Hush:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracers: Optional[List["Tracer"]] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -110,7 +110,9 @@ class Hush:
             user_id: Optional user identifier (auto-generated if not provided)
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
-            tracers: Optional list of tracers (e.g., [HushEyesTracer()])
+            tracer: Optional tracer or list of tracers for observability.
+                    Accepts a single Tracer instance or a list of Tracer instances.
+                    Examples: tracer=HushEyesTracer(), tracer=[t1, t2]
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -120,6 +122,14 @@ class Hush:
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
+
+        # Normalize tracer to list
+        if tracer is None:
+            tracers: List["Tracer"] = []
+        elif isinstance(tracer, list):
+            tracers = tracer
+        else:
+            tracers = [tracer]
 
         LOGGER.info(
             "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]",

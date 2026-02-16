@@ -23,7 +23,6 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops import Each, ForOp, WhileOp, op
-from hush.core.tracers import BaseTracer
 
 # =============================================================================
 # Helper: tạo OTELConfig trỏ đến Langfuse
@@ -279,11 +278,6 @@ async def main():
     await example_1_otel_basic()
     await example_2_otel_while()
     example_3_raw_otel()
-
-    print()
-    print("Flushing traces...")
-    BaseTracer.shutdown_executor()
-    print("Done!")
 
 
 if __name__ == "__main__":

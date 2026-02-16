@@ -24,7 +24,7 @@ class HushEyesTracer(Tracer):
 
         tracer = HushEyesTracer(tags=["dev", "testing"])
         engine = Hush(graph)
-        result = await engine.run({"x": 5}, tracers=[tracer])
+        result = await engine.run({"x": 5}, tracer=tracer)
         # Open http://localhost:8420 to view traces
     """
 

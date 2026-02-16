@@ -74,7 +74,7 @@ hush-tutorial/
 
 ### Production
 
-12. [Tracing](docs/09-tracing-observability.md) — LocalTracer, Langfuse, OpenTelemetry
+12. [Tracing](docs/09-tracing-observability.md) — HushEyesTracer, Langfuse, OpenTelemetry
 
 ### Reference
 

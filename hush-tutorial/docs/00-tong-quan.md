@@ -33,7 +33,7 @@ asyncio.run(main())
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    hush-telemetry                    │
-│         (LocalTracer, Langfuse, OpenTelemetry)           │
+│       (HushEyesTracer, Langfuse, OpenTelemetry)          │
 ├─────────────────────────────────────────────────────────┤
 │                     hush-providers                       │
 │    (LLMOp, PromptOp, EmbeddingOp, RerankOp)      │
@@ -105,7 +105,7 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Tracing & Observability](09-tracing-observability.md) | `06_tracing.py`, `08_langfuse_tracing.py`, `09_otel_tracing.py` | LocalTracer, Langfuse, OTEL, tags, cost tracking |
+| [Tracing & Observability](09-tracing-observability.md) | `06_tracing.py`, `08_langfuse_tracing.py`, `09_otel_tracing.py` | HushEyesTracer, Langfuse, OTEL, tags, cost tracking |
 
 ## Chạy ví dụ
 

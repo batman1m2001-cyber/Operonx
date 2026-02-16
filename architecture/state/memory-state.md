@@ -14,12 +14,9 @@ class MemoryState:
         "schema",           # StateSchema
         "_cells",           # List[Cell] - storage
         "_execution_order", # List[Dict] - execution tracking
-        "_trace_metadata",  # Dict - trace data
         "_user_id",
         "_session_id",
         "_request_id",
-        "_trace_store",     # Optional SQLite store
-        "_execution_count",
         "_tags"             # Dynamic tags
     )
 ```
@@ -33,7 +30,6 @@ state = MemoryState(
     user_id="user_123",
     session_id="session_456",
     request_id="req_789",
-    trace_store=None  # Or SQLite TraceStore
 )
 ```
 
@@ -118,6 +114,8 @@ state.set_by_index(idx, value, ctx)
 
 ### record_execution()
 
+Records op execution order for `TraceCollector`. After `engine.run()` completes, `TraceCollector` reads `_execution_order` to determine which ops ran and in what sequence.
+
 ```python
 def record_execution(self, op_name, parent, context_id):
     """Track op execution order."""
@@ -127,36 +125,6 @@ def record_execution(self, op_name, parent, context_id):
             "parent": parent,
             "context_id": context_id
         })
-```
-
-### record_trace()
-
-```python
-def record_trace(
-    self,
-    op_name: str,
-    context_id: Optional[str],
-    name: str,
-    input_vars: List[str],
-    output_vars: List[str],
-    parent_name: Optional[str] = None,
-    start_time: Any = None,
-    end_time: Any = None,
-    duration_ms: Optional[float] = None,
-    contain_generation: bool = False,
-    model: Optional[str] = None,
-    usage: Optional[Dict[str, int]] = None,
-    cost: Optional[float] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-):
-    """Store trace data."""
-    if self._trace_store is not None:
-        # Write directly to SQLite
-        self._trace_store.insert_op_trace(...)
-    else:
-        # Store in memory
-        key = f"{op_name}:{context_id}" if context_id else op_name
-        self._trace_metadata[key] = {...}
 ```
 
 ## Dynamic Tags
@@ -180,29 +148,11 @@ state.user_id
 state.session_id
 state.request_id
 
-# Execution data (legacy mode)
+# Execution data
 state.execution_order  # List of execution records
-state.trace_metadata   # Dict of trace data
 
 # Tags
 state.tags  # List of dynamic tags
-```
-
-## Tracing Modes
-
-### Legacy Mode (in-memory)
-
-```python
-state = MemoryState(schema, trace_store=None)
-# Traces stored in _execution_order and _trace_metadata
-```
-
-### SQLite Mode (incremental)
-
-```python
-state = MemoryState(schema, trace_store=trace_store)
-# Traces written directly to SQLite
-# Reduces memory, provides crash resilience
 ```
 
 ## Debug
