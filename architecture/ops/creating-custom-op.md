@@ -28,8 +28,17 @@ my_op = process_data(
 `@op` tự động:
 - Parse input schema từ function signature
 - Parse output schema từ return dict
-- Wrap sync function thành async
 - Set description từ docstring
+
+Sync functions chạy trực tiếp trên event loop (zero overhead). Dùng `@op(executor="thread")` cho blocking I/O:
+
+```python
+@op(executor="thread")
+def fetch_data(url: str):
+    """Chạy trong thread pool — không block event loop."""
+    import requests
+    return {"body": requests.get(url).text}
+```
 
 ### Return Dict Format
 

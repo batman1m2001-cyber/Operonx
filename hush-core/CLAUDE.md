@@ -65,12 +65,31 @@ class MyOp(BaseOp):
 
 3. Export in `ops/__init__.py`
 
+### Executor (Thread Pool for Sync Ops)
+
+By default, sync `op.core` runs directly on the event loop (no overhead). For blocking I/O or CPU-bound sync ops, use `executor="thread"` to run in a `ThreadPoolExecutor`:
+
+```python
+@op(executor="thread")
+def heavy_io(url: str):
+    """Runs in a thread pool — won't block the event loop."""
+    import requests
+    resp = requests.get(url)
+    return {"body": resp.text}
+
+# Or override at call time:
+step = my_sync_op(x=PARENT["x"], executor="thread")
+```
+
+Valid values: `None` (default, event loop), `"thread"` (ThreadPoolExecutor).
+Async ops always run on the event loop regardless of `executor` setting.
+
 ### Op Lifecycle
 
 1. **Definition**: Op created inside `with GraphOp(...) as graph:` context
 2. **Registration**: Auto-registered to parent graph via `get_current()`
 3. **Compilation**: `StateSchema` resolves all Refs and builds index
-4. **Execution**: Engine calls `op.run(state, context_id)` → `op.core(**inputs)`
+4. **Execution**: Engine calls `op.run(state, context_id)` → dispatches based on sync/async and `executor`
 
 ### Edge Operators
 
@@ -332,4 +351,4 @@ FuncOp(
 2. **Input/output overlap**: Same key cannot be in both inputs and outputs
 3. **Soft edges**: Use `>>~` or `>` for branch outputs to avoid deadlocks
 4. **PARENT resolution**: PARENT resolves at build time, not definition time
-5. **Async core**: If `op.core` is async, engine awaits it automatically
+5. **Sync ops on event loop**: Sync `op.core` runs directly on the event loop by default (zero overhead). Use `executor="thread"` for blocking ops
