@@ -9,7 +9,6 @@ Module này export các tiện ích chính:
     - raise_error: Raise error với message
     - extract_condition_variables: Trích xuất biến từ condition string
     - fake_chunk_from: Tạo fake chunk response
-    - ensure_async: Đảm bảo function tương thích async
     - YamlModel: Base class cho model đọc/ghi YAML
 """
 
@@ -17,7 +16,6 @@ from .auto_name import auto_name, register_skip, unique_name
 from .bimap import BiMap, BiMapReverse
 from .common import (
     Param,
-    ensure_async,
     extract_condition_variables,
     fake_chunk_from,
     raise_error,
@@ -39,6 +37,5 @@ __all__ = [
     "raise_error",
     "extract_condition_variables",
     "fake_chunk_from",
-    "ensure_async",
     "YamlModel",
 ]

@@ -299,6 +299,31 @@ with GraphOp(name="main") as main:
 | Workflow chính | `with GraphOp(name="main") as graph:` |
 | Chỉ chạy 1 function | `@op` |
 
+## Executor — Thread Pool cho Sync Ops
+
+Mặc định, sync ops chạy trực tiếp trên event loop (zero overhead). Nếu op thực hiện blocking I/O (HTTP requests, file I/O, ...), dùng `executor="thread"` để chạy trong thread pool:
+
+```python
+@op(executor="thread")
+def fetch_data(url: str):
+    """Chạy trong ThreadPoolExecutor — không block event loop."""
+    import requests
+    return {"body": requests.get(url).text}
+```
+
+Override tại call time:
+
+```python
+step = my_sync_op(x=PARENT["x"], executor="thread")
+```
+
+| `executor` | Hành vi |
+|------------|---------|
+| `None` (mặc định) | Chạy trực tiếp trên event loop |
+| `"thread"` | Chạy trong `ThreadPoolExecutor` via `asyncio.to_thread()` |
+
+**Lưu ý**: Async ops luôn chạy trên event loop bất kể `executor` setting.
+
 ## Tổng kết
 
 | Concept | Mô tả |
@@ -313,6 +338,7 @@ with GraphOp(name="main") as main:
 | `>> ~step` | Soft edge — chờ bất kỳ một |
 | `ResourceHub` | Quản lý providers qua resources.yaml |
 | `Hush(graph)` | Engine chạy workflow |
+| `executor="thread"` | Thread pool cho blocking sync ops |
 
 ## Tiếp theo
 

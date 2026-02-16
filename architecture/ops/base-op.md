@@ -27,6 +27,7 @@ class BaseOp(ABC):
         'father',       # Parent GraphOp
         'contain_generation',  # Có chứa LLM generation không
         'enabled',      # Op có được thực thi hay không (default True)
+        'executor',     # None (event loop) hoặc "thread" (ThreadPoolExecutor)
     ]
 ```
 
@@ -47,7 +48,8 @@ def __init__(
     end: bool = False,
     contain_generation: bool = False,
     verbose: bool = True,
-    enabled: bool = True  # Có thực thi op hay không
+    enabled: bool = True,  # Có thực thi op hay không
+    executor: str = None,  # None (event loop) hoặc "thread" (ThreadPoolExecutor)
 ):
 ```
 
@@ -184,7 +186,10 @@ Flow:
 1. Record execution với state
 2. **Skip nếu `enabled=False`** (return {} ngay)
 3. Lấy inputs từ state qua `get_inputs()`
-4. Thực thi `self.core(**inputs)`
+4. Dispatch execution dựa trên sync/async và `executor`:
+   - **Async core**: `await self.core(**inputs)` (luôn trên event loop)
+   - **Sync + `executor="thread"`**: `await asyncio.to_thread(self.core, **inputs)`
+   - **Sync + default (`None`)**: `self.core(**inputs)` (trực tiếp trên event loop, zero overhead)
 5. Lưu outputs vào state qua `store_result()`
 6. Log và record trace metadata
 
