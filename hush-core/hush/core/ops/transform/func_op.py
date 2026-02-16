@@ -10,48 +10,67 @@ from hush.core.exceptions import CodeError
 from hush.core.loggings import LOGGER
 from hush.core.ops.base import _BASE_INIT_KEYS, BaseOp, split_shorthand_kwargs
 from hush.core.utils.auto_name import register_skip
-from hush.core.utils.common import Param, ensure_async
+from hush.core.utils.common import Param
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def op(func):
+def op(func=None, *, executor=None):
     """Decorator that turns a plain function into a FuncOp factory.
 
-    The decorated function can be called with keyword arguments to create
-    a ``FuncOp`` instance. Auto-naming is supported.
-
-    Example::
+    Can be used bare or with keyword arguments::
 
         @op
         def double(x: int):
             return {"result": x * 2}
 
-        step = double(x=PARENT["x"])   # creates FuncOp, step.name == "step"
+        @op(executor="thread")
+        def fetch(url: str):
+            return {"data": requests.get(url).json()}
+
+        @op(executor="process")
+        def heavy(data: list):
+            return {"result": expensive_compute(data)}
+
+    Args:
+        executor: How to run sync functions. ``None`` (default) runs on
+            the event loop, ``"thread"`` uses a thread pool, ``"process"``
+            uses a process pool (bypasses the GIL).
     """
-    # Warn at decoration time if function params collide with reserved op keywords
-    sig = inspect.signature(func)
-    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
-    if collisions:
-        LOGGER.warning(
-            "@op function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
-            "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
-            "as op constructor args instead of function inputs. Consider renaming them.",
-            func.__name__,
-            sorted(collisions),
-            sorted(_BASE_INIT_KEYS),
-            func.__name__,
-        )
 
-    @wraps(func)
-    def wrapper(**kwargs):
-        mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
-        return FuncOp(code_fn=func, _mappings=mappings or None, **init_kwargs)
+    def decorator(fn):
+        sig = inspect.signature(fn)
+        collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
+        if collisions:
+            LOGGER.warning(
+                "@op function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
+                "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
+                "as op constructor args instead of function inputs. Consider renaming them.",
+                fn.__name__,
+                sorted(collisions),
+                sorted(_BASE_INIT_KEYS),
+                fn.__name__,
+            )
 
-    register_skip(wrapper)
-    wrapper.__wrapped__ = func
-    return wrapper
+        @wraps(fn)
+        def wrapper(**kwargs):
+            mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
+            # Call-time executor= overrides decoration-time default
+            op_executor = init_kwargs.pop("executor", executor)
+            return FuncOp(
+                code_fn=fn, executor=op_executor, _mappings=mappings or None, **init_kwargs
+            )
+
+        register_skip(wrapper)
+        wrapper.__wrapped__ = fn
+        return wrapper
+
+    if func is not None:
+        # @op without parentheses
+        return decorator(func)
+    # @op(executor="thread") with parentheses
+    return decorator
 
 
 TYPE_MAP = {
@@ -305,7 +324,7 @@ class FuncOp(BaseOp):
         self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
 
         self.code_fn = code_fn
-        self.core = ensure_async(code_fn) if code_fn else None
+        self.core = code_fn
 
         # Lấy source code
         try:
