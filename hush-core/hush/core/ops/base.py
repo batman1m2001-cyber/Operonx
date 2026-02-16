@@ -738,9 +738,7 @@ class BaseOp(ABC):
             if asyncio.iscoroutinefunction(self.core):
                 _outputs = await self.core(**_inputs)
             else:
-                _outputs = self.core(**_inputs)
-                # Yield control after synchronous CPU-bound operations
-                await asyncio.sleep(0)
+                _outputs = await asyncio.to_thread(self.core, **_inputs)
 
             self.store_result(state, _outputs, context_id)
 
