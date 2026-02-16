@@ -1,9 +1,6 @@
 """BaseOp — base class for all ops in a workflow."""
 
 import asyncio
-import atexit
-import concurrent.futures
-import functools
 import traceback
 import uuid
 from abc import ABC
@@ -20,35 +17,6 @@ from hush.core.utils.context import get_current
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
-
-# Lazy-initialized process pool for @op(executor="process")
-_process_pool: concurrent.futures.ProcessPoolExecutor | None = None
-
-
-def _get_process_pool() -> concurrent.futures.ProcessPoolExecutor:
-    """Return a module-level ProcessPoolExecutor (created on first use)."""
-    global _process_pool
-    if _process_pool is None:
-        _process_pool = concurrent.futures.ProcessPoolExecutor()
-        atexit.register(_process_pool.shutdown, wait=False)
-    return _process_pool
-
-
-def _process_invoke(module_name: str, qualname: str, inputs: dict) -> dict:
-    """Invoke a function by module path in a child process.
-
-    Resolves @op-decorated functions via ``__wrapped__`` so the original
-    user function runs even though the module-level name points to the wrapper.
-    """
-    import importlib
-
-    mod = importlib.import_module(module_name)
-    obj = mod
-    for part in qualname.split("."):
-        obj = getattr(obj, part)
-    # @op wrapper → get the original function
-    fn = getattr(obj, "__wrapped__", obj)
-    return fn(**inputs)
 
 
 class SoftEdge:
@@ -255,7 +223,7 @@ class BaseOp(ABC):
         "executor",
     ]
 
-    _VALID_EXECUTORS = (None, "thread", "process")
+    _VALID_EXECUTORS = (None, "thread")
 
     def __init__(
         self,
@@ -781,20 +749,8 @@ class BaseOp(ABC):
                 _outputs = await self.core(**_inputs)
             elif self.executor == "thread":
                 _outputs = await asyncio.to_thread(self.core, **_inputs)
-            elif self.executor == "process":
-                loop = asyncio.get_running_loop()
-                _outputs = await loop.run_in_executor(
-                    _get_process_pool(),
-                    functools.partial(
-                        _process_invoke,
-                        self.core.__module__,
-                        self.core.__qualname__,
-                        _inputs,
-                    ),
-                )
             else:
                 _outputs = self.core(**_inputs)
-                await asyncio.sleep(0)
 
             self.store_result(state, _outputs, context_id)
 

@@ -1,7 +1,5 @@
-"""Tests for @op(executor=...) — thread and process pool execution."""
+"""Tests for @op(executor=...) — thread pool execution."""
 
-import asyncio
-import os
 import threading
 
 import pytest
@@ -24,12 +22,6 @@ def default_sync(x: int):
 def thread_sync(x: int):
     """Sync op, thread executor."""
     return {"result": x * 3, "tid": threading.current_thread().ident}
-
-
-@op(executor="process")
-def process_sync(x: int):
-    """Sync op, process executor."""
-    return {"result": x * 5, "pid": os.getpid()}
 
 
 # ============================================================
@@ -81,28 +73,6 @@ class TestThreadExecutor:
         assert result["tid"] != main_tid
 
 
-class TestProcessExecutor:
-    """executor="process": sync ops run in a process pool (bypasses GIL)."""
-
-    async def test_process_correct_result(self):
-        with GraphOp(name="g") as graph:
-            step = process_sync(x=PARENT["x"])
-            START >> step >> END
-
-        result = await Hush(graph).run(inputs={"x": 7})
-        assert result["result"] == 35
-
-    async def test_process_different_pid(self):
-        main_pid = os.getpid()
-
-        with GraphOp(name="g") as graph:
-            step = process_sync(x=PARENT["x"])
-            START >> step >> END
-
-        result = await Hush(graph).run(inputs={"x": 1})
-        assert result["pid"] != main_pid
-
-
 class TestAsyncOpIgnoresExecutor:
     """Async ops always run on event loop regardless of executor setting."""
 
@@ -149,7 +119,7 @@ class TestInvalidExecutor:
 
 
 class TestParallelExecutors:
-    """Thread/process executors don't block each other in parallel graphs."""
+    """Thread executors don't block each other in parallel graphs."""
 
     async def test_parallel_thread_ops(self):
         @op(executor="thread")

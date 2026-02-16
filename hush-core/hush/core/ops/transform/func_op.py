@@ -29,14 +29,9 @@ def op(func=None, *, executor=None):
         def fetch(url: str):
             return {"data": requests.get(url).json()}
 
-        @op(executor="process")
-        def heavy(data: list):
-            return {"result": expensive_compute(data)}
-
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
-            the event loop, ``"thread"`` uses a thread pool, ``"process"``
-            uses a process pool (bypasses the GIL).
+            the event loop, ``"thread"`` uses a thread pool.
     """
 
     def decorator(fn):
