@@ -446,7 +446,7 @@ class TestBackgroundPerformance:
             await engine_with_tracer.run(
                 inputs={"x": 0},
                 request_id=f"bench-warmup-yes-{i}",
-                tracers=tracers,
+                tracer=tracers,
             )
 
         latencies_with_tracer = []
@@ -455,7 +455,7 @@ class TestBackgroundPerformance:
             result = await engine_with_tracer.run(
                 inputs={"x": 0},
                 request_id=f"bench-yes-{i}",
-                tracers=tracers,
+                tracer=tracers,
             )
             latencies_with_tracer.append((time.perf_counter() - t0) * 1000)
             assert result["x"] == 66

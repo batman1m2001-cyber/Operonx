@@ -26,7 +26,7 @@ hush-tutorial/
 │   ├── 03_llm_chat.py            # Requires API key
 │   ├── 04_llm_advanced.py        # Requires API key
 │   ├── 05_loops_and_branches.py
-│   ├── 06_tracing.py             # LocalTracer
+│   ├── 06_tracing.py             # HushEyesTracer
 │   ├── 07_embeddings_and_rag.py
 │   ├── 08_langfuse_tracing.py    # External tracer
 │   ├── 09_otel_tracing.py

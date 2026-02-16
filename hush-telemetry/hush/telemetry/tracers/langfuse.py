@@ -27,7 +27,7 @@ class LangfuseTracer(Tracer):
         tracer = LangfuseTracer(resource="langfuse:default", tags=["prod"])
 
         # Use with workflow engine
-        result = await engine.run(inputs={...}, tracers=[tracer])
+        result = await engine.run(inputs={...}, tracer=tracer)
         ```
     """
 

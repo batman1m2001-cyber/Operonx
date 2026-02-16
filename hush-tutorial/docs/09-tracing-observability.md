@@ -1,6 +1,6 @@
 # Tracing và Observability
 
-Debug và monitor workflows với LocalTracer, Langfuse, và OpenTelemetry.
+Debug và monitor workflows với HushEyesTracer, Langfuse, và OpenTelemetry.
 
 > **Ví dụ chạy được**: `examples/06_tracing.py`, `examples/08_langfuse_tracing.py`, `examples/09_otel_tracing.py`
 
@@ -13,29 +13,36 @@ Debug và monitor workflows với LocalTracer, Langfuse, và OpenTelemetry.
 ## Kiến trúc
 
 ```
-┌─────────────────────────────────────────────┐
-│                 Hush Engine                   │
-│  ┌─────────────────────────────────────┐     │
-│  │              Tracer                  │     │
-│  │  • LocalTracer  (SQLite, built-in)   │     │
-│  │  • LangfuseTracer (cloud)            │     │
-│  │  • OTelTracer (OpenTelemetry)        │     │
-│  └─────────────────────────────────────┘     │
-└─────────────────────────────────────────────┘
+Op.run() → stores I/O, timing, cost to state (ops không biết về tracing)
+engine.run() completes
+  → FlushWorker.submit(tracers, graph, state)     ← returns immediately
+    → ThreadPoolExecutor thread:
+      → TraceCollector.collect(graph, state)        ← reads state directly
+      → tracer.flush(trace_data)                    ← I/O-bound (HTTP, SDK calls)
 ```
 
-## LocalTracer (Built-in)
+Tracers nhận `trace_data` dict chứa:
+- `graph_structure`: Static metadata từ compiled graph (op_name, op_type, parent)
+- `records`: Dynamic execution data từ state (I/O, timing, model, usage, cost)
 
-Lưu traces vào SQLite — zero dependencies, chạy offline.
+## HushEyesTracer (Built-in)
+
+Gửi traces đến **hush-eyes** server — standalone Rust server với web UI.
+
+### Khởi chạy server
+
+```bash
+cd hush-eyes && cargo run
+# Mở http://localhost:8420 để xem traces
+```
+
+### Sử dụng
 
 ```python
 from hush.core import Hush
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import HushEyesTracer
 
-tracer = LocalTracer(
-    name="my-app",
-    tags=["dev", "testing"]
-)
+tracer = HushEyesTracer(tags=["dev", "testing"])
 
 engine = Hush(graph)
 result = await engine.run(
@@ -44,7 +51,17 @@ result = await engine.run(
     user_id="user-123",
     session_id="session-456"
 )
-# Traces lưu tại ~/.hush/traces.db
+# Mở http://localhost:8420 để xem trace
+```
+
+### Cấu hình server
+
+```bash
+# Default: localhost:8420, DB tại ~/.hush/hush-eyes.db
+cargo run
+
+# Custom host/port/db
+cargo run -- --host 0.0.0.0 --port 9000 --db-path /tmp/traces.db
 ```
 
 ## LangfuseTracer (Cloud)
@@ -113,6 +130,24 @@ result = await engine.run(inputs={...}, tracer=tracer)
 
 Xem ví dụ đầy đủ tại `examples/09_otel_tracing.py`.
 
+## Multiple Tracers
+
+Gửi traces đến nhiều backends cùng lúc:
+
+```python
+from hush.core.tracing import HushEyesTracer
+from hush.telemetry import LangfuseTracer
+
+result = await engine.run(
+    inputs={...},
+    tracer=[
+        HushEyesTracer(tags=["dev"]),
+        LangfuseTracer(resource="langfuse:default", tags=["prod"]),
+    ],
+)
+# Mỗi tracer nhận cùng trace_data, flush trong thread riêng
+```
+
 ## Trace Data
 
 Mỗi op execution được ghi lại:
@@ -120,15 +155,15 @@ Mỗi op execution được ghi lại:
 | Field | Mô tả |
 |-------|-------|
 | `op_name` | Tên đầy đủ của op |
+| `context_id` | Context ID (cho iteration ops) |
 | `start_time` | Thời gian bắt đầu |
 | `end_time` | Thời gian kết thúc |
 | `duration_ms` | Thời gian chạy (ms) |
-| `input_data` | Input của op |
-| `output_data` | Output của op |
+| `inputs` | Input của op |
+| `outputs` | Output của op |
 | `model` | Tên model (cho LLM ops) |
 | `usage` | Token usage |
 | `cost` | Chi phí USD |
-| `error` | Lỗi nếu có |
 
 ## Tags
 
@@ -137,7 +172,7 @@ Mỗi op execution được ghi lại:
 Set khi tạo tracer:
 
 ```python
-tracer = LocalTracer(tags=["production", "v2.0", "customer-a"])
+tracer = HushEyesTracer(tags=["production", "v2.0", "customer-a"])
 ```
 
 ### Dynamic tags
@@ -151,6 +186,13 @@ def process(data):
         return {"result": result, "$tags": ["cache-hit"]}
     return {"result": result}
 ```
+
+### Tag merging
+
+FlushWorker merge tags cho mỗi tracer:
+1. Static tags từ tracer (set khi tạo)
+2. Dynamic tags từ state (thu thập qua `$tags` trong op outputs)
+3. Deduplicated — không có trùng lặp
 
 ## Request Correlation
 
@@ -173,11 +215,11 @@ result = await engine.run(
 import os
 
 if os.getenv("ENABLE_TRACING") == "true":
-    tracer = LangfuseTracer(resource="langfuse:default")
+    tracers = [LangfuseTracer(resource="langfuse:default")]
 else:
-    tracer = None
+    tracers = []
 
-result = await engine.run(inputs={...}, tracer=tracer)
+result = await engine.run(inputs={...}, tracer=tracers)
 ```
 
 ### Sampling
@@ -186,7 +228,7 @@ result = await engine.run(inputs={...}, tracer=tracer)
 import random
 
 # Trace 10% of requests
-tracer = LangfuseTracer(resource="langfuse:default") if random.random() < 0.1 else None
+tracers = [LangfuseTracer(resource="langfuse:default")] if random.random() < 0.1 else []
 ```
 
 ## Cost Tracking
@@ -208,7 +250,7 @@ Cost được track tự động trong traces. Với LangfuseTracer, cost hiển
 
 | Aspect | Development | Production |
 |--------|-------------|------------|
-| Tracing | LocalTracer | LangfuseTracer / OTelTracer |
+| Tracing | HushEyesTracer | LangfuseTracer / OTelTracer |
 | Logging | DEBUG | INFO / WARNING |
 | Error handling | Basic | Comprehensive + fallback |
 | Cost tracking | Optional | Required |

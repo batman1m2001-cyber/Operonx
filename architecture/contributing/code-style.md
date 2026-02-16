@@ -28,14 +28,14 @@ ignore = ["E501"]  # Line too long - handled by formatter
 class GraphOp:
     pass
 
-class BaseTracer:
+class Tracer:
     pass
 
 # Functions/methods: snake_case
 def get_current():
     pass
 
-def insert_op_trace():
+def collect_trace():
     pass
 
 # Constants: UPPER_SNAKE_CASE

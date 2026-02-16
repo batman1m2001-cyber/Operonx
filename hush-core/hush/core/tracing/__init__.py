@@ -4,7 +4,7 @@ Usage:
     from hush.core.tracing import HushEyesTracer
 
     engine = Hush(graph)
-    result = await engine.run({"x": 5}, tracers=[HushEyesTracer()])
+    result = await engine.run({"x": 5}, tracer=HushEyesTracer())
 """
 
 from hush.core.tracing.base import Tracer

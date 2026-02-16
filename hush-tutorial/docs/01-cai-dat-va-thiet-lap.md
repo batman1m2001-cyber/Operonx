@@ -252,7 +252,7 @@ cp env.example .env
 | Biến | Bắt buộc? | Mặc định | Mô tả |
 |------|-----------|----------|-------|
 | `HUSH_CONFIG` | Tuỳ chọn | `./resources.yaml` | Đường dẫn đến file `resources.yaml`. Set nếu chạy code từ thư mục khác nơi đặt file |
-| `HUSH_TRACES_DB` | Tuỳ chọn | `~/.hush/traces.db` | Đường dẫn SQLite lưu traces (LocalTracer, background flush) |
+| `HUSH_TRACES_DB` | Tuỳ chọn | `~/.hush/hush-eyes.db` | Đường dẫn SQLite lưu traces (hush-eyes server) |
 | `LOG_LEVEL` | Tuỳ chọn | `WARNING` | Mức log: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_USE_RICH` | Tuỳ chọn | `auto` | Bật rich formatting cho logs |
 
@@ -398,9 +398,9 @@ Hush tự động lưu traces (lịch sử chạy workflow) vào SQLite database
 | Đường dẫn DB | `~/.hush/traces.db` | Set `HUSH_TRACES_DB` trong `.env` |
 
 Traces được dùng bởi:
-- **LocalTracer** — lưu traces cho debug local
-- **Background process** — buffer traces trước khi flush đến Langfuse/OTEL
-- **VS Code Trace Viewer** — đọc DB để hiển thị traces
+- **hush-eyes server** — standalone Rust server với web UI (http://localhost:8420)
+- **HushEyesTracer** — gửi traces từ engine đến hush-eyes server
+- **FlushWorker** — flush traces đến backends (hush-eyes, Langfuse, OTEL) trong background threads
 
 Không cần tạo DB thủ công — Hush tự tạo khi chạy workflow đầu tiên.
 
