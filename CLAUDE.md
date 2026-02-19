@@ -165,15 +165,17 @@ When a core API doesn't work as expected (e.g., `op >> END` not auto-forwarding 
 
 ## Build & Test Commands
 
+**IMPORTANT:** Always use `uv run` to execute Python tools (pytest, ruff, etc.) — never call them directly.
+
 ```bash
 # hush-core
-cd hush-core && uv pip install -e ".[dev]" && pytest
+cd hush-core && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-providers
-cd hush-providers && uv pip install -e ".[dev]" && pytest
+cd hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-telemetry
-cd hush-telemetry && uv pip install -e ".[dev]" && pytest
+cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-eyes (Rust trace server)
 cd hush-eyes && cargo build --release

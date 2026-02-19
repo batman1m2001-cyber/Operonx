@@ -24,7 +24,7 @@ class TestTildeSoftEdge:
         graph.build()
 
         # Check edges
-        a_to_b = next((e for e in graph._edges if e.from_node == "a" and e.to_node == "b"), None)
+        a_to_b = next((e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None)
         assert a_to_b is not None, "Edge a->b should exist"
         assert a_to_b.soft == True, "Edge a->b should be soft"
 
@@ -39,7 +39,7 @@ class TestTildeSoftEdge:
         graph.build()
 
         # Check edges
-        a_to_b = next((e for e in graph._edges if e.from_node == "a" and e.to_node == "b"), None)
+        a_to_b = next((e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None)
         assert a_to_b is not None, "Edge a->b should exist"
         assert a_to_b.soft == False, "Edge a->b should be hard"
 
@@ -57,7 +57,7 @@ class TestTildeSoftEdge:
         graph.build()
 
         # Check each edge
-        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
+        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges.values()}
 
         assert edges.get(("a", "b")) == True, "a->b should be soft"
         assert edges.get(("b", "c")) == False, "b->c should be hard"
@@ -79,7 +79,7 @@ class TestTildeSoftEdge:
 
         graph.build()
 
-        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
+        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges.values()}
 
         assert edges.get(("branch", "case1")) == True, "branch->case1 should be soft"
         assert edges.get(("branch", "case2")) == True, "branch->case2 should be soft"
@@ -105,7 +105,7 @@ class TestTildeSoftEdge:
 
         graph.build()
 
-        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges}
+        edges = {(e.from_node, e.to_node): e.soft for e in graph._edges.values()}
 
         assert edges.get(("a", "b")) == True, "a->b should be soft"
         assert edges.get(("b", "c")) == True, "b->c should be soft"
