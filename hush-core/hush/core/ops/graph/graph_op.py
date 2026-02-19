@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from functools import wraps
 from time import perf_counter
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
@@ -24,11 +24,8 @@ from hush.core.ops.base import (
 )
 from hush.core.states import MemoryState, Ref
 from hush.core.utils.auto_name import register_skip
-from hush.core.utils.bimap import BiMap
 from hush.core.utils.common import Param
 from hush.core.utils.context import _current_graph
-
-OpFlowType = Literal["MERGE", "FORK", "BLOOM", "BRANCH", "NORMAL", "OTHER"]
 
 
 # =============================================================================
@@ -173,9 +170,7 @@ class GraphOp(BaseOp):
         "nexts",
         "ready_count",
         "has_soft_preds",  # Set of ops that have soft predecessors
-        "flowtype_map",
         "_edges",
-        "_edges_lookup",
         "_is_building",
         "_compiled_adj",
     ]
@@ -188,13 +183,11 @@ class GraphOp(BaseOp):
         self._token = None
         self._is_building = True
         self._ops: Dict[str, BaseOp] = {}
-        self._edges = []
-        self._edges_lookup = {}
+        self._edges = {}
         self.entries = []
         self.exits = []
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
-        self.flowtype_map = BiMap[str, OpFlowType]()
         self.has_soft_preds = set()  # Ops with soft predecessors
         self._compiled_adj = {}
 
@@ -269,55 +262,6 @@ class GraphOp(BaseOp):
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)
 
-    def _build_flow_type(self):
-        """Determine the flow type of each op based on its connectivity pattern."""
-        LOGGER.debug("Graph [highlight]%s[/highlight]: determining flow types...", self.name)
-        self.flowtype_map = BiMap[str, OpFlowType]()
-
-        # Detect orphan ops (no connections at all)
-        orphan_ops = []
-
-        for name, child in self._ops.items():
-            prev_count = len(self.prevs[name])
-            next_count = len(self.nexts[name])
-
-            # Check orphan op (not start/end, not inner graph, and no connections)
-            if (
-                prev_count == 0
-                and next_count == 0
-                and not child.start
-                and not child.end
-                and name != BaseOp.INNER_PROCESS
-            ):
-                orphan_ops.append(name)
-
-            flow_type: OpFlowType = "OTHER"
-
-            if child.type == "branch":
-                flow_type = "BRANCH"
-                for target in child.candidates:
-                    if target in self._ops and len(self.nexts[target]) == 1:
-                        self.flowtype_map[target] = "NORMAL"
-
-            elif prev_count > 1 and next_count > 1:
-                flow_type = "BLOOM"
-            elif prev_count > 1 and next_count == 1:
-                flow_type = "MERGE"
-            elif prev_count == 1 and next_count > 1:
-                flow_type = "FORK"
-            elif prev_count == 1 and next_count == 1:
-                flow_type = "NORMAL"
-
-            self.flowtype_map[name] = flow_type
-
-        # Warn about orphan ops
-        if orphan_ops:
-            LOGGER.warning(
-                "Graph [highlight]%s[/highlight]: detected orphan ops [muted](no edges)[/muted]: %s. These ops will never be executed.",
-                self.full_name,
-                orphan_ops,
-            )
-
     def build(self):
         """Build graph by building child ops first, then this graph."""
         for child in self._ops.values():
@@ -325,7 +269,6 @@ class GraphOp(BaseOp):
                 child.build()
 
         self._setup_schema()
-        self._build_flow_type()
         self._setup_endpoints()
 
         # Compute ready_count:
@@ -338,7 +281,7 @@ class GraphOp(BaseOp):
             hard_pred_count = 0
             has_soft = False
             for pred in self.prevs[name]:
-                edge = self._edges_lookup.get((pred, name))
+                edge = self._edges.get((pred, name))
                 if edge and edge.soft:
                     has_soft = True
                 elif edge and not edge.soft:
@@ -361,7 +304,7 @@ class GraphOp(BaseOp):
         for name in self._ops:
             adj = []
             for successor in self.nexts[name]:
-                edge = self._edges_lookup.get((name, successor))
+                edge = self._edges.get((name, successor))
                 is_soft = bool(edge and edge.soft)
                 adj.append((successor, is_soft))
             self._compiled_adj[name] = adj
@@ -407,7 +350,7 @@ class GraphOp(BaseOp):
         result = ValidationResult(graph_name=self.name)
 
         # Run all validations
-        result.issues.extend(self._validate_branch_targets_detailed())
+        result.issues.extend(self._validate_branch_targets())
         result.issues.extend(self._validate_cycles())
         result.issues.extend(self._validate_reachability())
         result.issues.extend(self._validate_refs())
@@ -418,16 +361,7 @@ class GraphOp(BaseOp):
 
         return result
 
-    def _validate_branch_targets(self):
-        """Validate all branch targets exist (called during build, raises on error)."""
-        issues = self._validate_branch_targets_detailed()
-        errors = [i for i in issues if i.level == ValidationLevel.ERROR]
-
-        if errors:
-            result = ValidationResult(graph_name=self.name, issues=errors)
-            raise GraphValidationError(result)
-
-    def _validate_branch_targets_detailed(self) -> List[ValidationIssue]:
+    def _validate_branch_targets(self) -> List[ValidationIssue]:
         """Check all branch op targets exist in graph."""
         issues = []
         available = sorted(self._ops.keys())
@@ -468,7 +402,7 @@ class GraphOp(BaseOp):
 
         # Build adjacency list excluding lookback edges
         adj: Dict[str, List[str]] = defaultdict(list)
-        for edge in self._edges:
+        for edge in self._edges.values():
             if edge.type != "lookback":
                 adj[edge.from_node].append(edge.to_node)
 
@@ -520,11 +454,33 @@ class GraphOp(BaseOp):
         return issues
 
     def _validate_reachability(self) -> List[ValidationIssue]:
-        """Check for unreachable ops and dead-ends."""
+        """Check for orphan ops, unreachable ops, and dead-ends."""
         issues = []
 
+        # Detect orphan ops (no connections at all)
+        for name, child in self._ops.items():
+            if (
+                not self.prevs[name]
+                and not self.nexts[name]
+                and not child.start
+                and not child.end
+                and name != BaseOp.INNER_PROCESS
+            ):
+                issues.append(
+                    ValidationIssue(
+                        level=ValidationLevel.WARNING,
+                        category="Orphan op",
+                        message=f"Op '{name}' has no edges and will never be executed",
+                        op_name=name,
+                        suggestions=[
+                            f"Connect START >> {name} or connect from another op",
+                            "Remove this op if it's not needed",
+                        ],
+                    )
+                )
+
         if not self.entries or not self.exits:
-            return issues  # Can't validate without endpoints
+            return issues  # Can't validate reachability without endpoints
 
         # Forward reachability from entries
         reachable_from_start: Set[str] = set()
@@ -726,9 +682,8 @@ class GraphOp(BaseOp):
             raise ValueError(f"Target op '{target}' not found")
 
         new_edge = EdgeConfig(from_node=source, to_node=target, type=type, soft=soft)
-        if (source, target) not in self._edges_lookup:
-            self._edges.append(new_edge)
-            self._edges_lookup[source, target] = new_edge
+        if (source, target) not in self._edges:
+            self._edges[source, target] = new_edge
             self.nexts[source].append(target)
             self.prevs[target].append(source)
 
@@ -738,7 +693,7 @@ class GraphOp(BaseOp):
         LOGGER.debug("%sGraph: %s", prefix, self.name)
         LOGGER.debug("%sOps: %s", prefix, list(self._ops.keys()))
         LOGGER.debug("%sEdges:", prefix)
-        for edge in self._edges:
+        for edge in self._edges.values():
             soft_marker = " (soft)" if edge.soft else ""
             LOGGER.debug(
                 "%s  %s -> %s: %s%s", prefix, edge.from_node, edge.to_node, edge.type, soft_marker
@@ -835,29 +790,21 @@ class GraphOp(BaseOp):
                         newly_ready.append(next_op)
                 return newly_ready
 
-            # Start entry ops — inline sync leaves, create tasks for async/graph
-            for entry in self.entries:
-                entry_op = nodes[entry]
-                if _can_inline(entry_op):
-                    await entry_op.run(state, context_id, parent_context)
-                    # Process inline completions without yielding
-                    inline_queue = _activate_successors(entry)
-                    while inline_queue:
-                        nxt = inline_queue.pop(0)
-                        nxt_op = nodes[nxt]
-                        if _can_inline(nxt_op):
-                            await nxt_op.run(state, context_id, parent_context)
-                            inline_queue.extend(_activate_successors(nxt))
-                        else:
-                            task = asyncio.create_task(
-                                name=nxt, coro=nxt_op.run(state, context_id, parent_context)
-                            )
-                            active_tasks[nxt] = task
-                else:
-                    task = asyncio.create_task(
-                        name=entry, coro=entry_op.run(state, context_id, parent_context)
-                    )
-                    active_tasks[entry] = task
+            async def _schedule_ops(names: list):
+                """Run ready ops: inline sync leaves, create tasks for async/graph."""
+                queue = list(names)
+                while queue:
+                    name = queue.pop(0)
+                    op_obj = nodes[name]
+                    if _can_inline(op_obj):
+                        await op_obj.run(state, context_id, parent_context)
+                        queue.extend(_activate_successors(name))
+                    else:
+                        active_tasks[name] = asyncio.create_task(
+                            name=name, coro=op_obj.run(state, context_id, parent_context)
+                        )
+
+            await _schedule_ops(self.entries)
 
             while active_tasks:
                 done_tasks, _ = await asyncio.wait(
@@ -867,20 +814,7 @@ class GraphOp(BaseOp):
                 for task in done_tasks:
                     op_name = task.get_name()
                     active_tasks.pop(op_name)
-
-                    # Process completions — inline sync leaves without yielding
-                    inline_queue = _activate_successors(op_name)
-                    while inline_queue:
-                        nxt = inline_queue.pop(0)
-                        nxt_op = nodes[nxt]
-                        if _can_inline(nxt_op):
-                            await nxt_op.run(state, context_id, parent_context)
-                            inline_queue.extend(_activate_successors(nxt))
-                        else:
-                            task = asyncio.create_task(
-                                name=nxt, coro=nxt_op.run(state, context_id, parent_context)
-                            )
-                            active_tasks[nxt] = task
+                    await _schedule_ops(_activate_successors(op_name))
 
             _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
             self.store_result(state, _outputs, context_id)

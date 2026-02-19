@@ -142,7 +142,7 @@ class BaseIterationOp(GraphOp):
 
             nodes = self._ops
             nexts = self.nexts
-            edges_lookup = self._edges_lookup
+            edges_lookup = self._edges
 
             for task in done_tasks:
                 op_name = task.get_name()
