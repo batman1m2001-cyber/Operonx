@@ -168,11 +168,12 @@ class GraphOp(BaseOp):
         "exits",
         "prevs",
         "nexts",
-        "ready_count",
+        "initial_ready_count",
         "has_soft_preds",  # Set of ops that have soft predecessors
         "_edges",
         "_is_building",
         "_compiled_adj",
+        "_compiled_graph_rs",  # Optional CompiledGraph from hush-runtime
     ]
 
     type: OpType = "graph"
@@ -190,6 +191,7 @@ class GraphOp(BaseOp):
         self.nexts = defaultdict(list)
         self.has_soft_preds = set()  # Ops with soft predecessors
         self._compiled_adj = {}
+        self._compiled_graph_rs = None
 
     def __enter__(self):
         """Enter context manager mode."""
@@ -271,11 +273,11 @@ class GraphOp(BaseOp):
         self._setup_schema()
         self._setup_endpoints()
 
-        # Compute ready_count:
+        # Compute initial_ready_count:
         # - Hard edge (>>) counts individually
         # - Soft edges (>) to the same target count as 1 (wait for ANY soft pred to complete)
-        # Example: A >> D, B > D, C > D => ready_count[D] = 2 (1 hard + 1 soft group)
-        self.ready_count = {}
+        # Example: A >> D, B > D, C > D => initial_ready_count[D] = 2 (1 hard + 1 soft group)
+        self.initial_ready_count = {}
         self.has_soft_preds = set()
         for name in self._ops:
             hard_pred_count = 0
@@ -293,7 +295,7 @@ class GraphOp(BaseOp):
             if has_soft:
                 self.has_soft_preds.add(name)
                 hard_pred_count += 1
-            self.ready_count[name] = hard_pred_count
+            self.initial_ready_count[name] = hard_pred_count
 
         # Run full validation (errors will raise, warnings will be logged)
         result = self.validate()
@@ -324,6 +326,198 @@ class GraphOp(BaseOp):
     def _post_build(self):
         """Hook for subclasses to run after build. Override in subclasses."""
         pass
+
+    def _build_compiled_graph_rs(self):
+        """Attempt to build a CompiledGraph from this graph's compiled topology.
+
+        Sets self._compiled_graph_rs to the CompiledGraph instance, or None if
+        hush-runtime is not installed. Also recursively builds for child GraphOps.
+        """
+        try:
+            from hush_runtime import CompiledGraph
+
+            self._compiled_graph_rs = CompiledGraph.from_graph(self)
+        except ImportError:
+            self._compiled_graph_rs = None
+            return
+        except Exception as e:
+            LOGGER.warning("Failed to build CompiledGraph for %s: %s", self.name, e)
+            self._compiled_graph_rs = None
+            return
+
+        # Recursively build for child GraphOps
+        for child in self._ops.values():
+            if isinstance(child, GraphOp):
+                child._build_compiled_graph_rs()
+
+    async def _run_python_scheduled(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str],
+        parent_context: Optional[str],
+    ) -> Dict[str, Any]:
+        """Original Python scheduling loop (default mode)."""
+        active_tasks: Dict[str, asyncio.Task] = {}
+
+        ready_count: Dict[str, int] = self.initial_ready_count.copy()
+        soft_satisfied: set = set()
+
+        nodes = self._ops
+        compiled_adj = self._compiled_adj
+
+        def _can_inline(op_obj: BaseOp) -> bool:
+            return (
+                not isinstance(op_obj, GraphOp)
+                and not asyncio.iscoroutinefunction(getattr(op_obj, "core", None))
+                and getattr(op_obj, "executor", None) is None
+            )
+
+        def _get_successors(op_name: str) -> list:
+            current_op = nodes[op_name]
+            if current_op.type == "branch":
+                branch_target = current_op.get_target(state, context_id)
+                if branch_target == END.name:
+                    return []
+                for tgt, soft in compiled_adj[op_name]:
+                    if tgt == branch_target:
+                        return [(tgt, soft)]
+                available_ops = sorted(self.initial_ready_count.keys())
+                raise KeyError(
+                    f"\n"
+                    f"Op '{branch_target}' not found in graph '{self.name}'.\n"
+                    f"\n"
+                    f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
+                    f"  Available ops: {available_ops}\n"
+                    f"\n"
+                    f'  This usually means the target string in if_(..., "{branch_target}") '
+                    f"doesn't match any op's actual name.\n"
+                    f"  Check that your branch targets match the 'name' parameter of the target ops."
+                )
+            return compiled_adj[op_name]
+
+        def _activate_successors(op_name: str) -> list:
+            newly_ready = []
+            for next_op, is_soft in _get_successors(op_name):
+                if is_soft:
+                    if next_op in soft_satisfied:
+                        continue
+                    soft_satisfied.add(next_op)
+                ready_count[next_op] -= 1
+                if ready_count[next_op] == 0:
+                    newly_ready.append(next_op)
+            return newly_ready
+
+        async def _schedule_ops(names: list):
+            queue = list(names)
+            while queue:
+                name = queue.pop(0)
+                op_obj = nodes[name]
+                if _can_inline(op_obj):
+                    await op_obj.run(state, context_id, parent_context)
+                    queue.extend(_activate_successors(name))
+                else:
+                    active_tasks[name] = asyncio.create_task(
+                        name=name, coro=op_obj.run(state, context_id, parent_context)
+                    )
+
+        await _schedule_ops(self.entries)
+
+        while active_tasks:
+            done_tasks, _ = await asyncio.wait(
+                active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done_tasks:
+                op_name = task.get_name()
+                active_tasks.pop(op_name)
+                await _schedule_ops(_activate_successors(op_name))
+
+        return self.get_outputs(state, context_id=context_id, parent_context=parent_context)
+
+    async def _run_rust_scheduled(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str],
+        parent_context: Optional[str],
+    ) -> Dict[str, Any]:
+        """Scheduling loop driven by CompiledGraph.
+
+        Phase 5: Three execution tiers:
+        1. Fast path: all ops are sync Rust → run_sync() (single FFI call)
+        2. Hybrid: try inline Rust for each op → fallback to Python BaseOp.run()
+        3. Legacy: all ops via Python BaseOp.run() (non-RustMemoryState)
+        """
+        sched = self._compiled_graph_rs
+        nodes = self._ops
+
+        # Detect RustMemoryState for inline execution support
+        try:
+            from hush_runtime import RustMemoryState
+
+            _rust_state = isinstance(state, RustMemoryState)
+        except ImportError:
+            _rust_state = False
+
+        # Fast path: all-sync-Rust graph with RustMemoryState
+        if _rust_state and sched.all_rust_executable():
+            sched.run_sync(state, context_id, parent_context)
+            return self.get_outputs(state, context_id=context_id, parent_context=parent_context)
+
+        # Hybrid / legacy path
+        run_state = sched.new_run_state()
+        active_tasks: Dict[str, asyncio.Task] = {}
+
+        def _activate(op_name: str):
+            """Activate successors — with Rust branch resolution if possible."""
+            if _rust_state:
+                return sched.activate_successors_with_state(
+                    op_name, run_state, state, context_id
+                )
+            # Fallback: Python branch resolution
+            branch_target = None
+            if sched.is_branch_op(op_name):
+                branch_target = nodes[op_name].get_target(state, context_id)
+                if branch_target == END.name:
+                    return ([], True)
+            return (sched.activate_successors(op_name, run_state, branch_target), False)
+
+        async def _schedule_ops(entries: list):
+            queue = list(entries)
+            while queue:
+                name, can_inline = queue.pop(0)
+                if can_inline and _rust_state:
+                    # Phase 5: Try full inline Rust execution
+                    ok = sched.try_execute_inline(name, state, context_id, parent_context)
+                    if ok:
+                        newly_ready, is_end = _activate(name)
+                        if not is_end:
+                            queue.extend(newly_ready)
+                        continue
+                # Fallback to Python BaseOp.run()
+                op_obj = nodes[name]
+                if can_inline:
+                    await op_obj.run(state, context_id, parent_context)
+                    newly_ready, is_end = _activate(name)
+                    if not is_end:
+                        queue.extend(newly_ready)
+                else:
+                    active_tasks[name] = asyncio.create_task(
+                        name=name, coro=op_obj.run(state, context_id, parent_context)
+                    )
+
+        await _schedule_ops(sched.get_entries())
+
+        while active_tasks:
+            done_tasks, _ = await asyncio.wait(
+                active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done_tasks:
+                op_name = task.get_name()
+                active_tasks.pop(op_name)
+                newly_ready, is_end = _activate(op_name)
+                if not is_end:
+                    await _schedule_ops(newly_ready)
+
+        return self.get_outputs(state, context_id=context_id, parent_context=parent_context)
 
     # =========================================================================
     # Validation Methods
@@ -698,7 +892,7 @@ class GraphOp(BaseOp):
             LOGGER.debug(
                 "%s  %s -> %s: %s%s", prefix, edge.from_node, edge.to_node, edge.type, soft_marker
             )
-        LOGGER.debug("%sReady count: %s", prefix, dict(self.ready_count))
+        LOGGER.debug("%sReady count: %s", prefix, dict(self.initial_ready_count))
 
         for child in self._ops.values():
             if isinstance(child, GraphOp):
@@ -735,89 +929,14 @@ class GraphOp(BaseOp):
                     f"Graph {self.name} not built. Must call graph.build() before execution!!"
                 )
 
-            active_tasks: Dict[str, asyncio.Task] = {}
-
-            ready_count: Dict[str, int] = self.ready_count.copy()
-            # Track ops that have received soft edge completion (count once only)
-            soft_satisfied: set = set()
-
-            # Cache dict lookups for performance
-            nodes = self._ops
-            compiled_adj = self._compiled_adj
-
-            def _can_inline(op_obj: BaseOp) -> bool:
-                """Sync leaf op — no await in run(), safe to call directly."""
-                return (
-                    not isinstance(op_obj, GraphOp)
-                    and not asyncio.iscoroutinefunction(getattr(op_obj, "core", None))
-                    and getattr(op_obj, "executor", None) is None
-                )
-
-            def _get_successors(op_name: str) -> list:
-                """Get successor targets for a completed op (handles branch)."""
-                current_op = nodes[op_name]
-                if current_op.type == "branch":
-                    branch_target = current_op.get_target(state, context_id)
-                    if branch_target == END.name:
-                        return []
-                    for tgt, soft in compiled_adj[op_name]:
-                        if tgt == branch_target:
-                            return [(tgt, soft)]
-                    available_ops = sorted(ready_count.keys())
-                    raise KeyError(
-                        f"\n"
-                        f"Op '{branch_target}' not found in graph '{self.name}'.\n"
-                        f"\n"
-                        f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
-                        f"  Available ops: {available_ops}\n"
-                        f"\n"
-                        f'  This usually means the target string in if_(..., "{branch_target}") '
-                        f"doesn't match any op's actual name.\n"
-                        f"  Check that your branch targets match the 'name' parameter of the target ops."
-                    )
-                return compiled_adj[op_name]
-
-            def _activate_successors(op_name: str) -> list:
-                """Decrement ready counts and return newly-ready op names."""
-                newly_ready = []
-                for next_op, is_soft in _get_successors(op_name):
-                    if is_soft:
-                        if next_op in soft_satisfied:
-                            continue
-                        soft_satisfied.add(next_op)
-                    ready_count[next_op] -= 1
-                    if ready_count[next_op] == 0:
-                        newly_ready.append(next_op)
-                return newly_ready
-
-            async def _schedule_ops(names: list):
-                """Run ready ops: inline sync leaves, create tasks for async/graph."""
-                queue = list(names)
-                while queue:
-                    name = queue.pop(0)
-                    op_obj = nodes[name]
-                    if _can_inline(op_obj):
-                        await op_obj.run(state, context_id, parent_context)
-                        queue.extend(_activate_successors(name))
-                    else:
-                        active_tasks[name] = asyncio.create_task(
-                            name=name, coro=op_obj.run(state, context_id, parent_context)
-                        )
-
-            await _schedule_ops(self.entries)
-
-            while active_tasks:
-                done_tasks, _ = await asyncio.wait(
-                    active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
-                )
-
-                for task in done_tasks:
-                    op_name = task.get_name()
-                    active_tasks.pop(op_name)
-                    await _schedule_ops(_activate_successors(op_name))
-
-            _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
-            self.store_result(state, _outputs, context_id)
+            # Rust-accelerated scheduling
+            if self._compiled_graph_rs is not None:
+                _outputs = await self._run_rust_scheduled(state, context_id, parent_context)
+                self.store_result(state, _outputs, context_id)
+            else:
+                # Python scheduling (default)
+                _outputs = await self._run_python_scheduled(state, context_id, parent_context)
+                self.store_result(state, _outputs, context_id)
 
         except Exception:
             error_msg = traceback.format_exc()

@@ -68,23 +68,45 @@ class Hush:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema"]
+    __slots__ = ["graph", "name", "_schema", "_mode"]
 
-    def __init__(self, graph: GraphOp):
+    def __init__(self, graph: GraphOp, mode: str = "python"):
         """Initialize Hush engine with a GraphOp.
 
         Args:
             graph: The GraphOp workflow to execute.
                    Must be defined (context manager exited).
+            mode: Execution backend — "python" (default) or "rust".
+                  Rust mode uses hush-runtime for high-performance scheduling.
+                  Falls back to Python if hush-runtime is not installed.
         """
+        if mode not in ("python", "rust"):
+            raise ValueError(f"Invalid mode: {mode!r}. Must be 'python' or 'rust'.")
+
+        self._mode = mode
         self.graph = graph
         self.name = graph.name
 
         # Build graph and create schema immediately
         self.graph.build()
+
+        # Initialize Rust compiled graph if requested
+        if mode == "rust":
+            self.graph._build_compiled_graph_rs()
+            if self.graph._compiled_graph_rs is None:
+                LOGGER.warning(
+                    "hush-runtime not installed. Falling back to Python mode for [highlight]%s[/highlight]",
+                    self.name,
+                )
+                self._mode = "python"
+
         self._schema = StateSchema(self.graph)
 
-        LOGGER.debug("Hush engine initialized for workflow [highlight]%s[/highlight]", self.name)
+        LOGGER.debug(
+            "Hush engine initialized for workflow [highlight]%s[/highlight] (mode=%s)",
+            self.name,
+            self._mode,
+        )
 
     @property
     def schema(self) -> StateSchema:
@@ -138,12 +160,15 @@ class Hush:
         )
 
         # Create fresh state for this run
-        state = self._schema.create_state(
-            inputs=inputs,
-            user_id=user_id,
-            session_id=session_id,
-            request_id=request_id,
-        )
+        if self._mode == "rust":
+            state = self._create_rust_state(inputs, user_id, session_id, request_id)
+        else:
+            state = self._schema.create_state(
+                inputs=inputs,
+                user_id=user_id,
+                session_id=session_id,
+                request_id=request_id,
+            )
 
         # Execute the graph
         result = await self.graph.run(state)
@@ -167,6 +192,29 @@ class Hush:
         result["$state"] = state
 
         return result
+
+    def _create_rust_state(self, inputs, user_id, session_id, request_id):
+        """Create a Rust-backed MemoryState for high-performance state access."""
+        try:
+            from hush_runtime import RustMemoryState
+
+            return RustMemoryState.from_schema(
+                self._schema,
+                inputs=inputs,
+                user_id=user_id,
+                session_id=session_id,
+                request_id=request_id,
+            )
+        except (ImportError, Exception) as e:
+            LOGGER.warning(
+                "Failed to create RustMemoryState, falling back to Python: %s", e
+            )
+            return self._schema.create_state(
+                inputs=inputs,
+                user_id=user_id,
+                session_id=session_id,
+                request_id=request_id,
+            )
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.
