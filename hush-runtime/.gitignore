@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# maturin
+*.so
+*.pyd
+*.dll

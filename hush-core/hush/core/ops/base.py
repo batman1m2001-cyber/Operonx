@@ -715,6 +715,17 @@ class BaseOp(ABC):
                 format_log_data(outputs),
             )
 
+    def _try_rust_execute(self, rust_name: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Try to execute via Rust registry. Returns None if not available."""
+        try:
+            from hush_runtime import RustFuncRegistry
+
+            if RustFuncRegistry is None or not RustFuncRegistry.has(rust_name):
+                return None
+            return RustFuncRegistry.execute(rust_name, inputs)
+        except (ImportError, Exception):
+            return None
+
     async def run(
         self,
         state: "MemoryState",
@@ -745,7 +756,14 @@ class BaseOp(ABC):
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
 
-            if asyncio.iscoroutinefunction(self.core):
+            # Check for Rust-native op execution (Phase 3)
+            _rust_name = getattr(self.core, "_rust_op_name", None)
+            if _rust_name:
+                _outputs = self._try_rust_execute(_rust_name, _inputs)
+
+            if _rust_name and _outputs is not None:
+                pass  # Rust execution succeeded
+            elif asyncio.iscoroutinefunction(self.core):
                 _outputs = await self.core(**_inputs)
             elif self.executor == "thread":
                 _outputs = await asyncio.to_thread(self.core, **_inputs)

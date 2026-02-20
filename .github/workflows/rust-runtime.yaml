@@ -1,0 +1,104 @@
+name: Rust Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['hush-runtime/**']
+  pull_request:
+    branches: [main]
+    paths: ['hush-runtime/**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            hush-runtime/target
+          key: rust-${{ runner.os }}-${{ hashFiles('hush-runtime/Cargo.lock') }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Run Rust tests
+        working-directory: hush-runtime
+        run: cargo test
+
+      - name: Build native module (release)
+        working-directory: hush-runtime
+        run: |
+          uv sync --all-extras
+          uv run maturin develop --release
+
+      - name: Run Python tests
+        working-directory: hush-runtime
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Run scheduler benchmark
+        working-directory: hush-runtime
+        run: uv run python benches/bench_scheduler.py
+
+  # Verify existing hush-core tests still pass with Rust runtime available
+  integration:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            hush-runtime/target
+          key: rust-${{ runner.os }}-${{ hashFiles('hush-runtime/Cargo.lock') }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Build hush-runtime
+        working-directory: hush-runtime
+        run: |
+          uv sync --all-extras
+          uv run maturin develop --release
+
+      - name: Install hush-core
+        working-directory: hush-core
+        run: uv sync --all-extras
+
+      - name: Run hush-core tests (verifies no regression)
+        working-directory: hush-core
+        run: uv run pytest --tb=short -q -m "not integration"

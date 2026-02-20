@@ -1,0 +1,25 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "hush-runtime"
+version = "0.1.0"
+description = "High-performance Rust backend for the Hush workflow engine"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+bench = ["hush-core"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "hush_runtime._native"
+
+[tool.uv.sources]
+hush-core = { path = "../hush-core", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

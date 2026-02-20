@@ -869,8 +869,8 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_count: D should have ready_count = 1 (soft edges count as 1 group)
-        assert graph.ready_count["d"] == 1, (
-            f"Expected ready_count[d]=1, got {graph.ready_count['d']}"
+        assert graph.initial_ready_count["d"] == 1, (
+            f"Expected ready_count[d]=1, got {graph.initial_ready_count['d']}"
         )
         assert "d" in graph.has_soft_preds, "d should be in has_soft_preds"
 
@@ -936,8 +936,8 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_count: D should have ready_count = 2 (1 hard + 1 soft group)
-        assert graph.ready_count["d"] == 2, (
-            f"Expected ready_count[d]=2, got {graph.ready_count['d']}"
+        assert graph.initial_ready_count["d"] == 2, (
+            f"Expected ready_count[d]=2, got {graph.initial_ready_count['d']}"
         )
         assert "d" in graph.has_soft_preds, "d should be in has_soft_preds"
 
@@ -980,7 +980,7 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # D has ready_count = 2 (both hard edges counted)
-        assert graph.ready_count["d"] == 2
+        assert graph.initial_ready_count["d"] == 2
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
@@ -1024,8 +1024,8 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # D has ready_count = 2 (both hard edges counted)
-        assert graph.ready_count["d"] == 2, (
-            f"Expected ready_count[d]=2, got {graph.ready_count['d']}"
+        assert graph.initial_ready_count["d"] == 2, (
+            f"Expected ready_count[d]=2, got {graph.initial_ready_count['d']}"
         )
         assert "d" not in graph.has_soft_preds, "d should NOT be in has_soft_preds (no soft edges)"
 
@@ -1107,11 +1107,11 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_counts
-        assert graph.ready_count["e"] == 2, (
-            f"E should have ready_count=2 (1 hard + 1 soft group), got {graph.ready_count['e']}"
+        assert graph.initial_ready_count["e"] == 2, (
+            f"E should have ready_count=2 (1 hard + 1 soft group), got {graph.initial_ready_count['e']}"
         )
-        assert graph.ready_count["f"] == 2, (
-            f"F should have ready_count=2 (2 hard), got {graph.ready_count['f']}"
+        assert graph.initial_ready_count["f"] == 2, (
+            f"F should have ready_count=2 (2 hard), got {graph.initial_ready_count['f']}"
         )
         assert "e" in graph.has_soft_preds, "E should be in has_soft_preds"
         assert "f" not in graph.has_soft_preds, "F should NOT be in has_soft_preds"
@@ -1171,7 +1171,7 @@ class TestSoftEdgeBehavior:
 
         graph.build()
 
-        assert graph.ready_count["d"] == 2  # 1 hard + 1 soft group
+        assert graph.initial_ready_count["d"] == 2  # 1 hard + 1 soft group
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
