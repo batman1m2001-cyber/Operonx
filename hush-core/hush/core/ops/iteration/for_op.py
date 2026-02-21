@@ -140,6 +140,12 @@ class ForOp(BaseIterationOp):
         inputs, init_kwargs = split_iter_kwargs(kwargs)
         return cls(inputs=inputs, **init_kwargs)
 
+    def serialize(self) -> dict:
+        """Serialize ForOp for Rust backend."""
+        base = super().serialize()
+        base["fail_fast"] = self._fail_fast
+        return base
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""

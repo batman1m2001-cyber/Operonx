@@ -228,6 +228,55 @@ except Exception as e:
     # Op vẫn "hoàn thành", successors có thể chạy
 ```
 
+## Rust Mode Scheduling (rush-core)
+
+Rush-core (`rush-core/src/ops/graph/graph_op.rs`) implements the same scheduling algorithm in Rust with two key differences:
+
+### 1. Synchronous Execution
+
+Rust mode runs everything synchronously (no asyncio). The queue-based scheduler pops ops one at a time:
+
+```rust
+while !queue.is_empty() {
+    let batch: Vec<String> = queue.drain(..).collect();
+    // Execute batch, then activate successors
+}
+```
+
+### 2. Batch-Aware Parallel Execution
+
+When multiple ops are ready simultaneously, the scheduler checks if parallel execution would benefit:
+
+```
+batch = [A, B, C]  (all ready_count == 0)
+│
+├── All pure Python ops?  → Sequential (one at a time, GIL blocks parallelism)
+│
+└── Any rust_op present?  → Parallel via rayon thread pool
+                            py.allow_threads(|| {
+                              batch.par_iter().for_each(|op| {
+                                Python::with_gil(|py| execute(py, op))
+                              })
+                            })
+```
+
+**Heuristic**: `batch.len() > 1 AND any op has rust_op`. Pure Python batches execute sequentially to avoid `allow_threads`/`with_gil` overhead.
+
+### 3. Concurrent State (DashMap)
+
+Rust mode uses `DashMap<(String, String, String), PyObject>` for the state store, enabling lock-free concurrent reads/writes from rayon worker threads. Tags and execution order use `Mutex<Vec>`.
+
+All state mutation methods take `&self` (not `&mut self`), allowing shared access across threads.
+
+### Performance
+
+Rust mode achieves 2-6x speedup over Python mode for typical workflows (sync ops). The speedup comes from:
+- No asyncio overhead (no task creation, no event loop yields)
+- Rust scheduling loop (no Python interpreter overhead)
+- Pre-compiled config (no Python dict lookups per op)
+
+See `rush-core/CLAUDE.md` for detailed benchmark results.
+
 ## Iteration Op Scheduling
 
 Iteration ops tự quản lý scheduling cho child graph:

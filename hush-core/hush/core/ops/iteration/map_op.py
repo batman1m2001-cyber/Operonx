@@ -162,6 +162,13 @@ class MapOp(BaseIterationOp):
         inputs, init_kwargs = split_iter_kwargs(kwargs)
         return cls(inputs=inputs, **init_kwargs)
 
+    def serialize(self) -> dict:
+        """Serialize MapOp for Rust backend."""
+        base = super().serialize()
+        base["max_concurrency"] = self._max_concurrency
+        base["fail_fast"] = self._fail_fast
+        return base
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""

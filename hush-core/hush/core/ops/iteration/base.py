@@ -124,95 +124,6 @@ class BaseIterationOp(GraphOp):
     async def _run_graph(
         self, state: "MemoryState", context_id: str, parent_context: str
     ) -> Dict[str, Any]:
-        """Run child nodes with parent_context.
-
-        Uses Rust scheduler when available, otherwise falls back to Python.
-        """
-        if self._compiled_graph_rs is not None:
-            return await self._run_graph_rust(state, context_id, parent_context)
-        return await self._run_graph_python(state, context_id, parent_context)
-
-    async def _run_graph_rust(
-        self, state: "MemoryState", context_id: str, parent_context: str
-    ) -> Dict[str, Any]:
-        """Run child nodes using CompiledGraph.
-
-        Phase 5: Try inline Rust execution for Rust-native ops.
-        """
-        sched = self._compiled_graph_rs
-        nodes = self._ops
-
-        # Detect RustMemoryState
-        try:
-            from hush_runtime import RustMemoryState
-
-            _rust_state = isinstance(state, RustMemoryState)
-        except ImportError:
-            _rust_state = False
-
-        # Fast path: all-sync-Rust graph
-        if _rust_state and sched.all_rust_executable():
-            sched.run_sync(state, context_id, parent_context)
-            return self.get_outputs(state, context_id, parent_context)
-
-        # Hybrid path
-        run_state = sched.new_run_state()
-        active_tasks: Dict[str, asyncio.Task] = {}
-
-        def _activate(op_name: str):
-            if _rust_state:
-                return sched.activate_successors_with_state(
-                    op_name, run_state, state, context_id
-                )
-            branch_target = None
-            if sched.is_branch_op(op_name):
-                from hush.core.ops.base import END
-
-                branch_target = nodes[op_name].get_target(state, context_id)
-                if branch_target == END.name:
-                    return ([], True)
-            return (sched.activate_successors(op_name, run_state, branch_target), False)
-
-        async def _schedule_ops(entries: list):
-            queue = list(entries)
-            while queue:
-                name, can_inline = queue.pop(0)
-                if can_inline and _rust_state:
-                    ok = sched.try_execute_inline(name, state, context_id, parent_context)
-                    if ok:
-                        newly_ready, is_end = _activate(name)
-                        if not is_end:
-                            queue.extend(newly_ready)
-                        continue
-                op_obj = nodes[name]
-                if can_inline:
-                    await op_obj.run(state, context_id, parent_context)
-                    newly_ready, is_end = _activate(name)
-                    if not is_end:
-                        queue.extend(newly_ready)
-                else:
-                    active_tasks[name] = asyncio.create_task(
-                        name=name, coro=op_obj.run(state, context_id, parent_context)
-                    )
-
-        await _schedule_ops(sched.get_entries())
-
-        while active_tasks:
-            done_tasks, _ = await asyncio.wait(
-                active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in done_tasks:
-                op_name = task.get_name()
-                active_tasks.pop(op_name)
-                newly_ready, is_end = _activate(op_name)
-                if not is_end:
-                    await _schedule_ops(newly_ready)
-
-        return self.get_outputs(state, context_id, parent_context)
-
-    async def _run_graph_python(
-        self, state: "MemoryState", context_id: str, parent_context: str
-    ) -> Dict[str, Any]:
         """Run child nodes using Python scheduler (original implementation)."""
         active_tasks: Dict[str, asyncio.Task] = {}
         ready_count = self.initial_ready_count.copy()
@@ -356,6 +267,25 @@ class BaseIterationOp(GraphOp):
                 self.outputs[key].value = existing_param.value
 
         self.inputs = parsed_inputs
+
+    def serialize(self) -> dict:
+        """Serialize iteration op for Rust backend."""
+        base = super().serialize()
+
+        def _serialize_ref_dict(d: dict) -> dict:
+            result = {}
+            for k, v in d.items():
+                if isinstance(v, Ref):
+                    result[k] = {"ref": v.serialize()}
+                else:
+                    result[k] = {"literal": v}
+            return result
+
+        base.update({
+            "each": _serialize_ref_dict(self._each),
+            "broadcast": _serialize_ref_dict(self._broadcast_inputs),
+        })
+        return base
 
     async def run(
         self,
