@@ -715,17 +715,6 @@ class BaseOp(ABC):
                 format_log_data(outputs),
             )
 
-    def _try_rust_execute(self, rust_name: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Try to execute via Rust registry. Returns None if not available."""
-        try:
-            from hush_runtime import RustFuncRegistry
-
-            if RustFuncRegistry is None or not RustFuncRegistry.has(rust_name):
-                return None
-            return RustFuncRegistry.execute(rust_name, inputs)
-        except (ImportError, Exception):
-            return None
-
     async def run(
         self,
         state: "MemoryState",
@@ -756,14 +745,7 @@ class BaseOp(ABC):
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
 
-            # Check for Rust-native op execution (Phase 3)
-            _rust_name = getattr(self.core, "_rust_op_name", None)
-            if _rust_name:
-                _outputs = self._try_rust_execute(_rust_name, _inputs)
-
-            if _rust_name and _outputs is not None:
-                pass  # Rust execution succeeded
-            elif asyncio.iscoroutinefunction(self.core):
+            if asyncio.iscoroutinefunction(self.core):
                 _outputs = await self.core(**_inputs)
             elif self.executor == "thread":
                 _outputs = await asyncio.to_thread(self.core, **_inputs)
@@ -800,6 +782,45 @@ class BaseOp(ABC):
                 )
 
             return _outputs
+
+    # =========================================================================
+    # Serialization
+    # =========================================================================
+
+    def serialize(self) -> dict:
+        """Serialize this op to a config dict for the Rust backend."""
+        return {
+            "type": self.type,
+            "full_name": self.full_name,
+            "name": self.name,
+            "rust_op": getattr(self.core, "_rust_op_name", None),
+            "python_callable": self.core,
+            "is_async": asyncio.iscoroutinefunction(self.core),
+            "executor": self.executor,
+            "enabled": self.enabled,
+            "verbose": self.verbose,
+            "inputs": self._serialize_params(self.inputs),
+            "outputs": self._serialize_params(self.outputs),
+        }
+
+    def _serialize_params(self, params: Dict[str, "Param"]) -> dict:
+        """Serialize a dict of Params."""
+        if not params:
+            return {}
+        result = {}
+        for name, param in params.items():
+            entry = {
+                "default": param.default,
+                "required": param.required,
+                "ref": None,
+                "literal": None,
+            }
+            if isinstance(param.value, Ref):
+                entry["ref"] = param.value.serialize()
+            elif param.value is not None:
+                entry["literal"] = param.value
+            result[name] = entry
+        return result
 
     def get_input_variables(self) -> List[str]:
         """Trả về danh sách tên biến input."""

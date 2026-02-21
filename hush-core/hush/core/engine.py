@@ -68,7 +68,7 @@ class Hush:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_mode"]
+    __slots__ = ["graph", "name", "_schema", "_mode", "_rush_engine"]
 
     def __init__(self, graph: GraphOp, mode: str = "python"):
         """Initialize Hush engine with a GraphOp.
@@ -77,30 +77,24 @@ class Hush:
             graph: The GraphOp workflow to execute.
                    Must be defined (context manager exited).
             mode: Execution backend — "python" (default) or "rust".
-                  Rust mode uses hush-runtime for high-performance scheduling.
-                  Falls back to Python if hush-runtime is not installed.
+                  Rust mode uses rush-core for high-performance scheduling.
+                  Falls back to Python if rush-core is not installed.
         """
         if mode not in ("python", "rust"):
             raise ValueError(f"Invalid mode: {mode!r}. Must be 'python' or 'rust'.")
 
         self._mode = mode
+        self._rush_engine = None
         self.graph = graph
         self.name = graph.name
 
         # Build graph and create schema immediately
         self.graph.build()
-
-        # Initialize Rust compiled graph if requested
-        if mode == "rust":
-            self.graph._build_compiled_graph_rs()
-            if self.graph._compiled_graph_rs is None:
-                LOGGER.warning(
-                    "hush-runtime not installed. Falling back to Python mode for [highlight]%s[/highlight]",
-                    self.name,
-                )
-                self._mode = "python"
-
         self._schema = StateSchema(self.graph)
+
+        # Initialize Rust backend if requested
+        if self._mode == "rust":
+            self._init_rush_engine()
 
         LOGGER.debug(
             "Hush engine initialized for workflow [highlight]%s[/highlight] (mode=%s)",
@@ -112,6 +106,28 @@ class Hush:
     def schema(self) -> StateSchema:
         """Access the workflow state schema."""
         return self._schema
+
+    def _init_rush_engine(self) -> None:
+        """Initialize the Rust backend engine.
+
+        Serializes the graph config and creates a Rush executor.
+        Falls back to Python mode if rush-core is not installed.
+        """
+        try:
+            from rush_core import Rush
+
+            config = self.graph.serialize()
+            self._rush_engine = Rush(config)
+            LOGGER.debug(
+                "Rush backend initialized for [highlight]%s[/highlight]",
+                self.name,
+            )
+        except ImportError:
+            LOGGER.warning(
+                "rush-core not installed — falling back to Python mode for [highlight]%s[/highlight]",
+                self.name,
+            )
+            self._mode = "python"
 
     async def run(
         self,
@@ -154,21 +170,44 @@ class Hush:
             tracers = [tracer]
 
         LOGGER.info(
-            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]",
+            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight] (mode=%s)",
             request_id,
             self.name,
+            self._mode,
         )
 
-        # Create fresh state for this run
-        if self._mode == "rust":
-            state = self._create_rust_state(inputs, user_id, session_id, request_id)
-        else:
-            state = self._schema.create_state(
-                inputs=inputs,
+        # ── Rust fast path ──────────────────────────────────────
+        if self._rush_engine is not None:
+            result = self._rush_engine.run(
+                inputs,
+                request_id=request_id,
                 user_id=user_id,
                 session_id=session_id,
-                request_id=request_id,
             )
+
+            # Wire tracing for Rust path (mirrors Python path below)
+            if tracers:
+                from hush.core.tracing import get_flush_worker
+                from hush.core.tracing.rush_state import RushStateAdapter
+
+                rush_state = RushStateAdapter(result.get("$state", {}))
+                get_flush_worker().submit(tracers, self.graph, rush_state)
+
+            LOGGER.info(
+                "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed (rust)",
+                request_id,
+                self.name,
+            )
+            return result
+
+        # ── Python path ─────────────────────────────────────────
+        # Create fresh state for this run
+        state = self._schema.create_state(
+            inputs=inputs,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+        )
 
         # Execute the graph
         result = await self.graph.run(state)
@@ -192,29 +231,6 @@ class Hush:
         result["$state"] = state
 
         return result
-
-    def _create_rust_state(self, inputs, user_id, session_id, request_id):
-        """Create a Rust-backed MemoryState for high-performance state access."""
-        try:
-            from hush_runtime import RustMemoryState
-
-            return RustMemoryState.from_schema(
-                self._schema,
-                inputs=inputs,
-                user_id=user_id,
-                session_id=session_id,
-                request_id=request_id,
-            )
-        except (ImportError, Exception) as e:
-            LOGGER.warning(
-                "Failed to create RustMemoryState, falling back to Python: %s", e
-            )
-            return self._schema.create_state(
-                inputs=inputs,
-                user_id=user_id,
-                session_id=session_id,
-                request_id=request_id,
-            )
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.

@@ -48,6 +48,7 @@ Hush sử dụng ba lớp documentation:
 | hush-telemetry | [/hush-telemetry/CLAUDE.md](../hush-telemetry/CLAUDE.md) | Tracer patterns |
 | hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
 | hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Extension patterns |
+| rush-core | [/rush-core/CLAUDE.md](../rush-core/CLAUDE.md) | Rust backend patterns |
 
 ### Sync Rules
 
@@ -109,6 +110,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 12. [Trace Data Model](tracing/data-model.md) - Trace data structures
 13. [External Backends](tracing/external-backends.md) - Langfuse & OTEL
 14. [Hush Eyes Server](hush-eyes/overview.md) - Standalone Rust server for trace visualization
+15. [Rush-Core Backend](../rush-core/CLAUDE.md) - Rust execution engine (DashMap, rayon, batch parallel)
 
 ## Quick Reference
 
@@ -159,6 +161,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
 | hush-telemetry | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-telemetry/CLAUDE.md) |
 | hush-eyes | Standalone Rust server for trace visualization | `src/main.rs`, `src/api/`, `src/db/` | [CLAUDE.md](../hush-eyes/CLAUDE.md) |
+| rush-core | High-performance Rust execution backend | `src/engine.rs`, `src/ops/`, `src/states/` | [CLAUDE.md](../rush-core/CLAUDE.md) |
 
 ## Folder Structure
 

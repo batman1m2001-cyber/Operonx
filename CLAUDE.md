@@ -7,6 +7,7 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 ```
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
+├── rush-core/          # High-performance Rust execution backend (PyO3 + rayon + DashMap)
 ├── hush-providers/     # LLM, embedding, reranking integrations
 ├── hush-telemetry/ # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
@@ -31,7 +32,8 @@ Hush-ai/
 │  ├── /hush-providers/CLAUDE.md → Provider patterns              │
 │  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
 │  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
-│  └── /hush-eyes/CLAUDE.md → Rust server patterns     │
+│  ├── /hush-eyes/CLAUDE.md → Rust server patterns     │
+│  └── /rush-core/CLAUDE.md  → Rust backend patterns              │
 │                                                                  │
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
@@ -123,6 +125,8 @@ hush-core (foundation - no hush dependencies)
 hush-providers (depends on hush-core)
     ↓
 hush-telemetry (depends on hush-core)
+
+rush-core (Rust backend - depends on hush-core at runtime, built separately via maturin)
 ```
 
 ## When to Modify Which Package
@@ -132,6 +136,7 @@ hush-telemetry (depends on hush-core)
 | New op type | hush-core/hush/core/ops/ |
 | New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
 | New tracing backend | hush-telemetry/hush/telemetry/ |
+| Rust execution backend | rush-core/src/ |
 | Documentation or examples | hush-tutorial/ |
 | Trace visualization server | hush-eyes/ |
 
@@ -146,11 +151,14 @@ hush-telemetry (depends on hush-core)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust (hush-eyes)
+### Rust (rush-core, hush-eyes)
 
-- Build with cargo (`cargo build --release`)
-- Axum HTTP framework, rusqlite for SQLite storage
-- CLI via clap (--host, --port, --db-path)
+- **rush-core**: PyO3 extension module, built via `maturin develop --release`
+  - DashMap for concurrent state, rayon for parallel execution
+  - 2-6x speedup over Python mode for sync workflows
+- **hush-eyes**: Standalone binary, built via `cargo build --release`
+  - Axum HTTP framework, rusqlite for SQLite storage
+  - CLI via clap (--host, --port, --db-path)
 
 ### Code Style
 
@@ -176,6 +184,9 @@ cd hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-telemetry
 cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
+
+# rush-core (Rust execution backend)
+cd rush-core && uv run maturin develop --release && uv run -m pytest
 
 # hush-eyes (Rust trace server)
 cd hush-eyes && cargo build --release

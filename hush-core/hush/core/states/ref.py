@@ -504,6 +504,34 @@ class Ref:
                 result = f"{fname}({result})"
         return result
 
+    # =========================================================================
+    # Serialization
+    # =========================================================================
+
+    def serialize(self) -> dict:
+        """Serialize Ref to dict for Rust backend."""
+        return {
+            "source": self.source,
+            "var": self.var,
+            "ops": self._serialize_ops(),
+            "is_output": self.is_output,
+        }
+
+    def _serialize_ops(self) -> list:
+        """Serialize _ops list, handling nested Refs in compound booleans."""
+        result = []
+        for op_name, args in self._ops:
+            serialized_args = []
+            for arg in args:
+                if isinstance(arg, Ref):
+                    serialized_args.append({"__ref__": arg.serialize()})
+                elif callable(arg) and op_name == "apply":
+                    serialized_args.append({"__callable__": arg})
+                else:
+                    serialized_args.append(arg)
+            result.append([op_name, serialized_args])
+        return result
+
     def __repr__(self) -> str:
         if not self._ops:
             return f"Ref({self.source!r}, {self.var!r})"

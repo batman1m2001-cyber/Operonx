@@ -114,6 +114,60 @@ result["$state"] = state
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Rust Mode (rush-core)
+
+When `mode="rust"` is passed to `engine.run()`, execution bypasses the Python asyncio scheduler entirely and runs in a compiled Rust engine:
+
+```python
+result = await engine.run(inputs={"x": 5}, mode="rust")
+```
+
+### Rust Execution Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Rush.run() (Rust)                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. graph.serialize() → config dict (Python side)            │
+│                          |                                   │
+│  2. Rush(config) → GraphConfig::from_dict() (Rust side)      │
+│                          |                                   │
+│  3. Store inputs into EngineState (DashMap)                   │
+│                          |                                   │
+│  4. run_graph() ─────────────────────────────┐               │
+│                                              │               │
+│     ┌────────────────────────────────────────┴──────┐        │
+│     │          Batch-Aware Scheduler                 │        │
+│     ├────────────────────────────────────────────────┤        │
+│     │  * Drain all ready ops into batch              │        │
+│     │  * If batch has rust_op → parallel (rayon)     │        │
+│     │  * Else → sequential (one at a time)           │        │
+│     │  * Activate successors after batch completes   │        │
+│     │  * Repeat until queue empty                    │        │
+│     └────────────────────────────────────────────────┘        │
+│                          |                                   │
+│  5. collect_outputs() → result dict                          │
+│                          |                                   │
+│  6. Attach $state metadata (tags, execution_order, values)   │
+│                          |                                   │
+│  7. Return result to Python                                  │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Differences from Python Mode
+
+| Aspect | Python Mode | Rust Mode |
+|--------|------------|-----------|
+| Scheduler | asyncio event loop | Synchronous queue + rayon |
+| Parallelism | asyncio.wait(FIRST_COMPLETED) | Batch parallel via rayon (when beneficial) |
+| State | MemoryState (Python dict) | EngineState (DashMap, concurrent) |
+| Op execution | Async dispatch | Direct function call |
+| Performance | Baseline | 2-6x faster |
+
+For detailed Rust architecture, see `rush-core/CLAUDE.md`.
+
 ## Multiple Runs
 
 Engine có thể run nhiều lần với fresh state:

@@ -203,6 +203,13 @@ class WhileOp(BaseIterationOp):
         inputs, init_kwargs = split_iter_kwargs(kwargs)
         return cls(inputs=inputs, **init_kwargs)
 
+    def serialize(self) -> dict:
+        """Serialize WhileOp for Rust backend."""
+        base = super().serialize()
+        base["until"] = self._until
+        base["max_iterations"] = self._max_iterations
+        return base
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata."""
