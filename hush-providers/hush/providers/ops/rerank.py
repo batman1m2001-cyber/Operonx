@@ -55,6 +55,8 @@ class RerankOp(BaseOp):
             outputs: Output variable mappings
             **kwargs: Additional keyword arguments for BaseOp
         """
+        # Provider ops are I/O-bound by default (HTTP calls to reranker backends)
+        kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
         self.resource = resource

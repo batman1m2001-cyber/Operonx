@@ -33,6 +33,15 @@ pub struct GraphConfig {
     pub outputs: Vec<ParamConfig>,
 }
 
+/// Execution bound hint — tells the scheduler how to schedule this op.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpBound {
+    /// I/O-bound: HTTP calls, LLM, embeddings. Use tokio::spawn (async).
+    Io,
+    /// CPU-bound: computation, transforms. Use rayon (parallel threads).
+    Cpu,
+}
+
 /// Per-op configuration.
 pub struct OpConfig {
     pub op_type: String,
@@ -45,6 +54,8 @@ pub struct OpConfig {
     pub verbose: bool,
     /// Whether this op uses streaming mode (LLM streaming with STREAM_SERVICE).
     pub stream: bool,
+    /// Execution bound hint for scheduler dispatch.
+    pub bound: OpBound,
     pub inputs: Vec<ParamConfig>,
     pub outputs: Vec<ParamConfig>,
     /// Branch-specific config (only for type == "branch").
@@ -248,6 +259,16 @@ impl OpConfig {
             .map(|v| v.extract::<bool>().unwrap_or(false))
             .unwrap_or(false);
 
+        // bound: "io" | "cpu" (default "cpu")
+        let bound = match dict
+            .get_item("bound")?
+            .and_then(|v| if v.is_none() { None } else { v.extract::<String>().ok() })
+            .as_deref()
+        {
+            Some("io") => OpBound::Io,
+            _ => OpBound::Cpu,
+        };
+
         let inputs = parse_params(py, dict, "inputs")?;
         let outputs = parse_params(py, dict, "outputs")?;
 
@@ -286,6 +307,7 @@ impl OpConfig {
             enabled,
             verbose,
             stream,
+            bound,
             inputs,
             outputs,
             branch_config,

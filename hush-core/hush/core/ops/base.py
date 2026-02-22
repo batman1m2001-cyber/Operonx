@@ -98,6 +98,7 @@ _BASE_INIT_KEYS = frozenset(
         "stream",
         "start",
         "executor",
+        "bound",
     }
 )
 
@@ -221,9 +222,11 @@ class BaseOp(ABC):
         "contain_generation",
         "enabled",
         "executor",
+        "bound",
     ]
 
     _VALID_EXECUTORS = (None, "thread")
+    _VALID_BOUNDS = (None, "io", "cpu")
 
     def __init__(
         self,
@@ -241,12 +244,18 @@ class BaseOp(ABC):
         verbose: bool = True,
         enabled: bool = True,
         executor: Optional[str] = None,
+        bound: Optional[str] = None,
     ):
         if executor not in self._VALID_EXECUTORS:
             raise ValueError(
                 f"executor must be 'thread', 'process', or None, got {executor!r}"
             )
+        if bound not in self._VALID_BOUNDS:
+            raise ValueError(
+                f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}"
+            )
         self.executor = executor
+        self.bound = bound
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -789,17 +798,21 @@ class BaseOp(ABC):
 
     def serialize(self) -> dict:
         """Serialize this op to a config dict for the Rust backend."""
+        is_async = asyncio.iscoroutinefunction(self.core)
+        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→cpu)
+        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else "cpu")
         return {
             "type": self.type,
             "full_name": self.full_name,
             "name": self.name,
             "rust_op": getattr(self.core, "_rust_op_name", None),
             "python_callable": self.core,
-            "is_async": asyncio.iscoroutinefunction(self.core),
+            "is_async": is_async,
             "executor": self.executor,
             "enabled": self.enabled,
             "verbose": self.verbose,
             "stream": self.stream,
+            "bound": bound,
             "inputs": self._serialize_params(self.inputs),
             "outputs": self._serialize_params(self.outputs),
         }

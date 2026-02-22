@@ -1,16 +1,19 @@
 //! Graph op execution — scheduling loop, output collection, nested graphs.
 //!
 //! Mirrors Python's `ops/graph/graph_op.py` (GraphOp).
-//! Supports batch parallel execution via rayon when multiple independent ops are ready.
+//! Supports batch concurrent execution via tokio when multiple independent ops are ready.
+//! Uses OpBound to determine scheduling strategy:
+//! - I/O-bound ops: tokio async (HTTP calls overlap without blocking threads)
+//! - CPU-bound ops: tokio::spawn_blocking (parallel CPU, GIL released independently)
 
 use ahash::{AHashMap, AHashSet};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rayon::prelude::*;
 
-use crate::config::{GraphConfig, OpConfig};
+use crate::config::{GraphConfig, OpBound, OpConfig};
 use crate::ops::base;
 use crate::ops::iteration::{aiter_op, for_op, map_op, while_op};
+use crate::runtime;
 use crate::states::state::EngineState;
 
 // =============================================================================
@@ -20,15 +23,13 @@ use crate::states::state::EngineState;
 /// Run a graph's scheduling loop (used for both top-level and nested graphs).
 ///
 /// Supports two execution modes:
-/// - **Sequential** (default): ops executed one at a time (optimal for GIL-bound Python ops)
-/// - **Parallel** (batch): independent ops executed via rayon thread pool
-///   (benefits I/O-bound ops that release GIL, or Rust-native ops)
+/// - **Sequential** (default): ops executed one at a time (optimal for sync Python ops)
+/// - **Concurrent** (batch): independent ops executed via tokio's thread pool
 ///
-/// Parallel mode activates when multiple ops are ready AND at least one can
-/// release the GIL: either a Rust-native op (`rust_op`) or an async Python op
-/// (`is_async`). Async ops release the GIL during network I/O waits, enabling
-/// true concurrency for I/O-bound workloads (LLM calls, embeddings, etc.).
-/// Pure sync Python batches run sequentially to avoid overhead.
+/// Concurrent mode activates when a batch has 2+ ops AND at least one has
+/// `bound = Io` (I/O-bound, releases GIL during HTTP waits) or a Rust-native
+/// op (`rust_op`, executes without GIL). Pure sync CPU-bound Python batches
+/// run sequentially to avoid GIL contention overhead.
 pub(crate) fn run_graph(
     py: Python,
     config: &GraphConfig,
@@ -43,18 +44,20 @@ pub(crate) fn run_graph(
         // Drain all currently ready ops into a batch
         let batch: Vec<String> = queue.drain(..).collect();
 
-        // Check if parallel execution would benefit this batch:
-        // - Need 2+ ops (otherwise no parallelism)
-        // - At least one op that can release the GIL:
-        //   * rust_op: executes in Rust without GIL
-        //   * is_async: Python async ops release GIL during I/O waits
-        let use_parallel = batch.len() > 1 && batch.iter().any(|name| {
-            config.ops.get(name).map_or(false, |op| op.rust_op.is_some() || op.is_async)
+        // Check if concurrent execution would benefit this batch:
+        // - Need 2+ ops (otherwise no concurrency gain)
+        // - At least one op that releases the GIL:
+        //   * bound == Io: I/O-bound ops release GIL during HTTP waits
+        //   * rust_op: Rust-native ops execute without GIL
+        let use_concurrent = batch.len() > 1 && batch.iter().any(|name| {
+            config.ops.get(name).map_or(false, |op| {
+                op.bound == OpBound::Io || op.rust_op.is_some()
+            })
         });
 
-        if use_parallel {
-            // Parallel execution via rayon (beneficial when GIL can be released)
-            execute_batch_parallel(py, &batch, config, state, context)?;
+        if use_concurrent {
+            // Concurrent execution via tokio spawn_blocking
+            execute_batch_concurrent(py, &batch, config, state, context)?;
 
             // Activate successors sequentially after all ops complete
             for op_name in &batch {
@@ -114,59 +117,98 @@ pub(crate) fn run_graph(
 }
 
 // =============================================================================
-// Batch parallel execution
+// Batch concurrent execution
 // =============================================================================
 
-/// Execute a batch of independent ops in parallel using rayon.
+/// Execute a batch of independent ops concurrently via tokio.
 ///
 /// All ops in the batch have ready_count == 0 (no dependencies on each other).
-/// Each op runs in its own rayon thread, acquiring the GIL independently.
-/// DashMap-based EngineState allows concurrent reads/writes safely.
-fn execute_batch_parallel(
+/// Each op is spawned as a `tokio::task::spawn_blocking` task that acquires
+/// the GIL independently. DashMap-based EngineState allows concurrent reads/writes.
+///
+/// Benefits over rayon:
+/// - Tokio's blocking pool is dynamically-sized (grows as needed)
+/// - Native provider ops (LLM, embedding) use `block_on_async()` inside,
+///   which correctly detects the tokio context and uses Handle::block_on()
+///   instead of the panicking Runtime::block_on()
+/// - Uniform scheduling: both I/O-bound and CPU-bound ops go through tokio
+fn execute_batch_concurrent(
     py: Python,
     batch: &[String],
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
 ) -> PyResult<()> {
-    // Release the GIL so rayon threads can acquire it independently
+    // Collect op and state addresses as usize to cross the GIL boundary.
+    // SAFETY: config and state outlive the block_on call — they're owned by
+    // the Rush engine and live for the entire run() invocation.
+    let state_addr = state as *const EngineState as usize;
+    let context_owned = context.to_string();
+
+    let op_addrs: Vec<usize> = batch
+        .iter()
+        .filter_map(|name| {
+            config.ops.get(name).map(|op| op as *const OpConfig as usize)
+        })
+        .collect();
+
+    // Release the GIL, enter tokio, spawn all ops as blocking tasks
     py.allow_threads(|| {
-        batch.par_iter().for_each(|op_name| {
-            Python::with_gil(|py| {
-                let op = match config.ops.get(op_name) {
-                    Some(op) => op,
-                    None => return, // Skip if not found (shouldn't happen)
-                };
+        runtime::get_runtime().block_on(async {
+            let mut handles = Vec::with_capacity(op_addrs.len());
 
-                let result = match op.op_type.as_str() {
-                    "graph" => execute_nested_graph(py, op, state, context),
-                    "for" => for_op::execute_for_op(py, op, state, context),
-                    "while" => while_op::execute_while_op(py, op, state, context),
-                    _ => base::execute_leaf_op(py, op, state, context),
-                };
+            for &op_addr in &op_addrs {
+                let ctx = context_owned.clone();
 
-                // Handle errors from non-leaf ops (leaf ops catch internally)
-                if let Err(e) = result {
-                    let error_msg = format!("{}", e);
-                    state.set(
-                        op.full_name.clone(),
-                        "error".to_string(),
-                        context.to_string(),
-                        error_msg.to_object(py),
-                    );
-                    if let Ok(logging) = py.import_bound("logging") {
-                        if let Ok(logger) = logging.call_method1("getLogger", ("hush.core",)) {
-                            let _ = logger.call_method1(
-                                "error",
-                                (format!(
-                                    "[rush] Error in parallel op {}: {}",
-                                    op.full_name, error_msg
-                                ),),
+                let handle = tokio::task::spawn_blocking(move || {
+                    Python::with_gil(|py| {
+                        // SAFETY: op and state are alive for the duration of block_on
+                        let op = unsafe { &*(op_addr as *const OpConfig) };
+                        let state = unsafe { &*(state_addr as *const EngineState) };
+                        let context = ctx.as_str();
+
+                        let result = match op.op_type.as_str() {
+                            "graph" => execute_nested_graph(py, op, state, context),
+                            "for" => for_op::execute_for_op(py, op, state, context),
+                            "while" => while_op::execute_while_op(py, op, state, context),
+                            "map" => map_op::execute_map_op(py, op, state, context),
+                            "stream" => aiter_op::execute_aiter_op(py, op, state, context),
+                            _ => base::execute_leaf_op(py, op, state, context),
+                        };
+
+                        // Handle errors from non-leaf ops (leaf ops catch internally)
+                        if let Err(e) = result {
+                            let error_msg = format!("{}", e);
+                            state.set(
+                                op.full_name.clone(),
+                                "error".to_string(),
+                                context.to_string(),
+                                error_msg.to_object(py),
                             );
+                            if let Ok(logging) = py.import_bound("logging") {
+                                if let Ok(logger) =
+                                    logging.call_method1("getLogger", ("hush.core",))
+                                {
+                                    let _ = logger.call_method1(
+                                        "error",
+                                        (format!(
+                                            "[rush] Error in concurrent op {}: {}",
+                                            op.full_name, error_msg
+                                        ),),
+                                    );
+                                }
+                            }
                         }
-                    }
-                }
-            });
+                    });
+                });
+
+                handles.push(handle);
+            }
+
+            // Wait for all tasks to complete
+            for handle in handles {
+                let _ = handle.await;
+            }
         });
     });
 
