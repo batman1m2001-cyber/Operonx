@@ -799,6 +799,7 @@ class BaseOp(ABC):
             "executor": self.executor,
             "enabled": self.enabled,
             "verbose": self.verbose,
+            "stream": self.stream,
             "inputs": self._serialize_params(self.inputs),
             "outputs": self._serialize_params(self.outputs),
         }

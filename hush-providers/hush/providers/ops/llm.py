@@ -566,6 +566,34 @@ class LLMOp(BaseOp):
             **init_kwargs,
         )
 
+    def serialize(self) -> dict:
+        """Serialize LLMOp for Rust backend, including backend configs."""
+        base = super().serialize()
+
+        # Op-level LLM config
+        base["resource"] = self.resource
+        base["ratios"] = self.ratios
+        base["fallback"] = self.fallback
+        base["batch_mode"] = self.batch_mode
+
+        # Backend configs (one per LLM for load balancing)
+        configs = []
+        for llm in self._llms:
+            if llm and hasattr(llm, "config"):
+                configs.append(llm.config.model_dump(mode="json"))
+        if configs:
+            base["resource_configs"] = configs
+
+        # Fallback backend configs (tried in order if primary fails)
+        fallback_configs = []
+        for llm in self._fallback_llms:
+            if llm and hasattr(llm, "config"):
+                fallback_configs.append(llm.config.model_dump(mode="json"))
+        if fallback_configs:
+            base["fallback_configs"] = fallback_configs
+
+        return base
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLM-specific metadata dictionary."""

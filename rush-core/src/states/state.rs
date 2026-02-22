@@ -19,6 +19,8 @@ pub(crate) struct EngineState {
     tags: Mutex<Vec<String>>,
     /// Execution order: (op_name, parent_name, context_id).
     execution_order: Mutex<Vec<(String, String, String)>>,
+    /// Request ID for tracing / streaming (set by engine.run()).
+    request_id: Mutex<Option<String>>,
 }
 
 impl EngineState {
@@ -27,7 +29,18 @@ impl EngineState {
             values: DashMap::new(),
             tags: Mutex::new(Vec::new()),
             execution_order: Mutex::new(Vec::new()),
+            request_id: Mutex::new(None),
         }
+    }
+
+    /// Set the request ID (called by engine.run()).
+    pub(crate) fn set_request_id(&self, id: String) {
+        *self.request_id.lock().unwrap() = Some(id);
+    }
+
+    /// Get the request ID (used by streaming ops for STREAM_SERVICE).
+    pub(crate) fn request_id(&self) -> Option<String> {
+        self.request_id.lock().unwrap().clone()
     }
 
     /// Get a value from state. Returns an owned clone (safe for concurrent access).

@@ -164,7 +164,7 @@ fn my_op(py: Python, inputs: &Bound<'_, PyDict>) -> PyResult<Option<PyObject>> {
 
 2. Register in `INTERNAL_OPS` HashMap and `has_internal()`/`execute_internal()`.
 
-3. In Python, tag the op with `@rust_op("my_op")` decorator.
+3. In Python, tag the op with `@op(rust="my_op")`.
 
 ## Performance (Benchmark Results)
 

@@ -12,8 +12,9 @@ from hush.core import END, PARENT, START, GraphOp, graph, op
 from hush.core.ops.flow.branch_op import if_
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
+from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
-from rush_core import Rush, rust_op
+from rush_core import Rush
 
 
 # =============================================================================
@@ -21,21 +22,19 @@ from rush_core import Rush, rust_op
 # =============================================================================
 
 
-@rust_op("rust_double")
-@op
+@op(rust="rust_double")
 def double(x: int):
     return {"result": x * 2}
 
 
-@rust_op("rust_add")
-@op
+@op(rust="rust_add")
 def add(a: int, b: int):
     return {"result": a + b}
 
 
 @op
 def greet(name: str):
-    """Pure Python op (no @rust_op)."""
+    """Pure Python op (no rust=)."""
     return {"greeting": f"Hello {name}"}
 
 
@@ -58,7 +57,7 @@ def make_dict(key: str, value: str):
 
 class TestSingleOp:
     def test_single_rust_op(self):
-        """Single @rust_op FuncOp executed by Rush."""
+        """Single Rust-tagged FuncOp executed by Rush."""
         with GraphOp(name="g") as g:
             d = double(x=PARENT["x"])
             START >> d >> END
@@ -1097,3 +1096,325 @@ class TestTracingWiring:
         assert adapter["g.a", "duration_ms", ""] == 0.5
         assert adapter["g.a", "nonexistent", ""] is None
         assert adapter["missing_op", "x", ""] is None
+
+
+# =============================================================================
+# Async op tests (Phase 1: async coroutine driving)
+# =============================================================================
+
+
+@op
+async def async_double(x: int):
+    """Async op that doubles a value."""
+    import asyncio
+
+    await asyncio.sleep(0)  # yield to event loop
+    return {"result": x * 2}
+
+
+@op
+async def async_add(a: int, b: int):
+    """Async op that adds two values."""
+    import asyncio
+
+    await asyncio.sleep(0)
+    return {"result": a + b}
+
+
+class TestAsyncOps:
+    def test_single_async_op(self):
+        """Single async Python op runs correctly in Rust mode."""
+        with GraphOp(name="g") as g:
+            step = async_double(x=PARENT["x"])
+            START >> step >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({"x": 21})
+        assert result["result"] == 42
+
+    def test_async_op_chain(self):
+        """Chain of async ops — each coroutine driven to completion."""
+        with GraphOp(name="g") as g:
+            d = async_double(x=PARENT["x"])
+            a = async_add(a=d["result"], b=PARENT["y"])
+            START >> d >> a >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({"x": 5, "y": 3})
+        assert result["result"] == 13  # 5*2=10, 10+3=13
+
+    def test_parallel_async_ops(self):
+        """Multiple async ops in parallel batch — heuristic triggers parallelism."""
+        with GraphOp(name="g") as g:
+            a = async_double(x=PARENT["x"])
+            b = async_double(x=PARENT["y"])
+            c = add(a=a["result"], b=b["result"])
+            START >> a
+            START >> b
+            a >> c
+            b >> c
+            c >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({"x": 3, "y": 7})
+        assert result["result"] == 20  # 3*2=6, 7*2=14, 6+14=20
+
+    def test_mixed_async_and_sync(self):
+        """Graph with both async and sync ops."""
+        with GraphOp(name="g") as g:
+            d = async_double(x=PARENT["x"])
+            a = add(a=d["result"], b=PARENT["y"])
+            START >> d >> a >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({"x": 5, "y": 3})
+        assert result["result"] == 13
+
+    @pytest.mark.parametrize("mode", ["python", "rust"])
+    async def test_async_op_both_modes(self, mode):
+        """Async op produces same result in both execution modes."""
+        from hush.core import Hush
+
+        with GraphOp(name="g") as g:
+            step = async_double(x=PARENT["x"])
+            START >> step >> END
+
+        result = await Hush(g, mode=mode).run(inputs={"x": 7})
+        assert result["result"] == 14
+
+
+# =============================================================================
+# MapOp tests (Phase 2: concurrent iteration)
+# =============================================================================
+
+
+class TestMapOp:
+    def test_simple_map_literal_each(self):
+        """MapOp iterates over literal Each values concurrently."""
+
+        @op
+        def dbl(value: int):
+            return {"result": value * 2}
+
+        with GraphOp(name="g") as g:
+            with MapOp(name="loop", inputs={"value": Each([1, 2, 3])}) as loop:
+                node = dbl(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [2, 4, 6]
+
+    def test_map_with_broadcast(self):
+        """MapOp with Each values + broadcast scalar."""
+
+        @op
+        def multiply(value: int, multiplier: int):
+            return {"result": value * multiplier}
+
+        with GraphOp(name="g") as g:
+            with MapOp(
+                name="loop",
+                inputs={"value": Each([1, 2, 3]), "multiplier": 10},
+            ) as loop:
+                node = multiply(value=PARENT["value"], multiplier=PARENT["multiplier"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [10, 20, 30]
+
+    def test_map_multiple_each_zip(self):
+        """MapOp with multiple Each values (zipped)."""
+
+        with GraphOp(name="g") as g:
+            with MapOp(
+                name="loop",
+                inputs={"a": Each([1, 2, 3]), "b": Each([10, 20, 30])},
+            ) as loop:
+                node = add(a=PARENT["a"], b=PARENT["b"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [11, 22, 33]
+
+    def test_map_empty_list(self):
+        """MapOp with empty Each list produces empty results."""
+
+        @op
+        def dbl(value: int):
+            return {"result": value * 2}
+
+        with GraphOp(name="g") as g:
+            with MapOp(name="loop", inputs={"value": Each([])}) as loop:
+                node = dbl(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == []
+
+    def test_map_with_upstream_ref(self):
+        """MapOp reads Each from an upstream op's output."""
+
+        @op
+        def make_list():
+            return {"items": [10, 20, 30]}
+
+        with GraphOp(name="g") as g:
+            src = make_list()
+            with MapOp(name="loop", inputs={"value": Each(src["items"])}) as loop:
+                node = double(x=PARENT["value"])
+                START >> node >> END
+            START >> src >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [20, 40, 60]
+
+    def test_map_with_max_concurrency(self):
+        """MapOp respects max_concurrency parameter."""
+
+        @op
+        def dbl(value: int):
+            return {"result": value * 2}
+
+        with GraphOp(name="g") as g:
+            with MapOp(
+                name="loop",
+                inputs={"value": Each([1, 2, 3, 4, 5])},
+                max_concurrency=2,
+            ) as loop:
+                node = dbl(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [2, 4, 6, 8, 10]
+
+    def test_map_fail_fast_config_parsed(self):
+        """MapOp fail_fast=True: config is parsed, normal execution works.
+
+        fail_fast only catches errors that propagate through run_graph
+        (infrastructure failures, not individual op errors caught by execute_leaf_op).
+        This matches ForOp behavior.
+        """
+
+        @op
+        def ok_op(value: int):
+            return {"result": value * 10}
+
+        with GraphOp(name="g") as g:
+            with MapOp(
+                name="loop",
+                inputs={"value": Each([1, 2, 3])},
+                fail_fast=True,
+                max_concurrency=1,
+            ) as loop:
+                node = ok_op(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+        assert result["result"] == [10, 20, 30]
+
+    def test_map_no_fail_fast_continues(self):
+        """MapOp with fail_fast=False continues on error (per-op error handling)."""
+
+        @op
+        def maybe_fail(value: int):
+            if value == 2:
+                raise ValueError("fail on 2")
+            return {"result": value * 10}
+
+        with GraphOp(name="g") as g:
+            with MapOp(
+                name="loop",
+                inputs={"value": Each([1, 2, 3])},
+                fail_fast=False,
+                max_concurrency=1,
+            ) as loop:
+                node = maybe_fail(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+
+        # All iterations complete — erroring op produces None
+        assert result["result"][0] == 10
+        assert result["result"][1] is None  # Op error caught
+        assert result["result"][2] == 30
+
+    def test_map_iteration_metrics(self):
+        """MapOp stores iteration_metrics in state."""
+
+        @op
+        def dbl(value: int):
+            return {"result": value * 2}
+
+        with GraphOp(name="g") as g:
+            with MapOp(name="loop", inputs={"value": Each([1, 2, 3])}) as loop:
+                node = dbl(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+        g.build()
+
+        config = g.serialize()
+        engine = Rush(config)
+        result = engine.run({})
+
+        state = result["$state"]
+        metrics = state["values"]["g.loop"]["iteration_metrics"][""]
+        assert metrics["total_iterations"] == 3
+        assert metrics["success_count"] == 3
+        assert metrics["error_count"] == 0
+
+    @pytest.mark.parametrize("mode", ["python", "rust"])
+    async def test_map_both_modes(self, mode):
+        """MapOp produces same result in both execution modes."""
+        from hush.core import Hush
+
+        @op
+        def dbl(value: int):
+            return {"result": value * 2}
+
+        with GraphOp(name="g") as g:
+            with MapOp(name="loop", inputs={"value": Each([1, 2, 3])}) as loop:
+                node = dbl(value=PARENT["value"])
+                START >> node >> END
+            START >> loop >> END
+
+        result = await Hush(g, mode=mode).run(inputs={})
+        assert result["result"] == [2, 4, 6]

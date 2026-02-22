@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use crate::config::{GraphConfig, OpConfig};
 use crate::ops::base;
-use crate::ops::iteration::{for_op, while_op};
+use crate::ops::iteration::{aiter_op, for_op, map_op, while_op};
 use crate::states::state::EngineState;
 
 // =============================================================================
@@ -24,9 +24,11 @@ use crate::states::state::EngineState;
 /// - **Parallel** (batch): independent ops executed via rayon thread pool
 ///   (benefits I/O-bound ops that release GIL, or Rust-native ops)
 ///
-/// Parallel mode activates when multiple ops are ready AND at least one has a
-/// Rust implementation (`rust_op`). Pure Python batches run sequentially to
-/// avoid `allow_threads`/`with_gil` overhead when the GIL can't be released.
+/// Parallel mode activates when multiple ops are ready AND at least one can
+/// release the GIL: either a Rust-native op (`rust_op`) or an async Python op
+/// (`is_async`). Async ops release the GIL during network I/O waits, enabling
+/// true concurrency for I/O-bound workloads (LLM calls, embeddings, etc.).
+/// Pure sync Python batches run sequentially to avoid overhead.
 pub(crate) fn run_graph(
     py: Python,
     config: &GraphConfig,
@@ -43,9 +45,11 @@ pub(crate) fn run_graph(
 
         // Check if parallel execution would benefit this batch:
         // - Need 2+ ops (otherwise no parallelism)
-        // - At least one op with rust_op (can release GIL for true parallelism)
+        // - At least one op that can release the GIL:
+        //   * rust_op: executes in Rust without GIL
+        //   * is_async: Python async ops release GIL during I/O waits
         let use_parallel = batch.len() > 1 && batch.iter().any(|name| {
-            config.ops.get(name).map_or(false, |op| op.rust_op.is_some())
+            config.ops.get(name).map_or(false, |op| op.rust_op.is_some() || op.is_async)
         });
 
         if use_parallel {
@@ -86,6 +90,8 @@ pub(crate) fn run_graph(
                     "graph" => execute_nested_graph(py, op, state, context)?,
                     "for" => for_op::execute_for_op(py, op, state, context)?,
                     "while" => while_op::execute_while_op(py, op, state, context)?,
+                    "map" => map_op::execute_map_op(py, op, state, context)?,
+                    "stream" => aiter_op::execute_aiter_op(py, op, state, context)?,
                     _ => base::execute_leaf_op(py, op, state, context)?,
                 }
 

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def op(func=None, *, executor=None):
+def op(func=None, *, executor=None, rust=None):
     """Decorator that turns a plain function into a FuncOp factory.
 
     Can be used bare or with keyword arguments::
@@ -29,12 +29,22 @@ def op(func=None, *, executor=None):
         def fetch(url: str):
             return {"data": requests.get(url).json()}
 
+        @op(rust="rust_double")
+        def double(x: int):
+            return {"result": x * 2}  # Python fallback
+
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
+        rust: Optional Rust-native op name (e.g. ``"rust_double"``).
+            When set, the Rust backend dispatches to its internal registry
+            instead of calling the Python function. The Python body serves
+            as a fallback when the Rust op is not found.
     """
 
     def decorator(fn):
+        if rust is not None:
+            fn._rust_op_name = rust
         sig = inspect.signature(fn)
         collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
         if collisions:

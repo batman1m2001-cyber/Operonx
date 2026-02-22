@@ -11,7 +11,7 @@ Tests that:
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
-from rush_core import RustFuncRegistry, rust_op
+from rush_core import RustFuncRegistry
 
 
 # =============================================================================
@@ -164,8 +164,7 @@ class TestMathOps:
 
 class TestBuiltinOpsInWorkflow:
     async def test_string_concat_in_graph(self):
-        @rust_op("rust_string_concat")
-        @op
+        @op(rust="rust_string_concat")
         def concat(parts: list):
             return {"result": "".join(parts)}
 
@@ -177,13 +176,11 @@ class TestBuiltinOpsInWorkflow:
         assert result["result"] == "abc"
 
     async def test_math_chain_in_graph(self):
-        @rust_op("rust_math_sum")
-        @op
+        @op(rust="rust_math_sum")
         def total(values: list):
             return {"result": sum(values)}
 
-        @rust_op("rust_double")
-        @op
+        @op(rust="rust_double")
         def double(x: int):
             return {"result": x * 2}
 
@@ -197,8 +194,7 @@ class TestBuiltinOpsInWorkflow:
 
     @pytest.mark.parametrize("mode", ["python", "rust"])
     async def test_builtin_both_modes(self, mode):
-        @rust_op("rust_string_template")
-        @op
+        @op(rust="rust_string_template")
         def greet(template: str, vars: dict):
             result = template
             for k, v in vars.items():

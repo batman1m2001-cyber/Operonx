@@ -6,6 +6,7 @@
 use ahash::{AHashMap, AHashSet};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use rush_providers::config::ProviderConfig;
 use smallvec::SmallVec;
 
 // =============================================================================
@@ -42,6 +43,8 @@ pub struct OpConfig {
     pub is_async: bool,
     pub enabled: bool,
     pub verbose: bool,
+    /// Whether this op uses streaming mode (LLM streaming with STREAM_SERVICE).
+    pub stream: bool,
     pub inputs: Vec<ParamConfig>,
     pub outputs: Vec<ParamConfig>,
     /// Branch-specific config (only for type == "branch").
@@ -50,6 +53,8 @@ pub struct OpConfig {
     pub inner_graph: Option<Box<GraphConfig>>,
     /// Iteration config (for type == "for", "while").
     pub iteration_config: Option<IterationConfig>,
+    /// Provider config (for type == "llm", "embedding", "rerank").
+    pub provider_config: Option<ProviderConfig>,
 }
 
 /// Branch op configuration — conditions and targets.
@@ -64,13 +69,19 @@ pub struct BranchCase {
     pub target: String,
 }
 
-/// Iteration op configuration (ForOp, WhileOp).
+/// Iteration op configuration (ForOp, WhileOp, MapOp, AIterOp).
 pub struct IterationConfig {
     pub each: Vec<IterParamConfig>,
     pub broadcast: Vec<IterParamConfig>,
     pub fail_fast: bool,
     pub until: Option<String>,
     pub max_iterations: Option<usize>,
+    /// Max concurrent iterations (MapOp, AIterOp). Defaults to CPU count.
+    pub max_concurrency: Option<usize>,
+    /// Async callback called per result in order (AIterOp only).
+    pub callback: Option<PyObject>,
+    /// Batch flush predicate: (batch, new_item) → bool (AIterOp only).
+    pub batch_fn: Option<PyObject>,
 }
 
 /// A single iteration parameter (each or broadcast).
@@ -231,6 +242,12 @@ impl OpConfig {
             .map(|v| v.extract::<bool>().unwrap_or(false))
             .unwrap_or(false);
 
+        // stream: bool (default false — LLM streaming mode)
+        let stream: bool = dict
+            .get_item("stream")?
+            .map(|v| v.extract::<bool>().unwrap_or(false))
+            .unwrap_or(false);
+
         let inputs = parse_params(py, dict, "inputs")?;
         let outputs = parse_params(py, dict, "outputs")?;
 
@@ -241,20 +258,23 @@ impl OpConfig {
             None
         };
 
-        // Parse inner graph (for "graph", "for", "while" types)
+        // Parse inner graph (for "graph", "for", "while", "map", "stream" types)
         // These ops' serialized dicts ARE GraphConfig — they have ops, entries, etc.
-        let inner_graph = if matches!(op_type.as_str(), "graph" | "for" | "while") {
+        let inner_graph = if matches!(op_type.as_str(), "graph" | "for" | "while" | "map" | "stream") {
             Some(Box::new(GraphConfig::from_dict(py, dict)?))
         } else {
             None
         };
 
-        // Parse iteration config (for "for", "while" types)
-        let iteration_config = if matches!(op_type.as_str(), "for" | "while") {
+        // Parse iteration config (for "for", "while", "map", "stream" types)
+        let iteration_config = if matches!(op_type.as_str(), "for" | "while" | "map" | "stream") {
             Some(parse_iteration_config(py, dict, &op_type)?)
         } else {
             None
         };
+
+        // Parse provider config (for "llm", "embedding", "rerank" types)
+        let provider_config = rush_providers::config::parse_provider_config(py, &op_type, dict)?;
 
         Ok(OpConfig {
             op_type,
@@ -265,11 +285,13 @@ impl OpConfig {
             is_async,
             enabled,
             verbose,
+            stream,
             inputs,
             outputs,
             branch_config,
             inner_graph,
             iteration_config,
+            provider_config,
         })
     }
 }
@@ -326,7 +348,7 @@ fn parse_iteration_config(
     let each = parse_iter_params(py, dict, "each")?;
     let broadcast = parse_iter_params(py, dict, "broadcast")?;
 
-    let fail_fast = if op_type == "for" {
+    let fail_fast = if matches!(op_type, "for" | "map") {
         dict.get_item("fail_fast")?
             .map(|v| v.extract::<bool>().unwrap_or(false))
             .unwrap_or(false)
@@ -348,12 +370,36 @@ fn parse_iteration_config(
         None
     };
 
+    let max_concurrency = if matches!(op_type, "map" | "stream") {
+        dict.get_item("max_concurrency")?
+            .and_then(|v| if v.is_none() { None } else { v.extract::<usize>().ok() })
+    } else {
+        None
+    };
+
+    let callback = if op_type == "stream" {
+        dict.get_item("callback")?
+            .and_then(|v| if v.is_none() { None } else { Some(v.unbind()) })
+    } else {
+        None
+    };
+
+    let batch_fn = if op_type == "stream" {
+        dict.get_item("batch_fn")?
+            .and_then(|v| if v.is_none() { None } else { Some(v.unbind()) })
+    } else {
+        None
+    };
+
     Ok(IterationConfig {
         each,
         broadcast,
         fail_fast,
         until,
         max_iterations,
+        max_concurrency,
+        callback,
+        batch_fn,
     })
 }
 

@@ -3,7 +3,7 @@
 Tests that:
 - Registry has built-in ops (rust_double, rust_add, rust_hash_chain)
 - Ops execute correctly via registry
-- @rust_op decorator tags functions
+- @op(rust=...) tags functions for Rust dispatch
 - Rust ops work inside GraphOp workflows (both modes)
 - Fallback to Python when Rust op not found
 """
@@ -11,7 +11,7 @@ Tests that:
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
-from rush_core import RustFuncRegistry, rust_op
+from rush_core import RustFuncRegistry
 
 
 # =============================================================================
@@ -75,25 +75,28 @@ class TestDirectExecution:
 
 
 # =============================================================================
-# @rust_op decorator
+# @op(rust=...) decorator
 # =============================================================================
 
 
 class TestRustOpDecorator:
     def test_decorator_tags_function(self):
-        @rust_op("rust_double")
+        @op(rust="rust_double")
         def my_func(x: int):
             return {"result": x * 2}
 
-        assert my_func._rust_op_name == "rust_double"
+        # Call the wrapper to get a FuncOp, check the inner function
+        func_op = my_func(x=5)
+        assert func_op.core._rust_op_name == "rust_double"
 
     def test_decorator_preserves_function(self):
-        @rust_op("rust_double")
+        @op(rust="rust_double")
         def my_func(x: int):
             return {"result": x * 2}
 
-        # Function still callable as Python
-        assert my_func(x=5) == {"result": 10}
+        # Wrapper still produces working FuncOps
+        func_op = my_func(x=5)
+        assert func_op.core(x=5) == {"result": 10}
 
 
 # =============================================================================
@@ -105,8 +108,7 @@ class TestRustOpInWorkflow:
     async def test_rust_op_single(self):
         """Single Rust op in a graph."""
 
-        @rust_op("rust_double")
-        @op
+        @op(rust="rust_double")
         def double(x: int):
             return {"result": x * 2}
 
@@ -120,13 +122,11 @@ class TestRustOpInWorkflow:
     async def test_rust_op_chain(self):
         """Chain of Rust ops."""
 
-        @rust_op("rust_double")
-        @op
+        @op(rust="rust_double")
         def double(x: int):
             return {"result": x * 2}
 
-        @rust_op("rust_add")
-        @op
+        @op(rust="rust_add")
         def add(a: int, b: int):
             return {"result": a + b}
 
@@ -141,8 +141,7 @@ class TestRustOpInWorkflow:
     async def test_mixed_rust_and_python_ops(self):
         """Graph with both Rust and Python ops."""
 
-        @rust_op("rust_double")
-        @op
+        @op(rust="rust_double")
         def rust_double(x: int):
             return {"result": x * 2}
 
@@ -159,10 +158,9 @@ class TestRustOpInWorkflow:
         assert result["result"] == 13
 
     async def test_fallback_to_python(self):
-        """Unregistered rust_op falls back to Python."""
+        """Unregistered rust= falls back to Python."""
 
-        @rust_op("nonexistent_op")
-        @op
+        @op(rust="nonexistent_op")
         def fallback(x: int):
             return {"result": x * 99}
 
@@ -177,8 +175,7 @@ class TestRustOpInWorkflow:
     async def test_rust_op_both_modes(self, mode):
         """Rust op produces same result in both modes."""
 
-        @rust_op("rust_double")
-        @op
+        @op(rust="rust_double")
         def double(x: int):
             return {"result": x * 2}
 
