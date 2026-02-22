@@ -18,8 +18,8 @@ use crate::auth::google::{GoogleServiceAccountConfig, GoogleTokenProvider};
 use crate::batch::coordinator::{BatchConfig, BatchCoordinator};
 use crate::config::llm::LLMConfig;
 use crate::config::LLMProviderConfig;
-use crate::http::llm as http_llm;
 use crate::http::{ProviderError, ProviderResult};
+use crate::llms;
 
 /// Execute an LLM op with full load balancing, fallback, and batch support.
 pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
@@ -100,7 +100,7 @@ pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResul
 async fn execute_single(config: &LLMConfig, inputs: &Value) -> ProviderResult<Value> {
     // Get access token if needed (Gemini → Google OAuth2, or Keycloak)
     let access_token = get_access_token(config).await?;
-    http_llm::chat_completion(config, inputs, access_token.as_deref()).await
+    llms::chat_completion(config, inputs, access_token.as_deref()).await
 }
 
 /// Execute in batch mode (OpenAI Batch API).
@@ -299,5 +299,5 @@ async fn execute_single_streaming(
     chunk_tx: Sender<Value>,
 ) -> ProviderResult<Value> {
     let access_token = get_access_token(config).await?;
-    http_llm::chat_completion_stream(config, inputs, access_token.as_deref(), chunk_tx).await
+    llms::chat_completion_stream(config, inputs, access_token.as_deref(), chunk_tx).await
 }

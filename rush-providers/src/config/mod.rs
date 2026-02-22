@@ -2,8 +2,8 @@
 //!
 //! Each provider type has its own config module mirroring hush-providers:
 //! - llm: LLMConfig (OpenAI, Azure, vLLM, Gemini)
-//! - embedding: EmbeddingConfig (OpenAI, Azure, vLLM, TEI, HF, ONNX)
-//! - reranking: RerankingConfig (Cohere, TEI, vLLM, Pinecone, HF, ONNX)
+//! - embedding: EmbeddingConfig (OpenAI, Azure, vLLM, HF, ONNX)
+//! - reranking: RerankingConfig (Cohere, vLLM, Pinecone, HF, ONNX)
 
 pub mod embedding;
 pub mod llm;

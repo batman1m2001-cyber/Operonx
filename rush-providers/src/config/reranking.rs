@@ -1,6 +1,6 @@
 //! Reranking provider configuration — mirrors hush-providers RerankingConfig.
 //!
-//! Supports: Cohere, TEI, vLLM, Pinecone, HF, ONNX.
+//! Supports: Cohere, vLLM, Pinecone, HF, ONNX.
 //! Parsed from `RerankingConfig.model_dump(mode="json")` output.
 
 use pyo3::prelude::*;

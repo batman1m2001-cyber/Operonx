@@ -2,6 +2,7 @@
 //!
 //! Each op module implements the high-level logic:
 //! - LLM: load balancing, fallback chains, batch mode, keycloak auth
+//! - Chain: prompt template formatting + LLM call
 //! - Embedding: dispatch by api_type
 //! - Reranking: dispatch by api_type, document handling
 //! - Prompt: template formatting
@@ -9,6 +10,7 @@
 //! All ops are async and GIL-free — they operate on serde_json::Value
 //! and are called via rush-core's tokio integration.
 
+pub mod chain;
 pub mod embedding;
 pub mod llm;
 pub mod prompt;
@@ -78,6 +80,19 @@ pub async fn execute(
             };
             rerank::execute(inputs, rerank_config).await
         }
+        "chain" => {
+            let llm_config = match config {
+                ProviderConfig::LLM(c) => c,
+                _ => {
+                    return Err(ProviderError {
+                        message: "Chain op requires LLM provider config".to_string(),
+                        status_code: None,
+                        error_code: None,
+                    })
+                }
+            };
+            chain::execute(inputs, llm_config).await
+        }
         _ => Err(ProviderError {
             message: format!("Unknown provider op type: '{}'", op_type),
             status_code: None,
@@ -110,6 +125,19 @@ pub async fn execute_streaming(
             };
             llm::execute_streaming(inputs, llm_config, chunk_tx).await
         }
+        "chain" => {
+            let llm_config = match config {
+                ProviderConfig::LLM(c) => c,
+                _ => {
+                    return Err(ProviderError {
+                        message: "Chain streaming op requires LLM provider config".to_string(),
+                        status_code: None,
+                        error_code: None,
+                    })
+                }
+            };
+            chain::execute_streaming(inputs, llm_config, chunk_tx).await
+        }
         _ => Err(ProviderError {
             message: format!("Streaming not supported for op type: '{}'", op_type),
             status_code: None,
@@ -118,10 +146,54 @@ pub async fn execute_streaming(
     }
 }
 
-/// Check if an op_type is a provider op that we handle natively.
+/// Check if an api_type is a provider that we handle natively in Rust.
 pub fn is_native_provider_op(api_type: &str) -> bool {
     matches!(
         api_type,
-        "openai" | "vllm" | "azure" | "gemini" | "tei" | "pinecone" | "cohere"
+        "openai" | "vllm" | "azure" | "gemini" | "pinecone" | "cohere" | "hf" | "onnx"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // is_native_provider_op tests
+    // =========================================================================
+
+    #[test]
+    fn test_native_llm_providers() {
+        assert!(is_native_provider_op("openai"));
+        assert!(is_native_provider_op("vllm"));
+        assert!(is_native_provider_op("azure"));
+        assert!(is_native_provider_op("gemini"));
+    }
+
+    #[test]
+    fn test_native_embedding_providers() {
+        assert!(is_native_provider_op("openai"));
+        assert!(is_native_provider_op("vllm"));
+        assert!(is_native_provider_op("azure"));
+        assert!(is_native_provider_op("hf"));
+        assert!(is_native_provider_op("onnx"));
+    }
+
+    #[test]
+    fn test_native_reranker_providers() {
+        assert!(is_native_provider_op("cohere"));
+        assert!(is_native_provider_op("pinecone"));
+        assert!(is_native_provider_op("vllm"));
+        assert!(is_native_provider_op("hf"));
+        assert!(is_native_provider_op("onnx"));
+    }
+
+    #[test]
+    fn test_non_native_providers() {
+        assert!(!is_native_provider_op("tei")); // Removed
+        assert!(!is_native_provider_op("custom"));
+        assert!(!is_native_provider_op("unknown"));
+        assert!(!is_native_provider_op(""));
+        assert!(!is_native_provider_op("OPENAI")); // Case-sensitive
+    }
 }

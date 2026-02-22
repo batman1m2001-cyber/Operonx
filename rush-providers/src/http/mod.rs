@@ -1,11 +1,12 @@
-//! Shared HTTP client and provider-specific HTTP modules.
+//! Shared HTTP client and error types.
 //!
 //! Provides a connection-pooled reqwest Client singleton reused across all
 //! provider operations. Connection pools are shared for better performance.
-
-pub mod embedding;
-pub mod llm;
-pub mod reranker;
+//!
+//! Provider-specific HTTP logic has moved to:
+//! - llms/ — LLM providers (OpenAI, Azure, Gemini)
+//! - embeddings/ — Embedding providers (OpenAI/vLLM)
+//! - rerankers/ — Reranker providers (vLLM, Pinecone, Cohere)
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -78,3 +79,51 @@ impl From<reqwest::Error> for ProviderError {
 }
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_error_display_with_status() {
+        let err = ProviderError {
+            message: "Not found".to_string(),
+            status_code: Some(404),
+            error_code: None,
+        };
+        let display = format!("{}", err);
+        assert_eq!(display, "[HTTP 404] Not found");
+    }
+
+    #[test]
+    fn test_provider_error_display_without_status() {
+        let err = ProviderError {
+            message: "Something went wrong".to_string(),
+            status_code: None,
+            error_code: None,
+        };
+        let display = format!("{}", err);
+        assert_eq!(display, "Something went wrong");
+    }
+
+    #[test]
+    fn test_provider_error_debug() {
+        let err = ProviderError {
+            message: "test".to_string(),
+            status_code: Some(500),
+            error_code: Some(42),
+        };
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("test"));
+        assert!(debug.contains("500"));
+        assert!(debug.contains("42"));
+    }
+
+    #[test]
+    fn test_get_client_returns_same_instance() {
+        let client1 = get_client();
+        let client2 = get_client();
+        // Both should be the same static reference
+        assert!(std::ptr::eq(client1, client2));
+    }
+}
