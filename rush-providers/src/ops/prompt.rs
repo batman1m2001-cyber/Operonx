@@ -182,3 +182,308 @@ fn value_to_string(value: &Value) -> String {
         _ => value.to_string(), // Arrays/objects → JSON string
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // =========================================================================
+    // String template tests
+    // =========================================================================
+
+    #[test]
+    fn test_string_template_basic() {
+        let result = execute(json!({
+            "template": "Hello {name}",
+            "name": "World"
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "Hello World");
+    }
+
+    #[test]
+    fn test_string_template_multiple_vars() {
+        let result = execute(json!({
+            "template": "{greeting}, {name}! You are {age} years old.",
+            "greeting": "Hi",
+            "name": "Alice",
+            "age": 30
+        }))
+        .unwrap();
+
+        let content = result["messages"][0]["content"].as_str().unwrap();
+        assert_eq!(content, "Hi, Alice! You are 30 years old.");
+    }
+
+    #[test]
+    fn test_string_template_no_vars() {
+        let result = execute(json!({
+            "template": "No variables here"
+        }))
+        .unwrap();
+
+        assert_eq!(result["messages"][0]["content"], "No variables here");
+    }
+
+    #[test]
+    fn test_string_template_unused_var() {
+        // Vars that don't appear in template are ignored
+        let result = execute(json!({
+            "template": "Hello {name}",
+            "name": "World",
+            "unused": "value"
+        }))
+        .unwrap();
+
+        assert_eq!(result["messages"][0]["content"], "Hello World");
+    }
+
+    #[test]
+    fn test_string_template_missing_var() {
+        // Missing vars leave placeholder as-is
+        let result = execute(json!({
+            "template": "Hello {name}"
+        }))
+        .unwrap();
+
+        assert_eq!(result["messages"][0]["content"], "Hello {name}");
+    }
+
+    // =========================================================================
+    // Dict template tests
+    // =========================================================================
+
+    #[test]
+    fn test_dict_template_system_user() {
+        let result = execute(json!({
+            "template": {
+                "system": "You are a {role}.",
+                "user": "Tell me about {topic}."
+            },
+            "role": "helpful assistant",
+            "topic": "Rust"
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "You are a helpful assistant.");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "Tell me about Rust.");
+    }
+
+    #[test]
+    fn test_dict_template_all_roles() {
+        let result = execute(json!({
+            "template": {
+                "system": "System prompt",
+                "user": "User message",
+                "assistant": "Assistant response"
+            }
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[2]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_dict_template_user_only() {
+        let result = execute(json!({
+            "template": { "user": "Hello" }
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    #[test]
+    fn test_dict_template_empty_system_skipped() {
+        let result = execute(json!({
+            "template": { "system": "", "user": "Hello" }
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        // Empty system message should be skipped
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    // =========================================================================
+    // List template tests
+    // =========================================================================
+
+    #[test]
+    fn test_list_template_passthrough() {
+        let result = execute(json!({
+            "template": [
+                {"role": "system", "content": "Be helpful."},
+                {"role": "user", "content": "Hello {name}"}
+            ],
+            "name": "World"
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"], "Be helpful.");
+        assert_eq!(messages[1]["content"], "Hello World");
+    }
+
+    // =========================================================================
+    // Null / missing template
+    // =========================================================================
+
+    #[test]
+    fn test_null_template() {
+        let result = execute(json!({})).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert!(messages.is_empty());
+    }
+
+    // =========================================================================
+    // Conversation history tests
+    // =========================================================================
+
+    #[test]
+    fn test_conversation_history_inserted_before_last_user() {
+        let result = execute(json!({
+            "template": {
+                "system": "You are helpful.",
+                "user": "Current question"
+            },
+            "conversation_history": [
+                {"role": "user", "content": "Previous question"},
+                {"role": "assistant", "content": "Previous answer"}
+            ]
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        // system, then history (user + assistant), then current user
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["content"], "Previous question");
+        assert_eq!(messages[2]["content"], "Previous answer");
+        assert_eq!(messages[3]["content"], "Current question");
+    }
+
+    #[test]
+    fn test_empty_conversation_history() {
+        let result = execute(json!({
+            "template": "Hello",
+            "conversation_history": []
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+    }
+
+    // =========================================================================
+    // Tool results tests
+    // =========================================================================
+
+    #[test]
+    fn test_tool_results_appended() {
+        let result = execute(json!({
+            "template": "Hello",
+            "tool_results": [
+                {"role": "tool", "content": "Tool output", "tool_call_id": "t1"}
+            ]
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "tool");
+    }
+
+    // =========================================================================
+    // Value conversion tests
+    // =========================================================================
+
+    #[test]
+    fn test_value_to_string_types() {
+        assert_eq!(value_to_string(&json!("hello")), "hello");
+        assert_eq!(value_to_string(&json!(42)), "42");
+        assert_eq!(value_to_string(&json!(3.14)), "3.14");
+        assert_eq!(value_to_string(&json!(true)), "true");
+        assert_eq!(value_to_string(&json!(false)), "false");
+        assert_eq!(value_to_string(&json!(null)), "");
+    }
+
+    #[test]
+    fn test_value_to_string_complex() {
+        // Arrays/objects get JSON-serialized
+        let arr = value_to_string(&json!([1, 2, 3]));
+        assert!(arr.contains("1"));
+        assert!(arr.contains("2"));
+        assert!(arr.contains("3"));
+    }
+
+    // =========================================================================
+    // Error cases
+    // =========================================================================
+
+    #[test]
+    fn test_invalid_input_not_dict() {
+        let result = execute(json!("not a dict"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Prompt inputs must be a dict"));
+    }
+
+    #[test]
+    fn test_unsupported_template_type() {
+        let result = execute(json!({ "template": 42 }));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Unsupported template type"));
+    }
+
+    // =========================================================================
+    // Combined: history + tool results
+    // =========================================================================
+
+    #[test]
+    fn test_history_and_tool_results_combined() {
+        let result = execute(json!({
+            "template": { "system": "You are an assistant.", "user": "Help me." },
+            "conversation_history": [
+                {"role": "user", "content": "Prev q"},
+                {"role": "assistant", "content": "Prev a"}
+            ],
+            "tool_results": [
+                {"role": "tool", "content": "calc result", "tool_call_id": "t1"}
+            ]
+        }))
+        .unwrap();
+
+        let messages = result["messages"].as_array().unwrap();
+        // system + 2 history + user + 1 tool = 5
+        assert_eq!(messages.len(), 5);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["content"], "Prev q");
+        assert_eq!(messages[2]["content"], "Prev a");
+        assert_eq!(messages[3]["content"], "Help me.");
+        assert_eq!(messages[4]["role"], "tool");
+    }
+}

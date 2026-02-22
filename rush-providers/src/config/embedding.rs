@@ -1,6 +1,6 @@
 //! Embedding provider configuration — mirrors hush-providers EmbeddingConfig.
 //!
-//! Supports: OpenAI, Azure, Gemini, TEI, vLLM, HF, ONNX.
+//! Supports: OpenAI, Azure, vLLM, HF, ONNX.
 //! Parsed from `EmbeddingConfig.model_dump(mode="json")` output.
 
 use pyo3::prelude::*;

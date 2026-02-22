@@ -170,16 +170,17 @@ fn my_op(py: Python, inputs: &Bound<'_, PyDict>) -> PyResult<Option<PyObject>> {
 
 Release build, Python 3.13, comparing `mode="python"` vs `mode="rust"`:
 
-| Pattern | Speedup |
-|---------|---------|
-| Linear chain (50-500 ops) | 2.3x – 2.7x |
-| Nested @graph (2-20 stages) | 3.4x – 3.9x |
-| Parallel fan-out (5-50 branches) | 2.9x – 3.2x |
-| Branching (5-20 stages) | 2.0x – 2.4x |
-| ForOp loop (10-100 items) | 3.0x – 3.3x |
-| Production-like (3-10 cases) | 2.3x – 2.5x |
-| CPU contention (hash chains) | 2.4x – 6.1x |
-| Production + CPU | 3.4x – 5.1x |
+| Pattern | Speedup | Py mean | Rs mean |
+|---------|---------|---------|---------|
+| Linear chain (50-500 ops) | 1.9x – 2.4x | 0.31–3.02ms | 0.13–1.27ms |
+| Nested @graph (2-20 stages) | 3.6x – 3.9x | 0.20–1.87ms | 0.06–0.48ms |
+| Parallel fan-out (5-50 branches) | 2.8x – 3.0x | 0.17–1.39ms | 0.06–0.46ms |
+| Branching (5-20 stages) | 2.1x – 2.4x | 0.16–0.65ms | 0.08–0.28ms |
+| ForOp loop (10-100 items) | 3.2x | 0.19–1.61ms | 0.06–0.51ms |
+| Production-like (3-10 cases) | 2.4x – 2.5x | 0.18–0.44ms | 0.08–0.18ms |
+| CPU contention (hash chains) | 4.7x – 6.0x | 18–97ms | 3–17ms |
+| Production + CPU | 4.9x – 6.2x | 19–75ms | 3–15ms |
+| Pure CPU chain (sequential) | 1.1x – 2.7x | 20–75ms | 8–68ms |
 
 ## Gotchas
 

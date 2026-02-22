@@ -499,7 +499,7 @@ async fn download_results(
         let value = if let Some(resp) = parsed.response {
             if resp.status_code == 200 {
                 // Parse as ChatCompletion response
-                crate::http::llm::format_batch_result(&resp.body)
+                crate::llms::types::format_batch_result(&resp.body)
             } else {
                 json!({
                     "error_code": resp.status_code,

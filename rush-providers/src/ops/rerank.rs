@@ -1,13 +1,12 @@
-//! Reranking op — dispatches to appropriate HTTP backend.
+//! Reranking op — dispatches to appropriate backend.
 //!
 //! Mirrors hush-providers/hush/providers/ops/rerank.py.
 //! Handles both List[str] and List[Dict] document inputs.
-//! Supports: vLLM, TEI, Pinecone, Cohere (HTTP-based backends).
+//! Supports: vLLM, Pinecone, Cohere (HTTP), HF (PyO3), ONNX (native Rust ort).
 
 use serde_json::{json, Value};
 
 use crate::config::reranking::RerankingConfig;
-use crate::http::reranker as http_reranker;
 use crate::http::ProviderResult;
 
 /// Execute a reranking op.
@@ -65,8 +64,8 @@ pub async fn execute(inputs: Value, config: &RerankingConfig) -> ProviderResult<
             .collect()
     };
 
-    // Call HTTP reranker
-    let result = http_reranker::rerank(config, query, &texts, top_k, threshold).await?;
+    // Call reranker backend (HTTP, PyO3, or native Rust)
+    let result = crate::rerankers::rerank(config, query, &texts, top_k, threshold).await?;
 
     // Build reranked documents with original data
     let ranked_results = result
