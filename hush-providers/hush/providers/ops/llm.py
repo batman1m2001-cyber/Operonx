@@ -90,6 +90,8 @@ class LLMOp(BaseOp):
             outputs: Output variable mappings
             **kwargs: Additional keyword arguments for BaseOp
         """
+        # Provider ops are I/O-bound by default (HTTP calls to LLM backends)
+        kwargs.setdefault("bound", "io")
         # Initialize base without inputs/outputs first
         super().__init__(**kwargs)
 

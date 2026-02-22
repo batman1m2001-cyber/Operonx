@@ -368,8 +368,9 @@ fn execute_provider_op(
         })?;
 
     // 2. Release GIL and run async HTTP via tokio
+    //    Uses block_on_async() which works from both main thread and spawn_blocking
     let json_outputs = py.allow_threads(|| {
-        runtime::get_runtime().block_on(async {
+        runtime::block_on_async(async {
             rush_providers::ops::execute(&op.op_type, json_inputs, config).await
         })
     });
@@ -531,7 +532,7 @@ fn execute_provider_op_streaming(
 
     // 7. Get the accumulated final result from the tokio task
     let final_result = py.allow_threads(|| {
-        runtime::get_runtime().block_on(async { handle.await })
+        runtime::block_on_async(async { handle.await })
     });
 
     match final_result {

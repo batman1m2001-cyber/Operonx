@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def op(func=None, *, executor=None, rust=None):
+def op(func=None, *, executor=None, rust=None, bound=None):
     """Decorator that turns a plain function into a FuncOp factory.
 
     Can be used bare or with keyword arguments::
@@ -33,6 +33,14 @@ def op(func=None, *, executor=None, rust=None):
         def double(x: int):
             return {"result": x * 2}  # Python fallback
 
+        @op(bound="io")
+        async def call_api(url: str):
+            return {"data": await fetch(url)}
+
+        @op(bound="cpu")
+        def heavy_compute(data: list):
+            return {"result": process(data)}
+
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
@@ -40,11 +48,17 @@ def op(func=None, *, executor=None, rust=None):
             When set, the Rust backend dispatches to its internal registry
             instead of calling the Python function. The Python body serves
             as a fallback when the Rust op is not found.
+        bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
+            ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
+            ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
+            ``None`` auto-detects: async → ``"io"``, sync → ``"cpu"``.
     """
 
     def decorator(fn):
         if rust is not None:
             fn._rust_op_name = rust
+        if bound is not None:
+            fn._op_bound = bound
         sig = inspect.signature(fn)
         collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
         if collisions:
@@ -61,10 +75,12 @@ def op(func=None, *, executor=None, rust=None):
         @wraps(fn)
         def wrapper(**kwargs):
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
-            # Call-time executor= overrides decoration-time default
+            # Call-time overrides decoration-time defaults
             op_executor = init_kwargs.pop("executor", executor)
+            op_bound = init_kwargs.pop("bound", bound)
             return FuncOp(
-                code_fn=fn, executor=op_executor, _mappings=mappings or None, **init_kwargs
+                code_fn=fn, executor=op_executor, bound=op_bound,
+                _mappings=mappings or None, **init_kwargs,
             )
 
         register_skip(wrapper)
