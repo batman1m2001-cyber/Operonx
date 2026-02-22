@@ -163,6 +163,14 @@ class RerankOp(BaseOp):
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
         return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
+    def serialize(self) -> dict:
+        """Serialize RerankOp for Rust backend, including backend config."""
+        base = super().serialize()
+        base["resource"] = self.resource
+        if self.backend and hasattr(self.backend, "config"):
+            base["resource_config"] = self.backend.config.model_dump(mode="json")
+        return base
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return rerank-specific metadata dictionary."""

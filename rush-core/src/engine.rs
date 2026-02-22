@@ -57,6 +57,11 @@ impl Rush {
         let state = EngineState::new();
         let context = "";
 
+        // Store request_id on state (used by streaming ops for STREAM_SERVICE)
+        if let Some(ref rid) = request_id {
+            state.set_request_id(rid.clone());
+        }
+
         // 1. Store inputs into state under the graph's full_name
         for (k, v) in inputs.iter() {
             let key: String = k.extract()?;

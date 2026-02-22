@@ -4,7 +4,8 @@
 //! Includes observability: enabled flag, per-op timing, $tags, verbose logging,
 //! slow op warnings, and execution order tracking.
 
-use std::time::Instant;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -12,6 +13,7 @@ use pyo3::types::PyDict;
 use crate::config::{IterParamConfig, OpConfig, ParamConfig, RefConfig};
 use crate::ops::transform::func_op;
 use crate::refs::interpreter::evaluate_ref_ops;
+use crate::runtime;
 use crate::states::state::EngineState;
 
 // =============================================================================
@@ -54,8 +56,12 @@ pub(crate) fn execute_leaf_op(
             }
         }
 
-        // 4. Execute: try Rust registry first, then Python callable
-        let result_obj = if let Some(ref rust_name) = op.rust_op {
+        // 4. Execute: try native provider op (with streaming), then Rust registry, then Python callable
+        let result_obj = if op.provider_config.is_some() && op.stream && op.op_type == "llm" {
+            execute_provider_op_streaming(py, op, &inputs_dict, state, context)?
+        } else if op.provider_config.is_some() {
+            execute_provider_op(py, op, &inputs_dict)?
+        } else if let Some(ref rust_name) = op.rust_op {
             if func_op::has_internal(rust_name) {
                 func_op::execute_internal(py, rust_name, &inputs_dict.as_borrowed())?
             } else {
@@ -270,6 +276,9 @@ pub(crate) fn push_output_refs(
 }
 
 /// Call a Python callable for an op.
+/// For async ops (is_async=true), drives the returned coroutine to completion.
+/// Uses asyncio.run() when no event loop is running, or offloads to a worker
+/// thread when called from within an existing event loop (e.g., via Hush.run()).
 pub(crate) fn call_python(
     py: Python,
     op: &OpConfig,
@@ -278,11 +287,265 @@ pub(crate) fn call_python(
     match &op.python_callable {
         Some(callable) => {
             let result = callable.bind(py).call((), Some(inputs_dict))?;
-            Ok(Some(result.unbind()))
+            if op.is_async {
+                let driven = drive_coroutine(py, &result)?;
+                Ok(Some(driven.unbind()))
+            } else {
+                Ok(Some(result.unbind()))
+            }
         }
         None => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
             "Op '{}' has no python_callable and no rust_op",
             op.full_name
+        ))),
+    }
+}
+
+/// Drive an async coroutine to completion.
+///
+/// - If no event loop is running: uses `asyncio.run(coro)` directly.
+/// - If inside a running event loop (e.g., called from Hush's async engine):
+///   offloads to a ThreadPoolExecutor worker which creates its own event loop.
+///   This avoids the "cannot be called from a running event loop" error.
+pub(crate) fn drive_coroutine<'py>(
+    py: Python<'py>,
+    coro: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let asyncio = py.import_bound("asyncio")?;
+
+    // Check if there's already a running event loop
+    let in_running_loop = asyncio.call_method0("get_running_loop").is_ok();
+
+    if in_running_loop {
+        // Offload to a worker thread that creates its own event loop
+        let cf = py.import_bound("concurrent.futures")?;
+        let executor = cf.getattr("ThreadPoolExecutor")?.call1((1i32,))?;
+        let asyncio_run = asyncio.getattr("run")?;
+        let future = executor.call_method1("submit", (&asyncio_run, coro))?;
+        let output = future.call_method0("result")?;
+        let _ = executor.call_method0("shutdown");
+        Ok(output)
+    } else {
+        // No running loop — safe to use asyncio.run() directly
+        asyncio.call_method1("run", (coro,))
+    }
+}
+
+// =============================================================================
+// Native provider op execution (GIL-free async HTTP)
+// =============================================================================
+
+/// Execute a native provider op via rush-providers.
+///
+/// Flow:
+/// 1. Extract inputs from PyDict to serde_json::Value (with GIL)
+/// 2. Release GIL, run async HTTP via tokio runtime (no Python involved)
+/// 3. Acquire GIL, convert outputs back to PyDict
+///
+/// This is the key performance win: HTTP I/O happens entirely without GIL,
+/// enabling true concurrent I/O across parallel ops.
+fn execute_provider_op(
+    py: Python,
+    op: &OpConfig,
+    inputs_dict: &Bound<'_, PyDict>,
+) -> PyResult<Option<PyObject>> {
+    let config = match &op.provider_config {
+        Some(c) => c,
+        None => return call_python(py, op, inputs_dict),
+    };
+
+    if !is_native_config(config) {
+        return call_python(py, op, inputs_dict);
+    }
+
+    // 1. Extract inputs to serde_json::Value (with GIL)
+    let json_inputs =
+        rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to serialize inputs for native provider op: {}",
+                e
+            ))
+        })?;
+
+    // 2. Release GIL and run async HTTP via tokio
+    let json_outputs = py.allow_threads(|| {
+        runtime::get_runtime().block_on(async {
+            rush_providers::ops::execute(&op.op_type, json_inputs, config).await
+        })
+    });
+
+    match json_outputs {
+        Ok(outputs) => {
+            // 3. Convert back to PyDict (with GIL)
+            let py_result = rush_providers::py_serde::json_to_pydict(py, &outputs)?;
+            Ok(Some(py_result))
+        }
+        Err(e) => {
+            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Native provider op error: {}",
+                e
+            )))
+        }
+    }
+}
+
+/// Check if a provider config's api_type(s) are natively supported.
+fn is_native_config(config: &rush_providers::config::ProviderConfig) -> bool {
+    match config {
+        rush_providers::config::ProviderConfig::LLM(c) => {
+            !c.configs.is_empty()
+                && c.configs.iter().all(|cfg| {
+                    rush_providers::ops::is_native_provider_op(cfg.api_type())
+                })
+        }
+        rush_providers::config::ProviderConfig::Embedding(c) => {
+            rush_providers::ops::is_native_provider_op(&c.api_type)
+        }
+        rush_providers::config::ProviderConfig::Reranking(c) => {
+            rush_providers::ops::is_native_provider_op(&c.api_type)
+        }
+    }
+}
+
+// =============================================================================
+// Streaming native provider op execution
+// =============================================================================
+
+/// Wrapper to send a raw pointer across threads.
+/// SAFETY: The caller must guarantee the pointee outlives the spawned task.
+struct SendConfigPtr(*const rush_providers::config::ProviderConfig);
+unsafe impl Send for SendConfigPtr {}
+unsafe impl Sync for SendConfigPtr {}
+
+impl SendConfigPtr {
+    fn get(&self) -> &rush_providers::config::ProviderConfig {
+        // SAFETY: Guaranteed valid by construction (points to GraphConfig-owned data)
+        unsafe { &*self.0 }
+    }
+}
+
+/// Execute a native LLM provider op with streaming via rush-providers.
+///
+/// Flow:
+/// 1. Extract inputs to JSON (with GIL)
+/// 2. Get STREAM_SERVICE reference and streaming metadata
+/// 3. Create std::sync::mpsc channel for chunks
+/// 4. Spawn async streaming HTTP in tokio (GIL-free)
+/// 5. Poll channel for chunks, push each to STREAM_SERVICE (with GIL)
+/// 6. Signal end to STREAM_SERVICE
+/// 7. Return accumulated result as PyDict
+///
+/// The GIL is briefly released between chunk polls to allow other Python threads
+/// to make progress, while HTTP I/O runs entirely GIL-free in tokio.
+fn execute_provider_op_streaming(
+    py: Python,
+    op: &OpConfig,
+    inputs_dict: &Bound<'_, PyDict>,
+    state: &EngineState,
+    context: &str,
+) -> PyResult<Option<PyObject>> {
+    let config = match &op.provider_config {
+        Some(c) => c,
+        None => return call_python(py, op, inputs_dict),
+    };
+
+    if !is_native_config(config) {
+        return call_python(py, op, inputs_dict);
+    }
+
+    // 1. Extract inputs to serde_json::Value (with GIL)
+    let json_inputs =
+        rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to serialize inputs for streaming provider op: {}",
+                e
+            ))
+        })?;
+
+    // 2. Get STREAM_SERVICE and streaming metadata
+    let hush_core = py.import_bound("hush.core")?;
+    let stream_service = hush_core.getattr("STREAM_SERVICE")?;
+
+    let request_id = state.request_id().unwrap_or_else(|| "default".to_string());
+
+    // channel_name = "{full_name}[{context_id or 'main'}]" — mirrors Python's BaseOp.identity()
+    let ctx_label = if context.is_empty() { "main" } else { context };
+    let channel_name = format!("{}[{}]", op.full_name, ctx_label);
+
+    // 3. Create channel for chunk forwarding (std::sync::mpsc)
+    let (chunk_tx, chunk_rx) = mpsc::channel::<serde_json::Value>();
+
+    // 4. Spawn streaming HTTP in tokio (GIL-free)
+    let op_type = op.op_type.clone();
+    // SAFETY: config lives for the duration of the engine run (owned by GraphConfig).
+    // The spawned task completes before we return from this function (we await it).
+    let config_ptr = SendConfigPtr(config as *const _);
+
+    let handle = runtime::get_runtime().spawn(async move {
+        let config_ref = config_ptr.get();
+        rush_providers::ops::execute_streaming(&op_type, json_inputs, config_ref, chunk_tx).await
+    });
+
+    // 5. Pump chunks from channel to STREAM_SERVICE
+    //    Use try_recv() (non-blocking) + brief GIL release to avoid blocking Python
+    loop {
+        match chunk_rx.try_recv() {
+            Ok(chunk_json) => {
+                // Convert JSON chunk to Python dict and push to STREAM_SERVICE
+                let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
+
+                // STREAM_SERVICE.push() is async — drive the coroutine
+                let push_coro = stream_service.call_method1(
+                    "push",
+                    (&request_id, &channel_name, py_chunk.bind(py)),
+                )?;
+                drive_coroutine(py, &push_coro)?;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // No chunk ready — check if streaming task has finished
+                if handle.is_finished() {
+                    // Drain any remaining chunks that arrived before we checked
+                    while let Ok(chunk_json) = chunk_rx.try_recv() {
+                        let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
+                        let push_coro = stream_service.call_method1(
+                            "push",
+                            (&request_id, &channel_name, py_chunk.bind(py)),
+                        )?;
+                        drive_coroutine(py, &push_coro)?;
+                    }
+                    break;
+                }
+                // Release GIL briefly to let other Python threads progress
+                py.allow_threads(|| std::thread::sleep(Duration::from_millis(1)));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // Sender dropped — stream ended
+                break;
+            }
+        }
+    }
+
+    // 6. Signal end of stream to STREAM_SERVICE
+    let end_coro = stream_service.call_method1("end", (&request_id, &channel_name))?;
+    drive_coroutine(py, &end_coro)?;
+
+    // 7. Get the accumulated final result from the tokio task
+    let final_result = py.allow_threads(|| {
+        runtime::get_runtime().block_on(async { handle.await })
+    });
+
+    match final_result {
+        Ok(Ok(outputs)) => {
+            let py_result = rush_providers::py_serde::json_to_pydict(py, &outputs)?;
+            Ok(Some(py_result))
+        }
+        Ok(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Streaming provider op error: {}",
+            e
+        ))),
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Streaming task panicked: {}",
+            e
         ))),
     }
 }
