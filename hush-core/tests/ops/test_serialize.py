@@ -1,14 +1,14 @@
 """Tests for op serialize() methods (Phase 2 of Builder-Executor refactor)."""
 
-from hush.core import GraphOp, op, START, END, PARENT
+from hush.core import END, PARENT, START, GraphOp, op
 from hush.core.ops.flow.branch_op import if_
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
+
 
 @op
 def double(x: int):
@@ -32,6 +32,7 @@ def _build_graph(g: GraphOp) -> GraphOp:
 
 
 # ── Ref.serialize ────────────────────────────────────────────────────────
+
 
 class TestRefSerialize:
     def test_simple_ref(self):
@@ -67,6 +68,7 @@ class TestRefSerialize:
 
 
 # ── BaseOp.serialize (via @op / code type) ───────────────────────────────
+
 
 class TestBaseOpSerialize:
     def test_func_op_serialize(self):
@@ -132,6 +134,7 @@ class TestBaseOpSerialize:
 
 
 # ── GraphOp.serialize ───────────────────────────────────────────────────
+
 
 class TestGraphOpSerialize:
     def test_basic_graph(self):
@@ -202,6 +205,7 @@ class TestGraphOpSerialize:
 
 # ── BranchOp.serialize ──────────────────────────────────────────────────
 
+
 class TestBranchOpSerialize:
     def test_basic_branch(self):
         with GraphOp(name="g") as g:
@@ -241,6 +245,7 @@ class TestBranchOpSerialize:
 
 # ── ForOp.serialize ─────────────────────────────────────────────────────
 
+
 class TestForOpSerialize:
     def test_for_op(self):
         with ForOp(name="loop", inputs={"x": Each([1, 2, 3]), "m": 10}) as loop:
@@ -278,6 +283,7 @@ class TestForOpSerialize:
 
 # ── MapOp.serialize ─────────────────────────────────────────────────────
 
+
 class TestMapOpSerialize:
     def test_map_op(self):
         with MapOp(name="ploop", inputs={"x": Each([1, 2])}, max_concurrency=4) as loop:
@@ -295,9 +301,12 @@ class TestMapOpSerialize:
 
 # ── WhileOp.serialize ───────────────────────────────────────────────────
 
+
 class TestWhileOpSerialize:
     def test_while_op(self):
-        with WhileOp(name="wloop", inputs={"counter": 0}, until="counter >= 5", max_iterations=50) as loop:
+        with WhileOp(
+            name="wloop", inputs={"counter": 0}, until="counter >= 5", max_iterations=50
+        ) as loop:
             step = increment(counter=PARENT["counter"])
             step["counter"] >> PARENT["counter"]
             START >> step >> END
@@ -310,6 +319,7 @@ class TestWhileOpSerialize:
 
 
 # ── Round-trip: serialize produces valid structure ───────────────────────
+
 
 class TestSerializeStructure:
     def test_full_workflow_serializes(self):

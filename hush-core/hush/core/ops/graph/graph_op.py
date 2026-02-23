@@ -27,7 +27,6 @@ from hush.core.utils.auto_name import register_skip
 from hush.core.utils.common import Param
 from hush.core.utils.context import _current_graph
 
-
 # =============================================================================
 # Validation Types
 # =============================================================================
@@ -332,21 +331,23 @@ class GraphOp(BaseOp):
     def serialize(self) -> dict:
         """Serialize full graph to config dict for the Rust backend."""
         base = super().serialize()
-        base.update({
-            "ops": {name: op.serialize() for name, op in self._ops.items()},
-            "edges": [
-                {"from": src, "to": dst, "soft": edge.soft}
-                for (src, dst), edge in self._edges.items()
-            ],
-            "entries": list(self.entries),
-            "exits": list(self.exits),
-            "initial_ready_count": dict(self.initial_ready_count),
-            "has_soft_preds": list(self.has_soft_preds),
-            "compiled_adj": {
-                op: [[succ, soft] for succ, soft in successors]
-                for op, successors in self._compiled_adj.items()
-            },
-        })
+        base.update(
+            {
+                "ops": {name: op.serialize() for name, op in self._ops.items()},
+                "edges": [
+                    {"from": src, "to": dst, "soft": edge.soft}
+                    for (src, dst), edge in self._edges.items()
+                ],
+                "entries": list(self.entries),
+                "exits": list(self.exits),
+                "initial_ready_count": dict(self.initial_ready_count),
+                "has_soft_preds": list(self.has_soft_preds),
+                "compiled_adj": {
+                    op: [[succ, soft] for succ, soft in successors]
+                    for op, successors in self._compiled_adj.items()
+                },
+            }
+        )
         return base
 
     # =========================================================================
@@ -836,7 +837,12 @@ class GraphOp(BaseOp):
 
         except Exception:
             import sys
-            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+
+            error_msg = (
+                traceback.format_exc()
+                if LOGGER.isEnabledFor(40)
+                else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+            )
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
@@ -848,7 +854,14 @@ class GraphOp(BaseOp):
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
+            self._store_metrics(
+                state,
+                context_id,
+                error=error_msg,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
+            )
 
             return _outputs
 

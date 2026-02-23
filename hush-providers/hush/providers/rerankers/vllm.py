@@ -130,7 +130,6 @@ class VLLMReranker(BaseReranker):
 if __name__ == "__main__":
     # Example usage
     async def main():
-
         import time
 
         reranker = VLLMReranker(RerankingConfig.default())

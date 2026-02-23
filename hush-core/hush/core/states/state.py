@@ -82,7 +82,9 @@ class MemoryState:
         op, var, ctx = key
         return op, var, (ctx if ctx is not None else DEFAULT_CONTEXT)
 
-    def __setitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any) -> None:
+    def __setitem__(
+        self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any
+    ) -> None:
         """Store value. Push to target if push_ref exists (1 hop only).
 
         Args:

@@ -324,7 +324,6 @@ async def main():
 
 
 async def test_tool_calling():
-
     config = GeminiConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
@@ -396,7 +395,6 @@ async def test_tool_calling():
 
 
 async def test_multimodal_image():
-
     config = GeminiConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id"),
         location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),

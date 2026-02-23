@@ -16,7 +16,6 @@ from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import if_
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
 from rush_core import Rush
 
@@ -340,9 +339,7 @@ class TestOutputMappingEdgeCases:
             return {"result": x * 10}
 
         with GraphOp(name="g") as g:
-            step = compute(
-                x=PARENT["x"], outputs={"result": PARENT["answer"]}
-            )
+            step = compute(x=PARENT["x"], outputs={"result": PARENT["answer"]})
             START >> step >> END
         g.build()
 
@@ -399,9 +396,7 @@ class TestLargeDataHandling:
     def test_many_iterations(self):
         """ForOp with many iterations (100+)."""
         with GraphOp(name="g") as g:
-            with ForOp(
-                name="loop", inputs={"value": Each(list(range(100)))}
-            ) as loop:
+            with ForOp(name="loop", inputs={"value": Each(list(range(100)))}) as loop:
                 d = double(x=PARENT["value"])
                 START >> d >> END
             START >> loop >> END
@@ -456,9 +451,7 @@ class TestGraphDecoratorComposition:
             START >> mx >> a >> END
 
         with GraphOp(name="g") as g:
-            step = weighted_sum(
-                x=PARENT["x"], y=PARENT["y"], weight=PARENT["w"]
-            )
+            step = weighted_sum(x=PARENT["x"], y=PARENT["y"], weight=PARENT["w"])
             START >> step >> END
         g.build()
 
@@ -545,9 +538,7 @@ class TestWhileOpAdvanced:
                 inputs={"items": [], "counter": 0},
                 until="counter >= 4",
             ) as loop:
-                step = collect(
-                    items=PARENT["items"], counter=PARENT["counter"]
-                )
+                step = collect(items=PARENT["items"], counter=PARENT["counter"])
                 step["new_items"] >> PARENT["items"]
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END

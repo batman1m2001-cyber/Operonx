@@ -19,7 +19,6 @@ import time
 import tracemalloc
 
 from hush.core import Hush, GraphOp, graph, op, START, END, PARENT
-from hush.core.ops.flow import if_
 from hush.core.ops.flow.branch_op import Branch
 from hush.core.ops.iteration import Each, ForOp
 
@@ -29,7 +28,9 @@ def check_deps():
         from rush_core import is_rust_available
 
         if not is_rust_available():
-            print("ERROR: rush-core native module not built. Run: maturin develop --release")
+            print(
+                "ERROR: rush-core native module not built. Run: maturin develop --release"
+            )
             sys.exit(1)
     except ImportError:
         print("ERROR: rush-core not installed. Run: maturin develop --release")
@@ -83,8 +84,11 @@ def merge_two(a, b):
 
 @op
 def combine_all(
-    r1: dict = None, r2: dict = None, r3: dict = None,
-    r4: dict = None, r5: dict = None,
+    r1: dict = None,
+    r2: dict = None,
+    r3: dict = None,
+    r4: dict = None,
+    r5: dict = None,
 ):
     """Aggregate up to 5 parallel branch results."""
     parts = [r for r in [r1, r2, r3, r4, r5] if r is not None]
@@ -250,9 +254,13 @@ def build_branching(n: int):
             )
 
             exc = process_grade(grade=cls["grade"], score=cls["score"], name=f"exc{i}")
-            good = process_grade(grade=cls["grade"], score=cls["score"], name=f"good{i}")
+            good = process_grade(
+                grade=cls["grade"], score=cls["score"], name=f"good{i}"
+            )
             avg = process_grade(grade=cls["grade"], score=cls["score"], name=f"avg{i}")
-            fail = process_grade(grade=cls["grade"], score=cls["score"], name=f"fail{i}")
+            fail = process_grade(
+                grade=cls["grade"], score=cls["score"], name=f"fail{i}"
+            )
 
             if first is None:
                 START >> cls
@@ -307,7 +315,9 @@ def build_for_loop(n: int):
 def verify_case(x, threshold):
     """Single verification subgraph: classify → branch → 2 paths → merge."""
     cls = classify(score=x, name="cls")
-    router = Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
+    router = (
+        Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
+    )
     pass_op = process_grade(grade=cls["grade"], score=cls["score"], name="pass_op")
     fail_op = process_grade(grade=cls["grade"], score=cls["score"], name="fail_op")
     merge = noop(x=cls["score"], name="out")
@@ -507,7 +517,9 @@ def print_header(name: str):
         f"  {'Label':>30s} | {'Ops':>5s} | {'Py mean':>10s} | {'Rs mean':>10s} | "
         f"{'Py p99':>10s} | {'Rs p99':>10s} | {'Speedup':>8s} | {'Py mem':>10s} | {'Rs mem':>10s}"
     )
-    print(f"  {'-'*30}-+-{'-'*5}-+-{'-'*10}-+-{'-'*10}-+-{'-'*10}-+-{'-'*10}-+-{'-'*8}-+-{'-'*10}-+-{'-'*10}")
+    print(
+        f"  {'-' * 30}-+-{'-' * 5}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 8}-+-{'-' * 10}-+-{'-' * 10}"
+    )
 
 
 async def bench_one(label: str, graph, inputs: dict, runs: int = 200):
@@ -536,7 +548,9 @@ async def main():
 
     print("=" * 130)
     print("  End-to-End Stress Benchmark: Python mode vs Rust mode")
-    print("  Patterns: linear, nested, parallel, branching, ForOp, production, CPU-contention, CPU-production, CPU-chain")
+    print(
+        "  Patterns: linear, nested, parallel, branching, ForOp, production, CPU-contention, CPU-production, CPU-chain"
+    )
     print("=" * 130)
 
     # --- Linear chains ---
@@ -563,7 +577,11 @@ async def main():
     print_header("ForOp sequential loop")
     for n in [10, 50, 100]:
         items = [f"item{i}" for i in range(n)]
-        await bench_one(f"for_loop({n} items)", build_for_loop(n), {"items": items, "prefix": "test"})
+        await bench_one(
+            f"for_loop({n} items)",
+            build_for_loop(n),
+            {"items": items, "prefix": "test"},
+        )
 
     # --- Production-like ---
     print_header("Production-like (n parallel verify subgraphs → aggregate → post)")
@@ -572,7 +590,12 @@ async def main():
 
     # --- CPU contention: heavy + light parallel ---
     print_header("CPU contention (heavy hash chains + light ops in parallel)")
-    for n_heavy, n_light, iters in [(3, 10, 5000), (5, 10, 5000), (5, 20, 10000), (10, 20, 10000)]:
+    for n_heavy, n_light, iters in [
+        (3, 10, 5000),
+        (5, 10, 5000),
+        (5, 20, 10000),
+        (10, 20, 10000),
+    ]:
         await bench_one(
             f"cpu({n_heavy}h+{n_light}l,{iters}i)",
             build_cpu_contention(n_heavy, n_light, iters),
@@ -582,7 +605,12 @@ async def main():
 
     # --- Production + CPU ---
     print_header("Production-like + CPU (verify + hash + matrix post-process)")
-    for n, iters, msize in [(3, 5000, 30), (5, 5000, 30), (5, 10000, 50), (7, 10000, 50)]:
+    for n, iters, msize in [
+        (3, 5000, 30),
+        (5, 5000, 30),
+        (5, 10000, 50),
+        (7, 10000, 50),
+    ]:
         await bench_one(
             f"prod_cpu({n}c,{iters}i,{msize}m)",
             build_production_cpu(n, iters),

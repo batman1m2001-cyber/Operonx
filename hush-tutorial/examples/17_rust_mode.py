@@ -214,8 +214,8 @@ async def example_5_benchmark():
 
     speedup = py_time / rs_time if rs_time > 0 else float("inf")
 
-    print(f"  Python mode: {py_time*1000:.1f}ms / run")
-    print(f"  Rust mode:   {rs_time*1000:.1f}ms / run")
+    print(f"  Python mode: {py_time * 1000:.1f}ms / run")
+    print(f"  Rust mode:   {rs_time * 1000:.1f}ms / run")
     print(f"  Speedup:     {speedup:.1f}x")
 
 

@@ -24,7 +24,9 @@ class TestTildeSoftEdge:
         graph.build()
 
         # Check edges
-        a_to_b = next((e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None)
+        a_to_b = next(
+            (e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None
+        )
         assert a_to_b is not None, "Edge a->b should exist"
         assert a_to_b.soft == True, "Edge a->b should be soft"
 
@@ -39,7 +41,9 @@ class TestTildeSoftEdge:
         graph.build()
 
         # Check edges
-        a_to_b = next((e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None)
+        a_to_b = next(
+            (e for e in graph._edges.values() if e.from_node == "a" and e.to_node == "b"), None
+        )
         assert a_to_b is not None, "Edge a->b should exist"
         assert a_to_b.soft == False, "Edge a->b should be hard"
 

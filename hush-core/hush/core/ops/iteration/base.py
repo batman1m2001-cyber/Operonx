@@ -288,10 +288,12 @@ class BaseIterationOp(GraphOp):
                     result[k] = {"literal": v}
             return result
 
-        base.update({
-            "each": _serialize_ref_dict(self._each),
-            "broadcast": _serialize_ref_dict(self._broadcast_inputs),
-        })
+        base.update(
+            {
+                "each": _serialize_ref_dict(self._each),
+                "broadcast": _serialize_ref_dict(self._broadcast_inputs),
+            }
+        )
         return base
 
     async def run(
@@ -322,7 +324,12 @@ class BaseIterationOp(GraphOp):
 
         except Exception as e:
             import sys
-            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+
+            error_msg = (
+                traceback.format_exc()
+                if LOGGER.isEnabledFor(40)
+                else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+            )
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]: %s",
                 request_id,
@@ -335,7 +342,14 @@ class BaseIterationOp(GraphOp):
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
+            self._store_metrics(
+                state,
+                context_id,
+                error=error_msg,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
+            )
 
         return _outputs
 

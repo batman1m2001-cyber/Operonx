@@ -247,13 +247,9 @@ class BaseOp(ABC):
         bound: Optional[str] = None,
     ):
         if executor not in self._VALID_EXECUTORS:
-            raise ValueError(
-                f"executor must be 'thread', 'process', or None, got {executor!r}"
-            )
+            raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
         if bound not in self._VALID_BOUNDS:
-            raise ValueError(
-                f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}"
-            )
+            raise ValueError(f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}")
         self.executor = executor
         self.bound = bound
         self.id = id or uuid.uuid4().hex
@@ -780,7 +776,12 @@ class BaseOp(ABC):
 
         except Exception:
             import sys
-            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+
+            error_msg = (
+                traceback.format_exc()
+                if LOGGER.isEnabledFor(40)
+                else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+            )
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
@@ -792,7 +793,14 @@ class BaseOp(ABC):
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
+            self._store_metrics(
+                state,
+                context_id,
+                error=error_msg,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
+            )
 
             # Performance monitoring: log slow ops (>100ms)
             if duration_ms > 100 and LOGGER.isEnabledFor(30):

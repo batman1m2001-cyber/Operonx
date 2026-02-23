@@ -144,7 +144,6 @@ class TestRerankOpIntegration:
     async def test_rerank_node_with_hub(self, hub):
         """Test RerankOp works with ResourceHub."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import RerankOp
 
         # Check if bge-m3-onnx reranker is available
@@ -179,7 +178,6 @@ class TestRerankOpIntegration:
     async def test_rerank_node_with_pinecone(self, hub):
         """Test RerankOp works with Pinecone API."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import RerankOp
 
         # Check if bge-m3 (Pinecone) reranker is available

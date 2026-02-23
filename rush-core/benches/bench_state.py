@@ -17,16 +17,18 @@ import statistics
 import sys
 import time
 
-from hush.core import END, PARENT, START, Each, GraphOp, Hush, MapOp, graph, op
-from hush.core.states import MemoryState, StateSchema
+from hush.core import END, PARENT, START, Each, GraphOp, Hush, MapOp, op
+from hush.core.states import StateSchema
 
 
 def check_deps():
     try:
-        from rush_core import RustMemoryState, is_rust_available
+        from rush_core import is_rust_available
 
         if not is_rust_available():
-            print("ERROR: rush-core native module not built. Run: maturin develop --release")
+            print(
+                "ERROR: rush-core native module not built. Run: maturin develop --release"
+            )
             sys.exit(1)
     except ImportError:
         print("ERROR: rush-core not installed. Run: maturin develop --release")
@@ -138,6 +140,7 @@ async def bench_e2e_state(n_ops: int, runs: int = 30):
 
 async def bench_iteration(n_items: int, runs: int = 30):
     """MapOp with n_items concurrent iterations."""
+
     @op
     def process(value: int):
         return {"out": value * 2}
@@ -180,14 +183,22 @@ async def bench_multi_var(n_ops: int, runs: int = 30):
     """Linear chain of multi_var ops (5 reads + 3 writes per op)."""
     with GraphOp(name=f"multivar_{n_ops}") as g:
         prev = multi_var(
-            a=PARENT["a"], b=PARENT["b"], c=PARENT["c"],
-            d=PARENT["d"], e=PARENT["e"], name="op0",
+            a=PARENT["a"],
+            b=PARENT["b"],
+            c=PARENT["c"],
+            d=PARENT["d"],
+            e=PARENT["e"],
+            name="op0",
         )
         START >> prev
         for i in range(1, n_ops):
             cur = multi_var(
-                a=prev["sum"], b=prev["product"], c=prev["x"],
-                d=PARENT["d"], e=PARENT["e"], name=f"op{i}",
+                a=prev["sum"],
+                b=prev["product"],
+                c=prev["x"],
+                d=PARENT["d"],
+                e=PARENT["e"],
+                name=f"op{i}",
             )
             prev >> cur
             prev = cur
@@ -217,7 +228,9 @@ async def bench_multi_var(n_ops: int, runs: int = 30):
 
 def print_row(label: str, py_us, rs_us, unit="us"):
     speedup = py_us / rs_us if rs_us > 0 else float("inf")
-    print(f"  {label:>35s} | Py={py_us:10.1f}{unit} | Rs={rs_us:10.1f}{unit} | speedup={speedup:.2f}x")
+    print(
+        f"  {label:>35s} | Py={py_us:10.1f}{unit} | Rs={rs_us:10.1f}{unit} | speedup={speedup:.2f}x"
+    )
 
 
 async def main():
@@ -230,7 +243,7 @@ async def main():
     # --- Pattern 1: Raw state access ---
     print("\n  Pattern 1: Raw state set/get (no scheduling)")
     print(f"  {'Label':>35s} | {'Py':>12s} | {'Rs':>12s} | {'Speedup':>10s}")
-    print(f"  {'-'*35}-+-{'-'*12}-+-{'-'*12}-+-{'-'*10}")
+    print(f"  {'-' * 35}-+-{'-' * 12}-+-{'-' * 12}-+-{'-' * 10}")
     for n in [100, 500, 1000]:
         py, rs = bench_raw_state(n)
         print_row(f"raw set+get ({n} cells)", py, rs)
@@ -238,7 +251,7 @@ async def main():
     # --- Pattern 2: E2E linear ---
     print("\n  Pattern 2: End-to-end linear (1 read + 1 write per op)")
     print(f"  {'Label':>35s} | {'Py':>12s} | {'Rs':>12s} | {'Speedup':>10s}")
-    print(f"  {'-'*35}-+-{'-'*12}-+-{'-'*12}-+-{'-'*10}")
+    print(f"  {'-' * 35}-+-{'-' * 12}-+-{'-' * 12}-+-{'-' * 10}")
     for n in [10, 50, 100]:
         py, rs = await bench_e2e_state(n)
         print_row(f"e2e linear ({n} ops)", py, rs, unit="ms")
@@ -246,7 +259,7 @@ async def main():
     # --- Pattern 3: Iteration ---
     print("\n  Pattern 3: MapOp iteration (concurrent contexts)")
     print(f"  {'Label':>35s} | {'Py':>12s} | {'Rs':>12s} | {'Speedup':>10s}")
-    print(f"  {'-'*35}-+-{'-'*12}-+-{'-'*12}-+-{'-'*10}")
+    print(f"  {'-' * 35}-+-{'-' * 12}-+-{'-' * 12}-+-{'-' * 10}")
     for n in [10, 50, 100]:
         py, rs = await bench_iteration(n)
         print_row(f"MapOp ({n} items)", py, rs, unit="ms")
@@ -254,7 +267,7 @@ async def main():
     # --- Pattern 4: Multi-var ---
     print("\n  Pattern 4: Multi-var ops (5 reads + 3 writes per op)")
     print(f"  {'Label':>35s} | {'Py':>12s} | {'Rs':>12s} | {'Speedup':>10s}")
-    print(f"  {'-'*35}-+-{'-'*12}-+-{'-'*12}-+-{'-'*10}")
+    print(f"  {'-' * 35}-+-{'-' * 12}-+-{'-' * 12}-+-{'-' * 10}")
     for n in [10, 50, 100]:
         py, rs = await bench_multi_var(n)
         print_row(f"multi-var linear ({n} ops)", py, rs, unit="ms")

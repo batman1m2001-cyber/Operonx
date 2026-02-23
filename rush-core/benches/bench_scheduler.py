@@ -124,7 +124,9 @@ def rust_scheduler_simulate(sched: CompiledGraph, activation_sequence: list) -> 
 def bench_one(name: str, n: int, data: dict, runs: int = 1000):
     """Benchmark a single graph pattern."""
     # Build activation sequence (topological order based on ready_count)
-    activation_order = sorted(data["ready_count"].keys(), key=lambda k: data["ready_count"][k])
+    activation_order = sorted(
+        data["ready_count"].keys(), key=lambda k: data["ready_count"][k]
+    )
 
     sched = CompiledGraph.from_dict(data)
 
@@ -155,9 +157,11 @@ def bench_one(name: str, n: int, data: dict, runs: int = 1000):
     rs_p99 = sorted(rs_times)[int(len(rs_times) * 0.99)] / 1000
     speedup = py_mean / rs_mean if rs_mean > 0 else float("inf")
 
-    print(f"  {name:20s} | n={n:5d} | Py={py_mean:8.1f}us | Rs={rs_mean:8.1f}us | "
-          f"p50: {py_p50:.1f}/{rs_p50:.1f} | p99: {py_p99:.1f}/{rs_p99:.1f} | "
-          f"speedup={speedup:.1f}x")
+    print(
+        f"  {name:20s} | n={n:5d} | Py={py_mean:8.1f}us | Rs={rs_mean:8.1f}us | "
+        f"p50: {py_p50:.1f}/{rs_p50:.1f} | p99: {py_p99:.1f}/{rs_p99:.1f} | "
+        f"speedup={speedup:.1f}x"
+    )
 
 
 def main():

@@ -10,11 +10,9 @@ These tests focus on ops that can be tested without API keys.
 Provider ops requiring HTTP calls are tested in hush-providers.
 """
 
-import asyncio
-
 import pytest
 
-from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
+from hush.core import END, PARENT, START, GraphOp, Hush, op
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
@@ -29,14 +27,18 @@ from rush_core import Rush
 @op
 def format_messages(messages: list):
     """Extract content from messages list for easy assertion."""
-    contents = [m.get("content", "") if isinstance(m, dict) else str(m) for m in messages]
+    contents = [
+        m.get("content", "") if isinstance(m, dict) else str(m) for m in messages
+    ]
     return {"contents": contents, "count": len(messages)}
 
 
 @op
 def extract_roles(messages: list):
     """Extract roles from messages list."""
-    roles = [m.get("role", "unknown") if isinstance(m, dict) else "unknown" for m in messages]
+    roles = [
+        m.get("role", "unknown") if isinstance(m, dict) else "unknown" for m in messages
+    ]
     return {"roles": roles}
 
 
@@ -202,9 +204,7 @@ class TestWorkflowComposition:
             """Build messages from template."""
             messages = []
             if "system" in template:
-                messages.append(
-                    {"role": "system", "content": template["system"]}
-                )
+                messages.append({"role": "system", "content": template["system"]})
             if "user" in template:
                 content = template["user"].replace("{question}", question)
                 messages.append({"role": "user", "content": content})
@@ -235,9 +235,9 @@ class TestWorkflowComposition:
                 template={"system": "Be concise.", "user": "Q: {question}"},
                 question=PARENT["q"],
             )
-            l = mock_llm(messages=p["messages"])
-            r = parse_answer(content=l["content"])
-            START >> p >> l >> r >> END
+            llm_step = mock_llm(messages=p["messages"])
+            r = parse_answer(content=llm_step["content"])
+            START >> p >> llm_step >> r >> END
         g.build()
 
         config = g.serialize()
@@ -445,17 +445,13 @@ class TestDataFlowThroughRush:
             return {"score": total}
 
         with GraphOp(name="g") as g:
-            step = compute_score(
-                weights=PARENT["weights"], values=PARENT["values"]
-            )
+            step = compute_score(weights=PARENT["weights"], values=PARENT["values"])
             START >> step >> END
         g.build()
 
         config = g.serialize()
         engine = Rush(config)
-        result = engine.run(
-            {"weights": [0.3, 0.5, 0.2], "values": [0.9, 0.8, 0.7]}
-        )
+        result = engine.run({"weights": [0.3, 0.5, 0.2], "values": [0.9, 0.8, 0.7]})
         expected = 0.3 * 0.9 + 0.5 * 0.8 + 0.2 * 0.7
         assert abs(result["score"] - expected) < 1e-10
 
