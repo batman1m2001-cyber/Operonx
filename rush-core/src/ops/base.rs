@@ -2,7 +2,7 @@
 //!
 //! Mirrors Python's `ops/base.py` (BaseOp.run, store_result, resolve).
 //! Includes observability: enabled flag, per-op timing, $tags, verbose logging,
-//! slow op warnings, and execution order tracking.
+//! and slow op warnings.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -22,28 +22,23 @@ use crate::states::state::EngineState;
 
 /// Execute a leaf op: resolve inputs → call op → store outputs → push refs.
 /// Includes error resilience: catches op errors, stores in state, continues.
-/// Includes observability: execution order, enabled check, timing, logging.
+/// Includes observability: enabled check, timing, logging.
 /// Mirrors Python's BaseOp.run() try/except/finally pattern.
-pub(crate) fn execute_leaf_op(
+pub(crate) fn run(
     py: Python,
     op: &OpConfig,
     state: &EngineState,
     context: &str,
 ) -> PyResult<()> {
-    // 0. Record execution order (before enabled check — mirrors Python)
-    let parent = op
-        .full_name
-        .rsplit_once('.')
-        .map(|(p, _)| p.to_string())
-        .unwrap_or_default();
-    state.record_execution(op.full_name.clone(), parent, context.to_string());
-
     // 1. Check enabled flag — skip if disabled (mirrors base.py:734-737)
     if !op.enabled {
         return Ok(());
     }
 
-    // 2. Start timing (mirrors base.py:740-741)
+    // 2. Start timing (mirrors base.py _store_metrics: start_time + perf_counter)
+    let datetime_mod = py.import_bound("datetime")?;
+    let datetime_cls = datetime_mod.getattr("datetime")?;
+    let start_time = datetime_cls.call_method0("now")?;
     let perf_start = Instant::now();
 
     // 3-5. Try: resolve inputs → execute → store outputs (mirrors base.py:746-755)
@@ -79,8 +74,23 @@ pub(crate) fn execute_leaf_op(
 
     // === "finally" block — always runs (mirrors base.py:767-782) ===
 
-    // 6. End timing + store duration_ms
+    // 6. End timing + store start_time, end_time, duration_ms
+    //    Mirrors Python's _store_metrics() — always runs even on error.
+    //    start_time is used by TraceCollector (via iter_executed) to detect which ops ran.
     let duration_ms = perf_start.elapsed().as_secs_f64() * 1000.0;
+    let end_time = datetime_cls.call_method0("now")?;
+    state.set(
+        op.full_name.clone(),
+        "start_time".to_string(),
+        context.to_string(),
+        start_time.unbind(),
+    );
+    state.set(
+        op.full_name.clone(),
+        "end_time".to_string(),
+        context.to_string(),
+        end_time.unbind(),
+    );
     state.set(
         op.full_name.clone(),
         "duration_ms".to_string(),

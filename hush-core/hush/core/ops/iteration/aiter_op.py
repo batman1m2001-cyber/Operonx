@@ -156,8 +156,7 @@ class AIterOp(BaseIterationOp):
         chunk_context = get_iter_context((base_context + ".") if base_context else "", chunk_id)
 
         try:
-            for var_name, value in chunk_data.items():
-                state[self.full_name, var_name, chunk_context] = value
+            self._store_iteration_data(state, chunk_data, chunk_context)
 
             result = await self._run_graph(state, chunk_context, chunk_context)
             return {

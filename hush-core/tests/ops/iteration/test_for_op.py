@@ -367,7 +367,7 @@ class TestMismatchedLengths:
 
         await loop.run(state)
         # Error is captured in state, not raised
-        error = state["mismatch_loop", "error", None]
+        error = state["mismatch_loop", "error"]
         assert error is not None
         assert "same length" in error
 

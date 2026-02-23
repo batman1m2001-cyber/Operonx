@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
-    from hush.core.tracers.store import TraceStore
 
 
 class BaseTracer(ABC):
@@ -107,122 +106,6 @@ class BaseTracer(ABC):
             if tag not in merged:
                 merged.append(tag)
         return merged
-
-    def flush_in_background(self, workflow_name: str, state: "MemoryState") -> None:
-        """Mark trace as complete and trigger background flushing.
-
-        With incremental writes, trace data is already in SQLite (written during
-        node execution via state.record_trace()). This method:
-        1. Merges static (tracer) and dynamic (state) tags
-        2. Marks the request as complete (status: writing -> pending)
-        3. Background process will pick up and flush automatically
-
-        All operations are non-blocking.
-
-        For legacy mode (no trace_store), falls back to batch insert.
-
-        Args:
-            workflow_name: Name of the workflow
-            state: MemoryState object containing execution data
-        """
-        from hush.core.loggings import LOGGER
-        from hush.core.tracers.store import get_store
-
-        try:
-            # Merge static and dynamic tags
-            merged_tags = self._merge_tags(state)
-
-            if state.has_trace_store:
-                # New mode: traces already written incrementally
-                # Just mark complete - background process handles flushing
-                store = state._trace_store
-                store.mark_request_complete(
-                    request_id=state.request_id,
-                    tracer_type=self.__class__.__name__,
-                    tracer_config=self._get_tracer_config(),
-                    tags=merged_tags if merged_tags else None,
-                )
-            else:
-                # Legacy mode: batch insert from in-memory data
-                store = get_store()
-                self._insert_legacy_traces(store, workflow_name, state, merged_tags)
-
-            LOGGER.debug(
-                "[title]\\[%s][/title] Trace ready for flush: [highlight]%s[/highlight]",
-                state.request_id,
-                workflow_name,
-            )
-
-        except Exception as e:
-            LOGGER.error(
-                "[title]\\[%s][/title] Failed to prepare trace for [highlight]%s[/highlight]: %s",
-                state.request_id,
-                workflow_name,
-                str(e),
-            )
-
-    def _insert_legacy_traces(
-        self,
-        store: "TraceStore",
-        workflow_name: str,
-        state: "MemoryState",
-        tags: Optional[List[str]] = None,
-    ) -> None:
-        """Insert traces from legacy in-memory storage.
-
-        This is used when state doesn't have a trace_store (backwards compatibility).
-
-        Args:
-            store: TraceStore to insert into
-            workflow_name: Name of the workflow
-            state: MemoryState with in-memory trace data
-            tags: Optional merged tags (static + dynamic)
-        """
-        execution_order = state.execution_order
-        trace_metadata = state.trace_metadata
-
-        for idx, execution in enumerate(execution_order):
-            op_name = execution["op"]
-            parent_name = execution.get("parent")
-            context_id = execution.get("context_id")
-
-            # Get trace data for this node
-            trace_key = f"{op_name}:{context_id}" if context_id else op_name
-            trace_data = trace_metadata.get(trace_key, {})
-
-            # Extract fields from trace_data
-            usage = trace_data.get("usage") or {}
-
-            store.insert_op_trace(
-                request_id=state.request_id,
-                workflow_name=workflow_name,
-                op_name=op_name,
-                parent_name=parent_name,
-                context_id=context_id,
-                execution_order=idx,
-                start_time=None,  # Legacy mode doesn't have timing
-                end_time=None,
-                duration_ms=None,
-                input_data={},  # Would need to read from state
-                output_data={},
-                user_id=state.user_id,
-                session_id=state.session_id,
-                model=trace_data.get("model"),
-                prompt_tokens=usage.get("prompt_tokens"),
-                completion_tokens=usage.get("completion_tokens"),
-                total_tokens=usage.get("total_tokens"),
-                cost_usd=trace_data.get("cost"),
-                contain_generation=trace_data.get("contain_generation", False),
-                metadata=trace_data.get("metadata"),
-            )
-
-        # Mark as complete with tags
-        store.mark_request_complete(
-            request_id=state.request_id,
-            tracer_type=self.__class__.__name__,
-            tracer_config=self._get_tracer_config(),
-            tags=tags,
-        )
 
     @staticmethod
     @abstractmethod

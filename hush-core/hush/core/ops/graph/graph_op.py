@@ -236,10 +236,10 @@ class GraphOp(BaseOp):
         graph_outputs = {}
 
         for _, child in self._ops.items():
-            # Check inputs: if ref points to self (father), it's a graph input
+            # Check inputs: if ref points to self (parent), it's a graph input
             for var, param in child.inputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
-                    # PARENT["x"] resolves to father — this is a graph input
+                    # PARENT["x"] resolves to parent — this is a graph input
                     graph_inputs[param.value.var] = Param(
                         type=param.type,
                         required=param.required,
@@ -247,10 +247,10 @@ class GraphOp(BaseOp):
                         description=param.description,
                     )
 
-            # Check outputs: if ref points to self (father), it's a graph output
+            # Check outputs: if ref points to self (parent), it's a graph output
             for var, param in child.outputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
-                    # PARENT["x"] resolves to father — this is a graph output
+                    # PARENT["x"] resolves to parent — this is a graph output
                     graph_outputs[param.value.var] = Param(
                         type=param.type,
                         required=param.required,
@@ -742,14 +742,12 @@ class GraphOp(BaseOp):
             parent_context: Context of PARENT, passed to child ops.
         """
 
-        parent_name = self.father.full_name if self.father else None
-        state.record_execution(self.full_name, parent_name, context_id)
-
         request_id = state.request_id
         start_time = datetime.now()
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
+        error_msg = None
 
         try:
             _inputs = self.get_inputs(state, context_id=context_id, parent_context=parent_context)
@@ -837,22 +835,20 @@ class GraphOp(BaseOp):
             self.store_result(state, _outputs, context_id)
 
         except Exception:
-            error_msg = traceback.format_exc()
+            import sys
+            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
                 self.name,
                 error_msg.rstrip(),
             )
-            state[self.full_name, "error", context_id] = error_msg
 
         finally:
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            state[self.full_name, "start_time", context_id] = start_time
-            state[self.full_name, "end_time", context_id] = end_time
-            state[self.full_name, "duration_ms", context_id] = duration_ms
+            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
 
             return _outputs
 

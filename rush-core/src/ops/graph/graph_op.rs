@@ -57,7 +57,7 @@ pub(crate) fn run_graph(
 
         if use_concurrent {
             // Concurrent execution via tokio spawn_blocking
-            execute_batch_concurrent(py, &batch, config, state, context)?;
+            run_batch(py, &batch, config, state, context)?;
 
             // Activate successors sequentially after all ops complete
             for op_name in &batch {
@@ -90,12 +90,12 @@ pub(crate) fn run_graph(
                 })?;
 
                 match op.op_type.as_str() {
-                    "graph" => execute_nested_graph(py, op, state, context)?,
-                    "for" => for_op::execute_for_op(py, op, state, context)?,
-                    "while" => while_op::execute_while_op(py, op, state, context)?,
-                    "map" => map_op::execute_map_op(py, op, state, context)?,
-                    "stream" => aiter_op::execute_aiter_op(py, op, state, context)?,
-                    _ => base::execute_leaf_op(py, op, state, context)?,
+                    "graph" => run_nested(py, op, state, context)?,
+                    "for" => for_op::run(py, op, state, context)?,
+                    "while" => while_op::run(py, op, state, context)?,
+                    "map" => map_op::run(py, op, state, context)?,
+                    "stream" => aiter_op::run(py, op, state, context)?,
+                    _ => base::run(py, op, state, context)?,
                 }
 
                 activate_successors(
@@ -132,7 +132,7 @@ pub(crate) fn run_graph(
 ///   which correctly detects the tokio context and uses Handle::block_on()
 ///   instead of the panicking Runtime::block_on()
 /// - Uniform scheduling: both I/O-bound and CPU-bound ops go through tokio
-fn execute_batch_concurrent(
+fn run_batch(
     py: Python,
     batch: &[String],
     config: &GraphConfig,
@@ -168,12 +168,12 @@ fn execute_batch_concurrent(
                         let context = ctx.as_str();
 
                         let result = match op.op_type.as_str() {
-                            "graph" => execute_nested_graph(py, op, state, context),
-                            "for" => for_op::execute_for_op(py, op, state, context),
-                            "while" => while_op::execute_while_op(py, op, state, context),
-                            "map" => map_op::execute_map_op(py, op, state, context),
-                            "stream" => aiter_op::execute_aiter_op(py, op, state, context),
-                            _ => base::execute_leaf_op(py, op, state, context),
+                            "graph" => run_nested(py, op, state, context),
+                            "for" => for_op::run(py, op, state, context),
+                            "while" => while_op::run(py, op, state, context),
+                            "map" => map_op::run(py, op, state, context),
+                            "stream" => aiter_op::run(py, op, state, context),
+                            _ => base::run(py, op, state, context),
                         };
 
                         // Handle errors from non-leaf ops (leaf ops catch internally)
@@ -220,7 +220,7 @@ fn execute_batch_concurrent(
 // =============================================================================
 
 /// Collect graph outputs into a Python dict.
-pub(crate) fn collect_outputs(
+pub(crate) fn get_outputs(
     py: Python,
     config: &GraphConfig,
     state: &EngineState,
@@ -316,7 +316,7 @@ pub(crate) fn activate_successors(
 // =============================================================================
 
 /// Execute a nested GraphOp: resolve inputs, run inner scheduling loop, push outputs.
-pub(crate) fn execute_nested_graph(
+pub(crate) fn run_nested(
     py: Python,
     op: &OpConfig,
     state: &EngineState,

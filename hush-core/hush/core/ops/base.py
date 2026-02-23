@@ -44,7 +44,7 @@ class SoftEdge:
 
     def __rrshift__(self, other):
         """[a, b] >> ~self: soft edges from a list of ops to self.op."""
-        add_edge = getattr(self.op.father, "add_edge", None)
+        add_edge = getattr(self.op.parent, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
@@ -218,7 +218,7 @@ class BaseOp(ABC):
         "inputs",
         "outputs",
         "core",
-        "father",
+        "parent",
         "contain_generation",
         "enabled",
         "executor",
@@ -275,9 +275,9 @@ class BaseOp(ABC):
         self.core: Optional[Callable] = None
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
-        self.father = get_current()
+        self.parent = get_current()
         # Use getattr to avoid hasattr's double lookup
-        add_op = getattr(self.father, "add_op", None)
+        add_op = getattr(self.parent, "add_op", None)
         if add_op is not None:
             add_op(self)
 
@@ -307,14 +307,14 @@ class BaseOp(ABC):
             - some_op → Ref(some_op, key)
             - some_op["other"] → Ref(some_op, "other")
             - Ref(op, "var") → kept as-is
-            - PARENT["x"] → Ref(father, "x")
+            - PARENT["x"] → Ref(parent, "x")
             - literal → kept as-is
         """
 
         def resolve_parent(source):
-            """Resolve PARENT marker to the actual father op."""
+            """Resolve PARENT marker to the actual parent op."""
             if hasattr(source, "name") and source.name == "__PARENT__":
-                return self.father if self.father else source
+                return self.parent if self.parent else source
             return source
 
         # Handle Ref directly — keep operations intact
@@ -437,9 +437,9 @@ class BaseOp(ABC):
 
         # Then, apply wildcard forwarding for remaining keys
         if wildcard_source is not None:
-            # Resolve PARENT to father
+            # Resolve PARENT to parent
             if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
-                resolved_source = self.father if self.father else wildcard_source
+                resolved_source = self.parent if self.parent else wildcard_source
             else:
                 resolved_source = wildcard_source
 
@@ -475,8 +475,8 @@ class BaseOp(ABC):
         """Fully-qualified hierarchical path of this op. Cached after build()."""
         if self._full_name is not None:
             return self._full_name
-        if self.father:
-            return f"{self.father.full_name}.{self.name}"
+        if self.parent:
+            return f"{self.parent.full_name}.{self.name}"
         return self.name
 
     def _cache_full_name(self) -> None:
@@ -498,7 +498,7 @@ class BaseOp(ABC):
     def __rshift__(self, other):
         """``op >> other``: connect this op to *other* with a hard edge."""
         edge_type = "condition" if self.type == "branch" else "normal"
-        add_edge = getattr(self.father, "add_edge", None)
+        add_edge = getattr(self.parent, "add_edge", None)
 
         # Handle SoftEdge marker: a >> ~b
         if isinstance(other, SoftEdge):
@@ -521,12 +521,12 @@ class BaseOp(ABC):
                 if not _has_explicit_outputs(self):
                     if self.outputs is None:
                         self.outputs = {}
-                    father = getattr(self, "father", None) or PARENT
+                    parent_op = getattr(self, "parent", None) or PARENT
                     for key in self.outputs:
                         param = self.outputs[key]
                         # Only update if param is a Param with value=None
                         if hasattr(param, "value") and param.value is None:
-                            param.value = Ref(father, key)
+                            param.value = Ref(parent_op, key)
             if add_edge is not None:
                 add_edge(self.name, other.name, edge_type)
             return other
@@ -535,7 +535,7 @@ class BaseOp(ABC):
     def __rrshift__(self, other):
         """``[op1, op2] >> self``: connect a list of ops to this op."""
         edge_type = "condition" if self.type == "branch" else "normal"
-        add_edge = getattr(self.father, "add_edge", None)
+        add_edge = getattr(self.parent, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
@@ -551,7 +551,7 @@ class BaseOp(ABC):
         ``(a > b) and (b > c)``, so split into separate statements.
         """
         edge_type = "condition" if self.type == "branch" else "normal"
-        add_edge = getattr(self.father, "add_edge", None)
+        add_edge = getattr(self.parent, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
@@ -571,7 +571,7 @@ class BaseOp(ABC):
         returns NotImplemented, so Python falls back to self.__lt__).
         """
         edge_type = "condition" if self.type == "branch" else "normal"
-        add_edge = getattr(self.father, "add_edge", None)
+        add_edge = getattr(self.parent, "add_edge", None)
 
         if isinstance(other, list):
             if add_edge is not None:
@@ -646,7 +646,7 @@ class BaseOp(ABC):
             if (
                 parent_context is not None
                 and isinstance(param.value, Ref)
-                and param.value.raw_source is self.father
+                and param.value.raw_source is self.parent
             ):
                 lookup_ctx = parent_context
             else:
@@ -724,6 +724,23 @@ class BaseOp(ABC):
                 format_log_data(outputs),
             )
 
+    def _store_metrics(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str],
+        *,
+        error: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        duration_ms: float = 0,
+    ) -> None:
+        """Store execution metrics (timing, errors) to state."""
+        if error:
+            state[self.full_name, "error", context_id] = error
+        state[self.full_name, "start_time", context_id] = start_time
+        state[self.full_name, "end_time", context_id] = end_time
+        state[self.full_name, "duration_ms", context_id] = duration_ms
+
     async def run(
         self,
         state: "MemoryState",
@@ -737,9 +754,6 @@ class BaseOp(ABC):
             context_id: Context for this op's own variables.
             parent_context: Context used to resolve PARENT refs.
         """
-        parent_name = self.father.full_name if self.father else None
-        state.record_execution(self.full_name, parent_name, context_id)
-
         # Skip disabled ops
         if not self.enabled:
             LOGGER.debug("Skipped disabled op: %s", self.full_name)
@@ -750,6 +764,7 @@ class BaseOp(ABC):
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
+        error_msg = None
 
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
@@ -764,25 +779,23 @@ class BaseOp(ABC):
             self.store_result(state, _outputs, context_id)
 
         except Exception:
-            error_msg = traceback.format_exc()
+            import sys
+            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
                 request_id,
                 self.name,
                 error_msg.rstrip(),
             )
-            state[self.full_name, "error", context_id] = error_msg
 
         finally:
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            state[self.full_name, "start_time", context_id] = start_time
-            state[self.full_name, "end_time", context_id] = end_time
-            state[self.full_name, "duration_ms", context_id] = duration_ms
+            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
 
             # Performance monitoring: log slow ops (>100ms)
-            if duration_ms > 100:
+            if duration_ms > 100 and LOGGER.isEnabledFor(30):
                 LOGGER.warning(
                     "[title]\\[%s][/title] Slow op [highlight]%s[/highlight]: [red]%.1fms[/red]",
                     request_id,
@@ -934,16 +947,16 @@ class DummyOp(BaseOp):
                 return self
 
             elif self == END:
-                # Auto-set outputs: each output key -> father[key]
+                # Auto-set outputs: each output key -> parent[key]
                 def _set_wildcard_outputs(target_op):
                     if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
                         if target_op.outputs is None:
                             target_op.outputs = {}
-                        father = getattr(target_op, "father", None) or PARENT
+                        parent_op = getattr(target_op, "parent", None) or PARENT
                         for key in target_op.outputs:
                             param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(father, key)
+                                param.value = Ref(parent_op, key)
 
                 if isinstance(other, list):
                     for item in other:
@@ -961,16 +974,16 @@ class DummyOp(BaseOp):
         if self == END:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):
-                # Auto-set outputs: each output key -> father[key]
+                # Auto-set outputs: each output key -> parent[key]
                 def _set_wildcard_outputs(target_op):
                     if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
                         if target_op.outputs is None:
                             target_op.outputs = {}
-                        father = getattr(target_op, "father", None) or PARENT
+                        parent_op = getattr(target_op, "parent", None) or PARENT
                         for key in target_op.outputs:
                             param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(father, key)
+                                param.value = Ref(parent_op, key)
 
                 if isinstance(other, list):
                     for item in other:
@@ -1002,16 +1015,16 @@ class DummyOp(BaseOp):
         current_graph = get_current()
         if current_graph and hasattr(current_graph, "add_edge"):
             if self == END:
-                # Auto-set outputs: each output key -> father[key]
+                # Auto-set outputs: each output key -> parent[key]
                 def _set_wildcard_outputs(target_op):
                     if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
                         if target_op.outputs is None:
                             target_op.outputs = {}
-                        father = getattr(target_op, "father", None) or PARENT
+                        parent_op = getattr(target_op, "parent", None) or PARENT
                         for key in target_op.outputs:
                             param = target_op.outputs[key]
                             if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(father, key)
+                                param.value = Ref(parent_op, key)
 
                 if isinstance(other, list):
                     for item in other:

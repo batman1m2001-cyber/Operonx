@@ -778,10 +778,8 @@ class TestObservability:
         result = engine.run({"x": 5})
         # Disabled op produces no outputs — result should not have "result" key
         assert "result" not in result
-        # But $state should still record it in execution_order
-        assert any(
-            e["op"] == "g.d" for e in result["$state"]["execution_order"]
-        )
+        # Disabled ops skip entirely — no start_time stored
+        assert "g.d" not in result["$state"].get("values", {})
 
     def test_timing_metadata(self):
         """Per-op duration_ms should be recorded in $state."""
@@ -794,10 +792,13 @@ class TestObservability:
         engine = Rush(config)
         result = engine.run({"x": 5})
         assert result["result"] == 10
-        # duration_ms should appear as a graph output only if explicitly mapped,
-        # but it's stored in the engine state — we verify via $state presence
+        # Timing metadata should be stored in $state values
         assert "$state" in result
-        assert len(result["$state"]["execution_order"]) == 1
+        values = result["$state"]["values"]
+        assert "g.d" in values
+        assert "duration_ms" in values["g.d"]
+        assert "start_time" in values["g.d"]
+        assert "end_time" in values["g.d"]
 
     def test_tags_extraction(self):
         """$tags in op result should appear in $state.tags."""
@@ -813,8 +814,8 @@ class TestObservability:
         assert "fast" in result["$state"]["tags"]
         assert "cached" in result["$state"]["tags"]
 
-    def test_execution_order_tracking(self):
-        """Execution order should list all ops in run order."""
+    def test_start_time_tracking(self):
+        """Each executed op should have start_time in $state values."""
         with GraphOp(name="g") as g:
             a = double(x=PARENT["x"])
             b = double(x=a["result"])
@@ -827,13 +828,12 @@ class TestObservability:
         result = engine.run({"x": 1})
         assert result["result"] == 8
 
-        exec_order = result["$state"]["execution_order"]
-        assert len(exec_order) == 3
-        assert exec_order[0]["op"] == "g.a"
-        assert exec_order[1]["op"] == "g.b"
-        assert exec_order[2]["op"] == "g.c"
-        # Verify parent is the graph name
-        assert all(e["parent"] == "g" for e in exec_order)
+        values = result["$state"]["values"]
+        # All three ops should have start_time stored
+        for op_name in ["g.a", "g.b", "g.c"]:
+            assert op_name in values, f"{op_name} missing from values"
+            assert "start_time" in values[op_name], f"{op_name} missing start_time"
+            assert "" in values[op_name]["start_time"], f"{op_name} start_time has no default context"
 
     def test_slow_op_warning(self):
         """Ops >100ms should emit a Python warning."""
@@ -1066,12 +1066,12 @@ class TestTracingWiring:
 
     def test_rush_state_adapter(self):
         """RushStateAdapter should provide MemoryState-compatible interface."""
+        from datetime import datetime
         from hush.core.tracing.rush_state import RushStateAdapter
 
+        t1 = datetime(2024, 1, 1, 12, 0, 0)
+
         state_dict = {
-            "execution_order": [
-                {"op": "g.a", "parent": "g", "context_id": ""},
-            ],
             "tags": ["fast"],
             "request_id": "req-1",
             "user_id": "user-1",
@@ -1080,18 +1080,24 @@ class TestTracingWiring:
                 "g.a": {
                     "result": {"": 42},
                     "duration_ms": {"": 0.5},
+                    "start_time": {"": t1},
                 }
             },
         }
 
         adapter = RushStateAdapter(state_dict)
-        assert adapter.execution_order == [
-            {"op": "g.a", "parent": "g", "context_id": ""},
-        ]
+        # iter_executed derives execution from start_time values
+        executed = list(adapter.iter_executed("g.a"))
+        assert len(executed) == 1
+        assert executed[0] == ("", t1)
+        # Non-existent op returns empty
+        assert list(adapter.iter_executed("missing_op")) == []
+        # Properties
         assert adapter.tags == ["fast"]
         assert adapter.request_id == "req-1"
         assert adapter.user_id == "user-1"
         assert adapter.session_id == "sess-1"
+        # __getitem__ lookups
         assert adapter["g.a", "result", ""] == 42
         assert adapter["g.a", "duration_ms", ""] == 0.5
         assert adapter["g.a", "nonexistent", ""] is None

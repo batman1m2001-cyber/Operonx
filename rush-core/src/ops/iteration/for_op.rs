@@ -11,7 +11,7 @@ use crate::ops::graph::graph_op;
 use crate::states::state::EngineState;
 
 /// Execute a ForOp: resolve each/broadcast → iterate → transpose results.
-pub(crate) fn execute_for_op(
+pub(crate) fn run(
     py: Python,
     op: &OpConfig,
     state: &EngineState,
@@ -114,7 +114,7 @@ pub(crate) fn execute_for_op(
 
         // Run inner graph — catch errors (mirrors for_op.py:88-107)
         let iter_result = graph_op::run_graph(py, inner, state, &iter_context)
-            .and_then(|_| graph_op::collect_outputs(py, inner, state, &iter_context));
+            .and_then(|_| graph_op::get_outputs(py, inner, state, &iter_context));
 
         match iter_result {
             Ok(output) => {

@@ -9,6 +9,7 @@ import logging
 from dataclasses import asdict
 from typing import Any, Dict, List
 
+from hush.core.states.cell import DEFAULT_CONTEXT
 from hush.core.tracing.models import NodeStructure, TraceRecord
 
 LOGGER = logging.getLogger("hush.tracing")
@@ -45,7 +46,7 @@ class TraceCollector:
         # 2. Static: graph structure from op @properties
         graph_structure = self._collect_graph_structure(op_map)
 
-        # 3. Dynamic: walk state.execution_order, read values from state
+        # 3. Dynamic: derive execution data from start_time cells in state
         records = self._collect_records(op_map, state)
 
         # 4. Build payload — tags here are dynamic only (from $tags in op outputs)
@@ -73,50 +74,46 @@ class TraceCollector:
             NodeStructure(
                 op_name=op.full_name,
                 op_type=getattr(op, "type", "default"),
-                parent_name=op.father.full_name if op.father else None,
+                parent_name=op.parent.full_name if op.parent else None,
                 contain_generation=op.contain_generation,
             )
             for op in op_map.values()
         ]
 
     def _collect_records(self, op_map: Dict[str, Any], state: Any) -> List[TraceRecord]:
-        """Extract dynamic execution data from state, in execution order."""
+        """Extract dynamic execution data from state, derived from start_time cells."""
         records = []
 
-        for entry in state.execution_order:
-            op_name = entry["op"]
-            ctx = entry.get("context_id")
-            op = op_map.get(op_name)
-            if not op:
-                continue
+        for op_name, op in op_map.items():
+            for ctx, start_time in state.iter_executed(op_name):
+                # Read I/O from state
+                inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
+                outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
 
-            # Read I/O from state
-            inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
-            outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
+                # Read timing from state
+                end_time = state[op_name, "end_time", ctx]
+                duration_ms = state[op_name, "duration_ms", ctx]
 
-            # Read timing from state
-            start_time = state[op_name, "start_time", ctx]
-            end_time = state[op_name, "end_time", ctx]
-            duration_ms = state[op_name, "duration_ms", ctx]
+                # LLM-specific: model & usage are in outputs, cost in state
+                model = outputs.get("model_used") if op.contain_generation else None
+                usage = outputs.get("tokens_used") if op.contain_generation else None
+                cost = state[op_name, "cost_usd", ctx]
 
-            # LLM-specific: model & usage are in outputs, cost in state
-            model = outputs.get("model_used") if op.contain_generation else None
-            usage = outputs.get("tokens_used") if op.contain_generation else None
-            cost = state[op_name, "cost_usd", ctx]
-
-            records.append(
-                TraceRecord(
-                    op_name=op_name,
-                    context_id=ctx,
-                    inputs=inputs,
-                    outputs=outputs,
-                    start_time=start_time.isoformat() if start_time else None,
-                    end_time=end_time.isoformat() if end_time else None,
-                    duration_ms=duration_ms,
-                    model=model,
-                    usage=usage,
-                    cost=cost,
+                records.append(
+                    TraceRecord(
+                        op_name=op_name,
+                        context_id=ctx if ctx != DEFAULT_CONTEXT else None,
+                        inputs=inputs,
+                        outputs=outputs,
+                        start_time=start_time.isoformat() if start_time else None,
+                        end_time=end_time.isoformat() if end_time else None,
+                        duration_ms=duration_ms,
+                        model=model,
+                        usage=usage,
+                        cost=cost,
+                    )
                 )
-            )
 
+        # Sort by start_time to reconstruct execution order
+        records.sort(key=lambda r: r.start_time or "")
         return records

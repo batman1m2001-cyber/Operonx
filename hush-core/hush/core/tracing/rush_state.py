@@ -11,7 +11,7 @@ class RushStateAdapter:
     """Wraps Rust's $state dict to provide MemoryState-compatible read interface.
 
     TraceCollector expects:
-        state.execution_order  -> list of {op, parent, context_id}
+        state.iter_executed(op) -> yields (context_id, start_time) pairs
         state.tags             -> list of strings
         state.request_id       -> str
         state.user_id          -> str
@@ -24,9 +24,13 @@ class RushStateAdapter:
     def __init__(self, state_dict: dict):
         self._data = state_dict
 
-    @property
-    def execution_order(self):
-        return self._data.get("execution_order", [])
+    def iter_executed(self, op_name: str):
+        """Yield (context_id, start_time) for each execution of op_name."""
+        values = self._data.get("values", {})
+        start_times = values.get(op_name, {}).get("start_time", {})
+        for ctx, value in start_times.items():
+            if value is not None:
+                yield ctx, value
 
     @property
     def tags(self):

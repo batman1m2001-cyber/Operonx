@@ -378,23 +378,23 @@ class Ref:
             raise TypeError(f">> operator chỉ hỗ trợ Ref, không hỗ trợ {type(other).__name__}")
 
         source_node = self.raw_source  # producer node
-        target_node = other.raw_source  # consumer node hoặc PARENT
+        target_node = other.raw_source  # consumer node or PARENT
 
-        # Kiểm tra nếu target là PARENT["key"]
+        # Check if target is PARENT["key"]
         if hasattr(target_node, "name") and target_node.name == "__PARENT__":
-            # self là node["src_key"], other là PARENT["dest_key"]
-            # Set node.outputs[src_key].value = Ref(father, dest_key)
-            if hasattr(source_node, "outputs") and hasattr(source_node, "father"):
+            # self is node["src_key"], other is PARENT["dest_key"]
+            # Set node.outputs[src_key].value = Ref(parent, dest_key)
+            if hasattr(source_node, "outputs") and hasattr(source_node, "parent"):
                 from hush.core.utils.common import Param
 
                 if source_node.outputs is None:
                     source_node.outputs = {}
-                # Tạo Ref đến father (graph cha) với key đích
-                father_ref = Ref(source_node.father, other.var)
+                # Create Ref to parent graph with target key
+                parent_ref = Ref(source_node.parent, other.var)
                 if self.var in source_node.outputs:
-                    source_node.outputs[self.var].value = father_ref
+                    source_node.outputs[self.var].value = parent_ref
                 else:
-                    source_node.outputs[self.var] = Param(value=father_ref)
+                    source_node.outputs[self.var] = Param(value=parent_ref)
             return other
 
         # producer["output"] >> consumer["input"]

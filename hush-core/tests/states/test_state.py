@@ -25,7 +25,7 @@ class TestSimpleLinearGraphValueFlow:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"x": 5})
 
-        assert state["linear_graph", "x", None] == 5
+        assert state["linear_graph", "x"] == 5
 
     def test_ref_resolution(self):
         """Test that refs are resolved correctly."""
@@ -40,7 +40,7 @@ class TestSimpleLinearGraphValueFlow:
         state = MemoryState(schema, inputs={"x": 5})
 
         # node_a.x should resolve to linear_graph.x
-        x_val = state["linear_graph.node_a", "x", None]
+        x_val = state["linear_graph.node_a", "x"]
         assert x_val == 5
 
     def test_value_flow_through_nodes(self):
@@ -59,11 +59,11 @@ class TestSimpleLinearGraphValueFlow:
         state = MemoryState(schema, inputs={"x": 5})
 
         # Simulate node_a execution
-        x_val = state["linear_graph.node_a", "x", None]
-        state["linear_graph.node_a", "result", None] = x_val + 10  # 15
+        x_val = state["linear_graph.node_a", "x"]
+        state["linear_graph.node_a", "result"] = x_val + 10  # 15
 
         # Simulate node_b reading from node_a
-        x_val = state["linear_graph.node_b", "x", None]
+        x_val = state["linear_graph.node_b", "x"]
         assert x_val == 15
 
 
@@ -95,10 +95,10 @@ class TestRefWithOperations:
         state = MemoryState(schema)
 
         # Inject data_source output
-        state["ref_ops_graph.data_source", "data", None] = {"items": [10, 20, 30], "name": "hello"}
+        state["ref_ops_graph.data_source", "data"] = {"items": [10, 20, 30], "name": "hello"}
 
         # Read with ops applied
-        items = state["ref_ops_graph.extract_items", "items", None]
+        items = state["ref_ops_graph.extract_items", "items"]
         assert items == [10, 20, 30]
 
     def test_method_call_applied(self):
@@ -119,10 +119,10 @@ class TestRefWithOperations:
         state = MemoryState(schema)
 
         # Inject data
-        state["ref_ops_graph.data_source", "data", None] = {"items": [10, 20, 30], "name": "hello"}
+        state["ref_ops_graph.data_source", "data"] = {"items": [10, 20, 30], "name": "hello"}
 
         # Read with method call applied
-        name = state["ref_ops_graph.transform_name", "name", None]
+        name = state["ref_ops_graph.transform_name", "name"]
         assert name == "HELLO"
 
 
@@ -162,12 +162,12 @@ class TestRefWithApply:
         state = MemoryState(schema)
 
         # Inject list_source output
-        state["ref_apply_graph.list_source", "numbers", None] = [5, 2, 8, 1, 9, 3]
+        state["ref_apply_graph.list_source", "numbers"] = [5, 2, 8, 1, 9, 3]
 
         # Read with apply() fns
-        assert state["ref_apply_graph.get_length", "length", None] == 6
-        assert state["ref_apply_graph.sort_numbers", "sorted_nums", None] == [1, 2, 3, 5, 8, 9]
-        assert state["ref_apply_graph.sum_numbers", "total", None] == 28
+        assert state["ref_apply_graph.get_length", "length"] == 6
+        assert state["ref_apply_graph.sort_numbers", "sorted_nums"] == [1, 2, 3, 5, 8, 9]
+        assert state["ref_apply_graph.sum_numbers", "total"] == 28
 
 
 # ============================================================
@@ -249,8 +249,8 @@ class TestNestedGraphValueFlow:
         state = MemoryState(schema, inputs={"x": 7})
 
         # Verify ref chain works
-        assert state["outer", "x", None] == 7
-        assert state["outer.inner", "x", None] == 7
+        assert state["outer", "x"] == 7
+        assert state["outer.inner", "x"] == 7
 
 
 # ============================================================
@@ -279,25 +279,72 @@ class TestIndexBasedAccess:
 
 
 # ============================================================
-# Test 7: Execution Recording
+# Test 7: iter_executed (derive execution from start_time cells)
 # ============================================================
 
 
-class TestExecutionRecording:
-    """Test execution order recording."""
+class TestIterExecuted:
+    """Test deriving execution history from start_time cells."""
 
-    def test_record_execution(self):
-        """Test that execution is recorded correctly."""
+    def test_iter_executed_returns_contexts_with_start_time(self):
+        """iter_executed yields (ctx, start_time) for ops that have start_time set."""
+        from datetime import datetime
+
+        schema = StateSchema(name="test")
+        schema.set("node1", "start_time", None)
+        schema.set("node2", "start_time", None)
+        state = MemoryState(schema)
+
+        t1 = datetime(2024, 1, 1, 12, 0, 0)
+        t2 = datetime(2024, 1, 1, 12, 0, 1)
+        state["node1", "start_time"] = t1
+        state["node2", "start_time"] = t2
+
+        result = list(state.iter_executed("node1"))
+        assert len(result) == 1
+        assert result[0][1] == t1
+
+        result = list(state.iter_executed("node2"))
+        assert len(result) == 1
+        assert result[0][1] == t2
+
+    def test_iter_executed_skips_none_values(self):
+        """iter_executed skips contexts where start_time is None."""
+        schema = StateSchema(name="test")
+        schema.set("node", "start_time", None)
+        state = MemoryState(schema)
+
+        # Default is None, should not yield
+        result = list(state.iter_executed("node"))
+        assert len(result) == 0
+
+    def test_iter_executed_unknown_op(self):
+        """iter_executed returns empty for unknown op names."""
         schema = StateSchema(name="test")
         schema.set("node", "x", 0)
         state = MemoryState(schema)
 
-        state.record_execution("node1", None, None)
-        state.record_execution("node2", "node1", "ctx1")
+        result = list(state.iter_executed("unknown_op"))
+        assert len(result) == 0
 
-        assert len(state.execution_order) == 2
-        assert state.execution_order[0]["op"] == "node1"
-        assert state.execution_order[1]["parent"] == "node1"
+    def test_iter_executed_multiple_contexts(self):
+        """iter_executed yields all contexts for iteration ops."""
+        from datetime import datetime
+
+        schema = StateSchema(name="test")
+        schema.set("node", "start_time", None)
+        state = MemoryState(schema)
+
+        t1 = datetime(2024, 1, 1, 12, 0, 0)
+        t2 = datetime(2024, 1, 1, 12, 0, 1)
+        state["node", "start_time", "iter_0"] = t1
+        state["node", "start_time", "iter_1"] = t2
+
+        result = list(state.iter_executed("node"))
+        assert len(result) == 2
+        times = {ctx: t for ctx, t in result}
+        assert times["iter_0"] == t1
+        assert times["iter_1"] == t2
 
 
 # ============================================================
@@ -387,8 +434,8 @@ class TestContextManager:
         schema.set("node", "x", 0)
 
         with MemoryState(schema) as state:
-            state["node", "x", None] = 42
-            assert state["node", "x", None] == 42
+            state["node", "x"] = 42
+            assert state["node", "x"] == 42
 
 
 # ============================================================

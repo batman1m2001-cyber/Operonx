@@ -159,8 +159,7 @@ class WhileOp(BaseIterationOp):
         while not should_stop and step_count < self._max_iterations:
             step_context = get_iter_context(ctx_prefix, step_count)
 
-            for var_name, value in step_inputs.items():
-                state[self.full_name, var_name, step_context] = value
+            self._store_iteration_data(state, step_inputs, step_context)
 
             _outputs = await self._run_graph(state, step_context, step_context)
 

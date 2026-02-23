@@ -11,7 +11,7 @@ use crate::ops::graph::graph_op;
 use crate::states::state::EngineState;
 
 /// Execute a WhileOp: loop until condition is True or max_iterations reached.
-pub(crate) fn execute_while_op(
+pub(crate) fn run(
     py: Python,
     op: &OpConfig,
     state: &EngineState,
@@ -94,7 +94,7 @@ pub(crate) fn execute_while_op(
         graph_op::run_graph(py, inner, state, &step_context)?;
 
         // Collect outputs and merge into step_inputs
-        let outputs = graph_op::collect_outputs(py, inner, state, &step_context)?;
+        let outputs = graph_op::get_outputs(py, inner, state, &step_context)?;
         if let Ok(outputs_dict) = outputs.downcast_bound::<PyDict>(py) {
             for (k, v) in outputs_dict.iter() {
                 step_inputs.set_item(k, v)?;

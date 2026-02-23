@@ -22,7 +22,7 @@ use crate::ops::iteration::map_op;
 use crate::states::state::EngineState;
 
 /// Execute an AIterOp: collect async items → batch → process → callback.
-pub(crate) fn execute_aiter_op(
+pub(crate) fn run(
     py: Python,
     op: &OpConfig,
     state: &EngineState,
@@ -144,7 +144,7 @@ pub(crate) fn execute_aiter_op(
 
                     // Run inner graph + collect outputs
                     let iter_result = graph_op::run_graph(py, inner, state, &iter_context)
-                        .and_then(|_| graph_op::collect_outputs(py, inner, state, &iter_context));
+                        .and_then(|_| graph_op::get_outputs(py, inner, state, &iter_context));
 
                     match iter_result {
                         Ok(output) => {
