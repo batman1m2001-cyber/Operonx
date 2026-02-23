@@ -526,6 +526,7 @@ class TestChainOpIntegration:
     async def test_chain_simple_generation(self, hub):
         """Test ChainOp simple text generation with real LLM."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -555,6 +556,7 @@ class TestChainOpIntegration:
     async def test_chain_structured_output(self, hub):
         """Test ChainOp with structured output parsing."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -590,6 +592,7 @@ Output your response in XML format:
         import json
 
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -624,6 +627,7 @@ Output your response in XML format:
         import json
 
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -668,6 +672,7 @@ Output your response in XML format:
     async def test_chain_load_balancing(self, hub):
         """Test ChainOp with load balancing."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -695,6 +700,7 @@ Output your response in XML format:
     async def test_chain_with_fallback(self, hub):
         """Test ChainOp with fallback configuration."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -722,6 +728,7 @@ Output your response in XML format:
         import json
 
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -754,6 +761,7 @@ Output your response in XML format:
     async def test_unified_string_prompt_generation(self, hub):
         """Test ChainOp with unified string prompt."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -777,6 +785,7 @@ Output your response in XML format:
     async def test_unified_dict_prompt_generation(self, hub):
         """Test ChainOp with unified dict prompt (system + user)."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -809,6 +818,7 @@ Output your response in XML format:
         import json
 
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -841,6 +851,7 @@ Output your response in XML format:
     async def test_unified_prompt_with_load_balancing(self, hub):
         """Test unified prompt with load balancing."""
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import ChainOp
 
         if not hub.has("llm:gpt-4o"):
@@ -878,6 +889,7 @@ class TestChainOpRefTemplate:
         """When template is a Ref, PromptOp should still have template vars in its schema."""
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -913,6 +925,7 @@ class TestChainOpRefTemplate:
         """Multiple template vars should all be discovered when template is a Ref."""
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -949,6 +962,7 @@ class TestChainOpRefTemplate:
         """Existing behavior: static template should still discover vars from template text."""
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -976,6 +990,7 @@ class TestChainOpRefTemplate:
         """End-to-end: nested @graph passes Ref template to ChainOp, vars must propagate."""
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:

@@ -1,7 +1,6 @@
 """Tests for PromptOp functionality."""
 
 import pytest
-
 from hush.core.states import MemoryState, StateSchema
 
 

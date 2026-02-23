@@ -10,11 +10,12 @@ This example demonstrates:
 
 import asyncio
 
+from hush.core.registry import get_hub
+from hush.telemetry.models import MessageTraceInfo
+
 # IMPORTANT: Import hush.telemetry FIRST to register TracerPlugin
 # before get_hub() creates the global hub
 import hush.telemetry  # noqa: F401
-from hush.core.registry import get_hub
-from hush.telemetry.models import MessageTraceInfo
 
 
 async def main():

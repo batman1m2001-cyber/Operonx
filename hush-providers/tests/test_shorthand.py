@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
 from hush.core.states import MemoryState, StateSchema
 
 # ============================================================
@@ -32,6 +31,7 @@ class TestPromptShorthand:
 
     def test_prompt_shorthand_with_outputs(self):
         from hush.core.ops.base import PARENT
+
         from hush.providers.ops.prompt import PromptOp
 
         node = PromptOp.of("Hello", outputs={"*": PARENT})
@@ -112,6 +112,7 @@ class TestLLMShorthand:
 
     def test_llm_shorthand_with_outputs(self, hub):
         from hush.core.ops.base import PARENT
+
         from hush.providers.ops.llm import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -170,6 +171,7 @@ class TestEmbeddingShorthand:
 
     def test_embedding_shorthand_with_outputs(self, hub):
         from hush.core.ops.base import PARENT
+
         from hush.providers.ops.embedding import EmbeddingOp
 
         if not hub.has("embedding:bge-m3"):
@@ -210,6 +212,7 @@ class TestRerankShorthand:
 
     def test_rerank_shorthand_with_outputs(self, hub):
         from hush.core.ops.base import PARENT
+
         from hush.providers.ops.rerank import RerankOp
 
         if not hub.has("reranking:bge-m3-onnx"):
@@ -278,6 +281,7 @@ class TestLLMChainShorthand:
 
     def test_llmchain_shorthand_with_outputs(self):
         from hush.core.ops.base import PARENT
+
         from hush.providers.ops.chain import ChainOp
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
