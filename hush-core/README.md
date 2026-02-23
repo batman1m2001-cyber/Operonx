@@ -83,16 +83,17 @@ outputs={"result": PARENT}
 inputs={"value": other_node["output_key"]}
 ```
 
-## Local Tracing
+## Tracing
 
 ```python
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import HushEyesTracer
 
-tracer = LocalTracer()  # ~/.hush/traces.db
+tracer = HushEyesTracer(tags=["dev"])
 engine = Hush(graph)
 await engine.run(inputs={...}, tracer=tracer)
 
-# Xem traces: VS Code extension hush-eyes
+# Xem traces: chạy hush-eyes server (cd hush-eyes && cargo run -- serve --port 8420)
+# Mở http://localhost:8420
 ```
 
 ## Documentation
@@ -107,7 +108,8 @@ await engine.run(inputs={...}, tracer=tracer)
 
 - [hush-providers](../hush-providers/) - LLM, embedding, reranking
 - [hush-telemetry](../hush-telemetry/) - Langfuse, OpenTelemetry
-- [hush-eyes](../hush-eyes/) - VS Code extension
+- [rush-core](../rush-core/) - Rust execution backend (1.9x–6.2x speedup)
+- [hush-eyes](../hush-eyes/) - Standalone Rust server for trace visualization
 
 ## License
 

@@ -178,7 +178,7 @@ def my_flow(template, transcript):
 ```
 
 Helper methods:
-- `_resolve_wildcard_source()`: Resolve PARENT sentinel → actual father op
+- `_resolve_wildcard_source()`: Resolve PARENT sentinel → actual parent op
 - `_infer_wildcard_vars()`: Trả về set of variable names cần thêm vào schema
 - `_extract_template_variables()`: Parse `{var}` từ template (recursive cho str/dict/list)
 

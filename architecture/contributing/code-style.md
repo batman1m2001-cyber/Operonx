@@ -147,9 +147,14 @@ class MemoryState:
     def user_id(self) -> str:
         return self._user_id
 
-    # Method: has side effects or complex logic
-    def record_execution(self, op_name: str, parent: str):
-        self._execution_order.append({...})
+    # Method: has arguments or complex logic (generator)
+    def iter_executed(self, op_name: str):
+        idx = self.schema.get_index(op_name, "start_time")
+        if idx < 0:
+            return
+        for ctx, value in self._cells[idx].items():
+            if value is not None:
+                yield ctx, value
 ```
 
 ## Async Patterns

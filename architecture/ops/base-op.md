@@ -24,7 +24,7 @@ class BaseOp(ABC):
         'inputs',       # Dict[str, Param] - input parameters
         'outputs',      # Dict[str, Param] - output parameters
         'core',         # Callable - function thực thi logic chính
-        'father',       # Parent GraphOp
+        'parent',       # Parent GraphOp
         'contain_generation',  # Có chứa LLM generation không
         'enabled',      # Op có được thực thi hay không (default True)
         'executor',     # None (event loop) hoặc "thread" (ThreadPoolExecutor)
@@ -59,8 +59,8 @@ Khi một op được khởi tạo, nó tự động đăng ký với parent gra
 
 ```python
 # Trong __init__
-self.father = get_current()  # Lấy graph hiện tại từ context
-add_op = getattr(self.father, "add_op", None)
+self.parent = get_current()  # Lấy graph hiện tại từ context
+add_op = getattr(self.parent, "add_op", None)
 if add_op is not None:
     add_op(self)
 ```
@@ -103,7 +103,7 @@ inputs = {
     "x": 10,                    # Literal -> Param(value=10, type=int)
     "y": other_op,              # Op ref -> Param(value=Ref(other_op, "y"))
     "z": other_op["result"],    # Op["var"] -> Param(value=Ref(other_op, "result"))
-    "w": PARENT["input"],       # PARENT["var"] -> Param(value=Ref(father, "input"))
+    "w": PARENT["input"],       # PARENT["var"] -> Param(value=Ref(parent, "input"))
     "*": PARENT,                # Wildcard -> forward tất cả keys từ PARENT
 }
 ```
@@ -126,7 +126,7 @@ inputs = {
 def __rshift__(self, other):
     """op >> other: kết nối hard edge."""
     edge_type = "condition" if self.type == "branch" else "normal"
-    add_edge = getattr(self.father, "add_edge", None)
+    add_edge = getattr(self.parent, "add_edge", None)
 
     if isinstance(other, SoftEdge):
         # a >> ~b: soft edge
@@ -200,7 +200,7 @@ def get_inputs(self, state, context_id, parent_context=None):
     result = {}
     for var_name, param in self.inputs.items():
         # Xác định context để lookup
-        if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.father:
+        if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.parent:
             lookup_ctx = parent_context  # PARENT ref
         else:
             lookup_ctx = context_id
@@ -243,8 +243,8 @@ def store_result(self, state, result, context_id):
 @property
 def full_name(self) -> str:
     """Đường dẫn phân cấp đầy đủ: parent.child.op"""
-    if self.father:
-        return f"{self.father.full_name}.{self.name}"
+    if self.parent:
+        return f"{self.parent.full_name}.{self.name}"
     return self.name
 ```
 
@@ -316,11 +316,11 @@ def __rshift__(self, other):
         if not _has_explicit_outputs(self):
             if self.outputs is None:
                 self.outputs = {}
-            father = getattr(self, "father", None) or PARENT
+            parent = getattr(self, "parent", None) or PARENT
             for key in self.outputs:
                 param = self.outputs[key]
                 if hasattr(param, "value") and param.value is None:
-                    param.value = Ref(father, key)
+                    param.value = Ref(parent, key)
     # ... continue with edge creation ...
 ```
 

@@ -174,7 +174,7 @@ state[child, result, "[0]"]   # Child writes to same context
 def get_inputs(self, state, context_id, parent_context=None):
     for var_name, param in self.inputs.items():
         # PARENT ref → use parent_context
-        if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.father:
+        if parent_context and isinstance(param.value, Ref) and param.value.raw_source is self.parent:
             lookup_ctx = parent_context
         else:
             # Sibling/other → use context_id

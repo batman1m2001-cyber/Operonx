@@ -109,10 +109,12 @@ See [CLAUDE.md](CLAUDE.md) for the complete sync mapping.
 ```
 Hush-ai/
 ├── hush-core/          # Core workflow engine
-├── hush-providers/     # LLM, embedding, reranking
-├── hush-telemetry/ # Tracing backends
+├── rush-core/          # Rust execution backend (PyO3 + rayon)
+├── hush-providers/     # LLM, embedding, reranking (Python)
+├── rush-providers/     # Rust provider implementations (native HTTP, ONNX)
+├── hush-telemetry/     # Tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Docs (Vietnamese) + examples
-├── hush-eyes/ # VS Code extension
+├── hush-eyes/          # Standalone Rust server for trace visualization
 ├── architecture/       # Deep technical docs
 └── CLAUDE.md           # Quick reference
 ```
@@ -125,6 +127,9 @@ hush-core (foundation - no hush dependencies)
 hush-providers (depends on hush-core)
     ↓
 hush-telemetry (depends on hush-core)
+
+rush-core (Rust backend - depends on hush-core at runtime)
+rush-providers (Rust crate - used by rush-core)
 ```
 
 ## Questions?
