@@ -82,7 +82,7 @@ class TestSingleNodeGraph:
         await graph.run(state)
 
         # Access result directly from state
-        assert state["no_output_map.compute", "result", None] == 105
+        assert state["no_output_map.compute", "result"] == 105
 
 
 # ============================================================
@@ -595,7 +595,7 @@ class TestErrorHandling:
         await graph.run(state)
 
         # Check error is captured
-        error = state["error_graph.failing", "error", None]
+        error = state["error_graph.failing", "error"]
         assert "Intentional error" in error
 
     @pytest.mark.asyncio
@@ -626,10 +626,10 @@ class TestErrorHandling:
         await graph.run(state)
 
         # First node should succeed
-        assert state["partial_error.first", "result", None] == 15
+        assert state["partial_error.first", "result"] == 15
 
         # Failing node should have error
-        error = state["partial_error.failing", "error", None]
+        error = state["partial_error.failing", "error"]
         assert "division by zero" in error
 
 

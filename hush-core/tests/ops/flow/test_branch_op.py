@@ -89,7 +89,7 @@ class TestBasicScoreRouting:
         state = MemoryState(schema, inputs={"score": 85})
 
         await branch.run(state)
-        assert state["score_workflow.router", "target", None] == "good"
+        assert state["score_workflow.router", "target"] == "good"
 
     @pytest.mark.asyncio
     async def test_get_target_method(self, score_graph):
@@ -158,7 +158,7 @@ class TestMultipleVariablesRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema)
 
-        state["user_workflow.user_data", "age", None] = 25
+        state["user_workflow.user_data", "age"] = 25
 
         result = await branch.run(state)
         assert result["target"] == "adult_verified"
@@ -170,7 +170,7 @@ class TestMultipleVariablesRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema)
 
-        state["user_workflow.user_data", "age", None] = 15
+        state["user_workflow.user_data", "age"] = 15
 
         result = await branch.run(state)
         assert result["target"] == "teen"

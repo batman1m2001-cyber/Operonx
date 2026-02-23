@@ -1,7 +1,7 @@
-"""Workflow state với Cell-based storage và độ phân giải O(1) dựa trên index."""
+"""Workflow state with Cell-based storage and O(1) index-based resolution."""
 
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from hush.core.states.cell import DEFAULT_CONTEXT, Cell
 from hush.core.states.schema import StateSchema
@@ -12,22 +12,25 @@ _uuid4 = uuid.uuid4
 
 
 class MemoryState:
-    """Workflow state với Cell-based storage và truy cập O(1) theo index.
+    """Workflow state with Cell-based storage and O(1) indexed access.
 
-    Thiết kế đơn giản:
-        - Read pulls (1 hop): Nếu có input ref, lấy từ source và cache
-        - Write pushes (1 hop): Nếu có output ref, đẩy đến target
-        - Không có recursion, không có magic
+    Design:
+        - Read pulls (1 hop): If input ref exists, pull from source and cache
+        - Write pushes (1 hop): If output ref exists, push to target
+        - No recursion, no magic
 
-    Luồng dữ liệu:
-        __setitem__: Lưu value, nếu output ref thì push 1 hop
-        __getitem__: Nếu cached trả về, nếu input ref thì pull 1 hop và cache
+    Data flow:
+        __setitem__: Store value, push 1 hop if output ref exists
+        __getitem__: Return cached value, or pull 1 hop if input ref exists
+
+    Supports both 2-tuple and 3-tuple access:
+        state[op, var]          # default context
+        state[op, var, ctx]     # explicit context
     """
 
     __slots__ = (
         "schema",
         "_cells",
-        "_execution_order",
         "_user_id",
         "_session_id",
         "_request_id",
@@ -42,14 +45,14 @@ class MemoryState:
         session_id: str = None,
         request_id: str = None,
     ) -> None:
-        """Khởi tạo MemoryState.
+        """Initialize MemoryState.
 
         Args:
-            schema: StateSchema định nghĩa cấu trúc state
-            inputs: Giá trị input ban đầu cho workflow
-            user_id: ID người dùng (tự động tạo nếu không cung cấp)
-            session_id: ID phiên (tự động tạo nếu không cung cấp)
-            request_id: ID yêu cầu (tự động tạo nếu không cung cấp)
+            schema: StateSchema defining the state structure
+            inputs: Initial input values for the workflow
+            user_id: User ID (auto-generated if not provided)
+            session_id: Session ID (auto-generated if not provided)
+            request_id: Request ID (auto-generated if not provided)
         """
         self.schema = schema
         self._cells: List[Cell] = [Cell(v) for v in schema._defaults]
@@ -60,33 +63,37 @@ class MemoryState:
         # Dynamic tags collected during execution
         self._tags: List[str] = []
 
-        # Execution order for TraceCollector
-        self._execution_order: List[Dict[str, str]] = []
-
-        # Áp dụng input ban đầu
+        # Apply initial inputs
         if inputs:
             for var, value in inputs.items():
                 idx = schema.get_index(schema.name, var)
                 if idx >= 0:
-                    self._cells[idx][None] = value
+                    self._cells[idx][DEFAULT_CONTEXT] = value
 
     # =========================================================================
     # Core API: Simple and predictable
     # =========================================================================
 
-    def __setitem__(self, key: Tuple[str, str, Optional[str]], value: Any) -> None:
+    @staticmethod
+    def _unpack_key(key) -> Tuple[str, str, str]:
+        """Unpack 2-tuple or 3-tuple key into (op, var, ctx_key)."""
+        if len(key) == 2:
+            return key[0], key[1], DEFAULT_CONTEXT
+        op, var, ctx = key
+        return op, var, (ctx if ctx is not None else DEFAULT_CONTEXT)
+
+    def __setitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any) -> None:
         """Store value. Push to target if push_ref exists (1 hop only).
 
         Args:
-            key: Tuple (op, var, ctx)
-            value: Giá trị cần lưu
+            key: (op, var) or (op, var, ctx)
+            value: Value to store
         """
-        op, var, ctx = key
+        op, var, ctx_key = self._unpack_key(key)
         idx = self.schema.get_index(op, var)
         if idx < 0:
-            raise KeyError(f"({op}, {var}) không có trong schema")
+            raise KeyError(f"({op}, {var}) not found in schema")
 
-        ctx_key = ctx if ctx is not None else DEFAULT_CONTEXT
         self._cells[idx][ctx_key] = value
 
         # Push ref? Push 1 hop to target
@@ -94,21 +101,20 @@ class MemoryState:
         if push_ref and push_ref.idx >= 0:
             self._cells[push_ref.idx][ctx_key] = push_ref._fn(value)
 
-    def __getitem__(self, key: Tuple[str, str, Optional[str]]) -> Any:
+    def __getitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]]) -> Any:
         """Get value. Pull from source if pull_ref exists (1 hop only).
 
         Args:
-            key: Tuple (op, var, ctx)
+            key: (op, var) or (op, var, ctx)
 
         Returns:
-            Giá trị tại (op, var, ctx) hoặc None nếu không tìm thấy
+            Value at (op, var, ctx) or None if not found
         """
-        op, var, ctx = key
+        op, var, ctx_key = self._unpack_key(key)
         idx = self.schema.get_index(op, var)
         if idx < 0:
             return None
 
-        ctx_key = ctx if ctx is not None else DEFAULT_CONTEXT
         cell = self._cells[idx]
 
         # Has cached value? Return it
@@ -129,14 +135,14 @@ class MemoryState:
         return cell.default_value
 
     def get(self, op: str, var: str, ctx: Optional[str] = None) -> Any:
-        """Lấy giá trị với tham số explicit."""
+        """Get value with explicit parameters."""
         return self[op, var, ctx]
 
     def get_cell(self, op: str, var: str) -> Cell:
-        """Lấy object Cell cho một biến."""
+        """Get the Cell object for a variable."""
         idx = self.schema.get_index(op, var)
         if idx < 0:
-            raise KeyError(f"({op}, {var}) không có trong schema")
+            raise KeyError(f"({op}, {var}) not found in schema")
         return self._cells[idx]
 
     def has(self, op: str, var: str, ctx: Optional[str] = None) -> bool:
@@ -152,27 +158,34 @@ class MemoryState:
     # =========================================================================
 
     def get_by_index(self, idx: int, ctx: Optional[str] = None) -> Any:
-        """Truy cập cell trực tiếp theo index (không resolve ref)."""
+        """Direct cell access by index (no ref resolution)."""
         if 0 <= idx < len(self._cells):
             return self._cells[idx][ctx]
-        raise IndexError(f"Index {idx} ngoài phạm vi")
+        raise IndexError(f"Index {idx} out of range")
 
     def set_by_index(self, idx: int, value: Any, ctx: Optional[str] = None) -> None:
-        """Gán giá trị cell trực tiếp theo index (không push ref)."""
+        """Direct cell assignment by index (no ref push)."""
         if 0 <= idx < len(self._cells):
             self._cells[idx][ctx] = value
         else:
-            raise IndexError(f"Index {idx} ngoài phạm vi")
+            raise IndexError(f"Index {idx} out of range")
 
     # =========================================================================
-    # Execution Tracking
+    # Tracing Support
     # =========================================================================
 
-    def record_execution(self, op_name: str, parent: str, context_id: str) -> None:
-        """Record op execution order for TraceCollector."""
-        self._execution_order.append(
-            {"op": op_name, "parent": parent, "context_id": context_id}
-        )
+    def iter_executed(self, op_name: str):
+        """Yield (context_id, start_time) for each execution of op_name.
+
+        Derives execution history from start_time cells — no separate
+        recording needed. Used by TraceCollector post-execution.
+        """
+        idx = self.schema.get_index(op_name, "start_time")
+        if idx < 0:
+            return
+        for ctx, value in self._cells[idx].items():
+            if value is not None:
+                yield ctx, value
 
     # =========================================================================
     # Properties
@@ -180,17 +193,12 @@ class MemoryState:
 
     @property
     def name(self) -> str:
-        """Tên của workflow."""
+        """Workflow name."""
         return self.schema.name
 
     @property
-    def execution_order(self) -> List[Dict[str, str]]:
-        """Danh sách thứ tự thực thi các node."""
-        return self._execution_order.copy()
-
-    @property
     def metadata(self) -> Dict[str, Any]:
-        """Metadata của state bao gồm user_id, session_id, request_id."""
+        """State metadata including user_id, session_id, request_id."""
         return {
             "user_id": self._user_id,
             "session_id": self._session_id,
@@ -199,17 +207,17 @@ class MemoryState:
 
     @property
     def user_id(self) -> str:
-        """ID người dùng."""
+        """User ID."""
         return self._user_id
 
     @property
     def session_id(self) -> str:
-        """ID phiên."""
+        """Session ID."""
         return self._session_id
 
     @property
     def request_id(self) -> str:
-        """ID yêu cầu."""
+        """Request ID."""
         return self._request_id
 
     @property
@@ -243,19 +251,19 @@ class MemoryState:
     # =========================================================================
 
     def __contains__(self, key: Tuple[str, str]) -> bool:
-        """Kiểm tra (op, var) có tồn tại trong schema không."""
+        """Check if (op, var) exists in schema."""
         return key in self.schema
 
     def __len__(self) -> int:
-        """Số lượng cell."""
+        """Number of cells."""
         return len(self._cells)
 
     def __iter__(self):
-        """Duyệt qua các cặp (op, var)."""
+        """Iterate over (op, var) pairs."""
         return iter(self.schema)
 
     # =========================================================================
-    # Context Manager và Tiện ích
+    # Context Manager and Utilities
     # =========================================================================
 
     def __enter__(self) -> "MemoryState":
@@ -276,7 +284,7 @@ class MemoryState:
         return self._request_id == other._request_id
 
     def show(self) -> None:
-        """Hiển thị debug các giá trị state hiện tại."""
+        """Display debug view of current state values."""
         print(f"\n=== {self.__class__.__name__}: {self.name} ===")
 
         for op, var in self.schema:
@@ -285,19 +293,16 @@ class MemoryState:
             pull_ref = self.schema._pull_refs[idx]
 
             if not cell.contexts:
-                # Chưa có giá trị
                 if pull_ref:
-                    print(f"{op}.{var} -> pull_ref[{pull_ref.idx}] (chưa có giá trị)")
+                    print(f"{op}.{var} -> pull_ref[{pull_ref.idx}] (no value yet)")
                 else:
                     print(f"{op}.{var} -> {cell.default_value}")
             elif len(cell.contexts) == 1:
-                # Một context
                 ctx = next(iter(cell.contexts))
                 value = cell.contexts[ctx]
                 value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)
                 print(f"{op}.{var} [{ctx}] = {value_str}")
             else:
-                # Nhiều context
                 print(f"{op}.{var}:")
                 for ctx, value in cell.contexts.items():
                     value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)

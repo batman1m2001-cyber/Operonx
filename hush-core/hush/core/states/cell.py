@@ -1,4 +1,4 @@
-"""Cell lưu trữ giá trị đa context cho workflow state."""
+"""Cell stores multi-context values for workflow state."""
 
 from typing import Any, Dict, Optional
 
@@ -6,68 +6,72 @@ DEFAULT_CONTEXT = "main"
 
 
 class Cell:
-    """Lưu trữ một biến có thể có nhiều giá trị trong các context/iteration khác nhau.
+    """Stores a variable that may have different values across contexts/iterations.
 
-    Mỗi biến trong workflow có thể tồn tại trong nhiều context khác nhau,
-    ví dụ như các iteration của loop. Cell quản lý tất cả các giá trị này.
+    Each workflow variable can exist in multiple contexts (e.g., loop iterations).
+    Cell manages all values for a single variable.
 
     Attributes:
-        contexts: Dict ánh xạ context_id sang giá trị
-        default_value: Giá trị mặc định khi context không tồn tại
+        contexts: Dict mapping context_id to value
+        default_value: Fallback value when context doesn't exist
     """
 
     __slots__ = ("contexts", "default_value")
 
     def __init__(self, default_value: Any = None):
-        """Khởi tạo Cell với giá trị mặc định.
+        """Initialize Cell with a default value.
 
         Args:
-            default_value: Giá trị trả về khi context không tồn tại
+            default_value: Value returned when context doesn't exist
         """
         self.contexts: Dict[str, Any] = {}  # context_id -> value
         self.default_value = default_value
 
     def __setitem__(self, context_id: Optional[str], value: Any) -> None:
-        """Set giá trị cho context cụ thể.
+        """Set value for a specific context.
 
         Args:
-            context_id: ID của context (None = default context "main")
-            value: Giá trị cần lưu
+            context_id: Context ID (None = default context "main")
+            value: Value to store
         """
         if context_id is None:
             context_id = DEFAULT_CONTEXT
         self.contexts[context_id] = value
 
     def __getitem__(self, context_id: Optional[str] = None) -> Any:
-        """Lấy giá trị từ context cụ thể.
+        """Get value from a specific context.
 
         Args:
-            context_id: ID của context (None = default context "main")
+            context_id: Context ID (None = default context "main")
 
         Returns:
-            Giá trị của context hoặc default_value nếu không tồn tại
+            Context value or default_value if context doesn't exist
         """
         if context_id is None:
             context_id = DEFAULT_CONTEXT
         return self.contexts.get(context_id, self.default_value)
 
     def pop_context(self, context_id: str) -> Any:
-        """Xóa context và trả về giá trị của nó.
+        """Remove a context and return its value.
 
         Args:
-            context_id: ID của context cần xóa
+            context_id: Context ID to remove
 
         Returns:
-            Giá trị của context đã xóa hoặc default_value nếu không tồn tại
+            Value of removed context or default_value if it didn't exist
         """
         return self.contexts.pop(context_id, self.default_value)
 
     def __delitem__(self, context_id: str) -> None:
-        """Xóa context: del cell['context_id']"""
+        """Remove context: del cell['context_id']"""
         self.pop_context(context_id)
 
+    def items(self):
+        """Iterate (context_id, value) pairs."""
+        return self.contexts.items()
+
     def __contains__(self, context_id: str) -> bool:
-        """Kiểm tra context có tồn tại: 'context_id' in cell"""
+        """Check if context exists: 'context_id' in cell"""
         return context_id in self.contexts
 
     def __repr__(self) -> str:

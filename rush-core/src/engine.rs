@@ -77,27 +77,18 @@ impl Rush {
         graph_op::run_graph(py, &self.config, &state, context)?;
 
         // 3. Collect graph outputs
-        let result = graph_op::collect_outputs(py, &self.config, &state, context)?;
+        let result = graph_op::get_outputs(py, &self.config, &state, context)?;
 
-        // 4. Attach $state metadata (tags, execution_order, values, tracing IDs)
+        // 4. Attach $state metadata (tags, values, tracing IDs)
         //    Mirrors Python's result["$state"] = state
+        //    TraceCollector derives execution order from start_time values
+        //    (no separate execution_order list needed).
         if let Ok(dict) = result.downcast_bound::<PyDict>(py) {
             let state_meta = PyDict::new_bound(py);
 
             // Tags
             let tags_list = PyList::new_bound(py, state.tags());
             state_meta.set_item("tags", tags_list)?;
-
-            // Execution order
-            let exec_list = PyList::empty_bound(py);
-            for (op_name, parent, ctx) in state.execution_order() {
-                let entry = PyDict::new_bound(py);
-                entry.set_item("op", &op_name)?;
-                entry.set_item("parent", &parent)?;
-                entry.set_item("context_id", &ctx)?;
-                exec_list.append(entry)?;
-            }
-            state_meta.set_item("execution_order", exec_list)?;
 
             // Tracing metadata IDs
             if let Some(ref rid) = request_id {

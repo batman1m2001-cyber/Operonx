@@ -193,6 +193,13 @@ class BaseIterationOp(GraphOp):
                 result[var_name] = value
         return result
 
+    def _store_iteration_data(
+        self, state: "MemoryState", data: Dict[str, Any], context_id: str
+    ) -> None:
+        """Store iteration variables to state for a single iteration context."""
+        for var_name, value in data.items():
+            state[self.full_name, var_name, context_id] = value
+
     def _build_iteration_data(
         self, each_values: Dict[str, List], broadcast_values: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
@@ -302,21 +309,20 @@ class BaseIterationOp(GraphOp):
 
         Subclasses implement _execute() for specific iteration logic.
         """
-        parent_name = self.father.full_name if self.father else None
-        state.record_execution(self.full_name, parent_name, context_id)
-
         request_id = state.request_id
         start_time = datetime.now()
         perf_start = perf_counter()
         _inputs: Dict[str, Any] = {}
         _outputs: Dict[str, Any] = {}
+        error_msg = None
 
         try:
             _inputs, _outputs = await self._execute(state, context_id, parent_context, request_id)
             self.store_result(state, _outputs, context_id)
 
         except Exception as e:
-            error_msg = traceback.format_exc()
+            import sys
+            error_msg = traceback.format_exc() if LOGGER.isEnabledFor(40) else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             LOGGER.error(
                 "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]: %s",
                 request_id,
@@ -324,15 +330,12 @@ class BaseIterationOp(GraphOp):
                 str(e),
             )
             LOGGER.error(error_msg)
-            state[self.full_name, "error", context_id] = error_msg
 
         finally:
             end_time = datetime.now()
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
-            state[self.full_name, "start_time", context_id] = start_time
-            state[self.full_name, "end_time", context_id] = end_time
-            state[self.full_name, "duration_ms", context_id] = duration_ms
+            self._store_metrics(state, context_id, error=error_msg, start_time=start_time, end_time=end_time, duration_ms=duration_ms)
 
         return _outputs
 

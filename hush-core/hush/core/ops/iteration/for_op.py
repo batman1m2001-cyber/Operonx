@@ -83,8 +83,7 @@ class ForOp(BaseIterationOp):
             iter_context = get_iter_context(ctx_prefix, i)
 
             try:
-                for var_name, value in loop_data.items():
-                    state[self.full_name, var_name, iter_context] = value
+                self._store_iteration_data(state, loop_data, iter_context)
 
                 result = await self._run_graph(state, iter_context, iter_context)
                 final_results.append(result)

@@ -201,7 +201,7 @@ class TestWhileLoopWithRef:
 
         await graph.run(state)
 
-        loop_result = state[loop.full_name, "iteration_metrics", None]
+        loop_result = state[loop.full_name, "iteration_metrics"]
         iterations = loop_result.get("total_iterations", 0) if loop_result else 0
         # 0->3->6->9->12, 4 iterations to reach counter >= 10
         assert iterations == 4
@@ -366,12 +366,12 @@ class TestWhileLoopInitialFromUpstream:
 
         # Counter starts at 3 (from upstream), then: 3->4->5->6->7
         # Stops when counter >= 7, so 4 iterations
-        loop_result = state[loop.full_name, "iteration_metrics", None]
+        loop_result = state[loop.full_name, "iteration_metrics"]
         assert loop_result.get("total_iterations") == 4
         assert loop_result.get("stopped_by_condition") is True
 
         # Final counter value should be 7
-        final_counter = state[loop.full_name, "counter", None]
+        final_counter = state[loop.full_name, "counter"]
         assert final_counter == 7
 
     @pytest.mark.asyncio
@@ -418,10 +418,10 @@ class TestWhileLoopInitialFromUpstream:
 
         # Counter: 0->5->10->15->20, stops at counter >= 20
         # 4 iterations
-        loop_result = state[loop.full_name, "iteration_metrics", None]
+        loop_result = state[loop.full_name, "iteration_metrics"]
         assert loop_result.get("total_iterations") == 4
 
-        final_counter = state[loop.full_name, "counter", None]
+        final_counter = state[loop.full_name, "counter"]
         assert final_counter == 20
 
     @pytest.mark.asyncio
@@ -466,11 +466,11 @@ class TestWhileLoopInitialFromUpstream:
         # threshold = 5 * 3 = 15
         # value: 0->2->4->6->8->10->12->14->16
         # stops when value >= 15, so at 8 iterations (value=16)
-        loop_result = state[loop.full_name, "iteration_metrics", None]
+        loop_result = state[loop.full_name, "iteration_metrics"]
         assert loop_result.get("total_iterations") == 8
         assert loop_result.get("stopped_by_condition") is True
 
-        final_value = state[loop.full_name, "value", None]
+        final_value = state[loop.full_name, "value"]
         assert final_value == 16
 
 

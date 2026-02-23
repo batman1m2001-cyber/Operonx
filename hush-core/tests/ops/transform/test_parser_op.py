@@ -61,7 +61,7 @@ class TestJSONParser:
         state = MemoryState(schema, inputs={"text": json_text})
 
         await json_parser.run(state)
-        assert state["json_workflow.json_parser", "name", None] == "John"
+        assert state["json_workflow.json_parser", "name"] == "John"
 
     def test_json_parser_quick_call(self):
         """Test JSON parser with direct __call__."""
@@ -171,7 +171,7 @@ class TestParserErrors:
         await parser.run(state)
 
         # Error should be captured in state
-        error = state["invalid_json_graph.test_parser", "error", None]
+        error = state["invalid_json_graph.test_parser", "error"]
         assert error is not None
         assert "JSON" in error or "json" in error.lower()
 

@@ -6,7 +6,7 @@
 //! Iteration contexts: "[0]", "[1]", nested: "[0].[0]", etc.
 //!
 //! Uses DashMap for concurrent read/write (parallel op execution)
-//! and Mutex for append-only metadata (tags, execution_order).
+//! and Mutex for append-only metadata (tags).
 
 use dashmap::DashMap;
 use std::sync::Mutex;
@@ -17,8 +17,6 @@ pub(crate) struct EngineState {
     values: DashMap<(String, String, String), PyObject>,
     /// Dynamic tags collected from op results via `$tags` key.
     tags: Mutex<Vec<String>>,
-    /// Execution order: (op_name, parent_name, context_id).
-    execution_order: Mutex<Vec<(String, String, String)>>,
     /// Request ID for tracing / streaming (set by engine.run()).
     request_id: Mutex<Option<String>>,
 }
@@ -28,7 +26,6 @@ impl EngineState {
         EngineState {
             values: DashMap::new(),
             tags: Mutex::new(Vec::new()),
-            execution_order: Mutex::new(Vec::new()),
             request_id: Mutex::new(None),
         }
     }
@@ -65,20 +62,8 @@ impl EngineState {
         }
     }
 
-    /// Record op execution order. Mirrors Python's `MemoryState.record_execution()`.
-    pub(crate) fn record_execution(&self, op_name: String, parent: String, context: String) {
-        self.execution_order
-            .lock()
-            .unwrap()
-            .push((op_name, parent, context));
-    }
-
     pub(crate) fn tags(&self) -> Vec<String> {
         self.tags.lock().unwrap().clone()
-    }
-
-    pub(crate) fn execution_order(&self) -> Vec<(String, String, String)> {
-        self.execution_order.lock().unwrap().clone()
     }
 
     /// Snapshot all stored values. Used by engine.rs to export state for tracing.

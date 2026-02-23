@@ -1,21 +1,21 @@
-"""Quản lý state cho workflow v2 - thiết kế đơn giản dựa trên Cell.
+"""State management for workflows — simple Cell-based design.
 
-Kiến trúc:
-    StateSchema  - Định nghĩa cấu trúc với độ phân giải O(1) dựa trên index.
-    MemoryState  - Lưu trữ trong bộ nhớ dựa trên Cell.
-    Ref          - Tham chiếu với khả năng chain các operation.
-    Cell         - Lưu trữ giá trị đa context.
+Architecture:
+    StateSchema  - Defines structure with O(1) index-based resolution.
+    MemoryState  - In-memory Cell-based storage.
+    Ref          - Zero-copy references with chainable operations.
+    Cell         - Multi-context value storage.
 
 Example:
     from hush.core.states import StateSchema, MemoryState
 
-    # Từ graph
     schema = StateSchema(graph)
     state = MemoryState(schema, inputs={"x": 5})
 
-    # Truy cập giá trị
-    state["node", "var", None] = "value"
-    value = state["node", "var", None]
+    # Access values (2-tuple for default context, 3-tuple for explicit)
+    state["node", "var"] = "value"
+    value = state["node", "var"]
+    state["node", "var", "[0]"] = "iteration value"
 
     # Debug
     schema.show()

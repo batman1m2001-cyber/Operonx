@@ -62,7 +62,7 @@ graph.serialize() ──dict──→  GraphConfig::from_dict()
 
 ### Concurrent State (DashMap)
 
-`EngineState` uses `DashMap<(String, String, String), PyObject>` for lock-free concurrent reads/writes. Tags and execution order use `Mutex<Vec>`.
+`EngineState` uses `DashMap<(String, String, String), PyObject>` for lock-free concurrent reads/writes. Tags use `Mutex<Vec>`.
 
 ```rust
 // Thread-safe — no &mut needed
@@ -73,7 +73,7 @@ let val = state.get(py, op_name, var_name, context);  // Returns owned clone
 Key API:
 - `get(py, full_name, var, context) -> Option<PyObject>` — owned clone (needs GIL for clone_ref)
 - `set(full_name, var, context, value)` — takes `&self` (not `&mut self`)
-- `add_tags(tags)` / `record_execution(...)` — internally locked
+- `add_tags(tags)` — internally locked
 - `values_snapshot(py)` — collect all entries for export
 
 ### Batch-Aware Parallel Scheduler
