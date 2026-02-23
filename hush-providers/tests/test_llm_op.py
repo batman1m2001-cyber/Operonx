@@ -79,7 +79,6 @@ class TestLLMOpIntegration:
     async def test_llm_node_with_hub(self, hub):
         """Test LLMOp works with ResourceHub."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         # Check if or-claude-4-sonnet is available
@@ -107,7 +106,6 @@ class TestLLMOpIntegration:
 
         from hush.core import STREAM_SERVICE
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         # Check if or-claude-4-sonnet is available
@@ -273,7 +271,6 @@ class TestLLMOpLoadBalancing:
     async def test_load_balancing_execution(self, hub):
         """Test LLMOp execution with load balancing."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
@@ -462,7 +459,6 @@ class TestLLMOpFallback:
     async def test_fallback_with_valid_primary(self, hub):
         """Test normal execution with fallback configured (no fallback triggered)."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:or-claude-4-sonnet"):
@@ -491,7 +487,6 @@ class TestLLMOpTools:
     async def test_tools_function_calling(self, hub):
         """Test LLMOp with tools for function calling."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -553,7 +548,6 @@ class TestLLMOpTools:
     async def test_tools_force_function_call(self, hub):
         """Test LLMOp forcing a specific function call."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -605,7 +599,6 @@ class TestLLMOpResponseFormat:
         import json
 
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -648,7 +641,6 @@ class TestLLMOpResponseFormat:
         import json
 
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -700,7 +692,6 @@ class TestLLMOpVision:
     async def test_image_url_input(self, hub):
         """Test LLMOp with image URL input."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -744,7 +735,6 @@ class TestLLMOpVision:
         import base64
 
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -794,7 +784,6 @@ class TestLLMOpGenerationParams:
     async def test_temperature(self, hub):
         """Test LLMOp with different temperature settings."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -820,7 +809,6 @@ class TestLLMOpGenerationParams:
     async def test_max_tokens(self, hub):
         """Test LLMOp with max_tokens limit."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -853,7 +841,6 @@ class TestLLMOpGenerationParams:
     async def test_stop_sequences(self, hub):
         """Test LLMOp with stop sequences."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -883,7 +870,6 @@ class TestLLMOpGenerationParams:
     async def test_top_p(self, hub):
         """Test LLMOp with top_p (nucleus sampling)."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -909,7 +895,6 @@ class TestLLMOpGenerationParams:
     async def test_frequency_and_presence_penalty(self, hub):
         """Test LLMOp with frequency and presence penalties."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -936,7 +921,6 @@ class TestLLMOpGenerationParams:
     async def test_seed_reproducibility(self, hub):
         """Test LLMOp with seed for reproducible outputs."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -975,7 +959,6 @@ class TestLLMOpLogprobs:
     async def test_logprobs_enabled(self, hub):
         """Test LLMOp with logprobs enabled."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1011,7 +994,6 @@ class TestLLMOpMultipleCompletions:
     async def test_multiple_completions(self, hub):
         """Test LLMOp generating multiple completions."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1045,7 +1027,6 @@ class TestLLMOpUserTracking:
     async def test_user_parameter(self, hub):
         """Test LLMOp with user parameter for tracking."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1077,7 +1058,6 @@ class TestLLMOpAudio:
         import base64
 
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o-audio"):
@@ -1175,7 +1155,6 @@ class TestLLMOpComplexWorkflow:
     async def test_multi_turn_conversation(self, hub):
         """Test LLMOp with multi-turn conversation."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1218,7 +1197,6 @@ class TestLLMOpComplexWorkflow:
     async def test_system_prompt_behavior(self, hub):
         """Test LLMOp follows system prompt instructions."""
         from hush.core.states import MemoryState, StateSchema
-
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):

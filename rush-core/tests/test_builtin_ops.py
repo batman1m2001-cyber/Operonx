@@ -29,7 +29,9 @@ class TestStringOps:
             step = concat(parts=PARENT["parts"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(inputs={"parts": ["hello", " ", "world"]})
+        result = await Hush(graph, mode="rust").run(
+            inputs={"parts": ["hello", " ", "world"]}
+        )
         assert result["result"] == "hello world"
 
     async def test_concat_empty(self):
@@ -53,7 +55,9 @@ class TestStringOps:
             step = split(text=PARENT["text"], delimiter=PARENT["delim"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(inputs={"text": "a,b,c", "delim": ","})
+        result = await Hush(graph, mode="rust").run(
+            inputs={"text": "a,b,c", "delim": ","}
+        )
         assert result["parts"] == ["a", "b", "c"]
 
     async def test_split_no_match(self):
@@ -65,7 +69,9 @@ class TestStringOps:
             step = split(text=PARENT["text"], delimiter=PARENT["delim"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(inputs={"text": "hello", "delim": ","})
+        result = await Hush(graph, mode="rust").run(
+            inputs={"text": "hello", "delim": ","}
+        )
         assert result["parts"] == ["hello"]
 
     async def test_template(self):
@@ -81,7 +87,10 @@ class TestStringOps:
             START >> step >> END
 
         result = await Hush(graph, mode="rust").run(
-            inputs={"tpl": "Hello {name}, you are {age}!", "vars": {"name": "Alice", "age": "30"}}
+            inputs={
+                "tpl": "Hello {name}, you are {age}!",
+                "vars": {"name": "Alice", "age": "30"},
+            }
         )
         assert result["result"] == "Hello Alice, you are 30!"
 
@@ -113,6 +122,7 @@ class TestJsonOps:
         @op(rust=f"{BUILTIN_CRATE}::json_parse")
         def parse(text: str):
             import json
+
             return {"data": json.loads(text)}
 
         with GraphOp(name="test") as graph:
@@ -128,6 +138,7 @@ class TestJsonOps:
         @op(rust=f"{BUILTIN_CRATE}::json_parse")
         def parse(text: str):
             import json
+
             return {"data": json.loads(text)}
 
         with GraphOp(name="test") as graph:

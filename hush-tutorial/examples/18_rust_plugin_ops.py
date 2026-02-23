@@ -67,11 +67,11 @@ def concat_parts(parts: list):
 @op(rust=f"{BUILTIN}::hash_chain")
 def hash_chain(data: str, iterations: int):
     import hashlib
+
     current = data
     for _ in range(iterations):
         current = hashlib.md5(current.encode()).hexdigest()
     return {"hash": current}
-
 
 
 # =============================================================================
@@ -120,10 +120,12 @@ async def example_2_string_ops():
         START >> rendered >> END
 
     engine = Hush(graph, mode="rust")
-    result = await engine.run(inputs={
-        "template": "Xin chào {name}, bạn có {count} tin nhắn mới!",
-        "vars": {"name": "Hush", "count": "5"},
-    })
+    result = await engine.run(
+        inputs={
+            "template": "Xin chào {name}, bạn có {count} tin nhắn mới!",
+            "vars": {"name": "Hush", "count": "5"},
+        }
+    )
 
     print("  Template: 'Xin chào {name}, bạn có {count} tin nhắn mới!'")
     print(f"  Result:   '{result['result']}'")
@@ -178,10 +180,12 @@ async def example_4_mixed_ops():
         [s, c] >> r >> END
 
     engine = Hush(graph, mode="rust")
-    result = await engine.run(inputs={
-        "numbers": [1, 2, 3, 4, 5],
-        "labels": ["Kết", " quả", " tính", " toán"],
-    })
+    result = await engine.run(
+        inputs={
+            "numbers": [1, 2, 3, 4, 5],
+            "labels": ["Kết", " quả", " tính", " toán"],
+        }
+    )
 
     print("  math_sum([1,2,3,4,5]) = 15")
     print("  concat(['Kết',' quả',' tính',' toán']) = 'Kết quả tính toán'")
@@ -243,8 +247,8 @@ async def example_6_cpu_heavy():
     speedup = py_time / rs_time if rs_time > 0 else float("inf")
 
     print("  hash_chain('hello', 10000 iterations):")
-    print(f"  Rust mode:   {rs_time*1000:.1f}ms → {result_rs['hash'][:16]}...")
-    print(f"  Python mode: {py_time*1000:.1f}ms → {result_py['hash'][:16]}...")
+    print(f"  Rust mode:   {rs_time * 1000:.1f}ms → {result_rs['hash'][:16]}...")
+    print(f"  Python mode: {py_time * 1000:.1f}ms → {result_py['hash'][:16]}...")
     print(f"  Speedup:     {speedup:.1f}x")
     # Note: hash algorithms differ (Rust uses DefaultHasher, Python uses md5)
     # so the hash values will be different, but both are deterministic

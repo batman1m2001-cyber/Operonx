@@ -55,7 +55,6 @@ def test_langfuse_tracer_creation():
 def test_langfuse_tracer_inherits_from_new_tracer():
     """Test LangfuseTracer inherits from hush.core.tracing.Tracer."""
     from hush.core.tracing import Tracer
-
     from hush.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default", tags=["test"])

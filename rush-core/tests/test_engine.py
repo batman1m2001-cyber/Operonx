@@ -653,9 +653,7 @@ class TestWhileOp:
             return {"new_counter": counter + 1}
 
         with GraphOp(name="g") as g:
-            with WhileOp(
-                name="loop", inputs={"counter": 0}, max_iterations=5
-            ) as loop:
+            with WhileOp(name="loop", inputs={"counter": 0}, max_iterations=5) as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END
@@ -835,7 +833,9 @@ class TestObservability:
         for op_name in ["g.a", "g.b", "g.c"]:
             assert op_name in values, f"{op_name} missing from values"
             assert "start_time" in values[op_name], f"{op_name} missing start_time"
-            assert "" in values[op_name]["start_time"], f"{op_name} start_time has no default context"
+            assert "" in values[op_name]["start_time"], (
+                f"{op_name} start_time has no default context"
+            )
 
     def test_slow_op_warning(self):
         """Ops >100ms should emit a Python warning."""

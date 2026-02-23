@@ -80,8 +80,11 @@ def op(func=None, *, executor=None, rust=None, bound=None):
             op_executor = init_kwargs.pop("executor", executor)
             op_bound = init_kwargs.pop("bound", bound)
             return FuncOp(
-                code_fn=fn, executor=op_executor, bound=op_bound,
-                _mappings=mappings or None, **init_kwargs,
+                code_fn=fn,
+                executor=op_executor,
+                bound=op_bound,
+                _mappings=mappings or None,
+                **init_kwargs,
             )
 
         register_skip(wrapper)

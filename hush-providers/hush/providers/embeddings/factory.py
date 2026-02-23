@@ -30,7 +30,6 @@ class EmbeddingFactory:
 
 
 async def main():
-
     embed = EmbeddingFactory.create(config=EmbeddingConfig.default())
 
     # Test with sample text

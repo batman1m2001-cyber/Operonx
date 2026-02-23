@@ -6,7 +6,6 @@ import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
 
-
 # ============================================================
 # Sync ops with different executors
 # ============================================================

@@ -6,7 +6,6 @@ Hush(graph, mode="rust"), asserting that outputs match exactly.
 
 import asyncio
 
-import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
@@ -130,31 +129,23 @@ class TestForkJoin:
 class TestBranch:
     def test_branch_true_path(self):
         with GraphOp(name="g") as g:
-            router = (
-                Branch("router")
-                .if_(PARENT["score"] >= 90, "high")
-                .else_("low")
-            )
+            router = Branch("router").if_(PARENT["score"] >= 90, "high").else_("low")
             high = double(x=PARENT["score"])
             low = identity(value=PARENT["score"])
             START >> router
-            router >>~ high >> END
-            router >>~ low >> END
+            router >> ~high >> END
+            router >> ~low >> END
         py, rs = run_both(g, {"score": 95})
         assert py == rs == {"result": 190}
 
     def test_branch_false_path(self):
         with GraphOp(name="g") as g:
-            router = (
-                Branch("router")
-                .if_(PARENT["score"] >= 90, "high")
-                .else_("low")
-            )
+            router = Branch("router").if_(PARENT["score"] >= 90, "high").else_("low")
             high = double(x=PARENT["score"])
             low = identity(value=PARENT["score"])
             START >> router
-            router >>~ high >> END
-            router >>~ low >> END
+            router >> ~high >> END
+            router >> ~low >> END
         py, rs = run_both(g, {"score": 50})
         assert py == rs == {"value": 50}
 
@@ -170,9 +161,9 @@ class TestBranch:
             b = multiply(value=PARENT["score"], factor=2)
             c = identity(value=PARENT["score"])
             START >> router
-            router >>~ a >> END
-            router >>~ b >> END
-            router >>~ c >> END
+            router >> ~a >> END
+            router >> ~b >> END
+            router >> ~c >> END
         # Test middle case (score=80 → b path)
         py, rs = run_both(g, {"score": 80})
         assert py == rs == {"result": 160}
@@ -296,9 +287,7 @@ class TestWhileOp:
 
     def test_max_iterations_safety(self):
         with GraphOp(name="g") as g:
-            with WhileOp(
-                name="loop", inputs={"counter": 0}, max_iterations=5
-            ) as loop:
+            with WhileOp(name="loop", inputs={"counter": 0}, max_iterations=5) as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END

@@ -170,14 +170,15 @@ class BranchOp(BaseOp):
     def serialize(self) -> dict:
         """Serialize branch op with conditions for Rust backend."""
         base = super().serialize()
-        base.update({
-            "cases": [
-                {"condition": ref.serialize(), "target": target}
-                for ref, target in self.cases
-            ],
-            "default": self.default,
-            "candidates": self.given_candidates,
-        })
+        base.update(
+            {
+                "cases": [
+                    {"condition": ref.serialize(), "target": target} for ref, target in self.cases
+                ],
+                "default": self.default,
+                "candidates": self.given_candidates,
+            }
+        )
         return base
 
     @property
