@@ -13,7 +13,6 @@ class MemoryState:
     __slots__ = (
         "schema",           # StateSchema
         "_cells",           # List[Cell] - storage
-        "_execution_order", # List[Dict] - execution tracking
         "_user_id",
         "_session_id",
         "_request_id",
@@ -110,21 +109,46 @@ value = state.get_by_index(idx, ctx)
 state.set_by_index(idx, value, ctx)
 ```
 
-## Execution Tracking
+## Execution History (Derived)
 
-### record_execution()
+### iter_executed()
 
-Records op execution order for `TraceCollector`. After `engine.run()` completes, `TraceCollector` reads `_execution_order` to determine which ops ran and in what sequence.
+Derives execution history from `start_time` cells — no separate recording or storage needed. `TraceCollector` calls this after `engine.run()` completes to discover which ops ran and in which contexts.
 
 ```python
-def record_execution(self, op_name, parent, context_id):
-    """Track op execution order."""
-    if self._execution_order is not None:
-        self._execution_order.append({
-            "op": op_name,
-            "parent": parent,
-            "context_id": context_id
-        })
+def iter_executed(self, op_name: str):
+    """Yield (context_id, start_time) for each execution of op_name.
+
+    Derives execution history from start_time cells — no separate
+    recording needed. Used by TraceCollector post-execution.
+    """
+    idx = self.schema.get_index(op_name, "start_time")
+    if idx < 0:
+        return
+    for ctx, value in self._cells[idx].items():
+        if value is not None:
+            yield ctx, value
+```
+
+**How it works:** Every op stores a `start_time` into its state cell when it begins execution. `iter_executed()` looks up the `start_time` cell for the given `op_name` and yields all `(context_id, start_time)` pairs where the value is not `None`. For loop ops, each iteration has a different context, so the same op can yield multiple entries.
+
+**Example:**
+
+```python
+# After engine.run() completes:
+state = result["$state"]
+
+# Non-loop op: one execution
+list(state.iter_executed("workflow.step1"))
+# → [("main", datetime(2025, 1, 15, 10, 30, 0, 100000))]
+
+# Loop op: multiple iterations
+list(state.iter_executed("workflow.loop.step"))
+# → [("[0]", datetime(...)), ("[1]", datetime(...)), ("[2]", datetime(...))]
+
+# Unknown or unexecuted op: empty
+list(state.iter_executed("unknown_op"))
+# → []
 ```
 
 ## Dynamic Tags
@@ -148,11 +172,11 @@ state.user_id
 state.session_id
 state.request_id
 
-# Execution data
-state.execution_order  # List of execution records
-
 # Tags
 state.tags  # List of dynamic tags
+
+# Execution history (derived, not stored)
+state.iter_executed(op_name)  # Yields (context_id, start_time) tuples
 ```
 
 ## Debug

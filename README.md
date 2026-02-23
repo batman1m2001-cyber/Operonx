@@ -21,7 +21,7 @@
 
 - **DAG-based workflows** — define complex pipelines with nodes and edges, inspired by Airflow operators
 - **Async-first** — native async execution with automatic parallel processing
-- **Built-in tracing** — full observability via SQLite + external backends (Langfuse, OpenTelemetry)
+- **Built-in tracing** — full observability via hush-eyes server + external backends (Langfuse, OpenTelemetry)
 - **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
 - **Type-safe state** — O(1) state access with compile-time validation, zero magic
 
@@ -128,17 +128,22 @@ See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for deta
 | Package | Description |
 |---------|-------------|
 | [hush-core](hush-core/) | Core workflow engine — nodes, state, tracing, execution |
-| [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations |
+| [rush-core](rush-core/) | High-performance Rust execution backend (1.9x–6.2x speedup) |
+| [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations (Python) |
+| [rush-providers](rush-providers/) | Rust provider implementations (native HTTP, ONNX, per-provider) |
 | [hush-telemetry](hush-telemetry/) | External tracing backends (Langfuse, OpenTelemetry) |
 | [hush-tutorial](hush-tutorial/) | Documentation (Vietnamese) and runnable examples |
-| [hush-eyes](hush-eyes/) | VS Code extension for trace visualization |
+| [hush-eyes](hush-eyes/) | Standalone Rust server for trace visualization |
 
 ## Trace Viewer
 
-Traces are automatically saved to `~/.hush/traces.db`. View them in VS Code:
+Run the [hush-eyes](hush-eyes/) server to visualize workflow traces:
 
-1. Install the extension from [hush-eyes](hush-eyes/)
-2. Open Command Palette → **Hush: Open Trace Viewer**
+```bash
+cd hush-eyes && cargo build --release
+./target/release/hush-eyes serve --port 8420
+# Open http://localhost:8420
+```
 
 ## Documentation
 

@@ -55,7 +55,6 @@ state = self._schema.create_state(
     user_id=user_id,
     session_id=session_id,
     request_id=request_id,
-    trace_store=trace_store,  # Optional SQLite store
 )
 ```
 
@@ -73,9 +72,10 @@ GraphOp.run() thực thi tất cả child ops theo dependency order.
 # End streams
 await STREAM_SERVICE.end_request(request_id, session_id)
 
-# Flush traces (fire-and-forget, non-blocking)
-if tracer:
-    tracer.flush_in_background(self.name, state)
+# Collect + flush traces in background thread (non-blocking)
+if tracers:
+    from hush.core.tracing import get_flush_worker
+    get_flush_worker().submit(tracers, self.graph, state)
 
 # Include state in result
 result["$state"] = state
@@ -90,11 +90,9 @@ result["$state"] = state
 │                                                             │
 │  1. Generate IDs (user_id, session_id, request_id)          │
 │                          |                                  │
-│  2. Create TraceStore (if tracer provided)                  │
+│  2. Create MemoryState from schema                          │
 │                          |                                  │
-│  3. Create MemoryState from schema                          │
-│                          |                                  │
-│  4. graph.run(state) ─────────────────────────┐             │
+│  3. graph.run(state) ─────────────────────────┐             │
 │                                               │             │
 │     ┌─────────────────────────────────────────┴───────┐     │
 │     │              GraphOp.run()                    │     │
@@ -105,11 +103,11 @@ result["$state"] = state
 │     │  * Repeat until all complete                    │     │
 │     └─────────────────────────────────────────────────┘     │
 │                          |                                  │
-│  5. End streams                                             │
+│  4. End streams                                             │
 │                          |                                  │
-│  6. Flush traces (background)                               │
+│  5. Flush traces (background via FlushWorker)               │
 │                          |                                  │
-│  7. Return result + $state                                  │
+│  6. Return result + $state                                  │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -149,7 +147,7 @@ result = await engine.run(inputs={"x": 5}, mode="rust")
 │                          |                                   │
 │  5. collect_outputs() → result dict                          │
 │                          |                                   │
-│  6. Attach $state metadata (tags, execution_order, values)   │
+│  6. Attach $state metadata (tags, values)                    │
 │                          |                                   │
 │  7. Return result to Python                                  │
 │                                                              │

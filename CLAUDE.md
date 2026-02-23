@@ -8,10 +8,11 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
 ├── rush-core/          # High-performance Rust execution backend (PyO3 + rayon + DashMap)
-├── hush-providers/     # LLM, embedding, reranking integrations
-├── hush-telemetry/ # External tracing backends (Langfuse, OTEL)
+├── hush-providers/     # LLM, embedding, reranking integrations (Python)
+├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
+├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
-├── hush-eyes/ # Standalone Rust server for trace visualization (Axum + SQLite)
+├── hush-eyes/          # Standalone Rust server for trace visualization (Axum + SQLite)
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -33,7 +34,8 @@ Hush-ai/
 │  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
 │  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
 │  ├── /hush-eyes/CLAUDE.md → Rust server patterns     │
-│  └── /rush-core/CLAUDE.md  → Rust backend patterns              │
+│  ├── /rush-core/CLAUDE.md  → Rust backend patterns              │
+│  └── /rush-providers/CLAUDE.md → Rust provider patterns         │
 │                                                                  │
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
@@ -127,6 +129,7 @@ hush-providers (depends on hush-core)
 hush-telemetry (depends on hush-core)
 
 rush-core (Rust backend - depends on hush-core at runtime, built separately via maturin)
+rush-providers (Rust crate - used by rush-core, built via maturin)
 ```
 
 ## When to Modify Which Package
@@ -134,7 +137,8 @@ rush-core (Rust backend - depends on hush-core at runtime, built separately via 
 | Task | Package |
 |------|---------|
 | New op type | hush-core/hush/core/ops/ |
-| New LLM/embedding/reranker provider | hush-providers/hush/providers/ |
+| New LLM/embedding/reranker provider (Python) | hush-providers/hush/providers/ |
+| New LLM/embedding/reranker provider (Rust) | rush-providers/src/ |
 | New tracing backend | hush-telemetry/hush/telemetry/ |
 | Rust execution backend | rush-core/src/ |
 | Documentation or examples | hush-tutorial/ |
@@ -151,11 +155,15 @@ rush-core (Rust backend - depends on hush-core at runtime, built separately via 
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust (rush-core, hush-eyes)
+### Rust (rush-core, rush-providers, hush-eyes)
 
 - **rush-core**: PyO3 extension module, built via `maturin develop --release`
   - DashMap for concurrent state, rayon for parallel execution
-  - 2-6x speedup over Python mode for sync workflows
+  - 1.9x–6.2x speedup over Python mode for sync workflows
+- **rush-providers**: Rust crate with per-provider modules (llms/, embeddings/, rerankers/)
+  - Native HTTP providers (OpenAI, Azure, Gemini, Cohere, Pinecone, vLLM)
+  - ONNX inference via `ort` crate, HuggingFace via PyO3 bridge
+  - Built as part of rush-core via `maturin develop --release`
 - **hush-eyes**: Standalone binary, built via `cargo build --release`
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
@@ -187,6 +195,9 @@ cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 
 # rush-core (Rust execution backend)
 cd rush-core && uv run maturin develop --release && uv run -m pytest
+
+# rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
+cd rush-core && cargo test -p rush-providers
 
 # hush-eyes (Rust trace server)
 cd hush-eyes && cargo build --release

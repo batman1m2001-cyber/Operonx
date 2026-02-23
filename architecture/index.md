@@ -47,8 +47,9 @@ Hush sử dụng ba lớp documentation:
 | hush-providers | [/hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) | Provider patterns |
 | hush-telemetry | [/hush-telemetry/CLAUDE.md](../hush-telemetry/CLAUDE.md) | Tracer patterns |
 | hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
-| hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Extension patterns |
+| hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Rust server patterns |
 | rush-core | [/rush-core/CLAUDE.md](../rush-core/CLAUDE.md) | Rust backend patterns |
+| rush-providers | [/rush-providers/CLAUDE.md](../rush-providers/CLAUDE.md) | Rust provider patterns |
 
 ### Sync Rules
 
@@ -235,9 +236,9 @@ _current_graph: ContextVar[GraphOp] = ContextVar("current_graph")
 
 class BaseOp:
     def __init__(self, ...):
-        self.father = get_current()  # Auto-register với parent
-        if self.father:
-            self.father._add_child(self)
+        self.parent = get_current()  # Auto-register với parent
+        if self.parent:
+            self.parent._add_child(self)
 ```
 
 ### State Access Pattern

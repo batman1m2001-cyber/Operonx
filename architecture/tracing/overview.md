@@ -47,7 +47,7 @@ engine.run() completes
       → TraceCollector.collect(graph, state)             ← CPU-bound, microseconds
         → _build_op_map(graph)                           ← walk graph tree recursively
         → _collect_graph_structure(op_map)                ← read op @properties (static)
-        → _collect_records(op_map, state)                 ← walk state.execution_order (dynamic)
+        → _collect_records(op_map, state)                 ← iterate op_map + state.iter_executed() (dynamic)
       → for tracer in tracers:
         → _merge_tags(dynamic_tags, tracer.tags)          ← static + dynamic tags
         → tracer.flush(trace_data)                        ← I/O-bound (HTTP, SDK calls)
@@ -145,7 +145,7 @@ class TraceCollector:
         # 2. Static: graph structure from op @properties
         graph_structure = self._collect_graph_structure(op_map)
 
-        # 3. Dynamic: walk state.execution_order, read values from state
+        # 3. Dynamic: iterate op_map, derive execution from start_time cells
         records = self._collect_records(op_map, state)
 
         # 4. Build payload
@@ -174,7 +174,7 @@ def _build_op_map(self, op, result):
 
 #### `_collect_graph_structure(op_map)` — Read op @properties (static)
 
-Tạo `NodeStructure` cho mỗi op, đọc `type`, `father`, `contain_generation` từ op properties:
+Tạo `NodeStructure` cho mỗi op, đọc `type`, `parent`, `contain_generation` từ op properties:
 
 ```python
 def _collect_graph_structure(self, op_map):
@@ -182,40 +182,41 @@ def _collect_graph_structure(self, op_map):
         NodeStructure(
             op_name=op.full_name,
             op_type=getattr(op, "type", "default"),
-            parent_name=op.father.full_name if op.father else None,
+            parent_name=op.parent.full_name if op.parent else None,
             contain_generation=op.contain_generation,
         )
         for op in op_map.values()
     ]
 ```
 
-#### `_collect_records(op_map, state)` — Walk state.execution_order (dynamic)
+#### `_collect_records(op_map, state)` — Iterate op_map + state.iter_executed() (dynamic)
 
-Duyệt `state.execution_order` (danh sách `{"op": ..., "context_id": ...}`), đọc I/O, timing, LLM fields từ state cells:
+Iterates all ops in `op_map` and calls `state.iter_executed(op_name)` for each one to discover which contexts executed (derived from `start_time` cells). Then reads I/O, timing, LLM fields from state cells:
 
 ```python
 def _collect_records(self, op_map, state):
     records = []
-    for entry in state.execution_order:
-        op_name = entry["op"]
-        ctx = entry.get("context_id")
-        op = op_map.get(op_name)
 
-        inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
-        outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
+    for op_name, op in op_map.items():
+        for ctx, start_time in state.iter_executed(op_name):
+            # Read I/O from state
+            inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
+            outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
 
-        start_time = state[op_name, "start_time", ctx]
-        end_time = state[op_name, "end_time", ctx]
-        duration_ms = state[op_name, "duration_ms", ctx]
+            # Read timing from state
+            end_time = state[op_name, "end_time", ctx]
+            duration_ms = state[op_name, "duration_ms", ctx]
 
-        # LLM-specific fields
-        model = outputs.get("model_used") if op.contain_generation else None
-        usage = outputs.get("tokens_used") if op.contain_generation else None
-        cost = state[op_name, "cost_usd", ctx]
+            # LLM-specific: model & usage are in outputs, cost in state
+            model = outputs.get("model_used") if op.contain_generation else None
+            usage = outputs.get("tokens_used") if op.contain_generation else None
+            cost = state[op_name, "cost_usd", ctx]
 
-        records.append(TraceRecord(...))
+            records.append(TraceRecord(...))
     return records
 ```
+
+**Key change:** Execution history is no longer stored in a separate `_execution_order` list. Instead, `iter_executed()` derives it from `start_time` cells — if an op has a non-`None` `start_time` for a given context, it ran. This eliminates the coupling between ops and tracing (ops no longer need to call `state.record_execution()`).
 
 ### 3. FlushWorker — `flush_worker.py` (95 lines)
 

@@ -48,7 +48,7 @@ NodeStructure(
 |-------|--------|---------|
 | `op_name` | `op.full_name` | Dot-separated path trong graph tree |
 | `op_type` | `getattr(op, "type", "default")` | Literal type trên class |
-| `parent_name` | `op.father.full_name` | `None` nếu là root GraphOp |
+| `parent_name` | `op.parent.full_name` | `None` nếu là root GraphOp |
 | `contain_generation` | `op.contain_generation` | `True` cho LLMOp, ChainOp, v.v. |
 
 ### TraceRecord — Dynamic execution data
@@ -119,10 +119,10 @@ TraceRecord(op_name="workflow.loop.step", context_id="[2]", ...)
 
 **Nguồn dữ liệu:**
 
-| Field | Đọc từ state | Ghi chú |
-|-------|-------------|---------|
-| `op_name` | `entry["op"]` trong `state.execution_order` | |
-| `context_id` | `entry["context_id"]` | `None` cho non-loop ops |
+| Field | Đọc từ | Ghi chú |
+|-------|--------|---------|
+| `op_name` | `op_map` iteration (key = `op.full_name`) | Derived from compiled graph, not stored in state |
+| `context_id` | `state.iter_executed(op_name)` yields `(ctx, start_time)` | `None` cho non-loop ops, `"[0]"`, `"[1]"` for loops |
 | `inputs` | `state[op_name, var, ctx]` cho mỗi var trong `op.inputs` | |
 | `outputs` | `state[op_name, var, ctx]` cho mỗi var trong `op.outputs` | |
 | `start_time` | `state[op_name, "start_time", ctx].isoformat()` | Convert `datetime` → ISO string |
