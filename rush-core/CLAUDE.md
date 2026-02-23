@@ -12,18 +12,23 @@ rush-core/
 │   ├── config.rs           # Config deserialization (GraphConfig, OpConfig, etc.)
 │   ├── ops/
 │   │   ├── mod.rs
-│   │   ├── base.rs         # Leaf op execution, ref resolution, result storage
+│   │   ├── base.rs         # Leaf op execution, ref resolution, plugin dispatch
 │   │   ├── graph/
 │   │   │   └── graph_op.rs # Graph scheduling loop, batch parallel, nested graphs
 │   │   ├── iteration/
 │   │   │   ├── for_op.rs   # ForOp — iterate over lists
 │   │   │   └── while_op.rs # WhileOp — loop until condition
 │   │   └── transform/
-│   │       └── func_op.rs  # Rust-native op registry (string, json, math ops)
+│   │       └── func_op.rs  # FuncOp execution (plugin dispatch or Python callback)
+│   ├── plugins/
+│   │   └── mod.rs          # cdylib plugin loader (auto-build, caching, C ABI)
 │   ├── refs/
 │   │   └── interpreter.rs  # Ref op chain evaluation (getitem, arithmetic, boolean, etc.)
 │   └── states/
 │       └── state.rs        # EngineState — concurrent DashMap + Mutex state
+├── sdk/                    # Plugin SDK (separate Cargo crate)
+│   ├── Cargo.toml          # rush-ops-sdk (serde_json + paste)
+│   └── src/lib.rs          # export_ops! macro for C ABI wrapper generation
 ├── tests/                  # Python tests via pytest
 ├── benches/
 │   └── bench_e2e.py        # E2E benchmark: Python vs Rust mode
@@ -110,6 +115,8 @@ queue: [A, B, C]  →  drain batch
 | `dashmap 6` | Concurrent HashMap for EngineState (thread-safe values store) |
 | `rayon 1.10` | Work-stealing thread pool for batch parallel execution |
 | `smallvec 1` | Stack-allocated small vectors |
+| `libloading 0.8` | Runtime cdylib plugin loading (C ABI function lookup) |
+| `serde_json 1` | JSON serialization at plugin boundary |
 
 ## Build & Test
 
@@ -150,21 +157,67 @@ result = await engine.run(inputs={"input": 5})
 result = await engine.run(inputs={"input": 5}, mode="rust")
 ```
 
-## Adding a New Rust-Native Op
+## Adding a New Rust-Native Op (Plugin System)
 
-1. Add the function in `src/ops/transform/func_op.rs`:
+Rust ops are now loaded as cdylib plugins at runtime via the C ABI. To create new ops:
+
+### 1. Add to an existing plugin crate (e.g., `examples/rush-ops-builtin/src/lib.rs`):
+
 ```rust
-fn my_op(py: Python, inputs: &Bound<'_, PyDict>) -> PyResult<Option<PyObject>> {
-    let x: i64 = inputs.get_item("x")?.unwrap().extract()?;
-    let result = PyDict::new_bound(py);
-    result.set_item("output", x * 2)?;
-    Ok(Some(result.unbind()))
+fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
+    let x = inputs["x"].as_i64().unwrap();
+    serde_json::json!({"result": x * 2})
 }
+
+export_ops!(my_op, /* other ops... */);
 ```
 
-2. Register in `INTERNAL_OPS` HashMap and `has_internal()`/`execute_internal()`.
+### 2. Or create a new plugin crate:
 
-3. In Python, tag the op with `@op(rust="my_op")`.
+```bash
+mkdir -p examples/my-ops/src
+```
+
+```toml
+# examples/my-ops/Cargo.toml
+[package]
+name = "my-ops"
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+rush-ops-sdk = { path = "../../rush-core/sdk" }
+serde_json = "1"
+```
+
+```rust
+// examples/my-ops/src/lib.rs
+use rush_ops_sdk::{export_ops, serde_json};
+use serde_json::Value;
+
+fn my_op(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap();
+    serde_json::json!({"result": x * 2})
+}
+
+export_ops!(my_op);
+```
+
+### 3. Use in Python:
+
+```python
+@op(rust="./examples/my-ops::my_op")
+def my_op(x: int):
+    return {"result": x * 2}  # Python fallback
+```
+
+The engine auto-builds the crate, caches the `.so`, and loads it at runtime.
+
+### Plugin Architecture
+
+- **SDK** (`rush-core/sdk/`): Provides `export_ops!` macro that generates C ABI wrappers
+- **Plugin loader** (`src/plugins/mod.rs`): Auto-builds crates, caches `.so` files, loads via `libloading`
+- **Dispatch** (`src/ops/base.rs`): `rust_name.contains("::")` → plugin op, else → Python callback
+- **C ABI convention**: `rush_op_<name>(input_ptr, input_len, output_ptr, output_len) -> i32`
 
 ## Performance (Benchmark Results)
 

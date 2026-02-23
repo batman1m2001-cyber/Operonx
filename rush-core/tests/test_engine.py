@@ -16,18 +16,20 @@ from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
 from rush_core import Rush
 
+from conftest import BUILTIN_CRATE
+
 
 # =============================================================================
 # Helper ops
 # =============================================================================
 
 
-@op(rust="rust_double")
+@op(rust=f"{BUILTIN_CRATE}::double")
 def double(x: int):
     return {"result": x * 2}
 
 
-@op(rust="rust_add")
+@op(rust=f"{BUILTIN_CRATE}::add")
 def add(a: int, b: int):
     return {"result": a + b}
 

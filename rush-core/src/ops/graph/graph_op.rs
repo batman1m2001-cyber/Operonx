@@ -17,6 +17,27 @@ use crate::runtime;
 use crate::states::state::EngineState;
 
 // =============================================================================
+// Op dispatch
+// =============================================================================
+
+/// Dispatch an op to the appropriate runner based on op_type.
+pub(crate) fn dispatch_op(
+    py: Python,
+    op: &OpConfig,
+    state: &EngineState,
+    context: &str,
+) -> PyResult<()> {
+    match op.op_type.as_str() {
+        "graph" => run_nested(py, op, state, context),
+        "for" => for_op::run(py, op, state, context),
+        "while" => while_op::run(py, op, state, context),
+        "map" => map_op::run(py, op, state, context),
+        "stream" => aiter_op::run(py, op, state, context),
+        _ => base::run(py, op, state, context),
+    }
+}
+
+// =============================================================================
 // Graph scheduling loop
 // =============================================================================
 
@@ -41,14 +62,9 @@ pub(crate) fn run_graph(
     let mut queue: Vec<String> = config.entries.clone();
 
     while !queue.is_empty() {
-        // Drain all currently ready ops into a batch
         let batch: Vec<String> = queue.drain(..).collect();
 
-        // Check if concurrent execution would benefit this batch:
-        // - Need 2+ ops (otherwise no concurrency gain)
-        // - At least one op that releases the GIL:
-        //   * bound == Io: I/O-bound ops release GIL during HTTP waits
-        //   * rust_op: Rust-native ops execute without GIL
+        // Check if concurrent execution would benefit this batch
         let use_concurrent = batch.len() > 1 && batch.iter().any(|name| {
             config.ops.get(name).map_or(false, |op| {
                 op.bound == OpBound::Io || op.rust_op.is_some()
@@ -56,10 +72,8 @@ pub(crate) fn run_graph(
         });
 
         if use_concurrent {
-            // Concurrent execution via tokio spawn_blocking
             run_batch(py, &batch, config, state, context)?;
 
-            // Activate successors sequentially after all ops complete
             for op_name in &batch {
                 let op = config.ops.get(op_name).ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!(
@@ -68,19 +82,11 @@ pub(crate) fn run_graph(
                     ))
                 })?;
                 activate_successors(
-                    py,
-                    op,
-                    op_name,
-                    config,
-                    state,
-                    context,
-                    &mut ready_count,
-                    &mut soft_satisfied,
-                    &mut queue,
+                    py, op, op_name, config, state, context,
+                    &mut ready_count, &mut soft_satisfied, &mut queue,
                 )?;
             }
         } else {
-            // Sequential execution — one at a time with immediate successor activation
             for op_name in batch {
                 let op = config.ops.get(&op_name).ok_or_else(|| {
                     PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!(
@@ -89,25 +95,11 @@ pub(crate) fn run_graph(
                     ))
                 })?;
 
-                match op.op_type.as_str() {
-                    "graph" => run_nested(py, op, state, context)?,
-                    "for" => for_op::run(py, op, state, context)?,
-                    "while" => while_op::run(py, op, state, context)?,
-                    "map" => map_op::run(py, op, state, context)?,
-                    "stream" => aiter_op::run(py, op, state, context)?,
-                    _ => base::run(py, op, state, context)?,
-                }
+                dispatch_op(py, op, state, context)?;
 
                 activate_successors(
-                    py,
-                    op,
-                    &op_name,
-                    config,
-                    state,
-                    context,
-                    &mut ready_count,
-                    &mut soft_satisfied,
-                    &mut queue,
+                    py, op, &op_name, config, state, context,
+                    &mut ready_count, &mut soft_satisfied, &mut queue,
                 )?;
             }
         }
@@ -125,13 +117,6 @@ pub(crate) fn run_graph(
 /// All ops in the batch have ready_count == 0 (no dependencies on each other).
 /// Each op is spawned as a `tokio::task::spawn_blocking` task that acquires
 /// the GIL independently. DashMap-based EngineState allows concurrent reads/writes.
-///
-/// Benefits over rayon:
-/// - Tokio's blocking pool is dynamically-sized (grows as needed)
-/// - Native provider ops (LLM, embedding) use `block_on_async()` inside,
-///   which correctly detects the tokio context and uses Handle::block_on()
-///   instead of the panicking Runtime::block_on()
-/// - Uniform scheduling: both I/O-bound and CPU-bound ops go through tokio
 fn run_batch(
     py: Python,
     batch: &[String],
@@ -139,9 +124,6 @@ fn run_batch(
     state: &EngineState,
     context: &str,
 ) -> PyResult<()> {
-    // Collect op and state addresses as usize to cross the GIL boundary.
-    // SAFETY: config and state outlive the block_on call — they're owned by
-    // the Rush engine and live for the entire run() invocation.
     let state_addr = state as *const EngineState as usize;
     let context_owned = context.to_string();
 
@@ -152,7 +134,6 @@ fn run_batch(
         })
         .collect();
 
-    // Release the GIL, enter tokio, spawn all ops as blocking tasks
     py.allow_threads(|| {
         runtime::get_runtime().block_on(async {
             let mut handles = Vec::with_capacity(op_addrs.len());
@@ -165,24 +146,13 @@ fn run_batch(
                         // SAFETY: op and state are alive for the duration of block_on
                         let op = unsafe { &*(op_addr as *const OpConfig) };
                         let state = unsafe { &*(state_addr as *const EngineState) };
-                        let context = ctx.as_str();
 
-                        let result = match op.op_type.as_str() {
-                            "graph" => run_nested(py, op, state, context),
-                            "for" => for_op::run(py, op, state, context),
-                            "while" => while_op::run(py, op, state, context),
-                            "map" => map_op::run(py, op, state, context),
-                            "stream" => aiter_op::run(py, op, state, context),
-                            _ => base::run(py, op, state, context),
-                        };
-
-                        // Handle errors from non-leaf ops (leaf ops catch internally)
-                        if let Err(e) = result {
+                        if let Err(e) = dispatch_op(py, op, state, &ctx) {
                             let error_msg = format!("{}", e);
                             state.set(
                                 op.full_name.clone(),
                                 "error".to_string(),
-                                context.to_string(),
+                                ctx.to_string(),
                                 error_msg.to_object(py),
                             );
                             if let Ok(logging) = py.import_bound("logging") {
@@ -205,7 +175,6 @@ fn run_batch(
                 handles.push(handle);
             }
 
-            // Wait for all tasks to complete
             for handle in handles {
                 let _ = handle.await;
             }
@@ -228,11 +197,9 @@ pub(crate) fn get_outputs(
 ) -> PyResult<PyObject> {
     let result = PyDict::new_bound(py);
     for param in &config.outputs {
-        // First try resolving via ref/literal/default
         if let Some(value) = base::resolve_param(py, param, state, context)? {
             result.set_item(&param.var_name, value.bind(py))?;
         } else if let Some(value) = state.get(py, &config.full_name, &param.var_name, context) {
-            // Fall back to reading directly from graph state
             result.set_item(&param.var_name, value.bind(py))?;
         }
     }
@@ -244,7 +211,6 @@ pub(crate) fn get_outputs(
 // =============================================================================
 
 /// Activate successors after an op completes.
-/// Handles branch target routing and soft edge deduplication.
 pub(crate) fn activate_successors(
     py: Python,
     op: &OpConfig,
@@ -269,31 +235,22 @@ pub(crate) fn activate_successors(
             .and_then(|v| v.extract::<String>(py).ok());
 
         match target {
-            Some(ref t) if t == "__END__" => {
-                // Branch to END — no successors to activate
-                Default::default()
-            }
+            Some(ref t) if t == "__END__" => Default::default(),
             Some(ref t) => {
-                // Filter to only the matching target successor
                 all_successors
                     .iter()
                     .filter(|e| e.target == *t)
                     .cloned()
                     .collect()
             }
-            None => {
-                // No target resolved — skip all successors
-                Default::default()
-            }
+            None => Default::default(),
         }
     } else {
         all_successors
     };
 
-    // Activate each successor, handling soft edges
     for entry in &successors {
         if entry.is_soft {
-            // Soft edge: only activate once per target
             if soft_satisfied.contains(&entry.target) {
                 continue;
             }
@@ -329,7 +286,7 @@ pub(crate) fn run_nested(
         ))
     })?;
 
-    // 1. Resolve inputs from parent scope → write to nested graph's state namespace
+    // 1. Resolve inputs from parent scope
     for param in &op.inputs {
         if let Some(value) = base::resolve_param(py, param, state, context)? {
             state.set(
@@ -341,11 +298,10 @@ pub(crate) fn run_nested(
         }
     }
 
-    // 2. Run the inner graph scheduling loop (reuses same EngineState —
-    //    full_names are unique across nesting levels, e.g. "main.nested.step")
+    // 2. Run inner graph scheduling loop
     run_graph(py, inner, state, context)?;
 
-    // 3. Collect inner graph outputs into the nested graph op's state namespace
+    // 3. Collect inner graph outputs
     for param in &inner.outputs {
         if let Some(value) = base::resolve_param(py, param, state, context)? {
             state.set(
@@ -365,7 +321,7 @@ pub(crate) fn run_nested(
         }
     }
 
-    // 4. Process output refs (push nested graph outputs to parent namespace)
+    // 4. Push output refs
     base::push_output_refs(py, op, state, context)?;
 
     Ok(())

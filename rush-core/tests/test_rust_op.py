@@ -1,77 +1,17 @@
-"""Tests for RustFuncRegistry — Rust-native op execution bridge.
+"""Tests for Rust-native op execution via cdylib plugins.
 
 Tests that:
-- Registry has built-in ops (rust_double, rust_add, rust_hash_chain)
-- Ops execute correctly via registry
-- @op(rust=...) tags functions for Rust dispatch
+- @op(rust=...) tags functions for plugin dispatch
+- Plugin ops execute correctly via C ABI
 - Rust ops work inside GraphOp workflows (both modes)
-- Fallback to Python when Rust op not found
+- Fallback to Python when Rust op path has no "::" (no plugin)
 """
 
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
-from rush_core import RustFuncRegistry
 
-
-# =============================================================================
-# Registry basics
-# =============================================================================
-
-
-class TestRegistryBasics:
-    def test_has_builtin_ops(self):
-        assert RustFuncRegistry.has("rust_double")
-        assert RustFuncRegistry.has("rust_add")
-        assert RustFuncRegistry.has("rust_hash_chain")
-
-    def test_has_returns_false_for_unknown(self):
-        assert RustFuncRegistry.has("nonexistent") is False
-
-    def test_list_ops(self):
-        ops = RustFuncRegistry.list_ops()
-        assert "rust_double" in ops
-        assert "rust_add" in ops
-        assert "rust_hash_chain" in ops
-
-
-# =============================================================================
-# Direct execution
-# =============================================================================
-
-
-class TestDirectExecution:
-    def test_double(self):
-        result = RustFuncRegistry.execute("rust_double", {"x": 21})
-        assert result["result"] == 42
-
-    def test_add(self):
-        result = RustFuncRegistry.execute("rust_add", {"a": 10, "b": 32})
-        assert result["result"] == 42
-
-    def test_hash_chain(self):
-        result = RustFuncRegistry.execute(
-            "rust_hash_chain", {"data": "hello", "iterations": 10}
-        )
-        assert isinstance(result["hash"], str)
-        assert len(result["hash"]) == 16  # 16 hex chars
-
-    def test_hash_chain_deterministic(self):
-        r1 = RustFuncRegistry.execute(
-            "rust_hash_chain", {"data": "hello", "iterations": 5}
-        )
-        r2 = RustFuncRegistry.execute(
-            "rust_hash_chain", {"data": "hello", "iterations": 5}
-        )
-        assert r1["hash"] == r2["hash"]
-
-    def test_unknown_op_returns_none(self):
-        result = RustFuncRegistry.execute("nonexistent", {"x": 1})
-        assert result is None
-
-    def test_missing_input_raises(self):
-        with pytest.raises(KeyError):
-            RustFuncRegistry.execute("rust_double", {})
+from conftest import BUILTIN_CRATE
 
 
 # =============================================================================
@@ -81,16 +21,16 @@ class TestDirectExecution:
 
 class TestRustOpDecorator:
     def test_decorator_tags_function(self):
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def my_func(x: int):
             return {"result": x * 2}
 
         # Call the wrapper to get a FuncOp, check the inner function
         func_op = my_func(x=5)
-        assert func_op.core._rust_op_name == "rust_double"
+        assert func_op.core._rust_op_name == f"{BUILTIN_CRATE}::double"
 
     def test_decorator_preserves_function(self):
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def my_func(x: int):
             return {"result": x * 2}
 
@@ -108,7 +48,7 @@ class TestRustOpInWorkflow:
     async def test_rust_op_single(self):
         """Single Rust op in a graph."""
 
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def double(x: int):
             return {"result": x * 2}
 
@@ -122,11 +62,11 @@ class TestRustOpInWorkflow:
     async def test_rust_op_chain(self):
         """Chain of Rust ops."""
 
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def double(x: int):
             return {"result": x * 2}
 
-        @op(rust="rust_add")
+        @op(rust=f"{BUILTIN_CRATE}::add")
         def add(a: int, b: int):
             return {"result": a + b}
 
@@ -141,7 +81,7 @@ class TestRustOpInWorkflow:
     async def test_mixed_rust_and_python_ops(self):
         """Graph with both Rust and Python ops."""
 
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def rust_double(x: int):
             return {"result": x * 2}
 
@@ -158,7 +98,7 @@ class TestRustOpInWorkflow:
         assert result["result"] == 13
 
     async def test_fallback_to_python(self):
-        """Unregistered rust= falls back to Python."""
+        """Unregistered rust= (no ::) falls back to Python."""
 
         @op(rust="nonexistent_op")
         def fallback(x: int):
@@ -175,7 +115,7 @@ class TestRustOpInWorkflow:
     async def test_rust_op_both_modes(self, mode):
         """Rust op produces same result in both modes."""
 
-        @op(rust="rust_double")
+        @op(rust=f"{BUILTIN_CRATE}::double")
         def double(x: int):
             return {"result": x * 2}
 

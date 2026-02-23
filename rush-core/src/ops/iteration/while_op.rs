@@ -8,6 +8,7 @@ use pyo3::types::PyDict;
 use crate::config::OpConfig;
 use crate::ops::base;
 use crate::ops::graph::graph_op;
+use crate::ops::iteration::helpers;
 use crate::states::state::EngineState;
 
 /// Execute a WhileOp: loop until condition is True or max_iterations reached.
@@ -48,31 +49,10 @@ pub(crate) fn run(
         }
     }
 
-    // 2. Evaluate initial condition (catch errors — mirrors while_op.py:70-96)
-    let mut should_stop = match until_expr {
-        Some(expr) => match evaluate_until(py, expr, &step_inputs) {
-            Ok(val) => val,
-            Err(err) => {
-                let logging = py.import_bound("logging")?;
-                let logger = logging.call_method1("getLogger", ("hush.core",))?;
-                logger.call_method1(
-                    "warning",
-                    (format!(
-                        "[rush] WhileOp '{}' condition error: {}",
-                        op.full_name, err
-                    ),),
-                )?;
-                false // Continue loop on condition error (mirrors Python)
-            }
-        },
-        None => false,
-    };
+    // 2. Evaluate initial condition
+    let mut should_stop = evaluate_condition(py, &op.full_name, until_expr, &step_inputs)?;
 
-    let ctx_prefix = if context.is_empty() {
-        String::new()
-    } else {
-        format!("{}.", context)
-    };
+    let ctx_prefix = helpers::context_prefix(context);
     let mut step_count: usize = 0;
 
     // 3. Loop
@@ -103,25 +83,8 @@ pub(crate) fn run(
 
         step_count += 1;
 
-        // Re-evaluate condition (catch errors — mirrors while_op.py:70-96)
-        should_stop = match until_expr {
-            Some(expr) => match evaluate_until(py, expr, &step_inputs) {
-                Ok(val) => val,
-                Err(err) => {
-                    let logging = py.import_bound("logging")?;
-                    let logger = logging.call_method1("getLogger", ("hush.core",))?;
-                    logger.call_method1(
-                        "warning",
-                        (format!(
-                            "[rush] WhileOp '{}' condition error: {}",
-                            op.full_name, err
-                        ),),
-                    )?;
-                    false // Continue loop on condition error (mirrors Python)
-                }
-            },
-            None => false,
-        };
+        // Re-evaluate condition
+        should_stop = evaluate_condition(py, &op.full_name, until_expr, &step_inputs)?;
     }
 
     // 4. Store final step_inputs as outputs in parent context
@@ -153,6 +116,37 @@ pub(crate) fn run(
     base::push_output_refs(py, op, state, context)?;
 
     Ok(())
+}
+
+/// Evaluate the `until` condition, catching errors and logging warnings.
+///
+/// Returns `false` on error (continue loop), matching Python's behavior.
+fn evaluate_condition(
+    py: Python,
+    op_name: &str,
+    until_expr: Option<&str>,
+    inputs: &Bound<'_, PyDict>,
+) -> PyResult<bool> {
+    let expr = match until_expr {
+        Some(e) => e,
+        None => return Ok(false),
+    };
+
+    match evaluate_until(py, expr, inputs) {
+        Ok(val) => Ok(val),
+        Err(err) => {
+            let logging = py.import_bound("logging")?;
+            let logger = logging.call_method1("getLogger", ("hush.core",))?;
+            logger.call_method1(
+                "warning",
+                (format!(
+                    "[rush] WhileOp '{}' condition error: {}",
+                    op_name, err
+                ),),
+            )?;
+            Ok(false)
+        }
+    }
 }
 
 /// Evaluate a WhileOp's `until` expression against current inputs.

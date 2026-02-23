@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::config::{IterParamConfig, OpConfig, ParamConfig, RefConfig};
-use crate::ops::transform::func_op;
+use crate::plugins;
 use crate::refs::interpreter::evaluate_ref_ops;
 use crate::runtime;
 use crate::states::state::EngineState;
@@ -30,20 +30,18 @@ pub(crate) fn run(
     state: &EngineState,
     context: &str,
 ) -> PyResult<()> {
-    // 1. Check enabled flag — skip if disabled (mirrors base.py:734-737)
     if !op.enabled {
         return Ok(());
     }
 
-    // 2. Start timing (mirrors base.py _store_metrics: start_time + perf_counter)
+    // Start timing
     let datetime_mod = py.import_bound("datetime")?;
     let datetime_cls = datetime_mod.getattr("datetime")?;
     let start_time = datetime_cls.call_method0("now")?;
     let perf_start = Instant::now();
 
-    // 3-5. Try: resolve inputs → execute → store outputs (mirrors base.py:746-755)
+    // Try: resolve inputs → execute → store outputs
     let exec_result: PyResult<()> = (|| {
-        // 3. Resolve inputs
         let inputs_dict = PyDict::new_bound(py);
         for param in &op.inputs {
             if let Some(value) = resolve_param(py, param, state, context)? {
@@ -51,107 +49,161 @@ pub(crate) fn run(
             }
         }
 
-        // 4. Execute: try native provider op (with streaming), then Rust registry, then Python callable
-        let result_obj = if op.provider_config.is_some() && op.stream && op.op_type == "llm" {
-            execute_provider_op_streaming(py, op, &inputs_dict, state, context)?
-        } else if op.provider_config.is_some() {
-            execute_provider_op(py, op, &inputs_dict)?
-        } else if let Some(ref rust_name) = op.rust_op {
-            if func_op::has_internal(rust_name) {
-                func_op::execute_internal(py, rust_name, &inputs_dict.as_borrowed())?
-            } else {
-                call_python(py, op, &inputs_dict)?
-            }
-        } else {
-            call_python(py, op, &inputs_dict)?
-        };
-
-        // 5. Store outputs (store_result handles $tags extraction)
+        let result_obj = execute_op(py, op, &inputs_dict, state, context)?;
         store_result(py, op, result_obj, state, context)?;
 
         Ok(())
     })();
 
-    // === "finally" block — always runs (mirrors base.py:767-782) ===
+    // "finally" block — always runs
+    let duration_ms = store_timing(py, op, state, context, start_time, perf_start)?;
 
-    // 6. End timing + store start_time, end_time, duration_ms
-    //    Mirrors Python's _store_metrics() — always runs even on error.
-    //    start_time is used by TraceCollector (via iter_executed) to detect which ops ran.
-    let duration_ms = perf_start.elapsed().as_secs_f64() * 1000.0;
-    let end_time = datetime_cls.call_method0("now")?;
-    state.set(
-        op.full_name.clone(),
-        "start_time".to_string(),
-        context.to_string(),
-        start_time.unbind(),
-    );
-    state.set(
-        op.full_name.clone(),
-        "end_time".to_string(),
-        context.to_string(),
-        end_time.unbind(),
-    );
-    state.set(
-        op.full_name.clone(),
-        "duration_ms".to_string(),
-        context.to_string(),
-        duration_ms.to_object(py),
-    );
-
-    // Handle error from execution (mirrors base.py:757-765)
     if let Err(ref err) = exec_result {
-        let error_msg = format!("{}", err);
-        state.set(
-            op.full_name.clone(),
-            "error".to_string(),
-            context.to_string(),
-            error_msg.to_object(py),
-        );
-
-        let logging = py.import_bound("logging")?;
-        let logger = logging.call_method1("getLogger", ("hush.core",))?;
-        logger.call_method1(
-            "error",
-            (format!(
-                "[rush] Error in op {}: {}",
-                op.full_name, error_msg
-            ),),
-        )?;
+        log_error(py, op, state, context, &format!("{}", err))?;
     }
 
-    // 7. Slow op warning >100ms (mirrors base.py:775-782)
     if duration_ms > 100.0 {
-        let warnings = py.import_bound("warnings")?;
-        warnings.call_method1(
-            "warn",
-            (format!(
-                "Slow op {}: {:.1}ms",
-                op.full_name, duration_ms
-            ),),
-        )?;
+        warn_slow_op(py, op, duration_ms)?;
     }
 
-    // 8. Verbose logging (mirrors base.py:696-716)
     if op.verbose {
-        let logging = py.import_bound("logging")?;
-        let logger = logging.call_method1("getLogger", ("hush.core",))?;
-        logger.call_method1(
-            "info",
-            (format!(
-                "[rush] {}: {} ({:.1}ms)",
-                op.op_type.to_uppercase(),
-                op.full_name,
-                duration_ms
-            ),),
-        )?;
+        log_verbose(py, op, duration_ms)?;
     }
 
-    // 9. Push output refs (only if execution succeeded)
     if exec_result.is_ok() {
         push_output_refs(py, op, state, context)?;
     }
 
-    // Always return Ok — error is stored in state, graph continues
+    Ok(())
+}
+
+// =============================================================================
+// Execution dispatch
+// =============================================================================
+
+/// How an op should be executed — classified once, matched once.
+enum OpRoute<'a> {
+    /// Streaming LLM provider (SSE chunked response).
+    StreamingProvider,
+    /// Non-streaming provider (LLM, embedding, rerank).
+    Provider,
+    /// Native transform op (prompt, parser) — GIL-free, synchronous.
+    NativeTransform,
+    /// Plugin op from a cdylib shared library ("path/to/lib.so::func").
+    Plugin(&'a str),
+    /// Fallback to Python callable.
+    Python,
+}
+
+/// Classify an op into its execution route.
+fn classify_op(op: &OpConfig) -> OpRoute<'_> {
+    if op.provider_config.is_some() {
+        if op.stream && op.op_type == "llm" {
+            return OpRoute::StreamingProvider;
+        }
+        return OpRoute::Provider;
+    }
+    if rush_providers::ops::is_native_transform_op(&op.op_type) {
+        return OpRoute::NativeTransform;
+    }
+    if let Some(ref name) = op.rust_op {
+        if name.contains("::") {
+            return OpRoute::Plugin(name);
+        }
+    }
+    OpRoute::Python
+}
+
+/// Dispatch op execution to the appropriate handler.
+///
+/// Priority: streaming provider → provider → native transform → plugin → python.
+fn execute_op(
+    py: Python,
+    op: &OpConfig,
+    inputs_dict: &Bound<'_, PyDict>,
+    state: &EngineState,
+    context: &str,
+) -> PyResult<Option<PyObject>> {
+    match classify_op(op) {
+        OpRoute::StreamingProvider => execute_provider_op_streaming(py, op, inputs_dict, state, context),
+        OpRoute::Provider          => execute_provider_op(py, op, inputs_dict),
+        OpRoute::NativeTransform   => execute_native_transform_op(py, &op.op_type, inputs_dict),
+        OpRoute::Plugin(spec)      => execute_plugin_op(py, spec, inputs_dict),
+        OpRoute::Python            => call_python(py, op, inputs_dict),
+    }
+}
+
+// =============================================================================
+// Observability helpers
+// =============================================================================
+
+/// Store timing metrics (start_time, end_time, duration_ms) in state.
+fn store_timing(
+    py: Python,
+    op: &OpConfig,
+    state: &EngineState,
+    context: &str,
+    start_time: Bound<'_, PyAny>,
+    perf_start: Instant,
+) -> PyResult<f64> {
+    let duration_ms = perf_start.elapsed().as_secs_f64() * 1000.0;
+    let datetime_mod = py.import_bound("datetime")?;
+    let datetime_cls = datetime_mod.getattr("datetime")?;
+    let end_time = datetime_cls.call_method0("now")?;
+
+    state.set(op.full_name.clone(), "start_time".to_string(), context.to_string(), start_time.unbind());
+    state.set(op.full_name.clone(), "end_time".to_string(), context.to_string(), end_time.unbind());
+    state.set(op.full_name.clone(), "duration_ms".to_string(), context.to_string(), duration_ms.to_object(py));
+
+    Ok(duration_ms)
+}
+
+/// Log an error and store it in state.
+fn log_error(
+    py: Python,
+    op: &OpConfig,
+    state: &EngineState,
+    context: &str,
+    error_msg: &str,
+) -> PyResult<()> {
+    state.set(
+        op.full_name.clone(),
+        "error".to_string(),
+        context.to_string(),
+        error_msg.to_object(py),
+    );
+    let logging = py.import_bound("logging")?;
+    let logger = logging.call_method1("getLogger", ("hush.core",))?;
+    logger.call_method1(
+        "error",
+        (format!("[rush] Error in op {}: {}", op.full_name, error_msg),),
+    )?;
+    Ok(())
+}
+
+/// Emit a slow-op warning (>100ms).
+fn warn_slow_op(py: Python, op: &OpConfig, duration_ms: f64) -> PyResult<()> {
+    let warnings = py.import_bound("warnings")?;
+    warnings.call_method1(
+        "warn",
+        (format!("Slow op {}: {:.1}ms", op.full_name, duration_ms),),
+    )?;
+    Ok(())
+}
+
+/// Log verbose op execution info.
+fn log_verbose(py: Python, op: &OpConfig, duration_ms: f64) -> PyResult<()> {
+    let logging = py.import_bound("logging")?;
+    let logger = logging.call_method1("getLogger", ("hush.core",))?;
+    logger.call_method1(
+        "info",
+        (format!(
+            "[rush] {}: {} ({:.1}ms)",
+            op.op_type.to_uppercase(),
+            op.full_name,
+            duration_ms
+        ),),
+    )?;
     Ok(())
 }
 
@@ -166,19 +218,16 @@ pub(crate) fn resolve_param(
     state: &EngineState,
     context: &str,
 ) -> PyResult<Option<PyObject>> {
-    // Try ref first
     if let Some(ref ref_config) = param.ref_config {
         if let Some(value) = resolve_ref(py, ref_config, state, context)? {
             return Ok(Some(value));
         }
     }
 
-    // Try literal
     if let Some(ref literal) = param.literal {
         return Ok(Some(literal.clone_ref(py)));
     }
 
-    // Try default
     if let Some(ref default) = param.default_value {
         return Ok(Some(default.clone_ref(py)));
     }
@@ -193,16 +242,13 @@ pub(crate) fn resolve_ref(
     state: &EngineState,
     context: &str,
 ) -> PyResult<Option<PyObject>> {
-    // Look up the source value in state
     let value = state.get(py, &ref_config.source, &ref_config.var, context);
 
     match value {
         Some(val) => {
             if ref_config.ops.is_empty() {
-                // No ops to apply — return raw value
                 Ok(Some(val.clone_ref(py)))
             } else {
-                // Apply ref ops chain
                 let result = evaluate_ref_ops(py, val.clone_ref(py), &ref_config.ops, state, context)?;
                 Ok(Some(result))
             }
@@ -236,7 +282,6 @@ pub(crate) fn resolve_iter_param(
 // =============================================================================
 
 /// Store an op's execution result into state.
-/// Extracts `$tags` for dynamic tagging (mirrors base.py:679-694).
 pub(crate) fn store_result(
     py: Python,
     op: &OpConfig,
@@ -249,7 +294,6 @@ pub(crate) fn store_result(
             for (k, v) in dict.iter() {
                 let key: String = k.extract()?;
                 if key == "$tags" {
-                    // Extract tags and store in state metadata (not as output variable)
                     if let Ok(tag_list) = v.extract::<Vec<String>>() {
                         state.add_tags(tag_list);
                     }
@@ -285,10 +329,93 @@ pub(crate) fn push_output_refs(
     Ok(())
 }
 
+// =============================================================================
+// Plugin op execution
+// =============================================================================
+
+/// Execute a plugin op from a cdylib shared library.
+fn execute_plugin_op(
+    py: Python,
+    spec: &str,
+    inputs_dict: &Bound<'_, PyDict>,
+) -> PyResult<Option<PyObject>> {
+    let (lib_path, func_name) = plugins::parse_plugin_spec(spec).ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Invalid plugin spec '{}': expected 'path/to/lib.so::func_name'",
+            spec
+        ))
+    })?;
+
+    let json_value = rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Failed to serialize inputs for plugin op: {}",
+            e
+        ))
+    })?;
+    let json_bytes = serde_json::to_vec(&json_value).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Failed to serialize JSON: {}",
+            e
+        ))
+    })?;
+
+    let result_value = py.allow_threads(|| plugins::load_and_call(lib_path, func_name, &json_bytes));
+
+    match result_value {
+        Ok(output_json) => {
+            let py_result = rush_providers::py_serde::json_to_py(py, &output_json)?;
+            Ok(Some(py_result))
+        }
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Plugin op error: {}",
+            e
+        ))),
+    }
+}
+
+// =============================================================================
+// Native transform op execution (GIL-free, synchronous)
+// =============================================================================
+
+/// Execute a native transform op (prompt, parser) via rush-providers.
+///
+/// These are pure CPU ops that don't need provider config or async HTTP.
+/// Runs GIL-free for maximum performance.
+fn execute_native_transform_op(
+    py: Python,
+    op_type: &str,
+    inputs_dict: &Bound<'_, PyDict>,
+) -> PyResult<Option<PyObject>> {
+    let json_inputs =
+        rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to serialize inputs for native transform op: {}",
+                e
+            ))
+        })?;
+
+    let op_type_owned = op_type.to_string();
+    let json_outputs = py.allow_threads(|| {
+        rush_providers::ops::execute_transform(&op_type_owned, json_inputs)
+    });
+
+    match json_outputs {
+        Ok(outputs) => {
+            let py_result = rush_providers::py_serde::json_to_pydict(py, &outputs)?;
+            Ok(Some(py_result))
+        }
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Native transform op error: {}",
+            e
+        ))),
+    }
+}
+
+// =============================================================================
+// Python callable execution
+// =============================================================================
+
 /// Call a Python callable for an op.
-/// For async ops (is_async=true), drives the returned coroutine to completion.
-/// Uses asyncio.run() when no event loop is running, or offloads to a worker
-/// thread when called from within an existing event loop (e.g., via Hush.run()).
 pub(crate) fn call_python(
     py: Python,
     op: &OpConfig,
@@ -312,22 +439,14 @@ pub(crate) fn call_python(
 }
 
 /// Drive an async coroutine to completion.
-///
-/// - If no event loop is running: uses `asyncio.run(coro)` directly.
-/// - If inside a running event loop (e.g., called from Hush's async engine):
-///   offloads to a ThreadPoolExecutor worker which creates its own event loop.
-///   This avoids the "cannot be called from a running event loop" error.
 pub(crate) fn drive_coroutine<'py>(
     py: Python<'py>,
     coro: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let asyncio = py.import_bound("asyncio")?;
-
-    // Check if there's already a running event loop
     let in_running_loop = asyncio.call_method0("get_running_loop").is_ok();
 
     if in_running_loop {
-        // Offload to a worker thread that creates its own event loop
         let cf = py.import_bound("concurrent.futures")?;
         let executor = cf.getattr("ThreadPoolExecutor")?.call1((1i32,))?;
         let asyncio_run = asyncio.getattr("run")?;
@@ -336,7 +455,6 @@ pub(crate) fn drive_coroutine<'py>(
         let _ = executor.call_method0("shutdown");
         Ok(output)
     } else {
-        // No running loop — safe to use asyncio.run() directly
         asyncio.call_method1("run", (coro,))
     }
 }
@@ -346,14 +464,6 @@ pub(crate) fn drive_coroutine<'py>(
 // =============================================================================
 
 /// Execute a native provider op via rush-providers.
-///
-/// Flow:
-/// 1. Extract inputs from PyDict to serde_json::Value (with GIL)
-/// 2. Release GIL, run async HTTP via tokio runtime (no Python involved)
-/// 3. Acquire GIL, convert outputs back to PyDict
-///
-/// This is the key performance win: HTTP I/O happens entirely without GIL,
-/// enabling true concurrent I/O across parallel ops.
 fn execute_provider_op(
     py: Python,
     op: &OpConfig,
@@ -368,7 +478,6 @@ fn execute_provider_op(
         return call_python(py, op, inputs_dict);
     }
 
-    // 1. Extract inputs to serde_json::Value (with GIL)
     let json_inputs =
         rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -377,8 +486,6 @@ fn execute_provider_op(
             ))
         })?;
 
-    // 2. Release GIL and run async HTTP via tokio
-    //    Uses block_on_async() which works from both main thread and spawn_blocking
     let json_outputs = py.allow_threads(|| {
         runtime::block_on_async(async {
             rush_providers::ops::execute(&op.op_type, json_inputs, config).await
@@ -387,7 +494,6 @@ fn execute_provider_op(
 
     match json_outputs {
         Ok(outputs) => {
-            // 3. Convert back to PyDict (with GIL)
             let py_result = rush_providers::py_serde::json_to_pydict(py, &outputs)?;
             Ok(Some(py_result))
         }
@@ -423,31 +529,17 @@ fn is_native_config(config: &rush_providers::config::ProviderConfig) -> bool {
 // =============================================================================
 
 /// Wrapper to send a raw pointer across threads.
-/// SAFETY: The caller must guarantee the pointee outlives the spawned task.
 struct SendConfigPtr(*const rush_providers::config::ProviderConfig);
 unsafe impl Send for SendConfigPtr {}
 unsafe impl Sync for SendConfigPtr {}
 
 impl SendConfigPtr {
     fn get(&self) -> &rush_providers::config::ProviderConfig {
-        // SAFETY: Guaranteed valid by construction (points to GraphConfig-owned data)
         unsafe { &*self.0 }
     }
 }
 
 /// Execute a native LLM provider op with streaming via rush-providers.
-///
-/// Flow:
-/// 1. Extract inputs to JSON (with GIL)
-/// 2. Get STREAM_SERVICE reference and streaming metadata
-/// 3. Create std::sync::mpsc channel for chunks
-/// 4. Spawn async streaming HTTP in tokio (GIL-free)
-/// 5. Poll channel for chunks, push each to STREAM_SERVICE (with GIL)
-/// 6. Signal end to STREAM_SERVICE
-/// 7. Return accumulated result as PyDict
-///
-/// The GIL is briefly released between chunk polls to allow other Python threads
-/// to make progress, while HTTP I/O runs entirely GIL-free in tokio.
 fn execute_provider_op_streaming(
     py: Python,
     op: &OpConfig,
@@ -464,7 +556,7 @@ fn execute_provider_op_streaming(
         return call_python(py, op, inputs_dict);
     }
 
-    // 1. Extract inputs to serde_json::Value (with GIL)
+    // 1. Extract inputs to JSON
     let json_inputs =
         rush_providers::py_serde::pydict_to_json(py, inputs_dict).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -476,20 +568,13 @@ fn execute_provider_op_streaming(
     // 2. Get STREAM_SERVICE and streaming metadata
     let hush_core = py.import_bound("hush.core")?;
     let stream_service = hush_core.getattr("STREAM_SERVICE")?;
-
     let request_id = state.request_id().unwrap_or_else(|| "default".to_string());
-
-    // channel_name = "{full_name}[{context_id or 'main'}]" — mirrors Python's BaseOp.identity()
     let ctx_label = if context.is_empty() { "main" } else { context };
     let channel_name = format!("{}[{}]", op.full_name, ctx_label);
 
-    // 3. Create channel for chunk forwarding (std::sync::mpsc)
+    // 3. Create channel and spawn async streaming HTTP
     let (chunk_tx, chunk_rx) = mpsc::channel::<serde_json::Value>();
-
-    // 4. Spawn streaming HTTP in tokio (GIL-free)
     let op_type = op.op_type.clone();
-    // SAFETY: config lives for the duration of the engine run (owned by GraphConfig).
-    // The spawned task completes before we return from this function (we await it).
     let config_ptr = SendConfigPtr(config as *const _);
 
     let handle = runtime::get_runtime().spawn(async move {
@@ -497,50 +582,14 @@ fn execute_provider_op_streaming(
         rush_providers::ops::execute_streaming(&op_type, json_inputs, config_ref, chunk_tx).await
     });
 
-    // 5. Pump chunks from channel to STREAM_SERVICE
-    //    Use try_recv() (non-blocking) + brief GIL release to avoid blocking Python
-    loop {
-        match chunk_rx.try_recv() {
-            Ok(chunk_json) => {
-                // Convert JSON chunk to Python dict and push to STREAM_SERVICE
-                let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
+    // 4. Pump chunks from channel to STREAM_SERVICE
+    pump_chunks(py, &chunk_rx, &handle, &stream_service, &request_id, &channel_name)?;
 
-                // STREAM_SERVICE.push() is async — drive the coroutine
-                let push_coro = stream_service.call_method1(
-                    "push",
-                    (&request_id, &channel_name, py_chunk.bind(py)),
-                )?;
-                drive_coroutine(py, &push_coro)?;
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                // No chunk ready — check if streaming task has finished
-                if handle.is_finished() {
-                    // Drain any remaining chunks that arrived before we checked
-                    while let Ok(chunk_json) = chunk_rx.try_recv() {
-                        let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
-                        let push_coro = stream_service.call_method1(
-                            "push",
-                            (&request_id, &channel_name, py_chunk.bind(py)),
-                        )?;
-                        drive_coroutine(py, &push_coro)?;
-                    }
-                    break;
-                }
-                // Release GIL briefly to let other Python threads progress
-                py.allow_threads(|| std::thread::sleep(Duration::from_millis(1)));
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                // Sender dropped — stream ended
-                break;
-            }
-        }
-    }
-
-    // 6. Signal end of stream to STREAM_SERVICE
+    // 5. Signal end of stream
     let end_coro = stream_service.call_method1("end", (&request_id, &channel_name))?;
     drive_coroutine(py, &end_coro)?;
 
-    // 7. Get the accumulated final result from the tokio task
+    // 6. Get final result from tokio task
     let final_result = py.allow_threads(|| {
         runtime::block_on_async(async { handle.await })
     });
@@ -559,4 +608,49 @@ fn execute_provider_op_streaming(
             e
         ))),
     }
+}
+
+/// Pump chunks from an mpsc channel to the Python STREAM_SERVICE.
+///
+/// Uses try_recv() (non-blocking) + brief GIL release between polls
+/// to avoid blocking Python threads while HTTP I/O runs GIL-free.
+fn pump_chunks(
+    py: Python,
+    chunk_rx: &mpsc::Receiver<serde_json::Value>,
+    handle: &tokio::task::JoinHandle<Result<serde_json::Value, rush_providers::http::ProviderError>>,
+    stream_service: &Bound<'_, PyAny>,
+    request_id: &str,
+    channel_name: &str,
+) -> PyResult<()> {
+    loop {
+        match chunk_rx.try_recv() {
+            Ok(chunk_json) => {
+                let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
+                let push_coro = stream_service.call_method1(
+                    "push",
+                    (request_id, channel_name, py_chunk.bind(py)),
+                )?;
+                drive_coroutine(py, &push_coro)?;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                if handle.is_finished() {
+                    // Drain remaining chunks
+                    while let Ok(chunk_json) = chunk_rx.try_recv() {
+                        let py_chunk = rush_providers::py_serde::json_to_py(py, &chunk_json)?;
+                        let push_coro = stream_service.call_method1(
+                            "push",
+                            (request_id, channel_name, py_chunk.bind(py)),
+                        )?;
+                        drive_coroutine(py, &push_coro)?;
+                    }
+                    break;
+                }
+                py.allow_threads(|| std::thread::sleep(Duration::from_millis(1)));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                break;
+            }
+        }
+    }
+    Ok(())
 }

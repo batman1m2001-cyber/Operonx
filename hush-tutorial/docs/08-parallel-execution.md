@@ -176,61 +176,14 @@ Xem thêm parallel LLM comparison tại `examples/12_multi_model.py`.
 
 ## Rust Mode (`mode="rust"`)
 
-Hush hỗ trợ Rust execution backend cho performance cao hơn 2-6x so với Python mode.
-
-### Khi nào dùng Rust mode?
-
-- Workflows có nhiều ops nhẹ (data transformation, branching, ForOp loops)
-- CPU-bound workloads (hash chains, math operations)
-- Production deployment cần throughput cao
-- Không sử dụng MapOp (chưa hỗ trợ — dùng ForOp thay thế)
-
-### Cách sử dụng
+Hush hỗ trợ Rust execution backend cho performance cao hơn 2-6x so với Python mode, hỗ trợ **tất cả op types** (GraphOp, ForOp, MapOp, WhileOp, fan-out/fan-in).
 
 ```python
-from hush.core import Hush, GraphOp, op, START, END, PARENT
-
-@op
-def process(x: int):
-    return {"result": x * 2}
-
-with GraphOp(name="workflow") as graph:
-    step = process(x=PARENT["input"])
-    START >> step >> END
-
-engine = Hush(graph)
-
-# Python mode (mặc định)
-result = await engine.run(inputs={"input": 5})
-
-# Rust mode — nhanh hơn 2-6x
-result = await engine.run(inputs={"input": 5}, mode="rust")
+engine = Hush(graph, mode="rust")  # Chỉ cần thêm mode="rust"
+result = await engine.run(inputs={"x": 5})
 ```
 
-### Benchmark so sánh
-
-| Pattern | Tốc độ Rust vs Python |
-|---------|----------------------|
-| Linear chain (50-500 ops) | 2.3x – 2.7x |
-| Nested @graph (2-20 stages) | 3.4x – 3.9x |
-| Parallel fan-out (5-50 branches) | 2.9x – 3.2x |
-| ForOp loop (10-100 items) | 3.0x – 3.3x |
-| CPU contention | 2.4x – 6.1x |
-
-### Parallel execution trong Rust mode
-
-Rust mode sử dụng **batch-aware scheduler** với rayon thread pool:
-- Khi nhiều ops ready cùng lúc VÀ có ops Rust-native → chạy song song qua rayon
-- Python ops chạy tuần tự (GIL ngăn true parallelism)
-- State dùng DashMap (concurrent HashMap) — thread-safe
-
-### Hạn chế
-
-- **MapOp** chưa hỗ trợ — dùng ForOp thay thế
-- **Async ops** chạy sync trong Rust mode (không dùng asyncio)
-- **Streaming** chưa hỗ trợ trong Rust mode
-
-Chi tiết kiến trúc: xem `rush-core/CLAUDE.md`.
+Chi tiết đầy đủ: xem [Rust Mode và Plugin Ops](13-rust-mode-va-plugin.md) — bao gồm cả Rust plugin ops (`@op(rust=...)`).
 
 ## Best Practices
 
