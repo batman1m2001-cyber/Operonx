@@ -8,11 +8,14 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
 ├── rush-core/          # High-performance Rust execution backend (PyO3 + rayon + DashMap)
+│   └── sdk/            # Plugin SDK for building Rust op crates (export_ops! macro)
 ├── hush-providers/     # LLM, embedding, reranking integrations (Python)
 ├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
 ├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
 ├── hush-tutorial/      # Documentation (Vietnamese) and examples
 ├── hush-eyes/          # Standalone Rust server for trace visualization (Axum + SQLite)
+├── examples/           # Example/test crates (Rust plugin examples, test fixtures)
+│   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash)
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -129,7 +132,9 @@ hush-providers (depends on hush-core)
 hush-telemetry (depends on hush-core)
 
 rush-core (Rust backend - depends on hush-core at runtime, built separately via maturin)
+  └── rush-core/sdk (Plugin SDK - standalone Rust crate, no PyO3 dependency)
 rush-providers (Rust crate - used by rush-core, built via maturin)
+examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 ```
 
 ## When to Modify Which Package
@@ -141,6 +146,8 @@ rush-providers (Rust crate - used by rush-core, built via maturin)
 | New LLM/embedding/reranker provider (Rust) | rush-providers/src/ |
 | New tracing backend | hush-telemetry/hush/telemetry/ |
 | Rust execution backend | rush-core/src/ |
+| New Rust op plugin | Create cdylib crate under examples/, use rush-core/sdk |
+| Plugin SDK changes | rush-core/sdk/src/lib.rs |
 | Documentation or examples | hush-tutorial/ |
 | Trace visualization server | hush-eyes/ |
 
@@ -167,6 +174,38 @@ rush-providers (Rust crate - used by rush-core, built via maturin)
 - **hush-eyes**: Standalone binary, built via `cargo build --release`
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
+
+### Rust Op Plugin System
+
+Users can write high-performance ops in Rust and load them as plugins at runtime:
+
+```python
+# Point to crate directory — auto-builds and loads the .so
+@op(rust="./examples/rush-ops-builtin::double")
+def double(x: int):
+    return {"result": x * 2}  # Python fallback
+```
+
+**Creating a plugin crate:**
+1. Create a cdylib crate that depends on `rush-core/sdk`
+2. Write plain `fn(&serde_json::Value) -> serde_json::Value` functions
+3. Call `export_ops!(func1, func2, ...)` to generate C ABI wrappers
+4. Reference via `@op(rust="./path/to/crate::func_name")`
+
+The engine auto-detects crate directories, runs `cargo build --release`, caches the result, and loads the `.so` at runtime.
+
+### Naming Conventions
+
+**Packages** follow the `hush-*` / `rush-*` pattern:
+- `hush-*` — Python packages (hush-core, hush-providers, hush-telemetry)
+- `rush-*` — Rust packages (rush-core, rush-providers)
+
+**Example/test crates** live under `examples/`:
+- `examples/rush-ops-builtin` — built-in Rust ops (also used as test fixture by rush-core)
+- Pattern: `examples/<descriptive-name>/` with standard Cargo crate structure
+
+**Sub-crates** are nested inside their parent package:
+- `rush-core/sdk/` — Plugin SDK (separate Cargo crate, nested inside rush-core)
 
 ### Code Style
 

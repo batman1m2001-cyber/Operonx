@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use crate::config::OpConfig;
 use crate::ops::base;
 use crate::ops::graph::graph_op;
-use crate::ops::iteration::map_op;
+use crate::ops::iteration::{helpers, map_op};
 use crate::states::state::EngineState;
 
 /// Execute an AIterOp: collect async items → batch → process → callback.
@@ -69,12 +69,7 @@ pub(crate) fn run(
     let source_var = &source_param.var_name;
 
     // 3. Resolve broadcast values
-    let mut broadcast_values: Vec<(String, PyObject)> = Vec::new();
-    for param in &iter_config.broadcast {
-        if let Some(value) = base::resolve_iter_param(py, param, state, context)? {
-            broadcast_values.push((param.var_name.clone(), value));
-        }
-    }
+    let broadcast_values = helpers::resolve_broadcast_values(py, iter_config, state, context)?;
 
     // 4. Collect all items from async iterable
     let items = collect_async_items(py, &source)?;
@@ -83,13 +78,12 @@ pub(crate) fn run(
     let chunks: Vec<PyObject> = if let Some(ref batch_fn) = iter_config.batch_fn {
         apply_batching(py, &items, batch_fn)?
     } else {
-        // Each item is its own chunk
         items
     };
 
     let n = chunks.len();
     if n == 0 {
-        store_empty_results(py, op, state, context)?;
+        helpers::store_empty_results(py, op, state, context)?;
         return Ok(());
     }
 
@@ -97,11 +91,7 @@ pub(crate) fn run(
     let max_concurrency = iter_config
         .max_concurrency
         .unwrap_or_else(|| std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4));
-    let ctx_prefix = if context.is_empty() {
-        String::new()
-    } else {
-        format!("{}.", context)
-    };
+    let ctx_prefix = helpers::context_prefix(context);
 
     let results: Vec<Mutex<Option<Result<PyObject, String>>>> =
         (0..n).map(|_| Mutex::new(None)).collect();
@@ -152,7 +142,6 @@ pub(crate) fn run(
                         }
                         Err(err) => {
                             let err_msg = format!("{}", err);
-                            // AIterOp always continues (no fail_fast)
                             let _ = (|| -> PyResult<()> {
                                 let logging = py.import_bound("logging")?;
                                 let logger =
@@ -182,7 +171,6 @@ pub(crate) fn run(
     for i in 0..n {
         match results[i].lock().unwrap().take() {
             Some(Ok(output)) => {
-                // Call callback if provided (in order, sequentially)
                 if let Some(ref callback) = iter_config.callback {
                     if let Err(_err) = call_callback(py, callback, &output) {
                         callback_errors += 1;
@@ -219,13 +207,13 @@ pub(crate) fn run(
     // 8. Transpose results and store
     map_op::transpose_and_store(py, op, &result_objects, state, context)?;
 
-    // 9. Add iteration_metrics
-    let metrics = PyDict::new_bound(py);
+    // 9. Add iteration_metrics (with callback info)
+    let metrics = pyo3::types::PyDict::new_bound(py);
     metrics.set_item("total_iterations", n)?;
     metrics.set_item("success_count", success_count)?;
     metrics.set_item("error_count", n - success_count)?;
     if iter_config.callback.is_some() {
-        let cb_metrics = PyDict::new_bound(py);
+        let cb_metrics = pyo3::types::PyDict::new_bound(py);
         cb_metrics.set_item("error_count", callback_errors)?;
         metrics.set_item("callback", cb_metrics)?;
     }
@@ -247,7 +235,6 @@ pub(crate) fn run(
 // =============================================================================
 
 /// Collect all items from a Python async iterable into a Vec.
-/// Uses a Python helper to drive `async for item in source`.
 fn collect_async_items(py: Python, source: &PyObject) -> PyResult<Vec<PyObject>> {
     let builtins = py.import_bound("builtins")?;
     let globals = PyDict::new_bound(py);
@@ -277,7 +264,6 @@ fn collect_async_items(py: Python, source: &PyObject) -> PyResult<Vec<PyObject>>
 }
 
 /// Apply batching: group items using batch_fn(batch, new_item) → bool.
-/// When batch_fn returns True, the current batch is flushed.
 fn apply_batching(
     py: Python,
     items: &[PyObject],
@@ -303,7 +289,6 @@ fn apply_batching(
         current_batch.push(item.clone_ref(py));
     }
 
-    // Flush remaining items
     if !current_batch.is_empty() {
         let flushed = PyList::new_bound(py, current_batch.iter().map(|b| b.bind(py)));
         batches.push(flushed.unbind().into());
@@ -315,47 +300,6 @@ fn apply_batching(
 /// Call the async callback with a result dict.
 fn call_callback(py: Python, callback: &PyObject, result: &PyObject) -> PyResult<()> {
     let coro = callback.bind(py).call1((result.bind(py),))?;
-    // Drive the async callback
     let _ = base::drive_coroutine(py, &coro)?;
-    Ok(())
-}
-
-/// Store empty results for zero-item case.
-fn store_empty_results(
-    py: Python,
-    op: &OpConfig,
-    state: &EngineState,
-    context: &str,
-) -> PyResult<()> {
-    let output_keys: Vec<&str> = op
-        .outputs
-        .iter()
-        .filter(|p| p.var_name != "iteration_metrics")
-        .map(|p| p.var_name.as_str())
-        .collect();
-
-    for key in &output_keys {
-        let empty = PyList::empty_bound(py);
-        state.set(
-            op.full_name.clone(),
-            key.to_string(),
-            context.to_string(),
-            empty.unbind().into(),
-        );
-    }
-
-    let metrics = PyDict::new_bound(py);
-    metrics.set_item("total_iterations", 0)?;
-    metrics.set_item("success_count", 0)?;
-    metrics.set_item("error_count", 0)?;
-    state.set(
-        op.full_name.clone(),
-        "iteration_metrics".to_string(),
-        context.to_string(),
-        metrics.unbind().into(),
-    );
-
-    base::push_output_refs(py, op, state, context)?;
-
     Ok(())
 }

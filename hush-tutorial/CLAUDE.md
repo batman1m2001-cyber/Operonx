@@ -19,7 +19,8 @@ hush-tutorial/
 │   ├── 09-tracing-observability.md # Observability setup
 │   ├── 10-agent-workflow.md      # Agent patterns
 │   ├── 11-multi-model.md         # Multi-provider setups
-│   └── 12-shorthand-syntax.md    # Syntactic sugar
+│   ├── 12-shorthand-syntax.md    # Syntactic sugar
+│   └── 13-rust-mode-va-plugin.md # Rust mode & plugin ops
 ├── examples/           # Runnable Python files
 │   ├── 01_hello_world.py         # No API keys needed
 │   ├── 02_data_pipeline.py       # No API keys needed
@@ -35,14 +36,16 @@ hush-tutorial/
 │   ├── 12_multi_model.py
 │   ├── 13_parallel_advanced.py
 │   ├── 14_rag_advanced.py
-│   └── 15_shorthand_syntax.py
+│   ├── 15_shorthand_syntax.py
+│   ├── 17_rust_mode.py          # Requires rush-core
+│   └── 18_rust_plugin_ops.py    # Requires rush-core + rush-ops-builtin
 └── resources.starter.yaml        # Config template
 ```
 
 ## Documentation Conventions
 
 - **Language**: Vietnamese
-- **Progression**: Numbered 00-12 for reading order
+- **Progression**: Numbered 00-13 for reading order
 - **Format**: Each doc covers one concept with code examples
 - **Cross-references**: Link to related examples
 

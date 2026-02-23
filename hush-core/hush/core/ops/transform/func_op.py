@@ -29,7 +29,7 @@ def op(func=None, *, executor=None, rust=None, bound=None):
         def fetch(url: str):
             return {"data": requests.get(url).json()}
 
-        @op(rust="rust_double")
+        @op(rust="./my_ops::double")
         def double(x: int):
             return {"result": x * 2}  # Python fallback
 
@@ -44,10 +44,11 @@ def op(func=None, *, executor=None, rust=None, bound=None):
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
-        rust: Optional Rust-native op name (e.g. ``"rust_double"``).
-            When set, the Rust backend dispatches to its internal registry
-            instead of calling the Python function. The Python body serves
-            as a fallback when the Rust op is not found.
+        rust: Optional Rust plugin op spec (e.g. ``"./my_ops::double"``).
+            Format: ``"<crate_path>::<func_name>"``. The path can be a crate
+            directory, a ``.rs`` file, or a pre-built ``.so``/``.dylib``.
+            The engine auto-builds the crate via ``cargo build --release``
+            if needed. The Python body serves as a fallback.
         bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
             ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
             ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.

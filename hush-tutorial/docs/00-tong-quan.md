@@ -101,6 +101,12 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 | [Parallel Execution](08-parallel-execution.md) | `13_parallel_advanced.py` | Fan-out/fan-in, MapOp, partial failure |
 | [Error Handling](07-error-handling.md) | `10_error_handling.py` | Error capture, retry, fallback, BranchOp routing |
 
+### Performance
+
+| Doc | Ví dụ chạy được | Nội dung |
+|-----|-----------------|----------|
+| [Rust Mode & Plugin Ops](13-rust-mode-va-plugin.md) | `17_rust_mode.py`, `18_rust_plugin_ops.py` | Rust execution backend, Rust plugin ops, tạo plugin |
+
 ### Production
 
 | Doc | Ví dụ chạy được | Nội dung |

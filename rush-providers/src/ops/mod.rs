@@ -13,6 +13,7 @@
 pub mod chain;
 pub mod embedding;
 pub mod llm;
+pub mod parser;
 pub mod prompt;
 pub mod rerank;
 
@@ -23,76 +24,59 @@ use serde_json::Value;
 use crate::config::ProviderConfig;
 use crate::http::{ProviderError, ProviderResult};
 
+// =============================================================================
+// Config extraction helpers
+// =============================================================================
+
+/// Extract LLM config from a ProviderConfig, or return a typed error.
+fn expect_llm_config<'a>(config: &'a ProviderConfig, op_label: &str) -> ProviderResult<&'a crate::config::LLMProviderConfig> {
+    match config {
+        ProviderConfig::LLM(c) => Ok(c),
+        _ => Err(ProviderError {
+            message: format!("{} requires LLM provider config", op_label),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
+fn expect_embedding_config(config: &ProviderConfig) -> ProviderResult<&crate::config::embedding::EmbeddingConfig> {
+    match config {
+        ProviderConfig::Embedding(c) => Ok(c),
+        _ => Err(ProviderError {
+            message: "Embedding op requires Embedding provider config".to_string(),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
+fn expect_reranking_config(config: &ProviderConfig) -> ProviderResult<&crate::config::reranking::RerankingConfig> {
+    match config {
+        ProviderConfig::Reranking(c) => Ok(c),
+        _ => Err(ProviderError {
+            message: "Rerank op requires Reranking provider config".to_string(),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
+// =============================================================================
+// Dispatch
+// =============================================================================
+
 /// Execute a provider op by op_type.
-///
-/// This is the main entry point called by rush-core.
-/// Dispatches to the appropriate op module based on op_type.
-///
-/// Args:
-///   op_type: "llm", "embedding", "rerank", "prompt"
-///   inputs: Resolved input dict as JSON
-///   config: Provider config (parsed from serialized op dict)
-///
-/// Returns:
-///   Output dict as JSON (to be converted back to PyDict)
 pub async fn execute(
     op_type: &str,
     inputs: Value,
     config: &ProviderConfig,
 ) -> ProviderResult<Value> {
     match op_type {
-        "llm" => {
-            let llm_config = match config {
-                ProviderConfig::LLM(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "LLM op requires LLM provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            llm::execute(inputs, llm_config).await
-        }
-        "embedding" => {
-            let emb_config = match config {
-                ProviderConfig::Embedding(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "Embedding op requires Embedding provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            embedding::execute(inputs, emb_config).await
-        }
-        "rerank" => {
-            let rerank_config = match config {
-                ProviderConfig::Reranking(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "Rerank op requires Reranking provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            rerank::execute(inputs, rerank_config).await
-        }
-        "chain" => {
-            let llm_config = match config {
-                ProviderConfig::LLM(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "Chain op requires LLM provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            chain::execute(inputs, llm_config).await
-        }
+        "llm" => llm::execute(inputs, expect_llm_config(config, "LLM op")?).await,
+        "embedding" => embedding::execute(inputs, expect_embedding_config(config)?).await,
+        "rerank" => rerank::execute(inputs, expect_reranking_config(config)?).await,
+        "chain" => chain::execute(inputs, expect_llm_config(config, "Chain op")?).await,
         _ => Err(ProviderError {
             message: format!("Unknown provider op type: '{}'", op_type),
             status_code: None,
@@ -102,9 +86,6 @@ pub async fn execute(
 }
 
 /// Execute a provider op in streaming mode.
-///
-/// Only supported for LLM ops. Sends each SSE chunk through `chunk_tx`.
-/// Returns the accumulated final response.
 pub async fn execute_streaming(
     op_type: &str,
     inputs: Value,
@@ -113,30 +94,10 @@ pub async fn execute_streaming(
 ) -> ProviderResult<Value> {
     match op_type {
         "llm" => {
-            let llm_config = match config {
-                ProviderConfig::LLM(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "LLM streaming op requires LLM provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            llm::execute_streaming(inputs, llm_config, chunk_tx).await
+            llm::execute_streaming(inputs, expect_llm_config(config, "LLM streaming op")?, chunk_tx).await
         }
         "chain" => {
-            let llm_config = match config {
-                ProviderConfig::LLM(c) => c,
-                _ => {
-                    return Err(ProviderError {
-                        message: "Chain streaming op requires LLM provider config".to_string(),
-                        status_code: None,
-                        error_code: None,
-                    })
-                }
-            };
-            chain::execute_streaming(inputs, llm_config, chunk_tx).await
+            chain::execute_streaming(inputs, expect_llm_config(config, "Chain streaming op")?, chunk_tx).await
         }
         _ => Err(ProviderError {
             message: format!("Streaming not supported for op type: '{}'", op_type),
@@ -144,6 +105,31 @@ pub async fn execute_streaming(
             error_code: None,
         }),
     }
+}
+
+// =============================================================================
+// Native transform ops (GIL-free, no provider config)
+// =============================================================================
+
+/// Execute a native transform op (synchronous, no provider config needed).
+///
+/// These are pure CPU ops (prompt formatting, parsing) that have Rust
+/// implementations and don't require any HTTP/API calls.
+pub fn execute_transform(op_type: &str, inputs: Value) -> ProviderResult<Value> {
+    match op_type {
+        "prompt" => prompt::execute(inputs),
+        "parser" => parser::execute(inputs),
+        _ => Err(ProviderError {
+            message: format!("Unknown transform op type: '{}'", op_type),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
+/// Check if an op_type is a native transform op (pure CPU, no provider config).
+pub fn is_native_transform_op(op_type: &str) -> bool {
+    matches!(op_type, "prompt" | "parser")
 }
 
 /// Check if an api_type is a provider that we handle natively in Rust.
@@ -157,10 +143,6 @@ pub fn is_native_provider_op(api_type: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // is_native_provider_op tests
-    // =========================================================================
 
     #[test]
     fn test_native_llm_providers() {
@@ -190,10 +172,20 @@ mod tests {
 
     #[test]
     fn test_non_native_providers() {
-        assert!(!is_native_provider_op("tei")); // Removed
+        assert!(!is_native_provider_op("tei"));
         assert!(!is_native_provider_op("custom"));
         assert!(!is_native_provider_op("unknown"));
         assert!(!is_native_provider_op(""));
-        assert!(!is_native_provider_op("OPENAI")); // Case-sensitive
+        assert!(!is_native_provider_op("OPENAI"));
+    }
+
+    #[test]
+    fn test_is_native_transform_op() {
+        assert!(is_native_transform_op("prompt"));
+        assert!(is_native_transform_op("parser"));
+        assert!(!is_native_transform_op("llm"));
+        assert!(!is_native_transform_op("embedding"));
+        assert!(!is_native_transform_op("rerank"));
+        assert!(!is_native_transform_op(""));
     }
 }

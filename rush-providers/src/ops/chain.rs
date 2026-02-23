@@ -27,19 +27,17 @@ const LLM_PARAM_KEYS: &[&str] = &[
     "top_logprobs",
 ];
 
-/// Execute a chain op: format template → call LLM → return merged result.
+/// Build LLM inputs from chain inputs: format template → extract messages + LLM params.
 ///
-/// Inputs: {template, ...template_vars, conversation_history, tool_results, + LLM params}
-/// Outputs: {messages, content, role, finish_reason, model_used, tokens_used, ...}
-pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
-    // 1. Format prompt (reuse prompt op)
+/// Returns `(llm_inputs, messages)` where messages are also returned separately
+/// to be included in the chain output.
+fn build_llm_inputs(inputs: &Value) -> ProviderResult<(Value, Value)> {
     let prompt_result = crate::ops::prompt::execute(inputs.clone())?;
     let messages = prompt_result
         .get("messages")
         .cloned()
         .unwrap_or(json!([]));
 
-    // 2. Build LLM inputs: messages + completion params from original inputs
     let mut llm_inputs = json!({ "messages": messages });
     if let Some(obj) = inputs.as_object() {
         for &key in LLM_PARAM_KEYS {
@@ -49,12 +47,14 @@ pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResul
         }
     }
 
-    // 3. Execute LLM
+    Ok((llm_inputs, messages))
+}
+
+/// Execute a chain op: format template → call LLM → return merged result.
+pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
+    let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
     let mut result = crate::ops::llm::execute(llm_inputs, config).await?;
-
-    // 4. Include the formatted messages in output
     result["messages"] = messages;
-
     Ok(result)
 }
 
@@ -64,28 +64,8 @@ pub async fn execute_streaming(
     config: &LLMProviderConfig,
     chunk_tx: Sender<Value>,
 ) -> ProviderResult<Value> {
-    // 1. Format prompt
-    let prompt_result = crate::ops::prompt::execute(inputs.clone())?;
-    let messages = prompt_result
-        .get("messages")
-        .cloned()
-        .unwrap_or(json!([]));
-
-    // 2. Build LLM inputs
-    let mut llm_inputs = json!({ "messages": messages });
-    if let Some(obj) = inputs.as_object() {
-        for &key in LLM_PARAM_KEYS {
-            if let Some(v) = obj.get(key) {
-                llm_inputs[key] = v.clone();
-            }
-        }
-    }
-
-    // 3. Execute LLM with streaming
+    let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
     let mut result = crate::ops::llm::execute_streaming(llm_inputs, config, chunk_tx).await?;
-
-    // 4. Include the formatted messages in output
     result["messages"] = messages;
-
     Ok(result)
 }

@@ -1,6 +1,13 @@
 """Shared fixtures for rush-core tests."""
 
+import os
+
 import pytest
+
+# Path to the built-in ops crate (auto-built by the plugin loader)
+BUILTIN_CRATE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "examples", "rush-ops-builtin")
+)
 
 
 @pytest.fixture
