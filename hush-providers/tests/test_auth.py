@@ -453,8 +453,9 @@ class TestRealKeycloakIntegration:
 
         load_dotenv()
 
-        import hush.providers  # noqa: F401 - Register plugins
         from hush.core.registry import get_hub
+
+        import hush.providers  # noqa: F401 - Register plugins
 
         return get_hub()
 
