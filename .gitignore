@@ -94,5 +94,12 @@ temp/
 # MkDocs build output
 site/
 
+# Rust build artifacts
+target/
+
+# VSCode extension build artifacts
+*.vsix
+hush-eyes/out/
+
 # Local sync scripts
 sync_to_internal.bat
