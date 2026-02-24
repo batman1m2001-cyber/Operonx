@@ -111,13 +111,13 @@ class OpenAISDKModel(BaseLLM):
         sleep = kwargs.pop("sleep", 0.0)
         stream_response = await self.client.chat.completions.create(**params)
         async for chunk in stream_response:
-            if not self.check_chinese_characters(chunk, raise_on_found=True):
-                # Update kwargs onto chunk
-                for key, value in kwargs.items():
-                    setattr(chunk, key, value)
-                await asyncio.sleep(sleep)
+            self.sanitize_chinese_characters(chunk)
+            # Update kwargs onto chunk
+            for key, value in kwargs.items():
+                setattr(chunk, key, value)
+            await asyncio.sleep(sleep)
 
-                yield chunk
+            yield chunk
 
     async def generate(
         self,
@@ -188,7 +188,7 @@ class OpenAISDKModel(BaseLLM):
         )
 
         completion = await self.client.chat.completions.create(**params)
-        self.check_chinese_characters(completion, raise_on_found=True)
+        self.sanitize_chinese_characters(completion)
 
         # Update kwargs onto chunk
         for key, value in kwargs.items():
