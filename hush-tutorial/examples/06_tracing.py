@@ -101,7 +101,7 @@ async def example_1_hush_eyes_tracer():
     # Truy cập $state để debug
     state = result["$state"]
     print(f"  User ID:    {state.user_id}")
-    print(f"  Exec order: {state.execution_order}")
+    print(f"  Request ID: {state.request_id}")
     print(f"  Tags:       {state.tags}")
     # Tags sẽ gồm: ['analyzed', 'short-text', 'category:sentence']
     print("  → Mở http://localhost:8420 để xem trace")

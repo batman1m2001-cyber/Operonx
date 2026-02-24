@@ -145,7 +145,7 @@ result = await engine.run(inputs={"x": 5}, mode="rust")
 │     │  * Repeat until queue empty                    │        │
 │     └────────────────────────────────────────────────┘        │
 │                          |                                   │
-│  5. collect_outputs() → result dict                          │
+│  5. get_outputs() → result dict                          │
 │                          |                                   │
 │  6. Attach $state metadata (tags, values)                    │
 │                          |                                   │
