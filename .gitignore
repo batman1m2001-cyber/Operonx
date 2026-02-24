@@ -75,6 +75,9 @@ secrets.yaml
 # Local traces database
 .hush/
 
+# Claude Code local settings
+.claude/
+
 # Cache
 .cache/
 .ruff_cache/
