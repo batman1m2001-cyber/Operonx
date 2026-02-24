@@ -106,9 +106,9 @@ class PromptOp(BaseOp):
         self.core = self._format
 
     def _resolve_wildcard_source(self, wildcard_source):
-        """Resolve PARENT sentinel to actual father op."""
+        """Resolve PARENT sentinel to actual parent op."""
         if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
-            return self.father
+            return self.parent
         return wildcard_source
 
     def _infer_wildcard_vars(self, wildcard_source) -> set:

@@ -419,7 +419,7 @@ class LLMOp(BaseOp):
         Handles streaming internally with STREAM_SERVICE.push() for each chunk.
         Supports load balancing and batch mode.
         """
-        parent_name = self.father.full_name if self.father else None
+        parent_name = self.parent.full_name if self.parent else None
         state.record_execution(self.full_name, parent_name, context_id)
 
         request_id = state.request_id
