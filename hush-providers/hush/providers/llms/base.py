@@ -278,63 +278,45 @@ class BaseLLM(ABC):
 
         return any("\u4e00" <= char <= "\u9fff" for char in text)
 
-    def check_chinese_characters(
-        self, response: Union[ChatCompletion, ChatCompletionChunk], raise_on_found: bool = False
-    ) -> bool:
+    @staticmethod
+    def _strip_chinese(text: str) -> str:
+        """Remove CJK Unified Ideographs (U+4E00–U+9FFF) from a string."""
+        return "".join(ch for ch in text if not ("\u4e00" <= ch <= "\u9fff"))
+
+    def sanitize_chinese_characters(
+        self, response: Union[ChatCompletion, ChatCompletionChunk]
+    ) -> None:
         """
-        Check if a chat response contains Chinese (CJK) characters.
+        Strip Chinese (CJK) characters from a chat response in-place.
 
         Works with both ChatCompletionChunk (streaming) and ChatCompletion (non-streaming)
         responses by examining the appropriate content field.
-
-        Args:
-            response: Either a ChatCompletionChunk or ChatCompletion object
-            raise_on_found: If True, raises ValueError when Chinese characters are found
-
-        Returns:
-            bool: True if Chinese characters are found, False otherwise
-
-        Raises:
-            ValueError: If raise_on_found=True and Chinese characters are detected
-            AttributeError/IndexError: Returns False for any parsing errors or missing content
         """
         try:
             if not hasattr(response, "choices") or not response.choices:
-                return False
+                return
 
             choice = response.choices[0]
 
             # Handle streaming response (ChatCompletionChunk)
             if hasattr(choice, "delta"):
                 content = getattr(choice.delta, "content", None)
+                if isinstance(content, str) and self.has_chinese_characters(content):
+                    choice.delta.content = self._strip_chinese(content)
             # Handle non-streaming response (ChatCompletion)
             elif hasattr(choice, "message"):
                 content = getattr(choice.message, "content", None)
-            else:
-                return False
-
-            # Handle different content types
-            has_chinese = False
-
-            if isinstance(content, str):
-                has_chinese = self.has_chinese_characters(content)
-            elif isinstance(content, list):
-                # Handle multimodal content (list of content parts)
-                for item in content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        text_content = item.get("text", "")
-                        if self.has_chinese_characters(text_content):
-                            has_chinese = True
-                            break
-            # If content is None or other type, has_chinese remains False
-
-            if has_chinese and raise_on_found:
-                raise ValueError("Response contains Chinese characters, which are not allowed")
-
-            return has_chinese
+                if isinstance(content, str) and self.has_chinese_characters(content):
+                    choice.message.content = self._strip_chinese(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_content = item.get("text", "")
+                            if self.has_chinese_characters(text_content):
+                                item["text"] = self._strip_chinese(text_content)
 
         except (AttributeError, IndexError):
-            return False
+            pass
 
     def _prepare_params(
         self,
