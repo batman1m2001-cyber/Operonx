@@ -231,7 +231,7 @@ state = result["$state"]
 
 # Thông tin debug
 print(state.request_id)       # Unique request ID
-print(state.execution_order)  # Thứ tự thực thi ops
+print(list(state.iter_executed("op_name")))  # Thứ tự thực thi ops
 print(state.user_id)          # User ID (nếu set)
 ```
 
