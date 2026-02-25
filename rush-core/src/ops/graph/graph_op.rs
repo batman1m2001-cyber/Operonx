@@ -64,10 +64,14 @@ pub(crate) fn run_graph(
     while !queue.is_empty() {
         let batch: Vec<String> = queue.drain(..).collect();
 
-        // Check if concurrent execution would benefit this batch
+        // Check if concurrent execution would benefit this batch.
+        // Graph ops (nested workflows) are always eligible — they typically
+        // contain IO-bound ops (LLM, embedding) inside.
         let use_concurrent = batch.len() > 1 && batch.iter().any(|name| {
             config.ops.get(name).map_or(false, |op| {
-                op.bound == OpBound::Io || op.rust_op.is_some()
+                op.bound == OpBound::Io
+                    || op.rust_op.is_some()
+                    || op.op_type == "graph"
             })
         });
 
@@ -95,7 +99,24 @@ pub(crate) fn run_graph(
                     ))
                 })?;
 
-                dispatch_op(py, op, state, context)?;
+                // Release GIL during op execution so other concurrent
+                // workflows (from run_in_executor) can make progress.
+                // SAFETY: op and state are alive for the entire run_graph call.
+                let op_ptr = op as *const OpConfig as usize;
+                let state_ptr = state as *const EngineState as usize;
+                let ctx = context.to_string();
+
+                let result: Result<(), String> = py.allow_threads(|| {
+                    Python::with_gil(|py| {
+                        let op = unsafe { &*(op_ptr as *const OpConfig) };
+                        let state = unsafe { &*(state_ptr as *const EngineState) };
+                        dispatch_op(py, op, state, &ctx).map_err(|e| format!("{e}"))
+                    })
+                });
+
+                if let Err(msg) = result {
+                    return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(msg));
+                }
 
                 activate_successors(
                     py, op, &op_name, config, state, context,

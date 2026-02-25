@@ -73,10 +73,28 @@ impl Rush {
             );
         }
 
-        // 2. Run the graph scheduling loop
-        graph_op::run_graph(py, &self.config, &state, context)?;
+        // 2. Run the graph scheduling loop.
+        //    Release GIL at the top level so concurrent Rush.run() calls
+        //    (from asyncio run_in_executor threads) can make progress.
+        //    Each op inside reacquires the GIL only when it needs Python.
+        //    SAFETY: self.config and state live for the duration of block_on.
+        let config_ptr = &self.config as *const GraphConfig as usize;
+        let state_ptr = &state as *const EngineState as usize;
 
-        // 3. Collect graph outputs
+        let graph_result: Result<(), String> = py.allow_threads(|| {
+            Python::with_gil(|py| {
+                let config = unsafe { &*(config_ptr as *const GraphConfig) };
+                let state = unsafe { &*(state_ptr as *const EngineState) };
+                graph_op::run_graph(py, config, state, "")
+                    .map_err(|e| format!("{e}"))
+            })
+        });
+
+        if let Err(msg) = graph_result {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(msg));
+        }
+
+        // 3. Collect graph outputs (GIL reacquired here)
         let result = graph_op::get_outputs(py, &self.config, &state, context)?;
 
         // 4. Attach $state metadata (tags, values, tracing IDs)
