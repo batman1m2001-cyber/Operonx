@@ -221,10 +221,8 @@ class LangfuseTracer(Tracer):
                             kwargs["model"] = record["model"]
 
                         cost = record.get("cost")
-                        if cost:
-                            if kwargs["metadata"] is None:
-                                kwargs["metadata"] = {}
-                            kwargs["metadata"]["cost_usd"] = cost
+                        if cost and "usage" in kwargs and kwargs["usage"]:
+                            kwargs["usage"]["total_cost"] = cost
 
                         langfuse_objects[trace_key] = parent.generation(**kwargs)
                     else:
