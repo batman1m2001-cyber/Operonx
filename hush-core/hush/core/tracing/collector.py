@@ -86,9 +86,9 @@ class TraceCollector:
 
         for op_name, op in op_map.items():
             for ctx, start_time in state.iter_executed(op_name):
-                # Read I/O from state
-                inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {})}
-                outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {})}
+                # Read I/O from state (exclude internal $-prefixed keys)
+                inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {}) if not v.startswith("$")}
+                outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {}) if not v.startswith("$")}
 
                 # Read timing from state
                 end_time = state[op_name, "end_time", ctx]
