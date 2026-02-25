@@ -21,7 +21,9 @@ Example:
     ```
 """
 
+import asyncio
 import uuid
+from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
@@ -178,11 +180,16 @@ class Hush:
 
         # ── Rust fast path ──────────────────────────────────────
         if self._rush_engine is not None:
-            result = self._rush_engine.run(
-                inputs,
-                request_id=request_id,
-                user_id=user_id,
-                session_id=session_id,
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                partial(
+                    self._rush_engine.run,
+                    inputs,
+                    request_id=request_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
             )
 
             # Wire tracing for Rust path (mirrors Python path below)
