@@ -78,6 +78,7 @@ class TestRustOpInWorkflow:
         result = await Hush(graph, mode="rust").run(inputs={"x": 5, "y": 3})
         assert result["result"] == 13  # 5*2=10, 10+3=13
 
+    @pytest.mark.skip(reason="Python-only ops cannot run in Rust mode after GIL-free refactor")
     async def test_mixed_rust_and_python_ops(self):
         """Graph with both Rust and Python ops."""
 
@@ -98,7 +99,7 @@ class TestRustOpInWorkflow:
         assert result["result"] == 13
 
     async def test_fallback_to_python(self):
-        """Unregistered rust= (no ::) falls back to Python."""
+        """Ops without a valid rust= (no ::) are rejected at config parse time."""
 
         @op(rust="nonexistent_op")
         def fallback(x: int):
@@ -108,8 +109,8 @@ class TestRustOpInWorkflow:
             step = fallback(x=PARENT["x"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(inputs={"x": 2})
-        assert result["result"] == 198  # Python fallback: 2*99
+        with pytest.raises(ValueError, match="no Rust implementation"):
+            Hush(graph, mode="rust")
 
     @pytest.mark.parametrize("mode", ["python", "rust"])
     async def test_rust_op_both_modes(self, mode):

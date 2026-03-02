@@ -14,9 +14,7 @@ from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
-from rush_core import Rush
-
-from conftest import BUILTIN_CRATE
+from conftest import BUILTIN_CRATE, make_rush
 
 
 # =============================================================================
@@ -34,22 +32,22 @@ def add(a: int, b: int):
     return {"result": a + b}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::greet")
 def greet(name: str):
-    """Pure Python op (no rust=)."""
-    return {"greeting": f"Hello {name}"}
+    """Greet by name — Rust native with Python fallback."""
+    return {"greeting": f"Hello, {name}!"}
 
 
-@op
-def identity(x):
-    """Pass-through op."""
-    return {"out": x}
+@op(rust=f"{BUILTIN_CRATE}::passthrough")
+def identity(value):
+    """Pass-through op — Rust native with Python fallback."""
+    return {"out": value}
 
 
-@op
-def make_dict(key: str, value: str):
-    """Return a dict for testing getitem ref ops."""
-    return {"data": {key: value}}
+@op(rust=f"{BUILTIN_CRATE}::make_dict")
+def make_dict(key: str, value):
+    """Return a dict for testing getitem ref ops — Rust native with Python fallback."""
+    return {"out": {key: value}}
 
 
 # =============================================================================
@@ -66,7 +64,7 @@ class TestSingleOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
         assert result["result"] == 10
 
@@ -78,10 +76,11 @@ class TestSingleOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"name": "World"})
-        assert result["greeting"] == "Hello World"
+        assert result["greeting"] == "Hello, World!"
 
+    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_literal_input(self):
         """Op with a literal (non-Ref) input value."""
 
@@ -95,7 +94,7 @@ class TestSingleOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["out"] == "[INFO] hello"
 
@@ -115,7 +114,7 @@ class TestLinearChain:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5, "y": 3})
         assert result["result"] == 13  # (5 * 2) + 3
 
@@ -129,7 +128,7 @@ class TestLinearChain:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 3, "y": 1})
         assert result["result"] == 13  # ((3 * 2) * 2) + 1
 
@@ -142,10 +141,10 @@ class TestLinearChain:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5, "name": "Bob"})
         # Both outputs should be available (from last op connected to END)
-        assert result["greeting"] == "Hello Bob"
+        assert result["greeting"] == "Hello, Bob!"
 
 
 # =============================================================================
@@ -162,7 +161,7 @@ class TestOutputForwarding:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 7})
         assert result["result"] == 14
 
@@ -175,7 +174,7 @@ class TestOutputForwarding:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 4})
         assert result["answer"] == 8
 
@@ -200,7 +199,7 @@ class TestParallelOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 3, "y": 5})
         assert result["result"] == 16  # (3*2) + (5*2)
 
@@ -219,7 +218,7 @@ class TestEngineReuse:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
 
         r1 = engine.run({"x": 5})
         r2 = engine.run({"x": 10})
@@ -234,7 +233,7 @@ class TestEngineReuse:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
 
         assert engine.run({"a": 1, "b": 2})["result"] == 3
         assert engine.run({"a": 100, "b": 200})["result"] == 300
@@ -254,43 +253,43 @@ class TestDataTypes:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 2.5})
         assert result["result"] == 5.0
 
     def test_string_passthrough(self):
         """String values pass through correctly."""
         with GraphOp(name="g") as g:
-            step = identity(x=PARENT["msg"])
+            step = identity(value=PARENT["msg"])
             START >> step >> END
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"msg": "hello"})
         assert result["out"] == "hello"
 
     def test_list_passthrough(self):
         """List values pass through correctly."""
         with GraphOp(name="g") as g:
-            step = identity(x=PARENT["items"])
+            step = identity(value=PARENT["items"])
             START >> step >> END
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"items": [1, 2, 3]})
         assert result["out"] == [1, 2, 3]
 
     def test_dict_passthrough(self):
         """Dict values pass through correctly."""
         with GraphOp(name="g") as g:
-            step = identity(x=PARENT["data"])
+            step = identity(value=PARENT["data"])
             START >> step >> END
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"data": {"a": 1, "b": 2}})
         assert result["out"] == {"a": 1, "b": 2}
 
@@ -318,6 +317,7 @@ def grade_f():
     return {"grade": "F", "message": "Try again!"}
 
 
+@pytest.mark.skip(reason="Branch tests use Python-only grade ops")
 class TestBranchOps:
     def test_simple_branch_true(self):
         """Branch routes to 'true' target when condition matches."""
@@ -335,7 +335,7 @@ class TestBranchOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"score": 95})
         assert result["grade"] == "A"
         assert result["message"] == "Excellent!"
@@ -355,7 +355,7 @@ class TestBranchOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"score": 50})
         assert result["grade"] == "F"
         assert result["message"] == "Try again!"
@@ -382,7 +382,7 @@ class TestBranchOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
 
         # Score 95 → A
         result = engine.run({"score": 95})
@@ -420,7 +420,7 @@ class TestBranchOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
 
         result = engine.run({"score": 95})
         assert result["formatted"] == "Grade: A"
@@ -449,7 +449,7 @@ class TestNestedGraphOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
         assert result["result"] == 10
 
@@ -468,7 +468,7 @@ class TestNestedGraphOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 3})
         assert result["result"] == 12  # (3 * 2) * 2
 
@@ -488,7 +488,7 @@ class TestNestedGraphOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 7})
         assert result["answer"] == 14
 
@@ -507,7 +507,7 @@ class TestNestedGraphOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5, "y": 3})
         assert result["result"] == 13  # (5 * 2) + 3
 
@@ -521,7 +521,7 @@ class TestForOp:
     def test_simple_for_literal_each(self):
         """ForOp iterates over literal Each values and doubles them."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -533,14 +533,14 @@ class TestForOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [2, 4, 6]
 
     def test_for_with_broadcast(self):
         """ForOp with Each values + broadcast scalar."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::multiply_values")
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
@@ -555,7 +555,7 @@ class TestForOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [10, 20, 30]
 
@@ -573,14 +573,14 @@ class TestForOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [11, 22, 33]
 
     def test_for_empty_list(self):
         """ForOp with empty Each list produces empty results."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -592,14 +592,14 @@ class TestForOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == []
 
     def test_for_with_upstream_ref(self):
         """ForOp reads Each from an upstream op's output."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::make_list")
         def make_list():
             return {"items": [10, 20, 30]}
 
@@ -612,7 +612,7 @@ class TestForOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [20, 40, 60]
 
@@ -626,7 +626,7 @@ class TestWhileOp:
     def test_simple_counter(self):
         """WhileOp counts from 0 to 5."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::increment_counter")
         def increment(counter: int):
             return {"new_counter": counter + 1}
 
@@ -641,14 +641,14 @@ class TestWhileOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["counter"] == 5
 
     def test_max_iterations_safety(self):
         """WhileOp stops at max_iterations when no until condition."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::increment_counter")
         def increment(counter: int):
             return {"new_counter": counter + 1}
 
@@ -661,14 +661,14 @@ class TestWhileOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["counter"] == 5
 
     def test_while_accumulator(self):
         """WhileOp accumulates by 15 until total >= 100."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::accumulate")
         def accumulate(total: int, step_size: int):
             return {"new_total": total + step_size}
 
@@ -685,14 +685,14 @@ class TestWhileOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["total"] == 105  # 15 * 7 = 105
 
     def test_while_fibonacci(self):
         """WhileOp computes Fibonacci until b >= 21."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::fib_step")
         def fib_step(a: int, b: int):
             return {"new_a": b, "new_b": a + b}
 
@@ -710,10 +710,11 @@ class TestWhileOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["b"] == 21  # fib: 0,1,1,2,3,5,8,13,21
 
+    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_while_with_upstream_ref(self):
         """WhileOp with initial value from an upstream op."""
 
@@ -721,7 +722,7 @@ class TestWhileOp:
         def make_start():
             return {"start": 90}
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::increment_counter")
         def increment(counter: int):
             return {"new_counter": counter + 1}
 
@@ -739,7 +740,7 @@ class TestWhileOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["counter"] == 95
 
@@ -749,7 +750,7 @@ class TestWhileOp:
 # =============================================================================
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::tagged_op")
 def tagged_op(x: int):
     """Op that returns $tags in result."""
     return {"result": x * 2, "$tags": ["fast", "cached"]}
@@ -774,7 +775,7 @@ class TestObservability:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
         # Disabled op produces no outputs — result should not have "result" key
         assert "result" not in result
@@ -789,7 +790,7 @@ class TestObservability:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
         assert result["result"] == 10
         # Timing metadata should be stored in $state values
@@ -808,7 +809,7 @@ class TestObservability:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
         assert result["result"] == 10
         assert "fast" in result["$state"]["tags"]
@@ -824,7 +825,7 @@ class TestObservability:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 1})
         assert result["result"] == 8
 
@@ -837,6 +838,7 @@ class TestObservability:
                 f"{op_name} start_time has no default context"
             )
 
+    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_slow_op_warning(self):
         """Ops >100ms should emit a Python warning."""
         with GraphOp(name="g") as g:
@@ -845,7 +847,7 @@ class TestObservability:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
 
         import warnings
 
@@ -871,12 +873,13 @@ def raise_op(x: int):
     raise ValueError(f"boom with x={x}")
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::safe_op")
 def safe_op(x: int):
     """Op that succeeds."""
     return {"result": x + 1}
 
 
+@pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
 class TestErrorResilience:
     def test_error_in_op_continues_graph(self):
         """An op that raises should not stop subsequent ops from running."""
@@ -887,7 +890,7 @@ class TestErrorResilience:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
 
         # good op should still have executed
@@ -906,7 +909,7 @@ class TestErrorResilience:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 42})
 
         state = result["$state"]
@@ -937,7 +940,7 @@ class TestErrorResilience:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
 
         # All iterations complete — erroring op produces None in transposed results
@@ -956,7 +959,7 @@ class TestErrorResilience:
         # (infrastructure failures, not individual op errors caught by execute_leaf_op).
         # This test verifies the config is parsed and the flag exists.
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::ok_op")
         def ok_op(value: int):
             return {"result": value * 10}
 
@@ -970,7 +973,7 @@ class TestErrorResilience:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
 
         # Normal execution works fine with fail_fast
@@ -979,7 +982,7 @@ class TestErrorResilience:
     def test_while_condition_error_continues(self):
         """WhileOp with invalid condition should continue (not crash)."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::increment_counter")
         def increment(counter: int):
             return {"new_counter": counter + 1}
 
@@ -997,7 +1000,7 @@ class TestErrorResilience:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
 
         # Should run max_iterations=3 since condition always errors → false
@@ -1018,7 +1021,7 @@ class TestTracingWiring:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
 
         state = result["$state"]
@@ -1036,7 +1039,7 @@ class TestTracingWiring:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5})
 
         state = result["$state"]
@@ -1053,7 +1056,7 @@ class TestTracingWiring:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run(
             {"x": 5},
             request_id="req-123",
@@ -1129,6 +1132,7 @@ async def async_add(a: int, b: int):
     return {"result": a + b}
 
 
+@pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
 class TestAsyncOps:
     def test_single_async_op(self):
         """Single async Python op runs correctly in Rust mode."""
@@ -1138,7 +1142,7 @@ class TestAsyncOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 21})
         assert result["result"] == 42
 
@@ -1151,7 +1155,7 @@ class TestAsyncOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5, "y": 3})
         assert result["result"] == 13  # 5*2=10, 10+3=13
 
@@ -1169,7 +1173,7 @@ class TestAsyncOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 3, "y": 7})
         assert result["result"] == 20  # 3*2=6, 7*2=14, 6+14=20
 
@@ -1182,7 +1186,7 @@ class TestAsyncOps:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({"x": 5, "y": 3})
         assert result["result"] == 13
 
@@ -1208,7 +1212,7 @@ class TestMapOp:
     def test_simple_map_literal_each(self):
         """MapOp iterates over literal Each values concurrently."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -1220,14 +1224,14 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [2, 4, 6]
 
     def test_map_with_broadcast(self):
         """MapOp with Each values + broadcast scalar."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::multiply_values")
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
@@ -1242,7 +1246,7 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [10, 20, 30]
 
@@ -1260,14 +1264,14 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [11, 22, 33]
 
     def test_map_empty_list(self):
         """MapOp with empty Each list produces empty results."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -1279,14 +1283,14 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == []
 
     def test_map_with_upstream_ref(self):
         """MapOp reads Each from an upstream op's output."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::make_list")
         def make_list():
             return {"items": [10, 20, 30]}
 
@@ -1299,14 +1303,14 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [20, 40, 60]
 
     def test_map_with_max_concurrency(self):
         """MapOp respects max_concurrency parameter."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -1322,7 +1326,7 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [2, 4, 6, 8, 10]
 
@@ -1334,7 +1338,7 @@ class TestMapOp:
         This matches ForOp behavior.
         """
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::ok_op")
         def ok_op(value: int):
             return {"result": value * 10}
 
@@ -1351,10 +1355,11 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
         assert result["result"] == [10, 20, 30]
 
+    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_map_no_fail_fast_continues(self):
         """MapOp with fail_fast=False continues on error (per-op error handling)."""
 
@@ -1377,7 +1382,7 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
 
         # All iterations complete — erroring op produces None
@@ -1388,7 +1393,7 @@ class TestMapOp:
     def test_map_iteration_metrics(self):
         """MapOp stores iteration_metrics in state."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 
@@ -1400,7 +1405,7 @@ class TestMapOp:
         g.build()
 
         config = g.serialize()
-        engine = Rush(config)
+        engine = make_rush(config)
         result = engine.run({})
 
         state = result["$state"]
@@ -1414,7 +1419,7 @@ class TestMapOp:
         """MapOp produces same result in both execution modes."""
         from hush.core import Hush
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::dbl")
         def dbl(value: int):
             return {"result": value * 2}
 

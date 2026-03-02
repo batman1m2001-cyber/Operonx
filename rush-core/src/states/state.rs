@@ -1,29 +1,33 @@
 //! EngineState — concurrent key-value state with context dimension.
 //!
 //! Mirrors Python's `states/state.py` (MemoryState).
-//! Maps (op_full_name, var_name, context_id) → PyObject.
+//! Maps (op_full_name, var_name, context_id) → Arc<serde_json::Value>.
 //! Default context is "" (empty string) for non-iteration code.
 //! Iteration contexts: "[0]", "[1]", nested: "[0].[0]", etc.
 //!
-//! Uses DashMap for concurrent read/write (parallel op execution)
-//! and Mutex for append-only metadata (tags).
+//! Uses DashMap for concurrent read/write (parallel op execution),
+//! lasso::ThreadedRodeo for string interning (zero-alloc key lookups),
+//! and Arc<Value> for O(1) value cloning (critical for large LLM responses).
+
+use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
-use std::sync::Mutex;
-
-use pyo3::prelude::*;
+use lasso::{Spur, ThreadedRodeo};
+use serde_json::Value;
 
 pub(crate) struct EngineState {
-    values: DashMap<(String, String, String), PyObject>,
+    interner: ThreadedRodeo,
+    values: DashMap<(Spur, Spur, Spur), Arc<Value>>,
     /// Dynamic tags collected from op results via `$tags` key.
     tags: Mutex<Vec<String>>,
-    /// Request ID for tracing / streaming (set by engine.run()).
+    /// Request ID for tracing (set by engine.run()).
     request_id: Mutex<Option<String>>,
 }
 
 impl EngineState {
     pub(crate) fn new() -> Self {
         EngineState {
+            interner: ThreadedRodeo::default(),
             values: DashMap::new(),
             tags: Mutex::new(Vec::new()),
             request_id: Mutex::new(None),
@@ -35,21 +39,27 @@ impl EngineState {
         *self.request_id.lock().unwrap() = Some(id);
     }
 
-    /// Get the request ID (used by streaming ops for STREAM_SERVICE).
+    /// Get the request ID (used for tracing metadata).
     pub(crate) fn request_id(&self) -> Option<String> {
         self.request_id.lock().unwrap().clone()
     }
 
-    /// Get a value from state. Returns an owned clone (safe for concurrent access).
-    pub(crate) fn get(&self, py: Python, full_name: &str, var: &str, context: &str) -> Option<PyObject> {
-        self.values
-            .get(&(full_name.to_string(), var.to_string(), context.to_string()))
-            .map(|entry| entry.value().clone_ref(py))
+    /// Get a value from state. Zero heap allocations on cache hit.
+    /// Arc::clone() is O(1) regardless of value size.
+    pub(crate) fn get(&self, full_name: &str, var: &str, context: &str) -> Option<Arc<Value>> {
+        let k1 = self.interner.get(full_name)?;
+        let k2 = self.interner.get(var)?;
+        let k3 = self.interner.get(context)?;
+        self.values.get(&(k1, k2, k3)).map(|entry| Arc::clone(entry.value()))
     }
 
-    /// Set a value in state. Thread-safe via DashMap.
-    pub(crate) fn set(&self, full_name: String, var: String, context: String, value: PyObject) {
-        self.values.insert((full_name, var, context), value);
+    /// Set a value in state. Interns key strings (allocs only on first-seen string).
+    /// Callers pass &str — no more .clone() / .to_string() at call sites.
+    pub(crate) fn set(&self, full_name: &str, var: &str, context: &str, value: Value) {
+        let k1 = self.interner.get_or_intern(full_name);
+        let k2 = self.interner.get_or_intern(var);
+        let k3 = self.interner.get_or_intern(context);
+        self.values.insert((k1, k2, k3), Arc::new(value));
     }
 
     /// Add dynamic tags (deduplicated). Mirrors Python's `MemoryState.add_tags()`.
@@ -66,11 +76,30 @@ impl EngineState {
         self.tags.lock().unwrap().clone()
     }
 
-    /// Snapshot all stored values. Used by engine.rs to export state for tracing.
-    pub(crate) fn values_snapshot(&self, py: Python) -> Vec<((String, String, String), PyObject)> {
-        self.values
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone_ref(py)))
-            .collect()
+    /// Snapshot all stored values as a nested JSON object.
+    /// Format: {"op_name": {"var_name": {"context": value}}}.
+    /// Used by engine.rs to build $state metadata for tracing.
+    pub(crate) fn values_snapshot(&self) -> Value {
+        let mut result = serde_json::Map::new();
+        for entry in self.values.iter() {
+            let (k1, k2, k3) = entry.key();
+            let op = self.interner.resolve(k1);
+            let var = self.interner.resolve(k2);
+            let ctx = self.interner.resolve(k3);
+            let value: &Value = entry.value().as_ref();
+
+            let op_map = result
+                .entry(op.to_string())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+            if let Value::Object(ref mut op_obj) = op_map {
+                let var_map = op_obj
+                    .entry(var.to_string())
+                    .or_insert_with(|| Value::Object(serde_json::Map::new()));
+                if let Value::Object(ref mut var_obj) = var_map {
+                    var_obj.insert(ctx.to_string(), value.clone());
+                }
+            }
+        }
+        Value::Object(result)
     }
 }

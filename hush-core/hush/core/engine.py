@@ -112,14 +112,17 @@ class Hush:
     def _init_rush_engine(self) -> None:
         """Initialize the Rust backend engine.
 
-        Serializes the graph config and creates a Rush executor.
+        Serializes the graph config to JSON and creates a Rush executor.
         Falls back to Python mode if rush-core is not installed.
         """
         try:
+            import json
+
             from rush_core import Rush
 
             config = self.graph.serialize()
-            self._rush_engine = Rush(config)
+            config_json = json.dumps(config, default=str)
+            self._rush_engine = Rush(config_json)
             LOGGER.debug(
                 "Rush backend initialized for [highlight]%s[/highlight]",
                 self.name,

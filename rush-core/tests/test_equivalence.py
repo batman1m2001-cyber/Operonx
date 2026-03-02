@@ -6,7 +6,9 @@ Hush(graph, mode="rust"), asserting that outputs match exactly.
 
 import asyncio
 
+import pytest
 
+from conftest import BUILTIN_CRATE
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
 from hush.core.ops.iteration.base import Each
@@ -36,22 +38,22 @@ def run_both(graph_op, inputs=None):
 # ── Ops used across tests ───────────────────────────────────────────
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::double")
 def double(x: int):
     return {"result": x * 2}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::add")
 def add(a: int, b: int):
     return {"result": a + b}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::identity")
 def identity(value):
     return {"value": value}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::increment_counter")
 def increment(counter: int):
     return {"new_counter": counter + 1}
 
@@ -66,7 +68,7 @@ def multiply(value: int, factor: int):
     return {"result": value * factor}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::greet")
 def greet(name: str):
     return {"greeting": f"Hello, {name}!"}
 
@@ -149,6 +151,7 @@ class TestBranch:
         py, rs = run_both(g, {"score": 50})
         assert py == rs == {"value": 50}
 
+    @pytest.mark.skip(reason="Python-only op, no Rust equivalent")
     def test_multi_condition_branch(self):
         with GraphOp(name="g") as g:
             router = (
@@ -225,6 +228,7 @@ class TestForOp:
         py, rs = run_both(g)
         assert py["result"] == rs["result"] == [2, 4, 6]
 
+    @pytest.mark.skip(reason="Python-only op, no Rust equivalent")
     def test_broadcast(self):
         with GraphOp(name="g") as g:
             with ForOp(
@@ -295,6 +299,7 @@ class TestWhileOp:
         py, rs = run_both(g)
         assert py["counter"] == rs["counter"] == 5
 
+    @pytest.mark.skip(reason="Python-only op, no Rust equivalent")
     def test_while_accumulator(self):
         with GraphOp(name="g") as g:
             with WhileOp(
