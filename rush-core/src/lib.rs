@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 
 mod config;
 mod engine;
+pub(crate) mod error;
 mod ops;
 mod plugins;
 mod refs;

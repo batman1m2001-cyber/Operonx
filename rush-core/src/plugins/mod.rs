@@ -240,12 +240,15 @@ pub(crate) fn parse_plugin_spec(spec: &str) -> Option<(&str, &str)> {
 ///
 /// 1. Resolves the path (auto-builds from crate if needed)
 /// 2. Loads the library (cached after first load)
-/// 3. Looks up `rush_op_<func_name>` symbol
-/// 4. Calls it with JSON-serialized inputs
-/// 5. Frees the output buffer via `rush_ops_free`
-/// 6. Returns deserialized JSON output
+/// 3. Looks up `rush_op_<func_name>` symbol → extracts raw fn pointers
+/// 4. **Drops the registry lock** before calling the op
+/// 5. Calls the op with JSON-serialized inputs (lock-free, truly parallel)
+/// 6. Frees the output buffer via `rush_ops_free`
+/// 7. Returns deserialized JSON output
 ///
 /// This function does NOT require the GIL — it operates entirely in Rust.
+/// The registry Mutex is held only during library lookup, NOT during op execution,
+/// so concurrent plugin calls run in true parallel.
 pub(crate) fn load_and_call(
     lib_path: &str,
     func_name: &str,
@@ -254,38 +257,48 @@ pub(crate) fn load_and_call(
     // Resolve path: auto-build from crate if not a .so/.dylib
     let abs_path = resolve_lib_path(lib_path)?;
 
-    let registry = get_registry();
-    let mut libs = registry.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+    // Extract raw function pointers under the lock, then drop it.
+    // Safe because: libraries are only inserted (never removed) from the cache,
+    // so the loaded symbols remain valid for the process lifetime.
+    let (op_fn_ptr, free_fn_ptr) = {
+        let registry = get_registry();
+        let mut libs = registry.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
 
-    // Load library if not cached
-    if !libs.contains_key(&abs_path) {
-        let lib = unsafe {
-            Library::new(&abs_path)
-                .map_err(|e| format!("Failed to load plugin '{}': {}", abs_path.display(), e))?
+        // Load library if not cached
+        if !libs.contains_key(&abs_path) {
+            let lib = unsafe {
+                Library::new(&abs_path)
+                    .map_err(|e| format!("Failed to load plugin '{}': {}", abs_path.display(), e))?
+            };
+            libs.insert(abs_path.clone(), lib);
+        }
+
+        let lib = libs.get(&abs_path).unwrap();
+
+        // Look up symbols and extract raw pointers (Copy, no borrow on Library)
+        let symbol_name = format!("rush_op_{}", func_name);
+        let op_fn: Symbol<OpFn> = unsafe {
+            lib.get(symbol_name.as_bytes())
+                .map_err(|e| format!("Symbol '{}' not found in '{}': {}", symbol_name, lib_path, e))?
         };
-        libs.insert(abs_path.clone(), lib);
-    }
+        let free_fn: Symbol<FreeFn> = unsafe {
+            lib.get(b"rush_ops_free")
+                .map_err(|e| format!("Symbol 'rush_ops_free' not found in '{}': {}", lib_path, e))?
+        };
 
-    let lib = libs.get(&abs_path).unwrap();
+        // Dereference Symbol to get raw fn pointers (these are Copy, no lifetime tie)
+        let op_raw: OpFn = *op_fn;
+        let free_raw: FreeFn = *free_fn;
 
-    // Look up the op function: rush_op_<name>
-    let symbol_name = format!("rush_op_{}", func_name);
-    let op_fn: Symbol<OpFn> = unsafe {
-        lib.get(symbol_name.as_bytes())
-            .map_err(|e| format!("Symbol '{}' not found in '{}': {}", symbol_name, lib_path, e))?
+        (op_raw, free_raw)
+        // MutexGuard dropped here — lock released before op execution
     };
 
-    // Look up the free function
-    let free_fn: Symbol<FreeFn> = unsafe {
-        lib.get(b"rush_ops_free")
-            .map_err(|e| format!("Symbol 'rush_ops_free' not found in '{}': {}", lib_path, e))?
-    };
-
-    // Call the op
+    // ── Op execution — lock-free, truly parallel ──
     let mut output_ptr: *mut u8 = std::ptr::null_mut();
     let mut output_len: usize = 0;
 
-    let rc = unsafe { op_fn(input_json.as_ptr(), input_json.len(), &mut output_ptr, &mut output_len) };
+    let rc = unsafe { op_fn_ptr(input_json.as_ptr(), input_json.len(), &mut output_ptr, &mut output_len) };
 
     if rc != 0 {
         return Err(format!(
@@ -303,7 +316,7 @@ pub(crate) fn load_and_call(
 
     // Copy output and free the plugin's buffer
     let output_bytes = unsafe { std::slice::from_raw_parts(output_ptr, output_len) }.to_vec();
-    unsafe { free_fn(output_ptr, output_len) };
+    unsafe { free_fn_ptr(output_ptr, output_len) };
 
     // Deserialize output JSON
     serde_json::from_slice(&output_bytes)

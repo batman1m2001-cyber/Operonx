@@ -1,140 +1,239 @@
-//! Ref operation interpreter — evaluates serialized Ref._ops chains in Rust.
+//! Ref operation interpreter — evaluates serialized Ref._ops chains in pure Rust.
 //!
-//! Mirrors what Python's `Ref._fn` lambdas do, using PyO3's `PyAny` operations.
-//! All operations go through PyO3 so any Python object type is supported.
-//!
+//! Operates on `serde_json::Value` — no Python/GIL needed.
 //! Supports: getitem, getattr, arithmetic, comparisons, boolean (and_/or_/rand_/ror_/not_),
-//! apply, neg. Nested Ref args are resolved via EngineState lookup.
+//! neg. Nested Ref args are resolved via EngineState lookup.
 
-use pyo3::prelude::*;
-use pyo3::conversion::ToPyObject;
+use std::sync::Arc;
 
-use crate::config::{RefArg, RefOp};
+use serde_json::Value;
+
+use crate::config::{RefArg, RefConfig, RefOp};
+use crate::error::RushError;
 use crate::states::state::EngineState;
+
+// =============================================================================
+// JSON truthiness + comparison helpers
+// =============================================================================
+
+/// JSON truthiness — mirrors Python's truthiness for JSON values.
+///
+/// Falsy: null, false, 0, 0.0, "", [], {}
+/// Truthy: everything else
+pub fn is_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i != 0
+            } else if let Some(u) = n.as_u64() {
+                u != 0
+            } else if let Some(f) = n.as_f64() {
+                f != 0.0
+            } else {
+                true
+            }
+        }
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(o) => !o.is_empty(),
+    }
+}
+
+/// Compare two JSON values with the given operator.
+pub fn compare_values(lhs: &Value, rhs: &Value, op: &str) -> bool {
+    match (lhs, rhs) {
+        (Value::Number(a), Value::Number(b)) => {
+            let a = a.as_f64().unwrap_or(0.0);
+            let b = b.as_f64().unwrap_or(0.0);
+            match op {
+                "==" => a == b,
+                "!=" => a != b,
+                ">" => a > b,
+                ">=" => a >= b,
+                "<" => a < b,
+                "<=" => a <= b,
+                _ => false,
+            }
+        }
+        (Value::String(a), Value::String(b)) => match op {
+            "==" => a == b,
+            "!=" => a != b,
+            ">" => a > b,
+            ">=" => a >= b,
+            "<" => a < b,
+            "<=" => a <= b,
+            _ => false,
+        },
+        (Value::Bool(a), Value::Bool(b)) => match op {
+            "==" => a == b,
+            "!=" => a != b,
+            _ => false,
+        },
+        (Value::Null, Value::Null) => op == "==",
+        (Value::Null, _) | (_, Value::Null) => op == "!=",
+        _ => match op {
+            "==" => false,
+            "!=" => true,
+            _ => false,
+        },
+    }
+}
+
+// =============================================================================
+// Ref ops evaluation
+// =============================================================================
 
 /// Evaluate a chain of ref operations on a source value.
 ///
-/// State and context are needed for resolving nested Ref arguments
-/// (e.g. `(PARENT["a"] > 10) & (PARENT["b"] == "x")`).
+/// State and context are needed for resolving nested Ref arguments.
 pub fn evaluate_ref_ops(
-    py: Python,
-    value: PyObject,
+    value: Value,
     ops: &[RefOp],
     state: &EngineState,
     context: &str,
-) -> PyResult<PyObject> {
+) -> Result<Value, RushError> {
     let mut result = value;
 
     for op in ops {
         result = match op.name.as_str() {
             "getitem" => {
-                let key = resolve_arg(py, &op.args[0], state, context)?;
-                result
-                    .bind(py)
-                    .get_item(key.bind(py))?
-                    .unbind()
+                let key = resolve_arg(&op.args[0], state, context)?;
+                match (&result, &key) {
+                    (Value::Object(map), Value::String(k)) => {
+                        map.get(k).cloned().unwrap_or(Value::Null)
+                    }
+                    (Value::Array(arr), Value::Number(n)) => {
+                        if let Some(idx) = n.as_u64() {
+                            arr.get(idx as usize).cloned().unwrap_or(Value::Null)
+                        } else if let Some(idx) = n.as_i64() {
+                            // Support negative indexing
+                            if idx < 0 {
+                                let pos = (arr.len() as i64 + idx) as usize;
+                                arr.get(pos).cloned().unwrap_or(Value::Null)
+                            } else {
+                                arr.get(idx as usize).cloned().unwrap_or(Value::Null)
+                            }
+                        } else {
+                            Value::Null
+                        }
+                    }
+                    // String key on array → try parse as int
+                    (Value::Array(arr), Value::String(s)) => {
+                        if let Ok(idx) = s.parse::<usize>() {
+                            arr.get(idx).cloned().unwrap_or(Value::Null)
+                        } else {
+                            Value::Null
+                        }
+                    }
+                    _ => {
+                        return Err(RushError::RefError(format!(
+                            "Cannot getitem on {:?} with key {:?}",
+                            value_type_name(&result),
+                            key
+                        )));
+                    }
+                }
             }
             "getattr" => {
-                let attr: String = resolve_arg_as_string(py, &op.args[0], state, context)?;
-                result
-                    .bind(py)
-                    .getattr(attr.as_str())?
-                    .unbind()
+                // In JSON, getattr is equivalent to getitem on objects
+                let attr = resolve_arg_as_string(&op.args[0], state, context)?;
+                match &result {
+                    Value::Object(map) => map.get(&attr).cloned().unwrap_or(Value::Null),
+                    _ => {
+                        return Err(RushError::RefError(format!(
+                            "Cannot getattr '{}' on non-object: {}",
+                            attr,
+                            value_type_name(&result)
+                        )));
+                    }
+                }
             }
             // Arithmetic ops
             "add" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).call_method1("__add__", (other,))?.unbind()
+                let other = resolve_arg(&op.args[0], state, context)?;
+                // String concatenation
+                if let (Value::String(a), Value::String(b)) = (&result, &other) {
+                    Value::String(format!("{}{}", a, b))
+                } else {
+                    json_arithmetic(&result, &other, "add")?
+                }
             }
             "sub" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).call_method1("__sub__", (other,))?.unbind()
+                let other = resolve_arg(&op.args[0], state, context)?;
+                json_arithmetic(&result, &other, "sub")?
             }
             "mul" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).call_method1("__mul__", (other,))?.unbind()
+                let other = resolve_arg(&op.args[0], state, context)?;
+                json_arithmetic(&result, &other, "mul")?
             }
             "truediv" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).call_method1("__truediv__", (other,))?.unbind()
+                let other = resolve_arg(&op.args[0], state, context)?;
+                json_arithmetic(&result, &other, "truediv")?
             }
             // Comparison ops
-            "eq" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Eq)?.unbind()
+            "eq" | "ne" | "lt" | "le" | "gt" | "ge" => {
+                let other = resolve_arg(&op.args[0], state, context)?;
+                let op_str = match op.name.as_str() {
+                    "eq" => "==",
+                    "ne" => "!=",
+                    "lt" => "<",
+                    "le" => "<=",
+                    "gt" => ">",
+                    "ge" => ">=",
+                    _ => unreachable!(),
+                };
+                Value::Bool(compare_values(&result, &other, op_str))
             }
-            "ne" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Ne)?.unbind()
-            }
-            "lt" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Lt)?.unbind()
-            }
-            "le" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Le)?.unbind()
-            }
-            "gt" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Gt)?.unbind()
-            }
-            "ge" => {
-                let other = resolve_arg(py, &op.args[0], state, context)?;
-                result.bind(py).rich_compare(other.bind(py), pyo3::basic::CompareOp::Ge)?.unbind()
-            }
-            // Boolean ops — short-circuit semantics (mirrors ref.py:199-217)
+            // Boolean ops — short-circuit semantics (mirrors ref.py)
             "and_" => {
-                // left and right: if left is falsy, return left; else evaluate right
-                if !result.bind(py).is_truthy()? {
+                if !is_truthy(&result) {
                     result
                 } else {
-                    resolve_arg(py, &op.args[0], state, context)?
+                    resolve_arg(&op.args[0], state, context)?
                 }
             }
             "or_" => {
-                // left or right: if left is truthy, return left; else evaluate right
-                if result.bind(py).is_truthy()? {
+                if is_truthy(&result) {
                     result
                 } else {
-                    resolve_arg(py, &op.args[0], state, context)?
+                    resolve_arg(&op.args[0], state, context)?
                 }
             }
             "rand_" => {
-                // reverse and: right and left
-                let right = resolve_arg(py, &op.args[0], state, context)?;
-                if !right.bind(py).is_truthy()? {
+                let right = resolve_arg(&op.args[0], state, context)?;
+                if !is_truthy(&right) {
                     right
                 } else {
                     result
                 }
             }
             "ror_" => {
-                // reverse or: right or left
-                let right = resolve_arg(py, &op.args[0], state, context)?;
-                if right.bind(py).is_truthy()? {
+                let right = resolve_arg(&op.args[0], state, context)?;
+                if is_truthy(&right) {
                     right
                 } else {
                     result
                 }
             }
-            "not_" => {
-                let v = result.bind(py).is_truthy()?;
-                let b = !v;
-                PyObject::from(b.to_object(py))
-            }
-            // Apply callable
-            "apply" => {
-                let callable = resolve_arg(py, &op.args[0], state, context)?;
-                callable.call1(py, (result,))?
-            }
+            "not_" => Value::Bool(!is_truthy(&result)),
             "neg" => {
-                result.bind(py).call_method0("__neg__")?.unbind()
+                let n = result.as_f64().ok_or_else(|| {
+                    RushError::RefError(format!(
+                        "Cannot negate non-number: {}",
+                        value_type_name(&result)
+                    ))
+                })?;
+                serde_json::json!(-n)
+            }
+            "apply" => {
+                return Err(RushError::UnsupportedOp(
+                    "Ref.apply() is not supported in rust mode. Use @op(rust=...) instead.".into(),
+                ));
             }
             unknown => {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("Unknown ref op: {unknown}"),
-                ));
+                return Err(RushError::RefError(format!("Unknown ref op: {unknown}")));
             }
         };
     }
@@ -142,43 +241,93 @@ pub fn evaluate_ref_ops(
     Ok(result)
 }
 
-/// Resolve a RefArg to a PyObject, with state lookup for nested refs.
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Resolve a RefArg to a Value, with state lookup for nested refs.
 fn resolve_arg(
-    py: Python,
     arg: &RefArg,
     state: &EngineState,
     context: &str,
-) -> PyResult<PyObject> {
+) -> Result<Value, RushError> {
     match arg {
-        RefArg::Literal(obj) => Ok(obj.clone_ref(py)),
-        RefArg::Callable(obj) => Ok(obj.clone_ref(py)),
-        RefArg::NestedRef(ref_config) => {
-            // Look up the nested ref's value in state
-            let value = state
-                .get(py, &ref_config.source, &ref_config.var, context)
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Nested ref {}.{} not found in state",
-                        ref_config.source, ref_config.var
-                    ))
-                })?;
-            // If the nested ref has ops, evaluate them recursively
-            if ref_config.ops.is_empty() {
-                Ok(value.clone_ref(py))
-            } else {
-                evaluate_ref_ops(py, value.clone_ref(py), &ref_config.ops, state, context)
-            }
-        }
+        RefArg::Literal(val) => Ok(val.clone()),
+        RefArg::NestedRef(ref_config) => resolve_nested_ref(ref_config, state, context),
+    }
+}
+
+/// Resolve a nested ref config: look up value in state and apply ops.
+fn resolve_nested_ref(
+    ref_config: &RefConfig,
+    state: &EngineState,
+    context: &str,
+) -> Result<Value, RushError> {
+    let value = state
+        .get(&ref_config.source, &ref_config.var, context)
+        .ok_or_else(|| {
+            RushError::RefError(format!(
+                "Nested ref {}.{} not found in state",
+                ref_config.source, ref_config.var
+            ))
+        })?;
+    let value = Arc::try_unwrap(value).unwrap_or_else(|arc| (*arc).clone());
+    if ref_config.ops.is_empty() {
+        Ok(value)
+    } else {
+        evaluate_ref_ops(value, &ref_config.ops, state, context)
     }
 }
 
 /// Resolve a RefArg as a String (for getattr).
 fn resolve_arg_as_string(
-    py: Python,
     arg: &RefArg,
     state: &EngineState,
     context: &str,
-) -> PyResult<String> {
-    let obj = resolve_arg(py, arg, state, context)?;
-    obj.extract::<String>(py)
+) -> Result<String, RushError> {
+    let val = resolve_arg(arg, state, context)?;
+    val.as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| RushError::RefError(format!("Expected string for getattr, got: {:?}", val)))
+}
+
+/// Arithmetic on serde_json::Value.
+fn json_arithmetic(lhs: &Value, rhs: &Value, op: &str) -> Result<Value, RushError> {
+    let a = lhs
+        .as_f64()
+        .ok_or_else(|| RushError::RefError(format!("Cannot perform {op} on non-number: {lhs}")))?;
+    let b = rhs
+        .as_f64()
+        .ok_or_else(|| RushError::RefError(format!("Cannot perform {op} on non-number: {rhs}")))?;
+
+    let result = match op {
+        "add" => a + b,
+        "sub" => a - b,
+        "mul" => a * b,
+        "truediv" => {
+            if b == 0.0 {
+                return Err(RushError::RefError("Division by zero".into()));
+            }
+            a / b
+        }
+        _ => return Err(RushError::RefError(format!("Unknown arithmetic op: {op}"))),
+    };
+
+    // Preserve integer type if both inputs were integers and result is integer
+    if lhs.is_i64() && rhs.is_i64() && op != "truediv" && (result as i64 as f64) == result {
+        return Ok(Value::Number(serde_json::Number::from(result as i64)));
+    }
+    Ok(serde_json::json!(result))
+}
+
+/// Human-readable type name for error messages.
+fn value_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }

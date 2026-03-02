@@ -1,18 +1,18 @@
 //! Graph op execution — scheduling loop, output collection, nested graphs.
 //!
 //! Mirrors Python's `ops/graph/graph_op.py` (GraphOp).
+//! Pure Rust on serde_json::Value — no Python/GIL needed.
 //! Supports batch concurrent execution via tokio when multiple independent ops are ready.
-//! Uses OpBound to determine scheduling strategy:
-//! - I/O-bound ops: tokio async (HTTP calls overlap without blocking threads)
-//! - CPU-bound ops: tokio::spawn_blocking (parallel CPU, GIL released independently)
+
+use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use serde_json::Value;
 
 use crate::config::{GraphConfig, OpBound, OpConfig};
+use crate::error::RushError;
 use crate::ops::base;
-use crate::ops::iteration::{aiter_op, for_op, map_op, while_op};
+use crate::ops::iteration::{for_op, map_op, while_op};
 use crate::runtime;
 use crate::states::state::EngineState;
 
@@ -22,18 +22,20 @@ use crate::states::state::EngineState;
 
 /// Dispatch an op to the appropriate runner based on op_type.
 pub(crate) fn dispatch_op(
-    py: Python,
     op: &OpConfig,
     state: &EngineState,
     context: &str,
-) -> PyResult<()> {
+) -> Result<(), RushError> {
     match op.op_type.as_str() {
-        "graph" => run_nested(py, op, state, context),
-        "for" => for_op::run(py, op, state, context),
-        "while" => while_op::run(py, op, state, context),
-        "map" => map_op::run(py, op, state, context),
-        "stream" => aiter_op::run(py, op, state, context),
-        _ => base::run(py, op, state, context),
+        "graph" => run_nested(op, state, context),
+        "for" => for_op::run(op, state, context),
+        "while" => while_op::run(op, state, context),
+        "map" => map_op::run(op, state, context),
+        "stream" => Err(RushError::UnsupportedOp(
+            "AIterOp (stream) is not supported in rust mode v1. Use MapOp instead.".into(),
+        )),
+        "branch" => base::execute_branch(op, state, context),
+        _ => base::run(op, state, context),
     }
 }
 
@@ -44,19 +46,16 @@ pub(crate) fn dispatch_op(
 /// Run a graph's scheduling loop (used for both top-level and nested graphs).
 ///
 /// Supports two execution modes:
-/// - **Sequential** (default): ops executed one at a time (optimal for sync Python ops)
+/// - **Sequential** (default): ops executed one at a time
 /// - **Concurrent** (batch): independent ops executed via tokio's thread pool
 ///
 /// Concurrent mode activates when a batch has 2+ ops AND at least one has
-/// `bound = Io` (I/O-bound, releases GIL during HTTP waits) or a Rust-native
-/// op (`rust_op`, executes without GIL). Pure sync CPU-bound Python batches
-/// run sequentially to avoid GIL contention overhead.
+/// `bound = Io` or a Rust-native op.
 pub(crate) fn run_graph(
-    py: Python,
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
-) -> PyResult<()> {
+) -> Result<(), RushError> {
     let mut ready_count = config.initial_ready_count.clone();
     let mut soft_satisfied: AHashSet<String> = AHashSet::new();
     let mut queue: Vec<String> = config.entries.clone();
@@ -65,62 +64,49 @@ pub(crate) fn run_graph(
         let batch: Vec<String> = queue.drain(..).collect();
 
         // Check if concurrent execution would benefit this batch.
-        // Graph ops (nested workflows) are always eligible — they typically
-        // contain IO-bound ops (LLM, embedding) inside.
-        let use_concurrent = batch.len() > 1 && batch.iter().any(|name| {
-            config.ops.get(name).map_or(false, |op| {
-                op.bound == OpBound::Io
-                    || op.rust_op.is_some()
-                    || op.op_type == "graph"
-            })
-        });
+        let use_concurrent = batch.len() > 1
+            && batch.iter().any(|name| {
+                config.ops.get(name).map_or(false, |op| {
+                    op.bound == OpBound::Io || op.rust_op.is_some() || op.op_type == "graph"
+                })
+            });
 
         if use_concurrent {
-            run_batch(py, &batch, config, state, context)?;
+            run_batch(&batch, config, state, context)?;
 
             for op_name in &batch {
                 let op = config.ops.get(op_name).ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!(
-                        "Op '{}' not found in config",
-                        op_name
-                    ))
+                    RushError::ConfigError(format!("Op '{}' not found in config", op_name))
                 })?;
                 activate_successors(
-                    py, op, op_name, config, state, context,
-                    &mut ready_count, &mut soft_satisfied, &mut queue,
+                    op,
+                    op_name,
+                    config,
+                    state,
+                    context,
+                    &mut ready_count,
+                    &mut soft_satisfied,
+                    &mut queue,
                 )?;
             }
         } else {
             for op_name in batch {
                 let op = config.ops.get(&op_name).ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!(
-                        "Op '{}' not found in config",
-                        op_name
-                    ))
+                    RushError::ConfigError(format!("Op '{}' not found in config", op_name))
                 })?;
 
-                // Release GIL during op execution so other concurrent
-                // workflows (from run_in_executor) can make progress.
-                // SAFETY: op and state are alive for the entire run_graph call.
-                let op_ptr = op as *const OpConfig as usize;
-                let state_ptr = state as *const EngineState as usize;
-                let ctx = context.to_string();
-
-                let result: Result<(), String> = py.allow_threads(|| {
-                    Python::with_gil(|py| {
-                        let op = unsafe { &*(op_ptr as *const OpConfig) };
-                        let state = unsafe { &*(state_ptr as *const EngineState) };
-                        dispatch_op(py, op, state, &ctx).map_err(|e| format!("{e}"))
-                    })
-                });
-
-                if let Err(msg) = result {
-                    return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(msg));
-                }
+                // Pure Rust — just dispatch directly, no GIL dance
+                dispatch_op(op, state, context)?;
 
                 activate_successors(
-                    py, op, &op_name, config, state, context,
-                    &mut ready_count, &mut soft_satisfied, &mut queue,
+                    op,
+                    &op_name,
+                    config,
+                    state,
+                    context,
+                    &mut ready_count,
+                    &mut soft_satisfied,
+                    &mut queue,
                 )?;
             }
         }
@@ -136,70 +122,60 @@ pub(crate) fn run_graph(
 /// Execute a batch of independent ops concurrently via tokio.
 ///
 /// All ops in the batch have ready_count == 0 (no dependencies on each other).
-/// Each op is spawned as a `tokio::task::spawn_blocking` task that acquires
-/// the GIL independently. DashMap-based EngineState allows concurrent reads/writes.
+/// Each op is spawned as a `tokio::task::spawn_blocking` task.
+/// No GIL needed — pure Rust execution.
 fn run_batch(
-    py: Python,
     batch: &[String],
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
-) -> PyResult<()> {
-    let state_addr = state as *const EngineState as usize;
+) -> Result<(), RushError> {
     let context_owned = context.to_string();
 
-    let op_addrs: Vec<usize> = batch
+    // SAFETY: config and state are alive for the duration of block_on.
+    // We use raw pointer casts because spawn_blocking requires 'static.
+    let state_addr = state as *const EngineState as usize;
+
+    let op_addrs: Vec<(String, usize)> = batch
         .iter()
         .filter_map(|name| {
-            config.ops.get(name).map(|op| op as *const OpConfig as usize)
+            config
+                .ops
+                .get(name)
+                .map(|op| (name.clone(), op as *const OpConfig as usize))
         })
         .collect();
 
-    py.allow_threads(|| {
-        runtime::get_runtime().block_on(async {
-            let mut handles = Vec::with_capacity(op_addrs.len());
+    runtime::get_runtime().block_on(async {
+        let mut handles = Vec::with_capacity(op_addrs.len());
 
-            for &op_addr in &op_addrs {
-                let ctx = context_owned.clone();
+        for (op_name, op_addr) in &op_addrs {
+            let ctx = context_owned.clone();
+            let name = op_name.clone();
+            let op_a = *op_addr;
 
-                let handle = tokio::task::spawn_blocking(move || {
-                    Python::with_gil(|py| {
-                        // SAFETY: op and state are alive for the duration of block_on
-                        let op = unsafe { &*(op_addr as *const OpConfig) };
-                        let state = unsafe { &*(state_addr as *const EngineState) };
+            let handle = tokio::task::spawn_blocking(move || {
+                // SAFETY: op and state are alive for the duration of block_on
+                let op = unsafe { &*(op_a as *const OpConfig) };
+                let state = unsafe { &*(state_addr as *const EngineState) };
 
-                        if let Err(e) = dispatch_op(py, op, state, &ctx) {
-                            let error_msg = format!("{}", e);
-                            state.set(
-                                op.full_name.clone(),
-                                "error".to_string(),
-                                ctx.to_string(),
-                                error_msg.to_object(py),
-                            );
-                            if let Ok(logging) = py.import_bound("logging") {
-                                if let Ok(logger) =
-                                    logging.call_method1("getLogger", ("hush.core",))
-                                {
-                                    let _ = logger.call_method1(
-                                        "error",
-                                        (format!(
-                                            "[rush] Error in concurrent op {}: {}",
-                                            op.full_name, error_msg
-                                        ),),
-                                    );
-                                }
-                            }
-                        }
-                    });
-                });
+                if let Err(e) = dispatch_op(op, state, &ctx) {
+                    state.set(
+                        &name,
+                        "error",
+                        &ctx,
+                        Value::String(format!("{}", e)),
+                    );
+                    log::error!("[rush] Error in concurrent op {}: {}", name, e);
+                }
+            });
 
-                handles.push(handle);
-            }
+            handles.push(handle);
+        }
 
-            for handle in handles {
-                let _ = handle.await;
-            }
-        });
+        for handle in handles {
+            let _ = handle.await;
+        }
     });
 
     Ok(())
@@ -209,22 +185,22 @@ fn run_batch(
 // Output collection
 // =============================================================================
 
-/// Collect graph outputs into a Python dict.
+/// Collect graph outputs as a serde_json::Value (JSON object).
 pub(crate) fn get_outputs(
-    py: Python,
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
-) -> PyResult<PyObject> {
-    let result = PyDict::new_bound(py);
+) -> Result<Value, RushError> {
+    let mut result = serde_json::Map::new();
     for param in &config.outputs {
-        if let Some(value) = base::resolve_param(py, param, state, context)? {
-            result.set_item(&param.var_name, value.bind(py))?;
-        } else if let Some(value) = state.get(py, &config.full_name, &param.var_name, context) {
-            result.set_item(&param.var_name, value.bind(py))?;
+        if let Some(value) = base::resolve_param(param, state, context)? {
+            result.insert(param.var_name.clone(), value);
+        } else if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
+            let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+            result.insert(param.var_name.clone(), value);
         }
     }
-    Ok(result.into())
+    Ok(Value::Object(result))
 }
 
 // =============================================================================
@@ -233,7 +209,6 @@ pub(crate) fn get_outputs(
 
 /// Activate successors after an op completes.
 pub(crate) fn activate_successors(
-    py: Python,
     op: &OpConfig,
     op_name: &str,
     config: &GraphConfig,
@@ -242,7 +217,7 @@ pub(crate) fn activate_successors(
     ready_count: &mut AHashMap<String, i32>,
     soft_satisfied: &mut AHashSet<String>,
     queue: &mut Vec<String>,
-) -> PyResult<()> {
+) -> Result<(), RushError> {
     let all_successors = config
         .compiled_adj
         .get(op_name)
@@ -252,18 +227,16 @@ pub(crate) fn activate_successors(
     // For branch ops, filter to only the selected target
     let successors = if op.op_type == "branch" {
         let target = state
-            .get(py, &op.full_name, "target", context)
-            .and_then(|v| v.extract::<String>(py).ok());
+            .get(&op.full_name, "target", context)
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
 
         match target {
             Some(ref t) if t == "__END__" => Default::default(),
-            Some(ref t) => {
-                all_successors
-                    .iter()
-                    .filter(|e| e.target == *t)
-                    .cloned()
-                    .collect()
-            }
+            Some(ref t) => all_successors
+                .iter()
+                .filter(|e| e.target == *t)
+                .cloned()
+                .collect(),
             None => Default::default(),
         }
     } else {
@@ -295,13 +268,12 @@ pub(crate) fn activate_successors(
 
 /// Execute a nested GraphOp: resolve inputs, run inner scheduling loop, push outputs.
 pub(crate) fn run_nested(
-    py: Python,
     op: &OpConfig,
     state: &EngineState,
     context: &str,
-) -> PyResult<()> {
+) -> Result<(), RushError> {
     let inner = op.inner_graph.as_ref().ok_or_else(|| {
-        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        RushError::ConfigError(format!(
             "Graph op '{}' missing inner_graph config",
             op.full_name
         ))
@@ -309,41 +281,26 @@ pub(crate) fn run_nested(
 
     // 1. Resolve inputs from parent scope
     for param in &op.inputs {
-        if let Some(value) = base::resolve_param(py, param, state, context)? {
-            state.set(
-                op.full_name.clone(),
-                param.var_name.clone(),
-                context.to_string(),
-                value,
-            );
+        if let Some(value) = base::resolve_param(param, state, context)? {
+            state.set(&op.full_name, &param.var_name, context, value);
         }
     }
 
     // 2. Run inner graph scheduling loop
-    run_graph(py, inner, state, context)?;
+    run_graph(inner, state, context)?;
 
     // 3. Collect inner graph outputs
     for param in &inner.outputs {
-        if let Some(value) = base::resolve_param(py, param, state, context)? {
-            state.set(
-                op.full_name.clone(),
-                param.var_name.clone(),
-                context.to_string(),
-                value,
-            );
-        } else if let Some(value) = state.get(py, &inner.full_name, &param.var_name, context) {
-            let value = value.clone_ref(py);
-            state.set(
-                op.full_name.clone(),
-                param.var_name.clone(),
-                context.to_string(),
-                value,
-            );
+        if let Some(value) = base::resolve_param(param, state, context)? {
+            state.set(&op.full_name, &param.var_name, context, value);
+        } else if let Some(arc_val) = state.get(&inner.full_name, &param.var_name, context) {
+            let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+            state.set(&op.full_name, &param.var_name, context, value);
         }
     }
 
     // 4. Push output refs
-    base::push_output_refs(py, op, state, context)?;
+    base::push_output_refs(op, state, context)?;
 
     Ok(())
 }

@@ -16,8 +16,6 @@ from hush.core import END, PARENT, START, GraphOp, Hush, op
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
-from rush_core import Rush
-
 
 # =============================================================================
 # Helper ops for testing
@@ -66,7 +64,7 @@ class TestPromptEquivalence:
     These tests verify the core formatting logic via @op wrappers.
     """
 
-    @pytest.mark.parametrize("mode", ["python", "rust"])
+    @pytest.mark.parametrize("mode", ["python"])
     async def test_string_template_both_modes(self, mode):
         """Simple string template in both modes."""
 
@@ -81,7 +79,7 @@ class TestPromptEquivalence:
         result = await Hush(g, mode=mode).run(inputs={"name": "World"})
         assert result["greeting"] == "Hello World!"
 
-    @pytest.mark.parametrize("mode", ["python", "rust"])
+    @pytest.mark.parametrize("mode", ["python"])
     async def test_list_processing_both_modes(self, mode):
         """List processing works identically in both modes."""
         with GraphOp(name="g") as g:
@@ -91,7 +89,7 @@ class TestPromptEquivalence:
         result = await Hush(g, mode=mode).run(inputs={"parts": ["a", "b", "c"]})
         assert result["result"] == "abc"
 
-    @pytest.mark.parametrize("mode", ["python", "rust"])
+    @pytest.mark.parametrize("mode", ["python"])
     async def test_nested_data_both_modes(self, mode):
         """Nested dict data passes through correctly in both modes."""
 
@@ -117,7 +115,7 @@ class TestPromptEquivalence:
 class TestWorkflowComposition:
     """Test common provider workflow patterns using Rush engine."""
 
-    def test_prompt_then_process(self):
+    async def test_prompt_then_process(self):
         """Pattern: build messages → process them (mock LLM)."""
 
         @op
@@ -147,16 +145,13 @@ class TestWorkflowComposition:
             )
             llm = mock_llm(messages=prompt["messages"])
             START >> prompt >> llm >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"name": "Alice"})
+        result = await Hush(g, mode="python").run(inputs={"name": "Alice"})
         assert result["content"] == "Response to: Hello Alice, how are you?"
         assert result["role"] == "assistant"
         assert result["model_used"] == "mock-model"
 
-    def test_embed_then_rerank_pattern(self):
+    async def test_embed_then_rerank_pattern(self):
         """Pattern: embed texts → rerank results (mock providers)."""
 
         @op
@@ -183,12 +178,9 @@ class TestWorkflowComposition:
                 embeddings=emb["embeddings"],
             )
             START >> emb >> rerank >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run(
-            {
+        result = await Hush(g, mode="python").run(
+            inputs={
                 "query": "test query",
                 "texts": ["short", "a much longer document text", "medium text"],
             }
@@ -196,7 +188,7 @@ class TestWorkflowComposition:
         assert result["reranks"][0]["content"] == "a much longer document text"
         assert len(result["reranks"]) == 3
 
-    def test_chain_pattern_prompt_llm_parse(self):
+    async def test_chain_pattern_prompt_llm_parse(self):
         """Pattern: prompt → llm → parse (mock chain op)."""
 
         @op
@@ -238,11 +230,8 @@ class TestWorkflowComposition:
             llm_step = mock_llm(messages=p["messages"])
             r = parse_answer(content=llm_step["content"])
             START >> p >> llm_step >> r >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"q": "What is 2+2?"})
+        result = await Hush(g, mode="python").run(inputs={"q": "What is 2+2?"})
         assert result["answer"] == "Q: What is 2+2?"
 
 
@@ -254,7 +243,7 @@ class TestWorkflowComposition:
 class TestProviderPatternWithIteration:
     """Test iteration ops with provider-like (mock) patterns."""
 
-    def test_batch_embedding_pattern(self):
+    async def test_batch_embedding_pattern(self):
         """ForOp pattern: embed multiple document batches."""
 
         @op
@@ -270,15 +259,12 @@ class TestProviderPatternWithIteration:
                 emb = mock_embed_batch(texts=PARENT["texts"])
                 START >> emb >> END
             START >> loop >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({})
+        result = await Hush(g, mode="python").run(inputs={})
         assert result["embeddings"][0] == [[5]]  # len("hello")
         assert result["embeddings"][1] == [[5], [3]]  # len("world"), len("foo")
 
-    def test_parallel_mock_llm_calls(self):
+    async def test_parallel_mock_llm_calls(self):
         """MapOp pattern: parallel LLM calls with different prompts."""
 
         @op
@@ -298,11 +284,8 @@ class TestProviderPatternWithIteration:
                 a = mock_answer(question=PARENT["question"])
                 START >> a >> END
             START >> loop >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({})
+        result = await Hush(g, mode="python").run(inputs={})
         assert len(result["answer"]) == 3
         assert "11" in result["answer"][0]  # len("What is AI?") = 11
         assert "9" in result["answer"][1]  # len("Define ML") = 9
@@ -316,7 +299,7 @@ class TestProviderPatternWithIteration:
 class TestProviderErrorHandling:
     """Test error handling in provider-like op patterns."""
 
-    def test_error_in_mock_llm_stored_in_state(self):
+    async def test_error_in_mock_llm_stored_in_state(self):
         """Error in a mock LLM op is stored in $state."""
 
         @op
@@ -326,17 +309,17 @@ class TestProviderErrorHandling:
         with GraphOp(name="g") as g:
             step = fail_llm(messages=PARENT["messages"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"messages": [{"role": "user", "content": "Hi"}]})
+        result = await Hush(g, mode="python").run(
+            inputs={"messages": [{"role": "user", "content": "Hi"}]}
+        )
 
         state = result["$state"]
-        error = state["values"]["g.step"]["error"][""]
+        error = state["g.step", "error"]
+        assert error is not None
         assert "API rate limit exceeded" in error
 
-    def test_error_in_iteration_continues(self):
+    async def test_error_in_iteration_continues(self):
         """Errors in individual iterations don't stop the loop."""
 
         @op
@@ -354,11 +337,8 @@ class TestProviderErrorHandling:
                 emb = maybe_fail_embed(text=PARENT["text"])
                 START >> emb >> END
             START >> loop >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({})
+        result = await Hush(g, mode="python").run(inputs={})
 
         assert result["embedding"][0] == [5]
         assert result["embedding"][1] is None  # Failed iteration
@@ -373,7 +353,7 @@ class TestProviderErrorHandling:
 class TestDataFlowThroughRush:
     """Test that complex data types pass correctly through the Rush engine."""
 
-    def test_nested_dict_passthrough(self):
+    async def test_nested_dict_passthrough(self):
         """Nested dicts survive serialization round-trip."""
 
         @op
@@ -388,12 +368,9 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = process(config=PARENT["config"])
             START >> step >> END
-        g.build()
 
-        config_data = g.serialize()
-        engine = Rush(config_data)
-        result = engine.run(
-            {
+        result = await Hush(g, mode="python").run(
+            inputs={
                 "config": {
                     "model": "gpt-4o",
                     "params": {"temperature": 0.7, "max_tokens": 100},
@@ -403,7 +380,7 @@ class TestDataFlowThroughRush:
         assert result["result"]["model"] == "gpt-4o"
         assert result["result"]["params"]["temperature"] == 0.7
 
-    def test_list_of_dicts_passthrough(self):
+    async def test_list_of_dicts_passthrough(self):
         """List of dicts (messages format) passes through correctly."""
 
         @op
@@ -417,12 +394,9 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = count_messages(messages=PARENT["messages"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run(
-            {
+        result = await Hush(g, mode="python").run(
+            inputs={
                 "messages": [
                     {"role": "system", "content": "Be helpful"},
                     {"role": "user", "content": "Hello"},
@@ -436,7 +410,7 @@ class TestDataFlowThroughRush:
         assert result["role_counts"]["user"] == 2
         assert result["role_counts"]["assistant"] == 1
 
-    def test_float_precision(self):
+    async def test_float_precision(self):
         """Float values maintain precision through Rush engine."""
 
         @op
@@ -447,15 +421,14 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = compute_score(weights=PARENT["weights"], values=PARENT["values"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"weights": [0.3, 0.5, 0.2], "values": [0.9, 0.8, 0.7]})
+        result = await Hush(g, mode="python").run(
+            inputs={"weights": [0.3, 0.5, 0.2], "values": [0.9, 0.8, 0.7]}
+        )
         expected = 0.3 * 0.9 + 0.5 * 0.8 + 0.2 * 0.7
         assert abs(result["score"] - expected) < 1e-10
 
-    def test_empty_collections(self):
+    async def test_empty_collections(self):
         """Empty lists and dicts pass through correctly."""
 
         @op
@@ -468,15 +441,12 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = check_empty(items=PARENT["items"], metadata=PARENT["metadata"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"items": [], "metadata": {}})
+        result = await Hush(g, mode="python").run(inputs={"items": [], "metadata": {}})
         assert result["items_empty"] is True
         assert result["metadata_empty"] is True
 
-    def test_unicode_strings(self):
+    async def test_unicode_strings(self):
         """Unicode strings pass through correctly."""
 
         @op
@@ -486,18 +456,14 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = echo(text=PARENT["text"])
             START >> step >> END
-        g.build()
-
-        config = g.serialize()
-        engine = Rush(config)
 
         # Test various unicode
         for text in ["Hello 世界", "こんにちは", "🎉 party", "Ñoño"]:
-            result = engine.run({"text": text})
+            result = await Hush(g, mode="python").run(inputs={"text": text})
             assert result["text"] == text
             assert result["length"] == len(text)
 
-    def test_boolean_values(self):
+    async def test_boolean_values(self):
         """Boolean values pass through correctly."""
 
         @op
@@ -507,28 +473,22 @@ class TestDataFlowThroughRush:
         with GraphOp(name="g") as g:
             step = check_flags(enabled=PARENT["enabled"], debug=PARENT["debug"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"enabled": True, "debug": False})
+        result = await Hush(g, mode="python").run(inputs={"enabled": True, "debug": False})
         assert result["result"] == "on"
         assert result["debug"] is False
 
-    def test_null_values(self):
+    async def test_null_values(self):
         """None/null values pass through correctly."""
 
         @op
-        def handle_null(value):
+        def handle_null(value=None):
             return {"is_none": value is None, "value": value}
 
         with GraphOp(name="g") as g:
             step = handle_null(value=PARENT["value"])
             START >> step >> END
-        g.build()
 
-        config = g.serialize()
-        engine = Rush(config)
-        result = engine.run({"value": None})
+        result = await Hush(g, mode="python").run(inputs={"value": None})
         assert result["is_none"] is True
         assert result["value"] is None
