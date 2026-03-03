@@ -6,7 +6,7 @@ description = "High-performance Rust executor for the Hush workflow engine (Rust
 
 [lib]
 name = "rush_core"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module"] }
@@ -23,6 +23,10 @@ chrono = "0.4"
 log = "0.4"
 libloading = "0.8"
 rush-providers = { path = "../rush-providers" }
+
+[features]
+default = []
+onnx = ["rush-providers/onnx"]
 
 [profile.release]
 lto = true

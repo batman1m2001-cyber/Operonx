@@ -6,6 +6,7 @@
 //! - ONNX → onnx.rs (pure Rust: ort + tokenizers)
 
 pub mod huggingface;
+#[cfg(feature = "onnx")]
 pub mod onnx;
 pub mod openai;
 
@@ -19,6 +20,7 @@ pub async fn embed(config: &EmbeddingConfig, texts: &[String]) -> ProviderResult
     match config.api_type.as_str() {
         "openai" | "vllm" | "azure" => openai::embed(config, texts).await,
         "hf" => huggingface::embed(config, texts).await,
+        #[cfg(feature = "onnx")]
         "onnx" => onnx::embed(config, texts).await,
         other => Err(ProviderError {
             message: format!(

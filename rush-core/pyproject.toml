@@ -14,7 +14,7 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
 bench = ["hush-core"]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "onnx"]
 python-source = "python"
 module-name = "rush_core._native"
 

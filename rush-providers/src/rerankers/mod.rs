@@ -9,6 +9,7 @@
 
 pub mod cohere;
 pub mod huggingface;
+#[cfg(feature = "onnx")]
 pub mod onnx;
 pub mod pinecone;
 pub mod vllm;
@@ -31,6 +32,7 @@ pub async fn rerank(
         "pinecone" => pinecone::rerank(config, query, texts, top_k, threshold).await,
         "cohere" => cohere::rerank(config, query, texts, top_k, threshold).await,
         "hf" => huggingface::rerank(config, query, texts, top_k, threshold).await,
+        #[cfg(feature = "onnx")]
         "onnx" => onnx::rerank(config, query, texts, top_k, threshold).await,
         other => Err(ProviderError {
             message: format!(
