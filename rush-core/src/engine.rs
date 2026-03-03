@@ -8,6 +8,8 @@
 //! JSON result → Python dict. The entire graph execution happens in
 //! `py.allow_threads()` — true parallel execution for concurrent workflows.
 
+use std::time::Instant;
+
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -60,14 +62,19 @@ impl Rush {
         user_id: Option<String>,
         session_id: Option<String>,
     ) -> PyResult<PyObject> {
+        let t_total = Instant::now();
+
         // 1. Convert Python inputs → serde_json (GIL held, fast)
+        let t0 = Instant::now();
         let json_inputs = rush_providers::py_serde::pydict_to_json(py, inputs).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Failed to convert inputs: {e}"
             ))
         })?;
+        let serde_in_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // 2. Run ENTIRE graph GIL-free
+        let t1 = Instant::now();
         let json_result = py
             .allow_threads(|| {
                 self.run_graph_json(json_inputs, request_id, user_id, session_id)
@@ -75,14 +82,36 @@ impl Rush {
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}"))
             })?;
+        let graph_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
         // 3. Convert result → Python dict (GIL held, fast)
+        let t2 = Instant::now();
         let py_result =
             rush_providers::py_serde::json_to_pydict(py, &json_result).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Failed to convert result: {e}"
                 ))
             })?;
+        let serde_out_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+        let total_ms = t_total.elapsed().as_secs_f64() * 1000.0;
+        let pyo3_overhead_ms = total_ms - graph_ms;
+
+        // Inject timing into $state
+        let result_dict = py_result.downcast_bound::<PyDict>(py).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!("{e}"))
+        })?;
+        if let Ok(Some(state_obj)) = result_dict.get_item("$state") {
+            if let Ok(state_dict) = state_obj.downcast::<PyDict>() {
+                let timing = PyDict::new_bound(py);
+                timing.set_item("serde_in_ms", serde_in_ms)?;
+                timing.set_item("graph_ms", graph_ms)?;
+                timing.set_item("serde_out_ms", serde_out_ms)?;
+                timing.set_item("total_ms", total_ms)?;
+                timing.set_item("pyo3_overhead_ms", pyo3_overhead_ms)?;
+                state_dict.set_item("$timing", timing)?;
+            }
+        }
 
         Ok(py_result)
     }
