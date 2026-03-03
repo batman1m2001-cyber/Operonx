@@ -28,7 +28,9 @@ def check_deps():
         from rush_core import is_rust_available
 
         if not is_rust_available():
-            print("ERROR: rush-core native module not built. Run: maturin develop --release")
+            print(
+                "ERROR: rush-core native module not built. Run: maturin develop --release"
+            )
             sys.exit(1)
     except ImportError:
         print("ERROR: rush-core not installed. Run: maturin develop --release")
@@ -252,9 +254,13 @@ def build_branching(n: int):
             )
 
             exc = process_grade(grade=cls["grade"], score=cls["score"], name=f"exc{i}")
-            good = process_grade(grade=cls["grade"], score=cls["score"], name=f"good{i}")
+            good = process_grade(
+                grade=cls["grade"], score=cls["score"], name=f"good{i}"
+            )
             avg = process_grade(grade=cls["grade"], score=cls["score"], name=f"avg{i}")
-            fail = process_grade(grade=cls["grade"], score=cls["score"], name=f"fail{i}")
+            fail = process_grade(
+                grade=cls["grade"], score=cls["score"], name=f"fail{i}"
+            )
 
             if first is None:
                 START >> cls
@@ -309,7 +315,9 @@ def build_for_loop(n: int):
 def verify_case(x, threshold):
     """Single verification subgraph: classify → branch → 2 paths → merge."""
     cls = classify(score=x, name="cls")
-    router = Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
+    router = (
+        Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
+    )
     pass_op = process_grade(grade=cls["grade"], score=cls["score"], name="pass_op")
     fail_op = process_grade(grade=cls["grade"], score=cls["score"], name="fail_op")
     merge = noop(x=cls["score"], name="out")
@@ -372,7 +380,9 @@ def build_cpu_contention(n_heavy: int, n_light: int, hash_iters: int):
 
         # Heavy CPU branches (thread executor, blocks CPU)
         for i in range(n_heavy):
-            branch = cpu_heavy_branch(x=PARENT["x"], iterations=hash_iters, name=f"heavy{i}")
+            branch = cpu_heavy_branch(
+                x=PARENT["x"], iterations=hash_iters, name=f"heavy{i}"
+            )
             START >> branch
             branches.append(branch)
 

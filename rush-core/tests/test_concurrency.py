@@ -8,7 +8,6 @@ import asyncio
 import os
 import time
 
-import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
 from hush.core.ops.iteration.base import Each
@@ -80,7 +79,8 @@ class TestConcurrentThroughput:
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
         py_tasks = [
-            py_engine.run(inputs={"data": f"py_{i}", "iterations": ITERS}) for i in range(N)
+            py_engine.run(inputs={"data": f"py_{i}", "iterations": ITERS})
+            for i in range(N)
         ]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
@@ -89,7 +89,8 @@ class TestConcurrentThroughput:
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
         rs_tasks = [
-            rs_engine.run(inputs={"data": f"rs_{i}", "iterations": ITERS}) for i in range(N)
+            rs_engine.run(inputs={"data": f"rs_{i}", "iterations": ITERS})
+            for i in range(N)
         ]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
@@ -126,13 +127,19 @@ class TestConcurrentThroughput:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))}) for _ in range(N)]
+        py_tasks = [
+            py_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))})
+            for _ in range(N)
+        ]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))}) for _ in range(N)]
+        rs_tasks = [
+            rs_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))})
+            for _ in range(N)
+        ]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -254,13 +261,17 @@ class TestConcurrentWithIteration:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)]
+        py_tasks = [
+            py_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)
+        ]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)]
+        rs_tasks = [
+            rs_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)
+        ]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -292,13 +303,17 @@ class TestConcurrentWithIteration:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)]
+        py_tasks = [
+            py_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)
+        ]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)]
+        rs_tasks = [
+            rs_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)
+        ]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -344,7 +359,10 @@ class TestSequentialVsConcurrent:
 
         # Concurrent
         t0 = time.perf_counter()
-        tasks = [engine.run(inputs={"data": f"ccu_{i}", "iterations": ITERS}) for i in range(N)]
+        tasks = [
+            engine.run(inputs={"data": f"ccu_{i}", "iterations": ITERS})
+            for i in range(N)
+        ]
         await asyncio.gather(*tasks)
         ccu_wall = time.perf_counter() - t0
 

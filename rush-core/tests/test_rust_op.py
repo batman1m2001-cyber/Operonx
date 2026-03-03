@@ -76,7 +76,9 @@ class TestRustOpInWorkflow:
         result = await Hush(graph, mode="rust").run(inputs={"x": 5, "y": 3})
         assert result["result"] == 13  # 5*2=10, 10+3=13
 
-    @pytest.mark.skip(reason="Python-only ops cannot run in Rust mode after GIL-free refactor")
+    @pytest.mark.skip(
+        reason="Python-only ops cannot run in Rust mode after GIL-free refactor"
+    )
     async def test_mixed_rust_and_python_ops(self):
         """Graph with both Rust and Python ops."""
 
