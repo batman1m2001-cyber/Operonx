@@ -44,9 +44,9 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Run Rust unit tests (rush-providers)
+      - name: Run Rust unit tests
         working-directory: rush-core
-        run: cargo test -p rush-providers
+        run: cargo test --lib
 
       - name: Build native module (release)
         working-directory: rush-core
