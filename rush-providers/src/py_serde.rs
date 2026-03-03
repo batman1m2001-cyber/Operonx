@@ -10,7 +10,9 @@ use serde_json::{Map, Value};
 /// Convert a Python object to serde_json::Value.
 ///
 /// Supports: None, bool, int, float, str, list, dict.
-/// Unknown types fall back to str() representation.
+/// Also auto-serializes Pydantic models (.model_dump()), dataclasses,
+/// and objects with .dict() or .to_dict() methods.
+/// Raises TypeError for unsupported types.
 pub fn py_to_json(py: Python, obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if obj.is_none() {
         return Ok(Value::Null);
@@ -57,9 +59,60 @@ pub fn py_to_json(py: Python, obj: &Bound<'_, PyAny>) -> PyResult<Value> {
         return pydict_to_json(py, dict);
     }
 
-    // Fallback: convert to string representation
-    let s = obj.str()?.extract::<String>()?;
-    Ok(Value::String(s))
+    // Try common Python object → dict protocols before falling back to str()
+    // 1. Pydantic v2: .model_dump()
+    if let Ok(method) = obj.getattr("model_dump") {
+        if let Ok(dict_obj) = method.call0() {
+            if let Ok(dict) = dict_obj.downcast::<PyDict>() {
+                return pydict_to_json(py, dict);
+            }
+        }
+    }
+    // 2. Pydantic v1 / generic .dict()
+    if let Ok(method) = obj.getattr("dict") {
+        if method.is_callable() {
+            if let Ok(dict_obj) = method.call0() {
+                if let Ok(dict) = dict_obj.downcast::<PyDict>() {
+                    return pydict_to_json(py, dict);
+                }
+            }
+        }
+    }
+    // 3. Generic .to_dict() (e.g. custom classes, ORMs)
+    if let Ok(method) = obj.getattr("to_dict") {
+        if method.is_callable() {
+            if let Ok(dict_obj) = method.call0() {
+                if let Ok(dict) = dict_obj.downcast::<PyDict>() {
+                    return pydict_to_json(py, dict);
+                }
+            }
+        }
+    }
+    // 4. dataclasses.asdict()
+    if let Ok(dc_mod) = py.import_bound("dataclasses") {
+        if let Ok(is_dc) = dc_mod.call_method1("is_dataclass", (obj,)) {
+            if is_dc.is_truthy()? {
+                if let Ok(dict_obj) = dc_mod.call_method1("asdict", (obj,)) {
+                    if let Ok(dict) = dict_obj.downcast::<PyDict>() {
+                        return pydict_to_json(py, dict);
+                    }
+                }
+            }
+        }
+    }
+
+    // No known serialization protocol — raise a clear error
+    let type_name = obj
+        .get_type()
+        .name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+        "Cannot serialize '{}' to JSON for Rust mode. \
+         Use a Pydantic BaseModel, dataclass, or add a .to_dict() method. \
+         Alternatively, convert to a dict before passing to engine.run().",
+        type_name
+    )))
 }
 
 /// Convert a Python dict to serde_json::Value::Object.
