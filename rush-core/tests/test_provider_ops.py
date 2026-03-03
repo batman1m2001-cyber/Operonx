@@ -25,18 +25,14 @@ from hush.core.ops.iteration.map_op import MapOp
 @op
 def format_messages(messages: list):
     """Extract content from messages list for easy assertion."""
-    contents = [
-        m.get("content", "") if isinstance(m, dict) else str(m) for m in messages
-    ]
+    contents = [m.get("content", "") if isinstance(m, dict) else str(m) for m in messages]
     return {"contents": contents, "count": len(messages)}
 
 
 @op
 def extract_roles(messages: list):
     """Extract roles from messages list."""
-    roles = [
-        m.get("role", "unknown") if isinstance(m, dict) else "unknown" for m in messages
-    ]
+    roles = [m.get("role", "unknown") if isinstance(m, dict) else "unknown" for m in messages]
     return {"roles": roles}
 
 
@@ -101,9 +97,7 @@ class TestPromptEquivalence:
             step = extract(data=PARENT["data"])
             START >> step >> END
 
-        result = await Hush(g, mode=mode).run(
-            inputs={"data": {"nested": {"key": "found"}}}
-        )
+        result = await Hush(g, mode=mode).run(inputs={"data": {"nested": {"key": "found"}}})
         assert result["value"] == "found"
 
 
@@ -140,9 +134,7 @@ class TestWorkflowComposition:
             }
 
         with GraphOp(name="g") as g:
-            prompt = build_messages(
-                template="Hello {name}, how are you?", name=PARENT["name"]
-            )
+            prompt = build_messages(template="Hello {name}, how are you?", name=PARENT["name"])
             llm = mock_llm(messages=prompt["messages"])
             START >> prompt >> llm >> END
 
@@ -275,11 +267,7 @@ class TestProviderPatternWithIteration:
         with GraphOp(name="g") as g:
             with MapOp(
                 name="loop",
-                inputs={
-                    "question": Each(
-                        ["What is AI?", "Define ML", "Explain NLP in detail"]
-                    )
-                },
+                inputs={"question": Each(["What is AI?", "Define ML", "Explain NLP in detail"])},
             ) as loop:
                 a = mock_answer(question=PARENT["question"])
                 START >> a >> END

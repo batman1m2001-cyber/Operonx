@@ -7,8 +7,8 @@ Hush(graph, mode="rust"), asserting that outputs match exactly.
 import asyncio
 
 import pytest
-
 from conftest import BUILTIN_CRATE
+
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
 from hush.core.ops.iteration.base import Each
@@ -279,9 +279,7 @@ class TestForOp:
 class TestWhileOp:
     def test_simple_counter(self):
         with GraphOp(name="g") as g:
-            with WhileOp(
-                name="loop", inputs={"counter": 0}, until="counter >= 5"
-            ) as loop:
+            with WhileOp(name="loop", inputs={"counter": 0}, until="counter >= 5") as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END

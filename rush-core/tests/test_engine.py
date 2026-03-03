@@ -7,6 +7,7 @@ Validates the full vertical slice: config parsing → ref resolution → schedul
 """
 
 import pytest
+from conftest import BUILTIN_CRATE, make_rush
 
 from hush.core import END, PARENT, START, GraphOp, graph, op
 from hush.core.ops.flow.branch_op import if_
@@ -14,8 +15,6 @@ from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
-from conftest import BUILTIN_CRATE, make_rush
-
 
 # =============================================================================
 # Helper ops
@@ -363,11 +362,7 @@ class TestBranchOps:
     def test_multi_condition_branch(self):
         """Branch with multiple conditions routes correctly."""
         with GraphOp(name="g") as g:
-            router = (
-                if_(PARENT["score"] >= 90, "a")
-                .if_(PARENT["score"] >= 70, "b")
-                .else_("f")
-            )
+            router = if_(PARENT["score"] >= 90, "a").if_(PARENT["score"] >= 70, "b").else_("f")
             a = grade_a(outputs={"*": PARENT})
             b = grade_b(outputs={"*": PARENT})
             f = grade_f(outputs={"*": PARENT})
@@ -631,9 +626,7 @@ class TestWhileOp:
             return {"new_counter": counter + 1}
 
         with GraphOp(name="g") as g:
-            with WhileOp(
-                name="loop", inputs={"counter": 0}, until="counter >= 5"
-            ) as loop:
+            with WhileOp(name="loop", inputs={"counter": 0}, until="counter >= 5") as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END
@@ -931,9 +924,7 @@ class TestErrorResilience:
             return {"result": value * 10}
 
         with GraphOp(name="g") as g:
-            with ForOp(
-                name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=False
-            ) as loop:
+            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=False) as loop:
                 node = maybe_fail(value=PARENT["value"])
                 START >> node >> END
             START >> loop >> END
@@ -964,9 +955,7 @@ class TestErrorResilience:
             return {"result": value * 10}
 
         with GraphOp(name="g") as g:
-            with ForOp(
-                name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=True
-            ) as loop:
+            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=True) as loop:
                 node = ok_op(value=PARENT["value"])
                 START >> node >> END
             START >> loop >> END
@@ -1072,6 +1061,7 @@ class TestTracingWiring:
     def test_rush_state_adapter(self):
         """RushStateAdapter should provide MemoryState-compatible interface."""
         from datetime import datetime
+
         from hush.core.tracing.rush_state import RushStateAdapter
 
         t1 = datetime(2024, 1, 1, 12, 0, 0)

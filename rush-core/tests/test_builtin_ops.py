@@ -8,11 +8,9 @@ Tests that:
 """
 
 import pytest
-
-from hush.core import END, PARENT, START, GraphOp, Hush, op
-
 from conftest import BUILTIN_CRATE
 
+from hush.core import END, PARENT, START, GraphOp, Hush, op
 
 # =============================================================================
 # String ops in workflows
@@ -29,9 +27,7 @@ class TestStringOps:
             step = concat(parts=PARENT["parts"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"parts": ["hello", " ", "world"]}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"parts": ["hello", " ", "world"]})
         assert result["result"] == "hello world"
 
     async def test_concat_empty(self):
@@ -55,9 +51,7 @@ class TestStringOps:
             step = split(text=PARENT["text"], delimiter=PARENT["delim"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"text": "a,b,c", "delim": ","}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"text": "a,b,c", "delim": ","})
         assert result["parts"] == ["a", "b", "c"]
 
     async def test_split_no_match(self):
@@ -69,9 +63,7 @@ class TestStringOps:
             step = split(text=PARENT["text"], delimiter=PARENT["delim"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"text": "hello", "delim": ","}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"text": "hello", "delim": ","})
         assert result["parts"] == ["hello"]
 
     async def test_template(self):
@@ -106,9 +98,7 @@ class TestStringOps:
             step = template(template=PARENT["tpl"], vars=PARENT["vars"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"tpl": "no placeholders", "vars": {}}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"tpl": "no placeholders", "vars": {}})
         assert result["result"] == "no placeholders"
 
 
@@ -129,9 +119,7 @@ class TestJsonOps:
             step = parse(text=PARENT["text"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"text": '{"key": "value", "num": 42}'}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"text": '{"key": "value", "num": 42}'})
         assert result["data"] == {"key": "value", "num": 42}
 
     async def test_parse_list(self):
@@ -160,9 +148,7 @@ class TestJsonOps:
             step = extract(data=PARENT["data"], path=PARENT["path"])
             START >> step >> END
 
-        result = await Hush(graph, mode="rust").run(
-            inputs={"data": {"a": {"b": 1}}, "path": "a.b"}
-        )
+        result = await Hush(graph, mode="rust").run(inputs={"data": {"a": {"b": 1}}, "path": "a.b"})
         assert result["value"] == 1
 
     async def test_merge(self):

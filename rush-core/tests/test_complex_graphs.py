@@ -11,14 +11,13 @@ Based on hush-core test patterns, these tests exercise:
 """
 
 import pytest
+from conftest import BUILTIN_CRATE, make_rush
 
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import if_
 from hush.core.ops.iteration.base import Each
 from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.while_op import WhileOp
-from conftest import BUILTIN_CRATE, make_rush
-
 
 # =============================================================================
 # Helper ops
@@ -135,7 +134,9 @@ class TestDeepNesting:
 
 
 class TestWideParallelism:
-    @pytest.mark.skip(reason="sum_all has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="sum_all has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_many_parallel_ops(self):
         """5 independent ops running in parallel."""
 
@@ -220,7 +221,9 @@ class TestComplexDiamondPatterns:
 
 
 class TestBranchWithIteration:
-    @pytest.mark.skip(reason="grade_a/grade_f/apply_multiplier have no Rust builtins; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="grade_a/grade_f/apply_multiplier have no Rust builtins; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_branch_then_for_loop(self):
         """Branch decides which processing path, then iterate."""
 
@@ -257,7 +260,9 @@ class TestBranchWithIteration:
         result = engine.run({"score": 50})
         assert result["multiplier"] == 1
 
-    @pytest.mark.skip(reason="classify has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="classify has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_for_loop_with_branch_inside(self):
         """ForOp where each iteration has a branch decision."""
 
@@ -291,7 +296,9 @@ class TestBranchWithIteration:
 
 
 class TestOutputMappingEdgeCases:
-    @pytest.mark.skip(reason="multi_output has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="multi_output has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_multiple_output_mappings(self):
         """Multiple keys mapped to different parent keys."""
 
@@ -314,7 +321,9 @@ class TestOutputMappingEdgeCases:
         assert result["t"] == 15
         assert result["s"] == 25
 
-    @pytest.mark.skip(reason="multi has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="multi has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_wildcard_output_forwarding(self):
         """outputs={"*": PARENT} forwards all outputs."""
 
@@ -334,7 +343,9 @@ class TestOutputMappingEdgeCases:
         assert result["b"] == 12
         assert result["c"] == 13
 
-    @pytest.mark.skip(reason="compute has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="compute has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_output_rename_mapping(self):
         """Rename output keys via output mapping."""
 
@@ -359,7 +370,9 @@ class TestOutputMappingEdgeCases:
 
 
 class TestLargeDataHandling:
-    @pytest.mark.skip(reason="process_list has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="process_list has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_large_list_passthrough(self):
         """Large list passes through Rush engine correctly."""
 
@@ -379,7 +392,9 @@ class TestLargeDataHandling:
         assert result["count"] == 1000
         assert result["sum"] == sum(range(1000))
 
-    @pytest.mark.skip(reason="measure has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="measure has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_large_string_passthrough(self):
         """Large string passes through Rush engine correctly."""
 
@@ -497,7 +512,9 @@ class TestGraphDecoratorComposition:
 
 
 class TestWhileOpAdvanced:
-    @pytest.mark.skip(reason="append_char has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="append_char has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_while_with_string_accumulation(self):
         """WhileOp that accumulates a string."""
 
@@ -531,7 +548,9 @@ class TestWhileOpAdvanced:
         assert result["text"] == "*****"
         assert result["counter"] == 5
 
-    @pytest.mark.skip(reason="collect has no Rust builtin; Python-only ops not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="collect has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
+    )
     def test_while_with_list_building(self):
         """WhileOp that builds a list iteration by iteration."""
 

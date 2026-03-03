@@ -118,7 +118,7 @@ def test_langfuse_tracer_flush_with_mock(sample_trace_data):
     gen_kwargs = mock_trace.generation.call_args[1]
     assert gen_kwargs["name"] == "llm-node"
     assert gen_kwargs["model"] == "gpt-4"
-    assert gen_kwargs["usage"] == {"input": 10, "output": 20, "total": 30}
+    assert gen_kwargs["usage"] == {"input": 10, "output": 20, "total": 30, "total_cost": 0.0015}
 
     # Verify flush called on client
     mock_client.flush.assert_called_once()

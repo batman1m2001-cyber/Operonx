@@ -11,8 +11,8 @@ import time
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
-from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.base import Each
+from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
 
 BUILTIN_CRATE = os.path.abspath(
@@ -34,6 +34,7 @@ def double(x: int):
 def hash_chain(data: str, iterations: int):
     """CPU-heavy op: iterated hashing."""
     import hashlib
+
     current = data
     for _ in range(iterations):
         current = hashlib.sha256(current.encode()).hexdigest()
@@ -78,16 +79,18 @@ class TestConcurrentThroughput:
         # Python mode
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"data": f"py_{i}", "iterations": ITERS})
-                    for i in range(N)]
+        py_tasks = [
+            py_engine.run(inputs={"data": f"py_{i}", "iterations": ITERS}) for i in range(N)
+        ]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         # Rust mode — GIL-free
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"data": f"rs_{i}", "iterations": ITERS})
-                    for i in range(N)]
+        rs_tasks = [
+            rs_engine.run(inputs={"data": f"rs_{i}", "iterations": ITERS}) for i in range(N)
+        ]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -96,8 +99,10 @@ class TestConcurrentThroughput:
         assert all("hash" in r for r in rs_results)
 
         # Throughput: Rust must be faster
-        print(f"\n  [hash_chain x{N}] Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
-              f"Speedup: {py_wall/rs_wall:.2f}x")
+        print(
+            f"\n  [hash_chain x{N}] Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
+            f"Speedup: {py_wall / rs_wall:.2f}x"
+        )
         assert rs_wall < py_wall, (
             f"Rust ({rs_wall:.3f}s) should be faster than Python ({py_wall:.3f}s)"
         )
@@ -121,15 +126,13 @@ class TestConcurrentThroughput:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))})
-                    for _ in range(N)]
+        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))}) for _ in range(N)]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))})
-                    for _ in range(N)]
+        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS_PER_RUN))}) for _ in range(N)]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -137,9 +140,11 @@ class TestConcurrentThroughput:
         assert len(py_results) == N
         assert len(rs_results) == N
 
-        print(f"\n  [map x{N} ({ITEMS_PER_RUN} items each)] "
-              f"Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
-              f"Speedup: {py_wall/rs_wall:.2f}x")
+        print(
+            f"\n  [map x{N} ({ITEMS_PER_RUN} items each)] "
+            f"Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
+            f"Speedup: {py_wall / rs_wall:.2f}x"
+        )
         assert rs_wall < py_wall, (
             f"Rust ({rs_wall:.3f}s) should be faster than Python ({py_wall:.3f}s)"
         )
@@ -249,15 +254,13 @@ class TestConcurrentWithIteration:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(i, i + 5))})
-                    for i in range(N)]
+        py_tasks = [py_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(i, i + 5))})
-                    for i in range(N)]
+        rs_tasks = [rs_engine.run(inputs={"items": list(range(i, i + 5))}) for i in range(N)]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
@@ -265,8 +268,10 @@ class TestConcurrentWithIteration:
         assert len(py_results) == N
         assert len(rs_results) == N
 
-        print(f"\n  [map_op x{N}] Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
-              f"Speedup: {py_wall/rs_wall:.2f}x")
+        print(
+            f"\n  [map_op x{N}] Python: {py_wall:.3f}s | Rust: {rs_wall:.3f}s | "
+            f"Speedup: {py_wall / rs_wall:.2f}x"
+        )
         assert rs_wall < py_wall, (
             f"Rust ({rs_wall:.3f}s) should be faster than Python ({py_wall:.3f}s)"
         )
@@ -287,23 +292,23 @@ class TestConcurrentWithIteration:
 
         py_engine = Hush(g, mode="python")
         t0 = time.perf_counter()
-        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS))})
-                    for _ in range(N)]
+        py_tasks = [py_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)]
         py_results = await asyncio.gather(*py_tasks)
         py_wall = time.perf_counter() - t0
 
         rs_engine = Hush(g, mode="rust")
         t0 = time.perf_counter()
-        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS))})
-                    for _ in range(N)]
+        rs_tasks = [rs_engine.run(inputs={"items": list(range(ITEMS))}) for _ in range(N)]
         rs_results = await asyncio.gather(*rs_tasks)
         rs_wall = time.perf_counter() - t0
 
         assert len(py_results) == N
         assert len(rs_results) == N
 
-        print(f"\n  [for_op x{N} ({ITEMS} items)] Python: {py_wall:.3f}s | "
-              f"Rust: {rs_wall:.3f}s | Speedup: {py_wall/rs_wall:.2f}x")
+        print(
+            f"\n  [for_op x{N} ({ITEMS} items)] Python: {py_wall:.3f}s | "
+            f"Rust: {rs_wall:.3f}s | Speedup: {py_wall / rs_wall:.2f}x"
+        )
         assert rs_wall < py_wall, (
             f"Rust ({rs_wall:.3f}s) should be faster than Python ({py_wall:.3f}s)"
         )
@@ -339,12 +344,13 @@ class TestSequentialVsConcurrent:
 
         # Concurrent
         t0 = time.perf_counter()
-        tasks = [engine.run(inputs={"data": f"ccu_{i}", "iterations": ITERS})
-                 for i in range(N)]
+        tasks = [engine.run(inputs={"data": f"ccu_{i}", "iterations": ITERS}) for i in range(N)]
         await asyncio.gather(*tasks)
         ccu_wall = time.perf_counter() - t0
 
         speedup = seq_wall / ccu_wall
-        print(f"\n  [seq vs ccu x{N}] Sequential: {seq_wall:.3f}s | "
-              f"Concurrent: {ccu_wall:.3f}s | Speedup: {speedup:.2f}x")
+        print(
+            f"\n  [seq vs ccu x{N}] Sequential: {seq_wall:.3f}s | "
+            f"Concurrent: {ccu_wall:.3f}s | Speedup: {speedup:.2f}x"
+        )
         assert speedup > 1.3, f"Expected speedup > 1.3x, got {speedup:.2f}x"

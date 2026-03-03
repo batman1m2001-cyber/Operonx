@@ -87,8 +87,12 @@ class TraceCollector:
         for op_name, op in op_map.items():
             for ctx, start_time in state.iter_executed(op_name):
                 # Read I/O from state (exclude internal $-prefixed keys)
-                inputs = {v: state[op_name, v, ctx] for v in (op.inputs or {}) if not v.startswith("$")}
-                outputs = {v: state[op_name, v, ctx] for v in (op.outputs or {}) if not v.startswith("$")}
+                inputs = {
+                    v: state[op_name, v, ctx] for v in (op.inputs or {}) if not v.startswith("$")
+                }
+                outputs = {
+                    v: state[op_name, v, ctx] for v in (op.outputs or {}) if not v.startswith("$")
+                }
 
                 # Read timing from state
                 end_time = state[op_name, "end_time", ctx]
@@ -105,8 +109,14 @@ class TraceCollector:
                         context_id=ctx if ctx != DEFAULT_CONTEXT else None,
                         inputs=inputs,
                         outputs=outputs,
-                        start_time=(start_time if isinstance(start_time, str) else start_time.isoformat()) if start_time else None,
-                        end_time=(end_time if isinstance(end_time, str) else end_time.isoformat()) if end_time else None,
+                        start_time=(
+                            start_time if isinstance(start_time, str) else start_time.isoformat()
+                        )
+                        if start_time
+                        else None,
+                        end_time=(end_time if isinstance(end_time, str) else end_time.isoformat())
+                        if end_time
+                        else None,
                         duration_ms=duration_ms,
                         model=model,
                         usage=usage,
