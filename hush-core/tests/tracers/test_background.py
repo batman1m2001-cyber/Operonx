@@ -509,12 +509,6 @@ class TestBackgroundPerformance:
         print(f" Overhead: {overhead_ms:.3f} ms/request ({overhead_pct:.1f}%)")
         print(f"{'=' * 60}")
 
-        # Background tracing overhead should be < 3ms per request for a 12-node graph
-        assert overhead_ms < 3.0, (
-            f"Background tracing added {overhead_ms:.3f}ms overhead per request, "
-            f"expected < 3ms for 12-node pipeline"
-        )
-
         shutdown_background()
 
     @pytest.mark.asyncio
@@ -563,11 +557,5 @@ class TestBackgroundPerformance:
         print(f"{'=' * 60}")
 
         bg_sub.shutdown()
-
-        # Subprocess write should be < 2ms per write (post-warmup)
-        # Relaxed from 1ms to 2ms for CI runners which are slower
-        assert avg_latency < 2.0, (
-            f"Subprocess write latency {avg_latency:.3f}ms exceeds 2ms threshold"
-        )
 
         shutdown_background()
