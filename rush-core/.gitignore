@@ -21,3 +21,4 @@ build/
 *.so
 *.pyd
 *.dll
+*.pdb
