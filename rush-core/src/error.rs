@@ -1,14 +1,6 @@
 //! Custom error types for the rush-core engine.
-//!
-//! All errors during GIL-free execution use `RushError`.
-//! Converted to `PyErr` only at the boundary in `Rush::run()`.
-
-use pyo3::PyErr;
 
 /// Unified error type for all rush-core operations.
-///
-/// Replaces `PyResult<T>` / `PyErr` throughout the engine internals.
-/// Only converted to `PyErr` at the Python boundary (`engine.rs`).
 #[derive(Debug, thiserror::Error)]
 pub enum RushError {
     #[error("Op '{0}' has no Rust implementation")]
@@ -34,12 +26,6 @@ pub enum RushError {
 
     #[error("{0}")]
     Runtime(String),
-}
-
-impl From<RushError> for PyErr {
-    fn from(err: RushError) -> PyErr {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(err.to_string())
-    }
 }
 
 impl From<serde_json::Error> for RushError {

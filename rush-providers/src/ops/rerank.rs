@@ -2,7 +2,7 @@
 //!
 //! Mirrors hush-providers/hush/providers/ops/rerank.py.
 //! Handles both List[str] and List[Dict] document inputs.
-//! Supports: vLLM, Pinecone, Cohere (HTTP), HF (PyO3), ONNX (native Rust ort).
+//! Supports: vLLM, Pinecone, Cohere (HTTP), ONNX (native Rust ort).
 
 use serde_json::{json, Value};
 

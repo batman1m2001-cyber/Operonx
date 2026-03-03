@@ -163,19 +163,19 @@ fn store_timing(
 
     state.set(
         &op.full_name,
-        "start_time",
+        "$start_time",
         context,
         Value::String(start_time.to_rfc3339()),
     );
     state.set(
         &op.full_name,
-        "end_time",
+        "$end_time",
         context,
         Value::String(end_time.to_rfc3339()),
     );
     state.set(
         &op.full_name,
-        "duration_ms",
+        "$duration_ms",
         context,
         serde_json::json!(duration_ms),
     );

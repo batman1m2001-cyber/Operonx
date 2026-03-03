@@ -4,7 +4,7 @@
 //! - vLLM → vllm.rs (native HTTP)
 //! - Pinecone → pinecone.rs (native HTTP)
 //! - Cohere → cohere.rs (native HTTP)
-//! - HuggingFace → huggingface.rs (PyO3 bridge to Python)
+//! - HuggingFace → huggingface.rs (stub — use ONNX instead)
 //! - ONNX → onnx.rs (pure Rust: ort + tokenizers)
 
 pub mod cohere;
