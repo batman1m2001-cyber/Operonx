@@ -1,0 +1,33 @@
+[package]
+name = "rush-serve"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone Rust HTTP server for Hush workflows (Axum + rush-core)"
+
+[[bin]]
+name = "rush-serve"
+path = "src/main.rs"
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-providers = { path = "../rush-providers" }
+
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tower-http = { version = "0.6", features = ["cors"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+tokio-stream = "0.1"
+futures = "0.3"
+dashmap = "6"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
