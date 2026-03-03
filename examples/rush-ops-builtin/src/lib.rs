@@ -376,6 +376,146 @@ fn math_min(inputs: &Value) -> Value {
 }
 
 // =============================================================================
+// Benchmark ops — used by bench_e2e.py
+// =============================================================================
+
+/// bench_noop: x → {"x": x} (passthrough for benchmarks)
+fn bench_noop(inputs: &Value) -> Value {
+    let x = &inputs["x"];
+    serde_json::json!({"x": x})
+}
+
+/// classify: score → {"grade": str, "score": int}
+fn classify(inputs: &Value) -> Value {
+    let score = inputs["score"].as_i64().unwrap_or(0);
+    let grade = if score >= 90 {
+        "excellent"
+    } else if score >= 70 {
+        "good"
+    } else if score >= 50 {
+        "average"
+    } else {
+        "fail"
+    };
+    serde_json::json!({"grade": grade, "score": score})
+}
+
+/// process_grade: grade, score → {"result": "grade:score"}
+fn process_grade(inputs: &Value) -> Value {
+    let grade = inputs["grade"].as_str().unwrap_or("");
+    let score = inputs["score"].as_i64().unwrap_or(0);
+    serde_json::json!({"result": format!("{}:{}", grade, score)})
+}
+
+/// aggregate: results (list) → {"summary": len}
+fn aggregate(inputs: &Value) -> Value {
+    let len = inputs["results"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    serde_json::json!({"summary": len})
+}
+
+/// bench_transform: item, prefix → {"output": "prefix-item"}
+fn bench_transform(inputs: &Value) -> Value {
+    let item = inputs["item"].as_str().unwrap_or("");
+    let prefix = inputs["prefix"].as_str().unwrap_or("");
+    serde_json::json!({"output": format!("{}-{}", prefix, item)})
+}
+
+/// merge_two: a, b → {"merged": a, "x": a}
+fn merge_two(inputs: &Value) -> Value {
+    let a = &inputs["a"];
+    serde_json::json!({"merged": a, "x": a})
+}
+
+/// combine_all: r1..r5 → {"combined": [...], "count": n}
+fn combine_all(inputs: &Value) -> Value {
+    let mut parts = Vec::new();
+    for key in &["r1", "r2", "r3", "r4", "r5"] {
+        if !inputs[*key].is_null() {
+            parts.push(inputs[*key].clone());
+        }
+    }
+    let count = parts.len();
+    serde_json::json!({"combined": parts, "count": count})
+}
+
+/// cpu_hash_chain: x, iterations → {"hash": hex16, "x": x}
+fn cpu_hash_chain(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    let iterations = inputs["iterations"].as_i64().unwrap_or(0);
+    let mut hasher = DefaultHasher::new();
+    let mut current = format!("{}", x);
+    for _ in 0..iterations {
+        current.hash(&mut hasher);
+        current = format!("{:016x}", hasher.finish());
+        hasher = DefaultHasher::new();
+    }
+    serde_json::json!({"hash": &current[..16.min(current.len())], "x": x})
+}
+
+/// cpu_prime_sieve: limit → {"prime_count": count}
+fn cpu_prime_sieve(inputs: &Value) -> Value {
+    let limit = inputs["limit"].as_u64().unwrap_or(100) as usize;
+    let mut sieve = vec![true; limit + 1];
+    if limit >= 1 {
+        sieve[0] = false;
+        if limit >= 2 {
+            sieve[1] = false;
+        }
+    }
+    let mut i = 2;
+    while i * i <= limit {
+        if sieve[i] {
+            let mut j = i * i;
+            while j <= limit {
+                sieve[j] = false;
+                j += i;
+            }
+        }
+        i += 1;
+    }
+    let count: usize = sieve.iter().filter(|&&b| b).count();
+    serde_json::json!({"prime_count": count})
+}
+
+/// cpu_matrix_mult: size → {"trace": float}
+fn cpu_matrix_mult(inputs: &Value) -> Value {
+    let size = inputs["size"].as_u64().unwrap_or(10) as usize;
+    let mut a = vec![vec![0.0f64; size]; size];
+    let mut b = vec![vec![0.0f64; size]; size];
+    for i in 0..size {
+        for j in 0..size {
+            a[i][j] = (i + j) as f64;
+            b[i][j] = (i * j + 1) as f64;
+        }
+    }
+    let mut trace = 0.0f64;
+    for i in 0..size {
+        let mut s = 0.0f64;
+        for k in 0..size {
+            s += a[i][k] * b[k][i];
+        }
+        trace += s;
+    }
+    serde_json::json!({"trace": trace})
+}
+
+/// cpu_fibonacci: n → {"fib": result}
+fn cpu_fibonacci(inputs: &Value) -> Value {
+    let n = inputs["n"].as_u64().unwrap_or(0);
+    let modulus: u64 = 1_000_000_007;
+    let (mut a, mut b): (u64, u64) = (0, 1);
+    for _ in 0..n {
+        let tmp = (a + b) % modulus;
+        a = b;
+        b = tmp;
+    }
+    serde_json::json!({"fib": a})
+}
+
+// =============================================================================
 // Export all ops via C ABI
 // =============================================================================
 
@@ -413,4 +553,15 @@ export_ops!(
     math_mean,
     math_max,
     math_min,
+    bench_noop,
+    classify,
+    process_grade,
+    aggregate,
+    bench_transform,
+    merge_two,
+    combine_all,
+    cpu_hash_chain,
+    cpu_prime_sieve,
+    cpu_matrix_mult,
+    cpu_fibonacci,
 );

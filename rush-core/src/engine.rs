@@ -104,10 +104,10 @@ impl Rush {
             state.set_request_id(rid.clone());
         }
 
-        // 1. Store inputs under graph's full_name
-        if let Value::Object(ref map) = inputs {
+        // 1. Store inputs under graph's full_name (consume map, no cloning)
+        if let Value::Object(map) = inputs {
             for (key, value) in map {
-                state.set(&self.config.full_name, key, context, value.clone());
+                state.set(&self.config.full_name, &key, context, value);
             }
         }
 
