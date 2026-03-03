@@ -8,11 +8,9 @@ Tests that:
 """
 
 import pytest
-
-from hush.core import END, PARENT, START, GraphOp, Hush, op
-
 from conftest import BUILTIN_CRATE
 
+from hush.core import END, PARENT, START, GraphOp, Hush, op
 
 # =============================================================================
 # @op(rust=...) decorator
