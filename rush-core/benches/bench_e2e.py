@@ -13,6 +13,7 @@ Requirements:
 import asyncio
 import hashlib
 import math
+import os
 import statistics
 import sys
 import time
@@ -21,6 +22,10 @@ import tracemalloc
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
 from hush.core.ops.iteration import Each, ForOp
+
+BUILTIN_CRATE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "examples", "rush-ops-builtin")
+)
 
 
 def check_deps():
@@ -42,12 +47,12 @@ def check_deps():
 # =============================================================================
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::bench_noop")
 def noop(x: int):
     return {"x": x}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::classify")
 def classify(score: int):
     """Classify score into grade bucket."""
     if score >= 90:
@@ -61,28 +66,28 @@ def classify(score: int):
     return {"grade": grade, "score": score}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::process_grade")
 def process_grade(grade: str, score: int):
     return {"result": f"{grade}:{score}"}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::aggregate")
 def aggregate(results: list):
     return {"summary": len(results or [])}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::bench_transform")
 def transform(item: str, prefix: str):
     return {"output": f"{prefix}-{item}"}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::merge_two")
 def merge_two(a, b):
     """Merge two values into a single output."""
     return {"merged": a, "x": a}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::combine_all")
 def combine_all(
     r1: dict = None,
     r2: dict = None,
@@ -100,7 +105,7 @@ def combine_all(
 # =============================================================================
 
 
-@op(executor="thread")
+@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_hash_chain")
 def cpu_hash_chain(x: int, iterations: int):
     """Chain SHA-256 hashes — pure CPU, no I/O."""
     data = str(x).encode()
@@ -109,7 +114,7 @@ def cpu_hash_chain(x: int, iterations: int):
     return {"hash": data.hex()[:16], "x": x}
 
 
-@op(executor="thread")
+@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_prime_sieve")
 def cpu_prime_sieve(limit: int):
     """Sieve of Eratosthenes up to limit — heavy memory + CPU."""
     sieve = [True] * (limit + 1)
@@ -122,7 +127,7 @@ def cpu_prime_sieve(limit: int):
     return {"prime_count": count}
 
 
-@op(executor="thread")
+@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_matrix_mult")
 def cpu_matrix_mult(size: int):
     """Naive matrix multiplication — O(n^3) CPU burn."""
     a = [[float(i + j) for j in range(size)] for i in range(size)]
@@ -137,7 +142,7 @@ def cpu_matrix_mult(size: int):
     return {"trace": sum(c[i][i] for i in range(size))}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::cpu_fibonacci")
 def cpu_fibonacci(n: int):
     """Iterative fibonacci — lightweight CPU."""
     a, b = 0, 1
@@ -205,7 +210,7 @@ def build_nested(n: int):
 
 
 def build_parallel_nested(n: int):
-    """n parallel inner_pipeline calls → single aggregation.
+    """n parallel inner_pipeline calls -> single aggregation.
     Each branch has 3 internal ops, total ~ n*3 + 1 ops.
     """
     with GraphOp(name=f"parallel_nested_{n}") as g:
@@ -236,7 +241,7 @@ def build_parallel_nested(n: int):
 
 def build_branching(n: int):
     """n sequential classify-and-route stages. Each stage:
-    classify → if_() → 4 branches → merge. Total ~ n*7 ops.
+    classify -> if_() -> 4 branches -> merge. Total ~ n*7 ops.
     """
     with GraphOp(name=f"branching_{n}") as g:
         prev_out = PARENT["score"]
@@ -305,15 +310,15 @@ def build_for_loop(n: int):
 
 # =============================================================================
 # Pattern 6: Production-like workflow
-#   init → [5 parallel verification @graph subgraphs] → aggregate → post-process
-#   Each verification = classify → branch → 2 paths → merge (5-7 nodes)
+#   init -> [5 parallel verification @graph subgraphs] -> aggregate -> post-process
+#   Each verification = classify -> branch -> 2 paths -> merge (5-7 nodes)
 #   Total: ~40-50 nodes
 # =============================================================================
 
 
 @graph
 def verify_case(x, threshold):
-    """Single verification subgraph: classify → branch → 2 paths → merge."""
+    """Single verification subgraph: classify -> branch -> 2 paths -> merge."""
     cls = classify(score=x, name="cls")
     router = (
         Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
@@ -329,7 +334,7 @@ def verify_case(x, threshold):
 
 
 def build_production(n: int):
-    """n parallel verify_case subgraphs → combine_all → noop post-process.
+    """n parallel verify_case subgraphs -> combine_all -> noop post-process.
     Each subgraph has ~6 internal ops. Total ~ n*6 + 2 ops.
     """
     with GraphOp(name=f"production_{n}") as g:
@@ -364,7 +369,7 @@ def build_production(n: int):
 
 @graph
 def cpu_heavy_branch(x, iterations):
-    """CPU-heavy subgraph: hash chain → fibonacci → merge."""
+    """CPU-heavy subgraph: hash chain -> fibonacci -> merge."""
     h = cpu_hash_chain(x=x, iterations=iterations, name="hash")
     f = cpu_fibonacci(n=x, name="fib")
     m = merge_two(a=h["x"], b=f["fib"], name="merge")
@@ -372,7 +377,7 @@ def cpu_heavy_branch(x, iterations):
 
 
 def build_cpu_contention(n_heavy: int, n_light: int, hash_iters: int):
-    """n_heavy CPU-bound branches + n_light lightweight branches, all parallel → aggregate.
+    """n_heavy CPU-bound branches + n_light lightweight branches, all parallel -> aggregate.
     Stresses scheduler with mixed CPU contention.
     """
     with GraphOp(name=f"cpu_contention_{n_heavy}h_{n_light}l") as g:
@@ -408,7 +413,7 @@ def build_cpu_contention(n_heavy: int, n_light: int, hash_iters: int):
 
 # =============================================================================
 # Pattern 8: Production-like with CPU-bound stages
-#   init → [parallel verify + CPU ops] → aggregate → CPU post-process
+#   init -> [parallel verify + CPU ops] -> aggregate -> CPU post-process
 #   Simulates real workload: verification logic + heavy computation
 # =============================================================================
 
@@ -423,7 +428,7 @@ def cpu_verify_and_process(score, threshold, hash_iters):
 
 
 def build_production_cpu(n: int, hash_iters: int):
-    """n parallel cpu_verify_and_process subgraphs → combine → matrix post-process.
+    """n parallel cpu_verify_and_process subgraphs -> combine -> matrix post-process.
     Each subgraph: verify (6 ops) + hash chain (1 CPU op) + merge = 8+ ops.
     """
     with GraphOp(name=f"production_cpu_{n}") as g:
@@ -584,7 +589,7 @@ async def main():
         )
 
     # --- Production-like ---
-    print_header("Production-like (n parallel verify subgraphs → aggregate → post)")
+    print_header("Production-like (n parallel verify subgraphs -> aggregate -> post)")
     for n in [3, 5, 7, 10]:
         await bench_one(f"production({n} cases)", build_production(n), {"score": 75})
 

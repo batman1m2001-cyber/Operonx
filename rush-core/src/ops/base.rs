@@ -47,7 +47,7 @@ pub(crate) fn run(
             }
         }
 
-        let result_obj = execute_op(op, &inputs, state, context)?;
+        let result_obj = execute_op(op, inputs, state, context)?;
         store_result(op, result_obj, state, context)?;
 
         Ok(())
@@ -118,9 +118,10 @@ fn classify_op(op: &OpConfig) -> OpRoute<'_> {
 }
 
 /// Dispatch op execution to the appropriate handler.
+/// Takes ownership of inputs to avoid redundant cloning.
 fn execute_op(
     op: &OpConfig,
-    inputs: &serde_json::Map<String, Value>,
+    inputs: serde_json::Map<String, Value>,
     _state: &EngineState,
     _context: &str,
 ) -> Result<Option<Value>, RushError> {
@@ -352,7 +353,7 @@ pub(crate) fn push_output_refs(
 /// Execute a plugin op from a cdylib shared library.
 fn execute_plugin_op(
     spec: &str,
-    inputs: &serde_json::Map<String, Value>,
+    inputs: serde_json::Map<String, Value>,
 ) -> Result<Option<Value>, RushError> {
     let (lib_path, func_name) = plugins::parse_plugin_spec(spec).ok_or_else(|| {
         RushError::PluginError(format!(
@@ -361,8 +362,8 @@ fn execute_plugin_op(
         ))
     })?;
 
-    let json_value = Value::Object(inputs.clone());
-    let json_bytes = serde_json::to_vec(&json_value).map_err(|e| {
+    // Move inputs into Value::Object — zero-cost, no deep clone
+    let json_bytes = serde_json::to_vec(&Value::Object(inputs)).map_err(|e| {
         RushError::PluginError(format!("Failed to serialize inputs for plugin op: {}", e))
     })?;
 
@@ -379,11 +380,10 @@ fn execute_plugin_op(
 /// Execute a native transform op (prompt, parser) via rush-providers.
 fn execute_native_transform_op(
     op_type: &str,
-    inputs: &serde_json::Map<String, Value>,
+    inputs: serde_json::Map<String, Value>,
 ) -> Result<Option<Value>, RushError> {
-    let json_inputs = Value::Object(inputs.clone());
-
-    let json_outputs = rush_providers::ops::execute_transform(op_type, json_inputs)
+    // Move inputs into Value::Object — zero-cost, no deep clone
+    let json_outputs = rush_providers::ops::execute_transform(op_type, Value::Object(inputs))
         .map_err(|e| RushError::ProviderError(format!("Native transform op error: {}", e)))?;
 
     Ok(Some(json_outputs))
@@ -396,7 +396,7 @@ fn execute_native_transform_op(
 /// Execute a native provider op via rush-providers.
 fn execute_provider_op(
     op: &OpConfig,
-    inputs: &serde_json::Map<String, Value>,
+    inputs: serde_json::Map<String, Value>,
 ) -> Result<Option<Value>, RushError> {
     let config = op.provider_config.as_ref().ok_or_else(|| {
         RushError::ProviderError(format!(
@@ -412,7 +412,8 @@ fn execute_provider_op(
         )));
     }
 
-    let json_inputs = Value::Object(inputs.clone());
+    // Move inputs into Value::Object — zero-cost, no deep clone
+    let json_inputs = Value::Object(inputs);
 
     let json_outputs = runtime::block_on_async(async {
         rush_providers::ops::execute(&op.op_type, json_inputs, config).await
