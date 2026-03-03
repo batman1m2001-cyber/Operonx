@@ -362,7 +362,11 @@ class TestBranchOps:
     def test_multi_condition_branch(self):
         """Branch with multiple conditions routes correctly."""
         with GraphOp(name="g") as g:
-            router = if_(PARENT["score"] >= 90, "a").if_(PARENT["score"] >= 70, "b").else_("f")
+            router = (
+                if_(PARENT["score"] >= 90, "a")
+                .if_(PARENT["score"] >= 70, "b")
+                .else_("f")
+            )
             a = grade_a(outputs={"*": PARENT})
             b = grade_b(outputs={"*": PARENT})
             f = grade_f(outputs={"*": PARENT})
@@ -626,7 +630,9 @@ class TestWhileOp:
             return {"new_counter": counter + 1}
 
         with GraphOp(name="g") as g:
-            with WhileOp(name="loop", inputs={"counter": 0}, until="counter >= 5") as loop:
+            with WhileOp(
+                name="loop", inputs={"counter": 0}, until="counter >= 5"
+            ) as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END
@@ -924,7 +930,9 @@ class TestErrorResilience:
             return {"result": value * 10}
 
         with GraphOp(name="g") as g:
-            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=False) as loop:
+            with ForOp(
+                name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=False
+            ) as loop:
                 node = maybe_fail(value=PARENT["value"])
                 START >> node >> END
             START >> loop >> END
@@ -955,7 +963,9 @@ class TestErrorResilience:
             return {"result": value * 10}
 
         with GraphOp(name="g") as g:
-            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=True) as loop:
+            with ForOp(
+                name="loop", inputs={"value": Each([1, 2, 3])}, fail_fast=True
+            ) as loop:
                 node = ok_op(value=PARENT["value"])
                 START >> node >> END
             START >> loop >> END

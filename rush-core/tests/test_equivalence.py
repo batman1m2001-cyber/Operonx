@@ -279,7 +279,9 @@ class TestForOp:
 class TestWhileOp:
     def test_simple_counter(self):
         with GraphOp(name="g") as g:
-            with WhileOp(name="loop", inputs={"counter": 0}, until="counter >= 5") as loop:
+            with WhileOp(
+                name="loop", inputs={"counter": 0}, until="counter >= 5"
+            ) as loop:
                 step = increment(counter=PARENT["counter"])
                 step["new_counter"] >> PARENT["counter"]
                 START >> step >> END
