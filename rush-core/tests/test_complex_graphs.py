@@ -134,9 +134,6 @@ class TestDeepNesting:
 
 
 class TestWideParallelism:
-    @pytest.mark.skip(
-        reason="sum_all has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_many_parallel_ops(self):
         """5 independent ops running in parallel."""
 
@@ -144,16 +141,16 @@ class TestWideParallelism:
         def square(n: int):
             return {"result": n * n}
 
+        @op(rust=f"{BUILTIN_CRATE}::sum_all")
+        def sum_all(a: int, b: int, c: int, d: int, e: int):
+            return {"total": a + b + c + d + e}
+
         with GraphOp(name="g") as g:
             s0 = square(n=PARENT["n0"])
             s1 = square(n=PARENT["n1"])
             s2 = square(n=PARENT["n2"])
             s3 = square(n=PARENT["n3"])
             s4 = square(n=PARENT["n4"])
-
-            @op
-            def sum_all(a: int, b: int, c: int, d: int, e: int):
-                return {"total": a + b + c + d + e}
 
             total = sum_all(
                 a=s0["result"],
@@ -221,23 +218,16 @@ class TestComplexDiamondPatterns:
 
 
 class TestBranchWithIteration:
-    @pytest.mark.skip(
-        reason="grade_a/grade_f/apply_multiplier have no Rust builtins; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_branch_then_for_loop(self):
         """Branch decides which processing path, then iterate."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::grade_a_mult")
         def grade_a():
             return {"multiplier": 3}
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::grade_f_mult")
         def grade_f():
             return {"multiplier": 1}
-
-        @op
-        def apply_multiplier(value: int, multiplier: int):
-            return {"result": value * multiplier}
 
         with GraphOp(name="g") as g:
             router = if_(PARENT["score"] >= 90, "a").else_("f")
@@ -260,13 +250,10 @@ class TestBranchWithIteration:
         result = engine.run({"score": 50})
         assert result["multiplier"] == 1
 
-    @pytest.mark.skip(
-        reason="classify has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_for_loop_with_branch_inside(self):
         """ForOp where each iteration has a branch decision."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::classify_value")
         def classify(value: int):
             return {
                 "label": "high" if value >= 50 else "low",
@@ -296,13 +283,10 @@ class TestBranchWithIteration:
 
 
 class TestOutputMappingEdgeCases:
-    @pytest.mark.skip(
-        reason="multi_output has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_multiple_output_mappings(self):
         """Multiple keys mapped to different parent keys."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::multi_output")
         def multi_output(x: int):
             return {"doubled": x * 2, "tripled": x * 3, "squared": x * x}
 
@@ -321,13 +305,10 @@ class TestOutputMappingEdgeCases:
         assert result["t"] == 15
         assert result["s"] == 25
 
-    @pytest.mark.skip(
-        reason="multi has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_wildcard_output_forwarding(self):
         """outputs={"*": PARENT} forwards all outputs."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::multi")
         def multi(x: int):
             return {"a": x + 1, "b": x + 2, "c": x + 3}
 
@@ -343,13 +324,10 @@ class TestOutputMappingEdgeCases:
         assert result["b"] == 12
         assert result["c"] == 13
 
-    @pytest.mark.skip(
-        reason="compute has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_output_rename_mapping(self):
         """Rename output keys via output mapping."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::compute")
         def compute(x: int):
             return {"result": x * 10}
 
@@ -370,13 +348,10 @@ class TestOutputMappingEdgeCases:
 
 
 class TestLargeDataHandling:
-    @pytest.mark.skip(
-        reason="process_list has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_large_list_passthrough(self):
         """Large list passes through Rush engine correctly."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::process_list")
         def process_list(items: list):
             return {"count": len(items), "sum": sum(items)}
 
@@ -392,13 +367,10 @@ class TestLargeDataHandling:
         assert result["count"] == 1000
         assert result["sum"] == sum(range(1000))
 
-    @pytest.mark.skip(
-        reason="measure has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_large_string_passthrough(self):
         """Large string passes through Rush engine correctly."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::measure")
         def measure(text: str):
             return {"length": len(text), "first": text[:10], "last": text[-10:]}
 
@@ -512,13 +484,10 @@ class TestGraphDecoratorComposition:
 
 
 class TestWhileOpAdvanced:
-    @pytest.mark.skip(
-        reason="append_char has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_while_with_string_accumulation(self):
         """WhileOp that accumulates a string."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::append_char")
         def append_char(text: str, char: str, counter: int):
             return {
                 "new_text": text + char,
@@ -548,13 +517,10 @@ class TestWhileOpAdvanced:
         assert result["text"] == "*****"
         assert result["counter"] == 5
 
-    @pytest.mark.skip(
-        reason="collect has no Rust builtin; Python-only ops not supported in GIL-free Rust mode"
-    )
     def test_while_with_list_building(self):
         """WhileOp that builds a list iteration by iteration."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::collect_op")
         def collect(items: list, counter: int):
             new_items = items + [counter * counter]
             return {"new_items": new_items, "new_counter": counter + 1}

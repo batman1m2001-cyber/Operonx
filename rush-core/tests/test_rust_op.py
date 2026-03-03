@@ -77,7 +77,7 @@ class TestRustOpInWorkflow:
         assert result["result"] == 13  # 5*2=10, 10+3=13
 
     @pytest.mark.skip(
-        reason="Python-only ops cannot run in Rust mode after GIL-free refactor"
+        reason="Intentional: validates that Python-only ops are rejected in Rust mode"
     )
     async def test_mixed_rust_and_python_ops(self):
         """Graph with both Rust and Python ops."""

@@ -79,11 +79,10 @@ class TestSingleOp:
         result = engine.run({"name": "World"})
         assert result["greeting"] == "Hello, World!"
 
-    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_literal_input(self):
         """Op with a literal (non-Ref) input value."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::prefix")
         def prefix(text: str):
             return {"out": f"[INFO] {text}"}
 
@@ -298,25 +297,24 @@ class TestDataTypes:
 # =============================================================================
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::grade_a")
 def grade_a():
     """Returns A grade."""
     return {"grade": "A", "message": "Excellent!"}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::grade_b")
 def grade_b():
     """Returns B grade."""
     return {"grade": "B", "message": "Good job!"}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::grade_f")
 def grade_f():
     """Returns F grade."""
     return {"grade": "F", "message": "Try again!"}
 
 
-@pytest.mark.skip(reason="Branch tests use Python-only grade ops")
 class TestBranchOps:
     def test_simple_branch_true(self):
         """Branch routes to 'true' target when condition matches."""
@@ -398,7 +396,7 @@ class TestBranchOps:
     def test_branch_with_merge(self):
         """Branch arms merge via soft edges before END."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::format_grade")
         def format_result(grade: str):
             return {"formatted": f"Grade: {grade}"}
 
@@ -713,11 +711,10 @@ class TestWhileOp:
         result = engine.run({})
         assert result["b"] == 21  # fib: 0,1,1,2,3,5,8,13,21
 
-    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_while_with_upstream_ref(self):
         """WhileOp with initial value from an upstream op."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::make_start")
         def make_start():
             return {"start": 90}
 
@@ -837,7 +834,9 @@ class TestObservability:
                 f"{op_name} start_time has no default context"
             )
 
-    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
+    @pytest.mark.skip(
+        reason="Tests Python warnings.warn() — not applicable to Rust engine"
+    )
     def test_slow_op_warning(self):
         """Ops >100ms should emit a Python warning."""
         with GraphOp(name="g") as g:
@@ -866,7 +865,7 @@ class TestObservability:
 # =============================================================================
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::raise_op")
 def raise_op(x: int):
     """Op that always raises."""
     raise ValueError(f"boom with x={x}")
@@ -878,7 +877,6 @@ def safe_op(x: int):
     return {"result": x + 1}
 
 
-@pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
 class TestErrorResilience:
     def test_error_in_op_continues_graph(self):
         """An op that raises should not stop subsequent ops from running."""
@@ -923,7 +921,7 @@ class TestErrorResilience:
         This matches Python behavior where BaseOp.run() catches and stores errors.
         """
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::maybe_fail")
         def maybe_fail(value: int):
             if value == 2:
                 raise ValueError("fail on 2")
@@ -1114,7 +1112,7 @@ class TestTracingWiring:
 # =============================================================================
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::double")
 async def async_double(x: int):
     """Async op that doubles a value."""
     import asyncio
@@ -1123,7 +1121,7 @@ async def async_double(x: int):
     return {"result": x * 2}
 
 
-@op
+@op(rust=f"{BUILTIN_CRATE}::add")
 async def async_add(a: int, b: int):
     """Async op that adds two values."""
     import asyncio
@@ -1132,7 +1130,6 @@ async def async_add(a: int, b: int):
     return {"result": a + b}
 
 
-@pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
 class TestAsyncOps:
     def test_single_async_op(self):
         """Single async Python op runs correctly in Rust mode."""
@@ -1359,11 +1356,10 @@ class TestMapOp:
         result = engine.run({})
         assert result["result"] == [10, 20, 30]
 
-    @pytest.mark.skip(reason="Python-only op, not supported in GIL-free Rust mode")
     def test_map_no_fail_fast_continues(self):
         """MapOp with fail_fast=False continues on error (per-op error handling)."""
 
-        @op
+        @op(rust=f"{BUILTIN_CRATE}::maybe_fail")
         def maybe_fail(value: int):
             if value == 2:
                 raise ValueError("fail on 2")

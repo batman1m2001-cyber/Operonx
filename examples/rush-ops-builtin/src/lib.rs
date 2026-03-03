@@ -516,10 +516,163 @@ fn cpu_fibonacci(inputs: &Value) -> Value {
 }
 
 // =============================================================================
+// Test support ops — used by rush-core test suite
+// =============================================================================
+
+/// grade_a: returns A grade with message (for branch tests)
+fn grade_a(_inputs: &Value) -> Value {
+    serde_json::json!({"grade": "A", "message": "Excellent!"})
+}
+
+/// grade_b: returns B grade with message (for branch tests)
+fn grade_b(_inputs: &Value) -> Value {
+    serde_json::json!({"grade": "B", "message": "Good job!"})
+}
+
+/// grade_f: returns F grade with message (for branch tests)
+fn grade_f(_inputs: &Value) -> Value {
+    serde_json::json!({"grade": "F", "message": "Try again!"})
+}
+
+/// grade_a_mult: returns multiplier=3 (for branch+iteration tests)
+fn grade_a_mult(_inputs: &Value) -> Value {
+    serde_json::json!({"multiplier": 3})
+}
+
+/// grade_f_mult: returns multiplier=1 (for branch+iteration tests)
+fn grade_f_mult(_inputs: &Value) -> Value {
+    serde_json::json!({"multiplier": 1})
+}
+
+/// prefix: text → out = "[INFO] {text}"
+fn prefix(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    serde_json::json!({"out": format!("[INFO] {}", text)})
+}
+
+/// sum_all: a,b,c,d,e → total = a+b+c+d+e
+fn sum_all(inputs: &Value) -> Value {
+    let total: i64 = ["a", "b", "c", "d", "e"]
+        .iter()
+        .filter_map(|k| inputs[*k].as_i64())
+        .sum();
+    serde_json::json!({"total": total})
+}
+
+/// classify_value: value → label ("high" if >=50, else "low"), value
+fn classify_value(inputs: &Value) -> Value {
+    let value = inputs["value"].as_i64().unwrap_or(0);
+    let label = if value >= 50 { "high" } else { "low" };
+    serde_json::json!({"label": label, "value": value})
+}
+
+/// multi_output: x → doubled, tripled, squared
+fn multi_output(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    serde_json::json!({"doubled": x * 2, "tripled": x * 3, "squared": x * x})
+}
+
+/// multi: x → a=x+1, b=x+2, c=x+3
+fn multi(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    serde_json::json!({"a": x + 1, "b": x + 2, "c": x + 3})
+}
+
+/// compute: x → result = x * 10
+fn compute(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    serde_json::json!({"result": x * 10})
+}
+
+/// process_list: items → count, sum
+fn process_list(inputs: &Value) -> Value {
+    let items = inputs["items"].as_array();
+    let count = items.map(|a| a.len()).unwrap_or(0);
+    let sum: i64 = items
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).sum())
+        .unwrap_or(0);
+    serde_json::json!({"count": count, "sum": sum})
+}
+
+/// measure: text → length, first (10 chars), last (10 chars)
+fn measure(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let len = text.len();
+    let first: String = text.chars().take(10).collect();
+    let last: String = if len >= 10 {
+        text.chars().skip(len - 10).collect()
+    } else {
+        text.to_string()
+    };
+    serde_json::json!({"length": len, "first": first, "last": last})
+}
+
+/// append_char: text, char, counter → new_text = text + char, new_counter = counter + 1
+fn append_char(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let ch = inputs["char"].as_str().unwrap_or("");
+    let counter = inputs["counter"].as_i64().unwrap_or(0);
+    serde_json::json!({"new_text": format!("{}{}", text, ch), "new_counter": counter + 1})
+}
+
+/// collect_op: items, counter → new_items = items + [counter²], new_counter = counter + 1
+fn collect_op(inputs: &Value) -> Value {
+    let mut items = inputs["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let counter = inputs["counter"].as_i64().unwrap_or(0);
+    items.push(serde_json::json!(counter * counter));
+    serde_json::json!({"new_items": items, "new_counter": counter + 1})
+}
+
+/// make_start: returns {start: 90}
+fn make_start(_inputs: &Value) -> Value {
+    serde_json::json!({"start": 90})
+}
+
+/// format_grade: grade → formatted = "Grade: {grade}"
+fn format_grade(inputs: &Value) -> Value {
+    let grade = inputs["grade"].as_str().unwrap_or("");
+    serde_json::json!({"formatted": format!("Grade: {}", grade)})
+}
+
+/// multiply_vf: value, factor → result = value * factor
+fn multiply_vf(inputs: &Value) -> Value {
+    let value = inputs["value"].as_i64().unwrap_or(0);
+    let factor = inputs["factor"].as_i64().unwrap_or(1);
+    serde_json::json!({"result": value * factor})
+}
+
+/// accumulate_step: total, step → new_total = total + step
+fn accumulate_step(inputs: &Value) -> Value {
+    let total = inputs["total"].as_i64().unwrap_or(0);
+    let step = inputs["step"].as_i64().unwrap_or(0);
+    serde_json::json!({"new_total": total + step})
+}
+
+/// raise_op: always returns an error (for testing error resilience)
+fn raise_op(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    serde_json::json!({"error": format!("boom with x={}", x), "$error": true})
+}
+
+/// maybe_fail: returns value*10, but errors on value==2
+fn maybe_fail(inputs: &Value) -> Value {
+    let value = inputs["value"].as_i64().unwrap_or(0);
+    if value == 2 {
+        serde_json::json!({"error": "fail on 2", "$error": true})
+    } else {
+        serde_json::json!({"result": value * 10})
+    }
+}
+
+// =============================================================================
 // Export all ops via C ABI
 // =============================================================================
 
 export_ops!(
+    // Core ops
     double,
     add,
     identity,
@@ -543,16 +696,20 @@ export_ops!(
     passthrough,
     fail_op,
     hash_chain,
+    // String ops
     string_concat,
     string_split,
     string_template,
+    // JSON ops
     json_parse,
     json_extract,
     json_merge,
+    // Math ops
     math_sum,
     math_mean,
     math_max,
     math_min,
+    // Benchmark ops
     bench_noop,
     classify,
     process_grade,
@@ -564,4 +721,26 @@ export_ops!(
     cpu_prime_sieve,
     cpu_matrix_mult,
     cpu_fibonacci,
+    // Test support ops
+    grade_a,
+    grade_b,
+    grade_f,
+    grade_a_mult,
+    grade_f_mult,
+    prefix,
+    sum_all,
+    classify_value,
+    multi_output,
+    multi,
+    compute,
+    process_list,
+    measure,
+    append_char,
+    collect_op,
+    make_start,
+    format_grade,
+    multiply_vf,
+    accumulate_step,
+    raise_op,
+    maybe_fail,
 );
