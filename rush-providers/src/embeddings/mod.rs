@@ -2,7 +2,7 @@
 //!
 //! Dispatches by api_type to the appropriate provider:
 //! - OpenAI / vLLM / Azure → openai.rs (native HTTP)
-//! - HuggingFace → huggingface.rs (PyO3 bridge to Python)
+//! - HuggingFace → huggingface.rs (stub — use ONNX instead)
 //! - ONNX → onnx.rs (pure Rust: ort + tokenizers)
 
 pub mod huggingface;

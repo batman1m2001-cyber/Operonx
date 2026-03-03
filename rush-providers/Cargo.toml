@@ -8,7 +8,6 @@ description = "Provider configs and native op implementations for the Hush workf
 name = "rush_providers"
 
 [dependencies]
-pyo3 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,3 +27,4 @@ onnx = ["ort", "ndarray", "tokenizers"]
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

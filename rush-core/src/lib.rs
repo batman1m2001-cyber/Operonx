@@ -1,22 +1,15 @@
-use pyo3::prelude::*;
+//! rush-core — Pure Rust execution engine for Hush workflows.
+//!
+//! No PyO3 dependency. Communicates via JSON:
+//!   - Input: JSON config string from GraphOp.serialize()
+//!   - Input: JSON inputs (serde_json::Value)
+//!   - Output: JSON result (serde_json::Value)
 
-mod config;
-mod engine;
-pub(crate) mod error;
-mod ops;
-mod plugins;
-mod refs;
-mod runtime;
-mod states;
-
-use engine::Rush;
-
-/// rush_core._native — Rust executor for the Hush workflow engine.
-///
-/// Rush: standalone engine (Builder-Executor architecture).
-/// Plugin ops loaded at runtime from cdylib shared libraries.
-#[pymodule]
-fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<Rush>()?;
-    Ok(())
-}
+pub mod config;
+pub mod engine;
+pub mod error;
+pub mod ops;
+pub mod plugins;
+pub mod refs;
+pub mod runtime;
+pub mod states;

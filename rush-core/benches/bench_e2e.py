@@ -1,20 +1,26 @@
-"""End-to-end benchmark: Python mode vs Rust mode.
+"""End-to-end benchmark: Python backend vs Rust backend.
 
 Stress tests with nested @graph subgraphs, parallel branches,
 if_() routing, ForOp loops, CPU-bound contention — mirroring real production patterns.
 
+Python backend: hush-core's async Python engine (Hush + GraphOp.run)
+Rust backend:   rush-core's native Rust engine (Rush::run_json via rush-bench binary)
+
 Usage:
-    uv run python benches/bench_e2e.py
+    cd rush-core && uv run python benches/bench_e2e.py
 
 Requirements:
-    hush-core and rush-core must be installed.
+    hush-core must be installed (for Python backend + graph serialization).
+    rush-bench binary must be built: cargo build --release --bin rush-bench
 """
 
 import asyncio
 import hashlib
+import json
 import math
 import os
 import statistics
+import subprocess
 import sys
 import time
 import tracemalloc
@@ -27,19 +33,52 @@ BUILTIN_CRATE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "examples", "rush-ops-builtin")
 )
 
+# Path to the rush-bench binary (built from rush-core/benches/bench_runner.rs)
+RUSH_BENCH_BIN = None
 
-def check_deps():
-    try:
-        from rush_core import is_rust_available
 
-        if not is_rust_available():
-            print(
-                "ERROR: rush-core native module not built. Run: maturin develop --release"
-            )
-            sys.exit(1)
-    except ImportError:
-        print("ERROR: rush-core not installed. Run: maturin develop --release")
+def find_rush_bench():
+    """Find and optionally build the rush-bench binary."""
+    global RUSH_BENCH_BIN
+
+    rush_core_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    # Check release binary first, then debug
+    for profile in ["release", "debug"]:
+        if sys.platform == "win32":
+            candidate = os.path.join(rush_core_dir, "target", profile, "rush-bench.exe")
+        else:
+            candidate = os.path.join(rush_core_dir, "target", profile, "rush-bench")
+        if os.path.isfile(candidate):
+            RUSH_BENCH_BIN = candidate
+            return
+
+    # Not found — try building
+    print(
+        "  [info] rush-bench binary not found, building with cargo build --release..."
+    )
+    result = subprocess.run(
+        ["cargo", "build", "--release", "--bin", "rush-bench"],
+        cwd=rush_core_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"  [error] cargo build failed:\n{result.stderr}")
         sys.exit(1)
+
+    if sys.platform == "win32":
+        RUSH_BENCH_BIN = os.path.join(
+            rush_core_dir, "target", "release", "rush-bench.exe"
+        )
+    else:
+        RUSH_BENCH_BIN = os.path.join(rush_core_dir, "target", "release", "rush-bench")
+
+    if not os.path.isfile(RUSH_BENCH_BIN):
+        print(f"  [error] rush-bench binary not found at {RUSH_BENCH_BIN}")
+        sys.exit(1)
+
+    print(f"  [info] Built rush-bench at {RUSH_BENCH_BIN}")
 
 
 # =============================================================================
@@ -480,18 +519,19 @@ def build_cpu_chain(n: int, hash_iters: int):
 
 
 # =============================================================================
-# Benchmark runner
+# Benchmark runners
 # =============================================================================
 
 
-async def bench_mode(graph, mode: str, inputs: dict, runs: int = 200):
-    engine = Hush(graph, mode=mode)
+async def bench_python(graph_obj, inputs: dict, runs: int = 200):
+    """Benchmark using hush-core's Python async engine."""
+    engine = Hush(graph_obj, mode="python")
 
     # Warmup
     for _ in range(5):
         await engine.run(inputs=inputs)
 
-    # Measure time
+    # Timed runs
     times = []
     for _ in range(runs):
         start = time.perf_counter_ns()
@@ -499,7 +539,7 @@ async def bench_mode(graph, mode: str, inputs: dict, runs: int = 200):
         elapsed = time.perf_counter_ns() - start
         times.append(elapsed / 1_000_000)
 
-    # Measure memory
+    # Memory measurement
     tracemalloc.start()
     for _ in range(10):
         await engine.run(inputs=inputs)
@@ -516,18 +556,72 @@ async def bench_mode(graph, mode: str, inputs: dict, runs: int = 200):
     }
 
 
+def bench_rust(graph_obj, inputs: dict, runs: int = 200):
+    """Benchmark using rush-core's native Rust engine via the rush-bench binary.
+
+    Serializes the graph config from Python, sends it to the rush-bench binary
+    via stdin, and parses JSON timing results from stdout.
+    """
+    # Build and serialize the graph
+    graph_obj.build()
+    config = graph_obj.serialize()
+
+    # Build the request for rush-bench
+    request = json.dumps(
+        {
+            "config": config,
+            "inputs": inputs,
+            "warmup": 5,
+            "runs": runs,
+        },
+        default=str,
+    )
+
+    # Call rush-bench binary
+    result = subprocess.run(
+        [RUSH_BENCH_BIN],
+        input=request + "\n",
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    if result.returncode != 0:
+        print(f"  [error] rush-bench failed: {result.stderr}")
+        return None
+
+    # Parse first line of stdout as JSON
+    for line in result.stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            if "error" in data:
+                print(f"  [error] rush-bench: {data['error']}")
+                return None
+            data["peak_mem_kb"] = 0  # Rust doesn't report memory via this path
+            return data
+        except json.JSONDecodeError:
+            continue
+
+    print("  [error] rush-bench returned no valid output")
+    return None
+
+
 def print_header(name: str):
     print(f"\n  {name}:")
     print(
         f"  {'Label':>30s} | {'Ops':>5s} | {'Py mean':>10s} | {'Rs mean':>10s} | "
-        f"{'Py p99':>10s} | {'Rs p99':>10s} | {'Speedup':>8s} | {'Py mem':>10s} | {'Rs mem':>10s}"
+        f"{'Py p99':>10s} | {'Rs p99':>10s} | {'Speedup':>8s} | {'Py mem':>10s}"
     )
     print(
-        f"  {'-' * 30}-+-{'-' * 5}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 8}-+-{'-' * 10}-+-{'-' * 10}"
+        f"  {'-' * 30}-+-{'-' * 5}-+-{'-' * 10}-+-{'-' * 10}-+-"
+        f"{'-' * 10}-+-{'-' * 10}-+-{'-' * 8}-+-{'-' * 10}"
     )
 
 
-async def bench_one(label: str, graph, inputs: dict, runs: int = 200):
+async def bench_one(label: str, graph_obj, inputs: dict, runs: int = 200):
     # Count total ops (rough)
     def count_ops(g):
         n = len(getattr(g, "_ops", {}))
@@ -536,27 +630,37 @@ async def bench_one(label: str, graph, inputs: dict, runs: int = 200):
                 n += count_ops(child)
         return n
 
-    num_ops = count_ops(graph)
-    py = await bench_mode(graph, "python", inputs, runs)
-    rs = await bench_mode(graph, "rust", inputs, runs)
+    num_ops = count_ops(graph_obj)
+    py = await bench_python(graph_obj, inputs, runs)
+    rs = bench_rust(graph_obj, inputs, runs)
+
+    if rs is None:
+        print(
+            f"  {label:>30s} | {num_ops:5d} | {py['mean_ms']:8.3f}ms | {'FAILED':>10s} | "
+            f"{py['p99_ms']:8.3f}ms | {'--':>10s} | {'--':>8s} | {py['peak_mem_kb']:8.1f}KB"
+        )
+        return
+
     speedup = py["mean_ms"] / rs["mean_ms"] if rs["mean_ms"] > 0 else float("inf")
 
     print(
         f"  {label:>30s} | {num_ops:5d} | {py['mean_ms']:8.3f}ms | {rs['mean_ms']:8.3f}ms | "
         f"{py['p99_ms']:8.3f}ms | {rs['p99_ms']:8.3f}ms | "
-        f"{speedup:6.2f}x | {py['peak_mem_kb']:8.1f}KB | {rs['peak_mem_kb']:8.1f}KB"
+        f"{speedup:6.2f}x | {py['peak_mem_kb']:8.1f}KB"
     )
 
 
 async def main():
-    check_deps()
+    find_rush_bench()
 
-    print("=" * 130)
-    print("  End-to-End Stress Benchmark: Python mode vs Rust mode")
+    print("=" * 120)
+    print(
+        "  End-to-End Benchmark: Python backend (hush-core) vs Rust backend (rush-core)"
+    )
     print(
         "  Patterns: linear, nested, parallel, branching, ForOp, production, CPU-contention, CPU-production, CPU-chain"
     )
-    print("=" * 130)
+    print("=" * 120)
 
     # --- Linear chains ---
     print_header("Linear chain (baseline)")
@@ -633,9 +737,9 @@ async def main():
             runs=50,
         )
 
-    print("\n" + "=" * 130)
+    print("\n" + "=" * 120)
     print("  Done.")
-    print("=" * 130)
+    print("=" * 120)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 //! Embedding op — dispatches to appropriate backend.
 //!
 //! Mirrors hush-providers/hush/providers/ops/embedding.py.
-//! Supports: OpenAI, Azure, vLLM (HTTP), HF (PyO3), ONNX (native Rust ort).
+//! Supports: OpenAI, Azure, vLLM (HTTP), ONNX (native Rust ort).
 
 use serde_json::Value;
 

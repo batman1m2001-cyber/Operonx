@@ -186,20 +186,44 @@ fn run_batch(
 // =============================================================================
 
 /// Collect graph outputs as a serde_json::Value (JSON object).
+///
+/// When explicit `outputs` are defined, resolves each param via refs or graph state.
+/// When `outputs` is empty, auto-forwards all values from terminal ops (those
+/// whose adjacency points to `__end__`), matching Python's `>> END` behavior.
 pub(crate) fn get_outputs(
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
 ) -> Result<Value, RushError> {
     let mut result = serde_json::Map::new();
-    for param in &config.outputs {
-        if let Some(value) = base::resolve_param(param, state, context)? {
-            result.insert(param.var_name.clone(), value);
-        } else if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
-            let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-            result.insert(param.var_name.clone(), value);
+
+    if !config.outputs.is_empty() {
+        // Explicit output mappings
+        for param in &config.outputs {
+            if let Some(value) = base::resolve_param(param, state, context)? {
+                result.insert(param.var_name.clone(), value);
+            } else if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
+                let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+                result.insert(param.var_name.clone(), value);
+            }
+        }
+    } else {
+        // Auto-forward: collect all values from terminal ops (ops → __end__)
+        for (op_name, adj_list) in &config.compiled_adj {
+            let is_terminal = adj_list.iter().any(|e| e.target == "__end__");
+            if is_terminal {
+                if let Some(op) = config.ops.get(op_name) {
+                    let prefix = &op.full_name;
+                    for (key, value) in state.get_all_with_prefix(prefix, context) {
+                        if !key.starts_with('$') {
+                            result.insert(key, value);
+                        }
+                    }
+                }
+            }
         }
     }
+
     Ok(Value::Object(result))
 }
 
@@ -290,12 +314,34 @@ pub(crate) fn run_nested(
     run_graph(inner, state, context)?;
 
     // 3. Collect inner graph outputs
-    for param in &inner.outputs {
-        if let Some(value) = base::resolve_param(param, state, context)? {
-            state.set(&op.full_name, &param.var_name, context, value);
-        } else if let Some(arc_val) = state.get(&inner.full_name, &param.var_name, context) {
-            let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-            state.set(&op.full_name, &param.var_name, context, value);
+    if !inner.outputs.is_empty() {
+        // Explicit output mappings
+        for param in &inner.outputs {
+            if let Some(value) = base::resolve_param(param, state, context)? {
+                state.set(&op.full_name, &param.var_name, context, value);
+            } else if let Some(arc_val) =
+                state.get(&inner.full_name, &param.var_name, context)
+            {
+                let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+                state.set(&op.full_name, &param.var_name, context, value);
+            }
+        }
+    } else {
+        // Auto-forward: collect all values from terminal ops (>> END),
+        // matching Python's auto-forwarding behavior for nested graphs.
+        for (inner_op_name, adj_list) in &inner.compiled_adj {
+            let is_terminal = adj_list.iter().any(|e| e.target == "__end__");
+            if is_terminal {
+                if let Some(inner_op) = inner.ops.get(inner_op_name) {
+                    for (key, value) in
+                        state.get_all_with_prefix(&inner_op.full_name, context)
+                    {
+                        if !key.starts_with('$') {
+                            state.set(&op.full_name, &key, context, value);
+                        }
+                    }
+                }
+            }
         }
     }
 

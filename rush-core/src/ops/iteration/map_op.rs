@@ -186,31 +186,60 @@ pub(crate) fn run(
 // =============================================================================
 
 /// Transpose result dicts and store each key as a list in state.
+///
+/// When the op has explicit outputs, transpose only those keys.
+/// When outputs is empty, auto-detect keys from the iteration results
+/// (matching Python's behavior where ForOp/MapOp auto-collects all output keys).
 pub(super) fn transpose_and_store(
     op: &OpConfig,
     results: &[Value],
     state: &EngineState,
     context: &str,
 ) -> Result<(), RushError> {
-    let output_keys: Vec<&str> = op
+    let explicit_keys: Vec<&str> = op
         .outputs
         .iter()
         .filter(|p| p.var_name != "iteration_metrics")
         .map(|p| p.var_name.as_str())
         .collect();
 
-    for key in &output_keys {
-        let list: Vec<Value> = results
-            .iter()
-            .map(|r| {
-                if let Value::Object(map) = r {
-                    map.get(*key).cloned().unwrap_or(Value::Null)
-                } else {
-                    Value::Null
+    if explicit_keys.is_empty() {
+        // Auto-detect keys from all result objects
+        let mut seen = std::collections::BTreeSet::new();
+        for r in results {
+            if let Value::Object(map) = r {
+                for k in map.keys() {
+                    seen.insert(k.clone());
                 }
-            })
-            .collect();
-        state.set(&op.full_name, key, context, Value::Array(list));
+            }
+        }
+        for key in &seen {
+            let list: Vec<Value> = results
+                .iter()
+                .map(|r| {
+                    if let Value::Object(map) = r {
+                        map.get(key.as_str()).cloned().unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    }
+                })
+                .collect();
+            state.set(&op.full_name, key, context, Value::Array(list));
+        }
+    } else {
+        for key in &explicit_keys {
+            let list: Vec<Value> = results
+                .iter()
+                .map(|r| {
+                    if let Value::Object(map) = r {
+                        map.get(*key).cloned().unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    }
+                })
+                .collect();
+            state.set(&op.full_name, key, context, Value::Array(list));
+        }
     }
 
     Ok(())

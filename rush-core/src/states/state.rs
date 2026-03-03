@@ -15,7 +15,7 @@ use dashmap::DashMap;
 use lasso::{Spur, ThreadedRodeo};
 use serde_json::Value;
 
-pub(crate) struct EngineState {
+pub struct EngineState {
     interner: ThreadedRodeo,
     values: DashMap<(Spur, Spur, Spur), Arc<Value>>,
     /// Dynamic tags collected from op results via `$tags` key.
@@ -25,7 +25,7 @@ pub(crate) struct EngineState {
 }
 
 impl EngineState {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         EngineState {
             interner: ThreadedRodeo::default(),
             values: DashMap::new(),
@@ -35,18 +35,18 @@ impl EngineState {
     }
 
     /// Set the request ID (called by engine.run()).
-    pub(crate) fn set_request_id(&self, id: String) {
+    pub fn set_request_id(&self, id: String) {
         *self.request_id.lock().unwrap() = Some(id);
     }
 
     /// Get the request ID (used for tracing metadata).
-    pub(crate) fn request_id(&self) -> Option<String> {
+    pub fn request_id(&self) -> Option<String> {
         self.request_id.lock().unwrap().clone()
     }
 
     /// Get a value from state. Zero heap allocations on cache hit.
     /// Arc::clone() is O(1) regardless of value size.
-    pub(crate) fn get(&self, full_name: &str, var: &str, context: &str) -> Option<Arc<Value>> {
+    pub fn get(&self, full_name: &str, var: &str, context: &str) -> Option<Arc<Value>> {
         let k1 = self.interner.get(full_name)?;
         let k2 = self.interner.get(var)?;
         let k3 = self.interner.get(context)?;
@@ -55,7 +55,7 @@ impl EngineState {
 
     /// Set a value in state. Interns key strings (allocs only on first-seen string).
     /// Callers pass &str — no more .clone() / .to_string() at call sites.
-    pub(crate) fn set(&self, full_name: &str, var: &str, context: &str, value: Value) {
+    pub fn set(&self, full_name: &str, var: &str, context: &str, value: Value) {
         let k1 = self.interner.get_or_intern(full_name);
         let k2 = self.interner.get_or_intern(var);
         let k3 = self.interner.get_or_intern(context);
@@ -63,7 +63,7 @@ impl EngineState {
     }
 
     /// Add dynamic tags (deduplicated). Mirrors Python's `MemoryState.add_tags()`.
-    pub(crate) fn add_tags(&self, tags: Vec<String>) {
+    pub fn add_tags(&self, tags: Vec<String>) {
         let mut locked = self.tags.lock().unwrap();
         for tag in tags {
             if !locked.contains(&tag) {
@@ -72,14 +72,38 @@ impl EngineState {
         }
     }
 
-    pub(crate) fn tags(&self) -> Vec<String> {
+    pub fn tags(&self) -> Vec<String> {
         self.tags.lock().unwrap().clone()
+    }
+
+    /// Get all var→value pairs for a given `full_name` and `context`.
+    /// Used by auto-forwarding to collect terminal op outputs.
+    pub fn get_all_with_prefix(&self, full_name: &str, context: &str) -> Vec<(String, Value)> {
+        let k1 = match self.interner.get(full_name) {
+            Some(k) => k,
+            None => return Vec::new(),
+        };
+        let k3 = match self.interner.get(context) {
+            Some(k) => k,
+            None => return Vec::new(),
+        };
+
+        let mut result = Vec::new();
+        for entry in self.values.iter() {
+            let (ek1, ek2, ek3) = entry.key();
+            if *ek1 == k1 && *ek3 == k3 {
+                let var = self.interner.resolve(ek2).to_string();
+                let value = (**entry.value()).clone();
+                result.push((var, value));
+            }
+        }
+        result
     }
 
     /// Snapshot all stored values as a nested JSON object.
     /// Format: {"op_name": {"var_name": {"context": value}}}.
     /// Used by engine.rs to build $state metadata for tracing.
-    pub(crate) fn values_snapshot(&self) -> Value {
+    pub fn values_snapshot(&self) -> Value {
         let mut result = serde_json::Map::new();
         for entry in self.values.iter() {
             let (k1, k2, k3) = entry.key();
