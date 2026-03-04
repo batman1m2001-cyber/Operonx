@@ -16,7 +16,7 @@ git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core
 ```
 
-Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-cai-dat-va-thiet-lap.md).
+Xem chi tiết tại [Cài đặt và Thiết lập](../tutorial/docs/01-cai-dat-va-thiet-lap.md).
 
 ## Quick Start
 
@@ -92,13 +92,13 @@ tracer = HushEyesTracer(tags=["dev"])
 engine = Hush(graph)
 await engine.run(inputs={...}, tracer=tracer)
 
-# Xem traces: chạy hush-eyes server (cd hush-eyes && cargo run -- serve --port 8420)
+# Xem traces: chạy ui-hush-eyes server (cd ui-hush-eyes && cargo run -- serve --port 8420)
 # Mở http://localhost:8420
 ```
 
 ## Documentation
 
-- [User Docs](../hush-tutorial/docs/) - Tutorials và guides
+- [User Docs](../tutorial/docs/) - Tutorials và guides
 - [Architecture](../architecture/) - Internal documentation
   - [Engine](../architecture/engine/) - Execution internals
   - [State](../architecture/state/) - State management
@@ -109,7 +109,7 @@ await engine.run(inputs={...}, tracer=tracer)
 - [hush-providers](../hush-providers/) - LLM, embedding, reranking
 - [hush-telemetry](../hush-telemetry/) - Langfuse, OpenTelemetry
 - [rush-core](../rush-core/) - Rust execution backend (1.9x–6.2x speedup)
-- [hush-eyes](../hush-eyes/) - Standalone Rust server for trace visualization
+- [ui-hush-eyes](../ui-hush-eyes/) - Standalone Rust server for trace visualization
 
 ## License
 

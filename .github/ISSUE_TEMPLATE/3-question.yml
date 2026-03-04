@@ -27,4 +27,4 @@ body:
     attributes:
       label: Documentation Check
       options:
-        - label: I have checked the existing documentation in hush-tutorial/docs/
+        - label: I have checked the existing documentation in tutorial/docs/

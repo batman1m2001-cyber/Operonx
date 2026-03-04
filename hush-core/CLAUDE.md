@@ -12,7 +12,7 @@ hush/core/
 │   ├── base.py         # Tracer base class (tags + flush interface)
 │   ├── collector.py    # TraceCollector — reads state directly after execution
 │   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, singleton
-│   ├── hush_eyes.py    # HushEyesTracer — HTTP POST to hush-eyes server
+│   ├── hush_eyes.py    # HushEyesTracer — HTTP POST to ui-hush-eyes server
 │   └── models.py       # NodeStructure, TraceRecord, TracePayload dataclasses
 ├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
 ├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)

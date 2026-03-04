@@ -668,13 +668,13 @@ class TestTracerWithIterationNodes:
 
 
 # ---------------------------------------------------------------------------
-# Integration: HushEyesTracer (requires running hush-eyes server)
+# Integration: HushEyesTracer (requires running ui-hush-eyes server)
 # ---------------------------------------------------------------------------
 @pytest.mark.integration
 class TestHushEyesIntegration:
     @pytest.mark.asyncio
     async def test_hush_eyes_tracer_end_to_end(self):
-        """End-to-end test: workflow -> HushEyesTracer -> hush-eyes server."""
+        """End-to-end test: workflow -> HushEyesTracer -> ui-hush-eyes server."""
         with GraphOp(name="eyes-test") as graph:
             node = FuncOp(
                 name="double",

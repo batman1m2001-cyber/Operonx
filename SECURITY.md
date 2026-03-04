@@ -61,6 +61,6 @@ This security policy applies to:
 - `hush-core`
 - `hush-providers`
 - `hush-telemetry`
-- `hush-eyes`
+- `ui-hush-eyes`
 
 Third-party provider SDKs (OpenAI, Anthropic, etc.) have their own security policies.

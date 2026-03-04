@@ -102,7 +102,7 @@ target/
 
 # VSCode extension build artifacts
 *.vsix
-hush-eyes/out/
+ui-hush-eyes/out/
 
 # Local sync scripts
 sync_to_internal.bat

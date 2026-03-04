@@ -272,7 +272,7 @@ def get_flush_worker() -> FlushWorker:
 
 ### 4. HushEyesTracer — `hush_eyes.py` (69 lines)
 
-Tracer built-in gửi traces đến hush-eyes local server. Dùng stdlib `urllib.request` (không cần thêm dependency).
+Tracer built-in gửi traces đến ui-hush-eyes local server. Dùng stdlib `urllib.request` (không cần thêm dependency).
 
 ```python
 class HushEyesTracer(Tracer):
@@ -291,9 +291,9 @@ class HushEyesTracer(Tracer):
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status != 200:
-                    LOGGER.warning("hush-eyes returned status %d", resp.status)
+                    LOGGER.warning("ui-hush-eyes returned status %d", resp.status)
         except Exception:
-            LOGGER.debug("Could not reach hush-eyes at %s", self._url)
+            LOGGER.debug("Could not reach ui-hush-eyes at %s", self._url)
 ```
 
 **Đặc điểm:**

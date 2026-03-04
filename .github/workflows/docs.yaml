@@ -7,7 +7,7 @@ on:
     paths:
       - 'docs/**'
       - 'architecture/**'
-      - 'hush-tutorial/docs/**'
+      - 'tutorial/docs/**'
       - 'mkdocs.yml'
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
       - name: Create symlinks for docs
         run: |
           ln -s ../architecture docs/architecture
-          ln -s ../hush-tutorial/docs docs/tutorial
+          ln -s ../tutorial/docs docs/tutorial
           ln -s ../CONTRIBUTING.md docs/CONTRIBUTING.md
           ln -s ../assets docs/assets
 

@@ -8,7 +8,7 @@ Hush is an async-first workflow engine for building AI applications. Orchestrate
 
 - **DAG-based workflows** — define complex pipelines with nodes and edges
 - **Async-first** — native async execution with automatic parallel processing
-- **Built-in tracing** — full observability via hush-eyes server + external backends (Langfuse, OpenTelemetry)
+- **Built-in tracing** — full observability via ui-hush-eyes server + external backends (Langfuse, OpenTelemetry)
 - **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
 - **Type-safe state** — O(1) state access with compile-time validation
 - **Rust backend** — optional high-performance execution via rush-core (1.9x–6.2x speedup)
@@ -39,8 +39,8 @@ asyncio.run(main())
 
 | Section | Description |
 |---------|-------------|
-| [Getting Started](../hush-tutorial/docs/00-tong-quan.md) | Overview, installation, and quick start |
-| [User Guide](../hush-tutorial/docs/03-core-concepts.md) | Core concepts, LLM integration, loops, tracing |
+| [Getting Started](../tutorial/docs/00-tong-quan.md) | Overview, installation, and quick start |
+| [User Guide](../tutorial/docs/03-core-concepts.md) | Core concepts, LLM integration, loops, tracing |
 | [Architecture](../architecture/index.md) | Deep technical documentation for contributors |
 | [Contributing](../CONTRIBUTING.md) | How to contribute to Hush |
 
@@ -53,7 +53,7 @@ asyncio.run(main())
 | **hush-providers** | LLM, embedding, reranking provider integrations (Python) |
 | **rush-providers** | Rust provider implementations (native HTTP, ONNX, per-provider) |
 | **hush-telemetry** | External tracing backends (Langfuse, OpenTelemetry) |
-| **hush-eyes** | Standalone Rust server for trace visualization |
+| **ui-hush-eyes** | Standalone Rust server for trace visualization |
 
 ## License
 

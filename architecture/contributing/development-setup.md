@@ -13,9 +13,9 @@ hush/
 ├── hush-core/          # Core workflow engine
 ├── hush-providers/     # LLM, embedding, reranker providers
 ├── hush-telemetry/ # Tracing integration (Langfuse, etc.)
-├── hush-tutorial/      # Tutorials và examples
+├── tutorial/      # Tutorials và examples
 ├── architecture/       # Internal documentation
-└── hush-tutorial/docs/ # User documentation
+└── tutorial/docs/ # User documentation
 ```
 
 ## Clone Repository

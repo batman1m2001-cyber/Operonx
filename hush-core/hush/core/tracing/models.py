@@ -44,7 +44,7 @@ class TracePayload:
     """Complete trace data for a single workflow execution.
 
     Combines static graph structure with dynamic execution records.
-    Matches the IngestRequest format expected by hush-eyes server.
+    Matches the IngestRequest format expected by ui-hush-eyes server.
     """
 
     request_id: str
