@@ -242,19 +242,22 @@ cd hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
 cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 
 # rush-core (Rust execution backend)
-cd rush-core && cargo test
+cargo test -p rush-core
 
 # rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
-cd rush-core && cargo test -p rush-providers
+cargo test -p rush-providers
+
+# All Rust crates (workspace)
+cargo test --workspace
 
 # hush-serve (Python HTTP server)
 cd hush-serve && uv sync --all-extras && uv run -m pytest
 
 # rush-serve (Rust HTTP server)
-cd rush-serve && cargo build --release
+cargo build -p rush-serve --release
 
 # ui-hush-eyes (Rust trace server)
-cd ui-hush-eyes && cargo build --release
+cargo build -p hush-eyes --release
 ```
 
 ## Development Workflow

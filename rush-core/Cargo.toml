@@ -3,6 +3,7 @@ name = "rush-core"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance Rust executor for the Hush workflow engine (Rust + Hush = Rush)"
+autobenches = false
 
 [lib]
 name = "rush_core"
@@ -27,13 +28,6 @@ rush-providers = { path = "../rush-providers" }
 name = "rush-bench"
 path = "benches/bench_runner.rs"
 
-autobenches = false
-
 [features]
 default = []
 onnx = ["rush-providers/onnx"]
-
-[profile.release]
-lto = true
-codegen-units = 1
-opt-level = 3

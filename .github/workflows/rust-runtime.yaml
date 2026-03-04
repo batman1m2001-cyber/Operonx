@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['rush-core/**', 'rush-providers/**', 'examples/**']
+    paths: ['rush-core/**', 'rush-providers/**', 'rush-serve/**', 'examples/**', 'Cargo.toml']
   pull_request:
     branches: [main]
-    paths: ['rush-core/**', 'rush-providers/**', 'examples/**']
+    paths: ['rush-core/**', 'rush-providers/**', 'rush-serve/**', 'examples/**', 'Cargo.toml']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,17 +29,11 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            rush-core/target
-          key: rust-${{ runner.os }}-${{ hashFiles('rush-core/Cargo.lock') }}
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
 
-      - name: Run Rust tests
-        working-directory: rush-core
-        run: cargo test
+      - name: Run workspace tests
+        run: cargo test --workspace
 
-      - name: Run rush-providers tests
-        working-directory: rush-core
-        run: cargo test -p rush-providers
-
-      - name: Build release binary
-        working-directory: rush-core
-        run: cargo build --release
+      - name: Build release
+        run: cargo build --workspace --release
