@@ -9,7 +9,7 @@ Học được:
 - Auto-build: engine tự build crate lần đầu
 
 Yêu cầu:
-- rush-core đã build (cd rush-core && uv run maturin develop --release)
+- rush-core đã build (cd rush-core && cargo build --release)
 - rush-ops-builtin đã build (cd examples/rush-ops-builtin && cargo build --release)
 
 Chạy: cd tutorial && uv run python examples/18_rust_plugin_ops.py

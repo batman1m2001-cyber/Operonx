@@ -27,10 +27,10 @@ Kết quả: **2-6x nhanh hơn** cho hầu hết workflow patterns.
 ## Cài đặt rush-core
 
 ```bash
-cd rush-core && uv run maturin develop --release
+cd rush-core && cargo build --release
 ```
 
-> **Lưu ý:** Cần Rust toolchain (`rustup`) và maturin (`pip install maturin`).
+> **Lưu ý:** Cần Rust toolchain (`rustup`).
 
 ## Sử dụng Rust mode
 

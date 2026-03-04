@@ -16,10 +16,6 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
 
     steps:
       - uses: actions/checkout@v4
@@ -36,65 +32,14 @@ jobs:
             rush-core/target
           key: rust-${{ runner.os }}-${{ hashFiles('rush-core/Cargo.lock') }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Run Rust unit tests
+      - name: Run Rust tests
         working-directory: rush-core
-        run: cargo test --lib
+        run: cargo test
 
-      - name: Build native module (release)
+      - name: Run rush-providers tests
         working-directory: rush-core
-        run: |
-          uv sync --all-extras
-          uv run maturin develop --release
+        run: cargo test -p rush-providers
 
-      - name: Run Python tests
+      - name: Build release binary
         working-directory: rush-core
-        run: uv run pytest tests/ -v --tb=short
-
-  # Verify existing hush-core tests still pass with Rust runtime available
-  integration:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rush-core/target
-          key: rust-${{ runner.os }}-${{ hashFiles('rush-core/Cargo.lock') }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Build rush-core
-        working-directory: rush-core
-        run: |
-          uv sync --all-extras
-          uv run maturin develop --release
-
-      - name: Install hush-core
-        working-directory: hush-core
-        run: uv sync --all-extras
-
-      - name: Run hush-core tests (verifies no regression)
-        working-directory: hush-core
-        run: uv run pytest --tb=short -q -m "not integration"
+        run: cargo build --release

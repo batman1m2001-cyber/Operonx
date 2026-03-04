@@ -8,7 +8,7 @@ Học được:
 - Rust mode hoạt động với tất cả op types (ForOp, MapOp, fan-out, nested graphs)
 - Benchmark performance giữa hai modes
 
-Yêu cầu: rush-core đã build (cd rush-core && uv run maturin develop --release)
+Yêu cầu: rush-core đã build (cd rush-core && cargo build --release)
 
 Chạy: cd tutorial && uv run python examples/17_rust_mode.py
 """

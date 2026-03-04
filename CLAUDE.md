@@ -7,13 +7,15 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 ```
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
-├── rush-core/          # High-performance Rust execution backend (PyO3 + rayon + DashMap)
+├── rush-core/          # High-performance Rust execution backend (pure rlib, rayon + DashMap)
 │   └── sdk/            # Plugin SDK for building Rust op crates (export_ops! macro)
 ├── hush-providers/     # LLM, embedding, reranking integrations (Python)
 ├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
+├── hush-serve/         # HTTP API server from workflow graphs (Python, FastAPI + uvicorn)
+├── rush-serve/         # Standalone Rust HTTP server for workflows (Axum + rush-core)
 ├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
-├── tutorial/      # Documentation (Vietnamese) and examples
-├── ui-hush-eyes/          # Standalone Rust server for trace visualization (Axum + SQLite)
+├── tutorial/           # Documentation (Vietnamese) and examples
+├── ui-hush-eyes/       # Standalone Rust server for trace visualization (Axum + SQLite)
 ├── examples/           # Example/test crates (Rust plugin examples, test fixtures)
 │   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash)
 ├── architecture/       # Deep technical documentation
@@ -38,7 +40,9 @@ Hush-ai/
 │  ├── /tutorial/CLAUDE.md → Doc conventions                 │
 │  ├── /ui-hush-eyes/CLAUDE.md → Rust server patterns     │
 │  ├── /rush-core/CLAUDE.md  → Rust backend patterns              │
-│  └── /rush-providers/CLAUDE.md → Rust provider patterns         │
+│  ├── /rush-providers/CLAUDE.md → Rust provider patterns         │
+│  ├── /hush-serve/CLAUDE.md → Python serve patterns              │
+│  └── /rush-serve/CLAUDE.md → Rust serve patterns                │
 │                                                                  │
 │  Layer 2: architecture/ (Deep Documentation - for learning)     │
 │  ├── engine/      → Execution, compilation, scheduling          │
@@ -130,10 +134,13 @@ hush-core (foundation - no hush dependencies)
 hush-providers (depends on hush-core)
     ↓
 hush-telemetry (depends on hush-core)
+    ↓
+hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
 
-rush-core (Rust backend - depends on hush-core at runtime, built separately via maturin)
-  └── rush-core/sdk (Plugin SDK - standalone Rust crate, no PyO3 dependency)
-rush-providers (Rust crate - used by rush-core, built via maturin)
+rush-core (Pure Rust engine - standalone rlib, built via cargo build)
+  └── rush-core/sdk (Plugin SDK - standalone Rust crate)
+rush-providers (Rust crate - used by rush-core, built via cargo build)
+rush-serve (Rust binary - depends on rush-core + rush-providers)
 examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 ```
 
@@ -146,6 +153,8 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 | New LLM/embedding/reranker provider (Rust) | rush-providers/src/ |
 | New tracing backend | hush-telemetry/hush/telemetry/ |
 | Rust execution backend | rush-core/src/ |
+| HTTP API server (Python) | hush-serve/hush/serve/ |
+| HTTP API server (Rust) | rush-serve/src/ |
 | New Rust op plugin | Create cdylib crate under examples/, use rush-core/sdk |
 | Plugin SDK changes | rush-core/sdk/src/lib.rs |
 | Documentation or examples | tutorial/ |
@@ -164,13 +173,13 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 
 ### Rust (rush-core, rush-providers, ui-hush-eyes)
 
-- **rush-core**: PyO3 extension module, built via `maturin develop --release`
+- **rush-core**: Pure Rust library crate (`rlib`), built via `cargo build --release`
   - DashMap for concurrent state, rayon for parallel execution
-  - 1.9x–6.2x speedup over Python mode for sync workflows
+  - Standalone engine: `Rush::new(json_str)` + `Rush::run_json(inputs)`
 - **rush-providers**: Rust crate with per-provider modules (llms/, embeddings/, rerankers/)
   - Native HTTP providers (OpenAI, Azure, Gemini, Cohere, Pinecone, vLLM)
-  - ONNX inference via `ort` crate, HuggingFace via PyO3 bridge
-  - Built as part of rush-core via `maturin develop --release`
+  - ONNX inference via `ort` crate
+  - Built as part of rush-core via `cargo build`
 - **ui-hush-eyes**: Standalone binary, built via `cargo build --release`
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
@@ -233,10 +242,16 @@ cd hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
 cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 
 # rush-core (Rust execution backend)
-cd rush-core && uv run maturin develop --release && uv run -m pytest
+cd rush-core && cargo test
 
 # rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
 cd rush-core && cargo test -p rush-providers
+
+# hush-serve (Python HTTP server)
+cd hush-serve && uv sync --all-extras && uv run -m pytest
+
+# rush-serve (Rust HTTP server)
+cd rush-serve && cargo build --release
 
 # ui-hush-eyes (Rust trace server)
 cd ui-hush-eyes && cargo build --release

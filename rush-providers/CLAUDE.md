@@ -1,14 +1,13 @@
 # rush-providers
 
-Rust provider implementations for Hush workflows. Per-provider module architecture mirroring hush-providers. Native HTTP for cloud providers, ONNX via `ort` crate, HuggingFace via PyO3 bridge.
+Rust provider implementations for Hush workflows. Per-provider module architecture mirroring hush-providers. Native HTTP for cloud providers, ONNX via `ort` crate.
 
 ## Module Structure
 
 ```
 rush-providers/src/
 ├── lib.rs              # Module declarations
-├── py_serde.rs         # PyObject ↔ serde_json::Value conversion
-├── config/             # Config structs parsed from Python
+├── config/             # Config structs parsed from JSON
 │   ├── mod.rs          # LLMProviderConfig enum, is_native_provider_op()
 │   ├── llm.rs          # LLMConfig (OpenAI, Azure, Gemini variants)
 │   ├── embedding.rs    # EmbeddingConfig
@@ -26,14 +25,14 @@ rush-providers/src/
 ├── embeddings/         # Embedding providers
 │   ├── mod.rs          # Dispatch: embed()
 │   ├── openai.rs       # OpenAI / vLLM / Azure embeddings
-│   ├── huggingface.rs  # HuggingFace via PyO3 bridge
+│   ├── huggingface.rs  # HuggingFace stub (PyO3 removed, use ONNX instead)
 │   └── onnx.rs         # ONNX via ort crate (pure Rust)
 ├── rerankers/          # Reranker providers
 │   ├── mod.rs          # Dispatch: rerank() + shared filter_and_sort()
 │   ├── vllm.rs         # vLLM reranker
 │   ├── pinecone.rs     # Pinecone reranker
 │   ├── cohere.rs       # Cohere reranker
-│   ├── huggingface.rs  # HuggingFace via PyO3 bridge
+│   ├── huggingface.rs  # HuggingFace stub (PyO3 removed, use ONNX instead)
 │   └── onnx.rs         # ONNX cross-encoder (pure Rust via ort)
 ├── batch/              # OpenAI Batch API coordinator
 └── ops/                # High-level op implementations
@@ -63,15 +62,15 @@ Each provider category (llms/, embeddings/, rerankers/) follows the same pattern
 
 ### Provider Types
 
-| Type | Native HTTP | PyO3 Bridge | Pure Rust |
-|------|-------------|-------------|-----------|
-| **LLM** | OpenAI, Azure, Gemini | - | - |
-| **Embedding** | OpenAI/vLLM | HuggingFace | ONNX (via ort) |
-| **Reranker** | vLLM, Pinecone, Cohere | HuggingFace | ONNX (via ort) |
+| Type | Native HTTP | Pure Rust (ONNX) |
+|------|-------------|------------------|
+| **LLM** | OpenAI, Azure, Gemini | - |
+| **Embedding** | OpenAI/vLLM | ONNX (via ort) |
+| **Reranker** | vLLM, Pinecone, Cohere | ONNX (via ort) |
 
 - **Native HTTP**: Uses `reqwest` for direct API calls (fastest)
-- **PyO3 Bridge**: Calls Python hush-providers classes via `Python::with_gil()`
 - **Pure Rust**: Uses `ort` crate for ONNX Runtime inference (no Python needed)
+- **HuggingFace**: Stubs only — use ONNX export or Python backend (hush-providers)
 
 ### Dispatch Pattern
 
@@ -93,9 +92,8 @@ pub async fn chat_completion(config: &LLMConfig, inputs: &Value, token: Option<&
 |-------|---------|
 | `reqwest 0.12` | HTTP client for cloud provider APIs |
 | `serde / serde_json` | JSON serialization |
-| `pyo3 0.22` | Python bridge for HuggingFace providers |
-| `ort 2` | ONNX Runtime for pure Rust inference |
-| `tokenizers 0.21` | HuggingFace tokenizers for ONNX models |
+| `ort 2` | ONNX Runtime for pure Rust inference (optional) |
+| `tokenizers 0.20` | HuggingFace tokenizers for ONNX models (optional) |
 | `base64 0.22` | Image encoding for multimodal LLMs |
 | `tokio 1` | Async runtime |
 | `tempfile 3` | Dev dependency for tests |
@@ -104,13 +102,10 @@ pub async fn chat_completion(config: &LLMConfig, inputs: &Value, token: Option<&
 
 ```bash
 # Build (as part of rush-core)
-cd rush-core && uv run maturin develop --release
+cd rush-core && cargo build --release
 
-# Run Rust unit tests (91 tests)
+# Run Rust tests
 cd rush-core && cargo test -p rush-providers
-
-# Run Python integration tests
-cd rush-core && uv run -m pytest tests/ -v
 ```
 
 ## Adding a New Provider
