@@ -38,7 +38,7 @@ tutorial/
 │   ├── 14_rag_advanced.py
 │   ├── 15_shorthand_syntax.py
 │   ├── 17_rust_mode.py          # Requires rush-core
-│   └── 18_rust_plugin_ops.py    # Requires rush-core + rush-ops-builtin
+│   └── 18_rust_plugin_ops.py    # Requires rush-core
 └── resources.starter.yaml        # Config template
 ```
 

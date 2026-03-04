@@ -22,7 +22,6 @@ lasso = { version = "0.7", features = ["multi-threaded"] }
 chrono = "0.4"
 log = "0.4"
 rush-providers = { path = "../rush-providers" }
-rush-ops-builtin = { path = "../examples/rush-ops-builtin" }
 
 [[bin]]
 name = "rush-bench"

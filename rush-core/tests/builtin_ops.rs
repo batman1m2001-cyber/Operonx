@@ -1,6 +1,6 @@
 //! Integration tests for built-in Rust ops (string, JSON, math).
 //!
-//! Converted from test_builtin_ops.py — tests all 13+ ops from rush-ops-builtin.
+//! Converted from test_builtin_ops.py — tests all built-in ops.
 
 mod common;
 

@@ -2022,20 +2022,12 @@ dependencies = [
  "lasso",
  "log",
  "rayon",
- "rush-ops-builtin",
  "rush-providers",
  "serde",
  "serde_json",
  "smallvec",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "rush-ops-builtin"
-version = "0.1.0"
-dependencies = [
- "serde_json",
 ]
 
 [[package]]

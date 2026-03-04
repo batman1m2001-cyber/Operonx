@@ -1,7 +1,7 @@
 //! Provider-like workflow pattern tests — converted from test_provider_ops.py.
 //!
 //! The Python tests used mock @op functions for provider patterns (prompt → LLM → parse).
-//! In pure Rust we test equivalent patterns using rush-ops-builtin ops:
+//! In pure Rust we test equivalent patterns using built-in ops:
 //! chains, data flow, nested dicts, error handling, complex data types.
 
 mod common;

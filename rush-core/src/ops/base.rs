@@ -89,7 +89,7 @@ enum OpRoute<'a> {
     Provider,
     /// Native transform op (prompt, parser) — synchronous.
     NativeTransform,
-    /// Builtin op from rush-ops-builtin (direct rlib call).
+    /// Builtin op (direct function call from builtin_ops module).
     Builtin(&'a str),
     /// Streaming not supported in rust mode v1.
     StreamingProvider,
@@ -347,7 +347,7 @@ pub(crate) fn push_output_refs(
 // Builtin op execution
 // =============================================================================
 
-/// Execute a builtin op via rush-ops-builtin (direct rlib function call).
+/// Execute a builtin op via the builtin_ops module (direct function call).
 /// Accepts both "path::func" format (extracts func name) and plain "func" names.
 fn execute_builtin_op(
     spec: &str,

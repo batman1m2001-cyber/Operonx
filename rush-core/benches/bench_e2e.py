@@ -29,9 +29,7 @@ from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
 from hush.core.ops.iteration import Each, ForOp
 
-BUILTIN_CRATE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "examples", "rush-ops-builtin")
-)
+BUILTIN_CRATE = None  # Built-in ops are now internal to rush-core
 
 # Path to the rush-bench binary (built from rush-core/benches/bench_runner.rs)
 RUSH_BENCH_BIN = None
