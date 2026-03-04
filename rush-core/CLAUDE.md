@@ -1,14 +1,14 @@
 # rush-core
 
-High-performance Rust execution backend for Hush workflows. Compiles to a Python extension module via PyO3. Rust + Hush = Rush.
+High-performance Rust execution backend for Hush workflows. Pure `rlib` crate — standalone engine, no PyO3. Rust + Hush = Rush.
 
 ## Module Structure
 
 ```
 rush-core/
 ├── src/
-│   ├── lib.rs              # PyO3 module entry point
-│   ├── engine.rs           # Rush engine (#[pyclass]) — run() entry point
+│   ├── lib.rs              # Crate root (module declarations)
+│   ├── engine.rs           # Rush engine — new(json) + run_json(inputs) entry point
 │   ├── config.rs           # Config deserialization (GraphConfig, OpConfig, etc.)
 │   ├── ops/
 │   │   ├── mod.rs
@@ -23,22 +23,23 @@ rush-core/
 │   ├── plugins/
 │   │   └── mod.rs          # cdylib plugin loader (auto-build, caching, C ABI)
 │   ├── refs/
-│   │   └── interpreter.rs  # Ref op chain evaluation (getitem, arithmetic, boolean, etc.)
+│   │   └── ref_ops.rs      # Ref op chain evaluation (getitem, arithmetic, boolean, etc.)
 │   └── states/
-│       └── state.rs        # EngineState — concurrent DashMap + Mutex state
+│       └── state.rs        # EngineState — concurrent DashMap state (pure serde_json::Value)
 ├── sdk/                    # Plugin SDK (separate Cargo crate)
 │   ├── Cargo.toml          # rush-ops-sdk (serde_json + paste)
 │   └── src/lib.rs          # export_ops! macro for C ABI wrapper generation
-├── tests/                  # Python tests via pytest
+├── tests/                  # Rust integration tests (95+ tests)
 ├── benches/
-│   └── bench_e2e.py        # E2E benchmark: Python vs Rust mode
+│   ├── bench_runner.rs     # Standalone Rust benchmark binary (rush-bench)
+│   └── bench_e2e.py        # Python↔Rust comparison via subprocess
 ├── Cargo.toml
 └── pyproject.toml
 ```
 
 ## Key Files to Read First
 
-1. `src/engine.rs` — Entry point: `Rush::new(config)` + `Rush::run(inputs)`
+1. `src/engine.rs` — Entry point: `Rush::new(json_str)` + `Rush::run_json(inputs, req_id, user_id, session_id)`
 2. `src/ops/graph/graph_op.rs` — Scheduler: batch-aware parallel execution
 3. `src/states/state.rs` — Concurrent state: DashMap + Mutex
 4. `src/ops/base.rs` — Leaf op execution, ref resolution
@@ -67,19 +68,19 @@ graph.serialize() ──dict──→  GraphConfig::from_dict()
 
 ### Concurrent State (DashMap)
 
-`EngineState` uses `DashMap<(String, String, String), PyObject>` for lock-free concurrent reads/writes. Tags use `Mutex<Vec>`.
+`EngineState` uses `DashMap<(String, String, String), serde_json::Value>` for lock-free concurrent reads/writes.
 
 ```rust
 // Thread-safe — no &mut needed
 state.set(op_name, var_name, context, value);
-let val = state.get(py, op_name, var_name, context);  // Returns owned clone
+let val = state.get(op_name, var_name, context);  // Returns cloned Value
 ```
 
 Key API:
-- `get(py, full_name, var, context) -> Option<PyObject>` — owned clone (needs GIL for clone_ref)
+- `get(full_name, var, context) -> Option<Value>` — cloned value
 - `set(full_name, var, context, value)` — takes `&self` (not `&mut self`)
 - `add_tags(tags)` — internally locked
-- `values_snapshot(py)` — collect all entries for export
+- `values_snapshot()` — collect all entries for export
 
 ### Batch-Aware Parallel Scheduler
 
@@ -88,21 +89,19 @@ The `run_graph()` scheduler drains all ready ops into a batch each iteration:
 ```
 queue: [A, B, C]  →  drain batch
                       │
-                      ├── All pure Python? → sequential (one at a time)
+                      ├── batch.len() == 1  → execute directly
                       │
-                      └── Any rust_op?     → parallel via rayon
-                                             py.allow_threads(|| {
-                                               batch.par_iter().for_each(|op| {
-                                                 Python::with_gil(|py| execute(py, op))
-                                               })
-                                             })
+                      └── batch.len() > 1   → parallel via rayon
+                                              batch.par_iter().for_each(|op| {
+                                                execute_leaf_op(op, &state, &config)
+                                              })
 ```
 
-**Heuristic**: Parallel mode activates when `batch.len() > 1` AND at least one op has `rust_op` set. Pure Python batches run sequentially to avoid `allow_threads`/`with_gil` overhead (GIL prevents true parallelism for Python ops anyway).
+**Heuristic**: Parallel mode activates when `batch.len() > 1`. All ops execute via rayon without GIL constraints.
 
 **Why this is safe**:
 - Batch ops are independent (`ready_count == 0`) — no data dependencies
-- `GraphConfig` is `&` (shared immutable) — `PyObject` is `Send + Sync`
+- `GraphConfig` is `&` (shared immutable)
 - `EngineState` uses DashMap — concurrent access is lock-free for different keys
 - Successor activation happens sequentially AFTER all parallel ops complete
 
@@ -110,30 +109,32 @@ queue: [A, B, C]  →  drain batch
 
 | Crate | Purpose |
 |-------|---------|
-| `pyo3 0.22` | Python-Rust bridge, GIL management |
 | `ahash 0.8` | Fast HashMap for scheduling (ready_count, soft_satisfied) |
 | `dashmap 6` | Concurrent HashMap for EngineState (thread-safe values store) |
 | `rayon 1.10` | Work-stealing thread pool for batch parallel execution |
 | `smallvec 1` | Stack-allocated small vectors |
 | `libloading 0.8` | Runtime cdylib plugin loading (C ABI function lookup) |
-| `serde_json 1` | JSON serialization at plugin boundary |
+| `serde / serde_json 1` | JSON serialization |
+| `tokio 1` | Async runtime |
+| `chrono 0.4` | Timestamp metadata |
+| `rush-providers` | Native provider implementations |
 
 ## Build & Test
 
 ```bash
 cd rush-core
 
-# Dev build (fast compile, debug)
-uv run maturin develop
+# Run all tests (unit + integration)
+cargo test
+
+# Run rush-providers tests
+cargo test -p rush-providers
 
 # Release build (optimized, LTO)
-uv run maturin develop --release
-
-# Run tests
-uv run python -m pytest tests/ -v --tb=short
+cargo build --release
 
 # Run benchmarks (release build recommended)
-uv run maturin develop --release && uv run python benches/bench_e2e.py
+cargo build --release && uv run python benches/bench_e2e.py
 ```
 
 ## Usage from Python
@@ -237,11 +238,10 @@ Release build, Python 3.13, comparing `mode="python"` vs `mode="rust"`:
 
 ## Gotchas
 
-1. **`Py<T>` doesn't implement `Clone`** — use `clone_ref(py)` with a GIL token
-2. **`state.get()` needs `py`** — DashMap returns owned clone via `clone_ref(py)`
-3. **GIL limits Python op parallelism** — rayon only helps Rust-native ops or I/O ops that release GIL
-4. **MapOp not supported** — use ForOp in Rust mode (MapOp is asyncio-based)
-5. **Async ops** — Rust mode calls the sync version of all ops (no asyncio)
+1. **MapOp not supported** — use ForOp in Rust mode (MapOp is asyncio-based)
+2. **Timing metadata** — uses `$`-prefixed keys (`$start_time`, `$end_time`, `$duration_ms`)
+3. **Branch output refs** — must target parent graph (`output_ref("g", key)` not `output_ref("g.a", key)`)
+4. **Ref ops** — Python handles operator overloading at build time, Rust evaluates the serialized ops chain
 
 ## Deep Documentation Links
 
