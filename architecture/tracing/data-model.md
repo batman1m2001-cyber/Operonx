@@ -134,7 +134,7 @@ TraceRecord(op_name="workflow.loop.step", context_id="[2]", ...)
 
 ### TracePayload — Complete payload
 
-Kết hợp static graph structure với dynamic execution records. Match format `IngestRequest` của hush-eyes server.
+Kết hợp static graph structure với dynamic execution records. Match format `IngestRequest` của ui-hush-eyes server.
 
 ```python
 @dataclass
@@ -156,7 +156,7 @@ class TracePayload:
 
 ## trace_data Dict Format
 
-Đây là dict mà `TraceCollector.collect()` trả về, `FlushWorker` truyền cho `tracer.flush()`. Format này match `IngestRequest` của hush-eyes server.
+Đây là dict mà `TraceCollector.collect()` trả về, `FlushWorker` truyền cho `tracer.flush()`. Format này match `IngestRequest` của ui-hush-eyes server.
 
 ```python
 trace_data = {

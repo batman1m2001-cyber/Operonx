@@ -12,8 +12,8 @@ Hush-ai/
 ├── hush-providers/     # LLM, embedding, reranking integrations (Python)
 ├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
 ├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
-├── hush-tutorial/      # Documentation (Vietnamese) and examples
-├── hush-eyes/          # Standalone Rust server for trace visualization (Axum + SQLite)
+├── tutorial/      # Documentation (Vietnamese) and examples
+├── ui-hush-eyes/          # Standalone Rust server for trace visualization (Axum + SQLite)
 ├── examples/           # Example/test crates (Rust plugin examples, test fixtures)
 │   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash)
 ├── architecture/       # Deep technical documentation
@@ -35,8 +35,8 @@ Hush-ai/
 │  ├── /hush-core/CLAUDE.md    → Core patterns, how to extend     │
 │  ├── /hush-providers/CLAUDE.md → Provider patterns              │
 │  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
-│  ├── /hush-tutorial/CLAUDE.md → Doc conventions                 │
-│  ├── /hush-eyes/CLAUDE.md → Rust server patterns     │
+│  ├── /tutorial/CLAUDE.md → Doc conventions                 │
+│  ├── /ui-hush-eyes/CLAUDE.md → Rust server patterns     │
 │  ├── /rush-core/CLAUDE.md  → Rust backend patterns              │
 │  └── /rush-providers/CLAUDE.md → Rust provider patterns         │
 │                                                                  │
@@ -49,7 +49,7 @@ Hush-ai/
 │  ├── tracing/     → Tracer internals, data model                │
 │  └── contributing/ → Dev setup, code style, testing             │
 │                                                                  │
-│  Layer 3: hush-tutorial/ (User Guide - for end users)           │
+│  Layer 3: tutorial/ (User Guide - for end users)           │
 │  ├── docs/        → Vietnamese documentation (00-12 chapters)   │
 │  └── examples/    → Runnable Python examples (01-15)            │
 │                                                                  │
@@ -65,15 +65,15 @@ Hush-ai/
 | "Why does X work this way?" | `architecture/` |
 | Deep dive into internals | `architecture/` |
 | Learning from scratch | `architecture/index.md` → reading order |
-| User-facing docs (Vietnamese) | `hush-tutorial/docs/` |
-| Runnable examples | `hush-tutorial/examples/` |
-| Teaching someone Hush | `hush-tutorial/docs/00-tong-quan.md` → reading order |
+| User-facing docs (Vietnamese) | `tutorial/docs/` |
+| Runnable examples | `tutorial/examples/` |
+| Teaching someone Hush | `tutorial/docs/00-tong-quan.md` → reading order |
 
 ## Documentation Update Rules
 
 ### When to Update What
 
-| Change Type | CLAUDE.md | architecture/ | hush-tutorial/ |
+| Change Type | CLAUDE.md | architecture/ | tutorial/ |
 |-------------|-----------|---------------|----------------|
 | New op type | ✓ How to use | ✓ How it works internally | ✓ Add to docs/03 + example |
 | New provider | ✓ Integration pattern | ✓ Abstraction design | ✓ Add to docs/04 or 06 + example |
@@ -88,12 +88,12 @@ Hush-ai/
 When making significant changes:
 1. Update CLAUDE.md with new patterns/examples
 2. Update architecture/ with detailed explanations
-3. **Update hush-tutorial/docs/ with user-facing documentation (Vietnamese)**
-4. **Update/add hush-tutorial/examples/ with runnable examples**
+3. **Update tutorial/docs/ with user-facing documentation (Vietnamese)**
+4. **Update/add tutorial/examples/ with runnable examples**
 5. Ensure cross-references are correct
 6. Verify code examples match actual API
 
-### hush-tutorial Sync Mapping
+### tutorial Sync Mapping
 
 | Code Location | docs/ Update | examples/ Update |
 |---------------|--------------|------------------|
@@ -148,8 +148,8 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 | Rust execution backend | rush-core/src/ |
 | New Rust op plugin | Create cdylib crate under examples/, use rush-core/sdk |
 | Plugin SDK changes | rush-core/sdk/src/lib.rs |
-| Documentation or examples | hush-tutorial/ |
-| Trace visualization server | hush-eyes/ |
+| Documentation or examples | tutorial/ |
+| Trace visualization server | ui-hush-eyes/ |
 
 ## Global Coding Conventions
 
@@ -162,7 +162,7 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust (rush-core, rush-providers, hush-eyes)
+### Rust (rush-core, rush-providers, ui-hush-eyes)
 
 - **rush-core**: PyO3 extension module, built via `maturin develop --release`
   - DashMap for concurrent state, rayon for parallel execution
@@ -171,7 +171,7 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
   - Native HTTP providers (OpenAI, Azure, Gemini, Cohere, Pinecone, vLLM)
   - ONNX inference via `ort` crate, HuggingFace via PyO3 bridge
   - Built as part of rush-core via `maturin develop --release`
-- **hush-eyes**: Standalone binary, built via `cargo build --release`
+- **ui-hush-eyes**: Standalone binary, built via `cargo build --release`
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
 
@@ -238,8 +238,8 @@ cd rush-core && uv run maturin develop --release && uv run -m pytest
 # rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
 cd rush-core && cargo test -p rush-providers
 
-# hush-eyes (Rust trace server)
-cd hush-eyes && cargo build --release
+# ui-hush-eyes (Rust trace server)
+cd ui-hush-eyes && cargo build --release
 ```
 
 ## Development Workflow

@@ -21,7 +21,7 @@
 
 - **DAG-based workflows** — define complex pipelines with nodes and edges, inspired by Airflow operators
 - **Async-first** — native async execution with automatic parallel processing
-- **Built-in tracing** — full observability via hush-eyes server + external backends (Langfuse, OpenTelemetry)
+- **Built-in tracing** — full observability via ui-hush-eyes server + external backends (Langfuse, OpenTelemetry)
 - **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
 - **Type-safe state** — O(1) state access with compile-time validation, zero magic
 
@@ -63,7 +63,7 @@ asyncio.run(main())
 > **Core philosophy:** `GraphOp`, `FuncOp`, and `BranchOp` handle nearly every workflow pattern.
 > LLM, embedding, and other specialized nodes are optional add-ons — install and learn them as needed.
 
-> Want more? See the [quickstart guide](hush-tutorial/docs/02-quickstart.md) or [runnable examples](hush-tutorial/examples/).
+> Want more? See the [quickstart guide](tutorial/docs/02-quickstart.md) or [runnable examples](tutorial/examples/).
 
 ## LLM Integration
 
@@ -89,7 +89,7 @@ async def main():
     print(result["content"])
 ```
 
-> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
+> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](tutorial/docs/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
 
 ## Installation
 
@@ -121,7 +121,7 @@ uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-c
 
 > **Note:** `hush-providers` and `hush-telemetry` depend on `hush-core`, so always install `hush-core` first.
 
-See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
+See [installation guide](tutorial/docs/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
 
 ## Packages
 
@@ -132,16 +132,16 @@ See [installation guide](hush-tutorial/docs/01-cai-dat-va-thiet-lap.md) for deta
 | [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations (Python) |
 | [rush-providers](rush-providers/) | Rust provider implementations (native HTTP, ONNX, per-provider) |
 | [hush-telemetry](hush-telemetry/) | External tracing backends (Langfuse, OpenTelemetry) |
-| [hush-tutorial](hush-tutorial/) | Documentation (Vietnamese) and runnable examples |
-| [hush-eyes](hush-eyes/) | Standalone Rust server for trace visualization |
+| [tutorial](tutorial/) | Documentation (Vietnamese) and runnable examples |
+| [ui-hush-eyes](ui-hush-eyes/) | Standalone Rust server for trace visualization |
 
 ## Trace Viewer
 
-Run the [hush-eyes](hush-eyes/) server to visualize workflow traces:
+Run the [ui-hush-eyes](ui-hush-eyes/) server to visualize workflow traces:
 
 ```bash
-cd hush-eyes && cargo build --release
-./target/release/hush-eyes serve --port 8420
+cd ui-hush-eyes && cargo build --release
+./target/release/ui-hush-eyes serve --port 8420
 # Open http://localhost:8420
 ```
 
@@ -149,8 +149,8 @@ cd hush-eyes && cargo build --release
 
 | Need | Go to |
 |------|-------|
-| Learning from scratch | [hush-tutorial/docs/](hush-tutorial/docs/) |
-| Runnable examples | [hush-tutorial/examples/](hush-tutorial/examples/) |
+| Learning from scratch | [tutorial/docs/](tutorial/docs/) |
+| Runnable examples | [tutorial/examples/](tutorial/examples/) |
 | Deep internals | [architecture/](architecture/) |
 
 ## Contributing

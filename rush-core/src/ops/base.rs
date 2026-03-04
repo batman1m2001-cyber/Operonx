@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::config::{IterParamConfig, OpConfig, ParamConfig, RefConfig};
 use crate::error::RushError;
 use crate::plugins;
-use crate::refs::interpreter::evaluate_ref_ops;
+use crate::refs::ref_ops::evaluate_ref_ops;
 use crate::runtime;
 use crate::states::state::EngineState;
 
@@ -478,7 +478,7 @@ pub(crate) fn execute_branch(
         // Resolve it to the actual parent graph name.
         let cond_value = resolve_ref_with_parent(&case.condition, state, context, parent_graph)?;
         if let Some(ref val) = cond_value {
-            if crate::refs::interpreter::is_truthy(val) {
+            if crate::refs::ref_ops::is_truthy(val) {
                 state.set(
                     &op.full_name,
                     "target",

@@ -15,5 +15,5 @@
 ## Documentation
 
 - [ ] Updated relevant `CLAUDE.md` if API changed
-- [ ] Updated `hush-tutorial/docs/` if user-facing change
+- [ ] Updated `tutorial/docs/` if user-facing change
 - [ ] Updated `architecture/` if internal design changed

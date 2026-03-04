@@ -1,4 +1,4 @@
-"""HushEyesTracer — sends traces to hush-eyes local server.
+"""HushEyesTracer — sends traces to ui-hush-eyes local server.
 
 Uses stdlib urllib.request (no external dependency).
 """
@@ -14,9 +14,9 @@ LOGGER = logging.getLogger("hush.tracing")
 
 
 class HushEyesTracer(Tracer):
-    """Tracer that sends traces to the hush-eyes local server.
+    """Tracer that sends traces to the ui-hush-eyes local server.
 
-    hush-eyes is a lightweight Rust server that stores traces in SQLite
+    ui-hush-eyes is a lightweight Rust server that stores traces in SQLite
     and serves a web UI for visualization.
 
     Example:
@@ -38,7 +38,7 @@ class HushEyesTracer(Tracer):
         self._url = f"http://{host}:{port}/api/ingest"
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
-        """POST trace data to hush-eyes /api/ingest endpoint.
+        """POST trace data to ui-hush-eyes /api/ingest endpoint.
 
         Args:
             trace_data: Dict matching IngestRequest format
@@ -54,13 +54,13 @@ class HushEyesTracer(Tracer):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status != 200:
                     LOGGER.warning(
-                        "hush-eyes returned status %d: %s",
+                        "ui-hush-eyes returned status %d: %s",
                         resp.status,
                         resp.read().decode(),
                     )
         except Exception:
             LOGGER.debug(
-                "Could not reach hush-eyes at %s (server may not be running)",
+                "Could not reach ui-hush-eyes at %s (server may not be running)",
                 self._url,
             )
 

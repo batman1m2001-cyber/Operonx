@@ -96,9 +96,9 @@ When making changes, update the appropriate documentation:
 
 | Change Type | Update |
 |-------------|--------|
-| New op type | `hush-core/CLAUDE.md`, `hush-tutorial/docs/03-core-concepts.md` |
-| New provider | `hush-providers/CLAUDE.md`, `hush-tutorial/docs/04-llm-integration.md` |
-| New tracer | `hush-telemetry/CLAUDE.md`, `hush-tutorial/docs/09-tracing-observability.md` |
+| New op type | `hush-core/CLAUDE.md`, `tutorial/docs/03-core-concepts.md` |
+| New provider | `hush-providers/CLAUDE.md`, `tutorial/docs/04-llm-integration.md` |
+| New tracer | `hush-telemetry/CLAUDE.md`, `tutorial/docs/09-tracing-observability.md` |
 | API change | Relevant `CLAUDE.md` + tutorial docs |
 | Internal refactor | `architecture/` if algorithm changes |
 
@@ -113,8 +113,8 @@ Hush-ai/
 ├── hush-providers/     # LLM, embedding, reranking (Python)
 ├── rush-providers/     # Rust provider implementations (native HTTP, ONNX)
 ├── hush-telemetry/     # Tracing backends (Langfuse, OTEL)
-├── hush-tutorial/      # Docs (Vietnamese) + examples
-├── hush-eyes/          # Standalone Rust server for trace visualization
+├── tutorial/      # Docs (Vietnamese) + examples
+├── ui-hush-eyes/          # Standalone Rust server for trace visualization
 ├── architecture/       # Deep technical docs
 └── CLAUDE.md           # Quick reference
 ```
@@ -135,7 +135,7 @@ rush-providers (Rust crate - used by rush-core)
 ## Questions?
 
 - Open a [Question issue](https://github.com/batman1m2001-cyber/Hush-ai/issues/new?template=3-question.yml)
-- Check existing documentation in `hush-tutorial/docs/`
+- Check existing documentation in `tutorial/docs/`
 
 ## License
 

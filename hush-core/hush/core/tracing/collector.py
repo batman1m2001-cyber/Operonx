@@ -24,7 +24,7 @@ class TraceCollector:
     Usage:
         collector = TraceCollector()
         trace_data = collector.collect(graph, state)
-        # trace_data matches hush-eyes IngestRequest format
+        # trace_data matches ui-hush-eyes IngestRequest format
     """
 
     def collect(self, graph: Any, state: Any) -> Dict[str, Any]:
@@ -35,7 +35,7 @@ class TraceCollector:
             state: MemoryState after execution completes
 
         Returns:
-            Dict matching hush-eyes IngestRequest format:
+            Dict matching ui-hush-eyes IngestRequest format:
             {request_id, workflow_name, user_id, session_id, tags,
              graph_structure, records}
         """

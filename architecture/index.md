@@ -16,7 +16,7 @@ Hush sử dụng ba lớp documentation:
 │  • For quick lookup           • For deep understanding          │
 │  • Updated with API changes   • Updated with internals          │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 3: hush-tutorial/                                        │
+│  Layer 3: tutorial/                                        │
 │  (User Guide - Vietnamese)                                      │
 │  ─────────────────────────                                      │
 │  • docs/  → User-facing documentation (00-12 chapters)          │
@@ -34,9 +34,9 @@ Hush sử dụng ba lớp documentation:
 | "Tại sao X hoạt động như vậy?" | `architecture/` (bạn đang ở đây) |
 | Deep dive internals | `architecture/` |
 | Learning từ đầu | `architecture/index.md` → reading order |
-| User documentation (Vietnamese) | `hush-tutorial/docs/` |
-| Runnable examples | `hush-tutorial/examples/` |
-| Dạy người khác dùng Hush | `hush-tutorial/docs/00-tong-quan.md` → reading order |
+| User documentation (Vietnamese) | `tutorial/docs/` |
+| Runnable examples | `tutorial/examples/` |
+| Dạy người khác dùng Hush | `tutorial/docs/00-tong-quan.md` → reading order |
 
 ### CLAUDE.md Files
 
@@ -46,8 +46,8 @@ Hush sử dụng ba lớp documentation:
 | hush-core | [/hush-core/CLAUDE.md](../hush-core/CLAUDE.md) | Op patterns, state management |
 | hush-providers | [/hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) | Provider patterns |
 | hush-telemetry | [/hush-telemetry/CLAUDE.md](../hush-telemetry/CLAUDE.md) | Tracer patterns |
-| hush-tutorial | [/hush-tutorial/CLAUDE.md](../hush-tutorial/CLAUDE.md) | Doc conventions |
-| hush-eyes | [/hush-eyes/CLAUDE.md](../hush-eyes/CLAUDE.md) | Rust server patterns |
+| tutorial | [/tutorial/CLAUDE.md](../tutorial/CLAUDE.md) | Doc conventions |
+| ui-hush-eyes | [/ui-hush-eyes/CLAUDE.md](../ui-hush-eyes/CLAUDE.md) | Rust server patterns |
 | rush-core | [/rush-core/CLAUDE.md](../rush-core/CLAUDE.md) | Rust backend patterns |
 | rush-providers | [/rush-providers/CLAUDE.md](../rush-providers/CLAUDE.md) | Rust provider patterns |
 
@@ -55,14 +55,14 @@ Hush sử dụng ba lớp documentation:
 
 Khi thay đổi code:
 
-| Loại thay đổi | CLAUDE.md | architecture/ | hush-tutorial/ |
+| Loại thay đổi | CLAUDE.md | architecture/ | tutorial/ |
 |---------------|-----------|---------------|----------------|
 | New op/provider/tracer | ✓ Usage pattern | ✓ Internals | ✓ docs/ + examples/ |
 | API change | ✓ Update examples | ✓ Update explanations | ✓ Update docs + examples |
 | Internal refactor (same API) | - | ✓ If algorithm changes | - |
 | Bug fix | - | - | - |
 
-Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-mapping).
+Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#tutorial-sync-mapping).
 
 ## Tổng quan hệ thống
 
@@ -110,7 +110,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 11. [Streaming System](streams/streaming-system.md) - Real-time data streaming
 12. [Trace Data Model](tracing/data-model.md) - Trace data structures
 13. [External Backends](tracing/external-backends.md) - Langfuse & OTEL
-14. [Hush Eyes Server](hush-eyes/overview.md) - Standalone Rust server for trace visualization
+14. [Hush Eyes Server](ui-hush-eyes/overview.md) - Standalone Rust server for trace visualization
 15. [Rush-Core Backend](../rush-core/CLAUDE.md) - Rust execution engine (DashMap, rayon, batch parallel)
 
 ## Quick Reference
@@ -140,8 +140,8 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | Tracing system | [tracing/overview.md](tracing/overview.md) |
 | Trace data model | [tracing/data-model.md](tracing/data-model.md) |
 | External tracing backends | [tracing/external-backends.md](tracing/external-backends.md) |
-| Hush Eyes server | [hush-eyes/overview.md](hush-eyes/overview.md) |
-| Hush Eyes API & storage | [hush-eyes/api-and-storage.md](hush-eyes/api-and-storage.md) |
+| Hush Eyes server | [ui-hush-eyes/overview.md](ui-hush-eyes/overview.md) |
+| Hush Eyes API & storage | [ui-hush-eyes/api-and-storage.md](ui-hush-eyes/api-and-storage.md) |
 
 ### Muốn contribute/extend?
 
@@ -161,7 +161,7 @@ Chi tiết sync mapping xem tại [/CLAUDE.md](../CLAUDE.md#hush-tutorial-sync-m
 | hush-core | Core workflow engine | `engine.py`, `ops/`, `states/` | [CLAUDE.md](../hush-core/CLAUDE.md) |
 | hush-providers | LLM/Embedding providers | `llms/base.py`, `embeddings/base.py` | [CLAUDE.md](../hush-providers/CLAUDE.md) |
 | hush-telemetry | Tracing backends | `tracers/`, external integrations | [CLAUDE.md](../hush-telemetry/CLAUDE.md) |
-| hush-eyes | Standalone Rust server for trace visualization | `src/main.rs`, `src/api/`, `src/db/` | [CLAUDE.md](../hush-eyes/CLAUDE.md) |
+| ui-hush-eyes | Standalone Rust server for trace visualization | `src/main.rs`, `src/api/`, `src/db/` | [CLAUDE.md](../ui-hush-eyes/CLAUDE.md) |
 | rush-core | High-performance Rust execution backend | `src/engine.rs`, `src/ops/`, `src/states/` | [CLAUDE.md](../rush-core/CLAUDE.md) |
 
 ## Folder Structure
@@ -214,7 +214,7 @@ architecture/
 │   ├── authentication.md       ← Keycloak auth provider
 │   └── adding-new-provider.md  ← Guide thêm provider mới
 │
-├── hush-eyes/                  ← Standalone Rust server for trace visualization
+├── ui-hush-eyes/                  ← Standalone Rust server for trace visualization
 │   ├── overview.md             ← Server architecture, CLI, module structure
 │   └── api-and-storage.md      ← REST API endpoints, SQLite schema, data models
 │

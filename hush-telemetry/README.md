@@ -18,7 +18,7 @@ git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core -e "hush-telemetry[all]"
 ```
 
-Xem chi tiết tại [Cài đặt và Thiết lập](../hush-tutorial/docs/01-cai-dat-va-thiet-lap.md).
+Xem chi tiết tại [Cài đặt và Thiết lập](../tutorial/docs/01-cai-dat-va-thiet-lap.md).
 
 ## Quick Start
 
@@ -94,7 +94,7 @@ tracer:phoenix:
 
 ## Documentation
 
-- [User Docs](../hush-tutorial/docs/) - Tutorials và guides
+- [User Docs](../tutorial/docs/) - Tutorials và guides
 - [Architecture](../architecture/tracing/) - Internal documentation
   - [Tracer Interface](../architecture/tracing/tracer-interface.md)
   - [Local Tracer](../architecture/tracing/local-tracer.md)

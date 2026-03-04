@@ -35,7 +35,7 @@ class Tracer:
         Called by FlushWorker in a background thread.
 
         Args:
-            trace_data: Dict matching hush-eyes IngestRequest format.
+            trace_data: Dict matching ui-hush-eyes IngestRequest format.
                 Tags are already merged (dynamic + static) before this call.
         """
         raise NotImplementedError
