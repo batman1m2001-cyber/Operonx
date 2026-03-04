@@ -21,8 +21,8 @@ thiserror = "2"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 chrono = "0.4"
 log = "0.4"
-libloading = "0.8"
 rush-providers = { path = "../rush-providers" }
+rush-ops-builtin = { path = "../examples/rush-ops-builtin" }
 
 [[bin]]
 name = "rush-bench"

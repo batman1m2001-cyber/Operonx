@@ -8,7 +8,6 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 Hush-ai/
 ├── hush-core/          # Core workflow engine (ops, state, tracing)
 ├── rush-core/          # High-performance Rust execution backend (pure rlib, rayon + DashMap)
-│   └── sdk/            # Plugin SDK for building Rust op crates (export_ops! macro)
 ├── hush-providers/     # LLM, embedding, reranking integrations (Python)
 ├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
 ├── hush-serve/         # HTTP API server from workflow graphs (Python, FastAPI + uvicorn)
@@ -16,8 +15,8 @@ Hush-ai/
 ├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
 ├── tutorial/           # Documentation (Vietnamese) and examples
 ├── ui-hush-eyes/       # Standalone Rust server for trace visualization (Axum + SQLite)
-├── examples/           # Example/test crates (Rust plugin examples, test fixtures)
-│   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash)
+├── examples/           # Example crates and test fixtures
+│   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash) — rlib, linked directly by rush-core
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -49,7 +48,7 @@ Hush-ai/
 │  ├── state/       → StateSchema, MemoryState, indexer           │
 │  ├── ops/       → Op internals, creating custom ops            │
 │  ├── providers/   → Provider abstractions                       │
-│  ├── resources/   → ResourceHub, plugin system                  │
+│  ├── resources/   → ResourceHub                                 │
 │  ├── tracing/     → Tracer internals, data model                │
 │  └── contributing/ → Dev setup, code style, testing             │
 │                                                                  │
@@ -138,10 +137,10 @@ hush-telemetry (depends on hush-core)
 hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
 
 rush-core (Pure Rust engine - standalone rlib, built via cargo build)
-  └── rush-core/sdk (Plugin SDK - standalone Rust crate)
+  └── depends on rush-ops-builtin (rlib, linked directly)
 rush-providers (Rust crate - used by rush-core, built via cargo build)
 rush-serve (Rust binary - depends on rush-core + rush-providers)
-examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
+examples/rush-ops-builtin (rlib crate - built-in Rust ops, direct dependency of rush-core)
 ```
 
 ## When to Modify Which Package
@@ -155,8 +154,7 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
 | Rust execution backend | rush-core/src/ |
 | HTTP API server (Python) | hush-serve/hush/serve/ |
 | HTTP API server (Rust) | rush-serve/src/ |
-| New Rust op plugin | Create cdylib crate under examples/, use rush-core/sdk |
-| Plugin SDK changes | rush-core/sdk/src/lib.rs |
+| New built-in Rust op | examples/rush-ops-builtin/src/ + dispatch in rush-core/src/builtin_ops.rs |
 | Documentation or examples | tutorial/ |
 | Trace visualization server | ui-hush-eyes/ |
 
@@ -184,24 +182,21 @@ examples/rush-ops-builtin (cdylib plugin - depends on rush-core/sdk)
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
 
-### Rust Op Plugin System
+### Rust Built-in Ops
 
-Users can write high-performance ops in Rust and load them as plugins at runtime:
+Built-in Rust ops live in `examples/rush-ops-builtin` and are linked directly into `rush-core` as a standard rlib dependency. Dispatch is handled via a match statement in `rush-core/src/builtin_ops.rs` -- no dynamic loading, no C ABI.
 
 ```python
-# Point to crate directory — auto-builds and loads the .so
-@op(rust="./examples/rush-ops-builtin::double")
+# Reference the Rust op by function name
+@op(rust="double")
 def double(x: int):
     return {"result": x * 2}  # Python fallback
 ```
 
-**Creating a plugin crate:**
-1. Create a cdylib crate that depends on `rush-core/sdk`
-2. Write plain `fn(&serde_json::Value) -> serde_json::Value` functions
-3. Call `export_ops!(func1, func2, ...)` to generate C ABI wrappers
-4. Reference via `@op(rust="./path/to/crate::func_name")`
-
-The engine auto-detects crate directories, runs `cargo build --release`, caches the result, and loads the `.so` at runtime.
+**Adding a new built-in op:**
+1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `examples/rush-ops-builtin/src/`
+2. Add a match arm in `rush-core/src/builtin_ops.rs` to dispatch to it
+3. Reference via `@op(rust="func_name")`
 
 ### Naming Conventions
 
@@ -210,11 +205,8 @@ The engine auto-detects crate directories, runs `cargo build --release`, caches 
 - `rush-*` — Rust packages (rush-core, rush-providers)
 
 **Example/test crates** live under `examples/`:
-- `examples/rush-ops-builtin` — built-in Rust ops (also used as test fixture by rush-core)
+- `examples/rush-ops-builtin` — built-in Rust ops (rlib, direct dependency of rush-core)
 - Pattern: `examples/<descriptive-name>/` with standard Cargo crate structure
-
-**Sub-crates** are nested inside their parent package:
-- `rush-core/sdk/` — Plugin SDK (separate Cargo crate, nested inside rush-core)
 
 ### Code Style
 

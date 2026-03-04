@@ -40,21 +40,21 @@ class TestRefSerialize:
         s = ref.serialize()
         assert s["source"] == "__PARENT__"
         assert s["var"] == "score"
-        assert s["ops"] == []
+        assert s["transforms"] == []
         assert "is_output" in s
 
     def test_ref_with_comparison(self):
         ref = PARENT["score"] >= 90
         s = ref.serialize()
         assert s["var"] == "score"
-        assert len(s["ops"]) == 1
-        assert s["ops"][0][0] == "ge"
-        assert s["ops"][0][1] == [90]
+        assert len(s["transforms"]) == 1
+        assert s["transforms"][0][0] == "ge"
+        assert s["transforms"][0][1] == [90]
 
     def test_compound_ref(self):
         ref = (PARENT["a"] > 10) & (PARENT["b"] == "x")
         s = ref.serialize()
-        assert any(op_name == "and_" for op_name, _ in s["ops"])
+        assert any(op_name == "and_" for op_name, _ in s["transforms"])
 
     def test_op_ref(self):
         """Ref from an op uses the op's name as source."""

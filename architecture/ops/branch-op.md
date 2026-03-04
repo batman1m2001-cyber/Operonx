@@ -217,7 +217,7 @@ PARENT["items"].apply(len) > 0  # Ref với apply() và comparison
 
 ### Ref.describe()
 
-`Ref.describe()` renders a human-readable condition string from the Ref's ops:
+`Ref.describe()` renders a human-readable condition string from the Ref's transforms:
 
 ```python
 PARENT["score"] >= 90       → "score >= 90"

@@ -5,8 +5,7 @@ edition = "2021"
 description = "Built-in Rust ops for the Hush workflow engine (math, string, JSON, hash)"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["rlib"]
 
 [dependencies]
-rush-ops-sdk = { path = "../../rush-core/sdk" }
 serde_json = "1"

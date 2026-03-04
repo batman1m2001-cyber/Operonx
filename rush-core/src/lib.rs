@@ -5,11 +5,11 @@
 //!   - Input: JSON inputs (serde_json::Value)
 //!   - Output: JSON result (serde_json::Value)
 
+pub mod builtin_ops;
 pub mod config;
 pub mod engine;
 pub mod error;
 pub mod ops;
-pub mod plugins;
 pub mod refs;
 pub mod runtime;
 pub mod states;

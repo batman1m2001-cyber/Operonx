@@ -3,19 +3,6 @@
 use rush_core::engine::Rush;
 use serde_json::{json, Value};
 
-/// Resolve the absolute path to the rush-ops-builtin crate.
-pub fn builtin_crate_path() -> String {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let path = std::path::Path::new(&manifest)
-        .join("..")
-        .join("examples")
-        .join("rush-ops-builtin");
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
-}
-
 /// Create a Rush engine from a JSON Value config.
 pub fn make_rush(config: Value) -> Rush {
     Rush::new(&serde_json::to_string(&config).unwrap()).unwrap()
@@ -44,17 +31,17 @@ pub fn filter_internal(mut val: Value) -> Value {
 // Config builders — construct graph JSON configs directly
 // =============================================================================
 
-/// Build a ref config: `{"source": source, "var": var, "ops": [...], "is_output": is_output}`
-pub fn ref_config(source: &str, var: &str, ops: Vec<Value>, is_output: bool) -> Value {
+/// Build a ref config: `{"source": source, "var": var, "transforms": [...], "is_output": is_output}`
+pub fn ref_config(source: &str, var: &str, transforms: Vec<Value>, is_output: bool) -> Value {
     json!({
         "source": source,
         "var": var,
-        "ops": ops,
+        "transforms": transforms,
         "is_output": is_output
     })
 }
 
-/// Build a PARENT ref: `{"source": graph_name, "var": key, "ops": [], "is_output": false}`
+/// Build a PARENT ref: `{"source": graph_name, "var": key, "transforms": [], "is_output": false}`
 ///
 /// Matches Python's `PARENT["key"]` serialization: the `var` field IS the key,
 /// no `getitem` op needed (state lookup by `(source, var, context)` is direct).
@@ -62,7 +49,7 @@ pub fn parent_ref(graph_full_name: &str, key: &str) -> Value {
     ref_config(graph_full_name, key, vec![], false)
 }
 
-/// Build a sibling op ref: `{"source": op_full_name, "var": output_key, "ops": [], ...}`
+/// Build a sibling op ref: `{"source": op_full_name, "var": output_key, "transforms": [], ...}`
 ///
 /// Matches Python's `op["key"]` serialization.
 pub fn op_ref(op_full_name: &str, key: &str) -> Value {

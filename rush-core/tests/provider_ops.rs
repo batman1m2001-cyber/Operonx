@@ -15,13 +15,12 @@ use serde_json::json;
 
 #[test]
 fn test_chain_template_then_upper() {
-    let crate_path = builtin_crate_path();
 
     // Pattern: string_template → to_upper (simulates prompt formatting → processing)
     let tpl = func_op(
         "tpl",
         "g",
-        &format!("{}::string_template", crate_path),
+        "string_template",
         vec![
             ref_input("template", parent_ref("g", "template")),
             ref_input("vars", parent_ref("g", "vars")),
@@ -31,7 +30,7 @@ fn test_chain_template_then_upper() {
     let up = func_op(
         "up",
         "g",
-        &format!("{}::to_upper", crate_path),
+        "to_upper",
         vec![ref_input("text", op_ref("g.tpl", "result"))],
         vec![],
     );
@@ -47,20 +46,19 @@ fn test_chain_template_then_upper() {
 
 #[test]
 fn test_chain_three_step_greet_upper() {
-    let crate_path = builtin_crate_path();
 
     // Pattern: greet → to_upper (simulates prompt formatting → post-processing)
     let g_op = func_op(
         "greet",
         "g",
-        &format!("{}::greet", crate_path),
+        "greet",
         vec![ref_input("name", parent_ref("g", "name"))],
         vec![],
     );
     let up = func_op(
         "up",
         "g",
-        &format!("{}::to_upper", crate_path),
+        "to_upper",
         vec![ref_input("text", op_ref("g.greet", "greeting"))],
         vec![],
     );
@@ -80,13 +78,12 @@ fn test_chain_three_step_greet_upper() {
 
 #[test]
 fn test_nested_dict_passthrough() {
-    let crate_path = builtin_crate_path();
 
     // json_extract navigates nested dicts: {"a": {"b": {"c": 42}}} path="a.b.c" → 42
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::json_extract", crate_path),
+        "json_extract",
         vec![
             ref_input("data", parent_ref("g", "data")),
             ref_input("path", parent_ref("g", "path")),
@@ -103,13 +100,12 @@ fn test_nested_dict_passthrough() {
 
 #[test]
 fn test_json_merge_nested_configs() {
-    let crate_path = builtin_crate_path();
 
     // Merge two config-like dicts (simulates provider config merging)
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::json_merge", crate_path),
+        "json_merge",
         vec![
             ref_input("a", parent_ref("g", "base")),
             ref_input("b", parent_ref("g", "override")),
@@ -135,12 +131,11 @@ fn test_json_merge_nested_configs() {
 
 #[test]
 fn test_float_precision_math_sum() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("g", "values"))],
         vec![],
     );
@@ -152,12 +147,11 @@ fn test_float_precision_math_sum() {
 
 #[test]
 fn test_float_precision_math_mean() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::math_mean", crate_path),
+        "math_mean",
         vec![ref_input("values", parent_ref("g", "values"))],
         vec![],
     );
@@ -173,12 +167,11 @@ fn test_float_precision_math_mean() {
 
 #[test]
 fn test_empty_list_math_sum() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("g", "values"))],
         vec![],
     );
@@ -189,12 +182,11 @@ fn test_empty_list_math_sum() {
 
 #[test]
 fn test_empty_dict_json_merge() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::json_merge", crate_path),
+        "json_merge",
         vec![
             ref_input("a", parent_ref("g", "a")),
             ref_input("b", parent_ref("g", "b")),
@@ -212,12 +204,11 @@ fn test_empty_dict_json_merge() {
 
 #[test]
 fn test_error_op_stores_error_in_state() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::fail_op", crate_path),
+        "fail_op",
         vec![ref_input("message", parent_ref("g", "message"))],
         vec![],
     );
@@ -236,12 +227,11 @@ fn test_error_op_stores_error_in_state() {
 
 #[test]
 fn test_large_list_processing() {
-    let crate_path = builtin_crate_path();
 
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::process_list", crate_path),
+        "process_list",
         vec![ref_input("items", parent_ref("g", "items"))],
         vec![],
     );
@@ -259,13 +249,12 @@ fn test_large_list_processing() {
 
 #[test]
 fn test_string_split_then_concat() {
-    let crate_path = builtin_crate_path();
 
     // split "a,b,c" by "," → ["a","b","c"], then concat back → "abc"
     let split = func_op(
         "split",
         "g",
-        &format!("{}::string_split", crate_path),
+        "string_split",
         vec![
             ref_input("text", parent_ref("g", "text")),
             ref_input("delimiter", parent_ref("g", "delim")),
@@ -275,7 +264,7 @@ fn test_string_split_then_concat() {
     let concat = func_op(
         "concat",
         "g",
-        &format!("{}::string_concat", crate_path),
+        "string_concat",
         vec![ref_input("parts", op_ref("g.split", "parts"))],
         vec![],
     );

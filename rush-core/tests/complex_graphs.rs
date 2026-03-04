@@ -111,13 +111,12 @@ fn for_op(
 
 #[test]
 fn test_three_level_nesting() {
-    let crate_path = builtin_crate_path();
 
     // Innermost: double(x=PARENT["x"])
     let inner_double = func_op(
         "d",
         "g.top.sub",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", parent_ref("g.top.sub", "x"))],
         vec![],
     );
@@ -157,27 +156,26 @@ fn test_three_level_nesting() {
 
 #[test]
 fn test_deep_chain_in_nested_graph() {
-    let crate_path = builtin_crate_path();
 
     // Inner graph: triple double chain
     let a = func_op(
         "a",
         "g.step",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", parent_ref("g.step", "x"))],
         vec![],
     );
     let b = func_op(
         "b",
         "g.step",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", op_ref("g.step.a", "result"))],
         vec![],
     );
     let c = func_op(
         "c",
         "g.step",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", op_ref("g.step.b", "result"))],
         vec![],
     );
@@ -193,7 +191,7 @@ fn test_deep_chain_in_nested_graph() {
         "stream": false,
         "bound": "cpu",
         "inputs": {
-            "x": { "ref": { "source": "g", "var": "x", "ops": [], "is_output": false }, "literal": null, "default": null, "required": false }
+            "x": { "ref": { "source": "g", "var": "x", "transforms": [], "is_output": false }, "literal": null, "default": null, "required": false }
         },
         "outputs": {},
         "ops": { "a": a, "b": b, "c": c },
@@ -230,7 +228,6 @@ fn test_deep_chain_in_nested_graph() {
 
 #[test]
 fn test_five_parallel_ops() {
-    let crate_path = builtin_crate_path();
 
     let mut ops = serde_json::Map::new();
     let mut ready_count = serde_json::Map::new();
@@ -244,7 +241,7 @@ fn test_five_parallel_ops() {
         let op = func_op(
             &name,
             "g",
-            &format!("{}::square", crate_path),
+            "square",
             vec![ref_input("n", parent_ref("g", &input_key))],
             vec![],
         );
@@ -257,7 +254,7 @@ fn test_five_parallel_ops() {
     let total = func_op(
         "total",
         "g",
-        &format!("{}::sum_all", crate_path),
+        "sum_all",
         vec![
             ref_input("a", op_ref("g.s0", "result")),
             ref_input("b", op_ref("g.s1", "result")),
@@ -297,22 +294,21 @@ fn test_five_parallel_ops() {
 
 #[test]
 fn test_double_diamond() {
-    let crate_path = builtin_crate_path();
 
     // A → B,C → D → E,F → G
-    let a = func_op("a", "g", &format!("{}::double", crate_path),
+    let a = func_op("a", "g", "double",
         vec![ref_input("x", parent_ref("g", "x"))], vec![]);
-    let b = func_op("b", "g", &format!("{}::double", crate_path),
+    let b = func_op("b", "g", "double",
         vec![ref_input("x", op_ref("g.a", "result"))], vec![]);
-    let c = func_op("c", "g", &format!("{}::increment", crate_path),
+    let c = func_op("c", "g", "increment",
         vec![ref_input("x", op_ref("g.a", "result"))], vec![]);
-    let d = func_op("d", "g", &format!("{}::add", crate_path),
+    let d = func_op("d", "g", "add",
         vec![ref_input("a", op_ref("g.b", "result")), ref_input("b", op_ref("g.c", "result"))], vec![]);
-    let e = func_op("e", "g", &format!("{}::double", crate_path),
+    let e = func_op("e", "g", "double",
         vec![ref_input("x", op_ref("g.d", "result"))], vec![]);
-    let f = func_op("f", "g", &format!("{}::increment", crate_path),
+    let f = func_op("f", "g", "increment",
         vec![ref_input("x", op_ref("g.d", "result"))], vec![]);
-    let fin = func_op("fin", "g", &format!("{}::add", crate_path),
+    let fin = func_op("fin", "g", "add",
         vec![ref_input("a", op_ref("g.e", "result")), ref_input("b", op_ref("g.f", "result"))], vec![]);
 
     let config = json!({
@@ -347,12 +343,11 @@ fn test_double_diamond() {
 
 #[test]
 fn test_wildcard_output_forwarding() {
-    let crate_path = builtin_crate_path();
 
     let step = func_op(
         "step",
         "g",
-        &format!("{}::multi", crate_path),
+        "multi",
         vec![ref_input("x", parent_ref("g", "x"))],
         vec![
             ref_output("a", output_ref("g.step", "a")),
@@ -371,9 +366,9 @@ fn test_wildcard_output_forwarding() {
         "has_soft_preds": [],
         "inputs": {},
         "outputs": {
-            "a": { "ref": { "source": "g.step", "var": "a", "ops": [], "is_output": true }, "literal": null, "default": null, "required": false },
-            "b": { "ref": { "source": "g.step", "var": "b", "ops": [], "is_output": true }, "literal": null, "default": null, "required": false },
-            "c": { "ref": { "source": "g.step", "var": "c", "ops": [], "is_output": true }, "literal": null, "default": null, "required": false }
+            "a": { "ref": { "source": "g.step", "var": "a", "transforms": [], "is_output": true }, "literal": null, "default": null, "required": false },
+            "b": { "ref": { "source": "g.step", "var": "b", "transforms": [], "is_output": true }, "literal": null, "default": null, "required": false },
+            "c": { "ref": { "source": "g.step", "var": "c", "transforms": [], "is_output": true }, "literal": null, "default": null, "required": false }
         }
     });
 
@@ -386,12 +381,11 @@ fn test_wildcard_output_forwarding() {
 
 #[test]
 fn test_output_rename_mapping() {
-    let crate_path = builtin_crate_path();
 
     let step = func_op(
         "step",
         "g",
-        &format!("{}::compute", crate_path),
+        "compute",
         vec![ref_input("x", parent_ref("g", "x"))],
         vec![],
     );
@@ -407,7 +401,7 @@ fn test_output_rename_mapping() {
         "inputs": {},
         "outputs": {
             "answer": {
-                "ref": { "source": "g.step", "var": "result", "ops": [], "is_output": true },
+                "ref": { "source": "g.step", "var": "result", "transforms": [], "is_output": true },
                 "literal": null, "default": null, "required": false
             }
         }
@@ -424,11 +418,10 @@ fn test_output_rename_mapping() {
 
 #[test]
 fn test_large_list_passthrough() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::process_list", crate_path),
+        "process_list",
         vec![ref_input("items", parent_ref("g", "items"))],
         vec![],
     );
@@ -442,11 +435,10 @@ fn test_large_list_passthrough() {
 
 #[test]
 fn test_large_string_passthrough() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "g",
         "step",
-        &format!("{}::measure", crate_path),
+        "measure",
         vec![ref_input("text", parent_ref("g", "text"))],
         vec![],
     );
@@ -459,7 +451,6 @@ fn test_large_string_passthrough() {
 
 #[test]
 fn test_many_for_iterations() {
-    let crate_path = builtin_crate_path();
 
     let items: Vec<i64> = (0..100).collect();
 
@@ -467,7 +458,7 @@ fn test_many_for_iterations() {
     let inner_node = func_op(
         "node",
         "g.loop",
-        &format!("{}::dbl", crate_path),
+        "dbl",
         vec![ref_input("value", parent_ref("g.loop", "value"))],
         vec![],
     );

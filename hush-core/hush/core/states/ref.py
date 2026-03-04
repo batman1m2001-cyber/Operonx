@@ -1,4 +1,4 @@
-"""Kiểu Ref cho liên kết biến zero-copy với khả năng chain operation."""
+"""Kiểu Ref cho liên kết biến zero-copy với khả năng chain transform."""
 
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -9,11 +9,11 @@ __all__ = ["Ref"]
 
 
 class Ref:
-    """Tham chiếu đến biến khác với khả năng chain các operation.
+    """Tham chiếu đến biến khác với khả năng chain các transform.
 
-    Các operation được ghi lại và compile thành callable để thực thi nhanh.
+    Các transform được ghi lại và compile thành callable để thực thi nhanh.
     Ref cho phép truy cập dữ liệu từ node khác mà không cần copy,
-    đồng thời hỗ trợ transform dữ liệu thông qua các operation như
+    đồng thời hỗ trợ transform dữ liệu thông qua các phép biến đổi như
     getitem, getattr, arithmetic, comparison, v.v.
 
     Supports compound boolean operations với & và |:
@@ -24,30 +24,30 @@ class Ref:
     Attributes:
         _node: Node nguồn (có thể là string hoặc BaseOp)
         var: Tên biến nguồn
-        _ops: Danh sách các operation đã ghi
-        _fn: Function đã compile từ ops (signature: fn(value, context) -> result)
+        _transforms: Danh sách các transform đã ghi
+        _fn: Function đã compile từ transforms (signature: fn(value, context) -> result)
         idx: Index trong schema (được set bởi StateSchema._build())
         is_output: True nếu đây là output ref (đẩy giá trị ra ngoài)
     """
 
-    __slots__ = ("_source", "var", "_ops", "_fn", "idx", "is_output")
+    __slots__ = ("_source", "var", "_transforms", "_fn", "idx", "is_output")
 
     _RESERVED_ATTRS = frozenset(
         {
             "_source",
             "var",
-            "_ops",
+            "_transforms",
             "_fn",
             "idx",
             "is_output",
             "source",
             "raw_source",
-            "ops",
+            "transforms",
             "as_tuple",
             "apply",
             "execute",
-            "has_ops",
-            "_with_op",
+            "has_transforms",
+            "_with_transform",
             "_clone",
             "_resolve",
             "get_all_vars",
@@ -58,7 +58,7 @@ class Ref:
         self,
         node: Union["BaseOp", str],
         var: str,
-        _ops: Optional[List[Tuple[str, Any]]] = None,
+        _transforms: Optional[List[Tuple[str, Any]]] = None,
         _fn: Optional[Callable] = None,
         is_output: bool = False,
     ) -> None:
@@ -67,19 +67,19 @@ class Ref:
         Args:
             node: Node nguồn (BaseOp hoặc string tên node)
             var: Tên biến nguồn
-            _ops: Danh sách operation (dùng cho deserialization)
+            _transforms: Danh sách transform (dùng cho deserialization)
             _fn: Function đã compile (dùng cho clone)
             is_output: True nếu là output ref
         """
         object.__setattr__(self, "_source", node)
         object.__setattr__(self, "var", var)
-        object.__setattr__(self, "_ops", _ops or [])
+        object.__setattr__(self, "_transforms", _transforms or [])
         object.__setattr__(self, "idx", -1)  # Được set bởi StateSchema._build()
         object.__setattr__(self, "is_output", is_output)  # True cho output ref
-        # Nếu có ops nhưng không có fn, rebuild từ ops (trường hợp deserialization)
-        if _fn is None and _ops:
+        # Nếu có transforms nhưng không có fn, rebuild từ transforms (trường hợp deserialization)
+        if _fn is None and _transforms:
             _fn = lambda x, ctx={}: x
-            for op, args in _ops:
+            for op, args in _transforms:
                 _fn = self._wrap(_fn, op, args)
         object.__setattr__(self, "_fn", _fn or (lambda x, ctx={}: x))
 
@@ -94,14 +94,14 @@ class Ref:
         return self._source
 
     @property
-    def ops(self) -> List[Tuple[str, Tuple[Any, ...]]]:
-        """Danh sách các operation đã ghi."""
-        return self._ops
+    def transforms(self) -> List[Tuple[str, Tuple[Any, ...]]]:
+        """Danh sách các transform đã ghi."""
+        return self._transforms
 
     @property
-    def has_ops(self) -> bool:
-        """Kiểm tra có operation nào không."""
-        return len(self._ops) > 0
+    def has_transforms(self) -> bool:
+        """Kiểm tra có transform nào không."""
+        return len(self._transforms) > 0
 
     def as_tuple(self) -> Tuple[str, str]:
         """Trả về tuple (op_name, var_name)."""
@@ -109,17 +109,17 @@ class Ref:
 
     def _clone(self) -> "Ref":
         """Tạo bản sao của Ref."""
-        return Ref(self._source, self.var, list(self._ops), self._fn, self.is_output)
+        return Ref(self._source, self.var, list(self._transforms), self._fn, self.is_output)
 
-    def _with_op(self, op: str, *args: Any) -> "Ref":
-        """Tạo Ref mới với thêm một operation."""
-        new_ops = self._ops + [(op, args)]
+    def _with_transform(self, op: str, *args: Any) -> "Ref":
+        """Tạo Ref mới với thêm một transform."""
+        new_transforms = self._transforms + [(op, args)]
         new_fn = self._wrap(self._fn, op, args)
-        return Ref(self._source, self.var, new_ops, new_fn)
+        return Ref(self._source, self.var, new_transforms, new_fn)
 
     @staticmethod
     def _wrap(fn: Callable, op: str, args: Tuple) -> Callable:
-        """Wrap function với thêm một operation.
+        """Wrap function với thêm một transform.
 
         All lambdas have signature: fn(value, context={}) -> result
         Context is a dict containing all available variable values,
@@ -216,10 +216,10 @@ class Ref:
             case "not_":
                 return lambda x, ctx={}, f=fn: not f(x, ctx)
             case _:
-                raise ValueError(f"Operation không xác định: {op}")
+                raise ValueError(f"Transform không xác định: {op}")
 
     def execute(self, value: Any, context: Dict[str, Any] = None) -> Any:
-        """Thực thi tất cả operation trên giá trị đầu vào.
+        """Thực thi tất cả transform trên giá trị đầu vào.
 
         Args:
             value: Giá trị nguồn để transform
@@ -228,7 +228,7 @@ class Ref:
                     Nếu không cung cấp, mặc định là {}.
 
         Returns:
-            Giá trị sau khi áp dụng tất cả operation
+            Giá trị sau khi áp dụng tất cả transform
         """
         return self._fn(value, context or {})
 
@@ -242,7 +242,7 @@ class Ref:
             ctx: Dict chứa tất cả giá trị biến có sẵn
 
         Returns:
-            Giá trị sau khi resolve và execute operations
+            Giá trị sau khi resolve và execute transforms
         """
         value = ctx.get(self.var)
         return self.execute(value, ctx)
@@ -261,7 +261,7 @@ class Ref:
             ref.get_all_vars()  # Returns {"a", "b", "c"}
         """
         vars_set = {self.var}
-        for op, args in self._ops:
+        for op, args in self._transforms:
             if op in ("and_", "or_", "rand_", "ror_") and args:
                 other = args[0]
                 if isinstance(other, Ref):
@@ -277,86 +277,86 @@ class Ref:
             **kwargs: Các keyword argument bổ sung cho func
 
         Returns:
-            Ref mới với operation apply
+            Ref mới với transform apply
         """
-        return self._with_op("apply", func, args, kwargs)
+        return self._with_transform("apply", func, args, kwargs)
 
     # =========================================================================
     # Truy cập
     # =========================================================================
     def __getitem__(self, key: Any) -> "Ref":
-        return self._with_op("getitem", key)
+        return self._with_transform("getitem", key)
 
     def __getattr__(self, name: str) -> "Ref":
         if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' không có attribute '{name}'")
-        return self._with_op("getattr", name)
+        return self._with_transform("getattr", name)
 
     def __call__(self, *args: Any, **kwargs: Any) -> "Ref":
-        return self._with_op("call", args, kwargs)
+        return self._with_transform("call", args, kwargs)
 
     # =========================================================================
     # Số học
     # =========================================================================
     def __add__(self, other):
-        return self._with_op("add", other)
+        return self._with_transform("add", other)
 
     def __radd__(self, other):
-        return self._with_op("radd", other)
+        return self._with_transform("radd", other)
 
     def __sub__(self, other):
-        return self._with_op("sub", other)
+        return self._with_transform("sub", other)
 
     def __rsub__(self, other):
-        return self._with_op("rsub", other)
+        return self._with_transform("rsub", other)
 
     def __mul__(self, other):
-        return self._with_op("mul", other)
+        return self._with_transform("mul", other)
 
     def __rmul__(self, other):
-        return self._with_op("rmul", other)
+        return self._with_transform("rmul", other)
 
     def __truediv__(self, other):
-        return self._with_op("truediv", other)
+        return self._with_transform("truediv", other)
 
     def __rtruediv__(self, other):
-        return self._with_op("rtruediv", other)
+        return self._with_transform("rtruediv", other)
 
     def __floordiv__(self, other):
-        return self._with_op("floordiv", other)
+        return self._with_transform("floordiv", other)
 
     def __rfloordiv__(self, other):
-        return self._with_op("rfloordiv", other)
+        return self._with_transform("rfloordiv", other)
 
     def __mod__(self, other):
-        return self._with_op("mod", other)
+        return self._with_transform("mod", other)
 
     def __rmod__(self, other):
-        return self._with_op("rmod", other)
+        return self._with_transform("rmod", other)
 
     def __pow__(self, other):
-        return self._with_op("pow", other)
+        return self._with_transform("pow", other)
 
     def __rpow__(self, other):
-        return self._with_op("rpow", other)
+        return self._with_transform("rpow", other)
 
     def __matmul__(self, other):
-        return self._with_op("matmul", other)
+        return self._with_transform("matmul", other)
 
     def __rmatmul__(self, other):
-        return self._with_op("rmatmul", other)
+        return self._with_transform("rmatmul", other)
 
     # =========================================================================
     # Một ngôi
     # =========================================================================
     def __neg__(self):
-        return self._with_op("neg")
+        return self._with_transform("neg")
 
     def __pos__(self):
-        return self._with_op("pos")
+        return self._with_transform("pos")
 
     def __abs__(self):
-        return self._with_op("abs")
+        return self._with_transform("abs")
 
     # =========================================================================
     # Output Mapping (>>)
@@ -416,48 +416,48 @@ class Ref:
     # So sánh
     # =========================================================================
     def __lt__(self, other):
-        return self._with_op("lt", other)
+        return self._with_transform("lt", other)
 
     def __le__(self, other):
-        return self._with_op("le", other)
+        return self._with_transform("le", other)
 
     def __gt__(self, other):
-        return self._with_op("gt", other)
+        return self._with_transform("gt", other)
 
     def __ge__(self, other):
-        return self._with_op("ge", other)
+        return self._with_transform("ge", other)
 
     def __eq__(self, other):
-        return self._with_op("eq", other)
+        return self._with_transform("eq", other)
 
     def __ne__(self, other):
-        return self._with_op("ne", other)
+        return self._with_transform("ne", other)
 
     def __contains__(self, item):
-        return self._with_op("contains", item)
+        return self._with_transform("contains", item)
 
     # =========================================================================
     # Boolean (compound conditions với & và |)
     # =========================================================================
     def __and__(self, other):
-        return self._with_op("and_", other)
+        return self._with_transform("and_", other)
 
     def __rand__(self, other):
-        return self._with_op("rand_", other)
+        return self._with_transform("rand_", other)
 
     def __or__(self, other):
-        return self._with_op("or_", other)
+        return self._with_transform("or_", other)
 
     def __ror__(self, other):
-        return self._with_op("ror_", other)
+        return self._with_transform("ror_", other)
 
     def __invert__(self):
-        return self._with_op("not_")
+        return self._with_transform("not_")
 
     # =========================================================================
     # Tiện ích
     # =========================================================================
-    _OP_SYMBOLS: dict = {
+    _TRANSFORM_SYMBOLS: dict = {
         "eq": "==",
         "ne": "!=",
         "lt": "<",
@@ -477,18 +477,18 @@ class Ref:
     }
 
     def describe(self) -> str:
-        """Human-readable description of this Ref and its operations.
+        """Human-readable description of this Ref and its transforms.
 
         Examples:
-            Ref(PARENT, "score") with ops [("ge", (90,))]
+            Ref(PARENT, "score") with transforms [("ge", (90,))]
             → "score >= 90"
 
-            Ref(PARENT, "call_code") with ops [("eq", ("Hua_tra",))]
+            Ref(PARENT, "call_code") with transforms [("eq", ("Hua_tra",))]
             → "call_code == 'Hua_tra'"
         """
         result = self.var
-        for op, args in self._ops:
-            symbol = self._OP_SYMBOLS.get(op)
+        for op, args in self._transforms:
+            symbol = self._TRANSFORM_SYMBOLS.get(op)
             if symbol and args:
                 arg = args[0]
                 result = f"{result} {symbol} {arg!r}"
@@ -513,14 +513,14 @@ class Ref:
         return {
             "source": self.source,
             "var": self.var,
-            "ops": self._serialize_ops(),
+            "transforms": self._serialize_transforms(),
             "is_output": self.is_output,
         }
 
-    def _serialize_ops(self) -> list:
-        """Serialize _ops list, handling nested Refs in compound booleans."""
+    def _serialize_transforms(self) -> list:
+        """Serialize _transforms list, handling nested Refs in compound booleans."""
         result = []
-        for op_name, args in self._ops:
+        for op_name, args in self._transforms:
             serialized_args = []
             for arg in args:
                 if isinstance(arg, Ref):
@@ -533,6 +533,6 @@ class Ref:
         return result
 
     def __repr__(self) -> str:
-        if not self._ops:
+        if not self._transforms:
             return f"Ref({self.source!r}, {self.var!r})"
-        return f"Ref({self.source!r}, {self.var!r}, ops={len(self._ops)})"
+        return f"Ref({self.source!r}, {self.var!r}, transforms={len(self._transforms)})"

@@ -13,8 +13,7 @@ use serde_json::Value;
 
 use crate::config::{IterParamConfig, OpConfig, ParamConfig, RefConfig};
 use crate::error::RushError;
-use crate::plugins;
-use crate::refs::ref_ops::evaluate_ref_ops;
+use crate::refs::ref_transforms::evaluate_ref_transforms;
 use crate::runtime;
 use crate::states::state::EngineState;
 
@@ -90,8 +89,8 @@ enum OpRoute<'a> {
     Provider,
     /// Native transform op (prompt, parser) — synchronous.
     NativeTransform,
-    /// Plugin op from a cdylib shared library ("path/to/lib.so::func").
-    Plugin(&'a str),
+    /// Builtin op from rush-ops-builtin (direct rlib call).
+    Builtin(&'a str),
     /// Streaming not supported in rust mode v1.
     StreamingProvider,
     /// No Rust implementation available.
@@ -110,9 +109,7 @@ fn classify_op(op: &OpConfig) -> OpRoute<'_> {
         return OpRoute::NativeTransform;
     }
     if let Some(ref name) = op.rust_op {
-        if name.contains("::") {
-            return OpRoute::Plugin(name);
-        }
+        return OpRoute::Builtin(name);
     }
     OpRoute::Unsupported
 }
@@ -134,7 +131,7 @@ fn execute_op(
         )),
         OpRoute::Provider => execute_provider_op(op, inputs),
         OpRoute::NativeTransform => execute_native_transform_op(&op.op_type, inputs),
-        OpRoute::Plugin(spec) => execute_plugin_op(spec, inputs),
+        OpRoute::Builtin(spec) => execute_builtin_op(spec, inputs),
         OpRoute::Unsupported => {
             // Branch ops are handled separately by dispatch_op, not here.
             // If we get here, the op truly has no Rust implementation.
@@ -232,10 +229,10 @@ pub(crate) fn resolve_ref(
     match value {
         Some(arc_val) => {
             let val = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-            if ref_config.ops.is_empty() {
+            if ref_config.transforms.is_empty() {
                 Ok(Some(val))
             } else {
-                let result = evaluate_ref_ops(val, &ref_config.ops, state, context)?;
+                let result = evaluate_ref_transforms(val, &ref_config.transforms, state, context)?;
                 Ok(Some(result))
             }
         }
@@ -265,10 +262,10 @@ fn resolve_ref_with_parent(
     match value {
         Some(arc_val) => {
             let val = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-            if ref_config.ops.is_empty() {
+            if ref_config.transforms.is_empty() {
                 Ok(Some(val))
             } else {
-                let result = evaluate_ref_ops(val, &ref_config.ops, state, context)?;
+                let result = evaluate_ref_transforms(val, &ref_config.transforms, state, context)?;
                 Ok(Some(result))
             }
         }
@@ -347,30 +344,27 @@ pub(crate) fn push_output_refs(
 }
 
 // =============================================================================
-// Plugin op execution
+// Builtin op execution
 // =============================================================================
 
-/// Execute a plugin op from a cdylib shared library.
-fn execute_plugin_op(
+/// Execute a builtin op via rush-ops-builtin (direct rlib function call).
+/// Accepts both "path::func" format (extracts func name) and plain "func" names.
+fn execute_builtin_op(
     spec: &str,
     inputs: serde_json::Map<String, Value>,
 ) -> Result<Option<Value>, RushError> {
-    let (lib_path, func_name) = plugins::parse_plugin_spec(spec).ok_or_else(|| {
-        RushError::PluginError(format!(
-            "Invalid plugin spec '{}': expected 'path/to/lib.so::func_name'",
-            spec
-        ))
-    })?;
+    // Extract function name: "path::func" → "func", or plain "func" → "func"
+    let func_name = spec.rsplit("::").next().unwrap_or(spec);
 
-    // Move inputs into Value::Object — zero-cost, no deep clone
-    let json_bytes = serde_json::to_vec(&Value::Object(inputs)).map_err(|e| {
-        RushError::PluginError(format!("Failed to serialize inputs for plugin op: {}", e))
-    })?;
-
-    let result_value = plugins::load_and_call(lib_path, func_name, &json_bytes)
-        .map_err(|e| RushError::PluginError(format!("Plugin op error: {}", e)))?;
-
-    Ok(Some(result_value))
+    let input_value = Value::Object(inputs);
+    crate::builtin_ops::call(func_name, &input_value)
+        .map(Some)
+        .ok_or_else(|| {
+            RushError::BuiltinOpError(format!(
+                "Unknown builtin op function: '{}' (from rust_op='{}')",
+                func_name, spec
+            ))
+        })
 }
 
 // =============================================================================
@@ -478,7 +472,7 @@ pub(crate) fn execute_branch(
         // Resolve it to the actual parent graph name.
         let cond_value = resolve_ref_with_parent(&case.condition, state, context, parent_graph)?;
         if let Some(ref val) = cond_value {
-            if crate::refs::ref_ops::is_truthy(val) {
+            if crate::refs::ref_transforms::is_truthy(val) {
                 state.set(
                     &op.full_name,
                     "target",
