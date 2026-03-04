@@ -1,16 +1,14 @@
 """Tutorial 18: Rust Plugin Ops — Viết và sử dụng Rust ops trong workflow.
 
-Không cần API key. Cần rush-core + rush-ops-builtin.
+Không cần API key. Cần rush-core.
 
 Học được:
-- @op(rust="./path::func"): khai báo Rust plugin op
+- @op(rust="func_name"): khai báo Rust built-in op
 - Built-in Rust ops: double, add, math_sum, string_template, ...
-- Mix Python ops và Rust plugin ops trong cùng workflow
-- Auto-build: engine tự build crate lần đầu
+- Mix Python ops và Rust built-in ops trong cùng workflow
 
 Yêu cầu:
 - rush-core đã build (cd rush-core && cargo build --release)
-- rush-ops-builtin đã build (cd examples/rush-ops-builtin && cargo build --release)
 
 Chạy: cd tutorial && uv run python examples/18_rust_plugin_ops.py
 """
@@ -21,18 +19,16 @@ from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops import Each, ForOp, op
 
 # =============================================================================
-# Rust plugin ops — Python body là fallback khi chạy mode="python"
+# Rust built-in ops — Python body là fallback khi chạy mode="python"
 # =============================================================================
 
-BUILTIN = "../examples/rush-ops-builtin"
 
-
-@op(rust=f"{BUILTIN}::double")
+@op(rust="double")
 def double(x: int):
     return {"result": x * 2}
 
 
-@op(rust=f"{BUILTIN}::add")
+@op(rust="add")
 def add(a: int, b: int):
     match (isinstance(a, int), isinstance(b, int)):
         case (True, True):
@@ -41,17 +37,17 @@ def add(a: int, b: int):
             return {"result": float(a) + float(b)}
 
 
-@op(rust=f"{BUILTIN}::math_sum")
+@op(rust="math_sum")
 def math_sum(values: list):
     return {"result": sum(values)}
 
 
-@op(rust=f"{BUILTIN}::math_mean")
+@op(rust="math_mean")
 def math_mean(values: list):
     return {"result": sum(values) / len(values) if values else 0}
 
 
-@op(rust=f"{BUILTIN}::string_template")
+@op(rust="string_template")
 def render_template(template: str, vars: dict):
     result = template
     for k, v in vars.items():
@@ -59,12 +55,12 @@ def render_template(template: str, vars: dict):
     return {"result": result}
 
 
-@op(rust=f"{BUILTIN}::string_concat")
+@op(rust="string_concat")
 def concat_parts(parts: list):
     return {"result": "".join(parts)}
 
 
-@op(rust=f"{BUILTIN}::hash_chain")
+@op(rust="hash_chain")
 def hash_chain(data: str, iterations: int):
     import hashlib
 

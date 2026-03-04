@@ -15,8 +15,6 @@ Hush-ai/
 ├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
 ├── tutorial/           # Documentation (Vietnamese) and examples
 ├── ui-hush-eyes/       # Standalone Rust server for trace visualization (Axum + SQLite)
-├── examples/           # Example crates and test fixtures
-│   └── rush-ops-builtin/  # 13 built-in Rust ops (math, string, JSON, hash) — rlib, linked directly by rush-core
 ├── architecture/       # Deep technical documentation
 ├── .github/            # CI/CD workflows, issue/PR templates
 ├── env.example         # Environment variables template
@@ -137,10 +135,8 @@ hush-telemetry (depends on hush-core)
 hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
 
 rush-core (Pure Rust engine - standalone rlib, built via cargo build)
-  └── depends on rush-ops-builtin (rlib, linked directly)
 rush-providers (Rust crate - used by rush-core, built via cargo build)
 rush-serve (Rust binary - depends on rush-core + rush-providers)
-examples/rush-ops-builtin (rlib crate - built-in Rust ops, direct dependency of rush-core)
 ```
 
 ## When to Modify Which Package
@@ -154,7 +150,7 @@ examples/rush-ops-builtin (rlib crate - built-in Rust ops, direct dependency of 
 | Rust execution backend | rush-core/src/ |
 | HTTP API server (Python) | hush-serve/hush/serve/ |
 | HTTP API server (Rust) | rush-serve/src/ |
-| New built-in Rust op | examples/rush-ops-builtin/src/ + dispatch in rush-core/src/builtin_ops.rs |
+| New built-in Rust op | rush-core/src/builtin_ops/ops.rs + dispatch in rush-core/src/builtin_ops/mod.rs |
 | Documentation or examples | tutorial/ |
 | Trace visualization server | ui-hush-eyes/ |
 
@@ -184,7 +180,7 @@ examples/rush-ops-builtin (rlib crate - built-in Rust ops, direct dependency of 
 
 ### Rust Built-in Ops
 
-Built-in Rust ops live in `examples/rush-ops-builtin` and are linked directly into `rush-core` as a standard rlib dependency. Dispatch is handled via a match statement in `rush-core/src/builtin_ops.rs` -- no dynamic loading, no C ABI.
+Built-in Rust ops live in `rush-core/src/builtin_ops/` as an internal module. Dispatch is handled via a match statement in `rush-core/src/builtin_ops/mod.rs` -- no dynamic loading, no C ABI.
 
 ```python
 # Reference the Rust op by function name
@@ -194,8 +190,8 @@ def double(x: int):
 ```
 
 **Adding a new built-in op:**
-1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `examples/rush-ops-builtin/src/`
-2. Add a match arm in `rush-core/src/builtin_ops.rs` to dispatch to it
+1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `rush-core/src/builtin_ops/ops.rs`
+2. Add a match arm in `rush-core/src/builtin_ops/mod.rs` to dispatch to it
 3. Reference via `@op(rust="func_name")`
 
 ### Naming Conventions
@@ -203,10 +199,6 @@ def double(x: int):
 **Packages** follow the `hush-*` / `rush-*` pattern:
 - `hush-*` — Python packages (hush-core, hush-providers, hush-telemetry)
 - `rush-*` — Rust packages (rush-core, rush-providers)
-
-**Example/test crates** live under `examples/`:
-- `examples/rush-ops-builtin` — built-in Rust ops (rlib, direct dependency of rush-core)
-- Pattern: `examples/<descriptive-name>/` with standard Cargo crate structure
 
 ### Code Style
 

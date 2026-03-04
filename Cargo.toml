@@ -5,7 +5,6 @@ members = [
     "rush-providers",
     "rush-serve",
     "ui-hush-eyes",
-    "examples/rush-ops-builtin",
 ]
 
 [profile.release]

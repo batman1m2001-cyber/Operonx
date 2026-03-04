@@ -109,7 +109,7 @@ queue: [A, B, C]  →  drain batch
 | `dashmap 6` | Concurrent HashMap for EngineState (thread-safe values store) |
 | `rayon 1.10` | Work-stealing thread pool for batch parallel execution |
 | `smallvec 1` | Stack-allocated small vectors |
-| `rush-ops-builtin` | Built-in Rust op implementations (direct rlib dependency) |
+| `builtin_ops` (internal module) | Built-in Rust op implementations |
 | `serde / serde_json 1` | JSON serialization |
 | `tokio 1` | Async runtime |
 | `chrono 0.4` | Timestamp metadata |
@@ -156,9 +156,9 @@ result = await engine.run(inputs={"input": 5}, mode="rust")
 
 ## Adding a New Built-in Rust Op
 
-Built-in Rust ops are linked directly into rush-core as a standard rlib dependency -- no dynamic loading, no C ABI.
+Built-in Rust ops are an internal module of rush-core -- no external crate, no dynamic loading, no C ABI.
 
-### 1. Add the op function to `examples/rush-ops-builtin/src/lib.rs`:
+### 1. Add the op function to `src/builtin_ops/ops.rs`:
 
 ```rust
 pub fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
@@ -167,10 +167,10 @@ pub fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
 }
 ```
 
-### 2. Add a dispatch arm in `rush-core/src/builtin_ops.rs`:
+### 2. Add a dispatch arm in `src/builtin_ops/mod.rs`:
 
 ```rust
-"my_op" => rush_ops_builtin::my_op(inputs),
+"my_op" => ops::my_op(inputs),
 ```
 
 ### 3. Use in Python:
@@ -183,9 +183,9 @@ def my_op(x: int):
 
 ### Dispatch Architecture
 
-- **Op implementations** (`examples/rush-ops-builtin/`): Plain `pub fn(&Value) -> Value` functions in a standard rlib crate
-- **Dispatch** (`src/builtin_ops.rs`): Match on `rust_name` string, call the corresponding function directly
-- **No dynamic loading**: rush-ops-builtin is a Cargo dependency of rush-core, linked at compile time
+- **Op implementations** (`src/builtin_ops/ops.rs`): Plain `pub fn(&Value) -> Value` functions
+- **Dispatch** (`src/builtin_ops/mod.rs`): Match on `rust_name` string, call the corresponding function directly
+- **No dynamic loading**: builtin_ops is an internal module of rush-core
 
 ## Performance (Benchmark Results)
 

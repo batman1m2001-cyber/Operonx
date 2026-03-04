@@ -94,19 +94,16 @@ Ngoài Rust mode (tăng tốc scheduling), bạn có thể viết **Rust plugin 
 Dùng `@op(rust="<path>::<func>")` decorator:
 
 ```python
-@op(rust="./examples/rush-ops-builtin::double")
+@op(rust="double")
 def double(x: int):
     return {"result": x * 2}  # Python fallback
 ```
 
-- `./examples/rush-ops-builtin` — đường dẫn tới crate (tương đối từ working directory)
-- `double` — tên function trong Rust crate
-
-Engine tự động build crate (`cargo build --release`) lần đầu, cache kết quả cho lần sau.
+- `"double"` — tên function trong rush-core built-in ops
 
 ### Built-in Rust ops
 
-Hush đi kèm **rush-ops-builtin** với 13 ops sẵn có:
+Hush đi kèm các built-in ops trong `rush-core/src/builtin_ops/`:
 
 | Category | Op | Input → Output |
 |----------|----|---------------|
@@ -127,11 +124,11 @@ Hush đi kèm **rush-ops-builtin** với 13 ops sẵn có:
 Ví dụ:
 
 ```python
-@op(rust="./examples/rush-ops-builtin::math_sum")
+@op(rust="math_sum")
 def sum_values(values: list):
     return {"result": sum(values)}
 
-@op(rust="./examples/rush-ops-builtin::string_template")
+@op(rust="string_template")
 def render(template: str, vars: dict):
     result = template
     for k, v in vars.items():
@@ -236,7 +233,7 @@ def fetch_data():
     """Python op — I/O bound, không cần Rust."""
     return {"data": [1, 2, 3, 4, 5]}
 
-@op(rust="./examples/rush-ops-builtin::math_sum")
+@op(rust="math_sum")
 def sum_values(values: list):
     """Rust plugin — CPU bound, hưởng lợi từ Rust."""
     return {"result": sum(values)}

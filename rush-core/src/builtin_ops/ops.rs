@@ -1,7 +1,6 @@
-//! rush-ops-builtin — built-in Rust ops for the Hush workflow engine.
+//! Built-in Rust op implementations for the Hush workflow engine.
 //!
-//! Contains 58 ops across 4 categories: core, string, JSON, math.
-//! Linked as an rlib dependency of rush-core (direct function calls, no FFI).
+//! Contains ops across categories: core, string, JSON, math, benchmark, and test support.
 //!
 //! Usage in Python:
 //! ```python
@@ -375,7 +374,7 @@ pub fn math_min(inputs: &Value) -> Value {
 }
 
 // =============================================================================
-// Benchmark ops — used by bench_e2e.py
+// Benchmark ops
 // =============================================================================
 
 /// bench_noop: x → {"x": x} (passthrough for benchmarks)
@@ -515,7 +514,7 @@ pub fn cpu_fibonacci(inputs: &Value) -> Value {
 }
 
 // =============================================================================
-// Test support ops — used by rush-core test suite
+// Test support ops
 // =============================================================================
 
 /// grade_a: returns A grade with message (for branch tests)
@@ -665,4 +664,3 @@ pub fn maybe_fail(inputs: &Value) -> Value {
         serde_json::json!({"result": value * 10})
     }
 }
-
