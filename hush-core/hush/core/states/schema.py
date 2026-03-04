@@ -72,7 +72,7 @@ class StateSchema:
             if isinstance(param.value, Ref):
                 # Push ref: node.var -> target.var (push value to target khi ghi)
                 ref = param.value
-                if ref.has_ops:
+                if ref.has_transforms:
                     raise ValueError(
                         f"Push ref {op_name}.{var_name} -> {ref.source}.{ref.var} không được có operation"
                     )
@@ -228,10 +228,10 @@ class StateSchema:
     # =========================================================================
 
     @staticmethod
-    def _ops_to_str(ops: List[Tuple[str, Any]]) -> str:
-        """Chuyển đổi danh sách ops thành string dễ đọc như x['key'].upper()"""
+    def _transforms_to_str(transforms: List[Tuple[str, Any]]) -> str:
+        """Chuyển đổi danh sách transforms thành string dễ đọc như x['key'].upper()"""
         result = "x"
-        for op, args in ops:
+        for op, args in transforms:
             a = args[0] if args else None
             match op:
                 case "getitem":
@@ -299,7 +299,11 @@ class StateSchema:
 
             if pull_ref is not None:
                 source_key = idx_to_key.get(pull_ref.idx, ("?", "?"))
-                ops_str = f" {self._ops_to_str(pull_ref._ops)}" if pull_ref.has_ops else ""
+                ops_str = (
+                    f" {self._transforms_to_str(pull_ref._transforms)}"
+                    if pull_ref.has_transforms
+                    else ""
+                )
                 parts.append(f"<- pull {source_key[0]}.{source_key[1]}[{pull_ref.idx}]{ops_str}")
 
             if push_ref is not None:

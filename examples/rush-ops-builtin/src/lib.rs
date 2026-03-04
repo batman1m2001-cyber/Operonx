@@ -1,17 +1,16 @@
 //! rush-ops-builtin — built-in Rust ops for the Hush workflow engine.
 //!
-//! Contains 13 ops across 4 categories: core, string, JSON, math.
-//! Compiled as a cdylib plugin loaded by rush-core at runtime.
+//! Contains 58 ops across 4 categories: core, string, JSON, math.
+//! Linked as an rlib dependency of rush-core (direct function calls, no FFI).
 //!
 //! Usage in Python:
 //! ```python
-//! @op(rust="./examples/rush-ops-builtin::double")
+//! @op(rust="double")
 //! def double(x: int):
 //!     return {"result": x * 2}  # Python fallback
 //! ```
 
-use rush_ops_sdk::serde_json::{self, Value};
-use rush_ops_sdk::export_ops;
+use serde_json::{self, Value};
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -22,7 +21,7 @@ use std::hash::{Hash, Hasher};
 
 /// double: x → result = x * 2
 /// Accepts both int and float inputs.
-fn double(inputs: &Value) -> Value {
+pub fn double(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
         serde_json::json!({"result": x * 2})
     } else if let Some(x) = inputs["x"].as_f64() {
@@ -34,7 +33,7 @@ fn double(inputs: &Value) -> Value {
 
 /// add: a, b → result = a + b
 /// Accepts both int and float inputs.
-fn add(inputs: &Value) -> Value {
+pub fn add(inputs: &Value) -> Value {
     match (inputs["a"].as_i64(), inputs["b"].as_i64()) {
         (Some(a), Some(b)) => serde_json::json!({"result": a + b}),
         _ => {
@@ -46,7 +45,7 @@ fn add(inputs: &Value) -> Value {
 }
 
 /// hash_chain: data, iterations → hash (CPU-heavy)
-fn hash_chain(inputs: &Value) -> Value {
+pub fn hash_chain(inputs: &Value) -> Value {
     let data = inputs["data"].as_str().unwrap_or("");
     let iterations = inputs["iterations"].as_i64().unwrap_or(0);
 
@@ -62,7 +61,7 @@ fn hash_chain(inputs: &Value) -> Value {
 
 /// identity: passes through all inputs as outputs.
 /// Returns the full input object as-is.
-fn identity(inputs: &Value) -> Value {
+pub fn identity(inputs: &Value) -> Value {
     match inputs {
         Value::Object(map) => Value::Object(map.clone()),
         other => serde_json::json!({"out": other}),
@@ -70,7 +69,7 @@ fn identity(inputs: &Value) -> Value {
 }
 
 /// multiply: a, b → result = a * b
-fn multiply(inputs: &Value) -> Value {
+pub fn multiply(inputs: &Value) -> Value {
     match (inputs["a"].as_i64(), inputs["b"].as_i64()) {
         (Some(a), Some(b)) => serde_json::json!({"result": a * b}),
         _ => {
@@ -82,7 +81,7 @@ fn multiply(inputs: &Value) -> Value {
 }
 
 /// square: n → result = n * n
-fn square(inputs: &Value) -> Value {
+pub fn square(inputs: &Value) -> Value {
     if let Some(n) = inputs["n"].as_i64() {
         serde_json::json!({"result": n * n})
     } else if let Some(n) = inputs["n"].as_f64() {
@@ -93,7 +92,7 @@ fn square(inputs: &Value) -> Value {
 }
 
 /// increment: x → result = x + 1
-fn increment(inputs: &Value) -> Value {
+pub fn increment(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
         serde_json::json!({"result": x + 1})
     } else {
@@ -102,13 +101,13 @@ fn increment(inputs: &Value) -> Value {
 }
 
 /// greet: name → greeting = "Hello, {name}!"
-fn greet(inputs: &Value) -> Value {
+pub fn greet(inputs: &Value) -> Value {
     let name = inputs["name"].as_str().unwrap_or("World");
     serde_json::json!({"greeting": format!("Hello, {}!", name)})
 }
 
 /// make_dict: key, value → {key: value}
-fn make_dict(inputs: &Value) -> Value {
+pub fn make_dict(inputs: &Value) -> Value {
     let key = inputs["key"].as_str().unwrap_or("key").to_string();
     let value = inputs["value"].clone();
     let mut map = serde_json::Map::new();
@@ -117,13 +116,13 @@ fn make_dict(inputs: &Value) -> Value {
 }
 
 /// to_upper: text → result = text.upper()
-fn to_upper(inputs: &Value) -> Value {
+pub fn to_upper(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     serde_json::json!({"result": text.to_uppercase()})
 }
 
 /// join_strings: items (list), separator → result
-fn join_strings(inputs: &Value) -> Value {
+pub fn join_strings(inputs: &Value) -> Value {
     let sep = inputs["separator"].as_str().unwrap_or("");
     let items = inputs["items"]
         .as_array()
@@ -141,7 +140,7 @@ fn join_strings(inputs: &Value) -> Value {
 }
 
 /// dbl: value → result = value * 2 (alias for double with different param name)
-fn dbl(inputs: &Value) -> Value {
+pub fn dbl(inputs: &Value) -> Value {
     if let Some(v) = inputs["value"].as_i64() {
         serde_json::json!({"result": v * 2})
     } else if let Some(v) = inputs["value"].as_f64() {
@@ -152,7 +151,7 @@ fn dbl(inputs: &Value) -> Value {
 }
 
 /// ok_op: value → result = value * 10
-fn ok_op(inputs: &Value) -> Value {
+pub fn ok_op(inputs: &Value) -> Value {
     if let Some(v) = inputs["value"].as_i64() {
         serde_json::json!({"result": v * 10})
     } else {
@@ -161,12 +160,12 @@ fn ok_op(inputs: &Value) -> Value {
 }
 
 /// make_list: returns {"items": [10, 20, 30]}
-fn make_list(_inputs: &Value) -> Value {
+pub fn make_list(_inputs: &Value) -> Value {
     serde_json::json!({"items": [10, 20, 30]})
 }
 
 /// increment_counter: counter → new_counter = counter + 1
-fn increment_counter(inputs: &Value) -> Value {
+pub fn increment_counter(inputs: &Value) -> Value {
     if let Some(c) = inputs["counter"].as_i64() {
         serde_json::json!({"new_counter": c + 1})
     } else {
@@ -175,27 +174,27 @@ fn increment_counter(inputs: &Value) -> Value {
 }
 
 /// accumulate: total, step_size → new_total = total + step_size
-fn accumulate(inputs: &Value) -> Value {
+pub fn accumulate(inputs: &Value) -> Value {
     let total = inputs["total"].as_i64().unwrap_or(0);
     let step = inputs["step_size"].as_i64().unwrap_or(0);
     serde_json::json!({"new_total": total + step})
 }
 
 /// fib_step: a, b → new_a = b, new_b = a + b
-fn fib_step(inputs: &Value) -> Value {
+pub fn fib_step(inputs: &Value) -> Value {
     let a = inputs["a"].as_i64().unwrap_or(0);
     let b = inputs["b"].as_i64().unwrap_or(0);
     serde_json::json!({"new_a": b, "new_b": a + b})
 }
 
 /// tagged_op: x → result = x * 2, $tags = ["fast", "cached"]
-fn tagged_op(inputs: &Value) -> Value {
+pub fn tagged_op(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     serde_json::json!({"result": x * 2, "$tags": ["fast", "cached"]})
 }
 
 /// safe_op: x → result = x + 1
-fn safe_op(inputs: &Value) -> Value {
+pub fn safe_op(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
         serde_json::json!({"result": x + 1})
     } else {
@@ -204,20 +203,20 @@ fn safe_op(inputs: &Value) -> Value {
 }
 
 /// multiply_values: value, multiplier → result = value * multiplier
-fn multiply_values(inputs: &Value) -> Value {
+pub fn multiply_values(inputs: &Value) -> Value {
     let v = inputs["value"].as_i64().unwrap_or(0);
     let m = inputs["multiplier"].as_i64().unwrap_or(1);
     serde_json::json!({"result": v * m})
 }
 
 /// noop: does nothing, returns empty object. Used for testing.
-fn noop(_inputs: &Value) -> Value {
+pub fn noop(_inputs: &Value) -> Value {
     serde_json::json!({})
 }
 
 /// passthrough: returns all inputs wrapped in "out" key.
 /// For single-value passthrough: value → out = value
-fn passthrough(inputs: &Value) -> Value {
+pub fn passthrough(inputs: &Value) -> Value {
     if let Some(v) = inputs.get("value") {
         serde_json::json!({"out": v})
     } else {
@@ -227,7 +226,7 @@ fn passthrough(inputs: &Value) -> Value {
 }
 
 /// fail_op: always raises an error. For testing error handling.
-fn fail_op(inputs: &Value) -> Value {
+pub fn fail_op(inputs: &Value) -> Value {
     let msg = inputs["message"].as_str().unwrap_or("Intentional test failure");
     serde_json::json!({"error": msg, "$error": true})
 }
@@ -237,7 +236,7 @@ fn fail_op(inputs: &Value) -> Value {
 // =============================================================================
 
 /// string_concat: parts (list of str) → result (str)
-fn string_concat(inputs: &Value) -> Value {
+pub fn string_concat(inputs: &Value) -> Value {
     let parts = inputs["parts"]
         .as_array()
         .map(|arr| {
@@ -251,7 +250,7 @@ fn string_concat(inputs: &Value) -> Value {
 }
 
 /// string_split: text, delimiter → parts (list of str)
-fn string_split(inputs: &Value) -> Value {
+pub fn string_split(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let delimiter = inputs["delimiter"].as_str().unwrap_or("");
     let parts: Vec<&str> = text.split(delimiter).collect();
@@ -260,7 +259,7 @@ fn string_split(inputs: &Value) -> Value {
 
 /// string_template: template, vars → result (str)
 /// Simple {key} substitution.
-fn string_template(inputs: &Value) -> Value {
+pub fn string_template(inputs: &Value) -> Value {
     let template = inputs["template"].as_str().unwrap_or("").to_string();
     let mut output = template;
 
@@ -282,7 +281,7 @@ fn string_template(inputs: &Value) -> Value {
 // =============================================================================
 
 /// json_parse: text → data (parsed JSON)
-fn json_parse(inputs: &Value) -> Value {
+pub fn json_parse(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("null");
     match serde_json::from_str::<Value>(text) {
         Ok(data) => serde_json::json!({"data": data}),
@@ -291,7 +290,7 @@ fn json_parse(inputs: &Value) -> Value {
 }
 
 /// json_extract: data, path (dot-separated) → value
-fn json_extract(inputs: &Value) -> Value {
+pub fn json_extract(inputs: &Value) -> Value {
     let path = inputs["path"].as_str().unwrap_or("");
     let mut current = &inputs["data"];
 
@@ -314,7 +313,7 @@ fn json_extract(inputs: &Value) -> Value {
 
 /// json_merge: a (dict), b (dict) → result (dict)
 /// Shallow merge: b overwrites a.
-fn json_merge(inputs: &Value) -> Value {
+pub fn json_merge(inputs: &Value) -> Value {
     let mut result = inputs["a"]
         .as_object()
         .cloned()
@@ -345,13 +344,13 @@ fn extract_nums(inputs: &Value) -> Vec<f64> {
 }
 
 /// math_sum: values (list of numbers) → result
-fn math_sum(inputs: &Value) -> Value {
+pub fn math_sum(inputs: &Value) -> Value {
     let nums = extract_nums(inputs);
     serde_json::json!({"result": nums.iter().sum::<f64>()})
 }
 
 /// math_mean: values (list of numbers) → result
-fn math_mean(inputs: &Value) -> Value {
+pub fn math_mean(inputs: &Value) -> Value {
     let nums = extract_nums(inputs);
     let result = if nums.is_empty() {
         0.0
@@ -362,14 +361,14 @@ fn math_mean(inputs: &Value) -> Value {
 }
 
 /// math_max: values (list of numbers) → result
-fn math_max(inputs: &Value) -> Value {
+pub fn math_max(inputs: &Value) -> Value {
     let nums = extract_nums(inputs);
     let result = nums.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     serde_json::json!({"result": result})
 }
 
 /// math_min: values (list of numbers) → result
-fn math_min(inputs: &Value) -> Value {
+pub fn math_min(inputs: &Value) -> Value {
     let nums = extract_nums(inputs);
     let result = nums.iter().copied().fold(f64::INFINITY, f64::min);
     serde_json::json!({"result": result})
@@ -380,13 +379,13 @@ fn math_min(inputs: &Value) -> Value {
 // =============================================================================
 
 /// bench_noop: x → {"x": x} (passthrough for benchmarks)
-fn bench_noop(inputs: &Value) -> Value {
+pub fn bench_noop(inputs: &Value) -> Value {
     let x = &inputs["x"];
     serde_json::json!({"x": x})
 }
 
 /// classify: score → {"grade": str, "score": int}
-fn classify(inputs: &Value) -> Value {
+pub fn classify(inputs: &Value) -> Value {
     let score = inputs["score"].as_i64().unwrap_or(0);
     let grade = if score >= 90 {
         "excellent"
@@ -401,14 +400,14 @@ fn classify(inputs: &Value) -> Value {
 }
 
 /// process_grade: grade, score → {"result": "grade:score"}
-fn process_grade(inputs: &Value) -> Value {
+pub fn process_grade(inputs: &Value) -> Value {
     let grade = inputs["grade"].as_str().unwrap_or("");
     let score = inputs["score"].as_i64().unwrap_or(0);
     serde_json::json!({"result": format!("{}:{}", grade, score)})
 }
 
 /// aggregate: results (list) → {"summary": len}
-fn aggregate(inputs: &Value) -> Value {
+pub fn aggregate(inputs: &Value) -> Value {
     let len = inputs["results"]
         .as_array()
         .map(|a| a.len())
@@ -417,20 +416,20 @@ fn aggregate(inputs: &Value) -> Value {
 }
 
 /// bench_transform: item, prefix → {"output": "prefix-item"}
-fn bench_transform(inputs: &Value) -> Value {
+pub fn bench_transform(inputs: &Value) -> Value {
     let item = inputs["item"].as_str().unwrap_or("");
     let prefix = inputs["prefix"].as_str().unwrap_or("");
     serde_json::json!({"output": format!("{}-{}", prefix, item)})
 }
 
 /// merge_two: a, b → {"merged": a, "x": a}
-fn merge_two(inputs: &Value) -> Value {
+pub fn merge_two(inputs: &Value) -> Value {
     let a = &inputs["a"];
     serde_json::json!({"merged": a, "x": a})
 }
 
 /// combine_all: r1..r5 → {"combined": [...], "count": n}
-fn combine_all(inputs: &Value) -> Value {
+pub fn combine_all(inputs: &Value) -> Value {
     let mut parts = Vec::new();
     for key in &["r1", "r2", "r3", "r4", "r5"] {
         if !inputs[*key].is_null() {
@@ -442,7 +441,7 @@ fn combine_all(inputs: &Value) -> Value {
 }
 
 /// cpu_hash_chain: x, iterations → {"hash": hex16, "x": x}
-fn cpu_hash_chain(inputs: &Value) -> Value {
+pub fn cpu_hash_chain(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     let iterations = inputs["iterations"].as_i64().unwrap_or(0);
     let mut hasher = DefaultHasher::new();
@@ -456,7 +455,7 @@ fn cpu_hash_chain(inputs: &Value) -> Value {
 }
 
 /// cpu_prime_sieve: limit → {"prime_count": count}
-fn cpu_prime_sieve(inputs: &Value) -> Value {
+pub fn cpu_prime_sieve(inputs: &Value) -> Value {
     let limit = inputs["limit"].as_u64().unwrap_or(100) as usize;
     let mut sieve = vec![true; limit + 1];
     if limit >= 1 {
@@ -481,7 +480,7 @@ fn cpu_prime_sieve(inputs: &Value) -> Value {
 }
 
 /// cpu_matrix_mult: size → {"trace": float}
-fn cpu_matrix_mult(inputs: &Value) -> Value {
+pub fn cpu_matrix_mult(inputs: &Value) -> Value {
     let size = inputs["size"].as_u64().unwrap_or(10) as usize;
     let mut a = vec![vec![0.0f64; size]; size];
     let mut b = vec![vec![0.0f64; size]; size];
@@ -503,7 +502,7 @@ fn cpu_matrix_mult(inputs: &Value) -> Value {
 }
 
 /// cpu_fibonacci: n → {"fib": result}
-fn cpu_fibonacci(inputs: &Value) -> Value {
+pub fn cpu_fibonacci(inputs: &Value) -> Value {
     let n = inputs["n"].as_u64().unwrap_or(0);
     let modulus: u64 = 1_000_000_007;
     let (mut a, mut b): (u64, u64) = (0, 1);
@@ -520,38 +519,38 @@ fn cpu_fibonacci(inputs: &Value) -> Value {
 // =============================================================================
 
 /// grade_a: returns A grade with message (for branch tests)
-fn grade_a(_inputs: &Value) -> Value {
+pub fn grade_a(_inputs: &Value) -> Value {
     serde_json::json!({"grade": "A", "message": "Excellent!"})
 }
 
 /// grade_b: returns B grade with message (for branch tests)
-fn grade_b(_inputs: &Value) -> Value {
+pub fn grade_b(_inputs: &Value) -> Value {
     serde_json::json!({"grade": "B", "message": "Good job!"})
 }
 
 /// grade_f: returns F grade with message (for branch tests)
-fn grade_f(_inputs: &Value) -> Value {
+pub fn grade_f(_inputs: &Value) -> Value {
     serde_json::json!({"grade": "F", "message": "Try again!"})
 }
 
 /// grade_a_mult: returns multiplier=3 (for branch+iteration tests)
-fn grade_a_mult(_inputs: &Value) -> Value {
+pub fn grade_a_mult(_inputs: &Value) -> Value {
     serde_json::json!({"multiplier": 3})
 }
 
 /// grade_f_mult: returns multiplier=1 (for branch+iteration tests)
-fn grade_f_mult(_inputs: &Value) -> Value {
+pub fn grade_f_mult(_inputs: &Value) -> Value {
     serde_json::json!({"multiplier": 1})
 }
 
 /// prefix: text → out = "[INFO] {text}"
-fn prefix(inputs: &Value) -> Value {
+pub fn prefix(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     serde_json::json!({"out": format!("[INFO] {}", text)})
 }
 
 /// sum_all: a,b,c,d,e → total = a+b+c+d+e
-fn sum_all(inputs: &Value) -> Value {
+pub fn sum_all(inputs: &Value) -> Value {
     let total: i64 = ["a", "b", "c", "d", "e"]
         .iter()
         .filter_map(|k| inputs[*k].as_i64())
@@ -560,32 +559,32 @@ fn sum_all(inputs: &Value) -> Value {
 }
 
 /// classify_value: value → label ("high" if >=50, else "low"), value
-fn classify_value(inputs: &Value) -> Value {
+pub fn classify_value(inputs: &Value) -> Value {
     let value = inputs["value"].as_i64().unwrap_or(0);
     let label = if value >= 50 { "high" } else { "low" };
     serde_json::json!({"label": label, "value": value})
 }
 
 /// multi_output: x → doubled, tripled, squared
-fn multi_output(inputs: &Value) -> Value {
+pub fn multi_output(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     serde_json::json!({"doubled": x * 2, "tripled": x * 3, "squared": x * x})
 }
 
 /// multi: x → a=x+1, b=x+2, c=x+3
-fn multi(inputs: &Value) -> Value {
+pub fn multi(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     serde_json::json!({"a": x + 1, "b": x + 2, "c": x + 3})
 }
 
 /// compute: x → result = x * 10
-fn compute(inputs: &Value) -> Value {
+pub fn compute(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     serde_json::json!({"result": x * 10})
 }
 
 /// process_list: items → count, sum
-fn process_list(inputs: &Value) -> Value {
+pub fn process_list(inputs: &Value) -> Value {
     let items = inputs["items"].as_array();
     let count = items.map(|a| a.len()).unwrap_or(0);
     let sum: i64 = items
@@ -595,7 +594,7 @@ fn process_list(inputs: &Value) -> Value {
 }
 
 /// measure: text → length, first (10 chars), last (10 chars)
-fn measure(inputs: &Value) -> Value {
+pub fn measure(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let len = text.len();
     let first: String = text.chars().take(10).collect();
@@ -608,7 +607,7 @@ fn measure(inputs: &Value) -> Value {
 }
 
 /// append_char: text, char, counter → new_text = text + char, new_counter = counter + 1
-fn append_char(inputs: &Value) -> Value {
+pub fn append_char(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let ch = inputs["char"].as_str().unwrap_or("");
     let counter = inputs["counter"].as_i64().unwrap_or(0);
@@ -616,7 +615,7 @@ fn append_char(inputs: &Value) -> Value {
 }
 
 /// collect_op: items, counter → new_items = items + [counter²], new_counter = counter + 1
-fn collect_op(inputs: &Value) -> Value {
+pub fn collect_op(inputs: &Value) -> Value {
     let mut items = inputs["items"]
         .as_array()
         .cloned()
@@ -627,38 +626,38 @@ fn collect_op(inputs: &Value) -> Value {
 }
 
 /// make_start: returns {start: 90}
-fn make_start(_inputs: &Value) -> Value {
+pub fn make_start(_inputs: &Value) -> Value {
     serde_json::json!({"start": 90})
 }
 
 /// format_grade: grade → formatted = "Grade: {grade}"
-fn format_grade(inputs: &Value) -> Value {
+pub fn format_grade(inputs: &Value) -> Value {
     let grade = inputs["grade"].as_str().unwrap_or("");
     serde_json::json!({"formatted": format!("Grade: {}", grade)})
 }
 
 /// multiply_vf: value, factor → result = value * factor
-fn multiply_vf(inputs: &Value) -> Value {
+pub fn multiply_vf(inputs: &Value) -> Value {
     let value = inputs["value"].as_i64().unwrap_or(0);
     let factor = inputs["factor"].as_i64().unwrap_or(1);
     serde_json::json!({"result": value * factor})
 }
 
 /// accumulate_step: total, step → new_total = total + step
-fn accumulate_step(inputs: &Value) -> Value {
+pub fn accumulate_step(inputs: &Value) -> Value {
     let total = inputs["total"].as_i64().unwrap_or(0);
     let step = inputs["step"].as_i64().unwrap_or(0);
     serde_json::json!({"new_total": total + step})
 }
 
 /// raise_op: always returns an error (for testing error resilience)
-fn raise_op(inputs: &Value) -> Value {
+pub fn raise_op(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     serde_json::json!({"error": format!("boom with x={}", x), "$error": true})
 }
 
 /// maybe_fail: returns value*10, but errors on value==2
-fn maybe_fail(inputs: &Value) -> Value {
+pub fn maybe_fail(inputs: &Value) -> Value {
     let value = inputs["value"].as_i64().unwrap_or(0);
     if value == 2 {
         serde_json::json!({"error": "fail on 2", "$error": true})
@@ -667,80 +666,3 @@ fn maybe_fail(inputs: &Value) -> Value {
     }
 }
 
-// =============================================================================
-// Export all ops via C ABI
-// =============================================================================
-
-export_ops!(
-    // Core ops
-    double,
-    add,
-    identity,
-    multiply,
-    square,
-    increment,
-    greet,
-    make_dict,
-    to_upper,
-    join_strings,
-    dbl,
-    ok_op,
-    make_list,
-    increment_counter,
-    accumulate,
-    fib_step,
-    tagged_op,
-    safe_op,
-    multiply_values,
-    noop,
-    passthrough,
-    fail_op,
-    hash_chain,
-    // String ops
-    string_concat,
-    string_split,
-    string_template,
-    // JSON ops
-    json_parse,
-    json_extract,
-    json_merge,
-    // Math ops
-    math_sum,
-    math_mean,
-    math_max,
-    math_min,
-    // Benchmark ops
-    bench_noop,
-    classify,
-    process_grade,
-    aggregate,
-    bench_transform,
-    merge_two,
-    combine_all,
-    cpu_hash_chain,
-    cpu_prime_sieve,
-    cpu_matrix_mult,
-    cpu_fibonacci,
-    // Test support ops
-    grade_a,
-    grade_b,
-    grade_f,
-    grade_a_mult,
-    grade_f_mult,
-    prefix,
-    sum_all,
-    classify_value,
-    multi_output,
-    multi,
-    compute,
-    process_list,
-    measure,
-    append_char,
-    collect_op,
-    make_start,
-    format_grade,
-    multiply_vf,
-    accumulate_step,
-    raise_op,
-    maybe_fail,
-);

@@ -30,7 +30,7 @@ class TestBasicCreation:
 
         assert ref.source == "graph.node"
         assert ref.var == "output"
-        assert ref.has_ops is False
+        assert ref.has_transforms is False
 
     def test_mock_op(self):
         """Test Ref creation with MockOp."""
@@ -356,7 +356,7 @@ class TestImmutability:
         ref_add = ref + 5
         ref_mul = ref * 3
 
-        assert ref.has_ops is False
+        assert ref.has_transforms is False
         assert ref_add is not ref
         assert ref_mul is not ref
 
@@ -398,12 +398,12 @@ class TestClone:
 
 
 class TestDeserialization:
-    """Test rebuilding Ref from ops."""
+    """Test rebuilding Ref from transforms."""
 
-    def test_rebuild_from_ops(self):
-        """Test Ref can be rebuilt from serialized ops."""
-        ops = [("getitem", ("key",)), ("add", (5,))]
-        ref = Ref("n", "x", _ops=ops)
+    def test_rebuild_from_transforms(self):
+        """Test Ref can be rebuilt from serialized transforms."""
+        transforms = [("getitem", ("key",)), ("add", (5,))]
+        ref = Ref("n", "x", _transforms=transforms)
 
         assert ref.execute({"key": 10}) == 15
 
@@ -437,10 +437,10 @@ class TestRepr:
         ref = Ref("graph.node", "out")
         assert repr(ref) == "Ref('graph.node', 'out')"
 
-    def test_repr_with_ops(self):
-        """Test repr shows ops count."""
+    def test_repr_with_transforms(self):
+        """Test repr shows transforms count."""
         ref = Ref("graph.node", "out")["key"] + 5
-        assert "ops=2" in repr(ref)
+        assert "transforms=2" in repr(ref)
 
 
 # ============================================================
@@ -635,11 +635,11 @@ class TestGetAllVars:
         ref = Ref("n", "a")
         assert ref.get_all_vars() == {"a"}
 
-    def test_ref_with_ops(self):
-        """Test get_all_vars for ref with ops (no compound)."""
+    def test_ref_with_transforms(self):
+        """Test get_all_vars for ref with transforms (no compound)."""
         ref = Ref("n", "a")
-        ref_with_ops = ref["key"] + 5 > 10
-        assert ref_with_ops.get_all_vars() == {"a"}
+        ref_with_transforms = ref["key"] + 5 > 10
+        assert ref_with_transforms.get_all_vars() == {"a"}
 
     def test_and_two_refs(self):
         """Test get_all_vars with & operator."""

@@ -1,4 +1,4 @@
-//! Integration tests for built-in Rust ops (string, JSON, math) via cdylib plugin.
+//! Integration tests for built-in Rust ops (string, JSON, math).
 //!
 //! Converted from test_builtin_ops.py — tests all 13+ ops from rush-ops-builtin.
 
@@ -13,11 +13,10 @@ use serde_json::json;
 
 #[test]
 fn test_string_concat() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_concat", crate_path),
+        "string_concat",
         vec![ref_input("parts", parent_ref("test", "parts"))],
         vec![],
     );
@@ -28,11 +27,10 @@ fn test_string_concat() {
 
 #[test]
 fn test_string_concat_empty() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_concat", crate_path),
+        "string_concat",
         vec![ref_input("parts", parent_ref("test", "parts"))],
         vec![],
     );
@@ -43,11 +41,10 @@ fn test_string_concat_empty() {
 
 #[test]
 fn test_string_split() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_split", crate_path),
+        "string_split",
         vec![
             ref_input("text", parent_ref("test", "text")),
             ref_input("delimiter", parent_ref("test", "delim")),
@@ -61,11 +58,10 @@ fn test_string_split() {
 
 #[test]
 fn test_string_split_no_match() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_split", crate_path),
+        "string_split",
         vec![
             ref_input("text", parent_ref("test", "text")),
             ref_input("delimiter", parent_ref("test", "delim")),
@@ -79,11 +75,10 @@ fn test_string_split_no_match() {
 
 #[test]
 fn test_string_template() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_template", crate_path),
+        "string_template",
         vec![
             ref_input("template", parent_ref("test", "tpl")),
             ref_input("vars", parent_ref("test", "vars")),
@@ -100,11 +95,10 @@ fn test_string_template() {
 
 #[test]
 fn test_string_template_no_vars() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::string_template", crate_path),
+        "string_template",
         vec![
             ref_input("template", parent_ref("test", "tpl")),
             ref_input("vars", parent_ref("test", "vars")),
@@ -122,11 +116,10 @@ fn test_string_template_no_vars() {
 
 #[test]
 fn test_json_parse() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::json_parse", crate_path),
+        "json_parse",
         vec![ref_input("text", parent_ref("test", "text"))],
         vec![],
     );
@@ -137,11 +130,10 @@ fn test_json_parse() {
 
 #[test]
 fn test_json_parse_list() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::json_parse", crate_path),
+        "json_parse",
         vec![ref_input("text", parent_ref("test", "text"))],
         vec![],
     );
@@ -152,11 +144,10 @@ fn test_json_parse_list() {
 
 #[test]
 fn test_json_extract() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::json_extract", crate_path),
+        "json_extract",
         vec![
             ref_input("data", parent_ref("test", "data")),
             ref_input("path", parent_ref("test", "path")),
@@ -170,11 +161,10 @@ fn test_json_extract() {
 
 #[test]
 fn test_json_merge() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::json_merge", crate_path),
+        "json_merge",
         vec![
             ref_input("a", parent_ref("test", "a")),
             ref_input("b", parent_ref("test", "b")),
@@ -191,11 +181,10 @@ fn test_json_merge() {
 
 #[test]
 fn test_json_merge_empty() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::json_merge", crate_path),
+        "json_merge",
         vec![
             ref_input("a", parent_ref("test", "a")),
             ref_input("b", parent_ref("test", "b")),
@@ -213,11 +202,10 @@ fn test_json_merge_empty() {
 
 #[test]
 fn test_math_sum() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -228,11 +216,10 @@ fn test_math_sum() {
 
 #[test]
 fn test_math_sum_empty() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -243,11 +230,10 @@ fn test_math_sum_empty() {
 
 #[test]
 fn test_math_mean() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_mean", crate_path),
+        "math_mean",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -258,11 +244,10 @@ fn test_math_mean() {
 
 #[test]
 fn test_math_mean_empty() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_mean", crate_path),
+        "math_mean",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -273,11 +258,10 @@ fn test_math_mean_empty() {
 
 #[test]
 fn test_math_max() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_max", crate_path),
+        "math_max",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -288,11 +272,10 @@ fn test_math_max() {
 
 #[test]
 fn test_math_min() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_min", crate_path),
+        "math_min",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -303,11 +286,10 @@ fn test_math_min() {
 
 #[test]
 fn test_math_floats() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("test", "values"))],
         vec![],
     );
@@ -322,19 +304,18 @@ fn test_math_floats() {
 
 #[test]
 fn test_math_chain_sum_then_double() {
-    let crate_path = builtin_crate_path();
 
     let s = func_op(
         "s",
         "chain",
-        &format!("{}::math_sum", crate_path),
+        "math_sum",
         vec![ref_input("values", parent_ref("chain", "nums"))],
         vec![],
     );
     let d = func_op(
         "d",
         "chain",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", op_ref("chain.s", "result"))],
         vec![],
     );
@@ -351,11 +332,10 @@ fn test_math_chain_sum_then_double() {
 
 #[test]
 fn test_greet_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::greet", crate_path),
+        "greet",
         vec![ref_input("name", parent_ref("test", "name"))],
         vec![],
     );
@@ -366,11 +346,10 @@ fn test_greet_op() {
 
 #[test]
 fn test_add_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::add", crate_path),
+        "add",
         vec![
             ref_input("a", parent_ref("test", "a")),
             ref_input("b", parent_ref("test", "b")),
@@ -384,11 +363,10 @@ fn test_add_op() {
 
 #[test]
 fn test_multiply_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::multiply", crate_path),
+        "multiply",
         vec![
             ref_input("a", parent_ref("test", "a")),
             ref_input("b", parent_ref("test", "b")),
@@ -402,11 +380,10 @@ fn test_multiply_op() {
 
 #[test]
 fn test_square_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::square", crate_path),
+        "square",
         vec![ref_input("n", parent_ref("test", "n"))],
         vec![],
     );
@@ -417,11 +394,10 @@ fn test_square_op() {
 
 #[test]
 fn test_increment_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::increment", crate_path),
+        "increment",
         vec![ref_input("x", parent_ref("test", "x"))],
         vec![],
     );
@@ -432,11 +408,10 @@ fn test_increment_op() {
 
 #[test]
 fn test_to_upper_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::to_upper", crate_path),
+        "to_upper",
         vec![ref_input("text", parent_ref("test", "text"))],
         vec![],
     );
@@ -447,11 +422,10 @@ fn test_to_upper_op() {
 
 #[test]
 fn test_hash_chain_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::hash_chain", crate_path),
+        "hash_chain",
         vec![
             ref_input("data", parent_ref("test", "data")),
             ref_input("iterations", parent_ref("test", "iterations")),
@@ -467,11 +441,10 @@ fn test_hash_chain_op() {
 
 #[test]
 fn test_noop_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::noop", crate_path),
+        "noop",
         vec![],
         vec![],
     );
@@ -483,11 +456,10 @@ fn test_noop_op() {
 
 #[test]
 fn test_identity_op() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "test",
         "step",
-        &format!("{}::identity", crate_path),
+        "identity",
         vec![ref_input("x", parent_ref("test", "x"))],
         vec![],
     );

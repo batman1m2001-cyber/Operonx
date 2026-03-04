@@ -1,7 +1,7 @@
-//! Ref operation evaluator — evaluates serialized Ref._ops chains in pure Rust.
+//! Ref transform evaluator — evaluates serialized Ref._transforms chains in pure Rust.
 //!
 //! Operates on `serde_json::Value` — no Python/GIL needed.
-//! Full parity with Python's Ref._wrap() ops:
+//! Full parity with Python's Ref._wrap() transforms:
 //!   Access: getitem, getattr, call
 //!   Arithmetic: add/radd, sub/rsub, mul/rmul, truediv/rtruediv, floordiv/rfloordiv,
 //!              mod/rmod, pow/rpow, matmul/rmatmul
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::config::{RefArg, RefConfig, RefOp};
+use crate::config::{RefArg, RefConfig, RefTransform};
 use crate::error::RushError;
 use crate::states::state::EngineState;
 
@@ -93,24 +93,24 @@ pub fn compare_values(lhs: &Value, rhs: &Value, op: &str) -> bool {
 // Ref ops evaluation
 // =============================================================================
 
-/// Evaluate a chain of ref operations on a source value.
+/// Evaluate a chain of ref transforms on a source value.
 ///
 /// State and context are needed for resolving nested Ref arguments.
-pub fn evaluate_ref_ops(
+pub fn evaluate_ref_transforms(
     value: Value,
-    ops: &[RefOp],
+    transforms: &[RefTransform],
     state: &EngineState,
     context: &str,
 ) -> Result<Value, RushError> {
     let mut result = value;
 
-    for op in ops {
-        result = match op.name.as_str() {
+    for t in transforms {
+        result = match t.name.as_str() {
             // =================================================================
             // Access
             // =================================================================
             "getitem" => {
-                let key = resolve_arg(&op.args[0], state, context)?;
+                let key = resolve_arg(&t.args[0], state, context)?;
                 match (&result, &key) {
                     (Value::Object(map), Value::String(k)) => {
                         map.get(k).cloned().unwrap_or(Value::Null)
@@ -146,7 +146,7 @@ pub fn evaluate_ref_ops(
                 }
             }
             "getattr" => {
-                let attr = resolve_arg_as_string(&op.args[0], state, context)?;
+                let attr = resolve_arg_as_string(&t.args[0], state, context)?;
                 match &result {
                     Value::Object(map) => map.get(&attr).cloned().unwrap_or(Value::Null),
                     _ => {
@@ -169,7 +169,7 @@ pub fn evaluate_ref_ops(
             // Arithmetic: forward (result OP other)
             // =================================================================
             "add" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 // String + String → concatenation
                 if let (Value::String(a), Value::String(b)) = (&result, &other) {
                     Value::String(format!("{}{}", a, b))
@@ -183,11 +183,11 @@ pub fn evaluate_ref_ops(
                 }
             }
             "sub" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&result, &other, "sub")?
             }
             "mul" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 // String * int → repeat
                 if let (Value::String(s), Value::Number(n)) = (&result, &other) {
                     if let Some(count) = n.as_u64() {
@@ -200,19 +200,19 @@ pub fn evaluate_ref_ops(
                 }
             }
             "truediv" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&result, &other, "truediv")?
             }
             "floordiv" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&result, &other, "floordiv")?
             }
             "mod" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&result, &other, "mod")?
             }
             "pow" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&result, &other, "pow")?
             }
             "matmul" => {
@@ -225,7 +225,7 @@ pub fn evaluate_ref_ops(
             // Arithmetic: reverse (other OP result)
             // =================================================================
             "radd" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 if let (Value::String(a), Value::String(b)) = (&other, &result) {
                     Value::String(format!("{}{}", a, b))
                 } else if let (Value::Array(a), Value::Array(b)) = (&other, &result) {
@@ -237,11 +237,11 @@ pub fn evaluate_ref_ops(
                 }
             }
             "rsub" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&other, &result, "sub")?
             }
             "rmul" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 if let (Value::Number(n), Value::String(s)) = (&other, &result) {
                     if let Some(count) = n.as_u64() {
                         Value::String(s.repeat(count as usize))
@@ -253,19 +253,19 @@ pub fn evaluate_ref_ops(
                 }
             }
             "rtruediv" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&other, &result, "truediv")?
             }
             "rfloordiv" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&other, &result, "floordiv")?
             }
             "rmod" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&other, &result, "mod")?
             }
             "rpow" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
+                let other = resolve_arg(&t.args[0], state, context)?;
                 json_arithmetic(&other, &result, "pow")?
             }
             "rmatmul" => {
@@ -294,8 +294,8 @@ pub fn evaluate_ref_ops(
             // Comparison
             // =================================================================
             "eq" | "ne" | "lt" | "le" | "gt" | "ge" => {
-                let other = resolve_arg(&op.args[0], state, context)?;
-                let op_str = match op.name.as_str() {
+                let other = resolve_arg(&t.args[0], state, context)?;
+                let op_str = match t.name.as_str() {
                     "eq" => "==",
                     "ne" => "!=",
                     "lt" => "<",
@@ -307,7 +307,7 @@ pub fn evaluate_ref_ops(
                 Value::Bool(compare_values(&result, &other, op_str))
             }
             "contains" => {
-                let item = resolve_arg(&op.args[0], state, context)?;
+                let item = resolve_arg(&t.args[0], state, context)?;
                 match &result {
                     Value::Array(arr) => Value::Bool(arr.contains(&item)),
                     Value::Object(map) => {
@@ -335,18 +335,18 @@ pub fn evaluate_ref_ops(
                 if !is_truthy(&result) {
                     result
                 } else {
-                    resolve_arg(&op.args[0], state, context)?
+                    resolve_arg(&t.args[0], state, context)?
                 }
             }
             "or_" => {
                 if is_truthy(&result) {
                     result
                 } else {
-                    resolve_arg(&op.args[0], state, context)?
+                    resolve_arg(&t.args[0], state, context)?
                 }
             }
             "rand_" => {
-                let right = resolve_arg(&op.args[0], state, context)?;
+                let right = resolve_arg(&t.args[0], state, context)?;
                 if !is_truthy(&right) {
                     right
                 } else {
@@ -354,7 +354,7 @@ pub fn evaluate_ref_ops(
                 }
             }
             "ror_" => {
-                let right = resolve_arg(&op.args[0], state, context)?;
+                let right = resolve_arg(&t.args[0], state, context)?;
                 if is_truthy(&right) {
                     right
                 } else {
@@ -396,7 +396,7 @@ fn resolve_arg(
     }
 }
 
-/// Resolve a nested ref config: look up value in state and apply ops.
+/// Resolve a nested ref config: look up value in state and apply transforms.
 fn resolve_nested_ref(
     ref_config: &RefConfig,
     state: &EngineState,
@@ -411,10 +411,10 @@ fn resolve_nested_ref(
             ))
         })?;
     let value = Arc::try_unwrap(value).unwrap_or_else(|arc| (*arc).clone());
-    if ref_config.ops.is_empty() {
+    if ref_config.transforms.is_empty() {
         Ok(value)
     } else {
-        evaluate_ref_ops(value, &ref_config.ops, state, context)
+        evaluate_ref_transforms(value, &ref_config.transforms, state, context)
     }
 }
 
@@ -509,8 +509,8 @@ mod tests {
         EngineState::new()
     }
 
-    fn make_op(name: &str, args: Vec<RefArg>) -> RefOp {
-        RefOp {
+    fn make_transform(name: &str, args: Vec<RefArg>) -> RefTransform {
+        RefTransform {
             name: name.to_string(),
             args,
         }
@@ -525,24 +525,24 @@ mod tests {
     #[test]
     fn test_getitem_object() {
         let state = empty_state();
-        let ops = vec![make_op("getitem", vec![lit(json!("b"))])];
-        let result = evaluate_ref_ops(json!({"a": 1, "b": 2}), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("getitem", vec![lit(json!("b"))])];
+        let result = evaluate_ref_transforms(json!({"a": 1, "b": 2}), &ops, &state, "").unwrap();
         assert_eq!(result, json!(2));
     }
 
     #[test]
     fn test_getitem_array_index() {
         let state = empty_state();
-        let ops = vec![make_op("getitem", vec![lit(json!(1))])];
-        let result = evaluate_ref_ops(json!([10, 20, 30]), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("getitem", vec![lit(json!(1))])];
+        let result = evaluate_ref_transforms(json!([10, 20, 30]), &ops, &state, "").unwrap();
         assert_eq!(result, json!(20));
     }
 
     #[test]
     fn test_getitem_array_negative_index() {
         let state = empty_state();
-        let ops = vec![make_op("getitem", vec![lit(json!(-1))])];
-        let result = evaluate_ref_ops(json!([10, 20, 30]), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("getitem", vec![lit(json!(-1))])];
+        let result = evaluate_ref_transforms(json!([10, 20, 30]), &ops, &state, "").unwrap();
         assert_eq!(result, json!(30));
     }
 
@@ -551,72 +551,72 @@ mod tests {
     #[test]
     fn test_add_numbers() {
         let state = empty_state();
-        let ops = vec![make_op("add", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(7), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("add", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(7), &ops, &state, "").unwrap();
         assert_eq!(result, json!(10));
     }
 
     #[test]
     fn test_add_strings() {
         let state = empty_state();
-        let ops = vec![make_op("add", vec![lit(json!(" world"))])];
-        let result = evaluate_ref_ops(json!("hello"), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("add", vec![lit(json!(" world"))])];
+        let result = evaluate_ref_transforms(json!("hello"), &ops, &state, "").unwrap();
         assert_eq!(result, json!("hello world"));
     }
 
     #[test]
     fn test_add_arrays() {
         let state = empty_state();
-        let ops = vec![make_op("add", vec![lit(json!([3, 4]))])];
-        let result = evaluate_ref_ops(json!([1, 2]), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("add", vec![lit(json!([3, 4]))])];
+        let result = evaluate_ref_transforms(json!([1, 2]), &ops, &state, "").unwrap();
         assert_eq!(result, json!([1, 2, 3, 4]));
     }
 
     #[test]
     fn test_sub() {
         let state = empty_state();
-        let ops = vec![make_op("sub", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(10), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("sub", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(10), &ops, &state, "").unwrap();
         assert_eq!(result, json!(7));
     }
 
     #[test]
     fn test_mul() {
         let state = empty_state();
-        let ops = vec![make_op("mul", vec![lit(json!(4))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("mul", vec![lit(json!(4))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(12));
     }
 
     #[test]
     fn test_mul_string_repeat() {
         let state = empty_state();
-        let ops = vec![make_op("mul", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!("ab"), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("mul", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!("ab"), &ops, &state, "").unwrap();
         assert_eq!(result, json!("ababab"));
     }
 
     #[test]
     fn test_truediv() {
         let state = empty_state();
-        let ops = vec![make_op("truediv", vec![lit(json!(4))])];
-        let result = evaluate_ref_ops(json!(10), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("truediv", vec![lit(json!(4))])];
+        let result = evaluate_ref_transforms(json!(10), &ops, &state, "").unwrap();
         assert_eq!(result, json!(2.5));
     }
 
     #[test]
     fn test_floordiv() {
         let state = empty_state();
-        let ops = vec![make_op("floordiv", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(10), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("floordiv", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(10), &ops, &state, "").unwrap();
         assert_eq!(result, json!(3));
     }
 
     #[test]
     fn test_mod() {
         let state = empty_state();
-        let ops = vec![make_op("mod", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(10), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("mod", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(10), &ops, &state, "").unwrap();
         assert_eq!(result, json!(1));
     }
 
@@ -624,16 +624,16 @@ mod tests {
     fn test_mod_python_style() {
         // Python: -7 % 3 == 2 (result has sign of divisor)
         let state = empty_state();
-        let ops = vec![make_op("mod", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(-7), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("mod", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(-7), &ops, &state, "").unwrap();
         assert_eq!(result, json!(2));
     }
 
     #[test]
     fn test_pow() {
         let state = empty_state();
-        let ops = vec![make_op("pow", vec![lit(json!(3))])];
-        let result = evaluate_ref_ops(json!(2), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("pow", vec![lit(json!(3))])];
+        let result = evaluate_ref_transforms(json!(2), &ops, &state, "").unwrap();
         assert_eq!(result, json!(8));
     }
 
@@ -643,8 +643,8 @@ mod tests {
     fn test_radd() {
         let state = empty_state();
         // 5 + result(3) = 8
-        let ops = vec![make_op("radd", vec![lit(json!(5))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("radd", vec![lit(json!(5))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(8));
     }
 
@@ -652,8 +652,8 @@ mod tests {
     fn test_rsub() {
         let state = empty_state();
         // 10 - result(3) = 7
-        let ops = vec![make_op("rsub", vec![lit(json!(10))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rsub", vec![lit(json!(10))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(7));
     }
 
@@ -661,8 +661,8 @@ mod tests {
     fn test_rmul() {
         let state = empty_state();
         // 4 * result(3) = 12
-        let ops = vec![make_op("rmul", vec![lit(json!(4))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rmul", vec![lit(json!(4))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(12));
     }
 
@@ -670,8 +670,8 @@ mod tests {
     fn test_rtruediv() {
         let state = empty_state();
         // 10 / result(4) = 2.5
-        let ops = vec![make_op("rtruediv", vec![lit(json!(10))])];
-        let result = evaluate_ref_ops(json!(4), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rtruediv", vec![lit(json!(10))])];
+        let result = evaluate_ref_transforms(json!(4), &ops, &state, "").unwrap();
         assert_eq!(result, json!(2.5));
     }
 
@@ -679,8 +679,8 @@ mod tests {
     fn test_rfloordiv() {
         let state = empty_state();
         // 10 // result(3) = 3
-        let ops = vec![make_op("rfloordiv", vec![lit(json!(10))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rfloordiv", vec![lit(json!(10))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(3));
     }
 
@@ -688,8 +688,8 @@ mod tests {
     fn test_rmod() {
         let state = empty_state();
         // 10 % result(3) = 1
-        let ops = vec![make_op("rmod", vec![lit(json!(10))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rmod", vec![lit(json!(10))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(1));
     }
 
@@ -697,8 +697,8 @@ mod tests {
     fn test_rpow() {
         let state = empty_state();
         // 2 ** result(3) = 8
-        let ops = vec![make_op("rpow", vec![lit(json!(2))])];
-        let result = evaluate_ref_ops(json!(3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("rpow", vec![lit(json!(2))])];
+        let result = evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(8));
     }
 
@@ -707,24 +707,24 @@ mod tests {
     #[test]
     fn test_neg() {
         let state = empty_state();
-        let ops = vec![make_op("neg", vec![])];
-        let result = evaluate_ref_ops(json!(5), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("neg", vec![])];
+        let result = evaluate_ref_transforms(json!(5), &ops, &state, "").unwrap();
         assert_eq!(result, json!(-5));
     }
 
     #[test]
     fn test_pos() {
         let state = empty_state();
-        let ops = vec![make_op("pos", vec![])];
-        let result = evaluate_ref_ops(json!(-3), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("pos", vec![])];
+        let result = evaluate_ref_transforms(json!(-3), &ops, &state, "").unwrap();
         assert_eq!(result, json!(-3));
     }
 
     #[test]
     fn test_abs() {
         let state = empty_state();
-        let ops = vec![make_op("abs", vec![])];
-        let result = evaluate_ref_ops(json!(-7), &ops, &state, "").unwrap();
+        let ops = vec![make_transform("abs", vec![])];
+        let result = evaluate_ref_transforms(json!(-7), &ops, &state, "").unwrap();
         assert_eq!(result, json!(7));
     }
 
@@ -733,13 +733,13 @@ mod tests {
     #[test]
     fn test_eq() {
         let state = empty_state();
-        let ops = vec![make_op("eq", vec![lit(json!(5))])];
+        let ops = vec![make_transform("eq", vec![lit(json!(5))])];
         assert_eq!(
-            evaluate_ref_ops(json!(5), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(5), &ops, &state, "").unwrap(),
             json!(true)
         );
         assert_eq!(
-            evaluate_ref_ops(json!(3), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(3), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -747,14 +747,14 @@ mod tests {
     #[test]
     fn test_gt_lt() {
         let state = empty_state();
-        let ops = vec![make_op("gt", vec![lit(json!(3))])];
+        let ops = vec![make_transform("gt", vec![lit(json!(3))])];
         assert_eq!(
-            evaluate_ref_ops(json!(5), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(5), &ops, &state, "").unwrap(),
             json!(true)
         );
-        let ops = vec![make_op("lt", vec![lit(json!(3))])];
+        let ops = vec![make_transform("lt", vec![lit(json!(3))])];
         assert_eq!(
-            evaluate_ref_ops(json!(5), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(5), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -762,14 +762,14 @@ mod tests {
     #[test]
     fn test_contains_array() {
         let state = empty_state();
-        let ops = vec![make_op("contains", vec![lit(json!(2))])];
+        let ops = vec![make_transform("contains", vec![lit(json!(2))])];
         assert_eq!(
-            evaluate_ref_ops(json!([1, 2, 3]), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!([1, 2, 3]), &ops, &state, "").unwrap(),
             json!(true)
         );
-        let ops = vec![make_op("contains", vec![lit(json!(9))])];
+        let ops = vec![make_transform("contains", vec![lit(json!(9))])];
         assert_eq!(
-            evaluate_ref_ops(json!([1, 2, 3]), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!([1, 2, 3]), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -777,9 +777,9 @@ mod tests {
     #[test]
     fn test_contains_string() {
         let state = empty_state();
-        let ops = vec![make_op("contains", vec![lit(json!("ell"))])];
+        let ops = vec![make_transform("contains", vec![lit(json!("ell"))])];
         assert_eq!(
-            evaluate_ref_ops(json!("hello"), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!("hello"), &ops, &state, "").unwrap(),
             json!(true)
         );
     }
@@ -787,14 +787,14 @@ mod tests {
     #[test]
     fn test_contains_object_key() {
         let state = empty_state();
-        let ops = vec![make_op("contains", vec![lit(json!("a"))])];
+        let ops = vec![make_transform("contains", vec![lit(json!("a"))])];
         assert_eq!(
-            evaluate_ref_ops(json!({"a": 1, "b": 2}), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!({"a": 1, "b": 2}), &ops, &state, "").unwrap(),
             json!(true)
         );
-        let ops = vec![make_op("contains", vec![lit(json!("z"))])];
+        let ops = vec![make_transform("contains", vec![lit(json!("z"))])];
         assert_eq!(
-            evaluate_ref_ops(json!({"a": 1}), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!({"a": 1}), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -805,21 +805,21 @@ mod tests {
     fn test_and_or_not() {
         let state = empty_state();
         // true and_ 42 → 42
-        let ops = vec![make_op("and_", vec![lit(json!(42))])];
+        let ops = vec![make_transform("and_", vec![lit(json!(42))])];
         assert_eq!(
-            evaluate_ref_ops(json!(true), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(true), &ops, &state, "").unwrap(),
             json!(42)
         );
         // false or_ 42 → 42
-        let ops = vec![make_op("or_", vec![lit(json!(42))])];
+        let ops = vec![make_transform("or_", vec![lit(json!(42))])];
         assert_eq!(
-            evaluate_ref_ops(json!(false), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(false), &ops, &state, "").unwrap(),
             json!(42)
         );
         // not_ true → false
-        let ops = vec![make_op("not_", vec![])];
+        let ops = vec![make_transform("not_", vec![])];
         assert_eq!(
-            evaluate_ref_ops(json!(true), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(true), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -831,12 +831,12 @@ mod tests {
         // node["items"][0] + 10
         let state = empty_state();
         let ops = vec![
-            make_op("getitem", vec![lit(json!("items"))]),
-            make_op("getitem", vec![lit(json!(0))]),
-            make_op("add", vec![lit(json!(10))]),
+            make_transform("getitem", vec![lit(json!("items"))]),
+            make_transform("getitem", vec![lit(json!(0))]),
+            make_transform("add", vec![lit(json!(10))]),
         ];
         let result =
-            evaluate_ref_ops(json!({"items": [5, 15, 25]}), &ops, &state, "").unwrap();
+            evaluate_ref_transforms(json!({"items": [5, 15, 25]}), &ops, &state, "").unwrap();
         assert_eq!(result, json!(15));
     }
 
@@ -845,15 +845,15 @@ mod tests {
         // (value > 10) and_ true → true (if value > 10)
         let state = empty_state();
         let ops = vec![
-            make_op("gt", vec![lit(json!(10))]),
-            make_op("and_", vec![lit(json!(true))]),
+            make_transform("gt", vec![lit(json!(10))]),
+            make_transform("and_", vec![lit(json!(true))]),
         ];
         assert_eq!(
-            evaluate_ref_ops(json!(15), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(15), &ops, &state, "").unwrap(),
             json!(true)
         );
         assert_eq!(
-            evaluate_ref_ops(json!(5), &ops, &state, "").unwrap(),
+            evaluate_ref_transforms(json!(5), &ops, &state, "").unwrap(),
             json!(false)
         );
     }
@@ -863,21 +863,21 @@ mod tests {
     #[test]
     fn test_div_by_zero() {
         let state = empty_state();
-        let ops = vec![make_op("truediv", vec![lit(json!(0))])];
-        assert!(evaluate_ref_ops(json!(10), &ops, &state, "").is_err());
+        let ops = vec![make_transform("truediv", vec![lit(json!(0))])];
+        assert!(evaluate_ref_transforms(json!(10), &ops, &state, "").is_err());
     }
 
     #[test]
     fn test_unknown_op() {
         let state = empty_state();
-        let ops = vec![make_op("foobar", vec![])];
-        assert!(evaluate_ref_ops(json!(10), &ops, &state, "").is_err());
+        let ops = vec![make_transform("foobar", vec![])];
+        assert!(evaluate_ref_transforms(json!(10), &ops, &state, "").is_err());
     }
 
     #[test]
     fn test_apply_unsupported() {
         let state = empty_state();
-        let ops = vec![make_op("apply", vec![lit(json!("len"))])];
-        assert!(evaluate_ref_ops(json!([1, 2]), &ops, &state, "").is_err());
+        let ops = vec![make_transform("apply", vec![lit(json!("len"))])];
+        assert!(evaluate_ref_transforms(json!([1, 2]), &ops, &state, "").is_err());
     }
 }

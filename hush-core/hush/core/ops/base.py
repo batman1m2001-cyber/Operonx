@@ -313,10 +313,10 @@ class BaseOp(ABC):
                 return self.parent if self.parent else source
             return source
 
-        # Handle Ref directly — keep operations intact
+        # Handle Ref directly — keep transforms intact
         if isinstance(value, Ref):
             resolved = resolve_parent(value.raw_source)
-            return Ref(resolved, value.var, value.ops)
+            return Ref(resolved, value.var, value.transforms)
 
         # Handle op reference: some_op → Ref(some_op, key)
         if hasattr(value, "name"):

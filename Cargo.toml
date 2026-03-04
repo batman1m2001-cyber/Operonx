@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "rush-core",
-    "rush-core/sdk",
     "rush-providers",
     "rush-serve",
     "ui-hush-eyes",

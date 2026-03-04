@@ -10,25 +10,21 @@ rush-core/
 │   ├── lib.rs              # Crate root (module declarations)
 │   ├── engine.rs           # Rush engine — new(json) + run_json(inputs) entry point
 │   ├── config.rs           # Config deserialization (GraphConfig, OpConfig, etc.)
+│   ├── builtin_ops.rs      # Built-in op dispatch (match on rust_name → direct function call)
 │   ├── ops/
 │   │   ├── mod.rs
-│   │   ├── base.rs         # Leaf op execution, ref resolution, plugin dispatch
+│   │   ├── base.rs         # Leaf op execution, ref resolution
 │   │   ├── graph/
 │   │   │   └── graph_op.rs # Graph scheduling loop, batch parallel, nested graphs
 │   │   ├── iteration/
 │   │   │   ├── for_op.rs   # ForOp — iterate over lists
 │   │   │   └── while_op.rs # WhileOp — loop until condition
 │   │   └── transform/
-│   │       └── func_op.rs  # FuncOp execution (plugin dispatch or Python callback)
-│   ├── plugins/
-│   │   └── mod.rs          # cdylib plugin loader (auto-build, caching, C ABI)
+│   │       └── func_op.rs  # FuncOp execution (builtin dispatch or Python callback)
 │   ├── refs/
-│   │   └── ref_ops.rs      # Ref op chain evaluation (getitem, arithmetic, boolean, etc.)
+│   │   └── ref_transforms.rs # Ref transform chain evaluation (getitem, arithmetic, boolean, etc.)
 │   └── states/
 │       └── state.rs        # EngineState — concurrent DashMap state (pure serde_json::Value)
-├── sdk/                    # Plugin SDK (separate Cargo crate)
-│   ├── Cargo.toml          # rush-ops-sdk (serde_json + paste)
-│   └── src/lib.rs          # export_ops! macro for C ABI wrapper generation
 ├── tests/                  # Rust integration tests (95+ tests)
 ├── benches/
 │   ├── bench_runner.rs     # Standalone Rust benchmark binary (rush-bench)
@@ -113,7 +109,7 @@ queue: [A, B, C]  →  drain batch
 | `dashmap 6` | Concurrent HashMap for EngineState (thread-safe values store) |
 | `rayon 1.10` | Work-stealing thread pool for batch parallel execution |
 | `smallvec 1` | Stack-allocated small vectors |
-| `libloading 0.8` | Runtime cdylib plugin loading (C ABI function lookup) |
+| `rush-ops-builtin` | Built-in Rust op implementations (direct rlib dependency) |
 | `serde / serde_json 1` | JSON serialization |
 | `tokio 1` | Async runtime |
 | `chrono 0.4` | Timestamp metadata |
@@ -158,67 +154,38 @@ result = await engine.run(inputs={"input": 5})
 result = await engine.run(inputs={"input": 5}, mode="rust")
 ```
 
-## Adding a New Rust-Native Op (Plugin System)
+## Adding a New Built-in Rust Op
 
-Rust ops are now loaded as cdylib plugins at runtime via the C ABI. To create new ops:
+Built-in Rust ops are linked directly into rush-core as a standard rlib dependency -- no dynamic loading, no C ABI.
 
-### 1. Add to an existing plugin crate (e.g., `examples/rush-ops-builtin/src/lib.rs`):
+### 1. Add the op function to `examples/rush-ops-builtin/src/lib.rs`:
 
 ```rust
-fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
+pub fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
     let x = inputs["x"].as_i64().unwrap();
     serde_json::json!({"result": x * 2})
 }
-
-export_ops!(my_op, /* other ops... */);
 ```
 
-### 2. Or create a new plugin crate:
-
-```bash
-mkdir -p examples/my-ops/src
-```
-
-```toml
-# examples/my-ops/Cargo.toml
-[package]
-name = "my-ops"
-[lib]
-crate-type = ["cdylib"]
-[dependencies]
-rush-ops-sdk = { path = "../../rush-core/sdk" }
-serde_json = "1"
-```
+### 2. Add a dispatch arm in `rush-core/src/builtin_ops.rs`:
 
 ```rust
-// examples/my-ops/src/lib.rs
-use rush_ops_sdk::{export_ops, serde_json};
-use serde_json::Value;
-
-fn my_op(inputs: &Value) -> Value {
-    let x = inputs["x"].as_i64().unwrap();
-    serde_json::json!({"result": x * 2})
-}
-
-export_ops!(my_op);
+"my_op" => rush_ops_builtin::my_op(inputs),
 ```
 
 ### 3. Use in Python:
 
 ```python
-@op(rust="./examples/my-ops::my_op")
+@op(rust="my_op")
 def my_op(x: int):
     return {"result": x * 2}  # Python fallback
 ```
 
-The engine auto-builds the crate, caches the `.so`, and loads it at runtime.
+### Dispatch Architecture
 
-### Plugin Architecture
-
-- **SDK** (`rush-core/sdk/`): Provides `export_ops!` macro that generates C ABI wrappers
-- **Plugin loader** (`src/plugins/mod.rs`): Auto-builds crates, caches `.so` files, loads via `libloading`
-- **Dispatch** (`src/ops/base.rs`): `rust_name.contains("::")` → plugin op, else → Python callback
-- **C ABI convention**: `rush_op_<name>(input_ptr, input_len, output_ptr, output_len) -> i32`
+- **Op implementations** (`examples/rush-ops-builtin/`): Plain `pub fn(&Value) -> Value` functions in a standard rlib crate
+- **Dispatch** (`src/builtin_ops.rs`): Match on `rust_name` string, call the corresponding function directly
+- **No dynamic loading**: rush-ops-builtin is a Cargo dependency of rush-core, linked at compile time
 
 ## Performance (Benchmark Results)
 
@@ -241,7 +208,7 @@ Release build, Python 3.13, comparing `mode="python"` vs `mode="rust"`:
 1. **MapOp not supported** — use ForOp in Rust mode (MapOp is asyncio-based)
 2. **Timing metadata** — uses `$`-prefixed keys (`$start_time`, `$end_time`, `$duration_ms`)
 3. **Branch output refs** — must target parent graph (`output_ref("g", key)` not `output_ref("g.a", key)`)
-4. **Ref ops** — Python handles operator overloading at build time, Rust evaluates the serialized ops chain
+4. **Ref transforms** — Python handles operator overloading at build time, Rust evaluates the serialized transforms chain
 
 ## Deep Documentation Links
 

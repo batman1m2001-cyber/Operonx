@@ -15,11 +15,10 @@ use std::sync::Arc;
 
 #[test]
 fn test_concurrent_correctness_30_runs() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "g",
         "d",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", parent_ref("g", "x"))],
         vec![],
     );
@@ -55,11 +54,10 @@ fn test_concurrent_correctness_30_runs() {
 
 #[test]
 fn test_100_concurrent_runs_isolated() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "g",
         "d",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", parent_ref("g", "x"))],
         vec![],
     );
@@ -102,11 +100,10 @@ fn test_100_concurrent_runs_isolated() {
 
 #[test]
 fn test_concurrent_square_30_runs() {
-    let crate_path = builtin_crate_path();
     let config = single_op_graph(
         "g",
         "s",
-        &format!("{}::square", crate_path),
+        "square",
         vec![ref_input("n", parent_ref("g", "n"))],
         vec![],
     );
@@ -142,20 +139,19 @@ fn test_concurrent_square_30_runs() {
 
 #[test]
 fn test_concurrent_chain_50_runs() {
-    let crate_path = builtin_crate_path();
 
     // Chain: double -> increment (x*2 + 1)
     let d = func_op(
         "d",
         "g",
-        &format!("{}::double", crate_path),
+        "double",
         vec![ref_input("x", parent_ref("g", "x"))],
         vec![],
     );
     let inc = func_op(
         "inc",
         "g",
-        &format!("{}::increment", crate_path),
+        "increment",
         vec![ref_input("x", op_ref("g.d", "result"))],
         vec![],
     );

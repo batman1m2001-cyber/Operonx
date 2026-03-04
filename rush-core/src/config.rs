@@ -114,21 +114,21 @@ pub struct ParamConfig {
     pub required: bool,
 }
 
-/// A serialized Ref — variable reference with ops chain.
+/// A serialized Ref — variable reference with transforms chain.
 pub struct RefConfig {
     pub source: String,
     pub var: String,
-    pub ops: Vec<RefOp>,
+    pub transforms: Vec<RefTransform>,
     pub is_output: bool,
 }
 
-/// A single operation in a Ref's ops chain.
-pub struct RefOp {
+/// A single transform in a Ref's transforms chain.
+pub struct RefTransform {
     pub name: String,
     pub args: Vec<RefArg>,
 }
 
-/// An argument to a RefOp.
+/// An argument to a RefTransform.
 pub enum RefArg {
     Literal(Value),
     NestedRef(RefConfig),
@@ -327,17 +327,15 @@ impl OpConfig {
             return Ok(());
         }
 
-        // Plugin ops (rust_op with "path::func" format) are valid
-        if let Some(ref spec) = self.rust_op {
-            if spec.contains("::") {
-                return Ok(());
-            }
+        // Builtin ops (rust_op field present) are valid
+        if self.rust_op.is_some() {
+            return Ok(());
         }
 
         // Everything else has no Rust implementation
         Err(RushError::UnsupportedOp(format!(
             "Op '{}' (type={}) has no Rust implementation. \
-             Use @op(rust='./crate::func') to provide one.",
+             Use @op(rust='func_name') to provide one.",
             self.full_name, self.op_type
         )))
     }
@@ -475,44 +473,44 @@ fn parse_params(parent: &Value, key: &str) -> Result<Vec<ParamConfig>, RushError
 }
 
 /// Parse a RefConfig from a JSON value (output of `Ref.serialize()`).
-/// Format: {"source": str, "var": str, "ops": [[name, [args...]], ...], "is_output": bool}
+/// Format: {"source": str, "var": str, "transforms": [[name, [args...]], ...], "is_output": bool}
 fn parse_ref_config(val: &Value) -> Result<RefConfig, RushError> {
     let source = get_string(val, "source")?;
     let var = get_string(val, "var")?;
     let is_output = val.get("is_output").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    // Parse ops: [[name, [args...]], ...]
-    let ops_arr = val
-        .get("ops")
+    // Parse transforms: [[name, [args...]], ...]
+    let transforms_arr = val
+        .get("transforms")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| err("missing 'ops' in ref config"))?;
+        .ok_or_else(|| err("missing 'transforms' in ref config"))?;
 
-    let mut ops = Vec::with_capacity(ops_arr.len());
-    for item in ops_arr {
-        let pair = item.as_array().ok_or_else(|| err("ref op must be an array"))?;
-        let op_name = pair
+    let mut transforms = Vec::with_capacity(transforms_arr.len());
+    for item in transforms_arr {
+        let pair = item.as_array().ok_or_else(|| err("ref transform must be an array"))?;
+        let transform_name = pair
             .first()
             .and_then(|v| v.as_str())
-            .ok_or_else(|| err("ref op name must be a string"))?
+            .ok_or_else(|| err("ref transform name must be a string"))?
             .to_string();
 
         let args_arr = pair
             .get(1)
             .and_then(|v| v.as_array())
-            .ok_or_else(|| err("ref op args must be an array"))?;
+            .ok_or_else(|| err("ref transform args must be an array"))?;
 
         let mut args = Vec::with_capacity(args_arr.len());
         for arg in args_arr {
             args.push(parse_ref_arg(arg)?);
         }
 
-        ops.push(RefOp { name: op_name, args });
+        transforms.push(RefTransform { name: transform_name, args });
     }
 
     Ok(RefConfig {
         source,
         var,
-        ops,
+        transforms,
         is_output,
     })
 }
@@ -737,14 +735,14 @@ mod tests {
     #[test]
     fn test_config_structs_exist() {
         // Compile-time test: ensure all structs are usable
-        let _op = RefOp {
+        let _t = RefTransform {
             name: "getitem".to_string(),
             args: vec![],
         };
         let _ref = RefConfig {
             source: "op1".to_string(),
             var: "result".to_string(),
-            ops: vec![_op],
+            transforms: vec![_t],
             is_output: false,
         };
         let _param = ParamConfig {
@@ -769,7 +767,7 @@ mod tests {
             "__ref__": {
                 "source": "op1",
                 "var": "x",
-                "ops": [],
+                "transforms": [],
                 "is_output": false
             }
         });
