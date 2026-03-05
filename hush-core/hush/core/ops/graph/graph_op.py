@@ -769,7 +769,7 @@ class GraphOp(BaseOp):
             def _can_inline(op_obj: BaseOp) -> bool:
                 return (
                     not isinstance(op_obj, GraphOp)
-                    and not asyncio.iscoroutinefunction(getattr(op_obj, "core", None))
+                    and not inspect.iscoroutinefunction(getattr(op_obj, "core", None))
                     and getattr(op_obj, "executor", None) is None
                 )
 

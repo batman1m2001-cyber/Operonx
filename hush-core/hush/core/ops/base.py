@@ -1,6 +1,7 @@
 """BaseOp — base class for all ops in a workflow."""
 
 import asyncio
+import inspect
 import traceback
 import uuid
 from abc import ABC
@@ -765,7 +766,7 @@ class BaseOp(ABC):
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
 
-            if asyncio.iscoroutinefunction(self.core):
+            if inspect.iscoroutinefunction(self.core):
                 _outputs = await self.core(**_inputs)
             elif self.executor == "thread":
                 _outputs = await asyncio.to_thread(self.core, **_inputs)
@@ -819,7 +820,7 @@ class BaseOp(ABC):
 
     def serialize(self) -> dict:
         """Serialize this op to a config dict for the Rust backend."""
-        is_async = asyncio.iscoroutinefunction(self.core)
+        is_async = inspect.iscoroutinefunction(self.core)
         # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→cpu)
         bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else "cpu")
         return {
