@@ -343,8 +343,8 @@ class TestIterExecuted:
         result = list(state.iter_executed("node"))
         assert len(result) == 2
         times = {ctx: t for ctx, t in result}
-        assert times["iter_0"] == t1
-        assert times["iter_1"] == t2
+        assert times[("iter_0",)] == t1
+        assert times[("iter_1",)] == t2
 
 
 # ============================================================

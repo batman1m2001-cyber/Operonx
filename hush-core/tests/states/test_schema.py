@@ -1,7 +1,7 @@
 """Tests for StateSchema - workflow state structure definition."""
 
 from hush.core.ops.graph.graph_op import END, PARENT, START, GraphOp
-from hush.core.ops.transform.func_op import FuncOp
+from hush.core.ops.transform.func_op import FuncOp, op
 from hush.core.states.ref import Ref
 from hush.core.states.schema import StateSchema
 
@@ -287,41 +287,41 @@ class TestDeeplyNestedGraphs:
 # ============================================================
 
 
-class TestIterationNode:
-    """Test schema with iteration nodes."""
+class TestGeneratorIteration:
+    """Test schema with generator-based iteration (replaces WhileOp schema tests)."""
 
-    def test_while_loop_refs(self):
-        """Test refs in WhileOp.
+    def test_generator_graph_refs(self):
+        """Test refs in a graph with generator op.
 
-        Note: After refactor, iteration nodes inherit directly from GraphOp
-        (no inner graph), so child nodes reference the loop node directly.
+        Generator ops are regular FuncOps that yield dicts.
+        Their outputs are referenced via op['key'] by downstream ops.
         """
-        from hush.core.ops.iteration.while_op import WhileOp
 
-        with WhileOp(
-            name="counter_loop",
-            inputs={"counter": 0},
-            until="counter >= 5",
-            max_iterations=10,
-        ) as loop:
-            inc = FuncOp(
-                name="increment",
-                code_fn=lambda counter: {"new_counter": counter + 1},
-                inputs={"counter": PARENT["counter"]},
-                outputs={"new_counter": PARENT["counter"]},
-            )
-            START >> inc >> END
+        @op
+        def count_up(limit: int):
+            counter = 0
+            while counter < limit:
+                counter += 1
+                yield {"counter": counter}
 
-        loop.build()
-        schema = StateSchema(loop)
+        @op
+        def square(counter: int):
+            return {"squared": counter * counter}
 
-        # Child node's counter should ref to loop.counter (PARENT resolution)
-        # Iteration nodes now inherit from GraphOp directly, no __inner__ graph
-        child_counter_idx = schema.get_index("counter_loop.increment", "counter")
-        child_counter_ref = schema._pull_refs[child_counter_idx]
-        assert child_counter_ref is not None
-        assert child_counter_ref.source == "counter_loop"
-        assert child_counter_ref.var == "counter"
+        with GraphOp(name="gen_graph") as g:
+            src = count_up(limit=PARENT["limit"])
+            sq = square(counter=src["counter"])
+            START >> src >> sq >> END
+
+        g.build()
+        schema = StateSchema(g)
+
+        # sq's counter input should ref to src's counter output
+        sq_counter_idx = schema.get_index("gen_graph.sq", "counter")
+        sq_counter_ref = schema._pull_refs[sq_counter_idx]
+        assert sq_counter_ref is not None
+        assert sq_counter_ref.source == "gen_graph.src"
+        assert sq_counter_ref.var == "counter"
 
 
 # ============================================================

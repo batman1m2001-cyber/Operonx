@@ -18,28 +18,6 @@ Hush is a DAG-based workflow engine. The execution model:
    - Push refs: when writing to a cell, can auto-propagate to downstream cells
 5. **Edges**: `a >> b` = hard edge (counts toward ready_count), `a >>~ b` = soft edge (doesn't count)
 
-### Current Scheduler Code (simplified)
-
-```python
-# GraphOp.run() — current batch scheduler
-ready_count = self.initial_ready_count.copy()  # dict[op_name, int]
-active_tasks = {}
-
-# Start entry ops
-await _schedule_ops(self.entries)
-
-# Main loop
-while active_tasks:
-    done, _ = await asyncio.wait(active_tasks.values(), FIRST_COMPLETED)
-    for task in done:
-        op_name = task.get_name()
-        active_tasks.pop(op_name)
-        # Decrement successors, fire newly ready
-        await _schedule_ops(_activate_successors(op_name))
-```
-
-Each op fires exactly once. `_activate_successors` decrements ready_count and returns ops that hit 0.
-
 ## Problem Statement
 
 We want to extend Hush from batch DAG execution to support **streaming**: ops that produce multiple outputs over time. Example use cases:
@@ -82,25 +60,25 @@ This op works identically whether:
 
 The scheduler detects generator ops and handles them differently:
 
-**Batch op (return {}):** same as today
+**Regular op (return {}):** same as today
 ```
-op.run() completes -> store_result() -> activate_successors() -> done
+op.run() completes -> store_result() -> activate_successors(ctx) -> done
 ```
 
-**Streaming op (yield {}):** the scheduler iterates per-yield
+**Generator op (yield {}):** the scheduler iterates per-yield
 ```
 generator = op.core(**inputs)
 for each yield from generator:
     store_result(yield_value, context_id=new_ctx)
-    activate_successors(context_id=new_ctx)  # downstream fires immediately
+    activate_successors(new_ctx)  # downstream fires immediately
 generator exhausts -> done
 ```
 
-Each yield triggers the same `activate_successors()` that a normal op completion does. The source doesn't wait for consumers — it's an async task yielding concurrently while consumers run on their own.
+Each yield triggers the same `activate_successors()` that a normal op completion does. The only difference: generators activate successors N times (once per yield) in N different contexts. Regular ops activate once.
 
 ### Edges Are Unchanged
 
-`a >> b` still means "after a produces, b can fire." The only difference: for generators, successors get activated N times (once per yield), not just once.
+`a >> b` still means "after a produces, b can fire." The mechanism is identical.
 
 ## Context Model
 
@@ -113,63 +91,90 @@ source yields "hello" -> process.input = "hello"
 source yields "world" -> process.input = "world"  // overwrites before process reads "hello"!
 ```
 
-### Solution: Each Yield Creates a Context
+### Solution: Tuple-Based Context IDs with Stream Depth
 
-Each yield gets a monotonic context_id. The context propagates through the entire downstream chain.
+Context IDs are **tuples** that encode the execution hierarchy:
 
-```
-context_id = f"{parent_context}.{yield_index}"
+```python
+("main",)                         # top level (depth 0)
+("main", "s0")                   # first yield of a generator (depth 1)
+("main", "s0", "s0")             # nested generator yield (depth 2)
+("main", "[0]")                  # ForOp iteration 0
+("main", "s0", "[0]")            # ForOp inside a streaming context
 ```
 
 **Single source chain:**
 ```
 source >> process >> format >> END
 
-source yield 0 -> ctx="0" -> process[0] -> format[0]  // independent flow
-source yield 1 -> ctx="1" -> process[1] -> format[1]  // independent flow
-source yield 2 -> ctx="2" -> process[2] -> format[2]  // independent flow
+source yield 0 -> ctx=("main","s0") -> process[s0] -> format[s0]
+source yield 1 -> ctx=("main","s1") -> process[s1] -> format[s1]
+source yield 2 -> ctx=("main","s2") -> process[s2] -> format[s2]
 ```
 
-Each context has its own state slots. `process[0]` reads/writes in context "0", `process[1]` in context "1". No interference.
+Each context has its own state slots. No interference.
 
 **Fork (one source, two branches, then join):**
 ```
 source >> transform_a >> merge
 source >> transform_b >> merge
 
-source yield 0 -> ctx="0"
-  -> transform_a[0] completes -> merge gets ctx="0" from edge a->merge
-  -> transform_b[0] completes -> merge gets ctx="0" from edge b->merge
-  -> merge[0] fires when BOTH a[0] and b[0] complete (ready_count for ctx "0" hits 0)
+source yield 0 -> ctx=("main","s0")
+  -> transform_a[s0] completes -> merge ready_count in ("main","s0"): 2→1
+  -> transform_b[s0] completes -> merge ready_count in ("main","s0"): 1→0 → fires!
 ```
 
-Context propagates through the fork — both branches inherit the same context from the source yield. The join sees matching contexts and knows which items belong together.
+Context propagates through the fork. The join sees matching contexts.
 
-**Nested contexts (streaming inside a ForOp iteration):**
+### Stream Depth: O(1) Cross-Context Reads
+
+**Problem:** When `config` (no generator upstream) completes in `("main",)` and `process` runs in `("main", "s0")`, process can't read config's output — different contexts.
+
+**Solution:** At build time, compute each op's **stream depth** — how many generators are upstream:
+
+```python
+# Graph: config >> process, outer_gen >> inner_gen >> process >> END
+stream_depth = {
+    "config": 0,       # no generators upstream
+    "outer_gen": 0,    # is a generator at depth 0
+    "inner_gen": 1,    # downstream of 1 generator
+    "process": 2,      # downstream of 2 generators
+}
 ```
-ForOp iteration 2, inner streaming source yield 1:
-  context_id = "iter_2.1"
+
+At read time, the correct context for any source op is a **tuple slice**:
+
+```python
+# process runs in ("main", "s0", "s0") at depth 2
+# Reading from config (depth 0):     ctx[:1] = ("main",)         — O(1)
+# Reading from outer_gen (depth 1):  ctx[:2] = ("main", "s0")    — O(1)
+# Reading from inner_gen (depth 2):  ctx[:3] = ("main", "s0", "s0") — O(1)
 ```
+
+**No copying, no fallback chain, no runtime overhead.** Precomputed at build time.
 
 ## Ready Count: Per-Context
 
-Today: `ready_count: dict[op_name, int]` — one count per op.
-
-Streaming: `ready_count: dict[context_id, dict[op_name, int]]` — one count per op **per context**.
-
-```
-# Source yields with ctx="0"
-ready_count["0"]["process"] -= 1   # decrement process in context 0
-if ready_count["0"]["process"] == 0:
-    schedule process with context_id="0"
-
-# Source yields with ctx="1"  (independent of ctx="0")
-ready_count["1"]["process"] -= 1
-if ready_count["1"]["process"] == 0:
-    schedule process with context_id="1"
+```python
+ready_counts: Dict[tuple, Dict[str, int]]
+# ("main",)        → {"process": 2, "format": 1}    # top-level context
+# ("main", "s0")   → {"process": 1, "format": 1}    # streaming context (pre-decremented)
+# ("main", "s1")   → {"process": 1, "format": 1}
 ```
 
-Each context starts with a fresh copy of `initial_ready_count`. Contexts are fully independent.
+Each streaming context starts with a fresh copy of `initial_ready_count`, **pre-decremented** by predecessors that already completed in ancestor contexts:
+
+```python
+def _create_stream_context(stream_ctx, source_op, parent_ctx):
+    rc = initial_ready_count.copy()
+    for op_name in rc:
+        for pred in self.prevs[op_name]:
+            pred_depth = stream_depths[pred]
+            pred_ctx = stream_ctx[:pred_depth + 1]
+            if pred in completed_in_ctx.get(pred_ctx, set()):
+                rc[op_name] -= 1  # already done, pre-decrement
+    ready_counts[stream_ctx] = rc
+```
 
 ## Join Rules
 
@@ -180,74 +185,144 @@ source_a (yields 3) >> merge
 source_b (yields 2) >> merge
 ```
 
-Both sources produce context_ids independently: 0, 1, 2...
+Both produce context_ids with the same depth. Matching by index happens naturally via per-context ready_count.
 
-- `source_a` yields ctx="0" -> `ready_count["0"]["merge"]` -= 1 (now 1, needs source_b too)
-- `source_b` yields ctx="0" -> `ready_count["0"]["merge"]` -= 1 (now 0, merge[0] fires!)
-- `source_a` yields ctx="1" -> `ready_count["1"]["merge"]` -= 1
-- `source_b` yields ctx="1" -> `ready_count["1"]["merge"]` -= 1 (merge[1] fires!)
-- `source_a` yields ctx="2" -> `ready_count["2"]["merge"]` -= 1 (source_b never yields ctx="2", merge[2] never fires)
-
-This is natural zip semantics — no special handling needed, just per-context ready_count.
-
-### Fan-in: streaming + batch
+### Fan-in: streaming + non-streaming
 
 ```
 source (yields 3) >> process
 config (returns once) >> process
 ```
 
-- `config` completes once in the parent context (no streaming context)
-- Its ready_count contribution is "permanently satisfied" for all future contexts
-- When `source` yields ctx="0", `ready_count["0"]["process"]` starts at 1 (only source edge counts), because config's edge is already satisfied
-- `process` fires 3 times, each time reading:
-  - `source["item"]` from its streaming context (per-yield value)
-  - `config["settings"]` from the parent context (broadcast value, always available)
+- `config` completes in `("main",)` at depth 0
+- `source` yields create `("main", "s0")`, `("main", "s1")`, ...
+- When creating each streaming context, config's edge is pre-decremented (already completed)
+- `process` reads config via stream depth: `ctx[:0+1] = ("main",)` — O(1), correct
 
-**Implementation:** when creating `ready_count["0"]` for a new streaming context, pre-decrement edges from ops that have already completed (batch ops). Only streaming edges still need to fire.
+## Unified Event-Queue Scheduler
 
-## State Model
+Replace `asyncio.wait(FIRST_COMPLETED)` with an event queue. All events are **edge-triggered** (no polling).
 
-- **No new cell types.** Regular Cell with overwrite semantics, same as today.
-- State already supports context_id: `state[op_name, var_name, context_id]`
-- Batch ops write to parent context -> readable by all child contexts (Cell already falls back to parent context on read)
-- Streaming ops write to their specific context_id
-- `get_inputs()` reads from the op's context_id, falls back to parent context for broadcast values — **this already works** via Cell's existing context fallback
+### Event types
+
+```python
+("done", op_name, context_id)      # any op completed in any context
+("yield", gen_name, new_ctx)       # generator produced a new context
+("exhausted", gen_name)            # generator finished yielding
+```
+
+No batch/stream distinction. A regular op completing in `("main",)` and a regular op completing in `("main", "s0")` are both `("done", ...)` events.
+
+### Main loop
+
+```python
+# Start entries in top-level context
+for entry in entries:
+    _schedule_op(entry, context_id, parent_context)
+
+# Unified event loop
+while active_count > 0:
+    event = await event_queue.get()  # edge-triggered, suspends until event
+
+    if event[0] == "done":
+        _, op_name, ctx = event
+        completed_in_ctx[ctx].add(op_name)
+        newly_ready = _activate_successors(op_name, ctx)
+        for name in newly_ready:
+            _schedule_op(name, ctx, parent_context)
+
+    elif event[0] == "yield":
+        _, gen_name, stream_ctx = event
+        _create_stream_context(stream_ctx, gen_name)
+        newly_ready = _activate_successors(gen_name, stream_ctx)
+        for name in newly_ready:
+            _schedule_op(name, stream_ctx, parent_context)  # with semaphore
+
+    elif event[0] == "exhausted":
+        active_count -= 1
+
+# Result collection
+if stream_contexts:
+    _outputs = {var: [state[self.name, var, ctx] for ctx in stream_contexts] for var in self.outputs}
+else:
+    _outputs = self.get_outputs(state, context_id, parent_context)
+```
+
+### Backpressure
+
+Semaphore cap (`max_concurrent`, default 64) limits concurrent downstream contexts:
+
+```python
+semaphore = asyncio.Semaphore(max_concurrent)
+
+# When scheduling op in streaming context:
+async with semaphore:
+    await op.run(state, stream_ctx, parent_context)
+```
+
+## Resolved Design Questions
+
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| END collection | Aggregate into list | Consistent with ForOp pattern |
+| Error handling | Fail entire graph | Matches current behavior, simplest for v1 |
+| Backpressure | Semaphore cap | Limits concurrent contexts |
+| Broadcast | Stream depth + tuple slice | O(1), no copying |
+| Multiple streaming inputs | Zip by index | Natural via per-context ready_count |
+| Scheduler architecture | Unified event queue | Edge-triggered, extensible, replaces `asyncio.wait` |
+| Context ID format | Tuples | Enables O(1) depth slicing, hierarchical |
 
 ## What Doesn't Change
 
-- `BaseOp.run()` — completely unchanged, no `_run_stream()`
-- `BaseOp.get_inputs()` — unchanged (already reads by context_id)
-- `BaseOp.store_result()` — unchanged (already writes by context_id)
-- Edge operators (`>>`, `>>~`, `>`) — unchanged
-- Op definition (`@op`, `FuncOp`, etc.) — unchanged (except auto-detect generators)
+- `BaseOp.run()` — completely unchanged
+- `BaseOp.store_result()` — unchanged
+- Edge operators (`>>`, `>>~`) — unchanged
 - `StateSchema` — unchanged
-- `MemoryState.__getitem__` / `__setitem__` — unchanged (already supports context_id)
+- ForOp / WhileOp — unchanged in Phase 1 (refactored in Phase 2)
 - All existing tests — must pass without modification
 
 ## What Changes
 
-1. **GraphOp.run() scheduler** (`graph_op.py:761-834`):
-   - Detect generator ops (`inspect.isgeneratorfunction(op.core)`)
-   - For generators: iterate per-yield, each yield -> `store_result()` + `activate_successors()` with new context_id
-   - `ready_count` becomes `dict[context_id, dict[op_name, int]]`
-   - New context creation: copy `initial_ready_count`, pre-decrement already-completed batch edges
-   - Termination: graph completes when all generators exhausted AND all active_tasks done
-
-2. **@op decorator** (`func_op.py`):
+1. **`@op` decorator** (`func_op.py`):
    - Auto-detect generators via `inspect.isgeneratorfunction` / `inspect.isasyncgenfunction`
-   - Set a flag so the scheduler knows to iterate per-yield
-   - Also handle `ast.Yield` in `extract_return_schema()` for output key detection
+   - Set `_is_generator` flag
+   - Handle `ast.Yield` in `extract_return_schema()` for output key detection
 
-3. **Cell context fallback** (if not already working):
-   - When reading `state[op_name, var, ctx="0"]` and no value in ctx="0", fall back to parent context
-   - This enables broadcast: batch op writes to parent context, streaming consumers read from child context but get the parent value
+2. **`BaseOp`** (`base.py`):
+   - Add `_is_generator = False` class attribute
+   - `get_inputs()` uses `stream_depths` for tuple-sliced context reads
 
-## Open Questions
+3. **`GraphOp.build()`** (`graph_op.py`):
+   - Compute `_stream_depths` via topological traversal
+   - Detect `_has_streaming_ops`
 
-- **END collection:** How does END collect results from multiple contexts? Options: aggregate into list, return last, user-specified reducer
-- **Queue semantics:** Should there be a way to opt into queue/keep-all semantics? Or is "latest value" always enough?
-- **Error handling:** If one context fails (e.g., process[1] throws), should other contexts (process[0], process[2]) continue?
-- **Memory/GC:** When can we clean up a completed context's state? After all downstream ops in that context finish?
-- **Backpressure:** If source yields faster than consumers can process, should we buffer unlimited or cap?
-- **Multiple streaming inputs:** If an op reads from two different streaming sources with different rates, how do contexts align? (Current answer: zip by index)
+4. **`GraphOp.run()` scheduler** (`graph_op.py:761-834`):
+   - Replace `asyncio.wait` with event queue
+   - Per-context `ready_counts: Dict[tuple, Dict[str, int]]`
+   - Generator driving: `_drive_generator()` emits yield/exhausted events
+   - Stream context creation with pre-decremented ready_count
+   - Backpressure via semaphore
+   - Result collection from streaming contexts
+
+5. **Context ID format** (`cell.py`, `state.py`, `iteration/base.py`):
+   - `DEFAULT_CONTEXT = ("main",)` (was `"main"`)
+   - `get_iter_context` returns tuple
+   - Cell/MemoryState keyed by tuple (no logic changes)
+
+## Implications: Iteration Ops Become Redundant
+
+The streaming scheduler provides everything ForOp does:
+
+| ForOp Feature | Streaming Equivalent |
+|---------------|---------------------|
+| `Each([1,2,3])` | Generator that yields each item |
+| `Broadcast()` | Stream depth resolves to parent context |
+| Parallel execution | Semaphore (default: concurrent) |
+| Sequential execution | `max_concurrent=1` |
+| Result collection (column-oriented) | Scheduler collects into lists |
+| Context isolation per iteration | Context isolation per yield |
+| Error handling (skip/fail) | Scheduler error policy |
+
+ForOp (~200 lines + own scheduler) becomes a 3-line generator. See Phase 2 plan.
+
+WhileOp is harder — it requires feedback (downstream output → next iteration input). Generators can't receive downstream results without `gen.send()`. See Phase 2 plan for options.

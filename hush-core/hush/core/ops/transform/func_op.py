@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+import textwrap
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -229,7 +230,7 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
     try:
         source = inspect.getsource(func)
         source_lines = source.splitlines()
-        cleaned_source = inspect.cleandoc(source)
+        cleaned_source = textwrap.dedent(source)
 
         # Try to parse the source directly
         tree = None
@@ -273,6 +274,11 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
             elif isinstance(node, ast.Lambda):
                 if isinstance(node.body, ast.Dict):
                     schema.update(_extract_dict_keys(node.body, source_lines))
+
+            # Xử lý generator yield (streaming ops)
+            elif isinstance(node, ast.Yield) and node.value:
+                if isinstance(node.value, ast.Dict):
+                    schema.update(_extract_dict_keys(node.value, source_lines))
 
         return schema
     except Exception:

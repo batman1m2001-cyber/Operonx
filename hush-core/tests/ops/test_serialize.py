@@ -2,10 +2,6 @@
 
 from hush.core import END, PARENT, START, GraphOp, op
 from hush.core.ops.flow.branch_op import if_
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.map_op import MapOp
-from hush.core.ops.iteration.while_op import WhileOp
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -241,81 +237,6 @@ class TestBranchOpSerialize:
 
         s = router.serialize()
         assert s["candidates"] is None  # given_candidates not set
-
-
-# ── ForOp.serialize ─────────────────────────────────────────────────────
-
-
-class TestForOpSerialize:
-    def test_for_op(self):
-        with ForOp(name="loop", inputs={"x": Each([1, 2, 3]), "m": 10}) as loop:
-            step = double(x=PARENT["x"])
-            START >> step >> END
-        _build_graph(loop)
-
-        s = loop.serialize()
-        assert s["type"] == "for"
-        assert "each" in s
-        assert "x" in s["each"]
-        assert "broadcast" in s
-        assert "m" in s["broadcast"]
-        assert s["fail_fast"] is False
-
-    def test_for_op_fail_fast(self):
-        with ForOp(name="loop", inputs={"x": Each([1, 2])}, fail_fast=True) as loop:
-            step = double(x=PARENT["x"])
-            START >> step >> END
-        _build_graph(loop)
-
-        s = loop.serialize()
-        assert s["fail_fast"] is True
-
-    def test_for_op_each_literal(self):
-        with ForOp(name="loop", inputs={"x": Each([10, 20])}) as loop:
-            step = double(x=PARENT["x"])
-            START >> step >> END
-        _build_graph(loop)
-
-        s = loop.serialize()
-        assert "x" in s["each"]
-        assert s["each"]["x"]["literal"] == [10, 20]
-
-
-# ── MapOp.serialize ─────────────────────────────────────────────────────
-
-
-class TestMapOpSerialize:
-    def test_map_op(self):
-        with MapOp(name="ploop", inputs={"x": Each([1, 2])}, max_concurrency=4) as loop:
-            step = double(x=PARENT["x"])
-            START >> step >> END
-        _build_graph(loop)
-
-        s = loop.serialize()
-        assert s["type"] == "map"
-        assert s["max_concurrency"] == 4
-        assert s["fail_fast"] is False
-        assert "each" in s
-        assert "broadcast" in s
-
-
-# ── WhileOp.serialize ───────────────────────────────────────────────────
-
-
-class TestWhileOpSerialize:
-    def test_while_op(self):
-        with WhileOp(
-            name="wloop", inputs={"counter": 0}, until="counter >= 5", max_iterations=50
-        ) as loop:
-            step = increment(counter=PARENT["counter"])
-            step["counter"] >> PARENT["counter"]
-            START >> step >> END
-        _build_graph(loop)
-
-        s = loop.serialize()
-        assert s["type"] == "while"
-        assert s["until"] == "counter >= 5"
-        assert s["max_iterations"] == 50
 
 
 # ── Round-trip: serialize produces valid structure ───────────────────────

@@ -103,10 +103,14 @@ class TraceCollector:
                 usage = outputs.get("tokens_used") if op.contain_generation else None
                 cost = state[op_name, "cost_usd", ctx]
 
+                # Convert tuple context to string for trace storage
+                ctx_str = (
+                    ".".join(ctx) if isinstance(ctx, tuple) and ctx != DEFAULT_CONTEXT else None
+                )
                 records.append(
                     TraceRecord(
                         op_name=op_name,
-                        context_id=ctx if ctx != DEFAULT_CONTEXT else None,
+                        context_id=ctx_str,
                         inputs=inputs,
                         outputs=outputs,
                         start_time=(

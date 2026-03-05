@@ -1,139 +1,47 @@
 """GraphOp — container op that manages a graph of child ops."""
 
-import asyncio
-import inspect
 import traceback
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from functools import wraps
 from time import perf_counter
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
 from hush.core.loggings import LOGGER
-from hush.core.ops.base import (
-    _BASE_INIT_KEYS,
-    END,
-    PARENT,
-    START,
-    BaseOp,
-    split_shorthand_kwargs,
-)
+from hush.core.ops.base import END, PARENT, START, BaseOp
 from hush.core.states import MemoryState, Ref
-from hush.core.utils.auto_name import register_skip
+from hush.core.states.cell import DEFAULT_CONTEXT
 from hush.core.utils.common import Param
 from hush.core.utils.context import _current_graph
 
 # =============================================================================
-# Validation Types
+# Loop Configuration
 # =============================================================================
 
 
-class ValidationLevel(Enum):
-    """Severity level for validation issues."""
-
-    ERROR = "error"  # Must fix, will raise exception
-    WARNING = "warning"  # Should fix, logged as warning
-
-
 @dataclass
-class ValidationIssue:
-    """A single validation issue found in the graph."""
+class LoopConfig:
+    """Configuration for GraphOp.loop() feedback loops."""
 
-    level: ValidationLevel
-    category: str
-    message: str
-    op_name: Optional[str] = None
-    target_name: Optional[str] = None
-    available_nodes: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
-
-    def __str__(self) -> str:
-        lines = [f"[{self.level.value.upper()}] {self.category}: {self.message}"]
-
-        if self.op_name:
-            location = f"  Location: {self.op_name}"
-            if self.target_name:
-                location += f" -> '{self.target_name}'"
-            lines.append(location)
-
-        if self.available_nodes:
-            lines.append(f"  Available nodes: {self.available_nodes}")
-
-        if self.suggestions:
-            lines.append("  How to fix:")
-            for suggestion in self.suggestions:
-                lines.append(f"    - {suggestion}")
-
-        return "\n".join(lines)
+    until: Any  # str expression or callable
+    max_iterations: int
+    initial_state: dict
+    _compiled_until: Any = field(default=None, repr=False)
 
 
-@dataclass
-class ValidationResult:
-    """Result of graph validation."""
+from hush.core.ops.graph._algo import topo_sort
+from hush.core.ops.graph.scheduler import Scheduler, _is_gen
 
-    graph_name: str
-    issues: List[ValidationIssue] = field(default_factory=list)
-
-    @property
-    def has_errors(self) -> bool:
-        return any(issue.level == ValidationLevel.ERROR for issue in self.issues)
-
-    @property
-    def has_warnings(self) -> bool:
-        return any(issue.level == ValidationLevel.WARNING for issue in self.issues)
-
-    @property
-    def errors(self) -> List[ValidationIssue]:
-        return [i for i in self.issues if i.level == ValidationLevel.ERROR]
-
-    @property
-    def warnings(self) -> List[ValidationIssue]:
-        return [i for i in self.issues if i.level == ValidationLevel.WARNING]
-
-    def __str__(self) -> str:
-        if not self.issues:
-            return f"Graph '{self.graph_name}': All validations passed"
-
-        lines = [f"Graph '{self.graph_name}' validation found {len(self.issues)} issue(s):"]
-        lines.append("")
-        for i, issue in enumerate(self.issues, 1):
-            lines.append(f"{i}. {issue}")
-            lines.append("")
-        return "\n".join(lines)
-
-    def raise_if_errors(self):
-        """Raise exception if there are any errors."""
-        if self.has_errors:
-            LOGGER.error(
-                "Graph [highlight]%s[/highlight] validation found %d error(s):",
-                self.graph_name,
-                len(self.errors),
-            )
-            for issue in self.errors:
-                LOGGER.error(
-                    "  [%s] %s: %s | Location: %s -> '%s' | Available nodes: %s",
-                    issue.level.value.upper(),
-                    issue.category,
-                    issue.message,
-                    issue.op_name,
-                    issue.target_name,
-                    issue.available_nodes,
-                )
-            raise GraphValidationError(self)
-
-
-class GraphValidationError(Exception):
-    """Exception raised when graph validation fails."""
-
-    def __init__(self, result: ValidationResult):
-        self.result = result
-        super().__init__(
-            f"Graph '{result.graph_name}' validation failed with {len(result.errors)} error(s). See logs above for details."
-        )
+# Re-export validation types for backward compatibility
+from hush.core.ops.graph.validation import (  # noqa: E402, F401
+    GraphValidationError,
+    ValidationIssue,
+    ValidationLevel,
+    ValidationResult,
+    validate_graph,
+)
 
 
 class GraphOp(BaseOp):
@@ -172,6 +80,11 @@ class GraphOp(BaseOp):
         "_edges",
         "_is_building",
         "_compiled_adj",
+        "_has_streaming_ops",
+        "_stream_predecrements",
+        "_max_stream_concurrent",
+        "_loop_config",
+        "_scheduler",
     ]
 
     type: OpType = "graph"
@@ -188,7 +101,12 @@ class GraphOp(BaseOp):
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
         self.has_soft_preds = set()  # Ops with soft predecessors
+        self._has_streaming_ops = False
+        self._stream_predecrements = {}
+        self._max_stream_concurrent = 64
         self._compiled_adj = {}
+        self._loop_config = None
+        self._scheduler = None
 
     def __enter__(self):
         """Enter context manager mode."""
@@ -200,6 +118,36 @@ class GraphOp(BaseOp):
         _current_graph.reset(self._token)
         if exc_type is None:
             self._setup_schema()
+
+    @classmethod
+    def loop(cls, name=None, until=None, max_iterations=100, **initial_state):
+        """Create a GraphOp configured for feedback-loop execution.
+
+        Each iteration re-runs the graph's scheduler, carrying forward outputs
+        as the next iteration's inputs. Stops when ``until`` evaluates to True
+        or ``max_iterations`` is reached.
+
+        Args:
+            name: Graph name.
+            until: Stop condition — a string expression (evaluated against outputs)
+                   or a callable ``(outputs_dict) -> bool``.
+            max_iterations: Safety cap on iterations (default 100).
+            **initial_state: Initial values for loop variables, injected as inputs.
+
+        Example::
+
+            with GraphOp.loop(name="counter", until="count >= 5", count=0) as g:
+                inc = increment(counter=PARENT["count"])
+                inc["counter"] >> PARENT["count"]
+                START >> inc >> END
+        """
+        g = cls(name=name, inputs=initial_state or None)
+        g._loop_config = LoopConfig(
+            until=until,
+            max_iterations=max_iterations,
+            initial_state=initial_state,
+        )
+        return g
 
     def _setup_endpoints(self):
         """Discover entry/exit ops from the graph topology."""
@@ -269,11 +217,31 @@ class GraphOp(BaseOp):
 
         self._setup_schema()
         self._setup_endpoints()
+        self._build_ready_counts()
 
-        # Compute initial_ready_count:
-        # - Hard edge (>>) counts individually
-        # - Soft edges (>) to the same target count as 1 (wait for ANY soft pred to complete)
-        # Example: A >> D, B > D, C > D => initial_ready_count[D] = 2 (1 hard + 1 soft group)
+        # Run full validation (errors will raise, warnings will be logged)
+        result = self.validate()
+        result.raise_if_errors()
+
+        self._build_adj()
+        self._build_streaming()
+
+        # Compile loop until expression if needed
+        if self._loop_config and isinstance(self._loop_config.until, str):
+            self._loop_config._compiled_until = compile(self._loop_config.until, "<until>", "eval")
+
+        self._scheduler = Scheduler(self)
+        self._is_building = False
+        self._post_build()
+        self._cache_full_names()
+
+    def _build_ready_counts(self):
+        """Compute initial_ready_count from edge topology.
+
+        - Hard edge (>>) counts individually
+        - Soft edges (>) to the same target count as 1 (wait for ANY soft pred to complete)
+        - Example: A >> D, B > D, C > D => initial_ready_count[D] = 2 (1 hard + 1 soft group)
+        """
         self.initial_ready_count = {}
         self.has_soft_preds = set()
         for name in self._ops:
@@ -294,11 +262,8 @@ class GraphOp(BaseOp):
                 hard_pred_count += 1
             self.initial_ready_count[name] = hard_pred_count
 
-        # Run full validation (errors will raise, warnings will be logged)
-        result = self.validate()
-        result.raise_if_errors()
-
-        # Compile adjacency list for faster traversal at runtime
+    def _build_adj(self):
+        """Compile adjacency list for faster traversal at runtime."""
         self._compiled_adj = {}
         for name in self._ops:
             adj = []
@@ -308,9 +273,58 @@ class GraphOp(BaseOp):
                 adj.append((successor, is_soft))
             self._compiled_adj[name] = adj
 
-        self._is_building = False
-        self._post_build()
-        self._cache_full_names()
+    def _build_streaming(self):
+        """Compute stream depths via topological order (Kahn's algorithm).
+
+        Detects generator ops, assigns stream depths, and pre-computes
+        predecrements for the scheduler's streaming context creation.
+        """
+        self._stream_depths = {}
+        self._has_streaming_ops = False
+        self._stream_predecrements = {}
+
+        # Check if any ops are generators
+        has_gens = any(_is_gen(op) for op in self._ops.values())
+        if not has_gens:
+            return
+
+        self._has_streaming_ops = True
+
+        topological_order = topo_sort(list(self._ops.keys()), dict(self.nexts), dict(self.prevs))
+
+        # Compute stream depth for each op
+        for name in topological_order:
+            max_pred_depth = 0
+            for pred in self.prevs[name]:
+                pred_depth = self._stream_depths.get(pred, 0)
+                if _is_gen(self._ops[pred]):
+                    pred_depth += 1
+                max_pred_depth = max(max_pred_depth, pred_depth)
+            self._stream_depths[name] = max_pred_depth
+
+        # Store stream depths on each child op for get_inputs() access
+        for name, op_obj in self._ops.items():
+            op_obj._stream_depths = self._stream_depths
+
+        # Pre-compute stream predecrements per generator.
+        # When a streaming context is created, batch ops that already
+        # completed need their edges pre-decremented. Exclude the
+        # generator's own edges — those are handled by _activate_successors.
+        for name in self._ops:
+            if _is_gen(self._ops[name]):
+                predecrements = {}
+                for succ_name in self.initial_ready_count:
+                    decrement = 0
+                    for pred in self.prevs.get(succ_name, []):
+                        if pred == name:
+                            continue  # generator's own edge handled by _activate_successors
+                        if self._stream_depths.get(pred, 0) < self._stream_depths.get(succ_name, 0):
+                            edge = self._edges.get((pred, succ_name))
+                            if edge:
+                                decrement += 1
+                    if decrement > 0:
+                        predecrements[succ_name] = decrement
+                self._stream_predecrements[name] = predecrements
 
     def _cache_full_names(self) -> None:
         """Cache full_name for this op and all descendants after build."""
@@ -355,262 +369,16 @@ class GraphOp(BaseOp):
     # =========================================================================
 
     def validate(self) -> ValidationResult:
-        """Run all validations and return result.
-
-        This method runs comprehensive validation checks on the graph:
-        - Branch targets: All if_() targets must match actual op names
-        - Cycles: Detect circular dependencies (non-lookback)
-        - Reachability: Warn about unreachable or dead-end ops
-        - Refs: Validate all Ref references point to existing ops
-
-        Returns:
-            ValidationResult with all issues found
-
-        Example:
-            result = graph.validate()
-            if result.has_errors:
-                print(result)
-            result.raise_if_errors()  # Raises GraphValidationError if errors
-        """
-        result = ValidationResult(graph_name=self.name)
-
-        # Run all validations
-        result.issues.extend(self._validate_branch_targets())
-        result.issues.extend(self._validate_cycles())
-        result.issues.extend(self._validate_reachability())
-        result.issues.extend(self._validate_refs())
-
-        # Log warnings
-        for issue in result.warnings:
-            LOGGER.warning("Graph '%s': %s", self.name, issue.message)
-
-        return result
-
-    def _validate_branch_targets(self) -> List[ValidationIssue]:
-        """Check all branch op targets exist in graph."""
-        issues = []
-        available = sorted(self._ops.keys())
-
-        for name, child in self._ops.items():
-            if child.type != "branch":
-                continue
-
-            # Get all possible targets from branch op
-            candidates = getattr(child, "candidates", [])
-
-            for target in candidates:
-                if target == END.name:
-                    continue  # END is always valid
-
-                if target not in self._ops:
-                    issues.append(
-                        ValidationIssue(
-                            level=ValidationLevel.ERROR,
-                            category="Invalid branch target",
-                            message=f"Branch op '{name}' references target '{target}' which doesn't exist",
-                            op_name=name,
-                            target_name=target,
-                            available_nodes=available,
-                            suggestions=[
-                                f"Check if '{target}' matches the 'name' parameter of the target op",
-                                f'Use the op variable directly: if_(condition, my_op) instead of if_(condition, "{target}")',
-                                f"Available ops: {available}",
-                            ],
-                        )
-                    )
-
-        return issues
-
-    def _validate_cycles(self) -> List[ValidationIssue]:
-        """Detect cycles in the graph (excluding lookback edges)."""
-        issues = []
-
-        # Build adjacency list excluding lookback edges
-        adj: Dict[str, List[str]] = defaultdict(list)
-        for edge in self._edges.values():
-            if edge.type != "lookback":
-                adj[edge.from_node].append(edge.to_node)
-
-        # DFS-based cycle detection
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color = {name: WHITE for name in self._ops}
-        cycle_nodes = []
-
-        def dfs(node: str, path: List[str]) -> bool:
-            color[node] = GRAY
-            path.append(node)
-
-            for neighbor in adj[node]:
-                if neighbor not in color:
-                    continue
-                if color[neighbor] == GRAY:
-                    # Found cycle
-                    cycle_start = path.index(neighbor)
-                    cycle_nodes.append(path[cycle_start:] + [neighbor])
-                    return True
-                if color[neighbor] == WHITE:
-                    if dfs(neighbor, path):
-                        return True
-
-            path.pop()
-            color[node] = BLACK
-            return False
-
-        for node in self._ops:
-            if color[node] == WHITE:
-                dfs(node, [])
-
-        for cycle in cycle_nodes:
-            cycle_str = " -> ".join(cycle)
-            issues.append(
-                ValidationIssue(
-                    level=ValidationLevel.WARNING,
-                    category="Cycle detected",
-                    message=f"Circular dependency found: {cycle_str}",
-                    op_name=cycle[0],
-                    suggestions=[
-                        "Use lookback edge type for intentional cycles",
-                        "Check if this cycle is intentional (e.g., retry logic)",
-                        "Break the cycle by restructuring the flow",
-                    ],
-                )
-            )
-
-        return issues
-
-    def _validate_reachability(self) -> List[ValidationIssue]:
-        """Check for orphan ops, unreachable ops, and dead-ends."""
-        issues = []
-
-        # Detect orphan ops (no connections at all)
-        for name, child in self._ops.items():
-            if (
-                not self.prevs[name]
-                and not self.nexts[name]
-                and not child.start
-                and not child.end
-                and name != BaseOp.INNER_PROCESS
-            ):
-                issues.append(
-                    ValidationIssue(
-                        level=ValidationLevel.WARNING,
-                        category="Orphan op",
-                        message=f"Op '{name}' has no edges and will never be executed",
-                        op_name=name,
-                        suggestions=[
-                            f"Connect START >> {name} or connect from another op",
-                            "Remove this op if it's not needed",
-                        ],
-                    )
-                )
-
-        if not self.entries or not self.exits:
-            return issues  # Can't validate reachability without endpoints
-
-        # Forward reachability from entries
-        reachable_from_start: Set[str] = set()
-
-        def forward_dfs(node: str):
-            if node in reachable_from_start:
-                return
-            reachable_from_start.add(node)
-            for neighbor in self.nexts[node]:
-                forward_dfs(neighbor)
-            # Also follow branch candidates
-            if self._ops[node].type == "branch":
-                for target in getattr(self._ops[node], "candidates", []):
-                    if target in self._ops:
-                        forward_dfs(target)
-
-        for entry in self.entries:
-            forward_dfs(entry)
-
-        # Backward reachability from exits
-        reachable_to_end: Set[str] = set()
-
-        def backward_dfs(node: str):
-            if node in reachable_to_end:
-                return
-            reachable_to_end.add(node)
-            for pred in self.prevs[node]:
-                backward_dfs(pred)
-
-        for exit_node in self.exits:
-            backward_dfs(exit_node)
-
-        # Find unreachable ops
-        for name in self._ops:
-            if name not in reachable_from_start:
-                issues.append(
-                    ValidationIssue(
-                        level=ValidationLevel.WARNING,
-                        category="Unreachable op",
-                        message=f"Op '{name}' is not reachable from any entry point",
-                        op_name=name,
-                        suggestions=[
-                            f"Connect START >> {name} or connect from another reachable op",
-                            "Remove this op if it's not needed",
-                        ],
-                    )
-                )
-
-            if name not in reachable_to_end and name in reachable_from_start:
-                # Only warn about dead-ends that are reachable
-                if not self._ops[name].end:
-                    issues.append(
-                        ValidationIssue(
-                            level=ValidationLevel.WARNING,
-                            category="Dead-end op",
-                            message=f"Op '{name}' cannot reach any exit point",
-                            op_name=name,
-                            suggestions=[
-                                f"Connect {name} >> END or connect to another op leading to END",
-                                "Mark this op as an exit: op.end = True",
-                            ],
-                        )
-                    )
-
-        return issues
-
-    def _validate_refs(self) -> List[ValidationIssue]:
-        """Validate all Ref references point to existing ops."""
-        issues = []
-
-        for name, child in self._ops.items():
-            # Check input refs
-            for var, param in child.inputs.items():
-                if not isinstance(param.value, Ref):
-                    continue
-
-                ref = param.value
-                ref_source = ref.raw_source
-
-                # Skip PARENT refs (they refer to the graph itself)
-                if ref_source is self or (
-                    hasattr(ref_source, "name") and ref_source.name == "__PARENT__"
-                ):
-                    continue
-
-                # Check if referenced op exists
-                if hasattr(ref_source, "name"):
-                    ref_op_name = ref_source.name
-                    if ref_op_name not in self._ops and ref_op_name != self.name:
-                        issues.append(
-                            ValidationIssue(
-                                level=ValidationLevel.ERROR,
-                                category="Invalid Ref",
-                                message=f"Op '{name}' input '{var}' references non-existent op '{ref_op_name}'",
-                                op_name=name,
-                                target_name=ref_op_name,
-                                available_nodes=sorted(self._ops.keys()),
-                                suggestions=[
-                                    f"Check if op '{ref_op_name}' is defined in the graph",
-                                    "Ensure the referenced op is created before this op",
-                                ],
-                            )
-                        )
-
-        return issues
+        """Run all validations and return result."""
+        return validate_graph(
+            self.name,
+            self._ops,
+            self._edges,
+            self.prevs,
+            self.nexts,
+            self.entries,
+            self.exits,
+        )
 
     @staticmethod
     def get_current_graph() -> Optional["GraphOp"]:
@@ -729,6 +497,51 @@ class GraphOp(BaseOp):
             if isinstance(child, GraphOp):
                 child.show(indent + 1)
 
+    def _evaluate_until(self, outputs: dict) -> bool:
+        """Evaluate the loop's until condition against current outputs."""
+        cfg = self._loop_config
+        if cfg is None or cfg.until is None:
+            return False
+        if callable(cfg.until):
+            return bool(cfg.until(outputs))
+        compiled = cfg._compiled_until or compile(cfg.until, "<until>", "eval")
+        return bool(eval(compiled, {"__builtins__": {}}, outputs))  # noqa: S307
+
+    async def _run_loop(self, state, context_id, parent_context, request_id, outputs):
+        """Run feedback loop iterations until condition met or max reached.
+
+        Args:
+            state: Workflow state.
+            context_id: Base context for the loop.
+            parent_context: Context of PARENT, passed to child ops.
+            request_id: Request identifier for logging.
+            outputs: Initial outputs from the first scheduler pass.
+
+        Returns:
+            Final outputs dict with _loop_metrics added.
+        """
+        iteration = 0
+        while True:
+            if self._evaluate_until(outputs):
+                outputs["_loop_metrics"] = {
+                    "total_iterations": iteration + 1,
+                    "stopped_by_condition": True,
+                }
+                return outputs
+            iteration += 1
+            if iteration >= self._loop_config.max_iterations:
+                outputs["_loop_metrics"] = {
+                    "total_iterations": iteration,
+                    "stopped_by_condition": False,
+                    "max_iterations_reached": True,
+                }
+                return outputs
+            # Carry forward outputs as next iteration's inputs
+            next_ctx = context_id + (f"loop_{iteration}",)
+            for var_name, value in outputs.items():
+                state[self.full_name, var_name, next_ctx] = value
+            outputs, _ = await self._scheduler.run(state, next_ctx, parent_context, request_id)
+
     async def run(
         self,
         state: "MemoryState",
@@ -742,6 +555,9 @@ class GraphOp(BaseOp):
             context_id: Context of this graph.
             parent_context: Context of PARENT, passed to child ops.
         """
+
+        if context_id is None:
+            context_id = DEFAULT_CONTEXT
 
         request_id = state.request_id
         start_time = datetime.now()
@@ -758,81 +574,13 @@ class GraphOp(BaseOp):
                     f"Graph {self.name} not built. Must call graph.build() before execution!!"
                 )
 
-            # --- Scheduling loop ---
-            active_tasks: Dict[str, asyncio.Task] = {}
-            ready_count: Dict[str, int] = self.initial_ready_count.copy()
-            soft_satisfied: set = set()
+            _outputs, _ = await self._scheduler.run(state, context_id, parent_context, request_id)
 
-            nodes = self._ops
-            compiled_adj = self._compiled_adj
-
-            def _can_inline(op_obj: BaseOp) -> bool:
-                return (
-                    not isinstance(op_obj, GraphOp)
-                    and not inspect.iscoroutinefunction(getattr(op_obj, "core", None))
-                    and getattr(op_obj, "executor", None) is None
+            if self._loop_config:
+                _outputs = await self._run_loop(
+                    state, context_id, parent_context, request_id, _outputs
                 )
 
-            def _get_successors(op_name: str) -> list:
-                current_op = nodes[op_name]
-                if current_op.type == "branch":
-                    branch_target = current_op.get_target(state, context_id)
-                    if branch_target == END.name:
-                        return []
-                    for tgt, soft in compiled_adj[op_name]:
-                        if tgt == branch_target:
-                            return [(tgt, soft)]
-                    available_ops = sorted(self.initial_ready_count.keys())
-                    raise KeyError(
-                        f"\n"
-                        f"Op '{branch_target}' not found in graph '{self.name}'.\n"
-                        f"\n"
-                        f"  Source: Branch op '{op_name}' routed to '{branch_target}'\n"
-                        f"  Available ops: {available_ops}\n"
-                        f"\n"
-                        f'  This usually means the target string in if_(..., "{branch_target}") '
-                        f"doesn't match any op's actual name.\n"
-                        f"  Check that your branch targets match the 'name' parameter of the target ops."
-                    )
-                return compiled_adj[op_name]
-
-            def _activate_successors(op_name: str) -> list:
-                newly_ready = []
-                for next_op, is_soft in _get_successors(op_name):
-                    if is_soft:
-                        if next_op in soft_satisfied:
-                            continue
-                        soft_satisfied.add(next_op)
-                    ready_count[next_op] -= 1
-                    if ready_count[next_op] == 0:
-                        newly_ready.append(next_op)
-                return newly_ready
-
-            async def _schedule_ops(names: list):
-                queue = list(names)
-                while queue:
-                    name = queue.pop(0)
-                    op_obj = nodes[name]
-                    if _can_inline(op_obj):
-                        await op_obj.run(state, context_id, parent_context)
-                        queue.extend(_activate_successors(name))
-                    else:
-                        active_tasks[name] = asyncio.create_task(
-                            name=name, coro=op_obj.run(state, context_id, parent_context)
-                        )
-
-            await _schedule_ops(self.entries)
-
-            while active_tasks:
-                done_tasks, _ = await asyncio.wait(
-                    active_tasks.values(), return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in done_tasks:
-                    op_name = task.get_name()
-                    active_tasks.pop(op_name)
-                    await _schedule_ops(_activate_successors(op_name))
-
-            _outputs = self.get_outputs(state, context_id=context_id, parent_context=parent_context)
             self.store_result(state, _outputs, context_id)
 
         except Exception:
@@ -866,44 +614,4 @@ class GraphOp(BaseOp):
             return _outputs
 
 
-def graph(fn):
-    """Decorator to turn a builder function into a reusable GraphOp factory.
-
-    The function's parameters become graph inputs, injected as PARENT refs.
-    Auto-naming works through the decorator (via register_skip).
-
-    Example::
-
-        @graph
-        def verify_card(conversation):
-            check = detect_card(conversation=conversation)
-            START >> check >> END
-
-        g1 = verify_card(conversation=other_op["conv"])
-        # g1.name == "g1"
-    """
-    sig = inspect.signature(fn)
-    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
-    if collisions:
-        LOGGER.warning(
-            "@graph function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
-            "Consider renaming them.",
-            fn.__name__,
-            sorted(collisions),
-            sorted(_BASE_INIT_KEYS),
-        )
-
-    param_names = set(sig.parameters.keys())
-
-    @wraps(fn)
-    def wrapper(**kwargs):
-        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        g = GraphOp(inputs=input_mappings or None, **init_kwargs)
-        with g:
-            parent_refs = {key: PARENT[key] for key in input_mappings if key in param_names}
-            fn(**parent_refs)
-        return g
-
-    register_skip(wrapper)
-    wrapper.__wrapped__ = fn
-    return wrapper
+from hush.core.ops.graph._decorators import graph  # noqa: E402, F401
