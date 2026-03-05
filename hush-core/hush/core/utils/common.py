@@ -1,6 +1,7 @@
 """Các hàm tiện ích dùng chung cho hush-core."""
 
 import asyncio
+import inspect
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type
@@ -126,7 +127,7 @@ def ensure_async(func: Callable) -> Callable:
         func = ensure_async(sync_func)
         result = await func(10)
     """
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         return func
 
     async def async_wrapper(*args, **kwargs):
