@@ -1,1 +1,1 @@
-"""Tests for iteration nodes (ForOp, WhileOp, AIterOp)."""
+"""Tests for iteration patterns using generator ops."""

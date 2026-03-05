@@ -636,35 +636,33 @@ class TestTracerNonBlocking:
 # ---------------------------------------------------------------------------
 class TestTracerWithIterationNodes:
     @pytest.mark.asyncio
-    async def test_tracer_with_forloop(self):
-        """Tracers work with ForOp iteration nodes."""
-        from hush.core.ops import ForOp
-        from hush.core.ops.iteration import Each
+    async def test_tracer_with_generator_iteration(self):
+        """Tracers work with generator-based iteration (replaces ForOp)."""
         from hush.core.ops.transform.func_op import op
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
 
         @op
         def double(value: int):
             return {"result": value * 2}
 
         with GraphOp(name="loop-wf") as outer:
-            with ForOp(name="loop", inputs={"value": Each([1, 2, 3])}) as loop:
-                node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-                START >> node >> END
-            START >> loop >> END
+            src = each_item(items=PARENT["items"])
+            node = double(value=src["value"])
+            START >> src >> node >> END
 
         tracer = CaptureTracer()
         engine = Hush(outer)
-        await engine.run(inputs={}, tracer=tracer)
+        await engine.run(inputs={"items": [1, 2, 3]}, tracer=tracer)
 
         tracer.wait_for_flush(timeout=5)
 
         data = tracer.flush_calls[0]
-        # Should have records for graph, loop, and iterations
+        # Should have records for graph and ops
         assert len(data["records"]) >= 2
-
-        # Check graph structure includes the loop
-        gs_names = {n["op_name"] for n in data["graph_structure"]}
-        assert "loop-wf.loop" in gs_names
 
 
 # ---------------------------------------------------------------------------

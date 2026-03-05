@@ -3,9 +3,6 @@
 from hush.core.ops.base import PARENT, BaseOp
 from hush.core.ops.flow.branch_op import Branch, BranchOp
 from hush.core.ops.graph.graph_op import GraphOp
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.transform.func_op import FuncOp, op
 from hush.core.ops.transform.parser_op import ParserOp
 from hush.core.utils.auto_name import (
@@ -142,16 +139,6 @@ class TestAutoName:
         parser = ParserOp(format="json", extract=["x"])
         assert parser.name == "parser"
 
-    def test_map_op_auto_name(self):
-        """MapOp has depth 4 (MapOp → BaseIterationOp → GraphOp → BaseOp)."""
-        mapper = MapOp()
-        assert mapper.name == "mapper"
-
-    def test_for_op_auto_name(self):
-        """ForOp inherits BaseIterationOp.__init__ (depth 3)."""
-        loop = ForOp()
-        assert loop.name == "loop"
-
     def test_branch_op_auto_name(self):
         router = BranchOp()
         assert router.name == "router"
@@ -170,18 +157,6 @@ class TestAutoName:
         nodes = [BaseOp()]
         assert nodes[0].name is not None
         assert isinstance(nodes[0].name, str)
-
-
-class TestShorthandAutoName:
-    """Test auto-naming through @shorthand decorated .of() methods."""
-
-    def test_for_loop_of(self):
-        my_loop = ForOp.of(value=Each([1, 2, 3]))
-        assert my_loop.name == "my_loop"
-
-    def test_map_of(self):
-        my_map = MapOp.of(value=Each([1, 2, 3]))
-        assert my_map.name == "my_map"
 
 
 class TestFuncOpAutoName:

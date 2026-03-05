@@ -1,13 +1,12 @@
-"""Tests for ForOp - sequential iteration node."""
+"""Tests for sequential iteration patterns using generator ops.
+
+These tests replace the old ForOp tests. Generator ops + the streaming
+scheduler in GraphOp now handle all iteration patterns.
+"""
 
 import pytest
 
-from hush.core.ops.base import END, PARENT, START
-from hush.core.ops.graph.graph_op import GraphOp
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.while_op import WhileOp
-from hush.core.ops.transform.func_op import op
+from hush.core import END, PARENT, START, GraphOp, op
 from hush.core.states import MemoryState, StateSchema
 
 # ============================================================
@@ -16,218 +15,153 @@ from hush.core.states import MemoryState, StateSchema
 
 
 class TestSimpleIteration:
-    """Test basic sequential iteration with Each() wrapper."""
+    """Test basic iteration with generator op."""
 
     @pytest.mark.asyncio
     async def test_double_values(self):
-        """Test simple doubling of values sequentially."""
+        """Test simple doubling of values via generator."""
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
 
         @op
         def double(value: int):
             return {"result": value * 2}
 
-        with ForOp(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="double_loop") as g:
+            src = each_item(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == [2, 4, 6, 8, 10]
 
 
 # ============================================================
-# Test 2: Sequential Iteration with Broadcast
+# Test 2: Iteration with Broadcast
 # ============================================================
 
 
 class TestBroadcastIteration:
-    """Test sequential iteration with broadcast values."""
+    """Test iteration with broadcast values from batch op."""
 
     @pytest.mark.asyncio
     async def test_multiply_with_broadcast(self):
         """Test multiplication with broadcast multiplier."""
 
         @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
+
+        @op
+        def get_config():
+            return {"multiplier": 10}
+
+        @op
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
-        with ForOp(
-            name="multiply_loop",
-            inputs={
-                "value": Each([1, 2, 3]),
-                "multiplier": 10,  # broadcast
-            },
-        ) as loop:
-            node = multiply(
-                inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
+        with GraphOp(name="multiply_loop") as g:
+            cfg = get_config()
+            src = each_item(items=PARENT["items"])
+            m = multiply(value=src["value"], multiplier=cfg["multiplier"])
+            START >> [cfg, src]
+            [cfg, src] >> m >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == [10, 20, 30]
 
 
 # ============================================================
-# Test 3: Multiple Each() Variables (Zip)
+# Test 3: Multiple Lists (Zip)
 # ============================================================
 
 
-class TestMultipleEachVariables:
-    """Test sequential iteration with multiple Each() variables (zipped)."""
+class TestMultipleListsZip:
+    """Test zipping two lists inside a generator."""
 
     @pytest.mark.asyncio
     async def test_zip_two_lists(self):
-        """Test zipping two lists together sequentially."""
+        """Test zipping two lists together via generator."""
+
+        @op
+        def zip_items(xs: list, ys: list):
+            for x, y in zip(xs, ys):
+                yield {"x": x, "y": y}
 
         @op
         def add(x: int, y: int):
             return {"sum": x + y}
 
-        with ForOp(name="add_loop", inputs={"x": Each([1, 2, 3]), "y": Each([10, 20, 30])}) as loop:
-            node = add(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="add_loop") as g:
+            src = zip_items(xs=PARENT["xs"], ys=PARENT["ys"])
+            a = add(x=src["x"], y=src["y"])
+            START >> src >> a >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["sum"] == [11, 22, 33]
 
 
 # ============================================================
-# Test 4: Nested ForOp (Sequential Nested Loops)
+# Test 4: Nested Iteration (Generator inside Generator)
 # ============================================================
 
 
-class TestNestedForLoop:
-    """Test nested ForOp - sequential iteration supports nested loops."""
+class TestNestedIteration:
+    """Test nested iteration using nested graphs with generators."""
 
     @pytest.mark.asyncio
-    async def test_nested_forloop_with_outer_variable(self):
-        """Test nested ForOp where inner loop depends on outer variable.
+    async def test_nested_loop_with_outer_variable(self):
+        """Test nested iteration where inner loop depends on outer variable."""
 
-        This is the key advantage of sequential ForOp over parallel MapOp.
-        """
+        @op
+        def outer_iter(xs: list):
+            for x in xs:
+                yield {"x": x}
 
+        @op
+        def inner_iter(ys: list, x: int):
+            for y in ys:
+                yield {"result": x * y}
+
+        # Inner graph: iterates ys for a given x
         @op
         def multiply(x: int, y: int):
             return {"result": x * y}
 
-        with ForOp(name="outer_loop", inputs={"x": Each([1, 2, 3])}) as outer:
-            with ForOp(
-                name="inner_loop",
-                inputs={
-                    "y": Each([10, 20]),
-                    "x": PARENT["x"],  # Pass outer variable to inner loop
-                },
-            ) as inner:
-                node = multiply(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
-                START >> node >> END
+        with GraphOp(name="outer_loop") as g:
+            src = outer_iter(xs=PARENT["xs"])
 
-            inner["result"] >> PARENT["results"]
-            START >> inner >> END
+            # For each x, create an inner graph that iterates ys
+            inner = inner_iter(ys=PARENT["ys"], x=src["x"])
+            START >> src >> inner >> END
 
-        outer.build()
-        schema = StateSchema(outer)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20]})
 
-        result = await outer.run(state)
-
-        # Outer x=1: inner produces [1*10, 1*20] = [10, 20]
-        # Outer x=2: inner produces [2*10, 2*20] = [20, 40]
-        # Outer x=3: inner produces [3*10, 3*20] = [30, 60]
-        assert result["results"] == [[10, 20], [20, 40], [30, 60]]
-
-    @pytest.mark.asyncio
-    async def test_three_level_nested_forloop(self):
-        """Test 3-level nested ForOp."""
-
-        @op
-        def combine(a: int, b: int, c: int):
-            return {"value": a * 100 + b * 10 + c}
-
-        with ForOp(name="level1", inputs={"a": Each([1, 2])}) as l1:
-            with ForOp(name="level2", inputs={"b": Each([3, 4]), "a": PARENT["a"]}) as l2:
-                with ForOp(
-                    name="level3", inputs={"c": Each([5, 6]), "a": PARENT["a"], "b": PARENT["b"]}
-                ) as l3:
-                    node = combine(
-                        inputs={"a": PARENT["a"], "b": PARENT["b"], "c": PARENT["c"]},
-                        outputs={"*": PARENT},
-                    )
-                    START >> node >> END
-
-                l3["value"] >> PARENT["values"]
-                START >> l3 >> END
-
-            l2["values"] >> PARENT["level2_results"]
-            START >> l2 >> END
-
-        l1.build()
-        schema = StateSchema(l1)
-        state = MemoryState(schema)
-
-        result = await l1.run(state)
-
-        # a=1: b=3: [135, 136], b=4: [145, 146]
-        # a=2: b=3: [235, 236], b=4: [245, 246]
-        expected = [[[135, 136], [145, 146]], [[235, 236], [245, 246]]]
-        assert result["level2_results"] == expected
+        result = await g.run(state)
+        # Outer yields 3 items, inner yields 2 per outer → 6 total (nested streaming)
+        assert result["result"] == [10, 20, 20, 40, 30, 60]
 
 
 # ============================================================
-# Test 5: ForOp with WhileOp Inside
-# ============================================================
-
-
-class TestForLoopWithWhileLoop:
-    """Test ForOp containing WhileOp."""
-
-    @pytest.mark.asyncio
-    async def test_forloop_with_whileloop_inside(self):
-        """Test sequential ForLoop containing WhileLoop."""
-
-        @op
-        def halve(value: int):
-            return {"new_value": value // 2}
-
-        with ForOp(name="outer_for", inputs={"item": Each([10, 20, 30])}) as for_loop:
-            with WhileOp(
-                name="inner_while",
-                inputs={"value": PARENT["item"]},
-                until="value < 5",
-                max_iterations=10,
-            ) as while_loop:
-                node = halve(inputs={"value": PARENT["value"]})
-                node["new_value"] >> PARENT["value"]
-                START >> node >> END
-
-            while_loop["value"] >> PARENT["final_value"]
-            START >> while_loop >> END
-
-        for_loop.build()
-        schema = StateSchema(for_loop)
-        state = MemoryState(schema)
-
-        result = await for_loop.run(state)
-
-        # 10 -> 5 -> 2 (stops at 2)
-        # 20 -> 10 -> 5 -> 2 (stops at 2)
-        # 30 -> 15 -> 7 -> 3 (stops at 3)
-        assert result["final_value"] == [2, 2, 3]
-
-
-# ============================================================
-# Test 6: Empty Iteration
+# Test 5: Empty Iteration
 # ============================================================
 
 
@@ -236,40 +170,50 @@ class TestEmptyIteration:
 
     @pytest.mark.asyncio
     async def test_empty_list(self):
-        """Test sequential iteration over empty list."""
+        """Test iteration over empty list."""
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
 
         @op
         def double(value: int):
             return {"result": value * 2}
 
-        with ForOp(name="empty_loop", inputs={"value": Each([])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="empty_loop") as g:
+            src = each_item(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": []})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == []
-        assert result["iteration_metrics"]["total_iterations"] == 0
 
 
 # ============================================================
-# Test 7: Ref from Previous Node
+# Test 6: Ref from Previous Node
 # ============================================================
 
 
 class TestRefFromPreviousNode:
-    """Test iteration using Ref to data from previous node."""
+    """Test iteration using data from previous node."""
 
     @pytest.mark.asyncio
     async def test_each_from_ref(self):
-        """Test Each() with Ref to another node's output."""
+        """Test generator receiving list from upstream node."""
 
         @op
         def generate_data():
             return {"numbers": [10, 20, 30], "factor": 5}
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
         def process_item(item: int, factor: int):
@@ -277,196 +221,88 @@ class TestRefFromPreviousNode:
 
         with GraphOp(name="ref_test_graph") as graph:
             gen_node = generate_data()
-
-            with ForOp(
-                name="ref_loop",
-                inputs={
-                    "item": Each(gen_node["numbers"]),
-                    "factor": gen_node["factor"],  # broadcast Ref
-                },
-                outputs={"*": PARENT},
-            ) as loop:
-                proc_node = process_item(
-                    inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
-                )
-                START >> proc_node >> END
-
-            START >> gen_node >> loop >> END
+            src = each_item(items=gen_node["numbers"])
+            proc = process_item(item=src["item"], factor=gen_node["factor"])
+            START >> gen_node >> src >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state()
 
         result = await graph.run(state)
-        assert result["result"] == [50, 100, 150]  # 10*5, 20*5, 30*5
+        assert result["result"] == [50, 100, 150]
 
 
 # ============================================================
-# Test 8: Iteration Metrics
-# ============================================================
-
-
-class TestIterationMetrics:
-    """Test iteration metrics are collected."""
-
-    @pytest.mark.asyncio
-    async def test_metrics_collected(self):
-        """Test that iteration metrics are returned."""
-
-        @op
-        def double(value: int):
-            return {"result": value * 2}
-
-        with ForOp(name="metrics_loop", inputs={"value": Each([1, 2, 3])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        result = await loop.run(state)
-
-        assert "iteration_metrics" in result
-        metrics = result["iteration_metrics"]
-        assert metrics["total_iterations"] == 3
-        assert metrics["success_count"] == 3
-        assert metrics["error_count"] == 0
-
-
-# ============================================================
-# Test 9: Mismatched Lengths
-# ============================================================
-
-
-class TestMismatchedLengths:
-    """Test error handling for mismatched list lengths."""
-
-    @pytest.mark.asyncio
-    async def test_raises_on_length_mismatch(self):
-        """Test that mismatched Each() lengths are captured as error."""
-
-        @op
-        def dummy(x: int, y: int):
-            return {"result": x + y}
-
-        with ForOp(
-            name="mismatch_loop",
-            inputs={
-                "x": Each([1, 2, 3]),
-                "y": Each([10, 20]),  # Different length!
-            },
-        ) as loop:
-            node = dummy(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        await loop.run(state)
-        # Error is captured in state, not raised
-        error = state["mismatch_loop", "error"]
-        assert error is not None
-        assert "same length" in error
-
-
-# ============================================================
-# Test 10: Accumulation Pattern (Sequential Dependency)
+# Test 7: Accumulation Pattern (Sequential via Generator)
 # ============================================================
 
 
 class TestAccumulationPattern:
-    """Test patterns that require sequential execution."""
+    """Test accumulating values — generator naturally preserves order."""
 
     @pytest.mark.asyncio
     async def test_running_total(self):
         """Test accumulating values across iterations.
 
-        This pattern requires sequential execution because each iteration
-        depends on the result of the previous one.
+        Generator yields are sequential, so closures work for accumulation.
         """
-        # Use a closure to maintain state across iterations
         totals = []
 
         @op
-        def accumulate(value: int):
-            # Get previous total or start at 0
-            prev_total = totals[-1] if totals else 0
-            new_total = prev_total + value
-            totals.append(new_total)
-            return {"running_total": new_total}
+        def accumulate_items(items: list):
+            for item in items:
+                prev_total = totals[-1] if totals else 0
+                new_total = prev_total + item
+                totals.append(new_total)
+                yield {"running_total": new_total}
 
-        with ForOp(name="accumulate_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
-            node = accumulate(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="accumulate_loop") as g:
+            src = accumulate_items(items=PARENT["items"])
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await loop.run(state)
-
-        # Sequential: 1, 1+2=3, 3+3=6, 6+4=10, 10+5=15
+        result = await g.run(state)
         assert result["running_total"] == [1, 3, 6, 10, 15]
 
 
 # ============================================================
-# Test: ForOp.of() Shorthand
+# Test 8: Chain of Downstream Ops
 # ============================================================
 
 
-class TestForShorthand:
-    """Test ForOp.of() shorthand classmethod."""
+class TestChainOfDownstreamOps:
+    """Test multiple ops chained after a generator."""
 
     @pytest.mark.asyncio
-    async def test_for_shorthand_basic(self):
-        """Test basic ForOp.of() with Each()."""
+    async def test_add_then_multiply(self):
+        """Test chain: generator >> add_one >> multiply_two >> END."""
 
         @op
-        def double(value: int):
-            return {"result": value * 2}
-
-        with ForOp.of(value=Each([1, 2, 3])) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        result = await loop.run(state)
-        assert result["result"] == [2, 4, 6]
-
-    @pytest.mark.asyncio
-    async def test_for_shorthand_broadcast(self):
-        """Test ForOp.of() with Each() and broadcast values."""
+        def each_item(items: list):
+            for item in items:
+                yield {"x": item}
 
         @op
-        def multiply(value: int, multiplier: int):
-            return {"result": value * multiplier}
+        def add_one(x: int):
+            return {"y": x + 1}
 
-        with ForOp.of(value=Each([1, 2, 3]), multiplier=10) as loop:
-            node = multiply(
-                inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
+        @op
+        def multiply_two(y: int):
+            return {"z": y * 2}
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        with GraphOp(name="chain_loop") as g:
+            src = each_item(items=PARENT["items"])
+            n1 = add_one(x=src["x"])
+            n2 = multiply_two(y=n1["y"])
+            START >> src >> n1 >> n2 >> END
 
-        result = await loop.run(state)
-        assert result["result"] == [10, 20, 30]
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-    def test_for_shorthand_auto_name(self):
-        """Test that ForOp.of() auto-names from variable assignment."""
-        my_loop = ForOp.of(value=Each([1, 2, 3]))
-        assert my_loop.name == "my_loop"
-
-    def test_for_shorthand_is_forloopnode(self):
-        """Test that ForOp.of() returns a ForOp instance."""
-        loop = ForOp.of(value=Each([1, 2, 3]))
-        assert isinstance(loop, ForOp)
+        result = await g.run(state)
+        assert result["z"] == [4, 6, 8]

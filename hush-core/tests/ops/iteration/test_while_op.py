@@ -1,12 +1,13 @@
-"""Tests for WhileOp - conditional iteration node."""
+"""Tests for conditional iteration patterns using generator ops.
+
+These tests replace the old WhileOp tests. Generator ops with internal
+state management + the streaming scheduler handle all while-loop patterns.
+"""
 
 import pytest
 
-from hush.core.ops.base import END, PARENT, START
-from hush.core.ops.graph.graph_op import GraphOp
-from hush.core.ops.iteration.while_op import WhileOp
-from hush.core.ops.transform.func_op import op
-from hush.core.states import MemoryState, StateSchema
+from hush.core import END, PARENT, START, GraphOp, op
+from hush.core.states import StateSchema
 
 # ============================================================
 # Test 1: Simple Counter Loop
@@ -21,29 +22,22 @@ class TestSimpleCounterLoop:
         """Test counting loop that stops when counter >= 5."""
 
         @op
-        def increment(counter: int):
-            new_counter = counter + 1
-            return {"new_counter": new_counter}
+        def count_up(start: int, limit: int):
+            counter = start
+            while counter < limit:
+                counter += 1
+                yield {"counter": counter}
 
-        with WhileOp(
-            name="counter_loop",
-            inputs={"counter": 0},
-            until="counter >= 5",
-            max_iterations=10,
-        ) as loop:
-            node = increment(
-                inputs={"counter": PARENT["counter"]}, outputs={"new_counter": PARENT["counter"]}
-            )
-            START >> node >> END
+        with GraphOp(name="counter_loop") as g:
+            src = count_up(start=PARENT["start"], limit=PARENT["limit"])
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"start": 0, "limit": 5})
 
-        result = await loop.run(state)
-
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 5
-        assert result.get("iteration_metrics", {}).get("stopped_by_condition") is True
+        result = await g.run(state)
+        assert result["counter"] == [1, 2, 3, 4, 5]
 
 
 # ============================================================
@@ -59,30 +53,24 @@ class TestAccumulatorLoop:
         """Test accumulator loop that stops when total >= 100."""
 
         @op
-        def accumulate(total: int, step: int):
-            new_total = total + step
-            return {"new_total": new_total}
+        def accumulate(step: int, limit: int):
+            total = 0
+            while total < limit:
+                total += step
+                yield {"total": total}
 
-        with WhileOp(
-            name="accumulator_loop",
-            inputs={"total": 0, "step": 15},
-            max_iterations=10,
-            until="total >= 100",
-        ) as loop:
-            node = accumulate(
-                inputs={"total": PARENT["total"], "step": PARENT["step"]},
-                outputs={"new_total": PARENT["total"]},
-            )
-            START >> node >> END
+        with GraphOp(name="accumulator_loop") as g:
+            src = accumulate(step=PARENT["step"], limit=PARENT["limit"])
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"step": 15, "limit": 100})
 
-        result = await loop.run(state)
-
-        # 0+15*7=105 >= 100, so 7 iterations
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 7
+        result = await g.run(state)
+        # 15, 30, 45, 60, 75, 90, 105 — 7 iterations
+        assert len(result["total"]) == 7
+        assert result["total"][-1] == 105
 
 
 # ============================================================
@@ -95,27 +83,25 @@ class TestMaxIterationsSafety:
 
     @pytest.mark.asyncio
     async def test_max_iterations_reached(self):
-        """Test that loop stops at max_iterations when no until."""
+        """Test that generator stops at max iterations."""
 
         @op
-        def infinite_loop(value: int):
-            new_value = value + 1
-            return {"new_value": new_value}
+        def infinite_counter(max_steps: int):
+            value = 0
+            for _ in range(max_steps):
+                value += 1
+                yield {"value": value}
 
-        with WhileOp(name="safe_loop", max_iterations=5, inputs={"value": 0}) as loop:
-            node = infinite_loop(
-                inputs={"value": PARENT["value"]}, outputs={"new_value": PARENT["value"]}
-            )
-            START >> node >> END
+        with GraphOp(name="safe_loop") as g:
+            src = infinite_counter(max_steps=PARENT["max_steps"])
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"max_steps": 5})
 
-        result = await loop.run(state)
-
-        assert result.get("iteration_metrics", {}).get("max_iterations_reached") is True
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 5
+        result = await g.run(state)
+        assert result["value"] == [1, 2, 3, 4, 5]
 
 
 # ============================================================
@@ -131,28 +117,27 @@ class TestComplexCondition:
         """Test stop condition with OR: x >= 10 or done == True."""
 
         @op
-        def complex_step(x: int, done: bool):
-            new_x = x + 3
-            new_done = new_x > 8
-            return {"new_x": new_x, "new_done": new_done}
+        def complex_step():
+            x = 0
+            done = False
+            while not (x >= 10 or done):
+                x += 3
+                done = x > 8
+                yield {"x": x, "done": done}
 
-        with WhileOp(
-            name="complex_loop", inputs={"x": 0, "done": False}, until="x >= 10 or done"
-        ) as loop:
-            node = complex_step(
-                inputs={"x": PARENT["x"], "done": PARENT["done"]},
-                outputs={"new_x": PARENT["x"], "new_done": PARENT["done"]},
-            )
-            START >> node >> END
+        with GraphOp(name="complex_loop") as g:
+            src = complex_step()
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state()
 
-        result = await loop.run(state)
-
+        result = await g.run(state)
         # 0->3->6->9 (done=True at 9>8), so 3 iterations
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 3
+        assert len(result["x"]) == 3
+        assert result["x"] == [3, 6, 9]
+        assert result["done"] == [False, False, True]
 
 
 # ============================================================
@@ -161,354 +146,234 @@ class TestComplexCondition:
 
 
 class TestWhileLoopWithRef:
-    """Test WhileOp inside GraphOp with Ref inputs."""
+    """Test while-loop generator inside GraphOp with Ref inputs."""
 
     @pytest.mark.asyncio
     async def test_ref_inputs(self):
-        """Test WhileLoop receiving inputs via Ref from upstream node."""
+        """Test while-loop generator receiving inputs via Ref from upstream node."""
 
         @op
         def get_config():
             return {"config": {"settings": {"start_value": 0, "increment": 3, "limit": 10}}}
 
         @op
-        def increment_by(counter: int, step: int):
-            new_counter = counter + step
-            return {"new_counter": new_counter}
+        def count_by_step(start: int, step: int, limit: int):
+            counter = start
+            while counter < limit:
+                counter += step
+                yield {"counter": counter}
 
         with GraphOp(name="ref_while_graph") as graph:
             config_node = get_config()
-
-            with WhileOp(
-                name="ref_loop",
-                inputs={
-                    "counter": config_node["config"]["settings"]["start_value"],
-                    "step": config_node["config"]["settings"]["increment"],
-                },
-                until="counter >= 10",
-            ) as loop:
-                node = increment_by(
-                    inputs={"counter": PARENT["counter"], "step": PARENT["step"]},
-                    outputs={"new_counter": PARENT["counter"]},
-                )
-                START >> node >> END
-
-            START >> config_node >> loop >> END
+            src = count_by_step(
+                start=config_node["config"]["settings"]["start_value"],
+                step=config_node["config"]["settings"]["increment"],
+                limit=config_node["config"]["settings"]["limit"],
+            )
+            START >> config_node >> src >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state()
 
-        await graph.run(state)
-
-        loop_result = state[loop.full_name, "iteration_metrics"]
-        iterations = loop_result.get("total_iterations", 0) if loop_result else 0
+        result = await graph.run(state)
         # 0->3->6->9->12, 4 iterations to reach counter >= 10
-        assert iterations == 4
+        assert result["counter"] == [3, 6, 9, 12]
 
 
 # ============================================================
-# Test 6: Schema Extraction
+# Test 6: Fibonacci Sequence
 # ============================================================
 
 
-class TestSchemaExtraction:
-    """Test that WhileOp extracts inputs/outputs schema correctly."""
-
-    def test_inputs_include_condition_vars(self):
-        """Test that inputs include variables from until."""
-
-        @op
-        def increment(counter: int):
-            return {"new_counter": counter + 1}
-
-        with WhileOp(
-            name="schema_test_loop",
-            inputs={"counter": 0},
-            until="counter >= 5",
-            max_iterations=10,
-        ) as loop:
-            node = increment(
-                inputs={"counter": PARENT["counter"]}, outputs={"new_counter": PARENT["counter"]}
-            )
-            START >> node >> END
-
-        loop.build()
-
-        assert "counter" in loop.inputs
-        assert "iteration_metrics" in loop.outputs
-
-
-# ============================================================
-# Test 7: New Output Mapping Syntax with >>
-# ============================================================
-
-
-class TestWhileLoopNewOutputSyntax:
-    """Test WhileOp with node["key"] >> PARENT["key"] syntax."""
+class TestFibonacciSequence:
+    """Test Fibonacci sequence generation with generator."""
 
     @pytest.mark.asyncio
-    async def test_specific_key_mapping(self):
-        """Test node["key"] >> PARENT["key"] for specific mapping in WhileLoop.
-
-        Maps node output "new_a" to parent output "a" (for loop variable update),
-        and also creates explicit parent outputs "result_a" and "result_b".
-        """
+    async def test_fibonacci(self):
+        """Test Fibonacci via generator with internal state."""
 
         @op
-        def fibonacci_step(a: int, b: int):
-            new_a = b
-            new_b = a + b
-            return {"new_a": new_a, "new_b": new_b}
+        def fibonacci(limit: int):
+            a, b = 0, 1
+            while b < limit:
+                a, b = b, a + b
+                yield {"a": a, "b": b}
 
-        with WhileOp(
-            name="fibonacci_while_loop",
-            inputs={"a": 0, "b": 1},
-            until="b >= 21",
-            max_iterations=20,
-        ) as loop:
-            node = fibonacci_step(inputs={"a": PARENT["a"], "b": PARENT["b"]})
-            # Map to loop iteration variables
-            node["new_a"] >> PARENT["a"]
-            node["new_b"] >> PARENT["b"]
-            START >> node >> END
+        with GraphOp(name="fib_loop") as g:
+            src = fibonacci(limit=PARENT["limit"])
+            START >> src >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"limit": 21})
 
-        result = await loop.run(state)
-
+        result = await g.run(state)
         # Fibonacci: 0,1 -> 1,1 -> 1,2 -> 2,3 -> 3,5 -> 5,8 -> 8,13 -> 13,21
-        # Stop when b >= 21, so 7 iterations
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 7
-        # The mapped output keys are "a" and "b" (the PARENT keys)
-        assert result.get("a") == 13
-        assert result.get("b") == 21
-
-    @pytest.mark.asyncio
-    async def test_new_syntax_replaces_old_outputs(self):
-        """Test new >> syntax completely replaces old outputs= syntax."""
-
-        @op
-        def double_step(value: int):
-            doubled = value * 2
-            return {"doubled": doubled}
-
-        with WhileOp(
-            name="new_syntax_loop",
-            inputs={"value": 1},
-            until="value >= 16",
-            max_iterations=10,
-        ) as loop:
-            node = double_step(inputs={"value": PARENT["value"]})
-            # New syntax only: map doubled output to loop's value variable
-            node["doubled"] >> PARENT["value"]
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        result = await loop.run(state)
-
-        # Value: 1->2->4->8->16, stops at 4 iterations
-        assert result.get("iteration_metrics", {}).get("total_iterations") == 4
-        assert result.get("value") == 16
+        assert result["a"] == [1, 1, 2, 3, 5, 8, 13]
+        assert result["b"] == [1, 2, 3, 5, 8, 13, 21]
 
 
 # ============================================================
-# Test 8: WhileLoop with Initial Value from Upstream Node
+# Test 7: Doubling Loop
+# ============================================================
+
+
+class TestDoublingLoop:
+    """Test doubling loop with generator."""
+
+    @pytest.mark.asyncio
+    async def test_doubling(self):
+        """Test value doubling until threshold."""
+
+        @op
+        def double_until(start: int, limit: int):
+            value = start
+            while value < limit:
+                value *= 2
+                yield {"value": value}
+
+        with GraphOp(name="double_loop") as g:
+            src = double_until(start=PARENT["start"], limit=PARENT["limit"])
+            START >> src >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"start": 1, "limit": 16})
+
+        result = await g.run(state)
+        # 1->2->4->8->16, 4 iterations
+        assert result["value"] == [2, 4, 8, 16]
+
+
+# ============================================================
+# Test 8: Counter from Upstream Node
 # ============================================================
 
 
 class TestWhileLoopInitialFromUpstream:
-    """Test WhileOp receiving initial condition variable from upstream node."""
+    """Test while-loop generator receiving initial values from upstream node."""
 
     @pytest.mark.asyncio
     async def test_counter_from_upstream_node(self):
-        """Test WhileLoop's counter starts from value computed by upstream node.
-
-        This tests the scenario where the initial value of a condition variable
-        (like 'counter') comes from another node's output rather than a literal.
-        """
+        """Test generator's counter starts from value computed by upstream node."""
 
         @op
         def compute_start():
-            """Compute initial counter value."""
             return {"start_value": 3}
 
         @op
-        def increment(counter: int):
-            """Increment counter by 1."""
-            return {"new_counter": counter + 1}
+        def count_up(start: int, limit: int):
+            counter = start
+            while counter < limit:
+                counter += 1
+                yield {"counter": counter}
 
         with GraphOp(name="upstream_while_graph") as graph:
             start_node = compute_start()
-
-            with WhileOp(
-                name="counter_loop",
-                inputs={"counter": start_node["start_value"]},
-                until="counter >= 7",
-                max_iterations=10,
-            ) as loop:
-                inc_node = increment(inputs={"counter": PARENT["counter"]})
-                inc_node["new_counter"] >> PARENT["counter"]
-                START >> inc_node >> END
-
-            START >> start_node >> loop >> END
+            src = count_up(start=start_node["start_value"], limit=PARENT["limit"])
+            START >> start_node >> src >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state(inputs={"limit": 7})
 
-        await graph.run(state)
-
-        # Counter starts at 3 (from upstream), then: 3->4->5->6->7
-        # Stops when counter >= 7, so 4 iterations
-        loop_result = state[loop.full_name, "iteration_metrics"]
-        assert loop_result.get("total_iterations") == 4
-        assert loop_result.get("stopped_by_condition") is True
-
-        # Final counter value should be 7
-        final_counter = state[loop.full_name, "counter"]
-        assert final_counter == 7
+        result = await graph.run(state)
+        # Counter starts at 3: 4, 5, 6, 7 — 4 iterations
+        assert result["counter"] == [4, 5, 6, 7]
 
     @pytest.mark.asyncio
     async def test_multiple_vars_from_upstream(self):
-        """Test WhileLoop receiving multiple condition variables from upstream.
-
-        Both 'counter' and 'limit' come from an upstream node's output.
-        """
+        """Test generator receiving multiple values from upstream."""
 
         @op
         def compute_config():
-            """Compute initial values and limit."""
             return {"initial_counter": 0, "step_size": 5, "target_limit": 20}
 
         @op
-        def increment_by(counter: int, step: int):
-            """Increment counter by step."""
-            return {"new_counter": counter + step}
+        def count_by_step(start: int, step: int, limit: int):
+            counter = start
+            while counter < limit:
+                counter += step
+                yield {"counter": counter}
 
         with GraphOp(name="multi_var_graph") as graph:
             config = compute_config()
-
-            with WhileOp(
-                name="configured_loop",
-                inputs={
-                    "counter": config["initial_counter"],
-                    "step": config["step_size"],
-                    "limit": config["target_limit"],
-                },
-                until="counter >= limit",
-                max_iterations=20,
-            ) as loop:
-                inc = increment_by(inputs={"counter": PARENT["counter"], "step": PARENT["step"]})
-                inc["new_counter"] >> PARENT["counter"]
-                START >> inc >> END
-
-            START >> config >> loop >> END
+            src = count_by_step(
+                start=config["initial_counter"],
+                step=config["step_size"],
+                limit=config["target_limit"],
+            )
+            START >> config >> src >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state()
 
-        await graph.run(state)
-
-        # Counter: 0->5->10->15->20, stops at counter >= 20
-        # 4 iterations
-        loop_result = state[loop.full_name, "iteration_metrics"]
-        assert loop_result.get("total_iterations") == 4
-
-        final_counter = state[loop.full_name, "counter"]
-        assert final_counter == 20
+        result = await graph.run(state)
+        # 0->5->10->15->20, 4 iterations
+        assert result["counter"] == [5, 10, 15, 20]
 
     @pytest.mark.asyncio
     async def test_dynamic_stop_threshold(self):
-        """Test WhileLoop where stop threshold is computed dynamically.
-
-        The 'threshold' variable is computed by an upstream node and used
-        in the until.
-        """
+        """Test generator where stop threshold is computed dynamically."""
 
         @op
         def calculate_threshold(base: int):
-            """Calculate dynamic threshold."""
             return {"threshold": base * 3}
 
         @op
-        def increment(value: int):
-            """Increment value."""
-            return {"new_value": value + 2}
+        def count_by_two(limit: int):
+            value = 0
+            while value < limit:
+                value += 2
+                yield {"value": value}
 
-        with GraphOp(name="dynamic_threshold_graph", inputs={"base": 5}) as graph:
-            calc = calculate_threshold(inputs={"base": PARENT["base"]})
-
-            with WhileOp(
-                name="dynamic_loop",
-                inputs={"value": 0, "threshold": calc["threshold"]},
-                until="value >= threshold",
-                max_iterations=20,
-            ) as loop:
-                inc = increment(inputs={"value": PARENT["value"]})
-                inc["new_value"] >> PARENT["value"]
-                START >> inc >> END
-
-            START >> calc >> loop >> END
+        with GraphOp(name="dynamic_threshold_graph") as graph:
+            calc = calculate_threshold(base=PARENT["base"])
+            src = count_by_two(limit=calc["threshold"])
+            START >> calc >> src >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema, inputs={"base": 5})
+        state = schema.create_state(inputs={"base": 5})
 
-        await graph.run(state)
-
-        # threshold = 5 * 3 = 15
-        # value: 0->2->4->6->8->10->12->14->16
-        # stops when value >= 15, so at 8 iterations (value=16)
-        loop_result = state[loop.full_name, "iteration_metrics"]
-        assert loop_result.get("total_iterations") == 8
-        assert loop_result.get("stopped_by_condition") is True
-
-        final_value = state[loop.full_name, "value"]
-        assert final_value == 16
+        result = await graph.run(state)
+        # threshold = 15, value: 2, 4, 6, 8, 10, 12, 14, 16
+        assert result["value"] == [2, 4, 6, 8, 10, 12, 14, 16]
 
 
 # ============================================================
-# Test: WhileOp.of() Shorthand
+# Test 9: While-loop with Downstream Processing
 # ============================================================
 
 
-class TestWhileShorthand:
-    """Test WhileOp.of() shorthand classmethod."""
+class TestWhileWithDownstream:
+    """Test while-loop generator with downstream processing per yield."""
 
     @pytest.mark.asyncio
-    async def test_while_shorthand_basic(self):
-        """Test basic WhileOp.of() with until."""
+    async def test_while_then_process(self):
+        """Test while generator >> process >> END."""
 
         @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
+        def count_up(limit: int):
+            counter = 0
+            while counter < limit:
+                counter += 1
+                yield {"counter": counter}
 
-        with WhileOp.of(counter=0, until="counter >= 5") as loop:
-            node = increment(inputs={"counter": PARENT["counter"]})
-            node["counter"] >> PARENT["counter"]
-            START >> node >> END
+        @op
+        def square(counter: int):
+            return {"squared": counter * counter}
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        with GraphOp(name="while_process") as g:
+            src = count_up(limit=PARENT["limit"])
+            sq = square(counter=src["counter"])
+            START >> src >> sq >> END
 
-        result = await loop.run(state)
-        assert result["iteration_metrics"]["total_iterations"] == 5
-        assert result["iteration_metrics"]["stopped_by_condition"] is True
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"limit": 5})
 
-    def test_while_shorthand_auto_name(self):
-        """Test that WhileOp.of() auto-names from variable assignment."""
-        my_while = WhileOp.of(counter=0, until="counter >= 5")
-        assert my_while.name == "my_while"
-
-    def test_while_shorthand_is_whileloopnode(self):
-        """Test that WhileOp.of() returns a WhileOp instance."""
-        loop = WhileOp.of(counter=0, until="counter >= 5")
-        assert isinstance(loop, WhileOp)
+        result = await g.run(state)
+        assert result["squared"] == [1, 4, 9, 16, 25]

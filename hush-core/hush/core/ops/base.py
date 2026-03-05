@@ -9,65 +9,15 @@ from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from hush.core.configs.op_config import OpType
 from hush.core.loggings import LOGGER, format_log_data
+from hush.core.ops._params import merge_params, normalize_params, resolve_value
 from hush.core.states.ref import Ref
-from hush.core.utils.auto_name import auto_name, register_skip, unique_name
+from hush.core.utils.auto_name import auto_name, unique_name
 from hush.core.utils.common import Param
 from hush.core.utils.context import get_current
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
-
-
-class SoftEdge:
-    """Marker wrapper for a soft-edge connection.
-
-    Use with ``~op`` syntax to mark a soft edge::
-
-        a >> ~b       # soft edge from a to b
-        a >> b        # hard edge from a to b
-        [a, b] >> ~c  # soft edges from multiple ops
-        ~a >> b       # soft edge, then continue chaining
-
-    Soft edges do not count toward ready_count; used for branch outputs
-    when only one branch executes.
-    """
-
-    __slots__ = ["op"]
-
-    def __init__(self, op: "BaseOp"):
-        self.op = op
-
-    @property
-    def name(self) -> str:
-        return self.op.name
-
-    def __rrshift__(self, other):
-        """[a, b] >> ~self: soft edges from a list of ops to self.op."""
-        add_edge = getattr(self.op.parent, "add_edge", None)
-
-        if isinstance(other, list):
-            if add_edge is not None:
-                for item in other:
-                    edge_type = "condition" if getattr(item, "type", None) == "branch" else "normal"
-                    add_edge(item.name, self.op.name, edge_type, soft=True)
-            return self.op  # Return unwrapped for chaining
-        elif getattr(other, "name", None) is not None:
-            # single_op >> ~self
-            edge_type = "condition" if getattr(other, "type", None) == "branch" else "normal"
-            if add_edge is not None:
-                add_edge(other.name, self.op.name, edge_type, soft=True)
-            return self.op
-        return NotImplemented
-
-    def __rshift__(self, other):
-        """~a >> b: after soft edge marker, continue with a hard edge.
-
-        Allows chaining: source >> ~a >> b >> c
-        After ~a is processed, continue the chain with b.
-        """
-        return self.op.__rshift__(other)
 
 
 def _has_explicit_outputs(op) -> bool:
@@ -86,88 +36,28 @@ def _has_explicit_outputs(op) -> bool:
     return False
 
 
-# Base init keys shared by ALL nodes (from BaseOp.__init__)
-_BASE_INIT_KEYS = frozenset(
-    {
-        "name",
-        "id",
-        "description",
-        "inputs",
-        "outputs",
-        "sources",
-        "targets",
-        "stream",
-        "start",
-        "executor",
-        "bound",
-    }
+def _set_wildcard_outputs(target_op):
+    """Auto-set wildcard outputs for ops connecting to END.
+
+    For each output key with no explicit value, sets it to Ref(parent, key)
+    so the op's outputs are automatically forwarded to the parent graph.
+    """
+    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
+        if target_op.outputs is None:
+            target_op.outputs = {}
+        parent_op = getattr(target_op, "parent", None) or PARENT
+        for key in target_op.outputs:
+            param = target_op.outputs[key]
+            if hasattr(param, "value") and param.value is None:
+                param.value = Ref(parent_op, key)
+
+
+# Re-export shorthand utilities for backward compatibility
+from hush.core.ops._shortcuts import (  # noqa: F401, E402
+    _BASE_INIT_KEYS,
+    shorthand,
+    split_shorthand_kwargs,
 )
-
-
-def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
-    """Split flat kwargs into (inputs, init_kwargs).
-
-    Used by shorthand functions (llm_, for_, op, etc.) to separate
-    op constructor kwargs from input mappings.
-
-    Args:
-        kwargs: Flat keyword arguments from shorthand function.
-        extra_init_keys: Additional op-specific init keys beyond base keys
-            (e.g., {'max_concurrency', 'callback'} for iteration ops).
-
-    Returns:
-        (inputs, init_kwargs) tuple where:
-        - inputs: Dict of input variable mappings
-        - init_kwargs: Dict of op constructor arguments
-
-    Example:
-        # Provider ops - just base keys
-        inputs, init_kwargs = split_shorthand_kwargs(kwargs)
-
-        # Iteration ops - with extra keys
-        inputs, init_kwargs = split_shorthand_kwargs(
-            kwargs,
-            {'max_concurrency', 'until', 'callback'}
-        )
-    """
-    init_keys = _BASE_INIT_KEYS | (extra_init_keys or set())
-
-    inputs = {}
-    init_kwargs = {}
-
-    for key, value in kwargs.items():
-        if key in init_keys and not isinstance(value, Ref):
-            init_kwargs[key] = value
-        else:
-            if key in init_keys:
-                LOGGER.warning(
-                    "Keyword '%s' is a reserved op parameter (one of %s) but received a Ref value. "
-                    "It will be treated as an input mapping instead of an op constructor arg. "
-                    "Consider renaming this parameter to avoid ambiguity.",
-                    key,
-                    sorted(init_keys),
-                )
-            inputs[key] = value
-
-    return inputs, init_kwargs
-
-
-def shorthand(fn):
-    """Decorator for ``Op.of()`` classmethods.
-
-    Registers the function for auto-naming frame skip via ``register_skip()``
-    and wraps as ``classmethod``.
-
-    Usage::
-
-        class MyOp(BaseOp):
-            @shorthand
-            def of(cls, my_param=None, **kwargs):
-                inputs, init_kwargs = split_shorthand_kwargs(kwargs)
-                return cls(my_param=my_param, inputs=inputs or None, **init_kwargs)
-    """
-    register_skip(fn)
-    return classmethod(fn)
 
 
 class BaseOp(ABC):
@@ -224,6 +114,7 @@ class BaseOp(ABC):
         "enabled",
         "executor",
         "bound",
+        "_stream_depths",
     ]
 
     _VALID_EXECUTORS = (None, "thread")
@@ -270,6 +161,7 @@ class BaseOp(ABC):
         self.targets: List[str] = targets or []
 
         self.core: Optional[Callable] = None
+        self._stream_depths = None  # Set by GraphOp.build() for streaming
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
         self.parent = get_current()
@@ -298,174 +190,18 @@ class BaseOp(ABC):
                 )
 
     def _resolve_value(self, key: str, value: Any) -> Any:
-        """Convert value to a Ref or keep as a literal.
-
-        Supported formats:
-            - some_op → Ref(some_op, key)
-            - some_op["other"] → Ref(some_op, "other")
-            - Ref(op, "var") → kept as-is
-            - PARENT["x"] → Ref(parent, "x")
-            - literal → kept as-is
-        """
-
-        def resolve_parent(source):
-            """Resolve PARENT marker to the actual parent op."""
-            if hasattr(source, "name") and source.name == "__PARENT__":
-                return self.parent if self.parent else source
-            return source
-
-        # Handle Ref directly — keep transforms intact
-        if isinstance(value, Ref):
-            resolved = resolve_parent(value.raw_source)
-            return Ref(resolved, value.var, value.transforms)
-
-        # Handle op reference: some_op → Ref(some_op, key)
-        if hasattr(value, "name"):
-            resolved = resolve_parent(value)
-            return Ref(resolved, key)
-
-        # Literal value
-        return value
+        """Convert value to a Ref or keep as a literal."""
+        return resolve_value(key, value, self.parent)
 
     def _normalize_params(self, params: Any) -> Dict[str, Param]:
-        """Normalize inputs/outputs to Dict[str, Param].
-
-        Supported formats:
-            - params=None → {}
-            - params={"*": PARENT} → forward all keys from PARENT
-            - params={"x": 1, "*": PARENT} → x=1, rest from PARENT
-            - params={"var": Param(...)} → kept as-is, resolve value
-            - params={"var": some_op} → {"var": Param(value=Ref(some_op, "var"))}
-            - params={"var": some_op["other"]} → {"var": Param(value=Ref(some_op, "other"))}
-            - params={"var": literal} → {"var": Param(value=literal)}
-            - params={("a", "b"): some_op} → expanded to both keys
-        """
-        if params is None:
-            return {}
-
-        result = {}
-
-        if isinstance(params, dict):
-            for key, value in params.items():
-                # Handle wildcard "*" key - store for later processing in _merge_params
-                if key == "*":
-                    # Validate that value is an op reference (PARENT or another op)
-                    if hasattr(value, "name"):
-                        result["__FORWARD_WILDCARD__"] = value
-                    else:
-                        raise ValueError(
-                            f"Wildcard '*' key must have an op reference as value (e.g. PARENT), "
-                            f"got: {type(value)}"
-                        )
-                    continue
-
-                # Handle tuple keys: {("a", "b"): op} → expand to both
-                if isinstance(key, tuple):
-                    for k in key:
-                        resolved_value = self._resolve_value(k, value)
-                        result[k] = Param(value=resolved_value)
-                # Handle Param directly
-                elif isinstance(value, Param):
-                    # Resolve value inside Param if present
-                    if value.value is not None:
-                        value.value = self._resolve_value(key, value.value)
-                    result[key] = value
-                else:
-                    # Create new Param with resolved value (type auto-inferred)
-                    resolved_value = self._resolve_value(key, value)
-                    result[key] = Param(value=resolved_value)
-
-        return result
+        """Normalize inputs/outputs to Dict[str, Param]."""
+        return normalize_params(params, self.parent)
 
     def _merge_params(
         self, schema: Dict[str, Param], user_provided: Dict[str, Any]
     ) -> Dict[str, Param]:
-        """Merge schema (from parsing) with user-provided inputs/outputs.
-
-        - If key already exists in schema → assign value only
-        - If key is new → create new Param (type auto-inferred)
-        - If user_provided has __FORWARD_WILDCARD__ marker → forward keys
-          not explicitly defined to the op reference (PARENT)
-
-        Args:
-            schema: Dict[str, Param] from parsing (e.g. from function signature).
-            user_provided: Dict from user (Ref | literal | Param).
-
-        Returns:
-            Merged Dict[str, Param].
-        """
-        # Copy schema to avoid mutating original
-        result = {
-            k: Param(
-                type=v.type,
-                required=v.required,
-                default=v.default,
-                description=v.description,
-                value=v.value,
-            )
-            for k, v in schema.items()
-        }
-
-        # Resolve PARENT refs in schema values
-        for key, param in result.items():
-            if isinstance(param.value, Ref):
-                param.value = self._resolve_value(key, param.value)
-
-        if not user_provided:
-            return result
-
-        # Make a copy to avoid mutating the original dict
-        user_provided = dict(user_provided)
-
-        # Extract wildcard source if present
-        wildcard_source = user_provided.pop("__FORWARD_WILDCARD__", None)
-
-        # First, process explicitly provided keys
-        explicitly_set = set()
-        for key, value in user_provided.items():
-            # Handle tuple keys
-            if isinstance(key, tuple):
-                for k in key:
-                    self._merge_single_param(result, k, value)
-                    explicitly_set.add(k)
-            else:
-                self._merge_single_param(result, key, value)
-                explicitly_set.add(key)
-
-        # Then, apply wildcard forwarding for remaining keys
-        if wildcard_source is not None:
-            # Resolve PARENT to parent
-            if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
-                resolved_source = self.parent if self.parent else wildcard_source
-            else:
-                resolved_source = wildcard_source
-
-            # Forward schema keys that weren't explicitly set
-            for key in result:
-                if key not in explicitly_set:
-                    result[key].value = Ref(resolved_source, key)
-
-        return result
-
-    def _merge_single_param(self, result: Dict[str, Param], key: str, value: Any) -> None:
-        """Merge a single param into the result dict."""
-        if key in result:
-            # Key already exists → assign value only
-            if isinstance(value, Param):
-                result[key].value = (
-                    self._resolve_value(key, value.value) if value.value is not None else None
-                )
-            else:
-                result[key].value = self._resolve_value(key, value)
-        else:
-            # New key → create new Param (type auto-inferred in Param.__post_init__)
-            if isinstance(value, Param):
-                if value.value is not None:
-                    value.value = self._resolve_value(key, value.value)
-                result[key] = value
-            else:
-                resolved_value = self._resolve_value(key, value)
-                result[key] = Param(value=resolved_value)
+        """Merge schema (from parsing) with user-provided inputs/outputs."""
+        return merge_params(schema, user_provided, self.parent)
 
     @property
     def full_name(self) -> str:
@@ -479,10 +215,6 @@ class BaseOp(ABC):
     def _cache_full_name(self) -> None:
         """Cache full_name as stored attribute. Called at build time."""
         self._full_name = self.full_name
-
-    def identity(self, context_id: str) -> str:
-        """Fully-qualified path with context_id."""
-        return f"{self.full_name}[{context_id or 'main'}]"
 
     def __getitem__(self, item) -> "Ref":
         """Allow ``op["var"]`` syntax to reference an output as a Ref."""
@@ -515,15 +247,7 @@ class BaseOp(ABC):
         elif getattr(other, "name", None) is not None:
             # Check if other is END - auto-set wildcard outputs
             if getattr(other, "name", None) == "__END__":
-                if not _has_explicit_outputs(self):
-                    if self.outputs is None:
-                        self.outputs = {}
-                    parent_op = getattr(self, "parent", None) or PARENT
-                    for key in self.outputs:
-                        param = self.outputs[key]
-                        # Only update if param is a Param with value=None
-                        if hasattr(param, "value") and param.value is None:
-                            param.value = Ref(parent_op, key)
+                _set_wildcard_outputs(self)
             if add_edge is not None:
                 add_edge(self.name, other.name, edge_type)
             return other
@@ -582,48 +306,62 @@ class BaseOp(ABC):
         return NotImplemented
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
-        """Quick-test: call the op directly with keyword inputs.
-
-        Returns:
-            Dict of outputs from executing the op.
-        """
+        """Quick-test: call the op directly with keyword inputs."""
         from hush.core.states import MemoryState, StateSchema
 
-        # Auto-build if this is an unbuilt GraphOp
-        self._auto_build_if_needed()
+        # Auto-build unbuilt GraphOps
+        if hasattr(self, "_is_building") and self._is_building and hasattr(self, "build"):
+            self.build()
 
-        # Build schema from this op
-        schema = StateSchema(op=self)
-        # Pass kwargs into MemoryState to override inputs
-        state = MemoryState(schema, inputs=kwargs)
-
-        # Run synchronously
+        state = MemoryState(StateSchema(op=self), inputs=kwargs)
         try:
-            loop = asyncio.get_running_loop()
-            # If already in async context, run in thread pool
+            asyncio.get_running_loop()
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = pool.submit(asyncio.run, self.run(state)).result()
         except RuntimeError:
-            # No running loop, use asyncio.run()
             result = asyncio.run(self.run(state))
-
         return result
-
-    def _auto_build_if_needed(self):
-        """Auto-build this op if it's a GraphOp that hasn't been built.
-
-        This enables convenient testing: graph() will auto-build before execution.
-        """
-        # Check if this is a GraphOp (has _is_building attribute)
-        if hasattr(self, "_is_building") and self._is_building:
-            if hasattr(self, "build"):
-                LOGGER.debug("Auto-building graph '%s' before execution", self.name)
-                self.build()
 
     def is_base_op(self) -> bool:
         return True
+
+    def _resolve_ctx(self, param, context_id, parent_context):
+        """Resolve lookup context for a single input param.
+
+        Returns the context to use when reading from state, based on
+        whether the param references PARENT, a sibling op at a different
+        stream depth, or is a plain value.
+        """
+        # PARENT ref → use parent_context or batch context for streaming
+        if isinstance(param.value, Ref) and param.value.raw_source is self.parent:
+            if parent_context is not None:
+                return parent_context
+            if self._stream_depths and isinstance(context_id, tuple) and len(context_id) > 1:
+                # PARENT ref in streaming context — broadcast to batch (root) context
+                return context_id[:1]
+            return context_id
+
+        # Streaming broadcast: read from source op's stream depth context
+        if (
+            self._stream_depths
+            and isinstance(param.value, Ref)
+            and param.value.raw_source is not self.parent
+        ):
+            source_op = param.value.raw_source
+            source_depth = self._stream_depths.get(source_op.name, 0)
+            my_depth = self._stream_depths.get(self.name, 0)
+            # Only broadcast for non-generator sources at lower depth.
+            # Generator outputs live at stream context (depth+1), not batch.
+            source_fn = getattr(source_op, "core", None)
+            source_is_gen = source_fn is not None and (
+                inspect.isgeneratorfunction(source_fn) or inspect.isasyncgenfunction(source_fn)
+            )
+            if source_depth < my_depth and isinstance(context_id, tuple) and not source_is_gen:
+                return context_id[: source_depth + 1]
+
+        return context_id
 
     def get_inputs(
         self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
@@ -638,16 +376,7 @@ class BaseOp(ABC):
         result = {}
 
         for var_name, param in self.inputs.items():
-            # Determine context based on ref target
-            # PARENT ref → use parent_context (if available), sibling/other → use context_id
-            if (
-                parent_context is not None
-                and isinstance(param.value, Ref)
-                and param.value.raw_source is self.parent
-            ):
-                lookup_ctx = parent_context
-            else:
-                lookup_ctx = context_id
+            lookup_ctx = self._resolve_ctx(param, context_id, parent_context)
 
             # Always read from state first (may have value from MemoryState inputs or Ref)
             value = state[self.full_name, var_name, lookup_ctx]
@@ -677,10 +406,7 @@ class BaseOp(ABC):
             context_id: Context of this op.
             parent_context: Context of PARENT (for API consistency).
         """
-        result = {}
-        for var_name in self.outputs:
-            result[var_name] = state[self.full_name, var_name, context_id]
-        return result
+        return {var: state[self.full_name, var, context_id] for var in self.outputs}
 
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
         """Store result dict into state.
@@ -715,7 +441,7 @@ class BaseOp(ABC):
                 request_id or "unknown",
                 self.type.upper() if isinstance(self.type, str) else str(self.type).upper(),
                 self.full_name,
-                context_id or "main",
+                ".".join(context_id) if isinstance(context_id, tuple) else (context_id or "main"),
                 duration_ms,
                 format_log_data(inputs),
                 format_log_data(outputs),
@@ -737,6 +463,25 @@ class BaseOp(ABC):
         state[self.full_name, "start_time", context_id] = start_time
         state[self.full_name, "end_time", context_id] = end_time
         state[self.full_name, "duration_ms", context_id] = duration_ms
+
+    async def _exec_core(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch core function based on its type (async, threaded, sync).
+
+        Rejects generator functions — those must be driven by the
+        GraphOp scheduler, not called directly.
+        """
+        if inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core):
+            raise TypeError(
+                f"Generator op '{self.name}' cannot be called via run() directly. "
+                "Use it inside a GraphOp where the scheduler drives the generator."
+            )
+
+        if inspect.iscoroutinefunction(self.core):
+            return await self.core(**inputs)
+        elif self.executor == "thread":
+            return await asyncio.to_thread(self.core, **inputs)
+        else:
+            return self.core(**inputs)
 
     async def run(
         self,
@@ -765,14 +510,7 @@ class BaseOp(ABC):
 
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
-
-            if inspect.iscoroutinefunction(self.core):
-                _outputs = await self.core(**_inputs)
-            elif self.executor == "thread":
-                _outputs = await asyncio.to_thread(self.core, **_inputs)
-            else:
-                _outputs = self.core(**_inputs)
-
+            _outputs = await self._exec_core(_inputs)
             self.store_result(state, _outputs, context_id)
 
         except Exception:
@@ -858,14 +596,6 @@ class BaseOp(ABC):
             result[name] = entry
         return result
 
-    def get_input_variables(self) -> List[str]:
-        """Trả về danh sách tên biến input."""
-        return list(self.inputs.keys()) if self.inputs else []
-
-    def get_output_variables(self) -> List[str]:
-        """Trả về danh sách tên biến output."""
-        return list(self.outputs.keys()) if self.outputs else []
-
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return subclass-specific metadata. Override in subclasses."""
@@ -910,143 +640,5 @@ class BaseOp(ABC):
         return result
 
 
-class DummyOp(BaseOp):
-    """Dummy op used as a marker for START, END, and PARENT."""
-
-    type: OpType = "dummy"
-
-    def __init__(self, name: str):
-        super().__init__(name=name)
-
-    def __rshift__(self, other):
-        """START >> op or op >> END."""
-        # Soft edges are not supported with START/END
-        if isinstance(other, SoftEdge):
-            raise TypeError(
-                f"Cannot use soft edge (~) with {self.name}.\n"
-                f"  Wrong: {self.name} >> ~op\n"
-                f"  Right: {self.name} >> op"
-            )
-
-        if self == START:
-            current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
-                if isinstance(other, list):
-                    for item in other:
-                        current_graph.add_edge(self.name, item.name)
-                    return other
-                elif hasattr(other, "name"):
-                    current_graph.add_edge(self.name, other.name)
-                    return other
-        return super().__rshift__(other)
-
-    def __rrshift__(self, other):
-        """[ops] >> START or [ops] >> END.
-
-        When op >> END, auto-sets outputs = {"*": PARENT} if not already set.
-        """
-        current_graph = get_current()
-        if current_graph and hasattr(current_graph, "add_edge"):
-            if self == START:
-                if isinstance(other, list):
-                    for item in other:
-                        current_graph.add_edge(self.name, item.name)
-                elif hasattr(other, "name"):
-                    current_graph.add_edge(self.name, other.name)
-                return self
-
-            elif self == END:
-                # Auto-set outputs: each output key -> parent[key]
-                def _set_wildcard_outputs(target_op):
-                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
-                        if target_op.outputs is None:
-                            target_op.outputs = {}
-                        parent_op = getattr(target_op, "parent", None) or PARENT
-                        for key in target_op.outputs:
-                            param = target_op.outputs[key]
-                            if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(parent_op, key)
-
-                if isinstance(other, list):
-                    for item in other:
-                        _set_wildcard_outputs(item)
-                        current_graph.add_edge(item.name, self.name)
-                elif hasattr(other, "name"):
-                    _set_wildcard_outputs(other)
-                    current_graph.add_edge(other.name, self.name)
-                return self
-
-        return self
-
-    def __rlshift__(self, other):
-        """op >> END (deprecated path, __rrshift__ handles this)."""
-        if self == END:
-            current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
-                # Auto-set outputs: each output key -> parent[key]
-                def _set_wildcard_outputs(target_op):
-                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
-                        if target_op.outputs is None:
-                            target_op.outputs = {}
-                        parent_op = getattr(target_op, "parent", None) or PARENT
-                        for key in target_op.outputs:
-                            param = target_op.outputs[key]
-                            if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(parent_op, key)
-
-                if isinstance(other, list):
-                    for item in other:
-                        _set_wildcard_outputs(item)
-                        current_graph.add_edge(item.name, self.name)
-                    return self
-                elif hasattr(other, "name"):
-                    _set_wildcard_outputs(other)
-                    current_graph.add_edge(other.name, self.name)
-                    return self
-        return self
-
-    def __gt__(self, other):
-        """START > op or op > END (soft edge)."""
-        if self == START:
-            current_graph = get_current()
-            if current_graph and hasattr(current_graph, "add_edge"):
-                if isinstance(other, list):
-                    for item in other:
-                        current_graph.add_edge(self.name, item.name, soft=True)
-                    return other
-                elif hasattr(other, "name"):
-                    current_graph.add_edge(self.name, other.name, soft=True)
-                    return other
-        return super().__gt__(other)
-
-    def __rgt__(self, other):
-        """[ops] > END (soft edge)."""
-        current_graph = get_current()
-        if current_graph and hasattr(current_graph, "add_edge"):
-            if self == END:
-                # Auto-set outputs: each output key -> parent[key]
-                def _set_wildcard_outputs(target_op):
-                    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
-                        if target_op.outputs is None:
-                            target_op.outputs = {}
-                        parent_op = getattr(target_op, "parent", None) or PARENT
-                        for key in target_op.outputs:
-                            param = target_op.outputs[key]
-                            if hasattr(param, "value") and param.value is None:
-                                param.value = Ref(parent_op, key)
-
-                if isinstance(other, list):
-                    for item in other:
-                        _set_wildcard_outputs(item)
-                        current_graph.add_edge(item.name, self.name, soft=True)
-                elif hasattr(other, "name"):
-                    _set_wildcard_outputs(other)
-                    current_graph.add_edge(other.name, self.name, soft=True)
-                return self
-        return self
-
-
-# Global dummy ops
-START = DummyOp("__START__")
-END = DummyOp("__END__")
-PARENT = DummyOp("__PARENT__")
+# Re-export edge classes and singletons for backward compatibility
+from hush.core.ops._edges import END, PARENT, START, DummyOp, SoftEdge  # noqa: E402, F401

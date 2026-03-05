@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional
 
-DEFAULT_CONTEXT = "main"
+DEFAULT_CONTEXT = ("main",)
 
 
 class Cell:
@@ -24,7 +24,7 @@ class Cell:
         Args:
             default_value: Value returned when context doesn't exist
         """
-        self.contexts: Dict[str, Any] = {}  # context_id -> value
+        self.contexts: Dict[tuple, Any] = {}  # context_id -> value
         self.default_value = default_value
 
     def __setitem__(self, context_id: Optional[str], value: Any) -> None:

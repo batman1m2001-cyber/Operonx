@@ -75,12 +75,17 @@ class MemoryState:
     # =========================================================================
 
     @staticmethod
-    def _unpack_key(key) -> Tuple[str, str, str]:
+    def _unpack_key(key) -> Tuple[str, str, tuple]:
         """Unpack 2-tuple or 3-tuple key into (op, var, ctx_key)."""
         if len(key) == 2:
             return key[0], key[1], DEFAULT_CONTEXT
         op, var, ctx = key
-        return op, var, (ctx if ctx is not None else DEFAULT_CONTEXT)
+        if ctx is None:
+            return op, var, DEFAULT_CONTEXT
+        # Accept string context for backwards compat
+        if isinstance(ctx, str):
+            return op, var, (ctx,)
+        return op, var, ctx
 
     def __setitem__(
         self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any
@@ -136,7 +141,7 @@ class MemoryState:
         # No value - return default
         return cell.default_value
 
-    def get(self, op: str, var: str, ctx: Optional[str] = None) -> Any:
+    def get(self, op: str, var: str, ctx=None) -> Any:
         """Get value with explicit parameters."""
         return self[op, var, ctx]
 
@@ -147,12 +152,17 @@ class MemoryState:
             raise KeyError(f"({op}, {var}) not found in schema")
         return self._cells[idx]
 
-    def has(self, op: str, var: str, ctx: Optional[str] = None) -> bool:
+    def has(self, op: str, var: str, ctx=None) -> bool:
         """Check if value exists (without resolving ref)."""
         idx = self.schema.get_index(op, var)
         if idx < 0:
             return False
-        ctx_key = ctx if ctx is not None else DEFAULT_CONTEXT
+        if ctx is None:
+            ctx_key = DEFAULT_CONTEXT
+        elif isinstance(ctx, str):
+            ctx_key = (ctx,)
+        else:
+            ctx_key = ctx
         return ctx_key in self._cells[idx]
 
     # =========================================================================

@@ -1,41 +1,48 @@
-"""Tests for MapOp - parallel iteration node."""
+"""Tests for parallel iteration patterns using generator ops.
+
+These tests replace the old MapOp tests. Generator ops + the streaming
+scheduler in GraphOp now handle all parallel iteration patterns.
+MapOp's parallel execution is the default behavior of the streaming scheduler.
+"""
 
 import asyncio
 
 import pytest
 
-from hush.core.ops.base import END, PARENT, START
-from hush.core.ops.graph.graph_op import GraphOp
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.map_op import MapOp
-from hush.core.ops.transform.func_op import op
+from hush.core import END, PARENT, START, GraphOp, op
 from hush.core.states import MemoryState, StateSchema
 
 # ============================================================
-# Test 1: Simple Iteration with Each()
+# Test 1: Simple Iteration
 # ============================================================
 
 
 class TestSimpleIteration:
-    """Test basic iteration with Each() wrapper."""
+    """Test basic iteration with generator op."""
 
     @pytest.mark.asyncio
     async def test_double_values(self):
-        """Test simple doubling of values."""
+        """Test simple doubling of values via generator."""
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
 
         @op
         def double(value: int):
             return {"result": value * 2}
 
-        with MapOp(name="double_loop", inputs={"value": Each([1, 2, 3, 4, 5])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="double_loop") as g:
+            src = each_item(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == [2, 4, 6, 8, 10]
 
 
@@ -45,92 +52,103 @@ class TestSimpleIteration:
 
 
 class TestBroadcastIteration:
-    """Test iteration with broadcast values."""
+    """Test iteration with broadcast values from batch op."""
 
     @pytest.mark.asyncio
     async def test_multiply_with_broadcast(self):
         """Test multiplication with broadcast multiplier."""
 
         @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
+
+        @op
+        def get_config():
+            return {"multiplier": 10}
+
+        @op
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
-        with MapOp(
-            name="multiply_loop",
-            inputs={
-                "value": Each([1, 2, 3]),
-                "multiplier": 10,  # broadcast
-            },
-        ) as loop:
-            node = multiply(
-                inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
+        with GraphOp(name="multiply_loop") as g:
+            cfg = get_config()
+            src = each_item(items=PARENT["items"])
+            m = multiply(value=src["value"], multiplier=cfg["multiplier"])
+            START >> [cfg, src]
+            [cfg, src] >> m >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == [10, 20, 30]
 
 
 # ============================================================
-# Test 3: Multiple Each() Variables (Zip)
+# Test 3: Multiple Lists (Zip)
 # ============================================================
 
 
-class TestMultipleEachVariables:
-    """Test iteration with multiple Each() variables (zipped)."""
+class TestMultipleListsZip:
+    """Test zipping two lists inside a generator."""
 
     @pytest.mark.asyncio
     async def test_zip_two_lists(self):
-        """Test zipping two lists together."""
+        """Test zipping two lists together via generator."""
+
+        @op
+        def zip_items(xs: list, ys: list):
+            for x, y in zip(xs, ys):
+                yield {"x": x, "y": y}
 
         @op
         def add(x: int, y: int):
             return {"sum": x + y}
 
-        with MapOp(name="add_loop", inputs={"x": Each([1, 2, 3]), "y": Each([10, 20, 30])}) as loop:
-            node = add(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="add_loop") as g:
+            src = zip_items(xs=PARENT["xs"], ys=PARENT["ys"])
+            a = add(x=src["x"], y=src["y"])
+            START >> src >> a >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["sum"] == [11, 22, 33]
 
     @pytest.mark.asyncio
     async def test_multiple_each_with_broadcast(self):
-        """Test multiple Each() variables plus broadcast."""
+        """Test multiple zipped lists plus broadcast config."""
+
+        @op
+        def zip_items(xs: list, ys: list):
+            for x, y in zip(xs, ys):
+                yield {"x": x, "y": y}
+
+        @op
+        def get_factor():
+            return {"factor": 2}
 
         @op
         def compute(x: int, y: int, factor: int):
             return {"result": (x + y) * factor}
 
-        with MapOp(
-            name="compute_loop",
-            inputs={
-                "x": Each([1, 2, 3]),
-                "y": Each([10, 20, 30]),
-                "factor": 2,  # broadcast
-            },
-        ) as loop:
-            node = compute(
-                inputs={"x": PARENT["x"], "y": PARENT["y"], "factor": PARENT["factor"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
+        with GraphOp(name="compute_loop") as g:
+            f = get_factor()
+            src = zip_items(xs=PARENT["xs"], ys=PARENT["ys"])
+            c = compute(x=src["x"], y=src["y"], factor=f["factor"])
+            START >> [f, src]
+            [f, src] >> c >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await loop.run(state)
-        assert result["result"] == [22, 44, 66]  # (1+10)*2, (2+20)*2, (3+30)*2
+        result = await g.run(state)
+        assert result["result"] == [22, 44, 66]
 
 
 # ============================================================
@@ -146,27 +164,30 @@ class TestStringProcessing:
         """Test formatting greeting strings."""
 
         @op
+        def each_name(names: list):
+            for name in names:
+                yield {"name": name}
+
+        @op
+        def get_greeting():
+            return {"greeting": "Hello"}
+
+        @op
         def format_greeting(name: str, greeting: str):
             return {"message": f"{greeting}, {name}!"}
 
-        with MapOp(
-            name="greeting_loop",
-            inputs={
-                "name": Each(["Alice", "Bob", "Charlie"]),
-                "greeting": "Hello",  # broadcast
-            },
-        ) as loop:
-            node = format_greeting(
-                inputs={"name": PARENT["name"], "greeting": PARENT["greeting"]},
-                outputs={"*": PARENT},
-            )
-            START >> node >> END
+        with GraphOp(name="greeting_loop") as g:
+            greet = get_greeting()
+            src = each_name(names=PARENT["names"])
+            fmt = format_greeting(name=src["name"], greeting=greet["greeting"])
+            START >> [greet, src]
+            [greet, src] >> fmt >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"names": ["Alice", "Bob", "Charlie"]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         expected = ["Hello, Alice!", "Hello, Bob!", "Hello, Charlie!"]
         assert result["message"] == expected
 
@@ -177,11 +198,16 @@ class TestStringProcessing:
 
 
 class TestChainOfNodes:
-    """Test multiple nodes chained inside a loop."""
+    """Test multiple ops chained after a generator."""
 
     @pytest.mark.asyncio
     async def test_add_then_multiply(self):
-        """Test chain: add_one -> multiply_two."""
+        """Test chain: generator >> add_one >> multiply_two >> END."""
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"x": item}
 
         @op
         def add_one(x: int):
@@ -191,47 +217,52 @@ class TestChainOfNodes:
         def multiply_two(y: int):
             return {"z": y * 2}
 
-        with MapOp(name="chain_loop", inputs={"x": Each([1, 2, 3])}) as loop:
-            n1 = add_one(inputs={"x": PARENT["x"]})
-            n2 = multiply_two(inputs={"y": n1["y"]}, outputs={"*": PARENT})
-            START >> n1 >> n2 >> END
+        with GraphOp(name="chain_loop") as g:
+            src = each_item(items=PARENT["items"])
+            n1 = add_one(x=src["x"])
+            n2 = multiply_two(y=n1["y"])
+            START >> src >> n1 >> n2 >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await loop.run(state)
-        assert result["z"] == [4, 6, 8]  # (1+1)*2, (2+1)*2, (3+1)*2
+        result = await g.run(state)
+        assert result["z"] == [4, 6, 8]
 
 
 # ============================================================
-# Test 6: Concurrency Limit
+# Test 6: Concurrency with Async Downstream
 # ============================================================
 
 
-class TestConcurrencyLimit:
-    """Test max_concurrency parameter."""
+class TestConcurrency:
+    """Test that streaming scheduler runs downstream ops concurrently."""
 
     @pytest.mark.asyncio
-    async def test_limited_concurrency(self):
-        """Test with max_concurrency=2."""
+    async def test_concurrent_processing(self):
+        """Test concurrent execution of downstream ops."""
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
 
         @op
         async def slow_process(value: int):
             await asyncio.sleep(0.01)
             return {"result": value * 10}
 
-        with MapOp(
-            name="concurrent_loop", inputs={"value": Each([1, 2, 3, 4, 5])}, max_concurrency=2
-        ) as loop:
-            node = slow_process(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="concurrent_loop") as g:
+            src = each_item(items=PARENT["items"])
+            proc = slow_process(value=src["value"])
+            START >> src >> proc >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == [10, 20, 30, 40, 50]
 
 
@@ -241,15 +272,20 @@ class TestConcurrencyLimit:
 
 
 class TestRefFromPreviousNode:
-    """Test iteration using Ref to data from previous node."""
+    """Test iteration using data from previous node."""
 
     @pytest.mark.asyncio
     async def test_each_from_ref(self):
-        """Test Each() with Ref to another node's output."""
+        """Test generator receiving list from upstream node."""
 
         @op
         def generate_data():
             return {"numbers": [10, 20, 30], "factor": 5}
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
         def process_item(item: int, factor: int):
@@ -257,29 +293,16 @@ class TestRefFromPreviousNode:
 
         with GraphOp(name="ref_test_graph") as graph:
             gen_node = generate_data()
-
-            with MapOp(
-                name="ref_loop",
-                inputs={
-                    "item": Each(gen_node["numbers"]),
-                    "factor": gen_node["factor"],  # broadcast Ref
-                },
-                outputs={"*": PARENT},
-            ) as loop:
-                proc_node = process_item(
-                    inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
-                )
-                START >> proc_node >> END
-
-            START >> gen_node >> loop >> END
+            src = each_item(items=gen_node["numbers"])
+            proc = process_item(item=src["item"], factor=gen_node["factor"])
+            START >> gen_node >> src >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state()
 
         result = await graph.run(state)
-        assert result["result"] == [50, 100, 150]  # 10*5, 20*5, 30*5
+        assert result["result"] == [50, 100, 150]
 
 
 # ============================================================
@@ -295,61 +318,29 @@ class TestEmptyIteration:
         """Test iteration over empty list."""
 
         @op
+        def each_item(items: list):
+            for item in items:
+                yield {"value": item}
+
+        @op
         def double(value: int):
             return {"result": value * 2}
 
-        with MapOp(name="empty_loop", inputs={"value": Each([])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="empty_loop") as g:
+            src = each_item(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": []})
 
-        result = await loop.run(state)
+        result = await g.run(state)
         assert result["result"] == []
-        assert result["iteration_metrics"]["total_iterations"] == 0
 
 
 # ============================================================
-# Test 9: Mismatched Lengths
-# ============================================================
-
-
-class TestMismatchedLengths:
-    """Test error handling for mismatched list lengths."""
-
-    @pytest.mark.asyncio
-    async def test_raises_on_length_mismatch(self):
-        """Test that mismatched Each() lengths are captured as error."""
-
-        @op
-        def dummy(x: int, y: int):
-            return {"result": x + y}
-
-        with MapOp(
-            name="mismatch_loop",
-            inputs={
-                "x": Each([1, 2, 3]),
-                "y": Each([10, 20]),  # Different length!
-            },
-        ) as loop:
-            node = dummy(inputs={"x": PARENT["x"], "y": PARENT["y"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        await loop.run(state)
-        # Error is captured in state, not raised
-        error = state["mismatch_loop", "error"]
-        assert error is not None
-        assert "same length" in error
-
-
-# ============================================================
-# Test 10: Ref with Nested Operations
+# Test 9: Ref with Nested Key Access
 # ============================================================
 
 
@@ -358,11 +349,16 @@ class TestRefWithNestedOperations:
 
     @pytest.mark.asyncio
     async def test_nested_ref_access(self):
-        """Test Each() with nested Ref like node['a']['b']."""
+        """Test generator with nested Ref like node['a']['b']."""
 
         @op
         def get_complex_data():
             return {"dataset": {"items": [10, 20, 30], "multiplier": 2}}
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
         def process_with_factor(item: int, factor: int):
@@ -370,33 +366,20 @@ class TestRefWithNestedOperations:
 
         with GraphOp(name="ref_ops_graph") as graph:
             data_node = get_complex_data()
-
-            with MapOp(
-                name="ref_ops_loop",
-                inputs={
-                    "item": Each(data_node["dataset"]["items"]),
-                    "factor": data_node["dataset"]["multiplier"],
-                },
-                outputs={"*": PARENT},
-            ) as loop:
-                proc = process_with_factor(
-                    inputs={"item": PARENT["item"], "factor": PARENT["factor"]},
-                    outputs={"*": PARENT},
-                )
-                START >> proc >> END
-
-            START >> data_node >> loop >> END
+            src = each_item(items=data_node["dataset"]["items"])
+            proc = process_with_factor(item=src["item"], factor=data_node["dataset"]["multiplier"])
+            START >> data_node >> src >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state()
 
         result = await graph.run(state)
-        assert result["result"] == [20, 40, 60]  # [10*2, 20*2, 30*2]
+        assert result["result"] == [20, 40, 60]
 
 
 # ============================================================
-# Test 11: PARENT Broadcast Inside GraphOp
+# Test 10: PARENT Broadcast Inside GraphOp
 # ============================================================
 
 
@@ -405,11 +388,16 @@ class TestParentBroadcast:
 
     @pytest.mark.asyncio
     async def test_parent_broadcast(self):
-        """Test MapOp with PARENT broadcast inside GraphOp."""
+        """Test generator with PARENT broadcast inside GraphOp."""
 
         @op
         def get_items():
             return {"items": [1, 2, 3, 4, 5]}
+
+        @op
+        def each_item(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
         def multiply_item(item: int, multiplier: int):
@@ -417,202 +405,132 @@ class TestParentBroadcast:
 
         with GraphOp(name="parent_broadcast_graph") as graph:
             items_node = get_items()
-
-            with MapOp(
-                name="multiply_loop",
-                inputs={
-                    "item": Each(items_node["items"]),
-                    "multiplier": PARENT["multiplier"],  # PARENT = graph
-                },
-                outputs={"*": PARENT},
-            ) as loop:
-                proc = multiply_item(
-                    inputs={"item": PARENT["item"], "multiplier": PARENT["multiplier"]},
-                    outputs={"*": PARENT},
-                )
-                START >> proc >> END
-
-            START >> items_node >> loop >> END
+            src = each_item(items=items_node["items"])
+            proc = multiply_item(item=src["item"], multiplier=PARENT["multiplier"])
+            START >> items_node >> src >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema, inputs={"multiplier": 10})
+        state = schema.create_state(inputs={"multiplier": 10})
 
         result = await graph.run(state)
         assert result["result"] == [10, 20, 30, 40, 50]
 
 
 # ============================================================
-# Test 12: Iteration Metrics
-# ============================================================
-
-
-class TestIterationMetrics:
-    """Test iteration metrics are collected."""
-
-    @pytest.mark.asyncio
-    async def test_metrics_collected(self):
-        """Test that iteration metrics are returned."""
-
-        @op
-        def double(value: int):
-            return {"result": value * 2}
-
-        with MapOp(name="metrics_loop", inputs={"value": Each([1, 2, 3])}) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        result = await loop.run(state)
-
-        assert "iteration_metrics" in result
-        metrics = result["iteration_metrics"]
-        assert metrics["total_iterations"] == 3
-        assert metrics["success_count"] == 3
-        assert metrics["error_count"] == 0
-
-
-# ============================================================
-# Test 13: Nested Iteration (MapOp + WhileLoop)
+# Test 11: Nested Iteration
 # ============================================================
 
 
 class TestNestedIteration:
-    """Test nested iteration patterns.
-
-    Note: Nested MapOp-in-MapOp with outer loop variables passed to inner
-    loop is NOT currently supported due to parallel execution - all outer
-    iterations run concurrently and share state, causing variable conflicts.
-
-    The supported pattern is MapOp with WhileLoop inside, where WhileLoop
-    runs sequentially within each MapOp iteration.
-    """
+    """Test nested iteration using nested generators."""
 
     @pytest.mark.asyncio
-    async def test_mapnode_with_whileloop_inside(self):
-        """Test MapOp containing WhileLoop - the supported nested pattern."""
-        from hush.core.ops.iteration.while_op import WhileOp
+    async def test_nested_generators(self):
+        """Test nested generator ops for nested iteration."""
 
         @op
-        def halve(value: int):
-            return {"new_value": value // 2}
-
-        with MapOp(name="outer_map", inputs={"item": Each([10, 20, 30])}) as map_op:
-            with WhileOp(
-                name="inner_while",
-                inputs={"value": PARENT["item"]},
-                until="value < 5",
-                max_iterations=10,
-            ) as while_loop:
-                node = halve(inputs={"value": PARENT["value"]})
-                node["new_value"] >> PARENT["value"]
-                START >> node >> END
-
-            while_loop["value"] >> PARENT["final_value"]
-            START >> while_loop >> END
-
-        map_op.build()
-        schema = StateSchema(map_op)
-        state = MemoryState(schema)
-
-        result = await map_op.run(state)
-
-        # 10 -> 5 -> 2 (stops at 2)
-        # 20 -> 10 -> 5 -> 2 (stops at 2)
-        # 30 -> 15 -> 7 -> 3 (stops at 3)
-        assert result["final_value"] == [2, 2, 3]
-
-    @pytest.mark.asyncio
-    async def test_mapnode_independent_inner_loop(self):
-        """Test MapOp with inner MapOp that doesn't depend on outer vars."""
+        def outer_iter(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
-        def sum_list(items: list):
-            return {"total": sum(items)}
+        def inner_halve(value: int):
+            """Halve until < 5, yield each step."""
+            while value >= 5:
+                value = value // 2
+                yield {"final_value": value}
 
-        with MapOp(name="outer_map", inputs={"multiplier": Each([1, 2, 3])}) as outer:
-            # Inner map iterates over a fixed list, not dependent on outer
-            with MapOp(name="inner_map", inputs={"value": Each([10, 20, 30])}) as inner:
+        with GraphOp(name="outer_loop") as g:
+            src = outer_iter(items=PARENT["items"])
+            inner = inner_halve(value=src["item"])
+            START >> src >> inner >> END
 
-                @op
-                def double(value: int):
-                    return {"result": value * 2}
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [10, 20, 30]})
 
-                node = double(inputs={"value": PARENT["value"]})
-                node["result"] >> PARENT["result"]
-                START >> node >> END
-
-            # Sum the inner results
-            sum_node = sum_list(inputs={"items": inner["result"]})
-            sum_node["total"] >> PARENT["total"]
-            START >> inner >> sum_node >> END
-
-        outer.build()
-        schema = StateSchema(outer)
-        state = MemoryState(schema)
-
-        result = await outer.run(state)
-
-        # Inner map always produces [20, 40, 60], sum = 120
-        # This runs 3 times (once per outer iteration)
-        assert result["total"] == [120, 120, 120]
+        result = await g.run(state)
+        # 10 -> 5 -> 2 (yields 5, 2)
+        # 20 -> 10 -> 5 -> 2 (yields 10, 5, 2)
+        # 30 -> 15 -> 7 -> 3 (yields 15, 7, 3)
+        assert result["final_value"] == [5, 2, 10, 5, 2, 15, 7, 3]
 
 
 # ============================================================
-# Test: MapOp.of() Shorthand
+# Test 12: Dict Items in Stream
 # ============================================================
 
 
-class TestMapShorthand:
-    """Test MapOp.of() shorthand classmethod."""
+class TestDictItemsInStream:
+    """Test streaming dict items."""
 
     @pytest.mark.asyncio
-    async def test_map_shorthand_basic(self):
-        """Test basic MapOp.of() with Each()."""
+    async def test_process_user_dicts(self):
+        """Test processing user dictionaries via generator."""
+
+        @op
+        def each_user(users: list):
+            for user in users:
+                yield {"user": user}
+
+        @op
+        def grade_user(user: dict):
+            grade = "A" if user["score"] >= 90 else "B" if user["score"] >= 80 else "C"
+            return {"name": user["name"], "grade": grade}
+
+        with GraphOp(name="grade_loop") as g:
+            src = each_user(users=PARENT["users"])
+            grader = grade_user(user=src["user"])
+            START >> src >> grader >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(
+            inputs={
+                "users": [
+                    {"name": "Alice", "score": 85},
+                    {"name": "Bob", "score": 92},
+                    {"name": "Charlie", "score": 78},
+                ]
+            }
+        )
+
+        result = await g.run(state)
+        assert result["name"] == ["Alice", "Bob", "Charlie"]
+        assert result["grade"] == ["B", "A", "C"]
+
+
+# ============================================================
+# Test 13: Async Generator
+# ============================================================
+
+
+class TestAsyncGenerator:
+    """Test async generator op."""
+
+    @pytest.mark.asyncio
+    async def test_async_generator(self):
+        """Test async generator yields items with async iteration."""
+
+        @op
+        async def async_source(items: list):
+            for item in items:
+                await asyncio.sleep(0.01)
+                yield {"value": item}
 
         @op
         def double(value: int):
             return {"result": value * 2}
 
-        with MapOp.of(value=Each([1, 2, 3])) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
+        with GraphOp(name="async_gen_loop") as g:
+            src = async_source(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await loop.run(state)
-        assert sorted(result["result"]) == [2, 4, 6]
-
-    @pytest.mark.asyncio
-    async def test_map_shorthand_concurrency(self):
-        """Test MapOp.of() with max_concurrency."""
-
-        @op
-        def double(value: int):
-            return {"result": value * 2}
-
-        with MapOp.of(value=Each([1, 2, 3, 4]), max_concurrency=2) as loop:
-            node = double(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> node >> END
-
-        loop.build()
-        schema = StateSchema(loop)
-        state = MemoryState(schema)
-
-        result = await loop.run(state)
-        assert sorted(result["result"]) == [2, 4, 6, 8]
-
-    def test_map_shorthand_auto_name(self):
-        """Test that MapOp.of() auto-names from variable assignment."""
-        my_map = MapOp.of(value=Each([1, 2, 3]))
-        assert my_map.name == "my_map"
-
-    def test_map_shorthand_is_mapnode(self):
-        """Test that MapOp.of() returns a MapOp instance."""
-        loop = MapOp.of(value=Each([1, 2, 3]))
-        assert isinstance(loop, MapOp)
+        result = await g.run(state)
+        assert result["result"] == [2, 4, 6, 8, 10]

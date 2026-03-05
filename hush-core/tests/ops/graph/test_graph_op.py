@@ -1,6 +1,6 @@
 """Test suite for GraphOp - from simple to complex scenarios.
 
-Only tests GraphOp and FuncOp. Flow nodes (BranchOp, ForOp, etc.)
+Only tests GraphOp and FuncOp. Flow nodes (BranchOp, etc.)
 are tested separately.
 """
 
@@ -1437,427 +1437,164 @@ class TestNodeToNodeOutputMapping:
 
 
 class TestComplexGraphWithAllOpTypes:
-    """Test complex graphs combining BranchOp, ForOp, WhileOp, and FuncOp.
+    """Test complex graphs combining BranchOp and generator ops.
 
     These tests demonstrate real-world scenarios where multiple node types
-    work together in a single workflow using new syntax:
-    - Branch("name").if_(condition, target).else_(default)
-    - producer["key"] >> consumer["key"] for output mapping
+    work together using generator-based iteration (replaces ForOp/WhileOp).
     """
 
     @pytest.mark.asyncio
-    async def test_forloop_with_new_syntax(self):
-        """Test ForOp using >> syntax inside and to PARENT."""
-        from hush.core.ops.iteration.base import Each
-        from hush.core.ops.iteration.for_op import ForOp
+    async def test_generator_iteration_with_new_syntax(self):
+        """Test generator op with >> syntax for iteration."""
+
+        @op
+        def each_item(data: list):
+            for item in data:
+                yield {"value": item}
 
         @op
         def double_number(value: int):
             return {"result": value * 2}
 
-        with GraphOp(name="forloop_graph") as graph:
-            with ForOp(name="double_loop", inputs={"value": Each(PARENT["data"])}) as loop:
-                node = double_number(inputs={"value": PARENT["value"]})
-                node["result"] >> PARENT["result"]
-                START >> node >> END
-
-            # Map loop result to graph output
-            loop["result"] >> PARENT["final_result"]
-            START >> loop >> END
+        with GraphOp(name="gen_iter_graph") as graph:
+            src = each_item(data=PARENT["data"])
+            node = double_number(value=src["value"])
+            START >> src >> node >> END
 
         graph.build()
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"data": [1, 2, 3, 4, 5]})
         result = await graph.run(state)
-        state.show()
-        assert result["final_result"] == [2, 4, 6, 8, 10]
+        assert result["result"] == [2, 4, 6, 8, 10]
 
     @pytest.mark.asyncio
-    async def test_while_loop_with_branch_inside(self):
-        """WhileLoop with BranchOp inside for conditional processing.
-
-        Loop increments counter. Inside loop, branch decides:
-        - If counter is even: add 10
-        - If counter is odd: add 5
-        Stop when total >= 50
-        """
-        from hush.core.ops.flow.branch_op import Branch
-        from hush.core.ops.iteration.while_op import WhileOp
+    async def test_nested_generators(self):
+        """Nested generators: outer yields items, inner halves each until < 5."""
 
         @op
-        def increment_counter(counter: int):
-            return {"new_counter": counter + 1}
+        def each_item(items: list):
+            for item in items:
+                yield {"item": item}
 
         @op
-        def add_ten(total: int):
-            return {"new_total": total + 10}
+        def halve_until_small(value: int):
+            while value >= 5:
+                value = value // 2
+            yield {"final_value": value}
 
-        @op
-        def add_five(total: int):
-            return {"new_total": total + 5}
-
-        @op
-        def merge_totals(even_total=None, odd_total=None):
-            # One branch executes, the other returns None
-            return {"merged_total": even_total if even_total is not None else odd_total}
-
-        with GraphOp(name="while_branch_graph") as graph:
-            with WhileOp(
-                name="main_loop",
-                inputs={"counter": 0, "total": 0},
-                until="total >= 50",
-                max_iterations=20,
-            ) as loop:
-                # Increment counter first
-                inc = increment_counter(inputs={"counter": PARENT["counter"]})
-                inc["new_counter"] >> PARENT["counter"]
-
-                # Branch based on counter parity using new fluent syntax
-                branch = (
-                    Branch("parity_check")
-                    .if_(inc["new_counter"].apply(lambda x: x % 2 == 0), "even_node")
-                    .else_("odd_node")
-                )
-
-                # Even path: add 10
-                even_node = add_ten(inputs={"total": PARENT["total"]})
-
-                # Odd path: add 5
-                odd_node = add_five(inputs={"total": PARENT["total"]})
-
-                # Merge to update total using new >> syntax
-                # Both branches output to separate inputs, merge picks the one that executed
-                merge = merge_totals(
-                    inputs={
-                        "even_total": even_node["new_total"],
-                        "odd_total": odd_node["new_total"],
-                    }
-                )
-
-                merge["merged_total"] >> PARENT["total"]
-
-                # Note: Can't chain soft edges in single line due to Python's
-                # comparison chaining (a > b > c becomes (a>b) and (b>c))
-                START >> inc >> branch >> [even_node, odd_node] > merge
-                merge >> END
-
-            loop["total"] >> PARENT["final_total"]
-            loop["counter"] >> PARENT["final_counter"]
-            START >> loop >> END
+        with GraphOp(name="nested_gen_graph") as graph:
+            outer = each_item(items=PARENT["items"])
+            inner = halve_until_small(value=outer["item"])
+            START >> outer >> inner >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = schema.create_state(inputs={})
+        state = schema.create_state(inputs={"items": [10, 20, 30]})
 
         result = await graph.run(state)
 
-        # counter: 1(odd,+5), 2(even,+10), 3(odd,+5), 4(even,+10), 5(odd,+5), 6(even,+10), 7(odd,+5)
-        # total: 5->15->20->30->35->45->50
-        assert result["final_total"] >= 50
+        # 10 -> 5 -> 2 (final 2)
+        # 20 -> 10 -> 5 -> 2 (final 2)
+        # 30 -> 15 -> 7 -> 3 (final 3)
+        assert result["final_value"] == [2, 2, 3]
 
     @pytest.mark.asyncio
-    async def test_for_loop_with_while_loop_inside(self):
-        """ForLoop iterating items, with WhileLoop processing each item.
+    async def test_generator_with_conditional_processing(self):
+        """Generator with conditional logic inside the generator itself.
 
-        ForLoop: iterate over [10, 20, 30]
-        WhileLoop: for each item, divide by 2 until < 5
+        Generator yields numbers with even/odd conditional processing.
         """
-        from hush.core.ops.iteration.base import Each
-        from hush.core.ops.iteration.for_op import ForOp
-        from hush.core.ops.iteration.while_op import WhileOp
 
         @op
-        def halve(value: int):
-            return {"new_value": value // 2}
+        def process_items(limit: int):
+            for i in range(1, limit + 1):
+                if i % 2 == 0:
+                    yield {"result": i + 10}
+                else:
+                    yield {"result": i + 5}
 
-        with GraphOp(name="forloop_whileloop_graph") as graph:
-            with ForOp(name="outer_for", inputs={"item": Each([10, 20, 30])}) as for_loop:
-                with WhileOp(
-                    name="inner_while",
-                    inputs={"value": PARENT["item"]},
-                    until="value < 5",
-                    max_iterations=20,
-                ) as while_loop:
-                    halve_node = halve(inputs={"value": PARENT["value"]})
-                    halve_node["new_value"] >> PARENT["value"]
-                    START >> halve_node >> END
-
-                while_loop["value"] >> PARENT["value"]
-                START >> while_loop >> END
-
-            for_loop["value"] >> PARENT["results"]
-            START >> for_loop >> END
+        with GraphOp(name="gen_cond_graph") as graph:
+            src = process_items(limit=PARENT["limit"])
+            START >> src >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = schema.create_state(inputs={})
+        state = schema.create_state(inputs={"limit": 4})
+
+        result = await graph.run(state)
+        # 1(odd,+5=6), 2(even,+10=12), 3(odd,+5=8), 4(even,+10=14)
+        assert result["result"] == [6, 12, 8, 14]
+
+    @pytest.mark.asyncio
+    async def test_generator_with_downstream_chain(self):
+        """Generator with chain of downstream ops per yield.
+
+        Generator yields items, each goes through add >> multiply chain.
+        """
+
+        @op
+        def each_number(numbers: list):
+            for n in numbers:
+                yield {"value": n}
+
+        @op
+        def add_ten(value: int):
+            return {"added": value + 10}
+
+        @op
+        def double(added: int):
+            return {"result": added * 2}
+
+        with GraphOp(name="gen_chain") as graph:
+            src = each_number(numbers=PARENT["numbers"])
+            a = add_ten(value=src["value"])
+            d = double(added=a["added"])
+            START >> src >> a >> d >> END
+
+        graph.build()
+        schema = StateSchema(graph)
+        state = schema.create_state(inputs={"numbers": [1, 2, 3, 4, 5]})
 
         result = await graph.run(state)
 
-        # 10 -> 5 -> 2 (stops at 2)
-        # 20 -> 10 -> 5 -> 2 (stops at 2)
-        # 30 -> 15 -> 7 -> 3 (stops at 3)
-        expected = [2, 2, 3]
-        assert result["results"] == expected
+        # (1+10)*2=22, (2+10)*2=24, (3+10)*2=26, (4+10)*2=28, (5+10)*2=30
+        assert result["result"] == [22, 24, 26, 28, 30]
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_with_all_node_types(self):
-        """Complex pipeline: Input -> Transform -> Branch -> ForLoop/WhileLoop -> Aggregate.
+    async def test_nested_graph_with_generator(self):
+        """Nested GraphOp containing generator ops.
 
-        1. FuncOp: Parse input and determine processing mode
-        2. BranchOp: Route based on mode
-        3. ForOp: Batch processing path
-        4. WhileOp: Iterative processing path
-        5. FuncOp: Aggregate results
+        Outer graph calls inner graph which uses generators for iteration.
         """
-        from hush.core.ops.flow.branch_op import Branch
-        from hush.core.ops.iteration.base import Each
-        from hush.core.ops.iteration.for_op import ForOp
-        from hush.core.ops.iteration.while_op import WhileOp
-
-        @op
-        def parse_input(raw_input: dict):
-            return {
-                "mode": raw_input.get("mode", "batch"),
-                "items": raw_input.get("items", []),
-                "target": raw_input.get("target", 100),
-            }
-
-        @op
-        def process_item(item: int, multiplier: int):
-            return {"processed": item * multiplier}
-
-        @op
-        def iterative_accumulate(current: int, step: int):
-            return {"new_current": current + step}
-
-        @op
-        def aggregate_results(batch_result=None, iterative_result=None):
-            # One of these will be None depending on branch
-            if batch_result is not None:
-                return {
-                    "final": sum(batch_result) if isinstance(batch_result, list) else batch_result
-                }
-            return {"final": iterative_result}
-
-        with GraphOp(name="full_pipeline") as graph:
-            # Step 1: Parse input
-            parser = parse_input(inputs={"raw_input": PARENT["input"]})
-
-            # Step 2: Branch based on mode using new fluent syntax
-            router = (
-                Branch("mode_router")
-                .if_(parser["mode"] == "batch", "batch_process")
-                .else_("iterative_process")
-            )
-
-            # Step 3a: Batch processing with ForLoop
-            with ForOp(
-                name="batch_process", inputs={"item": Each(parser["items"]), "multiplier": 2}
-            ) as batch_loop:
-                batch_node = process_item(
-                    inputs={"item": PARENT["item"], "multiplier": PARENT["multiplier"]}
-                )
-                batch_node["processed"] >> PARENT["processed"]
-                START >> batch_node >> END
-
-            # Step 3b: Iterative processing with WhileLoop
-            with WhileOp(
-                name="iterative_process",
-                inputs={"current": 0, "step": 10, "target": parser["target"]},
-                until="current >= target",
-                max_iterations=50,
-            ) as iter_loop:
-                iter_node = iterative_accumulate(
-                    inputs={"current": PARENT["current"], "step": PARENT["step"]}
-                )
-                iter_node["new_current"] >> PARENT["current"]
-                START >> iter_node >> END
-
-            # Step 4: Aggregate using new >> syntax
-            aggregator = aggregate_results(
-                inputs={
-                    "batch_result": batch_loop["processed"],
-                    "iterative_result": iter_loop["current"],
-                }
-            )
-
-            aggregator["final"] >> PARENT["final"]
-
-            # Wire up the graph
-            START >> parser >> router >> [batch_loop, iter_loop] > aggregator
-            aggregator >> END
-
-        graph.build()
-
-        # Test batch mode
-        schema = StateSchema(graph)
-        state1 = schema.create_state(inputs={"input": {"mode": "batch", "items": [1, 2, 3, 4, 5]}})
-        result1 = await graph.run(state1)
-        # Batch: [1*2, 2*2, 3*2, 4*2, 5*2] = [2, 4, 6, 8, 10], sum = 30
-        assert result1["final"] == 30
-
-        # Test iterative mode
-        state2 = schema.create_state(inputs={"input": {"mode": "iterative", "target": 50}})
-        result2 = await graph.run(state2)
-        # Iterative: 0->10->20->30->40->50, final = 50
-        assert result2["final"] == 50
-
-    @pytest.mark.asyncio
-    async def test_parallel_branches_with_different_loop_types(self):
-        """Parallel branches: one uses ForLoop, other uses WhileLoop, then merge.
-
-        Input: {"numbers": [1,2,3], "target": 20}
-        - Branch A (ForLoop): Sum all numbers * 2
-        - Branch B (WhileLoop): Count up to target by 5s
-        - Merge: Return both results
-        """
-        from hush.core.ops.iteration.base import Each
-        from hush.core.ops.iteration.for_op import ForOp
-        from hush.core.ops.iteration.while_op import WhileOp
-
-        @op
-        def double(value: int):
-            return {"doubled": value * 2}
-
-        @op
-        def count_step(counter: int):
-            return {"new_counter": counter + 5}
-
-        @op
-        def merge_results(for_result, while_result):
-            total_doubled = sum(for_result) if for_result else 0
-            return {"for_sum": total_doubled, "while_count": while_result}
-
-        with GraphOp(name="parallel_loops") as graph:
-            # Parallel ForLoop
-            with ForOp(name="double_loop", inputs={"value": Each(PARENT["numbers"])}) as for_loop:
-                double_node = double(inputs={"value": PARENT["value"]})
-                double_node["doubled"] >> PARENT["doubled"]
-                START >> double_node >> END
-
-            # Parallel WhileLoop
-            with WhileOp(
-                name="count_loop",
-                inputs={"counter": 0, "target": PARENT["target"]},
-                until="counter >= target",
-                max_iterations=20,
-            ) as while_loop:
-                count_node = count_step(inputs={"counter": PARENT["counter"]})
-                count_node["new_counter"] >> PARENT["counter"]
-                START >> count_node >> END
-
-            # Merge both results using new >> syntax
-            merger = merge_results(inputs={})
-            for_loop["doubled"] >> merger["for_result"]
-            while_loop["counter"] >> merger["while_result"]
-            merger["for_sum"] >> PARENT["for_sum"]
-            merger["while_count"] >> PARENT["while_count"]
-
-            START >> [for_loop, while_loop] >> merger >> END
-
-        graph.build()
-        schema = StateSchema(graph)
-        state = schema.create_state(inputs={"numbers": [1, 2, 3, 4, 5], "target": 20})
-
-        result = await graph.run(state)
-
-        # ForLoop: [2, 4, 6, 8, 10], sum = 30
-        assert result["for_sum"] == 30
-        # WhileLoop: 0->5->10->15->20, final = 20
-        assert result["while_count"] == 20
-
-    @pytest.mark.asyncio
-    async def test_nested_graph_with_all_types(self):
-        """Nested GraphOp containing Branch, ForLoop, and WhileLoop.
-
-        Outer graph calls inner graph which has all node types.
-        """
-        from hush.core.ops.flow.branch_op import Branch
-        from hush.core.ops.iteration.base import Each
-        from hush.core.ops.iteration.for_op import ForOp
-        from hush.core.ops.iteration.while_op import WhileOp
 
         @op
         def prepare_data(x: int):
-            return {"should_loop": x > 5, "items": list(range(1, x + 1)), "limit": x * 2}
+            return {"items": list(range(1, x + 1))}
 
         @op
-        def square(value: int):
-            return {"squared": value * value}
+        def square_items(items: list):
+            for item in items:
+                yield {"squared": item * item}
 
-        @op
-        def increment(counter: int):
-            return {"new_counter": counter + 1}
-
-        # Outer graph containing inner graph with all node types
         with GraphOp(name="outer_graph") as outer_graph:
-            # Inner graph with all node types (nested inside outer_graph)
             with GraphOp(
                 name="inner_processor", inputs={"x": PARENT["input_value"]}
             ) as inner_graph:
                 prep = prepare_data(inputs={"x": PARENT["x"]})
+                gen = square_items(items=prep["items"])
+                START >> prep >> gen >> END
 
-                # Branch using new fluent syntax
-                branch = (
-                    Branch("process_router")
-                    .if_(prep["should_loop"] == True, "for_process")
-                    .else_("while_process")
-                )
-
-                # ForLoop path
-                with ForOp(name="for_process", inputs={"value": Each(prep["items"])}) as for_loop:
-                    sq = square(inputs={"value": PARENT["value"]})
-                    sq["squared"] >> PARENT["squared"]
-                    START >> sq >> END
-
-                # WhileLoop path
-                with WhileOp(
-                    name="while_process",
-                    inputs={"counter": 0, "limit": prep["limit"]},
-                    until="counter >= limit",
-                    max_iterations=50,
-                ) as while_loop:
-                    inc = increment(inputs={"counter": PARENT["counter"]})
-                    inc["new_counter"] >> PARENT["counter"]
-                    START >> inc >> END
-
-                # Collect results using new >> syntax
-                collector = FuncOp(
-                    name="collector",
-                    code_fn=lambda for_result=None, while_result=None: {
-                        "result": sum(for_result) if for_result else while_result
-                    },
-                    inputs={
-                        "for_result": for_loop["squared"],
-                        "while_result": while_loop["counter"],
-                    },
-                )
-
-                collector["result"] >> PARENT["result"]
-
-                START >> prep >> branch >> [for_loop, while_loop] > collector
-                collector >> END
-
-            # Wire inner graph to outer graph
-            inner_graph["result"] >> PARENT["result"]
             START >> inner_graph >> END
 
         outer_graph.build()
 
-        # Test with x=10 (should_loop=True, use ForLoop)
+        # Test with x=5
         schema = StateSchema(outer_graph)
-        state1 = schema.create_state(inputs={"input_value": 10})
-        result1 = await outer_graph.run(state1)
-        # ForLoop: squares of 1..10 = 1+4+9+16+25+36+49+64+81+100 = 385
-        assert result1["result"] == 385
-
-        # Test with x=3 (should_loop=False, use WhileLoop)
-        state2 = schema.create_state(inputs={"input_value": 3})
-        result2 = await outer_graph.run(state2)
-        # WhileLoop: count to limit=6, result = 6
-        assert result2["result"] == 6
+        state = schema.create_state(inputs={"input_value": 5})
+        result = await outer_graph.run(state)
+        # squares of 1..5 = [1, 4, 9, 16, 25]
+        assert result["squared"] == [1, 4, 9, 16, 25]
 
 
 # ============================================================

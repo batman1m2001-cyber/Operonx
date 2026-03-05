@@ -1,56 +1,49 @@
-"""Tests for AIterOp - async streaming iteration node."""
+"""Tests for async streaming iteration patterns using generator ops.
+
+These tests replace the old AIterOp tests. Async generator ops + the streaming
+scheduler in GraphOp now handle all async streaming patterns.
+"""
 
 import asyncio
 
 import pytest
 
-from hush.core.ops.base import END, PARENT, START
-from hush.core.ops.graph.graph_op import GraphOp
-from hush.core.ops.iteration.aiter_op import AIterOp, batch_by_size
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.transform.func_op import op
-from hush.core.states import MemoryState, StateSchema
+from hush.core import END, PARENT, START, GraphOp, op
+from hush.core.states import StateSchema
 
 # ============================================================
-# Test 1: Simple Streaming
+# Test 1: Simple Async Streaming
 # ============================================================
 
 
 class TestSimpleStreaming:
-    """Test basic async iteration."""
+    """Test basic async generator iteration."""
 
     @pytest.mark.asyncio
     async def test_double_values(self):
-        """Test simple doubling of streamed values."""
+        """Test simple doubling of async-streamed values."""
 
-        async def simple_source():
-            for i in range(10):
-                yield i
+        @op
+        async def async_source(count: int):
+            for i in range(count):
                 await asyncio.sleep(0.01)
-
-        results = []
-
-        async def collect_results(data):
-            results.append(data)
+                yield {"value": i}
 
         @op
         def double_value(value: int):
             return {"result": value * 2}
 
-        with AIterOp(
-            name="double_stream", inputs={"value": Each(simple_source())}, callback=collect_results
-        ) as stream_node:
-            processor = double_value(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> processor >> END
+        with GraphOp(name="double_stream") as g:
+            src = async_source(count=PARENT["count"])
+            d = double_value(value=src["value"])
+            START >> src >> d >> END
 
-        stream_node.build()
-        schema = StateSchema(stream_node)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"count": 10})
 
-        output = await stream_node.run(state)
-
-        assert output["result"] == [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
-        assert len(results) == 10
+        result = await g.run(state)
+        assert result["result"] == [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
 
 
 # ============================================================
@@ -59,91 +52,48 @@ class TestSimpleStreaming:
 
 
 class TestStreamingWithBroadcast:
-    """Test async iteration with broadcast values."""
+    """Test async generator iteration with broadcast values."""
 
     @pytest.mark.asyncio
     async def test_multiply_with_broadcast(self):
         """Test multiplication with broadcast multiplier."""
 
-        async def number_source():
-            for i in range(5):
-                yield i + 1
+        @op
+        async def number_source(count: int):
+            for i in range(count):
                 await asyncio.sleep(0.01)
+                yield {"value": i + 1}
+
+        @op
+        def get_multiplier():
+            return {"multiplier": 10}
 
         @op
         def multiply(value: int, multiplier: int):
             return {"result": value * multiplier}
 
-        with AIterOp(
-            name="multiply_stream",
-            inputs={
-                "value": Each(number_source()),
-                "multiplier": 10,  # broadcast
-            },
-        ) as stream_node:
-            processor = multiply(
-                inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> processor >> END
+        with GraphOp(name="multiply_stream") as g:
+            cfg = get_multiplier()
+            src = number_source(count=PARENT["count"])
+            m = multiply(value=src["value"], multiplier=cfg["multiplier"])
+            START >> [cfg, src]
+            [cfg, src] >> m >> END
 
-        stream_node.build()
-        schema = StateSchema(stream_node)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"count": 5})
 
-        output = await stream_node.run(state)
-
-        assert output["result"] == [10, 20, 30, 40, 50]
+        result = await g.run(state)
+        assert result["result"] == [10, 20, 30, 40, 50]
 
 
 # ============================================================
-# Test 3: Streaming with Batching
-# ============================================================
-
-
-class TestStreamingWithBatching:
-    """Test async iteration with batching."""
-
-    @pytest.mark.asyncio
-    async def test_batch_processing(self):
-        """Test batching items before processing."""
-
-        async def batch_source():
-            for i in range(12):
-                yield i
-                await asyncio.sleep(0.005)
-
-        @op
-        def sum_batch(batch: list, batch_size: int):
-            return {"total": sum(batch), "size": batch_size}
-
-        with AIterOp(
-            name="batch_stream", inputs={"item": Each(batch_source())}, batch_fn=batch_by_size(4)
-        ) as stream_node:
-            processor = sum_batch(
-                inputs={"batch": PARENT["batch"], "batch_size": PARENT["batch_size"]},
-                outputs={"*": PARENT},
-            )
-            START >> processor >> END
-
-        stream_node.build()
-        schema = StateSchema(stream_node)
-        state = MemoryState(schema)
-
-        output = await stream_node.run(state)
-
-        # [0+1+2+3, 4+5+6+7, 8+9+10+11] = [6, 22, 38]
-        assert output["total"] == [6, 22, 38]
-        assert output["size"] == [4, 4, 4]
-
-
-# ============================================================
-# Test 4: Streaming with Ref from Upstream
+# Test 3: Streaming with Ref from Upstream
 # ============================================================
 
 
 class TestStreamingWithRef:
-    """Test async iteration with Ref from upstream node."""
+    """Test async generator with Ref from upstream node."""
 
     @pytest.mark.asyncio
     async def test_dynamic_config(self):
@@ -153,10 +103,11 @@ class TestStreamingWithRef:
         def get_config():
             return {"factor": 5, "offset": 100}
 
-        async def ref_source():
-            for i in range(4):
-                yield i + 1
+        @op
+        async def ref_source(count: int):
+            for i in range(count):
                 await asyncio.sleep(0.01)
+                yield {"value": i + 1}
 
         @op
         def compute(value: int, factor: int, offset: int):
@@ -164,312 +115,216 @@ class TestStreamingWithRef:
 
         with GraphOp(name="ref_test") as graph:
             config_node = get_config()
-
-            with AIterOp(
-                name="compute_stream",
-                inputs={
-                    "value": Each(ref_source()),
-                    "factor": config_node["factor"],  # broadcast Ref
-                    "offset": config_node["offset"],  # broadcast Ref
-                },
-                outputs={"*": PARENT},
-            ) as stream_node:
-                processor = compute(
-                    inputs={
-                        "value": PARENT["value"],
-                        "factor": PARENT["factor"],
-                        "offset": PARENT["offset"],
-                    },
-                    outputs={"*": PARENT},
-                )
-                START >> processor >> END
-
-            START >> config_node >> stream_node >> END
+            src = ref_source(count=PARENT["count"])
+            proc = compute(
+                value=src["value"],
+                factor=config_node["factor"],
+                offset=config_node["offset"],
+            )
+            START >> [config_node, src]
+            [config_node, src] >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema)
+        state = schema.create_state(inputs={"count": 4})
 
-        output = await graph.run(state)
-
+        result = await graph.run(state)
         # [1*5+100, 2*5+100, 3*5+100, 4*5+100] = [105, 110, 115, 120]
-        assert output["result"] == [105, 110, 115, 120]
+        assert result["result"] == [105, 110, 115, 120]
 
 
 # ============================================================
-# Test 5: Dict Items in Stream
+# Test 4: Dict Items in Stream
 # ============================================================
 
 
 class TestDictItemsInStream:
-    """Test streaming dict items."""
+    """Test streaming dict items via async generator."""
 
     @pytest.mark.asyncio
     async def test_process_user_dicts(self):
         """Test streaming and processing user dictionaries."""
 
-        async def dict_source():
-            users = [
-                {"name": "Alice", "score": 85},
-                {"name": "Bob", "score": 92},
-                {"name": "Charlie", "score": 78},
-            ]
+        @op
+        async def dict_source(users: list):
             for user in users:
-                yield user
                 await asyncio.sleep(0.01)
+                yield {"user": user}
 
         @op
         def grade_user(user: dict):
             grade = "A" if user["score"] >= 90 else "B" if user["score"] >= 80 else "C"
             return {"name": user["name"], "grade": grade}
 
-        with AIterOp(name="grade_stream", inputs={"user": Each(dict_source())}) as stream_node:
-            processor = grade_user(inputs={"user": PARENT["user"]}, outputs={"*": PARENT})
-            START >> processor >> END
+        with GraphOp(name="grade_stream") as g:
+            src = dict_source(users=PARENT["users"])
+            grader = grade_user(user=src["user"])
+            START >> src >> grader >> END
 
-        stream_node.build()
-        schema = StateSchema(stream_node)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(
+            inputs={
+                "users": [
+                    {"name": "Alice", "score": 85},
+                    {"name": "Bob", "score": 92},
+                    {"name": "Charlie", "score": 78},
+                ]
+            }
+        )
 
-        output = await stream_node.run(state)
-
-        assert output["name"] == ["Alice", "Bob", "Charlie"]
-        assert output["grade"] == ["B", "A", "C"]
+        result = await g.run(state)
+        assert result["name"] == ["Alice", "Bob", "Charlie"]
+        assert result["grade"] == ["B", "A", "C"]
 
 
 # ============================================================
-# Test 6: Concurrency Limit
+# Test 5: Concurrency with Async Downstream
 # ============================================================
 
 
 class TestConcurrencyLimit:
-    """Test max_concurrency parameter."""
+    """Test concurrent execution with async generator."""
 
     @pytest.mark.asyncio
-    async def test_limited_concurrency(self):
-        """Test streaming with limited concurrency."""
+    async def test_concurrent_processing(self):
+        """Test streaming with concurrent downstream processing."""
 
-        async def slow_source():
-            for i in range(6):
-                yield i
+        @op
+        async def slow_source(count: int):
+            for i in range(count):
                 await asyncio.sleep(0.01)
+                yield {"value": i}
 
         @op
         async def slow_process(value: int):
             await asyncio.sleep(0.05)
             return {"result": value * 10}
 
-        with AIterOp(
-            name="concurrent_stream", inputs={"value": Each(slow_source())}, max_concurrency=2
-        ) as stream_node:
-            processor = slow_process(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> processor >> END
+        with GraphOp(name="concurrent_stream") as g:
+            src = slow_source(count=PARENT["count"])
+            proc = slow_process(value=src["value"])
+            START >> src >> proc >> END
 
-        stream_node.build()
-        schema = StateSchema(stream_node)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"count": 6})
 
-        output = await stream_node.run(state)
-
-        assert output["result"] == [0, 10, 20, 30, 40, 50]
+        result = await g.run(state)
+        assert result["result"] == [0, 10, 20, 30, 40, 50]
 
 
 # ============================================================
-# Test 7: Stream Source from Upstream Node Output
+# Test 6: Stream from Upstream Node Output
 # ============================================================
 
 
 class TestStreamFromUpstreamNode:
-    """Test AIterOp receiving stream source from upstream node."""
+    """Test async generator receiving data from upstream node."""
 
     @pytest.mark.asyncio
     async def test_dynamic_stream_source(self):
-        """Test stream source created by upstream node."""
+        """Test stream source data created by upstream node."""
 
         @op
-        def create_stream_source(start: int, end: int):
-            """Node that produces an async iterable as output."""
+        def create_items(begin: int, end: int):
+            return {"items": [{"id": i, "value": i * 10} for i in range(begin, end)]}
 
-            async def generated_stream():
-                for i in range(start, end):
-                    yield {"id": i, "value": i * 10}
-                    await asyncio.sleep(0.01)
-
-            return {"stream": generated_stream(), "metadata": {"count": end - start}}
+        @op
+        async def stream_items(items: list):
+            for item in items:
+                await asyncio.sleep(0.01)
+                yield {"item": item}
 
         @op
         def process_item(item: dict, prefix: str):
-            """Process each streamed item."""
             return {"processed_id": f"{prefix}_{item['id']}", "doubled_value": item["value"] * 2}
 
         with GraphOp(name="dynamic_stream_graph") as graph:
-            source_creator = create_stream_source(
-                inputs={"start": PARENT["start"], "end": PARENT["end"]}
-            )
-
-            with AIterOp(
-                name="dynamic_processor",
-                inputs={"item": Each(source_creator["stream"]), "prefix": PARENT["prefix"]},
-                outputs={"*": PARENT},
-            ) as stream_node:
-                processor = process_item(
-                    inputs={"item": PARENT["item"], "prefix": PARENT["prefix"]},
-                    outputs={"*": PARENT},
-                )
-                START >> processor >> END
-
-            START >> source_creator >> stream_node >> END
+            source_creator = create_items(begin=PARENT["begin"], end=PARENT["end"])
+            src = stream_items(items=source_creator["items"])
+            proc = process_item(item=src["item"], prefix=PARENT["prefix"])
+            START >> source_creator >> src >> proc >> END
 
         graph.build()
         schema = StateSchema(graph)
-        state = MemoryState(schema, inputs={"start": 0, "end": 5, "prefix": "MSG"})
+        state = schema.create_state(inputs={"begin": 0, "end": 5, "prefix": "MSG"})
 
-        output = await graph.run(state)
-
-        assert output["processed_id"] == ["MSG_0", "MSG_1", "MSG_2", "MSG_3", "MSG_4"]
-        assert output["doubled_value"] == [0, 20, 40, 60, 80]
-
-
-# ============================================================
-# Test 8: Validation
-# ============================================================
-
-
-class TestValidation:
-    """Test input validation."""
-
-    def test_requires_exactly_one_each(self):
-        """Test that AIterOp requires exactly one Each() source."""
-
-        async def source1():
-            yield 1
-
-        async def source2():
-            yield 2
-
-        with pytest.raises(ValueError, match="exactly one Each"):
-            AIterOp(
-                name="invalid_stream",
-                inputs={
-                    "a": Each(source1()),
-                    "b": Each(source2()),  # Two Each() sources - invalid
-                },
-            )
-
-    def test_requires_at_least_one_each(self):
-        """Test that AIterOp requires at least one Each() source."""
-        with pytest.raises(ValueError, match="exactly one Each"):
-            AIterOp(
-                name="invalid_stream",
-                inputs={
-                    "a": 10,
-                    "b": 20,  # No Each() source - invalid
-                },
-            )
+        result = await graph.run(state)
+        assert result["processed_id"] == ["MSG_0", "MSG_1", "MSG_2", "MSG_3", "MSG_4"]
+        assert result["doubled_value"] == [0, 20, 40, 60, 80]
 
 
 # ============================================================
-# Test 9: AIterOp.of() Shorthand
+# Test 7: Empty Async Stream
 # ============================================================
 
 
-class TestAiterShorthand:
-    """Test AIterOp.of() shorthand classmethod."""
+class TestEmptyStream:
+    """Test empty async generator."""
 
     @pytest.mark.asyncio
-    async def test_aiter_shorthand_basic(self):
-        """Test basic AIterOp.of() with Each()."""
-
-        async def simple_source():
-            for i in range(5):
-                yield i
-                await asyncio.sleep(0.01)
+    async def test_empty_async_stream(self):
+        """Test async generator that yields nothing."""
 
         @op
-        def double_value(value: int):
+        async def empty_source(items: list):
+            for item in items:
+                await asyncio.sleep(0.01)
+                yield {"value": item}
+
+        @op
+        def double(value: int):
             return {"result": value * 2}
 
-        with AIterOp.of(value=Each(simple_source())) as stream:
-            processor = double_value(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> processor >> END
+        with GraphOp(name="empty_stream") as g:
+            src = empty_source(items=PARENT["items"])
+            d = double(value=src["value"])
+            START >> src >> d >> END
 
-        stream.build()
-        schema = StateSchema(stream)
-        state = MemoryState(schema)
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": []})
 
-        result = await stream.run(state)
-        assert result["result"] == [0, 2, 4, 6, 8]
+        result = await g.run(state)
+        assert result["result"] == []
 
-    @pytest.mark.asyncio
-    async def test_aiter_shorthand_with_broadcast(self):
-        """Test AIterOp.of() with Each() and broadcast values."""
 
-        async def number_source():
-            for i in range(4):
-                yield i + 1
-                await asyncio.sleep(0.01)
+# ============================================================
+# Test 8: Chain After Async Generator
+# ============================================================
 
-        @op
-        def multiply(value: int, multiplier: int):
-            return {"result": value * multiplier}
 
-        with AIterOp.of(value=Each(number_source()), multiplier=10) as stream:
-            processor = multiply(
-                inputs={"value": PARENT["value"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> processor >> END
-
-        stream.build()
-        schema = StateSchema(stream)
-        state = MemoryState(schema)
-
-        result = await stream.run(state)
-        assert result["result"] == [10, 20, 30, 40]
+class TestChainAfterAsyncGenerator:
+    """Test chain of ops after async generator."""
 
     @pytest.mark.asyncio
-    async def test_aiter_shorthand_with_callback(self):
-        """Test AIterOp.of() with callback passthrough."""
-
-        async def simple_source():
-            for i in range(3):
-                yield i
-                await asyncio.sleep(0.01)
-
-        results = []
-
-        async def collect(data):
-            results.append(data)
+    async def test_async_gen_chain(self):
+        """Test async generator >> add >> multiply >> END."""
 
         @op
-        def double_value(value: int):
-            return {"result": value * 2}
+        async def async_source(items: list):
+            for item in items:
+                await asyncio.sleep(0.01)
+                yield {"x": item}
 
-        with AIterOp.of(value=Each(simple_source()), callback=collect) as stream:
-            processor = double_value(inputs={"value": PARENT["value"]}, outputs={"*": PARENT})
-            START >> processor >> END
+        @op
+        def add_one(x: int):
+            return {"y": x + 1}
 
-        stream.build()
-        schema = StateSchema(stream)
-        state = MemoryState(schema)
+        @op
+        def multiply_two(y: int):
+            return {"z": y * 2}
 
-        await stream.run(state)
-        assert len(results) == 3
+        with GraphOp(name="async_chain") as g:
+            src = async_source(items=PARENT["items"])
+            n1 = add_one(x=src["x"])
+            n2 = multiply_two(y=n1["y"])
+            START >> src >> n1 >> n2 >> END
 
-    def test_aiter_shorthand_auto_name(self):
-        """Test that AIterOp.of() auto-names from variable assignment."""
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        async def src():
-            yield 1
-
-        my_stream = AIterOp.of(value=Each(src()))
-        assert my_stream.name == "my_stream"
-
-    def test_aiter_shorthand_is_asynciternode(self):
-        """Test that AIterOp.of() returns an AIterOp instance."""
-
-        async def src():
-            yield 1
-
-        node = AIterOp.of(value=Each(src()))
-        assert isinstance(node, AIterOp)
+        result = await g.run(state)
+        assert result["z"] == [4, 6, 8]
