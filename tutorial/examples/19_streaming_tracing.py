@@ -24,7 +24,6 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
 
-
 # =============================================================================
 # Generator ops — yield items one-by-one
 # =============================================================================
@@ -57,8 +56,6 @@ def analyze_chunk(chunk: str, index: int):
 # =============================================================================
 # Async generator op
 # =============================================================================
-
-
 @op
 async def async_counter(n: int):
     """Async generator: yields numbers 1..n with a simulated delay."""
@@ -76,8 +73,6 @@ def format_square(number: int, squared: int):
 # =============================================================================
 # Build workflows
 # =============================================================================
-
-
 def build_text_pipeline():
     """Pipeline: chunk_text (generator) >> analyze >> END.
 
@@ -109,8 +104,6 @@ def build_async_pipeline():
 # =============================================================================
 # Example 1: engine.run() — accumulated result
 # =============================================================================
-
-
 async def example_run():
     """Run generator workflow with engine.run() — returns final result."""
     print("=" * 60)
@@ -136,8 +129,6 @@ async def example_run():
 # =============================================================================
 # Example 2: engine.stream() — real-time events
 # =============================================================================
-
-
 async def example_stream():
     """Stream generator workflow — yields token events in real-time."""
     print("=" * 60)
@@ -169,8 +160,6 @@ async def example_stream():
 # =============================================================================
 # Example 3: async generator + stream
 # =============================================================================
-
-
 async def example_async_generator():
     """Async generator op streamed in real-time."""
     print("=" * 60)
@@ -197,8 +186,6 @@ async def example_async_generator():
 # =============================================================================
 # Example 4: Langfuse tracing with streaming metadata
 # =============================================================================
-
-
 async def example_langfuse_tracing():
     """Push streaming traces to Langfuse — shows kind, yield_count in metadata."""
     import os
@@ -268,8 +255,6 @@ async def example_langfuse_tracing():
 # =============================================================================
 # Main
 # =============================================================================
-
-
 async def main():
     await example_run()
     await example_stream()
