@@ -69,9 +69,6 @@ GraphOp.run() thực thi tất cả child ops theo dependency order.
 ### 5. Cleanup
 
 ```python
-# End streams
-await STREAM_SERVICE.end_request(request_id, session_id)
-
 # Collect + flush traces in background thread (non-blocking)
 if tracers:
     from hush.core.tracing import get_flush_worker

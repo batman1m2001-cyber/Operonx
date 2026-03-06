@@ -47,7 +47,6 @@ class HushApp:
         title: str = "Hush API",
         description: str = "",
         version: str = "0.1.0",
-        mode: str = "python",
         tracer: Optional[Union[Tracer, List[Tracer]]] = None,
         cors: bool = True,
         cors_origins: Optional[List[str]] = None,
@@ -56,7 +55,6 @@ class HushApp:
             title=title,
             description=description,
             version=version,
-            mode=mode,
             cors=cors,
             cors_origins=cors_origins or ["*"],
         )
@@ -70,7 +68,6 @@ class HushApp:
         path: str,
         *,
         graph: Optional[GraphOp] = None,
-        mode: Optional[str] = None,
         stream: Optional[bool] = None,
         batch: bool = True,
         jobs: bool = False,
@@ -94,7 +91,6 @@ class HushApp:
         """
         config = EndpointConfig(
             path=path,
-            mode=mode or self._config.mode,
             stream=stream,
             batch=batch,
             jobs=jobs,

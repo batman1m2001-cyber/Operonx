@@ -9,7 +9,6 @@ class EndpointConfig(BaseModel):
     """Configuration for a single API endpoint."""
 
     path: str
-    mode: str = "python"
     stream: Optional[bool] = None  # None = auto-detect
     batch: bool = True
     jobs: bool = False
@@ -29,6 +28,5 @@ class AppConfig(BaseModel):
     title: str = "Hush API"
     description: str = ""
     version: str = "0.1.0"
-    mode: str = "python"
     cors: bool = True
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])

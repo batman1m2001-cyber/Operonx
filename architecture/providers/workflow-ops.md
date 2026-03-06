@@ -232,18 +232,15 @@ Thuật toán: `random.choices(weights=ratios)` sử dụng dedicated RNG instan
 
 ### Streaming Mode
 
-Khi `stream=True`, LLMOp tích hợp với `STREAM_SERVICE`:
+Khi `stream=True`, LLMOp tích lũy nội dung từ stream:
 
 ```python
 async for chunk in llm.stream(**params):
     response += chunk.choices[0].delta.content or ""
-    # Push từng chunk đến STREAM_SERVICE
-    asyncio.create_task(STREAM_SERVICE.push(request_id, channel, chunk))
-
-asyncio.create_task(STREAM_SERVICE.end(request_id, channel))
+    # Accumulate thinking, tool_calls, finish_reason, etc.
 ```
 
-Consumer (API/WebSocket) đọc từ `STREAM_SERVICE.get()`.
+Kết quả cuối cùng chứa toàn bộ nội dung đã tích lũy.
 
 ### Batch Mode
 
@@ -383,7 +380,6 @@ Tất cả provider ops wrap exception thành OpError subclass:
 - [LLM Abstraction](llm-abstraction.md) - BaseLLM interface
 - [Embedding Provider](embedding-provider.md) - BaseEmbedder interface
 - [Reranker Provider](reranker-provider.md) - BaseReranker interface
-- [Streaming System](../streams/streaming-system.md) - STREAM_SERVICE
 - [Exception Hierarchy](../ops/exception-hierarchy.md) - Error types
 - [ParserOp](../ops/parser-op.md) - Parser trong ChainOp
 - [BaseOp Anatomy](../ops/base-op.md) - Param system

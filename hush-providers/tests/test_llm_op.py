@@ -102,10 +102,7 @@ class TestLLMOpIntegration:
 
     @pytest.mark.asyncio
     async def test_llm_node_streaming_with_tokens(self, hub):
-        """Test LLMOp streaming mode with token verification via STREAM_SERVICE."""
-        import asyncio
-
-        from hush.core import STREAM_SERVICE
+        """Test LLMOp streaming mode accumulates content and tokens."""
         from hush.core.states import MemoryState, StateSchema
 
         from hush.providers.ops import LLMOp
@@ -126,43 +123,12 @@ class TestLLMOpIntegration:
             request_id=request_id,
         )
 
-        # Collect streamed chunks
-        chunks_received = []
-        content_parts = []
-
-        async def collect_chunks():
-            """Collect chunks from STREAM_SERVICE."""
-            channel_name = node.identity(None)
-            async for chunk in STREAM_SERVICE.get(request_id, channel_name):
-                chunks_received.append(chunk)
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content_parts.append(chunk.choices[0].delta.content)
-
-        # Run streaming and chunk collection concurrently
-        collector_task = asyncio.create_task(collect_chunks())
-
-        # Execute the node (this will push chunks to STREAM_SERVICE)
         result = await node.run(state)
 
-        # Give time for background tasks to complete pushing to STREAM_SERVICE
-        await asyncio.sleep(0.1)
-
-        # Wait for collector to finish (should end when STREAM_SERVICE.end() is called)
-        await asyncio.wait_for(collector_task, timeout=5.0)
-
-        # Verify chunks were received
-        assert len(chunks_received) > 0, "Should receive streaming chunks"
-        print(f"Received {len(chunks_received)} chunks")
-
-        # Verify content parts were collected
-        streamed_content = "".join(content_parts)
-        assert len(streamed_content) > 0, "Should have streamed content"
-        print(f"Streamed content: {streamed_content}")
-
-        # Verify final result matches accumulated stream
+        # Verify accumulated content
         assert "content" in result
-        assert result["content"] == streamed_content, "Final result should match streamed content"
-        print(f"Final result content: {result['content']}")
+        assert len(result["content"]) > 0, "Should have accumulated content"
+        print(f"Streamed result content: {result['content']}")
 
         # Verify tokens_used is populated
         assert "tokens_used" in result

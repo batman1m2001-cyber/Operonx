@@ -11,7 +11,8 @@ from hush.core.tracing.base import Tracer
 from hush.core.tracing.collector import TraceCollector
 from hush.core.tracing.flush_worker import FlushWorker, get_flush_worker
 from hush.core.tracing.hush_eyes import HushEyesTracer
-from hush.core.tracing.models import NodeStructure, TracePayload, TraceRecord
+from hush.core.tracing.local import LocalTracer
+from hush.core.tracing.models import NodeStructure, TracePayload, TraceRecord, TraceSummary
 
 __all__ = [
     "Tracer",
@@ -19,7 +20,9 @@ __all__ = [
     "FlushWorker",
     "get_flush_worker",
     "HushEyesTracer",
+    "LocalTracer",
     "NodeStructure",
     "TracePayload",
     "TraceRecord",
+    "TraceSummary",
 ]
