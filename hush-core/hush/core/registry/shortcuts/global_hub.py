@@ -18,7 +18,7 @@ def _get_global_hub() -> Optional["ResourceHub"]:
     """Get or create global ResourceHub instance.
 
     Tries to load config from:
-    1. HUSH_CONFIG environment variable
+    1. HUSH_CONFIG environment variable (walks up from CWD for relative paths)
     2. ./resources.yaml (current directory)
     3. ~/.hush/resources.yaml (home directory)
 
@@ -36,15 +36,28 @@ def _get_global_hub() -> Optional["ResourceHub"]:
 
             # 1. Check environment variable
             env_config = os.getenv("HUSH_CONFIG")
-            if env_config and Path(env_config).exists():
-                config_path = Path(env_config)
+            if env_config:
+                p = Path(env_config)
+                if p.is_absolute() and p.exists():
+                    config_path = p
+                elif not p.is_absolute():
+                    # Walk up from CWD to find the file
+                    d = Path.cwd()
+                    while True:
+                        candidate = d / p
+                        if candidate.exists():
+                            config_path = candidate
+                            break
+                        if d.parent == d:
+                            break
+                        d = d.parent
 
             # 2. Check current directory
-            elif Path("resources.yaml").exists():
+            if config_path is None and Path("resources.yaml").exists():
                 config_path = Path("resources.yaml")
 
             # 3. Check home directory
-            elif (Path.home() / ".hush" / "resources.yaml").exists():
+            elif config_path is None and (Path.home() / ".hush" / "resources.yaml").exists():
                 config_path = Path.home() / ".hush" / "resources.yaml"
 
             # Create hub
