@@ -4,13 +4,12 @@ Uses ResourceHub to access LLM resources. Supports streaming, load balancing,
 fallback chains, and OpenAI Batch API mode.
 """
 
-import asyncio
 import random
 from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from hush.core import LOGGER, STREAM_SERVICE
+from hush.core import LOGGER
 from hush.core.configs import OpType
 from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
@@ -341,13 +340,11 @@ class LLMOp(BaseOp):
         llm: "BaseLLM",
         llm_params: Dict[str, Any],
         resource: str,
-        request_id: str,
-        channel_name: str,
         _inputs: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Handle streaming response from LLM.
 
-        Accumulates chunks and pushes to STREAM_SERVICE.
+        Accumulates chunks into a single response dict.
 
         Returns:
             Dict with accumulated response data
@@ -387,14 +384,6 @@ class LLMOp(BaseOp):
                 if hasattr(choice.delta, "refusal") and choice.delta.refusal:
                     refusal = (refusal or "") + choice.delta.refusal
 
-            # Push chunk to STREAM_SERVICE
-            asyncio.create_task(
-                STREAM_SERVICE.push(request_id=request_id, channel_name=channel_name, data=chunk)
-            )
-
-        # Signal end of stream
-        asyncio.create_task(STREAM_SERVICE.end(request_id, channel_name))
-
         return {
             "role": "assistant",
             "content": response,
@@ -414,10 +403,9 @@ class LLMOp(BaseOp):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the LLM op with streaming support via STREAM_SERVICE.
+        """Run the LLM op.
 
-        Handles streaming internally with STREAM_SERVICE.push() for each chunk.
-        Supports load balancing and batch mode.
+        Supports streaming accumulation, load balancing, fallback, and batch mode.
         """
         request_id = state.request_id
         start_time = datetime.now()
@@ -442,15 +430,13 @@ class LLMOp(BaseOp):
                 _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
 
             elif self.stream:
-                # Streaming mode with STREAM_SERVICE
+                # Streaming mode
                 LOGGER.info(f"Streaming mode for {self.name}...")
                 stream_llm = selected_llm or self._llm
                 _outputs = await self._handle_streaming(
                     llm=stream_llm,
                     llm_params=llm_params,
                     resource=selected_resource,
-                    request_id=request_id,
-                    channel_name=self.identity(context_id),
                     _inputs=_inputs,
                 )
 
@@ -482,8 +468,6 @@ class LLMOp(BaseOp):
                                 llm=fallback_llm,
                                 llm_params=llm_params,
                                 resource=fallback_key,
-                                request_id=request_id,
-                                channel_name=self.identity(context_id),
                                 _inputs=_inputs,
                             )
                         else:

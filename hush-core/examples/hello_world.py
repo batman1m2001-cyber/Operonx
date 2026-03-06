@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from hush.core import END, PARENT, START, FuncOp, GraphOp, Hush
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import LocalTracer
 
 
 async def main():

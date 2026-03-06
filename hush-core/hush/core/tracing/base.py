@@ -21,8 +21,13 @@ class Tracer:
         tracer = MyTracer(tags=["prod", "ml-team"])
     """
 
-    def __init__(self, tags: Optional[List[str]] = None):
+    def __init__(
+        self,
+        tags: Optional[List[str]] = None,
+        stream_trace_limit: Optional[int] = 100,
+    ):
         self._tags = tags or []
+        self._stream_trace_limit = stream_trace_limit
 
     @property
     def tags(self) -> List[str]:

@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-# Load .env file from package root
-load_dotenv(Path(__file__).parent.parent / ".env")
+# Load .env file from package root (hush-providers/)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# Also try loading from monorepo root
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+# Also try loading from monorepo root (Hush-ai/)
+# __file__ = hush-providers/tests/conftest.py → .parent.parent = hush-providers/ → .parent = Hush-ai/
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 # Get config path from environment
 CONFIGS_PATH = Path(os.environ.get("HUSH_CONFIG", ""))

@@ -34,7 +34,7 @@ class HushEyesTracer(Tracer):
         port: int = 8420,
         tags: Optional[List[str]] = None,
     ):
-        super().__init__(tags=tags)
+        super().__init__(tags=tags, stream_trace_limit=None)
         self._url = f"http://{host}:{port}/api/ingest"
 
     def flush(self, trace_data: Dict[str, Any]) -> None:

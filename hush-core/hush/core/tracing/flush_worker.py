@@ -6,8 +6,9 @@ never blocking the main async thread.
 
 import atexit
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from hush.core.tracing.base import Tracer
 from hush.core.tracing.collector import TraceCollector
@@ -55,8 +56,12 @@ class FlushWorker:
                 try:
                     # Merge: dynamic tags (from state) + static tags (from tracer)
                     merged = _merge_tags(trace_data.get("tags", []), tracer.tags)
-                    # Create a copy with merged tags for this tracer
-                    data = {**trace_data, "tags": merged if merged else None}
+                    # Apply stream sampling per tracer's limit
+                    records = trace_data.get("records", [])
+                    limit = getattr(tracer, "_stream_trace_limit", None)
+                    sampled_records = _sample_stream_records(records, limit)
+                    # Create a copy with merged tags and sampled records
+                    data = {**trace_data, "tags": merged if merged else None, "records": sampled_records}
                     tracer.flush(data)
                 except Exception:
                     LOGGER.exception("Failed to flush traces to %s", type(tracer).__name__)
@@ -66,6 +71,37 @@ class FlushWorker:
     def shutdown(self, wait: bool = True) -> None:
         """Shutdown the thread pool."""
         self._executor.shutdown(wait=wait)
+
+
+def _sample_stream_records(
+    records: List[Dict[str, Any]], limit: Optional[int]
+) -> List[Dict[str, Any]]:
+    """Apply stream_trace_limit sampling to stream_item records.
+
+    Args:
+        records: Full list of trace record dicts.
+        limit: Max stream_items to keep per spawned_by generator.
+            None = keep all, 0 = drop all stream_items.
+
+    Returns:
+        Filtered record list. Non-stream_item records pass through unchanged.
+    """
+    if limit is None:
+        return records
+
+    # Group stream_items by spawned_by, keep first N per generator
+    counts: Dict[Optional[str], int] = defaultdict(int)
+    result = []
+    for r in records:
+        if r.get("kind") != "stream_item":
+            result.append(r)
+            continue
+        spawner = r.get("spawned_by")
+        counts[spawner] += 1
+        if counts[spawner] <= limit:
+            result.append(r)
+
+    return result
 
 
 def _merge_tags(dynamic_tags: List[str], static_tags: List[str]) -> List[str]:

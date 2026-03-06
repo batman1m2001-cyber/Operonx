@@ -25,7 +25,7 @@ from hush.core.ops.iteration.for_op import ForOp
 from hush.core.ops.iteration.map_op import MapOp
 from hush.core.ops.iteration.while_op import WhileOp
 from hush.core.ops.transform.func_op import op
-from hush.core.tracers import LocalTracer
+from hush.core.tracing import LocalTracer
 
 # ============================================================================
 # Func Ops with Dynamic Tags
@@ -416,35 +416,15 @@ async def run_demo():
     print()
     print("=" * 60)
     print("Generated 8 diverse traces!")
-    print("Waiting for background process to flush...")
 
-    sleep(3)  # Give time for background to write all traces
+    sleep(3)  # Give time for background flush to complete
 
-    print()
-    from hush.core.background import DEFAULT_DB_PATH
-
-    print(f"Traces saved to {DEFAULT_DB_PATH}")
+    print("Done!")
 
 
 def main():
     """Main entry point - run demo to generate traces."""
-    import os
-    from pathlib import Path
-
-    # Remove old traces database for a clean demo
-    from hush.core.background import DEFAULT_DB_PATH
-
-    db_path = Path(os.environ.get("HUSH_TRACES_DB", DEFAULT_DB_PATH))
-    if db_path.exists():
-        db_path.unlink()
-        print(f"Removed old database: {db_path}")
-        print()
-
-    # Run the demo to generate traces
     asyncio.run(run_demo())
-
-    print()
-    print("To view traces, use VS Code command: 'Hush: Open Traces'")
 
 
 if __name__ == "__main__":

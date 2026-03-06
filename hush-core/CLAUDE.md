@@ -7,7 +7,7 @@ Core workflow engine providing ops, state management, tracing, and the execution
 ```
 hush/core/
 ├── engine.py           # Hush engine - compiles and runs workflows
-├── tracing/            # New tracing system (Tracer, TraceCollector, FlushWorker)
+├── tracing/            # Tracing system (Tracer, TraceCollector, FlushWorker)
 │   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, HushEyesTracer
 │   ├── base.py         # Tracer base class (tags + flush interface)
 │   ├── collector.py    # TraceCollector — reads state directly after execution
@@ -19,9 +19,6 @@ hush/core/
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
 ├── configs/            # Configuration classes (OpConfig, EdgeConfig)
 ├── registry/           # Resource management (ResourceHub, plugins)
-├── background/         # (legacy — pending removal)
-├── tracers/            # (legacy — pending removal)
-├── streams/            # Data streaming
 ├── loggings/           # Logging configuration with Rich
 └── utils/              # Utilities (context vars, common helpers)
 ```

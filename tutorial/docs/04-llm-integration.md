@@ -219,12 +219,8 @@ llm = LLMOp.of(
     stream=True,  # Default
     messages=p["messages"],
 )
-
-# Subscribe to stream
-from hush.core.streams import STREAM_SERVICE
-
-async for chunk in STREAM_SERVICE.subscribe(request_id, channel_name):
-    print(chunk.choices[0].delta.content, end="")
+# Kết quả cuối cùng chứa toàn bộ nội dung đã tích lũy từ stream
+# result["content"] == "full accumulated response"
 ```
 
 ## Load Balancing

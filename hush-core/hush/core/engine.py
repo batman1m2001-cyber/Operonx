@@ -21,15 +21,12 @@ Example:
     ```
 """
 
-import asyncio
 import uuid
-from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
 from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
-from hush.core.streams import STREAM_SERVICE
 
 if TYPE_CHECKING:
     from hush.core.tracing import Tracer
@@ -70,23 +67,15 @@ class Hush:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_mode", "_rush_engine"]
+    __slots__ = ["graph", "name", "_schema"]
 
-    def __init__(self, graph: GraphOp, mode: str = "python"):
+    def __init__(self, graph: GraphOp):
         """Initialize Hush engine with a GraphOp.
 
         Args:
             graph: The GraphOp workflow to execute.
                    Must be defined (context manager exited).
-            mode: Execution backend — "python" (default) or "rust".
-                  Rust mode uses rush-core for high-performance scheduling.
-                  Falls back to Python if rush-core is not installed.
         """
-        if mode not in ("python", "rust"):
-            raise ValueError(f"Invalid mode: {mode!r}. Must be 'python' or 'rust'.")
-
-        self._mode = mode
-        self._rush_engine = None
         self.graph = graph
         self.name = graph.name
 
@@ -94,45 +83,15 @@ class Hush:
         self.graph.build()
         self._schema = StateSchema(self.graph)
 
-        # Initialize Rust backend if requested
-        if self._mode == "rust":
-            self._init_rush_engine()
-
         LOGGER.debug(
-            "Hush engine initialized for workflow [highlight]%s[/highlight] (mode=%s)",
+            "Hush engine initialized for workflow [highlight]%s[/highlight]",
             self.name,
-            self._mode,
         )
 
     @property
     def schema(self) -> StateSchema:
         """Access the workflow state schema."""
         return self._schema
-
-    def _init_rush_engine(self) -> None:
-        """Initialize the Rust backend engine.
-
-        Serializes the graph config to JSON and creates a Rush executor.
-        Falls back to Python mode if rush-core is not installed.
-        """
-        try:
-            import json
-
-            from rush_core import Rush
-
-            config = self.graph.serialize()
-            config_json = json.dumps(config, default=str)
-            self._rush_engine = Rush(config_json)
-            LOGGER.debug(
-                "Rush backend initialized for [highlight]%s[/highlight]",
-                self.name,
-            )
-        except ImportError:
-            LOGGER.warning(
-                "rush-core not installed — falling back to Python mode for [highlight]%s[/highlight]",
-                self.name,
-            )
-            self._mode = "python"
 
     async def run(
         self,
@@ -175,42 +134,11 @@ class Hush:
             tracers = [tracer]
 
         LOGGER.info(
-            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight] (mode=%s)",
+            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]",
             request_id,
             self.name,
-            self._mode,
         )
 
-        # ── Rust fast path ──────────────────────────────────────
-        if self._rush_engine is not None:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                partial(
-                    self._rush_engine.run,
-                    inputs,
-                    request_id=request_id,
-                    user_id=user_id,
-                    session_id=session_id,
-                ),
-            )
-
-            # Wire tracing for Rust path (mirrors Python path below)
-            if tracers:
-                from hush.core.tracing import get_flush_worker
-                from hush.core.tracing.rush_state import RushStateAdapter
-
-                rush_state = RushStateAdapter(result.get("$state", {}))
-                get_flush_worker().submit(tracers, self.graph, rush_state)
-
-            LOGGER.info(
-                "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed (rust)",
-                request_id,
-                self.name,
-            )
-            return result
-
-        # ── Python path ─────────────────────────────────────────
         # Create fresh state for this run
         state = self._schema.create_state(
             inputs=inputs,
@@ -221,9 +149,6 @@ class Hush:
 
         # Execute the graph
         result = await self.graph.run(state)
-
-        # End stream for this request
-        await STREAM_SERVICE.end_request(request_id, session_id=session_id)
 
         # Collect + flush in background thread (non-blocking)
         if tracers:
