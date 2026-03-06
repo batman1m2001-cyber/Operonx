@@ -20,7 +20,7 @@ class HushEyesTracer(Tracer):
     and serves a web UI for visualization.
 
     Example:
-        from hush.core.tracing import HushEyesTracer
+        from hush.telemetry import HushEyesTracer
 
         tracer = HushEyesTracer(tags=["dev", "testing"])
         engine = Hush(graph)

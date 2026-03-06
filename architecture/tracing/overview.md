@@ -270,9 +270,9 @@ def get_flush_worker() -> FlushWorker:
 - `atexit.register()`: đảm bảo flush hết pending tasks khi interpreter exit
 - Singleton: toàn bộ process dùng chung một thread pool
 
-### 4. HushEyesTracer — `hush_eyes.py` (69 lines)
+### 4. HushEyesTracer — `hush-telemetry/hush/telemetry/tracers/hush_eyes.py` (69 lines)
 
-Tracer built-in gửi traces đến ui-hush-eyes local server. Dùng stdlib `urllib.request` (không cần thêm dependency).
+Tracer built-in gửi traces đến ui-hush-eyes local server. Dùng stdlib `urllib.request` (không cần thêm dependency). **Note:** HushEyesTracer has been moved from `hush-core/tracing/` to `hush-telemetry/tracers/`.
 
 ```python
 class HushEyesTracer(Tracer):
@@ -399,16 +399,16 @@ Engine chỉ cần 2 dòng code để tích hợp tracing. Không có tracing lo
 
 ## Source Files
 
-Tất cả nằm trong `hush-core/hush/core/tracing/`:
+Core tracing infrastructure nằm trong `hush-core/hush/core/tracing/`, HushEyesTracer nằm trong `hush-telemetry/hush/telemetry/tracers/`:
 
 | File | Lines | Mục đích |
 |------|-------|---------|
-| `__init__.py` | 26 | Package exports |
-| `base.py` | 42 | Tracer base class |
-| `collector.py` | 123 | TraceCollector — đọc graph + state |
-| `flush_worker.py` | 95 | FlushWorker — ThreadPoolExecutor singleton |
-| `hush_eyes.py` | 69 | HushEyesTracer — HTTP POST to localhost:8420 |
-| `models.py` | 57 | NodeStructure, TraceRecord, TracePayload dataclasses |
+| `hush-core/.../tracing/__init__.py` | 26 | Package exports |
+| `hush-core/.../tracing/base.py` | 42 | Tracer base class |
+| `hush-core/.../tracing/collector.py` | 123 | TraceCollector — đọc graph + state |
+| `hush-core/.../tracing/flush_worker.py` | 95 | FlushWorker — ThreadPoolExecutor singleton |
+| `hush-core/.../tracing/models.py` | 57 | NodeStructure, TraceRecord, TracePayload dataclasses |
+| `hush-telemetry/.../tracers/hush_eyes.py` | 69 | HushEyesTracer — HTTP POST to localhost:8420 |
 | **Total** | **412** | |
 
 ## Xem thêm

@@ -23,7 +23,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops.transform.func_op import op
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 
 # =============================================================================
 # Code ops với dynamic tags

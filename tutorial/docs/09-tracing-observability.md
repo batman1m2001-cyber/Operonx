@@ -40,7 +40,7 @@ cd ui-hush-eyes && cargo run
 
 ```python
 from hush.core import Hush
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 
 tracer = HushEyesTracer(tags=["dev", "testing"])
 
@@ -135,7 +135,7 @@ Xem ví dụ đầy đủ tại `examples/09_otel_tracing.py`.
 Gửi traces đến nhiều backends cùng lúc:
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 from hush.telemetry import LangfuseTracer
 
 result = await engine.run(

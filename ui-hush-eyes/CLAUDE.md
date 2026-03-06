@@ -58,7 +58,7 @@ Default: `http://127.0.0.1:8420`, DB at `~/.hush/ui-hush-eyes.db`
 ## Connection from Python
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 
 tracer = HushEyesTracer(host="127.0.0.1", port=8420, tags=["dev"])
 result = await engine.run(inputs={...}, tracer=tracer)

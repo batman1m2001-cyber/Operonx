@@ -130,10 +130,10 @@ The `DbPool` type is `Arc<Mutex<Connection>>`, providing thread-safe access from
 
 ## Connection with hush-core
 
-`HushEyesTracer` (from `hush.core.tracing`) is the Python-side client that sends trace data to the server:
+`HushEyesTracer` (from `hush.telemetry`) is the Python-side client that sends trace data to the server:
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 
 tracer = HushEyesTracer(host="127.0.0.1", port=8420, tags=["dev"])
 result = await engine.run(inputs={...}, tracer=tracer)
