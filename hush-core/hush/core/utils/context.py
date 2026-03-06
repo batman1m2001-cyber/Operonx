@@ -5,6 +5,9 @@ import contextvars
 # Context variable lưu trữ graph đang thực thi
 _current_graph = contextvars.ContextVar("current_graph")
 
+# Context variable for streaming output queue (set by engine.stream(), read by Scheduler)
+_output_queue = contextvars.ContextVar("output_queue", default=None)
+
 
 def get_current():
     """Lấy graph hiện tại từ context.

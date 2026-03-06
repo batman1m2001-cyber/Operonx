@@ -229,6 +229,18 @@ class TraceCollector:
                     if not v.startswith("$")
                 }
 
+                # For generators, aggregate outputs from stream contexts
+                if kind == "generator" and all(v is None for v in outputs.values()):
+                    agg_outputs = {v: [] for v in outputs}
+                    for sc in stream_contexts:
+                        if len(sc) == len(ctx) + 1 and sc[: len(ctx)] == ctx:
+                            for v in agg_outputs:
+                                val = state[op_name, v, sc]
+                                if val is not None:
+                                    agg_outputs[v].append(val)
+                    if any(agg_outputs.values()):
+                        outputs = agg_outputs
+
                 # Timing
                 end_time = state[op_name, "end_time", ctx]
                 duration_ms = state[op_name, "duration_ms", ctx]

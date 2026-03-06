@@ -113,6 +113,39 @@ class LangfuseTracer(Tracer):
 
         return result
 
+    @staticmethod
+    def _context_to_str(ctx) -> str | None:
+        """Convert a context tuple to a dot-separated string for trace keys.
+
+        Examples: () → None, ("main",) → "main", ("main", "s0") → "main.s0"
+        """
+        if not ctx:
+            return None
+        if isinstance(ctx, (list, tuple)):
+            return ".".join(str(s) for s in ctx)
+        return str(ctx)
+
+    @staticmethod
+    def _build_streaming_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract streaming-specific fields into metadata dict."""
+        meta = {}
+        kind = record.get("kind")
+        if kind and kind != "batch":
+            meta["kind"] = kind
+        if record.get("yield_count") is not None:
+            meta["yield_count"] = record["yield_count"]
+        if record.get("spawned_by"):
+            meta["spawned_by"] = record["spawned_by"]
+        if record.get("depth", 0) > 0:
+            meta["depth"] = record["depth"]
+        if record.get("parent_context"):
+            ctx = record["parent_context"]
+            if isinstance(ctx, (list, tuple)):
+                meta["parent_context"] = ".".join(str(s) for s in ctx)
+            else:
+                meta["parent_context"] = str(ctx)
+        return meta
+
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data to Langfuse.
 
@@ -147,30 +180,54 @@ class LangfuseTracer(Tracer):
 
             for record in trace_data.get("records", []):
                 op_name = record["op_name"]
-                context_id = record.get("context_id")
+                context_str = self._context_to_str(record.get("context"))
+                kind = record.get("kind", "batch")
                 structure = structure_map.get(op_name, {})
                 parent_name = structure.get("parent_name")
                 contain_generation = structure.get("contain_generation", False)
 
                 # Build unique key for context-aware nodes
-                trace_key = f"{op_name}:{context_id}" if context_id else op_name
+                trace_key = f"{op_name}:{context_str}" if context_str else op_name
 
                 # Resolve parent key with context awareness
-                parent_key = parent_name
-                if parent_name and context_id:
-                    context_parent_key = f"{parent_name}:{context_id}"
+                # For stream_items, nest under the generator that spawned them
+                spawned_by = record.get("spawned_by")
+                if kind == "stream_item" and spawned_by and context_str:
+                    # Try spawner with same context first (e.g. "gen:main.s0")
+                    spawner_ctx_key = f"{spawned_by}:{context_str}"
+                    if spawner_ctx_key in langfuse_objects:
+                        parent_key = spawner_ctx_key
+                    else:
+                        # Try spawner with parent context (e.g. "gen:main")
+                        last_dot = context_str.rfind(".")
+                        if last_dot > 0:
+                            spawner_parent_key = f"{spawned_by}:{context_str[:last_dot]}"
+                            if spawner_parent_key in langfuse_objects:
+                                parent_key = spawner_parent_key
+                            else:
+                                parent_key = spawned_by
+                        else:
+                            parent_key = spawned_by
+                elif parent_name and context_str:
+                    context_parent_key = f"{parent_name}:{context_str}"
                     if context_parent_key in langfuse_objects:
                         parent_key = context_parent_key
                     else:
-                        last_dot = context_id.rfind(".")
+                        last_dot = context_str.rfind(".")
                         if last_dot > 0:
-                            parent_context = context_id[:last_dot]
+                            parent_context = context_str[:last_dot]
                             parent_with_parent_ctx = f"{parent_name}:{parent_context}"
                             if parent_with_parent_ctx in langfuse_objects:
                                 parent_key = parent_with_parent_ctx
+                else:
+                    parent_key = parent_name
 
                 # Short name for display
                 short_name = op_name.rsplit(".", 1)[-1] if "." in op_name else op_name
+
+                # Merge existing metadata with streaming metadata
+                metadata = dict(record.get("metadata") or {})
+                metadata.update(self._build_streaming_metadata(record))
 
                 if parent_name is None:
                     # Root — create trace
@@ -185,7 +242,7 @@ class LangfuseTracer(Tracer):
                         end_time=record.get("end_time"),
                         input=record.get("inputs"),
                         output=record.get("outputs"),
-                        metadata=record.get("metadata"),
+                        metadata=metadata or None,
                     )
                     langfuse_objects[trace_key] = root_trace
                 else:
@@ -201,10 +258,14 @@ class LangfuseTracer(Tracer):
                         "end_time": record.get("end_time"),
                         "input": record.get("inputs"),
                         "output": record.get("outputs"),
-                        "metadata": record.get("metadata"),
+                        "metadata": metadata or None,
                     }
 
-                    if contain_generation:
+                    # Use generation() for LLM ops (batch or generator aggregate),
+                    # but NOT for stream_items (individual yields are sub-spans)
+                    use_generation = contain_generation and kind != "stream_item"
+
+                    if use_generation:
                         usage = record.get("usage")
                         if usage:
                             langfuse_usage = {}

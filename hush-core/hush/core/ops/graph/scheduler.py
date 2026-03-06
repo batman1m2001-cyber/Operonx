@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, BaseOp
+from hush.core.utils.context import _output_queue
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -46,6 +47,7 @@ class Scheduler:
         "ready_counts",
         "soft_satisfied",
         "stream_contexts",
+        "output_queue",
     ]
 
     def __init__(self, graph):
@@ -63,6 +65,7 @@ class Scheduler:
         self.ready_counts = {context_id: self.graph.initial_ready_count.copy()}
         self.soft_satisfied = {}
         self.stream_contexts = []
+        self.output_queue = _output_queue.get()
 
     def _can_inline(self, op_obj: BaseOp) -> bool:
         """Check if op can be inlined (run synchronously without a task)."""
@@ -153,13 +156,13 @@ class Scheduler:
                 async for result in gen_fn(**gen_inputs):
                     stream_ctx = ctx + (f"s{yield_idx}",)
                     op_obj.store_result(self.state, result, stream_ctx)
-                    await self.event_queue.put(("yield", name, stream_ctx))
+                    await self.event_queue.put(("yield", name, stream_ctx, result))
                     yield_idx += 1
             elif inspect.isgeneratorfunction(gen_fn):
                 for result in gen_fn(**gen_inputs):
                     stream_ctx = ctx + (f"s{yield_idx}",)
                     op_obj.store_result(self.state, result, stream_ctx)
-                    await self.event_queue.put(("yield", name, stream_ctx))
+                    await self.event_queue.put(("yield", name, stream_ctx, result))
                     yield_idx += 1
 
         except Exception:
@@ -258,10 +261,16 @@ class Scheduler:
                 await self._drain_ready(ready, ctx, self.parent_context)
 
             elif event[0] == "yield":
-                _, gen_name, stream_ctx = event
+                _, gen_name, stream_ctx, result_data = event
                 self._create_stream_context(stream_ctx, gen_name)
                 ready = list(self._activate_successors(gen_name, stream_ctx))
                 await self._drain_ready(ready, stream_ctx, self.parent_context)
+
+                # Forward yield event to output queue for real-time delivery
+                if self.output_queue is not None:
+                    await self.output_queue.put(
+                        {"type": "token", "op": gen_name, "data": result_data}
+                    )
 
             elif event[0] == "exhausted":
                 self.active_count -= 1

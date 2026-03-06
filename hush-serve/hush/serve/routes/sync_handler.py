@@ -1,17 +1,12 @@
 """Sync request-response handler: POST /path -> JSON result."""
 
-from __future__ import annotations
-
 import uuid
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from fastapi import Request
 
-if TYPE_CHECKING:
-    from hush.serve.endpoint import Endpoint
 
-
-def create_sync_handler(endpoint: "Endpoint") -> Callable:
+def create_sync_handler(endpoint) -> Callable:
     """Create a FastAPI route handler for sync execution."""
     request_model = endpoint.request_model
 

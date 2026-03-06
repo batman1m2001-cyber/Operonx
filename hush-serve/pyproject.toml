@@ -45,3 +45,5 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 hush-core = { path = "../hush-core", editable = true }
+hush-providers = { path = "../hush-providers", editable = true }
+hush-telemetry = { path = "../hush-telemetry", editable = true }

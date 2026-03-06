@@ -1,25 +1,18 @@
 """SSE streaming handler: POST /path/stream -> text/event-stream.
 
-NOTE: Streaming consumer logic (STREAM_SERVICE) has been removed.
-This handler currently runs the workflow and returns the final result as
-a single SSE "done" event. A callback-based streaming mechanism will be
-added in a future phase.
+Uses engine.stream() to deliver real-time token events from generator ops,
+followed by a final "done" event with the complete result.
 """
-
-from __future__ import annotations
 
 import json
 import uuid
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-if TYPE_CHECKING:
-    from hush.serve.endpoint import Endpoint
 
-
-def create_stream_handler(endpoint: "Endpoint") -> Callable:
+def create_stream_handler(endpoint) -> Callable:
     """Create a FastAPI route handler for SSE streaming."""
     request_model = endpoint.request_model
 
@@ -29,15 +22,18 @@ def create_stream_handler(endpoint: "Endpoint") -> Callable:
         session_id = request.headers.get("X-Session-ID")
 
         async def event_generator():
-            result = await endpoint.engine.run(
+            async for event in endpoint.engine.stream(
                 inputs=body.model_dump(exclude_none=False),
                 request_id=request_id,
                 user_id=user_id,
                 session_id=session_id,
                 tracer=endpoint.tracer,
-            )
-            output = {k: v for k, v in result.items() if not k.startswith("$")}
-            yield f"event: done\ndata: {json.dumps(output)}\n\n"
+            ):
+                if event["type"] == "token":
+                    yield f"event: token\ndata: {json.dumps(event['data'])}\n\n"
+                elif event["type"] == "done":
+                    output = {k: v for k, v in event["data"].items() if not k.startswith("$")}
+                    yield f"event: done\ndata: {json.dumps(output)}\n\n"
 
         return StreamingResponse(
             event_generator(),

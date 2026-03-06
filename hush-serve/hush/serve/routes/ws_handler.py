@@ -1,30 +1,24 @@
 """WebSocket bidirectional handler: WS /path/ws.
 
-NOTE: Streaming consumer logic (STREAM_SERVICE) has been removed.
-This handler currently runs the workflow and returns the final result.
-A callback-based streaming mechanism will be added in a future phase.
-"""
+Uses engine.stream() to deliver real-time token events from generator ops,
+followed by a final "result" message with the complete output.
 
-from __future__ import annotations
+Protocol:
+  Client -> {"inputs": {...}}
+  Server -> {"type": "token", "data": {...}}   (per-token, zero or more)
+  Server -> {"type": "result", "data": {...}}  (final complete output)
+  Client -> {"type": "close"}
+"""
 
 import json
 import uuid
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-if TYPE_CHECKING:
-    from hush.serve.endpoint import Endpoint
 
-
-def create_ws_handler(endpoint: "Endpoint") -> Callable:
-    """Create a WebSocket handler for bidirectional communication.
-
-    Protocol:
-      Client -> {"inputs": {...}}
-      Server -> {"type": "result", "data": {full output}}
-      Client -> {"type": "close"}
-    """
+def create_ws_handler(endpoint) -> Callable:
+    """Create a WebSocket handler for bidirectional communication."""
     request_model = endpoint.request_model
 
     async def handler(websocket: WebSocket):
@@ -47,14 +41,18 @@ def create_ws_handler(endpoint: "Endpoint") -> Callable:
                     await websocket.send_json({"type": "error", "data": {"message": str(e)}})
                     continue
 
-                result = await endpoint.engine.run(
+                async for event in endpoint.engine.stream(
                     inputs=validated.model_dump(exclude_none=False),
                     request_id=request_id,
                     tracer=endpoint.tracer,
-                )
-
-                output = {k: v for k, v in result.items() if not k.startswith("$")}
-                await websocket.send_json({"type": "result", "data": output})
+                ):
+                    if event["type"] == "token":
+                        await websocket.send_json({"type": "token", "data": event["data"]})
+                    elif event["type"] == "done":
+                        output = {
+                            k: v for k, v in event["data"].items() if not k.startswith("$")
+                        }
+                        await websocket.send_json({"type": "result", "data": output})
 
         except WebSocketDisconnect:
             pass
