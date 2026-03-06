@@ -1,19 +1,14 @@
 """Batch processing handler: POST /path/batch -> [results]."""
 
-from __future__ import annotations
-
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, Callable, List
+from typing import Callable, List
 
 from fastapi import Request
 from pydantic import Field, create_model
 
-if TYPE_CHECKING:
-    from hush.serve.endpoint import Endpoint
 
-
-def create_batch_handler(endpoint: "Endpoint") -> Callable:
+def create_batch_handler(endpoint) -> Callable:
     """Create a batch processing handler.
 
     Accepts a list of inputs and processes them concurrently

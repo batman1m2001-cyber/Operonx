@@ -1,21 +1,16 @@
 """Background job handlers: POST /path/submit + GET /jobs/{job_id}."""
 
-from __future__ import annotations
-
 import asyncio
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from hush.serve.jobs import JobStatus, JobStore
 
-if TYPE_CHECKING:
-    from hush.serve.endpoint import Endpoint
 
-
-def create_submit_handler(endpoint: "Endpoint", job_store: JobStore) -> Callable:
+def create_submit_handler(endpoint, job_store: JobStore) -> Callable:
     """Create a handler that submits a workflow as a background job."""
     request_model = endpoint.request_model
 

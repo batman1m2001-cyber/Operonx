@@ -21,12 +21,14 @@ Example:
     ```
 """
 
+import asyncio
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
 from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
+from hush.core.utils.context import _output_queue
 
 if TYPE_CHECKING:
     from hush.core.tracing import Tracer
@@ -166,6 +168,89 @@ class Hush:
         result["$state"] = state
 
         return result
+
+    async def stream(
+        self,
+        inputs: Dict[str, Any],
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute the workflow and yield streaming events as they arrive.
+
+        For graphs with generator ops, yields per-token events in real-time.
+        Always yields a final "done" event with the complete result.
+
+        Args:
+            inputs: Input data for the workflow
+            user_id: Optional user identifier
+            session_id: Optional session identifier
+            request_id: Optional request identifier
+            tracer: Optional tracer(s) for observability
+
+        Yields:
+            Dicts with "type" key:
+            - {"type": "token", "op": name, "data": {...}} — per-yield from generator ops
+            - {"type": "done", "data": {full outputs}} — final result
+        """
+        user_id = user_id or str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
+
+        if tracer is None:
+            tracers: List["Tracer"] = []
+        elif isinstance(tracer, list):
+            tracers = tracer
+        else:
+            tracers = [tracer]
+
+        LOGGER.info(
+            "[title]\\[%s][/title] Streaming workflow [highlight]%s[/highlight]",
+            request_id,
+            self.name,
+        )
+
+        state = self._schema.create_state(
+            inputs=inputs,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+        )
+
+        queue = asyncio.Queue()
+        token = _output_queue.set(queue)
+
+        try:
+            task = asyncio.create_task(self.graph.run(state))
+
+            while True:
+                if task.done() and queue.empty():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield event
+                except asyncio.TimeoutError:
+                    continue
+
+            result = task.result()
+        finally:
+            _output_queue.reset(token)
+
+        if tracers:
+            from hush.core.tracing import get_flush_worker
+
+            get_flush_worker().submit(tracers, self.graph, state)
+
+        LOGGER.info(
+            "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] stream completed",
+            request_id,
+            self.name,
+        )
+
+        result["$state"] = state
+        yield {"type": "done", "data": result}
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.

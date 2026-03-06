@@ -205,7 +205,7 @@ class LLMOp(BaseOp):
             )
             self.core = self._batch_coordinator.submit
         elif self.stream:
-            self.core = self._llm.stream
+            self.core = self._stream_core
         else:
             self.core = self._llm.generate
 
@@ -335,20 +335,17 @@ class LLMOp(BaseOp):
         """Estimate context size from messages (rough token count)."""
         return len(str(_inputs.get("messages", []))) // 4
 
-    async def _handle_streaming(
-        self,
-        llm: "BaseLLM",
-        llm_params: Dict[str, Any],
-        resource: str,
-        _inputs: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Handle streaming response from LLM.
+    async def _stream_core(self, **inputs):
+        """Async generator core for streaming mode.
 
-        Accumulates chunks into a single response dict.
-
-        Returns:
-            Dict with accumulated response data
+        Yields per-token dicts as chunks arrive from the LLM backend.
+        The scheduler's _drive_generator() drives this, creating a stream
+        context per yield. The final yield contains complete metadata.
         """
+        llm_params = self._build_llm_params(inputs)
+        selected_llm = self._select_llm() if self._llms else self._llm
+        resource = self._get_selected_resource(selected_llm) if selected_llm else self.resource
+
         response = ""
         thinking_content = ""
         finish_reason = "stop"
@@ -356,43 +353,81 @@ class LLMOp(BaseOp):
         tool_calls = []
         refusal = None
 
-        async for chunk in llm.stream(**llm_params):
-            # Extract usage info
-            if chunk.usage:
-                tokens_used = chunk.usage.model_dump()
+        try:
+            async for chunk in selected_llm.stream(**llm_params):
+                if chunk.usage:
+                    tokens_used = chunk.usage.model_dump()
 
-            if chunk.choices:
-                choice = chunk.choices[0]
+                if chunk.choices:
+                    choice = chunk.choices[0]
 
-                # Accumulate thinking content
-                if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
-                    thinking_content += choice.delta.reasoning_content
+                    if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
+                        thinking_content += choice.delta.reasoning_content
 
-                # Accumulate main content
-                if choice.delta.content:
-                    response += choice.delta.content
+                    if choice.delta.content:
+                        response += choice.delta.content
+                        yield {"content": choice.delta.content, "role": "assistant"}
 
-                # Capture finish reason
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
 
-                # Capture tool calls
-                if choice.delta.tool_calls:
-                    tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
+                    if choice.delta.tool_calls:
+                        tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
 
-                # Capture refusal (streaming)
-                if hasattr(choice.delta, "refusal") and choice.delta.refusal:
-                    refusal = (refusal or "") + choice.delta.refusal
+                    if hasattr(choice.delta, "refusal") and choice.delta.refusal:
+                        refusal = (refusal or "") + choice.delta.refusal
 
-        return {
-            "role": "assistant",
+        except Exception as e:
+            LOGGER.error(f"Error streaming from {resource}: {e}")
+
+            # Try fallback LLMs
+            if self._fallback_llms:
+                for idx, fallback_llm in enumerate(self._fallback_llms):
+                    fallback_key = self.fallback[idx]
+                    LOGGER.info(f"Trying streaming fallback {fallback_key}...")
+                    try:
+                        response = ""
+                        thinking_content = ""
+                        tokens_used = {}
+                        tool_calls = []
+                        refusal = None
+
+                        async for chunk in fallback_llm.stream(**llm_params):
+                            if chunk.usage:
+                                tokens_used = chunk.usage.model_dump()
+                            if chunk.choices:
+                                choice = chunk.choices[0]
+                                if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
+                                    thinking_content += choice.delta.reasoning_content
+                                if choice.delta.content:
+                                    response += choice.delta.content
+                                    yield {"content": choice.delta.content, "role": "assistant"}
+                                if choice.finish_reason:
+                                    finish_reason = choice.finish_reason
+                                if choice.delta.tool_calls:
+                                    tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
+                                if hasattr(choice.delta, "refusal") and choice.delta.refusal:
+                                    refusal = (refusal or "") + choice.delta.refusal
+
+                        resource = fallback_key
+                        LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
+                        break
+                    except Exception as fallback_error:
+                        LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
+                        continue
+                else:
+                    raise
+
+        # Final yield with complete metadata
+        yield {
             "content": response,
+            "role": "assistant",
             "finish_reason": finish_reason,
             "model_used": resource,
             "tokens_used": tokens_used,
             "tool_calls": tool_calls,
-            "thinking_content": thinking_content if thinking_content else None,
-            "context_used": self._estimate_context(_inputs),
+            "thinking_content": thinking_content or None,
+            "context_used": self._estimate_context(inputs),
             "refusal": refusal,
             "logprobs": None,
         }
@@ -403,9 +438,10 @@ class LLMOp(BaseOp):
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the LLM op.
+        """Run the LLM op (generate and batch modes).
 
-        Supports streaming accumulation, load balancing, fallback, and batch mode.
+        When stream=True, the scheduler drives _stream_core via _drive_generator()
+        instead of calling this method.
         """
         request_id = state.request_id
         start_time = datetime.now()
@@ -424,26 +460,12 @@ class LLMOp(BaseOp):
             llm_params = self._build_llm_params(_inputs)
 
             if self.batch_mode:
-                # Batch mode: submit to BatchCoordinator
                 LOGGER.info(f"Batch mode for {self.name}...")
                 completion = await self._batch_coordinator.submit(**llm_params)
                 _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
 
-            elif self.stream:
-                # Streaming mode
-                LOGGER.info(f"Streaming mode for {self.name}...")
-                stream_llm = selected_llm or self._llm
-                _outputs = await self._handle_streaming(
-                    llm=stream_llm,
-                    llm_params=llm_params,
-                    resource=selected_resource,
-                    _inputs=_inputs,
-                )
-
             else:
-                # Non-streaming generate mode
                 LOGGER.info(f"Generate mode for {self.name}...")
-                # Use selected LLM's generate method for load balancing
                 generate_fn = selected_llm.generate if selected_llm else self.core
                 completion = await generate_fn(**llm_params)
                 _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
@@ -462,20 +484,10 @@ class LLMOp(BaseOp):
                     fallback_key = self.fallback[idx]
                     LOGGER.info(f"Trying fallback model {fallback_key}...")
                     try:
-                        if self.stream:
-                            # Streaming fallback
-                            _outputs = await self._handle_streaming(
-                                llm=fallback_llm,
-                                llm_params=llm_params,
-                                resource=fallback_key,
-                                _inputs=_inputs,
-                            )
-                        else:
-                            # Non-streaming fallback
-                            completion = await fallback_llm.generate(**llm_params)
-                            _outputs = self._extract_completion_data(
-                                completion, _inputs, fallback_key
-                            )
+                        completion = await fallback_llm.generate(**llm_params)
+                        _outputs = self._extract_completion_data(
+                            completion, _inputs, fallback_key
+                        )
 
                         selected_llm = fallback_llm
                         selected_resource = fallback_key
