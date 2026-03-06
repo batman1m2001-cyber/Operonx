@@ -114,7 +114,7 @@ class Hush:
             request_id: Optional request identifier (auto-generated if not provided)
             tracer: Optional tracer or list of tracers for observability.
                     Accepts a single Tracer instance or a list of Tracer instances.
-                    Examples: tracer=HushEyesTracer(), tracer=[t1, t2]
+                    Examples: tracer=LocalTracer(), tracer=[t1, t2]
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key

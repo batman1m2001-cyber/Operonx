@@ -511,7 +511,7 @@ result = await engine.run(inputs={...}, tracer=tracer)
 ### Multiple Tracers
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.telemetry import HushEyesTracer
 from hush.telemetry import LangfuseTracer
 
 result = await engine.run(

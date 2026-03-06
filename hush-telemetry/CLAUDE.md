@@ -16,6 +16,7 @@ hush/telemetry/
 │       ├── config.py   # OTELConfig
 │       └── client.py   # OTELClient
 └── tracers/            # Tracer implementations
+    ├── hush_eyes.py    # HushEyesTracer — HTTP POST to ui-hush-eyes server
     ├── langfuse.py     # LangfuseTracer
     └── otel.py         # OTELTracer
 ```
@@ -46,10 +47,18 @@ tracer = LangfuseTracer(config=config)
 result = await engine.run(inputs={...}, tracer=tracer)
 ```
 
+### HushEyesTracer (ui-hush-eyes)
+```python
+from hush.telemetry import HushEyesTracer
+
+tracer = HushEyesTracer(tags=["dev"])
+result = await engine.run(inputs={...}, tracer=tracer)
+# Open http://localhost:8420 to view traces
+```
+
 ### Multiple Tracers
 ```python
-from hush.core.tracing import HushEyesTracer
-from hush.telemetry import LangfuseTracer
+from hush.telemetry import HushEyesTracer, LangfuseTracer
 
 result = await engine.run(
     inputs={...},

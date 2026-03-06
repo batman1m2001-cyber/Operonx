@@ -50,6 +50,7 @@ from hush.telemetry.plugin import ObservabilityPlugin  # noqa: F401
 
 # Tracers
 from hush.telemetry.tracers import (
+    HushEyesTracer,
     LangfuseTracer,
     OTELTracer,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "LangfuseClient",
     "OTELClient",
     # Tracers
+    "HushEyesTracer",
     "LangfuseTracer",
     "OTELTracer",
     # Base class (from hush.core.tracing)

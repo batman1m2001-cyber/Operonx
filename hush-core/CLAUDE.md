@@ -8,11 +8,11 @@ Core workflow engine providing ops, state management, tracing, and the execution
 hush/core/
 ├── engine.py           # Hush engine - compiles and runs workflows
 ├── tracing/            # Tracing system (Tracer, TraceCollector, FlushWorker)
-│   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, HushEyesTracer
+│   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, LocalTracer
 │   ├── base.py         # Tracer base class (tags + flush interface)
 │   ├── collector.py    # TraceCollector — reads state directly after execution
 │   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, singleton
-│   ├── hush_eyes.py    # HushEyesTracer — HTTP POST to ui-hush-eyes server
+│   ├── local.py        # LocalTracer — zero-dep JSON file tracer
 │   └── models.py       # NodeStructure, TraceRecord, TracePayload dataclasses
 ├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
 ├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)
@@ -212,13 +212,14 @@ class MyTracer(Tracer):
 ### Engine API
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.core.tracing import LocalTracer
 
 engine = Hush(graph)
 result = await engine.run(
     inputs={"x": 5},
-    tracer=HushEyesTracer(tags=["dev"]),  # single tracer or list
+    tracer=LocalTracer(tags=["dev"]),  # single tracer or list
 )
+# For external tracers (HushEyesTracer, Langfuse, OTEL), see hush-telemetry
 ```
 
 ### Key Components
@@ -226,7 +227,8 @@ result = await engine.run(
 - **`Tracer`** (`tracing/base.py`): Base class — just `__init__(tags)` + `flush(trace_data)`
 - **`TraceCollector`** (`tracing/collector.py`): Walks graph for static data + state for dynamic data
 - **`FlushWorker`** (`tracing/flush_worker.py`): `ThreadPoolExecutor(4)`, merges tags, calls `flush()`
-- **`HushEyesTracer`** (`tracing/hush_eyes.py`): HTTP POST to `localhost:8420/api/ingest`
+- **`LocalTracer`** (`tracing/local.py`): Zero-dep JSON file tracer (writes to `~/.hush/traces/`)
+- **`HushEyesTracer`**: Moved to `hush-telemetry` package (`hush.telemetry.tracers.hush_eyes`)
 
 ### Tags
 

@@ -86,14 +86,14 @@ inputs={"value": other_node["output_key"]}
 ## Tracing
 
 ```python
-from hush.core.tracing import HushEyesTracer
+from hush.core.tracing import LocalTracer
 
-tracer = HushEyesTracer(tags=["dev"])
+tracer = LocalTracer(tags=["dev"])
 engine = Hush(graph)
 await engine.run(inputs={...}, tracer=tracer)
+# Traces written to ~/.hush/traces/{request_id}.json
 
-# Xem traces: chạy ui-hush-eyes server (cd ui-hush-eyes && cargo run -- serve --port 8420)
-# Mở http://localhost:8420
+# For external tracers (HushEyesTracer, Langfuse, OTEL), see hush-telemetry package
 ```
 
 ## Documentation
