@@ -94,11 +94,12 @@ class OTELTracer(Tracer):
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data via OpenTelemetry.
 
-        Called by FlushWorker in a background thread.
+        Called by FlushWorker in a background thread. Uses pre-computed
+        TraceNode tree — no parent-resolution heuristics needed.
 
         Args:
             trace_data: {request_id, workflow_name, user_id, session_id,
-                        tags, graph_structure, records}
+                        tags, nodes}
         """
         from hush.core.loggings import LOGGER
 
@@ -114,9 +115,6 @@ class OTELTracer(Tracer):
             session_id = trace_data.get("session_id")
             tags = trace_data.get("tags") or []
 
-            # Build structure lookup: op_name → {parent_name, contain_generation, ...}
-            structure_map = {s["op_name"]: s for s in trace_data.get("graph_structure", [])}
-
             LOGGER.info(
                 "Workflow: %s, Request ID: %s, Creating OpenTelemetry trace hierarchy...",
                 workflow_name,
@@ -124,94 +122,51 @@ class OTELTracer(Tracer):
             )
 
             otel_tracer = client.tracer
-
-            # Track created spans for parent-child linking
             spans: Dict[str, Any] = {}
             span_end_times: Dict[str, Optional[int]] = {}
 
-            for record in trace_data.get("records", []):
-                op_name = record["op_name"]
-                context_str = self._context_to_str(record.get("context"))
-                kind = record.get("kind", "batch")
-                structure = structure_map.get(op_name, {})
-                parent_name = structure.get("parent_name")
-                contain_generation = structure.get("contain_generation", False)
+            for node in trace_data.get("nodes", []):
+                key = node["trace_key"]
+                parent_key = node.get("parent_trace_key")
+                node_type = node.get("node_type", "span")
+                kind = node.get("kind", "batch")
 
-                # Build unique key for context-aware nodes
-                trace_key = f"{op_name}:{context_str}" if context_str else op_name
-
-                # Resolve parent key with context awareness
-                # For stream_items, nest under the generator that spawned them
-                spawned_by = record.get("spawned_by")
-                if kind == "stream_item" and spawned_by and context_str:
-                    spawner_ctx_key = f"{spawned_by}:{context_str}"
-                    if spawner_ctx_key in spans:
-                        parent_key = spawner_ctx_key
-                    else:
-                        last_dot = context_str.rfind(".")
-                        if last_dot > 0:
-                            spawner_parent_key = f"{spawned_by}:{context_str[:last_dot]}"
-                            if spawner_parent_key in spans:
-                                parent_key = spawner_parent_key
-                            else:
-                                parent_key = spawned_by
-                        else:
-                            parent_key = spawned_by
-                elif parent_name and context_str:
-                    context_parent_key = f"{parent_name}:{context_str}"
-                    if context_parent_key in spans:
-                        parent_key = context_parent_key
-                    else:
-                        last_dot = context_str.rfind(".")
-                        if last_dot > 0:
-                            parent_context = context_str[:last_dot]
-                            parent_with_parent_ctx = f"{parent_name}:{parent_context}"
-                            if parent_with_parent_ctx in spans:
-                                parent_key = parent_with_parent_ctx
-                else:
-                    parent_key = parent_name
-
-                # Timing
-                start_time_ns = self._datetime_to_ns(record.get("start_time"))
-                end_time_ns = self._datetime_to_ns(record.get("end_time"))
-
-                # Short name for display
-                short_name = self._get_short_name(op_name)
+                start_time_ns = self._datetime_to_ns(node.get("start_time"))
+                end_time_ns = self._datetime_to_ns(node.get("end_time"))
 
                 # Build span attributes
-                attributes = {
+                attributes: Dict[str, Any] = {
                     "workflow.name": workflow_name,
                     "workflow.request_id": req_id,
-                    "op.name": op_name,
                 }
-
+                if node.get("op_name"):
+                    attributes["op.name"] = node["op_name"]
                 if user_id:
                     attributes["user.id"] = user_id
-                    attributes["langfuse.user.id"] = user_id
                 if session_id:
                     attributes["session.id"] = session_id
-                    attributes["langfuse.session.id"] = session_id
                 if tags:
                     clean_tags = [t for t in tags if t is not None]
                     if clean_tags:
-                        attributes["langfuse.tags"] = clean_tags
+                        attributes["workflow.tags"] = clean_tags
 
-                # Streaming metadata
+                # Kind and streaming metadata
                 if kind and kind != "batch":
                     attributes["op.kind"] = kind
-                if record.get("yield_count") is not None:
-                    attributes["op.yield_count"] = record["yield_count"]
-                if record.get("spawned_by"):
-                    attributes["op.spawned_by"] = record["spawned_by"]
-                if record.get("depth", 0) > 0:
-                    attributes["op.depth"] = record["depth"]
+                metadata = node.get("metadata") or {}
+                if metadata.get("yield_count") is not None:
+                    attributes["op.yield_count"] = metadata["yield_count"]
+                if metadata.get("spawned_by"):
+                    attributes["op.spawned_by"] = metadata["spawned_by"]
+                if metadata.get("depth", 0) > 0:
+                    attributes["op.depth"] = metadata["depth"]
 
-                # LLM-specific attributes (not for stream_items — those are individual yields)
-                if contain_generation and kind != "stream_item":
+                # LLM-specific
+                if node_type == "generation":
                     attributes["llm.request.type"] = "generation"
-                    if record.get("model"):
-                        attributes["llm.model"] = record["model"]
-                    usage = record.get("usage")
+                    if node.get("model"):
+                        attributes["llm.model"] = node["model"]
+                    usage = node.get("usage")
                     if usage:
                         if "prompt_tokens" in usage:
                             attributes["llm.usage.prompt_tokens"] = usage["prompt_tokens"]
@@ -220,58 +175,56 @@ class OTELTracer(Tracer):
                         if "total_tokens" in usage:
                             attributes["llm.usage.total_tokens"] = usage["total_tokens"]
 
-                # Serialize input/output as attributes
-                if record.get("inputs"):
+                # Serialize I/O as attributes
+                if node.get("inputs"):
                     try:
                         import json
 
-                        input_str = json.dumps(record["inputs"])
+                        input_str = json.dumps(node["inputs"])
                         if len(input_str) < 10000:
                             attributes["input"] = input_str
                     except (TypeError, ValueError):
                         pass
-
-                if record.get("outputs"):
+                if node.get("outputs"):
                     try:
                         import json
 
-                        output_str = json.dumps(record["outputs"])
+                        output_str = json.dumps(node["outputs"])
                         if len(output_str) < 10000:
                             attributes["output"] = output_str
                     except (TypeError, ValueError):
                         pass
 
                 # Metadata as attributes
-                if record.get("metadata"):
-                    for key, value in record["metadata"].items():
-                        if isinstance(value, (str, int, float, bool)):
-                            attributes[f"metadata.{key}"] = value
+                for mk, mv in metadata.items():
+                    if mk not in ("kind", "yield_count", "spawned_by", "depth"):
+                        if isinstance(mv, (str, int, float, bool)):
+                            attributes[f"metadata.{mk}"] = mv
 
-                if parent_name is None:
+                if parent_key is None:
                     # Root span
                     span = otel_tracer.start_span(
-                        name=workflow_name,
+                        name=node["display_name"],
                         attributes=attributes,
                         start_time=start_time_ns,
                     )
-                    spans[trace_key] = span
-                    span_end_times[trace_key] = end_time_ns
+                    spans[key] = span
+                    span_end_times[key] = end_time_ns
                 else:
-                    # Child span with parent context
                     parent_span = spans.get(parent_key)
                     if parent_span is None:
-                        LOGGER.warning("Parent '%s' not found for op '%s'", parent_key, op_name)
+                        LOGGER.warning("Parent '%s' not found for node '%s'", parent_key, key)
                         continue
 
                     ctx = trace.set_span_in_context(parent_span)
                     span = otel_tracer.start_span(
-                        name=short_name,
+                        name=node["display_name"],
                         context=ctx,
                         attributes=attributes,
                         start_time=start_time_ns,
                     )
-                    spans[trace_key] = span
-                    span_end_times[trace_key] = end_time_ns
+                    spans[key] = span
+                    span_end_times[key] = end_time_ns
 
             # End all spans in reverse order (children first)
             for key in reversed(list(spans.keys())):

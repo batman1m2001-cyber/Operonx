@@ -7,13 +7,13 @@ Core workflow engine providing ops, state management, tracing, and the execution
 ```
 hush/core/
 ├── engine.py           # Hush engine - compiles and runs workflows
-├── tracing/            # Tracing system (Tracer, TraceCollector, FlushWorker)
-│   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, LocalTracer
-│   ├── base.py         # Tracer base class (tags + flush interface)
-│   ├── collector.py    # TraceCollector — reads state directly after execution
-│   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, singleton
+├── tracing/            # Tracing system (Tracer, TraceCollector, FlushWorker, TraceNode)
+│   ├── __init__.py     # Exports: Tracer, TraceCollector, FlushWorker, LocalTracer, TraceNode
+│   ├── base.py         # Tracer base class (tags, stream_trace_limit, flush interface)
+│   ├── collector.py    # TraceCollector — collect_tree() builds pre-computed TraceNode tree
+│   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, stream sampling
 │   ├── local.py        # LocalTracer — zero-dep JSON file tracer
-│   └── models.py       # NodeStructure, TraceRecord, TracePayload dataclasses
+│   └── models.py       # TraceNode, NodeStructure, TraceRecord, TracePayload dataclasses
 ├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
 ├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
@@ -180,16 +180,40 @@ def llm_plugin(config: dict) -> LLMConfig:
 
 ### Overview
 
-Ops do **not** know about tracing. After `engine.run()` completes, `TraceCollector` reads
-all data directly from state, then `FlushWorker` sends it to tracers in background threads.
+Ops do **not** know about tracing. After `engine.run()` completes, `TraceCollector` builds
+a pre-computed tree of `TraceNode` objects, then `FlushWorker` sends it to tracers in background threads.
 
 ```
 Op.run() → stores I/O, timing, cost to state (no tracing awareness)
 engine.run() completes
   → FlushWorker.submit(tracers, graph, state)     ← returns immediately
     → ThreadPoolExecutor thread:
-      → TraceCollector.collect(graph, state)        ← CPU-bound, microseconds
+      → TraceCollector.collect_tree(graph, state)   ← builds TraceNode tree
+      → _sample_stream_nodes(nodes, limit)          ← caps stream items per generator
       → tracer.flush(trace_data)                    ← I/O-bound (HTTP, SDK calls)
+```
+
+### TraceNode (Pre-computed Tree)
+
+`collect_tree()` returns a flat list of `TraceNode` dicts with pre-computed `parent_trace_key`.
+Tracers do a simple parent lookup — no heuristics needed.
+
+Key fields:
+- `trace_key`: Unique identifier (e.g. `"root.step:main"`, `"$ctx:root:main.s0"`)
+- `parent_trace_key`: Parent's trace_key (None for root)
+- `display_name`: Short UI label (e.g. `"step"`, `"[0]"`, `"[iter 0]"`)
+- `node_type`: `"trace"` (root) | `"span"` (most things) | `"generation"` (LLM ops)
+- `kind`: `"batch"` | `"generator"` | `"stream_context"` | `"stream_item"` | `"loop_iter"` | `"graph"`
+
+Synthetic nodes (prefixed with `$ctx:`) group stream yields or loop iterations:
+```
+workflow (trace)
+├── chunker (span, kind=generator, yields=5)
+├── [0] (span, kind=stream_context)      ← synthetic grouping
+│   └── analyze (span, kind=stream_item)
+├── [1] (span, kind=stream_context)
+│   └── analyze (span, kind=stream_item)
+└── ...
 ```
 
 ### Tracer Base Class
@@ -198,13 +222,13 @@ engine.run() completes
 from hush.core.tracing import Tracer
 
 class MyTracer(Tracer):
-    def __init__(self, endpoint: str, tags=None):
-        super().__init__(tags=tags)
+    def __init__(self, endpoint: str, tags=None, stream_trace_limit=100):
+        super().__init__(tags=tags, stream_trace_limit=stream_trace_limit)
         self._endpoint = endpoint
 
     def flush(self, trace_data: dict) -> None:
         """Called by FlushWorker in a background thread."""
-        # trace_data has: graph_structure, records, tags, request_id, etc.
+        # trace_data has: nodes (TraceNode list), tags, request_id, etc.
         import requests
         requests.post(self._endpoint, json=trace_data)
 ```
@@ -224,11 +248,17 @@ result = await engine.run(
 
 ### Key Components
 
-- **`Tracer`** (`tracing/base.py`): Base class — just `__init__(tags)` + `flush(trace_data)`
-- **`TraceCollector`** (`tracing/collector.py`): Walks graph for static data + state for dynamic data
-- **`FlushWorker`** (`tracing/flush_worker.py`): `ThreadPoolExecutor(4)`, merges tags, calls `flush()`
+- **`Tracer`** (`tracing/base.py`): Base class — `__init__(tags, stream_trace_limit)` + `flush(trace_data)`
+- **`TraceNode`** (`tracing/models.py`): Dataclass for pre-computed trace tree nodes
+- **`TraceCollector`** (`tracing/collector.py`): `collect_tree()` builds TraceNode list with synthetic grouping nodes
+- **`FlushWorker`** (`tracing/flush_worker.py`): `ThreadPoolExecutor(4)`, merges tags, samples stream nodes, calls `flush()`
 - **`LocalTracer`** (`tracing/local.py`): Zero-dep JSON file tracer (writes to `~/.hush/traces/`)
 - **`HushEyesTracer`**: Moved to `hush-telemetry` package (`hush.telemetry.tracers.hush_eyes`)
+
+### Stream Sampling
+
+`stream_trace_limit` (default 100) caps stream_item nodes per generator before flushing.
+Orphaned stream_context nodes are also removed. Set to `None` to keep all.
 
 ### Tags
 

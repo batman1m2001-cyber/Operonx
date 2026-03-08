@@ -199,10 +199,13 @@ async def example_langfuse_tracing():
         print("  Set LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST")
         return
 
-    from hush.telemetry import LangfuseTracer
+    from hush.telemetry import LangfuseConfig, LangfuseTracer
 
+    config = LangfuseConfig.from_env()
+
+    request_id_1 = str(uuid.uuid4())
     tracer = LangfuseTracer(
-        resource="langfuse:default",
+        config=config,
         tags=["streaming", "generator-ops"],
     )
 
@@ -218,7 +221,7 @@ async def example_langfuse_tracing():
         tracer=tracer,
         user_id="streaming-demo",
         session_id="streaming-session",
-        request_id=str(uuid.uuid4()),
+        request_id=request_id_1,
     )
 
     print(f"  Chunks analyzed: {len(result['result'])}")
@@ -228,8 +231,9 @@ async def example_langfuse_tracing():
 
     # Also trace the async generator pipeline
     engine2 = Hush(build_async_pipeline())
+    request_id_2 = str(uuid.uuid4())
     tracer2 = LangfuseTracer(
-        resource="langfuse:default",
+        config=config,
         tags=["streaming", "async-generator"],
     )
 
@@ -238,18 +242,27 @@ async def example_langfuse_tracing():
         tracer=tracer2,
         user_id="streaming-demo",
         session_id="streaming-session",
-        request_id=str(uuid.uuid4()),
+        request_id=request_id_2,
     )
 
     print(f"  Squares (1..7): {result2['label']}")
     print()
-    print("  Check Langfuse UI:")
-    print("    - Filter by tag 'streaming'")
-    print("    - chunk_text span: metadata.kind='generator', metadata.yield_count=N")
-    print("    - analyze_chunk spans: metadata.kind='stream_item', metadata.spawned_by='...'")
 
-    # Give FlushWorker time to send traces
-    await asyncio.sleep(3)
+    # Wait for flush to complete and surface any errors
+    from hush.core.tracing import get_flush_worker
+
+    errors = get_flush_worker().wait(timeout=30)
+    if errors:
+        print("  FLUSH ERRORS:")
+        for err in errors:
+            print(f"    {err}")
+    else:
+        from hush.telemetry.backends.langfuse import LangfuseClient
+
+        client = LangfuseClient(config)
+        print(f"  Trace 1: {client.trace_url(request_id_1)}")
+        print(f"  Trace 2: {client.trace_url(request_id_2)}")
+    print()
 
 
 # =============================================================================

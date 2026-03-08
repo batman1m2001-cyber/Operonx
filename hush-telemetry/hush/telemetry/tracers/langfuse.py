@@ -1,10 +1,14 @@
-"""Langfuse tracer — sends workflow traces to Langfuse.
+"""Langfuse tracer — sends workflow traces via Langfuse public REST API.
+
+No SDK dependency. Builds a batch of ingestion events from the pre-computed
+TraceNode tree and POSTs to /api/public/ingestion.
 
 Inherits from hush.core.tracing.Tracer. Flush runs in FlushWorker's
 thread pool, never blocking the main async thread.
 """
 
-import base64
+import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from hush.core.tracing import Tracer
@@ -14,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class LangfuseTracer(Tracer):
-    """Tracer that sends workflow traces to Langfuse.
+    """Tracer that sends workflow traces to Langfuse via public REST API.
 
     Example:
         ```python
@@ -60,271 +64,202 @@ class LangfuseTracer(Tracer):
 
         return get_hub().langfuse(self._resource)
 
-    @staticmethod
-    def _resolve_media(
-        data: Dict[str, Any],
-        media_attachments: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """Resolve media attachments to LangfuseMedia objects."""
-        if not media_attachments:
-            return data
-
-        try:
-            from langfuse.media import LangfuseMedia
-        except ImportError:
-            return data
-
-        by_location: Dict[str, Dict[str, Any]] = {"input": {}, "output": {}, "metadata": {}}
-
-        for key, attachment in media_attachments.items():
-            attach_to = attachment.get("attach_to", "metadata")
-            content_type = attachment["content_type"]
-
-            if "base64" in attachment:
-                content_bytes = base64.b64decode(attachment["base64"])
-            elif "path" in attachment:
-                with open(attachment["path"], "rb") as f:
-                    content_bytes = f.read()
-            else:
-                continue
-
-            media_obj = LangfuseMedia(content_bytes=content_bytes, content_type=content_type)
-            by_location[attach_to][key] = media_obj
-
-        result = data.copy()
-
-        if by_location["input"]:
-            if isinstance(result.get("input"), dict):
-                result["input"] = {**result["input"], **by_location["input"]}
-            else:
-                result["input"] = {"_original": result.get("input"), **by_location["input"]}
-
-        if by_location["output"]:
-            if isinstance(result.get("output"), dict):
-                result["output"] = {**result["output"], **by_location["output"]}
-            else:
-                result["output"] = {"_original": result.get("output"), **by_location["output"]}
-
-        if by_location["metadata"]:
-            if isinstance(result.get("metadata"), dict):
-                result["metadata"] = {**result["metadata"], **by_location["metadata"]}
-            else:
-                result["metadata"] = by_location["metadata"]
-
-        return result
-
-    @staticmethod
-    def _context_to_str(ctx) -> str | None:
-        """Convert a context tuple to a dot-separated string for trace keys.
-
-        Examples: () → None, ("main",) → "main", ("main", "s0") → "main.s0"
-        """
-        if not ctx:
-            return None
-        if isinstance(ctx, (list, tuple)):
-            return ".".join(str(s) for s in ctx)
-        return str(ctx)
-
-    @staticmethod
-    def _build_streaming_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract streaming-specific fields into metadata dict."""
-        meta = {}
-        kind = record.get("kind")
-        if kind and kind != "batch":
-            meta["kind"] = kind
-        if record.get("yield_count") is not None:
-            meta["yield_count"] = record["yield_count"]
-        if record.get("spawned_by"):
-            meta["spawned_by"] = record["spawned_by"]
-        if record.get("depth", 0) > 0:
-            meta["depth"] = record["depth"]
-        if record.get("parent_context"):
-            ctx = record["parent_context"]
-            if isinstance(ctx, (list, tuple)):
-                meta["parent_context"] = ".".join(str(s) for s in ctx)
-            else:
-                meta["parent_context"] = str(ctx)
-        return meta
-
     def flush(self, trace_data: Dict[str, Any]) -> None:
-        """Send trace data to Langfuse.
+        """Send trace data to Langfuse via batch ingestion API.
 
-        Called by FlushWorker in a background thread.
+        Builds a list of trace-create/span-create/generation-create events
+        from the pre-computed TraceNode tree and sends them in one batch.
 
         Args:
             trace_data: {request_id, workflow_name, user_id, session_id,
-                        tags, graph_structure, records}
+                        tags, nodes}
         """
         from hush.core.loggings import LOGGER
 
-        try:
-            client = self._get_client()
+        client = self._get_client()
 
-            workflow_name = trace_data["workflow_name"]
-            req_id = trace_data["request_id"]
-            user_id = trace_data.get("user_id")
-            session_id = trace_data.get("session_id")
-            tags = trace_data.get("tags") or []
+        workflow_name = trace_data["workflow_name"]
+        trace_id = trace_data["request_id"]
+        user_id = trace_data.get("user_id")
+        session_id = trace_data.get("session_id")
+        tags = trace_data.get("tags") or []
+        clean_tags = [t for t in tags if t is not None] if tags else None
 
-            # Build structure lookup: op_name → {parent_name, contain_generation, ...}
-            structure_map = {s["op_name"]: s for s in trace_data.get("graph_structure", [])}
+        LOGGER.info(
+            "Workflow: %s, Request ID: %s, Creating Langfuse trace hierarchy...",
+            workflow_name,
+            trace_id,
+        )
 
-            LOGGER.info(
-                "Workflow: %s, Request ID: %s, Creating Langfuse trace hierarchy...",
-                workflow_name,
-                req_id,
-            )
+        # Build batch events from nodes
+        batch: List[Dict[str, Any]] = []
+        # Map trace_key -> observation UUID (for parentObservationId linking)
+        obs_ids: Dict[str, str] = {}
+        # Fallback timestamp for nodes without start_time (e.g. synthetic context nodes)
+        # Langfuse expects UTC timestamps ending with "Z", not "+00:00"
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-            langfuse_objects = {}
-            root_trace = None
+        # Pre-process: assign monotonically increasing start times per parent.
+        # Langfuse sorts children by startTime. The nodes list is already in
+        # execution order from collect_tree(), so we just assign each sibling
+        # start_time = parent_start + (child_index * 1ms) to preserve ordering.
+        from datetime import timedelta
 
-            for record in trace_data.get("records", []):
-                op_name = record["op_name"]
-                context_str = self._context_to_str(record.get("context"))
-                kind = record.get("kind", "batch")
-                structure = structure_map.get(op_name, {})
-                parent_name = structure.get("parent_name")
-                contain_generation = structure.get("contain_generation", False)
+        nodes = list(trace_data.get("nodes", []))
+        # Collect parent start times first
+        node_start: Dict[str, str] = {}
+        for node in nodes:
+            st = node.get("start_time")
+            if st:
+                node_start[node["trace_key"]] = st
 
-                # Build unique key for context-aware nodes
-                trace_key = f"{op_name}:{context_str}" if context_str else op_name
+        parent_child_count: Dict[Optional[str], int] = {}
+        for node in nodes:
+            pk = node.get("parent_trace_key")
+            if pk is None:
+                continue
+            idx = parent_child_count.get(pk, 0)
+            parent_child_count[pk] = idx + 1
+            if idx > 0:
+                # Get parent's start_time as base
+                base_iso = node_start.get(pk) or node.get("start_time") or now_iso
+                try:
+                    base = datetime.fromisoformat(base_iso.replace("Z", "+00:00"))
+                    bumped = base + timedelta(milliseconds=idx)
+                    node["start_time"] = bumped.isoformat().replace("+00:00", "Z")
+                except (ValueError, TypeError):
+                    pass
 
-                # Resolve parent key with context awareness
-                # For stream_items, nest under the generator that spawned them
-                spawned_by = record.get("spawned_by")
-                if kind == "stream_item" and spawned_by and context_str:
-                    # Try spawner with same context first (e.g. "gen:main.s0")
-                    spawner_ctx_key = f"{spawned_by}:{context_str}"
-                    if spawner_ctx_key in langfuse_objects:
-                        parent_key = spawner_ctx_key
-                    else:
-                        # Try spawner with parent context (e.g. "gen:main")
-                        last_dot = context_str.rfind(".")
-                        if last_dot > 0:
-                            spawner_parent_key = f"{spawned_by}:{context_str[:last_dot]}"
-                            if spawner_parent_key in langfuse_objects:
-                                parent_key = spawner_parent_key
-                            else:
-                                parent_key = spawned_by
-                        else:
-                            parent_key = spawned_by
-                elif parent_name and context_str:
-                    context_parent_key = f"{parent_name}:{context_str}"
-                    if context_parent_key in langfuse_objects:
-                        parent_key = context_parent_key
-                    else:
-                        last_dot = context_str.rfind(".")
-                        if last_dot > 0:
-                            parent_context = context_str[:last_dot]
-                            parent_with_parent_ctx = f"{parent_name}:{parent_context}"
-                            if parent_with_parent_ctx in langfuse_objects:
-                                parent_key = parent_with_parent_ctx
-                else:
-                    parent_key = parent_name
+        for node in nodes:
+            key = node["trace_key"]
+            parent_key = node.get("parent_trace_key")
+            node_type = node.get("node_type", "span")
+            metadata = dict(node.get("metadata") or {})
+            event_id = str(uuid.uuid4())
 
-                # Short name for display
-                short_name = op_name.rsplit(".", 1)[-1] if "." in op_name else op_name
+            if node_type == "trace":
+                # Root trace event
+                body: Dict[str, Any] = {
+                    "id": trace_id,
+                    "name": node["display_name"],
+                    "input": node.get("inputs") or None,
+                    "output": node.get("outputs") or None,
+                    "metadata": metadata or None,
+                    "tags": clean_tags if clean_tags else None,
+                }
+                if user_id:
+                    body["userId"] = user_id
+                if session_id:
+                    body["sessionId"] = session_id
+                if node.get("start_time"):
+                    body["timestamp"] = node["start_time"]
 
-                # Merge existing metadata with streaming metadata
-                metadata = dict(record.get("metadata") or {})
-                metadata.update(self._build_streaming_metadata(record))
-
-                if parent_name is None:
-                    # Root — create trace
-                    clean_tags = [t for t in tags if t is not None] if tags else None
-                    root_trace = client.trace(
-                        id=req_id,
-                        name=workflow_name,
-                        user_id=user_id,
-                        session_id=session_id,
-                        tags=clean_tags if clean_tags else None,
-                        start_time=record.get("start_time"),
-                        end_time=record.get("end_time"),
-                        input=record.get("inputs"),
-                        output=record.get("outputs"),
-                        metadata=metadata or None,
-                    )
-                    langfuse_objects[trace_key] = root_trace
-                else:
-                    # Child — span or generation
-                    parent = langfuse_objects.get(parent_key)
-                    if parent is None:
-                        LOGGER.warning("Parent '%s' not found for op '%s'", parent_key, op_name)
-                        continue
-
-                    kwargs = {
-                        "name": short_name,
-                        "start_time": record.get("start_time"),
-                        "end_time": record.get("end_time"),
-                        "input": record.get("inputs"),
-                        "output": record.get("outputs"),
-                        "metadata": metadata or None,
+                batch.append(
+                    {
+                        "id": event_id,
+                        "type": "trace-create",
+                        "timestamp": node.get("start_time") or now_iso,
+                        "body": body,
                     }
-
-                    # Use generation() for LLM ops (batch or generator aggregate),
-                    # but NOT for stream_items (individual yields are sub-spans)
-                    use_generation = contain_generation and kind != "stream_item"
-
-                    if use_generation:
-                        usage = record.get("usage")
-                        if usage:
-                            langfuse_usage = {}
-                            if "prompt_tokens" in usage:
-                                langfuse_usage["input"] = usage["prompt_tokens"]
-                            if "completion_tokens" in usage:
-                                langfuse_usage["output"] = usage["completion_tokens"]
-                            if "total_tokens" in usage:
-                                langfuse_usage["total"] = usage["total_tokens"]
-                            if langfuse_usage:
-                                kwargs["usage"] = langfuse_usage
-
-                        if record.get("model"):
-                            kwargs["model"] = record["model"]
-
-                        cost = record.get("cost")
-                        if cost and "usage" in kwargs and kwargs["usage"]:
-                            kwargs["usage"]["total_cost"] = cost
-
-                        langfuse_objects[trace_key] = parent.generation(**kwargs)
-                    else:
-                        langfuse_objects[trace_key] = parent.span(**kwargs)
-
-            client.flush()
-
-            trace_url = root_trace.get_trace_url() if root_trace else None
-            if trace_url:
-                LOGGER.info(
-                    "Workflow: %s, Request ID: %s, Langfuse trace created. View: %s",
-                    workflow_name,
-                    req_id,
-                    trace_url,
                 )
+                obs_ids[key] = trace_id  # trace's "id" is used as traceId
+
+            elif node_type == "generation":
+                obs_id = str(uuid.uuid4())
+                obs_ids[key] = obs_id
+
+                body = {
+                    "id": obs_id,
+                    "traceId": trace_id,
+                    "name": node["display_name"],
+                    "startTime": node.get("start_time"),
+                    "endTime": node.get("end_time"),
+                    "input": node.get("inputs") or None,
+                    "output": node.get("outputs") or None,
+                    "metadata": metadata or None,
+                }
+
+                # Parent observation (if not direct child of trace)
+                if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
+                    body["parentObservationId"] = obs_ids[parent_key]
+
+                # LLM-specific fields
+                if node.get("model"):
+                    body["model"] = node["model"]
+                usage = node.get("usage")
+                if usage:
+                    usage_details = {}
+                    if "prompt_tokens" in usage:
+                        usage_details["input"] = usage["prompt_tokens"]
+                    if "completion_tokens" in usage:
+                        usage_details["output"] = usage["completion_tokens"]
+                    if "total_tokens" in usage:
+                        usage_details["total"] = usage["total_tokens"]
+                    if usage_details:
+                        body["usageDetails"] = usage_details
+                cost = node.get("cost")
+                if cost is not None:
+                    body["costDetails"] = {"total": cost}
+
+                batch.append(
+                    {
+                        "id": event_id,
+                        "type": "generation-create",
+                        "timestamp": node.get("start_time") or now_iso,
+                        "body": body,
+                    }
+                )
+
             else:
-                LOGGER.warning(
-                    "Workflow: %s, Request ID: %s, Failed to generate Langfuse trace URL.",
-                    workflow_name,
-                    req_id,
+                # Span (batch, stream_context, stream_item, loop_iter, graph)
+                obs_id = str(uuid.uuid4())
+                obs_ids[key] = obs_id
+
+                body = {
+                    "id": obs_id,
+                    "traceId": trace_id,
+                    "name": node["display_name"],
+                    "startTime": node.get("start_time"),
+                    "endTime": node.get("end_time"),
+                    "input": node.get("inputs") or None,
+                    "output": node.get("outputs") or None,
+                    "metadata": metadata or None,
+                }
+
+                if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
+                    body["parentObservationId"] = obs_ids[parent_key]
+
+                batch.append(
+                    {
+                        "id": event_id,
+                        "type": "span-create",
+                        "timestamp": node.get("start_time") or now_iso,
+                        "body": body,
+                    }
                 )
 
-        except ImportError as e:
-            from hush.core.loggings import LOGGER
+        # Send batch
+        result = client.ingest(batch)
 
-            LOGGER.error(
-                "langfuse package is required for LangfuseTracer. "
-                "Install it with: pip install langfuse. Error: %s",
-                str(e),
+        # Check for errors — raise so FlushWorker surfaces them
+        errors = result.get("errors", [])
+        if errors:
+            msg = (
+                f"Langfuse ingestion had {len(errors)} error(s) for "
+                f"workflow '{workflow_name}': {errors[:5]}"
             )
+            LOGGER.error(msg)
+            raise RuntimeError(msg)
 
-        except Exception as e:
-            import traceback
-
-            from hush.core.loggings import LOGGER
-
-            LOGGER.error(
-                "Langfuse flush failed: %s\nTraceback:\n%s",
-                str(e),
-                traceback.format_exc(),
-            )
+        successes = result.get("successes", [])
+        trace_url = client.trace_url(trace_id)
+        LOGGER.info(
+            "Workflow: %s, Request ID: %s, Langfuse trace created (%d events). View: %s",
+            workflow_name,
+            trace_id,
+            len(successes),
+            trace_url,
+        )
 
     def __repr__(self) -> str:
         if self._resource:

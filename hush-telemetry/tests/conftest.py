@@ -13,8 +13,18 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 # Also try loading from monorepo root
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-# Get config path from environment
-CONFIGS_PATH = Path(os.environ.get("HUSH_CONFIG", ""))
+# Get config path from environment, resolve relative paths by walking up
+_raw_config = os.environ.get("HUSH_CONFIG", "")
+CONFIGS_PATH = Path(_raw_config)
+if _raw_config and not CONFIGS_PATH.is_absolute() and not CONFIGS_PATH.exists():
+    # Walk up from CWD to find the file (matches hush-core behavior)
+    _p = Path.cwd()
+    while _p != _p.parent:
+        candidate = _p / _raw_config
+        if candidate.exists():
+            CONFIGS_PATH = candidate
+            break
+        _p = _p.parent
 
 # =============================================================================
 # Configuration Validation
@@ -88,7 +98,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 # ============================================================================
-# Test Data Fixtures — new tracing format (graph_structure + records)
+# Test Data Fixtures — nodes format (TraceNode tree)
 # ============================================================================
 
 
@@ -100,37 +110,21 @@ def sample_request_id():
 
 @pytest.fixture
 def sample_trace_data(sample_request_id):
-    """Create sample trace data in the new format (graph_structure + records)."""
+    """Create sample trace data in nodes format (pre-computed TraceNode tree)."""
     return {
         "workflow_name": "test-workflow",
         "request_id": sample_request_id,
         "user_id": "test-user",
         "session_id": "test-session",
         "tags": ["test", "unit"],
-        "graph_structure": [
+        "nodes": [
             {
+                "trace_key": "root",
+                "parent_trace_key": None,
                 "op_name": "root",
-                "op_type": "graph",
-                "parent_name": None,
-                "contain_generation": False,
-            },
-            {
-                "op_name": "root.child-1",
-                "op_type": "code",
-                "parent_name": "root",
-                "contain_generation": False,
-            },
-            {
-                "op_name": "root.llm-node",
-                "op_type": "llm",
-                "parent_name": "root",
-                "contain_generation": True,
-            },
-        ],
-        "records": [
-            {
-                "op_name": "root",
-                "context_id": None,
+                "display_name": "test-workflow",
+                "node_type": "trace",
+                "kind": "graph",
                 "inputs": {"workflow": "test"},
                 "outputs": {"status": "completed"},
                 "start_time": "2024-01-15T10:00:00Z",
@@ -139,8 +133,12 @@ def sample_trace_data(sample_request_id):
                 "metadata": {"version": "1.0"},
             },
             {
+                "trace_key": "root.child-1",
+                "parent_trace_key": "root",
                 "op_name": "root.child-1",
-                "context_id": None,
+                "display_name": "child-1",
+                "node_type": "span",
+                "kind": "batch",
                 "inputs": {"step": 1},
                 "outputs": {"processed": True},
                 "start_time": "2024-01-15T10:00:00.100Z",
@@ -149,13 +147,18 @@ def sample_trace_data(sample_request_id):
                 "metadata": {},
             },
             {
+                "trace_key": "root.llm-node",
+                "parent_trace_key": "root",
                 "op_name": "root.llm-node",
-                "context_id": None,
+                "display_name": "llm-node",
+                "node_type": "generation",
+                "kind": "batch",
                 "inputs": {"prompt": "Test prompt"},
                 "outputs": {"completion": "Test response"},
                 "start_time": "2024-01-15T10:00:00.500Z",
                 "end_time": "2024-01-15T10:00:00.900Z",
                 "duration_ms": 400.0,
+                "metadata": {"temperature": 0.7},
                 "model": "gpt-4",
                 "usage": {
                     "prompt_tokens": 10,
@@ -163,7 +166,6 @@ def sample_trace_data(sample_request_id):
                     "total_tokens": 30,
                 },
                 "cost": 0.0015,
-                "metadata": {"temperature": 0.7},
             },
         ],
     }
@@ -171,93 +173,110 @@ def sample_trace_data(sample_request_id):
 
 @pytest.fixture
 def sample_iteration_trace_data(sample_request_id):
-    """Create trace data with iteration context (MapOp, ForLoop)."""
+    """Create trace data with iteration context (stream contexts)."""
     return {
         "workflow_name": "iteration-workflow",
         "request_id": sample_request_id,
         "user_id": "test-user",
         "session_id": "test-session",
         "tags": ["iteration", "test"],
-        "graph_structure": [
+        "nodes": [
             {
+                "trace_key": "root",
+                "parent_trace_key": None,
                 "op_name": "root",
-                "op_type": "graph",
-                "parent_name": None,
-                "contain_generation": False,
-            },
-            {
-                "op_name": "root.map_op",
-                "op_type": "map",
-                "parent_name": "root",
-                "contain_generation": False,
-            },
-            {
-                "op_name": "root.map_op.process",
-                "op_type": "code",
-                "parent_name": "root.map_op",
-                "contain_generation": False,
-            },
-            {
-                "op_name": "root.aggregate",
-                "op_type": "code",
-                "parent_name": "root",
-                "contain_generation": False,
-            },
-        ],
-        "records": [
-            {
-                "op_name": "root",
-                "context_id": None,
+                "display_name": "iteration-workflow",
+                "node_type": "trace",
+                "kind": "graph",
                 "inputs": {"items": [1, 2, 3]},
                 "outputs": {"result": 6},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
             },
             {
+                "trace_key": "root.map_op",
+                "parent_trace_key": "root",
                 "op_name": "root.map_op",
-                "context_id": None,
+                "display_name": "map_op",
+                "node_type": "span",
+                "kind": "generator",
                 "inputs": {},
                 "outputs": {},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
+                "metadata": {"yield_count": 3},
             },
             {
+                "trace_key": "$ctx:root:main.s0",
+                "parent_trace_key": "root",
+                "op_name": None,
+                "display_name": "[0]",
+                "node_type": "span",
+                "kind": "stream_context",
+                "inputs": {},
+                "outputs": {},
+                "metadata": {},
+            },
+            {
+                "trace_key": "root.map_op.process:main.s0",
+                "parent_trace_key": "$ctx:root:main.s0",
                 "op_name": "root.map_op.process",
-                "context_id": "[0]",
+                "display_name": "process",
+                "node_type": "span",
+                "kind": "stream_item",
                 "inputs": {"item": 1},
                 "outputs": {"doubled": 2},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
+                "metadata": {"spawned_by": "root.map_op"},
             },
             {
+                "trace_key": "$ctx:root:main.s1",
+                "parent_trace_key": "root",
+                "op_name": None,
+                "display_name": "[1]",
+                "node_type": "span",
+                "kind": "stream_context",
+                "inputs": {},
+                "outputs": {},
+                "metadata": {},
+            },
+            {
+                "trace_key": "root.map_op.process:main.s1",
+                "parent_trace_key": "$ctx:root:main.s1",
                 "op_name": "root.map_op.process",
-                "context_id": "[1]",
+                "display_name": "process",
+                "node_type": "span",
+                "kind": "stream_item",
                 "inputs": {"item": 2},
                 "outputs": {"doubled": 4},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
+                "metadata": {"spawned_by": "root.map_op"},
             },
             {
+                "trace_key": "$ctx:root:main.s2",
+                "parent_trace_key": "root",
+                "op_name": None,
+                "display_name": "[2]",
+                "node_type": "span",
+                "kind": "stream_context",
+                "inputs": {},
+                "outputs": {},
+                "metadata": {},
+            },
+            {
+                "trace_key": "root.map_op.process:main.s2",
+                "parent_trace_key": "$ctx:root:main.s2",
                 "op_name": "root.map_op.process",
-                "context_id": "[2]",
+                "display_name": "process",
+                "node_type": "span",
+                "kind": "stream_item",
                 "inputs": {"item": 3},
                 "outputs": {"doubled": 6},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
+                "metadata": {"spawned_by": "root.map_op"},
             },
             {
+                "trace_key": "root.aggregate",
+                "parent_trace_key": "root",
                 "op_name": "root.aggregate",
-                "context_id": None,
+                "display_name": "aggregate",
+                "node_type": "span",
+                "kind": "batch",
                 "inputs": {"values": [2, 4, 6]},
                 "outputs": {"sum": 12},
-                "start_time": None,
-                "end_time": None,
-                "duration_ms": None,
             },
         ],
     }
