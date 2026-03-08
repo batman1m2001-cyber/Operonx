@@ -14,8 +14,18 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # __file__ = hush-providers/tests/conftest.py → .parent.parent = hush-providers/ → .parent = Hush-ai/
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
-# Get config path from environment
-CONFIGS_PATH = Path(os.environ.get("HUSH_CONFIG", ""))
+# Get config path from environment, resolve relative paths by walking up
+_raw_config = os.environ.get("HUSH_CONFIG", "")
+CONFIGS_PATH = Path(_raw_config)
+if _raw_config and not CONFIGS_PATH.is_absolute() and not CONFIGS_PATH.exists():
+    # Walk up from CWD to find the file (matches hush-core behavior)
+    _p = Path.cwd()
+    while _p != _p.parent:
+        candidate = _p / _raw_config
+        if candidate.exists():
+            CONFIGS_PATH = candidate
+            break
+        _p = _p.parent
 
 # =============================================================================
 # Configuration Validation

@@ -5,7 +5,7 @@ Tests cover:
 - OTELTracer creation and validation
 - Inheritance from hush.core.tracing.Tracer
 - Helper methods (datetime conversion, short name extraction)
-- flush() with new trace_data format (graph_structure + records)
+- flush() with nodes format (pre-computed TraceNode tree)
 """
 
 import uuid
@@ -279,18 +279,14 @@ class TestOTELTracerFlush:
             "user_id": "test-user",
             "session_id": "test-session",
             "tags": ["otel-test"],
-            "graph_structure": [
+            "nodes": [
                 {
+                    "trace_key": "root",
+                    "parent_trace_key": None,
                     "op_name": "root",
-                    "op_type": "graph",
-                    "parent_name": None,
-                    "contain_generation": False,
-                },
-            ],
-            "records": [
-                {
-                    "op_name": "root",
-                    "context_id": None,
+                    "display_name": "test-workflow",
+                    "node_type": "trace",
+                    "kind": "graph",
                     "inputs": {"test": True},
                     "outputs": {"success": True},
                     "start_time": "2024-01-15T10:00:00Z",
@@ -360,62 +356,69 @@ class TestOTELTracerFlush:
             "user_id": None,
             "session_id": None,
             "tags": [],
-            "graph_structure": [
+            "nodes": [
                 {
+                    "trace_key": "root",
+                    "parent_trace_key": None,
                     "op_name": "root",
-                    "op_type": "graph",
-                    "parent_name": None,
-                    "contain_generation": False,
-                },
-                {
-                    "op_name": "root.loop",
-                    "op_type": "for",
-                    "parent_name": "root",
-                    "contain_generation": False,
-                },
-                {
-                    "op_name": "root.loop.process",
-                    "op_type": "code",
-                    "parent_name": "root.loop",
-                    "contain_generation": False,
-                },
-            ],
-            "records": [
-                {
-                    "op_name": "root",
-                    "context_id": None,
+                    "display_name": "iteration-workflow",
+                    "node_type": "trace",
+                    "kind": "graph",
                     "inputs": {},
                     "outputs": {},
-                    "start_time": None,
-                    "end_time": None,
-                    "duration_ms": None,
                 },
                 {
+                    "trace_key": "root.loop",
+                    "parent_trace_key": "root",
                     "op_name": "root.loop",
-                    "context_id": None,
+                    "display_name": "loop",
+                    "node_type": "span",
+                    "kind": "generator",
                     "inputs": {},
                     "outputs": {},
-                    "start_time": None,
-                    "end_time": None,
-                    "duration_ms": None,
+                    "metadata": {"yield_count": 2},
                 },
                 {
+                    "trace_key": "$ctx:root:main.s0",
+                    "parent_trace_key": "root",
+                    "op_name": None,
+                    "display_name": "[0]",
+                    "node_type": "span",
+                    "kind": "stream_context",
+                    "inputs": {},
+                    "outputs": {},
+                },
+                {
+                    "trace_key": "root.loop.process:main.s0",
+                    "parent_trace_key": "$ctx:root:main.s0",
                     "op_name": "root.loop.process",
-                    "context_id": "[0]",
+                    "display_name": "process",
+                    "node_type": "span",
+                    "kind": "stream_item",
                     "inputs": {"i": 0},
                     "outputs": {"r": 0},
-                    "start_time": None,
-                    "end_time": None,
-                    "duration_ms": None,
+                    "metadata": {"spawned_by": "root.loop"},
                 },
                 {
+                    "trace_key": "$ctx:root:main.s1",
+                    "parent_trace_key": "root",
+                    "op_name": None,
+                    "display_name": "[1]",
+                    "node_type": "span",
+                    "kind": "stream_context",
+                    "inputs": {},
+                    "outputs": {},
+                },
+                {
+                    "trace_key": "root.loop.process:main.s1",
+                    "parent_trace_key": "$ctx:root:main.s1",
                     "op_name": "root.loop.process",
-                    "context_id": "[1]",
+                    "display_name": "process",
+                    "node_type": "span",
+                    "kind": "stream_item",
                     "inputs": {"i": 1},
                     "outputs": {"r": 1},
-                    "start_time": None,
-                    "end_time": None,
-                    "duration_ms": None,
+                    "metadata": {"spawned_by": "root.loop"},
                 },
             ],
         }
@@ -435,8 +438,8 @@ class TestOTELTracerFlush:
                 mock_set_ctx.return_value = MagicMock()
                 tracer.flush(trace_data)
 
-        # Should have created 4 spans (root, loop, process:[0], process:[1])
-        assert mock_tracer.start_span.call_count == 4
+        # root + loop + 2 stream_contexts + 2 process = 6 spans
+        assert mock_tracer.start_span.call_count == 6
 
 
 # ============================================================================

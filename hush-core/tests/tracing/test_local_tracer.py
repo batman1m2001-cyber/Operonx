@@ -364,8 +364,7 @@ class TestEngineWithTracers:
         data = tracer.flush_calls[0]
         assert data["request_id"] == "eng-001"
         assert data["workflow_name"] == "engine-wf"
-        assert len(data["graph_structure"]) >= 2  # graph + node
-        assert len(data["records"]) >= 2  # graph + node
+        assert len(data["nodes"]) >= 2  # graph + node
 
     @pytest.mark.asyncio
     async def test_engine_multiple_runs(self):
@@ -635,7 +634,5 @@ class TestTracerWithIterationNodes:
         tracer.wait_for_flush(timeout=5)
 
         data = tracer.flush_calls[0]
-        # Should have records for graph and ops
-        assert len(data["records"]) >= 2
-
-
+        # Should have nodes for graph and ops
+        assert len(data["nodes"]) >= 2

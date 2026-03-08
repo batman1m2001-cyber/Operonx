@@ -72,6 +72,44 @@ class TraceSummary:
 
 
 @dataclass
+class TraceNode:
+    """Pre-computed tree node for trace visualization.
+
+    The collector builds these with parent_trace_key already resolved,
+    so tracers (Langfuse, OTEL, etc.) do a simple parent lookup with
+    zero heuristics.
+
+    Kinds:
+        - "batch": Normal op execution.
+        - "generator": Generator summary (yield_count, total time).
+        - "stream_context": Synthetic grouping span for execution slice [N].
+        - "stream_item": Op execution inside a stream context.
+        - "loop_iter": Synthetic grouping span for loop iteration [iter N].
+        - "graph": Nested GraphOp container.
+    """
+
+    trace_key: str  # unique: "op_name:ctx_str" or synthetic "$ctx:main.s0"
+    parent_trace_key: Optional[str]  # pre-computed — tracers just look this up
+
+    op_name: Optional[str]  # None for synthetic nodes
+    display_name: str  # short name for UI (e.g. "analyze", "[0]", "[iter 0]")
+    node_type: str  # "trace" | "span" | "generation"
+    kind: str  # "batch"|"generator"|"stream_context"|"stream_item"|"loop_iter"|"graph"
+
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    outputs: Dict[str, Any] = field(default_factory=dict)
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    duration_ms: Optional[float] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # LLM-specific (node_type="generation" only)
+    model: Optional[str] = None
+    usage: Optional[Dict[str, Any]] = None
+    cost: Optional[float] = None
+
+
+@dataclass
 class TracePayload:
     """Complete trace data for a single workflow execution.
 
