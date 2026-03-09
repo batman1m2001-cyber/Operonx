@@ -69,7 +69,7 @@ class Hush:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema"]
+    __slots__ = ["graph", "name", "_schema", "_collector"]
 
     def __init__(self, graph: GraphOp):
         """Initialize Hush engine with a GraphOp.
@@ -84,6 +84,11 @@ class Hush:
         # Build graph and create schema immediately
         self.graph.build()
         self._schema = StateSchema(self.graph)
+
+        # Precompute trace collector (graph metadata, topo order)
+        from hush.core.tracing import TraceCollector
+
+        self._collector = TraceCollector(self.graph)
 
         LOGGER.debug(
             "Hush engine initialized for workflow [highlight]%s[/highlight]",
@@ -156,7 +161,7 @@ class Hush:
         if tracers:
             from hush.core.tracing import get_flush_worker
 
-            get_flush_worker().submit(tracers, self.graph, state)
+            get_flush_worker().submit(tracers, self._collector, state)
 
         LOGGER.info(
             "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed",
@@ -241,7 +246,7 @@ class Hush:
         if tracers:
             from hush.core.tracing import get_flush_worker
 
-            get_flush_worker().submit(tracers, self.graph, state)
+            get_flush_worker().submit(tracers, self._collector, state)
 
         LOGGER.info(
             "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] stream completed",

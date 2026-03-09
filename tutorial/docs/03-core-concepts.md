@@ -215,7 +215,7 @@ llm = LLMOp(
 llm:gpt-4o:         # category=llm, name=gpt-4o
 embedding:openai:    # category=embedding, name=openai
 reranking:bge-m3:    # category=reranking, name=bge-m3
-langfuse:default:    # category=langfuse, name=default
+langfuse:hush:    # category=langfuse, name=default
 otel:default:        # category=otel, name=default
 ```
 

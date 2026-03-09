@@ -1,15 +1,15 @@
-"""Tutorial 11: Agent Workflow — AI Agent sử dụng tools.
+"""Tutorial 11: Agent Workflow — AI Agent su dung tools.
 
-Cần: OPENAI_API_KEY trong .env + llm:gpt-4o-mini trong resources.yaml
+Can: OPENAI_API_KEY trong .env + llm:gpt-4o-mini trong resources.yaml
 
-Học được:
-- Tool-calling agent pattern: Query → LLM → Execute Tools → Loop → Final Answer
-- WhileOp cho agent loop (stop khi LLM không gọi tool nữa)
+Hoc duoc:
+- Tool-calling agent pattern: Query -> LLM -> Execute Tools -> Loop -> Final Answer
+- @graph.loop() decorator cho agent loop (stop khi LLM khong goi tool nua)
 - Tool definitions (OpenAI function calling format)
-- Process tool_calls và feed results back vào messages
-- max_iterations để tránh infinite loops
+- Process tool_calls va feed results back vao messages
+- max_iterations de tranh infinite loops
 
-Chạy: cd tutorial && uv run python examples/11_agent_workflow.py
+Chay: cd tutorial && uv run python examples/11_agent_workflow.py
 """
 
 import asyncio
@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import WhileOp, op
+from hush.core import END, PARENT, START, GraphOp, Hush, graph
+from hush.core.ops import op
 from hush.providers import LLMOp
 
 # =============================================================================
@@ -89,40 +89,40 @@ TOOL_DESCRIPTIONS = [
 
 
 # =============================================================================
-# Agent logic
+# Agent ops
 # =============================================================================
 
 
 @op
 def init_agent(query: str):
-    """Khởi tạo agent state."""
+    """Khoi tao agent state."""
     return {
         "messages": [
             {
                 "role": "system",
-                "content": "You are a helpful assistant with access to tools. Use them when needed.",
+                "content": "You are a helpful assistant with access to tools. "
+                "Use them when needed.",
             },
             {"role": "user", "content": query},
         ],
-        "iteration": 0,
         "done": False,
-        "final_answer": None,
+        "answer": "",
     }
 
 
 @op
-def process_llm_response(content, tool_calls, messages, iteration):
-    """Xử lý response từ LLM: execute tools hoặc return final answer."""
-    new_messages = messages.copy()
+def process_response(content, tool_calls, messages):
+    """Xu ly response tu LLM: execute tools hoac return final answer."""
+    new_messages = list(messages)
 
-    # Thêm assistant message
-    assistant_msg = {"role": "assistant", "content": content}
+    # Them assistant message
+    assistant_msg = {"role": "assistant", "content": content or ""}
     if tool_calls:
         assistant_msg["tool_calls"] = tool_calls
     new_messages.append(assistant_msg)
 
     if tool_calls:
-        # Execute từng tool và thêm kết quả vào messages
+        # Execute tung tool va them ket qua vao messages
         for tool_call in tool_calls:
             func_name = tool_call["function"]["name"]
             args = json.loads(tool_call["function"]["arguments"])
@@ -141,76 +141,76 @@ def process_llm_response(content, tool_calls, messages, iteration):
             )
 
         return {
-            "new_messages": new_messages,
-            "new_iteration": iteration + 1,
-            "is_done": False,
-            "answer": None,
+            "messages": new_messages,
+            "done": False,
+            "answer": "",
         }
     else:
-        # Không có tool calls → LLM đã có final answer
+        # Khong co tool calls -> LLM da co final answer
         return {
-            "new_messages": new_messages,
-            "new_iteration": iteration + 1,
-            "is_done": True,
-            "answer": content,
+            "messages": new_messages,
+            "done": True,
+            "answer": content or "",
         }
 
 
 # =============================================================================
-# Ví dụ 1: Simple tool-calling agent
+# @graph.loop — agent loop decorator
+# =============================================================================
+
+
+@graph.loop(until="done == True", max_iterations=10)
+def agent_loop(messages, done, answer):
+    """Repeat LLM -> process until done == True."""
+    # Goi LLM voi tools
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        messages=messages,
+        tools=TOOL_DESCRIPTIONS,
+    )
+
+    # Xu ly response: execute tools hoac set done=True
+    proc = process_response(
+        content=llm["content"],
+        tool_calls=llm["tool_calls"],
+        messages=messages,
+    )
+
+    # Update loop state
+    proc["messages"] >> PARENT["messages"]
+    proc["done"] >> PARENT["done"]
+    proc["answer"] >> PARENT["answer"]
+
+    START >> llm >> proc >> END
+
+
+# =============================================================================
+# Vi du 1: Simple tool-calling agent
 # =============================================================================
 
 
 async def example_1_simple_agent():
-    """Agent loop: LLM gọi tools → execute → feed back → repeat."""
+    """Agent loop: LLM goi tools -> execute -> feed back -> repeat."""
     print("=" * 50)
-    print("Ví dụ 1: Tool-calling Agent")
+    print("Vi du 1: Tool-calling Agent (@graph.loop)")
     print("=" * 50)
 
     import os
 
     if not os.environ.get("OPENAI_API_KEY"):
-        print("  Skipped — OPENAI_API_KEY chưa set")
+        print("  Skipped — OPENAI_API_KEY chua set")
         return
 
     with GraphOp(name="simple-agent") as graph:
-        init = init_agent(
-            query=PARENT["query"],
-            outputs={"*": PARENT},
+        init = init_agent(query=PARENT["query"])
+
+        loop = agent_loop(
+            messages=init["messages"],
+            done=init["done"],
+            answer=init["answer"],
         )
 
-        with WhileOp.of(
-            messages=PARENT["messages"],
-            iteration=PARENT["iteration"],
-            done=PARENT["done"],
-            final_answer=PARENT["final_answer"],
-            until="done == True or iteration >= 5",
-            max_iterations=10,
-        ) as loop:
-            # Gọi LLM với tools
-            llm = LLMOp.of(
-                resource="gpt-4o-mini",
-                messages=PARENT["messages"],
-                tools=TOOL_DESCRIPTIONS,
-            )
-
-            # Xử lý response
-            process = process_llm_response(
-                content=llm["content"],
-                tool_calls=llm["tool_calls"],
-                messages=PARENT["messages"],
-                iteration=PARENT["iteration"],
-            )
-
-            # Update loop state
-            process["new_messages"] >> PARENT["messages"]
-            process["new_iteration"] >> PARENT["iteration"]
-            process["is_done"] >> PARENT["done"]
-            process["answer"] >> PARENT["final_answer"]
-
-            START >> llm >> process >> END
-
-        loop["final_answer"] >> PARENT["answer"]
+        loop["answer"] >> PARENT["answer"]
         START >> init >> loop >> END
 
     engine = Hush(graph)
@@ -226,7 +226,7 @@ async def example_1_simple_agent():
         result = await engine.run(inputs={"query": query})
         answer = result.get("answer", "No answer")
         print(f"\n  Q: {query}")
-        print(f"  A: {answer[:150]}{'...' if len(str(answer)) > 150 else ''}")
+        print(f"  A: {str(answer)[:150]}{'...' if len(str(answer)) > 150 else ''}")
 
 
 # =============================================================================

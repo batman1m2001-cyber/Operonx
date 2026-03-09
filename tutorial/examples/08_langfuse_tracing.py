@@ -1,7 +1,7 @@
 """Tutorial 08: Langfuse Tracing — Gửi traces lên Langfuse cloud.
 
 Cần: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST trong .env
-     + langfuse:default trong resources.yaml
+     + langfuse:hush trong resources.yaml
 
 Học được:
 - LangfuseTracer qua ResourceHub (resource)
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import Each, MapOp, op
+from hush.core.ops import op
 
 # =============================================================================
 # Code ops với dynamic tags
@@ -46,6 +46,13 @@ def tokenize(text: str):
     if len(tokens) > 5:
         tags.append("many-tokens")
     return {"tokens": tokens, "count": len(tokens), "$tags": tags}
+
+
+@op
+def each_token(tokens: list):
+    """Yield từng token — thay thế MapOp + Each."""
+    for token in tokens:
+        yield {"token": token}
 
 
 @op
@@ -83,40 +90,37 @@ def classify(score: float):
 
 
 def build_text_analysis():
-    """Pipeline: preprocess → tokenize → map(score) → aggregate → classify."""
-    with GraphOp(name="text-analysis") as graph:
-        prep = preprocess(
-            name="preprocess",
-            inputs={"text": PARENT["text"]},
-        )
-        tok = tokenize(
-            name="tokenize",
-            inputs={"text": prep["cleaned"]},
-        )
-        with MapOp.of(
-            token=Each(tok["tokens"]),
-            multiplier=PARENT["multiplier"],
-        ) as map_op:
-            sc = score_token(
-                name="score",
-                inputs={"token": PARENT["token"], "multiplier": PARENT["multiplier"]},
-                outputs={"*": PARENT},
-            )
-            START >> sc >> END
+    """Pipeline: preprocess → tokenize → [score each token] → aggregate → classify.
 
-        agg = aggregate(
-            name="aggregate",
-            inputs={"scores": map_op["score"]},
+    Generator stream (each_token >> score_token) is wrapped in a subgraph
+    so results auto-collect as a list at the subgraph boundary.
+    """
+    # Subgraph: iterate tokens and score each one
+    with GraphOp(name="score-tokens") as score_graph:
+        et = each_token(tokens=PARENT["tokens"])
+        sc = score_token(token=et["token"], multiplier=PARENT["multiplier"])
+        START >> et >> sc >> END
+
+    with GraphOp(name="text-analysis") as graph:
+        prep = preprocess(text=PARENT["text"])
+        tok = tokenize(text=prep["cleaned"])
+
+        # score_graph returns collected list of scores
+        scores = score_graph(
+            name="score_tokens",
+            tokens=tok["tokens"],
+            multiplier=PARENT["multiplier"],
         )
-        cls = classify(
-            name="classify",
-            inputs={"score": agg["average"]},
-            outputs={"category": PARENT},
-        )
+
+        agg = aggregate(scores=scores["score"])
+        cls = classify(score=agg["average"])
+
+        # Output mapping
         agg["total"] >> PARENT["total"]
         agg["average"] >> PARENT["average"]
+        cls["category"] >> PARENT["category"]
 
-        START >> prep >> tok >> map_op >> agg >> cls >> END
+        START >> prep >> tok >> scores >> agg >> cls >> END
     return graph
 
 
@@ -141,7 +145,7 @@ async def example_1_resource_hub():
 
     # Tạo tracer với static tags
     tracer = LangfuseTracer(
-        resource="langfuse:default",
+        resource="langfuse:hush",
         tags=["tutorial", "resource-hub"],
     )
 
@@ -237,7 +241,7 @@ async def example_3_multi_user():
 
     for u in users:
         tracer = LangfuseTracer(
-            resource="langfuse:default",
+            resource="langfuse:hush",
             tags=["tutorial", "multi-user"],
         )
         result = await engine.run(

@@ -90,11 +90,11 @@ export HUSH_CONFIG=/path/to/resources.yaml
 ```python
 import asyncio
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import ChainOp
+from hush.providers import chain
 
 async def main():
     with GraphOp(name="chat-workflow") as graph:
-        chat = ChainOp.of(
+        chat = chain(
             resource="gpt-4o",
             template={"system": "Bạn là trợ lý AI thân thiện.", "user": "{question}"},
             question=PARENT["question"],
@@ -120,7 +120,7 @@ asyncio.run(main())
 | `step["key"]` | Lấy output từ op anh em (sibling) |
 | `outputs` | Mapping output — hoặc dùng `>> END` auto-forward |
 | `step["key"] >> PARENT["key"]` | Output mapping via `>>` operator |
-| `ChainOp.of()` | Gọi LLM — **add-on** (cài `hush-providers`) |
+| `chain()` | Gọi LLM — **add-on** (cài `hush-providers`) |
 
 ## Tiếp theo
 

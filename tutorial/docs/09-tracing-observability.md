@@ -71,7 +71,7 @@ Gửi traces đến [Langfuse](https://langfuse.com) — cloud platform với da
 ### Cấu hình resources.yaml
 
 ```yaml
-langfuse:default:
+langfuse:hush:
   public_key: ${LANGFUSE_PUBLIC_KEY}
   secret_key: ${LANGFUSE_SECRET_KEY}
   host: ${LANGFUSE_HOST}
@@ -85,7 +85,7 @@ from hush.telemetry import LangfuseTracer
 
 # Cách 1: Dùng ResourceHub
 tracer = LangfuseTracer(
-    resource="langfuse:default",
+    resource="langfuse:hush",
     tags=["production", "v1.0"]
 )
 
@@ -142,7 +142,7 @@ result = await engine.run(
     inputs={...},
     tracer=[
         HushEyesTracer(tags=["dev"]),
-        LangfuseTracer(resource="langfuse:default", tags=["prod"]),
+        LangfuseTracer(resource="langfuse:hush", tags=["prod"]),
     ],
 )
 # Mỗi tracer nhận cùng trace_data, flush trong thread riêng
@@ -215,7 +215,7 @@ result = await engine.run(
 import os
 
 if os.getenv("ENABLE_TRACING") == "true":
-    tracers = [LangfuseTracer(resource="langfuse:default")]
+    tracers = [LangfuseTracer(resource="langfuse:hush")]
 else:
     tracers = []
 
@@ -228,7 +228,7 @@ result = await engine.run(inputs={...}, tracer=tracers)
 import random
 
 # Trace 10% of requests
-tracers = [LangfuseTracer(resource="langfuse:default")] if random.random() < 0.1 else []
+tracers = [LangfuseTracer(resource="langfuse:hush")] if random.random() < 0.1 else []
 ```
 
 ## Cost Tracking

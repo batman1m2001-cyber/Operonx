@@ -32,7 +32,7 @@ hush/providers/
 │   └── keycloak.py     # Keycloak token provider
 ├── ops/              # Workflow op wrappers
 │   ├── llm.py          # LLMOp + LLMOp.of()
-│   ├── chain.py    # ChainOp + ChainOp.of()
+│   ├── chain.py    # chain() factory function
 │   ├── embedding.py    # EmbeddingOp + EmbeddingOp.of()
 │   ├── rerank.py       # RerankOp + RerankOp.of()
 │   └── prompt.py       # PromptOp + PromptOp.of()
@@ -132,14 +132,14 @@ class MyReranker(BaseReranker):
 
 ## Workflow Ops
 
-All provider ops use `Op.of()` classmethods for concise creation (recommended) and full `__init__` for explicit control.
+Provider ops use `Op.of()` classmethods for concise creation, and `chain()` for prompt+LLM combos.
 
-### Op.of() Shorthand (Recommended)
+### Shorthand (Recommended)
 ```python
-from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
+from hush.providers import chain, LLMOp, PromptOp, EmbeddingOp, RerankOp
 
-# Prompt + LLM all-in-one
-chat = ChainOp.of(resource="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
+# Prompt + LLM all-in-one (chain is a factory function, not a class)
+chat = chain(resource="gpt-4o", template={"system": "...", "user": "{query}"}, query=PARENT["query"])
 
 # Separate LLM call
 llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
@@ -156,14 +156,14 @@ rerank = RerankOp.of(resource="bge-m3", query=PARENT["query"], documents=PARENT[
 
 ### Full Class Equivalents
 ```python
-from hush.providers import ChainOp, LLMOp, PromptOp, EmbeddingOp, RerankOp
+from hush.providers import chain, LLMOp, PromptOp, EmbeddingOp, RerankOp
 
-# ChainOp = Prompt + LLM combined
-chain = ChainOp(
-    name="chat",
+# chain() = Prompt + LLM combined (returns a GraphOp)
+chat = chain(
     resource="gpt-4o",
-    inputs={"template": {"system": "...", "user": "{input}"}, "input": PARENT["query"]},
-    outputs={"content": PARENT["answer"]}
+    template={"system": "...", "user": "{input}"},
+    input=PARENT["query"],
+    outputs={"content": PARENT["answer"]},
 )
 
 # LLMOp = Raw LLM call
@@ -184,14 +184,14 @@ prompt = PromptOp(
 
 ### PromptOp Wildcard with Ref Templates
 
-When ChainOp is used inside `@graph` where `template` is a PARENT ref, PromptOp's wildcard forwarding (`{"*": PARENT}`) automatically discovers template variables by falling back to the source op's non-reserved input keys. This means template variables like `transcript` are correctly forwarded even when the template itself is dynamic.
+When `chain()` is used inside `@graph` where `template` is a PARENT ref, PromptOp's wildcard forwarding (`{"*": PARENT}`) automatically discovers template variables by falling back to the source op's non-reserved input keys. This means template variables like `transcript` are correctly forwarded even when the template itself is dynamic.
 
 ```python
 @graph
 def my_flow(template, transcript):
-    chain = ChainOp.of(resource="gpt-4o", template=template, transcript=transcript)
-    START >> chain >> END
-# Works: PromptOp detects "transcript" from ChainOp's inputs
+    c = chain(resource="gpt-4o", template=template, transcript=transcript)
+    START >> c >> END
+# Works: PromptOp detects "transcript" from chain's inputs
 ```
 
 ## Plugin Registration

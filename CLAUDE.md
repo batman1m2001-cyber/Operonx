@@ -344,16 +344,16 @@ with GraphOp(name="main") as graph:
 
 ### Shorthand Style Rule
 
-**Always use `Op.of()` classmethods** for concise op creation. Use explicit keyword arguments — never positional args:
+**Always use `Op.of()` classmethods** for concise op creation, and `chain()` for prompt+LLM combos. Use explicit keyword arguments — never positional args:
 
 ```python
 # CORRECT
-chat = ChainOp.of(resource="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+chat = chain(resource="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
 llm = LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
 # WRONG — no positional args
-chat = ChainOp.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
+chat = chain("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 ```
 
 ### Edge Types

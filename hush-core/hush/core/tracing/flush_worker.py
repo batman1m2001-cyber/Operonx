@@ -31,28 +31,30 @@ class FlushWorker:
         )
         self._futures: List[Future] = []
 
-    def submit(self, tracers: List[Tracer], graph: Any, state: Any) -> Future:
+    def submit(self, tracers: List[Tracer], collector: TraceCollector, state: Any) -> Future:
         """Submit a collect-and-flush task to the thread pool.
 
         Returns a Future that callers can optionally wait on to check for errors.
         The background thread will:
-        1. Run TraceCollector.collect_tree(graph, state)
+        1. Run collector.collect(state)
         2. For each tracer, merge tags and call tracer.flush()
 
         Args:
             tracers: List of Tracer instances to flush to
-            graph: Root GraphOp (compiled workflow graph)
+            collector: Pre-built TraceCollector (graph metadata already computed)
             state: MemoryState after execution completes
 
         Returns:
             Future that resolves when flush completes. Call .result() to
             re-raise any exception from the background thread.
         """
-        future = self._executor.submit(self._collect_and_flush, tracers, graph, state)
+        future = self._executor.submit(self._collect_and_flush, tracers, collector, state)
         self._futures.append(future)
         return future
 
-    def _collect_and_flush(self, tracers: List[Tracer], graph: Any, state: Any) -> None:
+    def _collect_and_flush(
+        self, tracers: List[Tracer], collector: TraceCollector, state: Any
+    ) -> None:
         """Collect trace data and flush to all tracers.
 
         Errors are logged AND re-raised so they propagate through the Future.
@@ -61,8 +63,7 @@ class FlushWorker:
 
         try:
             # 1. Collect trace tree (CPU-bound, microseconds)
-            collector = TraceCollector()
-            trace_data = collector.collect_tree(graph, state)
+            trace_data = collector.collect(state)
         except Exception as e:
             LOGGER.exception("Failed to collect trace data")
             raise

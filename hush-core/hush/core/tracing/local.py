@@ -19,7 +19,7 @@ class LocalTracer(Tracer):
     """Tracer that writes trace data to local JSON files.
 
     Each engine.run() produces one file: {path}/{request_id}.json
-    containing the full TracePayload as pretty-printed JSON.
+    containing the trace data as pretty-printed JSON.
 
     Example:
         from hush.core.tracing import LocalTracer
@@ -46,7 +46,7 @@ class LocalTracer(Tracer):
         """Write trace data to a JSON file.
 
         Args:
-            trace_data: Dict matching TracePayload format.
+            trace_data: Dict from collect_tree() with nodes, summary, etc.
         """
         self._path.mkdir(parents=True, exist_ok=True)
         request_id = trace_data.get("request_id", "unknown")

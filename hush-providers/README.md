@@ -26,11 +26,11 @@ Xem chi tiết tại [Cài đặt và Thiết lập](../tutorial/docs/01-cai-dat
 
 ```python
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import ChainOp
+from hush.providers import chain
 
 async def main():
     with GraphOp(name="chat") as graph:
-        chat = ChainOp.of(
+        chat = chain(
             resource="gpt-4o",
             template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
             question=PARENT["question"],

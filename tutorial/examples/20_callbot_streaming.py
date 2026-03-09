@@ -9,7 +9,7 @@ Demonstrates:
 - Langfuse tracing with nested streaming (requires LANGFUSE keys in .env)
 
 Example 1-2: No API keys needed (local trace tree + stream mode)
-Example 3: Requires LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST in .env
+Example 3: Requires LANGFUSE_HUSH_* keys in .env + langfuse:hush in resources.yaml
 
 Run:
     cd tutorial && uv run python examples/20_callbot_streaming.py
@@ -250,8 +250,8 @@ async def example_run_and_trace():
     print()
 
     # Collect and print trace tree
-    collector = TraceCollector()
-    trace = collector.collect_tree(callbot, state)
+    collector = TraceCollector(callbot)
+    trace = collector.collect(state)
 
     print("Trace Tree:")
     print("-" * 60)
@@ -334,26 +334,16 @@ async def example_langfuse_tracing():
     print("=" * 60)
     print()
 
-    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
-        print("  Skipped — LANGFUSE keys not set in .env")
-        print("  Set LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST")
+    if not os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY"):
+        print("  Skipped — LANGFUSE_HUSH keys not set in .env")
+        print("  Set LANGFUSE_HUSH_PUBLIC_KEY, LANGFUSE_HUSH_SECRET_KEY, LANGFUSE_HUSH_BASE_URL")
         return
 
-    from hush.telemetry import LangfuseConfig, LangfuseTracer
-
-    # Verify auth first
-    config = LangfuseConfig.from_env()
-    from hush.telemetry.backends.langfuse import LangfuseClient
-
-    client = LangfuseClient(config)
-    if not client.auth_check():
-        print("  ERROR: Langfuse auth failed! Check your keys.")
-        return
-    print("  Langfuse auth OK")
+    from hush.telemetry import LangfuseTracer
 
     request_id = str(uuid.uuid4())
     tracer = LangfuseTracer(
-        config=config,
+        resource="langfuse:hush",
         tags=["callbot", "nested-streaming"],
     )
 
@@ -381,8 +371,8 @@ async def example_langfuse_tracing():
         for err in errors:
             print(f"    {err}")
     else:
-        trace_url = client.trace_url(request_id)
-        print(f"  Trace URL: {trace_url}")
+        host = os.environ.get("LANGFUSE_HUSH_BASE_URL", "").rstrip("/")
+        print(f"  Trace URL: {host}/trace/{request_id}")
     print()
 
 

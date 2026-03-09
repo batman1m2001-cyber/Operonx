@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import Each, ForOp, WhileOp, op
+from hush.core.ops import op
 
 # =============================================================================
 # Helper: tạo OTELConfig trỏ đến Langfuse
@@ -78,24 +78,44 @@ def summarize(products: list):
 
 
 @op
-def halve_value(value: int):
-    """Chia đôi giá trị (cho while loop demo)."""
-    new_val = value // 2
-    tags = []
-    if new_val < 10:
-        tags.append("small-value")
-    return {"new_value": new_val, "$tags": tags} if tags else {"new_value": new_val}
+def halve_until_small(value: int, threshold: int = 5):
+    """Chia đôi giá trị cho đến khi nhỏ hơn threshold (thay thế WhileOp)."""
+    while value >= threshold:
+        value = value // 2
+        tags = []
+        if value < 10:
+            tags.append("small-value")
+        yield {"new_value": value, "$tags": tags} if tags else {"new_value": value}
 
 
 # =============================================================================
-# Ví dụ 1: OTELTracer với nested ForLoop
+# Generator ops cho iteration (thay thế ForOp + Each)
+# =============================================================================
+
+
+@op
+def each_x(xs: list):
+    """Yield từng x — thay thế outer ForOp."""
+    for x in xs:
+        yield {"x": x}
+
+
+@op
+def each_y(ys: list):
+    """Yield từng y — thay thế inner ForOp."""
+    for y in ys:
+        yield {"y": y}
+
+
+# =============================================================================
+# Ví dụ 1: OTELTracer với nested iteration
 # =============================================================================
 
 
 async def example_1_otel_basic():
     """OTELTracer gửi traces qua OTEL protocol đến Langfuse."""
     print("=" * 50)
-    print("Ví dụ 1: OTELTracer — Nested ForLoop")
+    print("Ví dụ 1: OTELTracer — Nested Iteration")
     print("=" * 50)
 
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
@@ -104,29 +124,17 @@ async def example_1_otel_basic():
 
     from hush.telemetry import OTELTracer
 
+    # Outer loop: iterate x values, validate, then inner loop multiply with y values
     with GraphOp(name="nested-loop") as graph:
-        with ForOp.of(x=Each([2, 3, 4])) as outer:
-            val = validate(
-                name="validate",
-                inputs={"x": PARENT["x"]},
-            )
-            with ForOp.of(y=Each([10, 20]), x=val["validated_x"]) as inner:
-                mult = multiply(
-                    name="multiply",
-                    inputs={"x": PARENT["x"], "y": PARENT["y"]},
-                    outputs={"*": PARENT},
-                )
-                START >> mult >> END
+        src = each_x(xs=PARENT["xs"])
+        val = validate(x=src["x"])
+        inner = each_y(ys=PARENT["ys"])
+        mult = multiply(x=val["validated_x"], y=inner["y"])
+        summ = summarize(products=mult["product"])
 
-            summ = summarize(
-                name="summarize",
-                inputs={"products": inner["product"]},
-                outputs={"*": PARENT},
-            )
-            START >> val >> inner >> summ >> END
+        summ["total"] >> PARENT["results"]
 
-        outer["total"] >> PARENT["results"]
-        START >> outer >> END
+        START >> src >> val >> inner >> mult >> summ >> END
 
     tracer = OTELTracer(
         config=create_langfuse_otel_config(),
@@ -135,7 +143,7 @@ async def example_1_otel_basic():
 
     engine = Hush(graph)
     result = await engine.run(
-        inputs={},
+        inputs={"xs": [2, 3, 4], "ys": [10, 20]},
         tracer=tracer,
         user_id="alice",
         session_id="tutorial-otel",
@@ -148,15 +156,15 @@ async def example_1_otel_basic():
 
 
 # =============================================================================
-# Ví dụ 2: OTELTracer với WhileLoop
+# Ví dụ 2: OTELTracer với While Loop (generator)
 # =============================================================================
 
 
 async def example_2_otel_while():
-    """WhileLoop workflow traced qua OTEL."""
+    """While loop workflow traced qua OTEL — dùng generator thay WhileOp."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: OTELTracer — WhileLoop")
+    print("Ví dụ 2: OTELTracer — While Loop (generator)")
     print("=" * 50)
 
     if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
@@ -166,20 +174,9 @@ async def example_2_otel_while():
     from hush.telemetry import OTELTracer
 
     with GraphOp(name="while-loop") as graph:
-        with WhileOp.of(
-            value=PARENT["start_value"],
-            until="value < 5",
-            max_iterations=10,
-        ) as while_loop:
-            halve = halve_value(
-                name="halve",
-                inputs={"value": PARENT["value"]},
-            )
-            halve["new_value"] >> PARENT["value"]
-            START >> halve >> END
-
-        while_loop["value"] >> PARENT["final_value"]
-        START >> while_loop >> END
+        halve = halve_until_small(value=PARENT["start_value"], threshold=5)
+        halve["new_value"] >> PARENT["final_value"]
+        START >> halve >> END
 
     tracer = OTELTracer(
         config=create_langfuse_otel_config(),

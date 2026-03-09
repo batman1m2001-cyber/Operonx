@@ -13,14 +13,16 @@ hush/core/
 │   ├── collector.py    # TraceCollector — collect_tree() builds pre-computed TraceNode tree
 │   ├── flush_worker.py # FlushWorker — ThreadPoolExecutor, tag merging, stream sampling
 │   ├── local.py        # LocalTracer — zero-dep JSON file tracer
-│   └── models.py       # TraceNode, NodeStructure, TraceRecord, TracePayload dataclasses
+│   └── models.py       # TraceNode, TraceSummary dataclasses
 ├── exceptions.py       # Unified exception hierarchy (OpError, etc.)
 ├── ops/                # Op types (BaseOp, FuncOp, GraphOp, etc.)
 ├── states/             # State management (StateSchema, MemoryState, Cell, Ref)
 ├── configs/            # Configuration classes (OpConfig, EdgeConfig)
 ├── registry/           # Resource management (ResourceHub, plugins)
 ├── loggings/           # Logging configuration with Rich
-└── utils/              # Utilities (context vars, common helpers)
+└── utils/              # Utilities (context vars, common helpers, shared algorithms)
+    └── algo.py         # Graph algorithms (topo_sort, topo_rank, find_cycles, reachable)
+                        # Tree algorithms (build_children, tree_walk, prune_leaves, collapse)
 ```
 
 ## Key Files to Read First

@@ -210,7 +210,7 @@ architecture/
 │   ├── llm-abstraction.md      ← LLM provider interface
 │   ├── embedding-provider.md   ← Embedding provider design
 │   ├── reranker-provider.md    ← Reranker design
-│   ├── workflow-ops.md         ← LLMOp, ChainOp, PromptOp, EmbeddingOp, RerankOp
+│   ├── workflow-ops.md         ← LLMOp, chain(), PromptOp, EmbeddingOp, RerankOp
 │   ├── authentication.md       ← Keycloak auth provider
 │   └── adding-new-provider.md  ← Guide thêm provider mới
 │

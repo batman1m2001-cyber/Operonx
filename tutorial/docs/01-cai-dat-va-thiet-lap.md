@@ -364,7 +364,7 @@ llm:gpt-4o:
 | `llm` | Model ngôn ngữ | `llm:gpt-4o-mini`, `llm:or-claude-4-sonnet` |
 | `embedding` | Chuyển text → vector | `embedding:openai`, `embedding:bge-m3` |
 | `reranking` | Xếp hạng lại kết quả | `reranking:bge-m3` |
-| `langfuse` | Tracing với Langfuse | `langfuse:default` |
+| `langfuse` | Tracing với Langfuse | `langfuse:hush` |
 | `otel` | Tracing với OpenTelemetry | `otel:default` |
 
 ### Cú pháp biến môi trường
@@ -447,11 +447,11 @@ from dotenv import load_dotenv
 load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo op
 
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import ChainOp
+from hush.providers import chain
 
 async def main():
     with GraphOp(name='test-llm') as graph:
-        chat = ChainOp.of(
+        chat = chain(
             resource='gpt-4o-mini',  # ← tra cứu trong resources.yaml
             template='Say hello in exactly 3 words.',
         )
@@ -491,7 +491,7 @@ async def main():
         step = hello()
         START >> step >> END
 
-    tracer = LangfuseTracer(resource='langfuse:default')
+    tracer = LangfuseTracer(resource='langfuse:hush')
     engine = Hush(graph)
     result = await engine.run(inputs={}, tracer=tracer)
     print(f'Result: {result[\"message\"]}')

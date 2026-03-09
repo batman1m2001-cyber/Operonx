@@ -15,10 +15,7 @@ from hush.core.tracing.collector import TraceCollector
 from hush.core.tracing.flush_worker import FlushWorker, get_flush_worker
 from hush.core.tracing.local import LocalTracer
 from hush.core.tracing.models import (
-    NodeStructure,
     TraceNode,
-    TracePayload,
-    TraceRecord,
     TraceSummary,
 )
 
@@ -28,9 +25,6 @@ __all__ = [
     "FlushWorker",
     "get_flush_worker",
     "LocalTracer",
-    "NodeStructure",
     "TraceNode",
-    "TracePayload",
-    "TraceRecord",
     "TraceSummary",
 ]

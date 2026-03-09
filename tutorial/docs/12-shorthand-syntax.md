@@ -15,7 +15,7 @@ Hush cung cấp các `.of()` classmethod và decorator để viết workflow ng�
 | `WhileOp(inputs={...})` | `WhileOp.of(counter=0, until=...)` | Loop với điều kiện |
 | `AIterOp(inputs={...})` | `AIterOp.of(chunk=Each(stream), ...)` | Xử lý async streaming |
 | `BranchOp(...)` | `if_(...).else_(...)` | Routing có điều kiện |
-| `ChainOp(inputs={...})` | `ChainOp.of(resource="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
+| *(verbose graph)* | `chain(resource="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
 | `LLMOp(inputs={...})` | `LLMOp.of(resource="gpt-4o", messages=...)` | Gọi LLM |
 | `PromptOp(inputs={...})` | `PromptOp.of(template=..., ...)` | Tạo messages từ template |
 | `EmbeddingOp(inputs={...})` | `EmbeddingOp.of(resource="model", texts=...)` | Tạo embeddings |
@@ -361,29 +361,17 @@ llm = LLMOp.of(
 )
 ```
 
-## ChainOp.of() — ChainOp Classmethod
+## chain() — Factory Function
 
-Prompt + LLM all-in-one. Ngắn nhất có thể.
+Prompt + LLM all-in-one. Ngắn nhất có thể. `chain()` là một factory function (không phải class), trả về `GraphOp`.
 
-### So sánh
+### Cách dùng
 
 ```python
-from hush.providers import ChainOp
+from hush.providers import chain
 
-# ❌ Verbose
-chain = ChainOp(
-    name="chat",
-    resource="gpt-4o",
-    inputs={
-        "template": {"system": "Bạn là assistant.", "user": "{query}"},
-        "query": PARENT["query"],
-        "*": PARENT,
-    },
-    outputs={"content": PARENT["response"]},
-)
-
-# ✅ Classmethod (auto-name + >> END auto-forward)
-chat = ChainOp.of(
+# ✅ Factory function (auto-name + >> END auto-forward)
+chat = chain(
     resource="gpt-4o",
     template={"system": "Bạn là assistant.", "user": "{query}"},
     query=PARENT["query"],
@@ -394,13 +382,13 @@ START >> chat >> END  # result["content"], result["model_used"], ...
 ### String template
 
 ```python
-summarize = ChainOp.of(resource="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
+summarize = chain(resource="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
 ```
 
 ### Structured output
 
 ```python
-classifier = ChainOp.of(
+classifier = chain(
     resource="gpt-4o",
     template={"user": "Phân loại: {text}"},
     text=PARENT["text"],
@@ -411,7 +399,7 @@ classifier = ChainOp.of(
 ### Load Balancing + Fallback
 
 ```python
-chat = ChainOp.of(
+chat = chain(
     resource=["gpt-4o", "gpt-4o-mini"],
     template={"system": "Help.", "user": "{query}"},
     ratios=[0.7, 0.3],
@@ -642,7 +630,7 @@ START >> step >> END         # Auto-forward
 | `WhileOp.of(...)` | `until`, `max_iterations` | Conditional loop |
 | `AIterOp.of(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
 | `if_(...).else_(...)` | - | Conditional routing |
-| `ChainOp.of(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
+| `chain(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
 | `LLMOp.of(...)` | `ratios`, `fallback`, `batch_mode`, `seed` | LLM calls |
 | `PromptOp.of(...)` | - | Tạo messages từ template |
 | `EmbeddingOp.of(...)` | - | Tạo embeddings |

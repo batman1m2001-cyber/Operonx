@@ -16,10 +16,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Langfuse cloud credentials (for integration tests) - loaded from environment
+# Prefer LANGFUSE_HUSH_* keys (Langfuse Cloud) over LANGFUSE_* (VPBank internal)
 LANGFUSE_CONFIG = {
-    "public_key": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
-    "secret_key": os.environ.get("LANGFUSE_SECRET_KEY", ""),
-    "host": os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+    "public_key": os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY") or os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+    "secret_key": os.environ.get("LANGFUSE_HUSH_SECRET_KEY") or os.environ.get("LANGFUSE_SECRET_KEY", ""),
+    "host": os.environ.get("LANGFUSE_HUSH_BASE_URL") or os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 }
 
 
@@ -412,8 +413,8 @@ def test_langfuse_tracer_flush_integration():
     """Test LangfuseTracer.flush() end-to-end with real Langfuse cloud."""
     from hush.telemetry import LangfuseConfig, LangfuseTracer
 
-    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
-        pytest.skip("LANGFUSE_PUBLIC_KEY not set")
+    if not (os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY") or os.environ.get("LANGFUSE_PUBLIC_KEY")):
+        pytest.skip("LANGFUSE keys not set")
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     tracer = LangfuseTracer(config=config)
