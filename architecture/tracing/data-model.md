@@ -49,7 +49,7 @@ NodeStructure(
 | `op_name` | `op.full_name` | Dot-separated path trong graph tree |
 | `op_type` | `getattr(op, "type", "default")` | Literal type trên class |
 | `parent_name` | `op.parent.full_name` | `None` nếu là root GraphOp |
-| `contain_generation` | `op.contain_generation` | `True` cho LLMOp, ChainOp, v.v. |
+| `contain_generation` | `op.contain_generation` | `True` cho LLMOp, chain(), v.v. |
 
 ### TraceRecord — Dynamic execution data
 
@@ -338,7 +338,7 @@ if context_id:
 
 ## LLM-Specific Fields
 
-Chỉ ops có `contain_generation == True` (LLMOp, ChainOp) mới có các fields `model`, `usage`, `cost` khác `None`.
+Chỉ ops có `contain_generation == True` (LLMOp, chain()) mới có các fields `model`, `usage`, `cost` khác `None`.
 
 ### model
 

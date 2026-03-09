@@ -9,13 +9,14 @@ Available backends:
 - otel: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
 """
 
-from hush.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig
+from hush.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig, LangfusePromptManager
 from hush.telemetry.backends.otel import OTELClient, OTELConfig
 
 __all__ = [
     # Langfuse
     "LangfuseConfig",
     "LangfuseClient",
+    "LangfusePromptManager",
     # OpenTelemetry
     "OTELConfig",
     "OTELClient",

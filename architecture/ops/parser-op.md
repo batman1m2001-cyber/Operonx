@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ParserOp` trích xuất dữ liệu có cấu trúc từ text (thường là output của LLM). Hỗ trợ JSON, XML, và YAML. Được sử dụng độc lập hoặc như thành phần trong ChainOp.
+`ParserOp` trích xuất dữ liệu có cấu trúc từ text (thường là output của LLM). Hỗ trợ JSON, XML, và YAML. Được sử dụng độc lập hoặc như thành phần trong `chain()`.
 
 Location: `hush-core/hush/core/ops/transform/parser_op.py`
 
@@ -24,7 +24,7 @@ LLM Output (text)
 Structured Data (dict)
 ```
 
-### Trong ChainOp
+### Trong chain()
 
 ```
 PromptOp → LLMOp → ParserOp → Output
@@ -167,19 +167,19 @@ parser = ParserOp(
 )
 ```
 
-### Trong ChainOp
+### Trong chain()
 
 ```python
-from hush.providers import ChainOp
+from hush.providers import chain
 
-chain = ChainOp.of(
+c = chain(
     resource="gpt-4o",
     template={"user": "Classify this text: {text}"},
     extract=["category: str", "confidence: float"],
     parser="xml",                # Format cho parser (mặc định "xml")
     text=PARENT["text"],
 )
-# Output: chain["category"], chain["confidence"]
+# Output: c["category"], c["confidence"]
 ```
 
 ### Error Handling
@@ -210,4 +210,4 @@ except Exception as e:
 
 - [Exception Hierarchy](exception-hierarchy.md) - ParserError chi tiết
 - [BaseOp Anatomy](base-op.md) - Param system, input/output normalization
-- [Workflow Ops](../providers/workflow-ops.md) - ChainOp tích hợp với ParserOp
+- [Workflow Ops](../providers/workflow-ops.md) - chain() tích hợp với ParserOp

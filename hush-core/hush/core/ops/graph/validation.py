@@ -6,7 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from hush.core.loggings import LOGGER
-from hush.core.ops.graph._algo import find_cycles, reachable
+from hush.core.utils.algo import find_cycles, reachable
 from hush.core.states.ref import Ref
 
 if TYPE_CHECKING:

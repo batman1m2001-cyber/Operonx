@@ -5,10 +5,10 @@ Ví dụ 4 cần OPENAI_API_KEY (parallel LLM calls).
 
 Học được:
 - Fan-out / fan-in pattern: split → parallel branches → merge
-- MapOp với max_concurrency để control rate limiting
-- Partial failure handling trong MapOp
+- Generator ops cho iteration (thay thế MapOp + Each)
+- Partial failure handling với generator ops
 - Parallel LLM calls: nhiều prompts cùng lúc
-- Batch LLM với MapOp: process list of queries song song
+- Batch LLM với generator ops: process list of queries
 
 Chạy: cd tutorial && uv run python examples/13_parallel_advanced.py
 """
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import Each, MapOp, op
+from hush.core.ops import op
 
 # =============================================================================
 # Ví dụ 1: Fan-out / Fan-in
@@ -128,8 +128,15 @@ async def example_1_fan_out_fan_in():
 
 
 # =============================================================================
-# Ví dụ 2: MapOp với concurrency control
+# Ví dụ 2: Iteration với generator op (thay thế MapOp + concurrency)
 # =============================================================================
+
+
+@op
+def each_item(items: list):
+    """Yield từng item — thay thế MapOp + Each."""
+    for item in items:
+        yield {"item": item}
 
 
 @op
@@ -142,26 +149,17 @@ def process_item(item: int):
 
 
 async def example_2_concurrency_control():
-    """MapOp max_concurrency — giới hạn số tasks song song."""
+    """Generator op iteration — downstream ops auto-called per yield."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: MapOp Concurrency Control")
+    print("Ví dụ 2: Generator Iteration (replaces MapOp)")
     print("=" * 50)
 
-    with GraphOp(name="concurrency-demo") as graph:
-        with MapOp.of(
-            item=Each(PARENT["items"]),
-            max_concurrency=3,  # Max 3 concurrent tasks
-        ) as map_op:
-            proc = process_item(
-                name="process",
-                inputs={"item": PARENT["item"]},
-                outputs={"*": PARENT},
-            )
-            START >> proc >> END
-
-        map_op["result"] >> PARENT["results"]
-        START >> map_op >> END
+    with GraphOp(name="iteration-demo") as graph:
+        src = each_item(items=PARENT["items"])
+        proc = process_item(item=src["item"])
+        proc["result"] >> PARENT["results"]
+        START >> src >> proc >> END
 
     engine = Hush(graph)
 
@@ -174,7 +172,7 @@ async def example_2_concurrency_control():
 
     print(f"  Items: {items}")
     print(f"  Results: {result['results']}")
-    print(f"  Time: {elapsed:.2f}s (max_concurrency=3, ~{len(items) // 3} batches)")
+    print(f"  Time: {elapsed:.2f}s")
 
 
 # =============================================================================
@@ -182,20 +180,19 @@ async def example_2_concurrency_control():
 # =============================================================================
 
 
-@op
-def risky_process(item: int):
-    """Process that fails for even numbers."""
-    if item % 2 == 0:
-        raise ValueError(f"Cannot process even number: {item}")
-    return {"result": item * 10, "error": None}
-
-
 async def example_3_partial_failure():
-    """MapOp xử lý partial failures — items lỗi không ảnh hưởng items khác."""
+    """Generator op với safe processing — items lỗi trả error thay vì crash."""
     print()
     print("=" * 50)
     print("Ví dụ 3: Partial Failure Handling")
     print("=" * 50)
+
+    @op
+    def safe_process(item: int):
+        """Process that returns error for even numbers instead of raising."""
+        if item % 2 != 0:
+            return {"result": item * 10, "error": None}
+        return {"result": None, "error": f"Even number: {item}"}
 
     @op
     def filter_results(results, errors):
@@ -205,29 +202,16 @@ async def example_3_partial_failure():
         }
 
     with GraphOp(name="partial-failure") as graph:
-        # Wrap risky logic trong try/catch
-        with MapOp.of(item=Each(PARENT["items"])) as map_op:
+        src = each_item(items=PARENT["items"])
+        proc = safe_process(item=src["item"])
 
-            @op
-            def safe_op(item: int):
-                if item % 2 != 0:
-                    return {"result": item * 10, "error": None}
-                return {"result": None, "error": f"Even number: {item}"}
-
-            proc = safe_op(
-                item=PARENT["item"],
-                outputs={"result": PARENT, "error": PARENT},
-            )
-            START >> proc >> END
-
-        # Filter results
         flt = filter_results(
-            results=map_op["result"],
-            errors=map_op["error"],
+            results=proc["result"],
+            errors=proc["error"],
             outputs={"*": PARENT},
         )
 
-        START >> map_op >> flt >> END
+        START >> src >> proc >> flt >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"items": [1, 2, 3, 4, 5, 6, 7]})
@@ -243,7 +227,7 @@ async def example_3_partial_failure():
 
 
 async def example_4_parallel_llm():
-    """Nhiều LLM prompts song song + batch queries qua MapOp."""
+    """Nhiều LLM prompts song song + batch queries qua generator op."""
     print()
     print("=" * 50)
     print("Ví dụ 4: Parallel & Batch LLM Calls")
@@ -297,27 +281,28 @@ async def example_4_parallel_llm():
     print(f"    Summary:  {result['summary']}")
     print(f"    Keywords: {result['keywords']}")
 
-    # --- Part B: Batch LLM via MapOp ---
-    print("\n  B) Batch LLM (multiple queries via MapOp):")
+    # --- Part B: Batch LLM via generator op ---
+    print("\n  B) Batch LLM (multiple queries via generator op):")
+
+    @op
+    def each_query(queries: list):
+        """Yield từng query — thay thế MapOp + Each."""
+        for query in queries:
+            yield {"query": query}
 
     with GraphOp(name="batch-llm") as graph:
-        with MapOp.of(
-            query=Each(PARENT["queries"]),
-            max_concurrency=3,
-        ) as map_op:
-            p = PromptOp.of(
-                template={"system": "Answer in one sentence.", "user": "{query}"},
-                query=PARENT["query"],
-            )
-            llm = LLMOp.of(
-                resource="gpt-4o-mini",
-                messages=p["messages"],
-                outputs={"content": PARENT["answer"]},
-            )
-            START >> p >> llm >> END
-
-        map_op["answer"] >> PARENT["answers"]
-        START >> map_op >> END
+        src = each_query(queries=PARENT["queries"])
+        p = PromptOp.of(
+            template={"system": "Answer in one sentence.", "user": "{query}"},
+            query=src["query"],
+        )
+        llm = LLMOp.of(
+            resource="gpt-4o-mini",
+            messages=p["messages"],
+            outputs={"content": PARENT["answer"]},
+        )
+        llm["answer"] >> PARENT["answers"]
+        START >> src >> p >> llm >> END
 
     engine = Hush(graph)
     result = await engine.run(

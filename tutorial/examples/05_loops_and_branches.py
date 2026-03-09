@@ -3,11 +3,11 @@
 Không cần API key. Chỉ dùng hush-core.
 
 Học được:
-- ForOp: iterate tuần tự
-- MapOp: iterate song song (parallel)
-- WhileOp: loop với điều kiện
+- Generator @op với yield: iterate tuần tự (thay ForOp)
+- Generator @op tự động song song hóa bởi scheduler (thay MapOp)
+- Generator @op với while loop (thay WhileOp)
 - if_(): routing có điều kiện
-- Each(): đánh dấu biến để iterate
+- Broadcast: op thường chạy 1 lần, kết quả broadcast cho stream items
 - Soft edge (~): merge sau branch
 
 Chạy: cd tutorial && uv run python examples/05_loops_and_branches.py
@@ -16,11 +16,18 @@ Chạy: cd tutorial && uv run python examples/05_loops_and_branches.py
 import asyncio
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.ops import Each, ForOp, MapOp, WhileOp, if_, op
+from hush.core.ops import if_, op
 
 # =============================================================================
-# Code ops dùng @op decorator (gọn hơn FuncOp class)
+# Generator ops dùng yield để iterate (thay ForOp/MapOp/WhileOp)
 # =============================================================================
+
+
+@op
+def each_item(items: list, prefix: str):
+    """Yield từng item — downstream ops tự động chạy per item."""
+    for item in items:
+        yield {"item": item, "prefix": prefix}
 
 
 @op
@@ -30,15 +37,24 @@ def process_item(item: str, prefix: str):
 
 
 @op
+def each_number(numbers: list):
+    """Yield từng số — scheduler tự động song song hóa."""
+    for x in numbers:
+        yield {"x": x}
+
+
+@op
 def square(x: int):
     """Bình phương số."""
     return {"squared": x * x}
 
 
 @op
-def halve_value(value: int):
-    """Chia đôi giá trị."""
-    return {"new_value": value // 2}
+def halve_until(value: int):
+    """Chia đôi cho đến khi < 5 — while loop trong generator."""
+    while value >= 5:
+        value = value // 2
+        yield {"value": value}
 
 
 # =============================================================================
@@ -47,25 +63,15 @@ def halve_value(value: int):
 
 
 async def example_1_for_loop():
-    """ForOp — Xử lý tuần tự từng item."""
+    """Generator yield — Xử lý tuần tự từng item (thay ForOp)."""
     print("=" * 50)
-    print("Ví dụ 1: ForOp (sequential)")
+    print("Ví dụ 1: Generator yield (sequential, thay ForOp)")
     print("=" * 50)
 
     with GraphOp(name="for-loop-demo") as graph:
-        with ForOp.of(
-            item=Each(PARENT["items"]),  # Iterate qua mỗi item
-            prefix=PARENT["prefix"],  # Broadcast cho tất cả iterations
-        ) as loop:
-            step = process_item(
-                name="process",
-                inputs={"item": PARENT["item"], "prefix": PARENT["prefix"]},
-                outputs={"*": PARENT},
-            )
-            START >> step >> END
-
-        loop["result"] >> PARENT["results"]
-        START >> loop >> END
+        src = each_item(items=PARENT["items"], prefix=PARENT["prefix"])
+        step = process_item(item=src["item"], prefix=src["prefix"])
+        START >> src >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(
@@ -75,69 +81,47 @@ async def example_1_for_loop():
         }
     )
 
-    print(f"  Results: {result['results']}")
+    print(f"  Results: {result['result']}")
     # ['Fruit: apple', 'Fruit: banana', 'Fruit: cherry']
 
 
 async def example_2_map_op():
-    """MapOp — Xử lý song song, có giới hạn concurrency."""
+    """Generator yield — Scheduler tự động song song hóa (thay MapOp)."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: MapOp (parallel)")
+    print("Ví dụ 2: Generator yield (parallel, thay MapOp)")
     print("=" * 50)
 
     with GraphOp(name="map-op-demo") as graph:
-        with MapOp.of(
-            x=Each(PARENT["numbers"]),
-            max_concurrency=3,  # Tối đa 3 tasks cùng lúc
-        ) as map_op:
-            step = square(
-                name="square",
-                inputs={"x": PARENT["x"]},
-                outputs={"*": PARENT},
-            )
-            START >> step >> END
-
-        map_op["squared"] >> PARENT["results"]
-        START >> map_op >> END
+        src = each_number(numbers=PARENT["numbers"])
+        step = square(x=src["x"])
+        START >> src >> step >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"numbers": [1, 2, 3, 4, 5]})
 
     print("  Input:   [1, 2, 3, 4, 5]")
-    print(f"  Squared: {result['results']}")
+    print(f"  Squared: {result['squared']}")
     # [1, 4, 9, 16, 25]
 
 
 async def example_3_while_loop():
-    """WhileOp — Loop cho đến khi điều kiện dừng."""
+    """Generator while — Loop cho đến khi điều kiện dừng (thay WhileOp)."""
     print()
     print("=" * 50)
-    print("Ví dụ 3: WhileOp (conditional)")
+    print("Ví dụ 3: Generator while (conditional, thay WhileOp)")
     print("=" * 50)
 
     with GraphOp(name="while-loop-demo") as graph:
-        with WhileOp.of(
-            value=PARENT["start_value"],
-            until="value < 5",
-            max_iterations=20,
-        ) as while_loop:
-            step = halve_value(
-                name="halve",
-                inputs={"value": PARENT["value"]},
-            )
-            step["new_value"] >> PARENT["value"]
-            START >> step >> END
-
-        while_loop["value"] >> PARENT["final_value"]
-        START >> while_loop >> END
+        src = halve_until(value=PARENT["start_value"])
+        START >> src >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"start_value": 256})
 
     print("  Start: 256")
-    print(f"  Final: {result['final_value']}")
-    # 256 → 128 → 64 → 32 → 16 → 8 → 4 (dừng vì < 5)
+    print(f"  Values: {result['value']}")
+    # [128, 64, 32, 16, 8, 4, 2] — mỗi yield tạo 1 item trong list
 
 
 async def example_4_branch_op():
@@ -189,46 +173,35 @@ async def example_4_branch_op():
 
 
 async def example_5_nested_loops():
-    """Nested ForLoops — Loop trong loop."""
+    """Nested generators — Loop trong loop (thay nested ForOp)."""
     print()
     print("=" * 50)
-    print("Ví dụ 5: Nested Loops")
+    print("Ví dụ 5: Nested Generators (thay Nested ForLoops)")
     print("=" * 50)
 
     @op
-    def multiply(x: int, y: int):
-        return {"product": x * y}
+    def outer_iter(xs: list):
+        """Yield từng x — tạo outer stream."""
+        for x in xs:
+            yield {"x": x}
 
     @op
-    def summarize(products: list):
-        return {"total": sum(products) if products else 0}
+    def inner_iter(ys: list, x: int):
+        """Yield từng y kết hợp với x — tạo inner stream."""
+        for y in ys:
+            yield {"product": x * y}
 
     with GraphOp(name="nested-loops") as graph:
-        with ForOp.of(x=Each([2, 3, 4])) as outer:
-            with ForOp.of(y=Each([10, 20, 30]), x=PARENT["x"]) as inner:
-                mult = multiply(
-                    name="multiply",
-                    inputs={"x": PARENT["x"], "y": PARENT["y"]},
-                    outputs={"*": PARENT},
-                )
-                START >> mult >> END
-
-            sum_node = summarize(
-                name="summarize",
-                inputs={"products": inner["product"]},
-                outputs={"*": PARENT},
-            )
-            START >> inner >> sum_node >> END
-
-        outer["total"] >> PARENT["results"]
-        START >> outer >> END
+        outer = outer_iter(xs=PARENT["xs"])
+        inner = inner_iter(ys=PARENT["ys"], x=outer["x"])
+        START >> outer >> inner >> END
 
     engine = Hush(graph)
-    result = await engine.run(inputs={})
+    result = await engine.run(inputs={"xs": [2, 3, 4], "ys": [10, 20, 30]})
 
     print("  Outer [2,3,4] x Inner [10,20,30]:")
-    print(f"  Totals per outer: {result['results']}")
-    # [120, 180, 240] = [2*(10+20+30), 3*(10+20+30), 4*(10+20+30)]
+    print(f"  Products (flattened): {result['product']}")
+    # [20, 40, 60, 30, 60, 90, 40, 80, 120] (flattened)
 
 
 async def main():

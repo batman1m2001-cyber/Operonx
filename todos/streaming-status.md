@@ -55,11 +55,11 @@ Discovered by reverse-engineering the Langfuse Python SDK (`langfuse.request.Lan
 - `LangfuseTracer.flush()` raises `RuntimeError` on partial API errors (was silently swallowed)
 - Examples use `get_flush_worker().wait(timeout=30)` instead of `asyncio.sleep(3)`
 
-**Fix 4 — Sibling ordering** (`tracers/langfuse.py`):
+**Fix 4 — Sibling ordering** (`collector.py` + `tracers/langfuse.py`):
 - Langfuse sorts children by `startTime`, truncates to milliseconds
 - Fast ops within same ms appear in arbitrary (alphabetical) order
-- Fix: assign `parent_start + (child_index * 1ms)` per sibling group
-- Nodes list from `collect_tree()` is already in execution order
+- **Root fix in `collect_tree()` step 9**: Replaced global sort-by-`(start_time, key)` with tree DFS that sorts siblings by DAG edge order. Computes `topo_rank` per graph from `prevs` via Kahn's algorithm. Synthetic context nodes sort right after their spawner generator
+- **Langfuse tracer fix**: Assign `parent_start + (child_index * 1ms)` for ALL siblings (was skipping idx=0), preserving collect_tree's edge-based order
 
 ### Tests ✅
 - `hush-core/tests/tracing/test_collector.py` — 15 tests (basic, nested graph, callbot integration)
@@ -92,10 +92,16 @@ callbot (trace)
 
 All nodes have proper I/O data. Ordering matches execution flow in Langfuse UI.
 
+### Langfuse Cloud Integration ✅
+- Added `langfuse:hush` resource in `resources.yaml` using `LANGFUSE_HUSH_*` env vars (Langfuse Cloud)
+- Updated `tutorial/examples/20_callbot_streaming.py` to use `resource="langfuse:hush"` via ResourceHub
+- Updated `hush-telemetry/tests/test_langfuse_tracer.py` integration test to prefer `LANGFUSE_HUSH_*` keys (reachable) over `LANGFUSE_*` (VPBank internal, often unreachable)
+- All 21 telemetry tests now pass (was 1 failure from unreachable VPBank host)
+
 ## Open Issues
 
-### Remaining ordering edge case
-Langfuse ordering fix uses `parent_start + (child_index * 1ms)`. First child keeps real time, subsequent children get bumped. This works for most cases but could be improved — currently skips `idx==0` (first child keeps original time which might equal parent's time).
+### ~~Remaining ordering edge case~~ — FIXED
+~~Langfuse ordering fix skipped idx==0~~ → Now bumps ALL siblings. Root cause was in `collect_tree()` using alphabetical key sort as fallback; fixed by edge-based topo sort.
 
 ### Display names from @graph
 Inside `@graph def llm_router`, ops are named by variable: `c = classify_intent(...)` → display name is `c`, not `classify_intent`. This is auto-naming behavior — the variable name becomes the op name. Users should use descriptive variable names or explicit `name=` parameter.

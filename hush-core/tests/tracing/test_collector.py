@@ -2,9 +2,9 @@
 
 Covers:
     - Batch-only workflows (no streaming, no regression)
-    - Streaming workflows (generator → downstream, kind/lineage derivation)
+    - Streaming workflows (generator → downstream, kind derivation)
     - TraceSummary correctness
-    - Context lineage (parent_context, spawned_by, depth)
+    - Streaming metadata (spawned_by, depth)
     - collect_tree(): named contexts, collapse, flatten, nested graphs, callbot
 """
 
@@ -64,37 +64,32 @@ def step_c(result_a: int):
 
 @pytest.mark.asyncio
 async def test_batch_only_trace():
-    """Batch workflow: all records should be kind='batch', no streaming metadata."""
-    with GraphOp(name="batch_wf") as graph:
+    """Batch workflow: all nodes should be kind='batch', no streaming metadata."""
+    with GraphOp(name="batch_wf") as g:
         d = double(x=PARENT["x"])
         a = add_one(value=d["result"])
         START >> d >> a >> END
 
-    engine = Hush(graph)
+    engine = Hush(g)
     result = await engine.run(inputs={"x": 5})
     state = result["$state"]
     assert result["result"] == 11  # 5*2 + 1
 
-    # Collect trace
-    collector = TraceCollector()
-    trace = collector.collect(graph, state)
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
 
     assert trace["workflow_name"] == "batch_wf"
     assert trace["request_id"] is not None
 
-    # Graph structure should include the root + 2 child ops
-    assert len(trace["graph_structure"]) == 3  # batch_wf, d, a
+    nodes = trace["nodes"]
+    # Root + 2 child ops
+    real_nodes = [n for n in nodes if n["op_name"] is not None]
+    assert len(real_nodes) == 3  # batch_wf, d, a
 
-    # Records: 2 ops executed (d and a), not the graph itself
-    records = trace["records"]
-    op_records = [r for r in records if r["kind"] == "batch"]
-    assert len(op_records) >= 2
-
-    # All should be kind="batch"
-    for r in records:
-        assert r["kind"] == "batch", f"Expected batch, got {r['kind']} for {r['op_name']}"
-        assert r["yield_count"] is None
-        assert r["spawned_by"] is None
+    # Non-root nodes should be kind="batch"
+    child_nodes = [n for n in real_nodes if n["node_type"] != "trace"]
+    for n in child_nodes:
+        assert n["kind"] == "batch", f"Expected batch, got {n['kind']} for {n['op_name']}"
 
     # Summary
     summary = trace["summary"]
@@ -110,57 +105,43 @@ async def test_batch_only_trace():
 
 @pytest.mark.asyncio
 async def test_streaming_trace():
-    """Streaming workflow: generator + downstream. Verify kind and lineage."""
-    with GraphOp(name="stream_wf") as graph:
+    """Streaming workflow: generator + downstream. Verify kind and metadata."""
+    with GraphOp(name="stream_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
 
-    engine = Hush(graph)
+    engine = Hush(g)
     result = await engine.run(inputs={"count": 3})
     state = result["$state"]
     assert len(result["result"]) == 3
     assert sorted(result["result"]) == [0, 10, 20]
 
-    # Collect trace
-    collector = TraceCollector()
-    trace = collector.collect(graph, state)
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
+    nodes = trace["nodes"]
 
-    records = trace["records"]
+    # Find generator node
+    gen_nodes = [n for n in nodes if n["kind"] == "generator"]
+    assert len(gen_nodes) == 1, f"Expected 1 generator, got {len(gen_nodes)}"
+    gen_node = gen_nodes[0]
+    assert gen_node["op_name"] == "stream_wf.gen"
+    assert gen_node["metadata"]["yield_count"] == 3
 
-    # Find generator record
-    gen_records = [r for r in records if r["kind"] == "generator"]
-    assert len(gen_records) == 1, f"Expected 1 generator record, got {len(gen_records)}"
-    gen_rec = gen_records[0]
-    assert gen_rec["op_name"] == "stream_wf.gen"
-    assert gen_rec["yield_count"] == 3
-    assert gen_rec["depth"] == 0  # generator is at depth 0
+    # Downstream proc nodes exist (collapsed as proc[0..2] since single child)
+    proc_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".proc")]
+    assert len(proc_nodes) == 3, f"Expected 3 proc nodes, got {len(proc_nodes)}"
 
-    # Find stream_item records (downstream op at stream contexts)
-    stream_records = [r for r in records if r["kind"] == "stream_item"]
-    assert len(stream_records) == 3, f"Expected 3 stream_items, got {len(stream_records)}"
-
-    for sr in stream_records:
-        assert sr["op_name"] == "stream_wf.proc"
-        assert sr["context"] is not None
-        # Context should have a stream segment
-        ctx = sr["context"]
-        assert isinstance(ctx, (list, tuple))
-        assert any(isinstance(s, str) and s.startswith("s") for s in ctx), (
-            f"Expected stream segment in context {ctx}"
-        )
-        # Parent context should exist
-        assert sr["parent_context"] is not None
-        # spawned_by should point to the generator
-        assert sr["spawned_by"] == "stream_wf.gen"
-        # Depth should be 1 (downstream of generator at depth 0)
-        assert sr["depth"] == 1
+    for pn in proc_nodes:
+        # spawned_by in metadata should point to the generator
+        assert pn["metadata"].get("spawned_by") == "stream_wf.gen"
+        # depth should be 1 (downstream of generator at depth 0)
+        assert pn["metadata"].get("depth") == 1
 
     # Summary
     summary = trace["summary"]
     assert summary["stream_count"] == 1
     assert summary["total_yields"] == 3
-    assert summary["total_records"] >= 4  # 1 generator + 3 stream_items + graph
 
 
 # =========================================================================
@@ -171,17 +152,17 @@ async def test_streaming_trace():
 @pytest.mark.asyncio
 async def test_summary_fields():
     """Verify TraceSummary has correct aggregated values."""
-    with GraphOp(name="summary_wf") as graph:
+    with GraphOp(name="summary_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
 
-    engine = Hush(graph)
+    engine = Hush(g)
     result = await engine.run(inputs={"count": 5})
     state = result["$state"]
 
-    collector = TraceCollector()
-    trace = collector.collect(graph, state)
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
 
     summary = trace["summary"]
     assert summary["total_ops"] == 3  # summary_wf + gen + proc
@@ -193,36 +174,32 @@ async def test_summary_fields():
 
 
 # =========================================================================
-# Test: Context lineage correctness
+# Test: Streaming metadata correctness
 # =========================================================================
 
 
 @pytest.mark.asyncio
-async def test_context_lineage():
-    """Verify parent_context is correct tuple slicing."""
-    with GraphOp(name="lineage_wf") as graph:
+async def test_streaming_metadata():
+    """Verify spawned_by and depth are set correctly on stream items."""
+    with GraphOp(name="meta_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
 
-    engine = Hush(graph)
+    engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
     state = result["$state"]
 
-    collector = TraceCollector()
-    trace = collector.collect(graph, state)
-    records = trace["records"]
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
+    nodes = trace["nodes"]
 
-    stream_records = [r for r in records if r["kind"] == "stream_item"]
-    for sr in stream_records:
-        ctx = tuple(sr["context"]) if isinstance(sr["context"], list) else sr["context"]
-        parent = (
-            tuple(sr["parent_context"])
-            if isinstance(sr["parent_context"], list)
-            else sr["parent_context"]
-        )
-        # parent_context should be ctx[:-1]
-        assert parent == ctx[:-1], f"parent_context {parent} != ctx[:-1] {ctx[:-1]}"
+    # proc nodes should have spawned_by and depth in metadata
+    proc_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".proc")]
+    assert len(proc_nodes) == 2
+    for pn in proc_nodes:
+        assert pn["metadata"]["spawned_by"] == "meta_wf.gen"
+        assert pn["metadata"]["depth"] == 1
 
 
 # =========================================================================
@@ -235,26 +212,24 @@ async def test_trace_json_serializable():
     """Verify trace output can be serialized to JSON (for LocalTracer)."""
     import json
 
-    with GraphOp(name="json_wf") as graph:
+    with GraphOp(name="json_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
 
-    engine = Hush(graph)
+    engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
     state = result["$state"]
 
-    collector = TraceCollector()
-    trace = collector.collect(graph, state)
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
 
-    # Should serialize without error (tuples become lists in JSON)
     json_str = json.dumps(trace, default=str)
     assert len(json_str) > 0
 
-    # Round-trip
     parsed = json.loads(json_str)
     assert parsed["workflow_name"] == "json_wf"
-    assert len(parsed["records"]) >= 3  # 1 gen + 2 stream_items + graph
+    assert len(parsed["nodes"]) >= 3
 
 
 # =========================================================================
@@ -268,8 +243,8 @@ def _collect_tree(graph_op, inputs):
     async def _run():
         engine = Hush(graph_op)
         result = await engine.run(inputs=inputs)
-        collector = TraceCollector()
-        return collector.collect_tree(graph_op, result["$state"])
+        collector = TraceCollector(graph_op)
+        return collector.collect(result["$state"])
 
     return asyncio.get_event_loop().run_until_complete(_run())
 
@@ -301,8 +276,8 @@ async def test_tree_single_downstream_collapsed():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 3})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # No stream_context nodes — all collapsed into child
@@ -340,8 +315,8 @@ async def test_tree_multi_downstream_named():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # Stream contexts should exist (multiple children → not collapsed)
@@ -369,8 +344,8 @@ async def test_tree_chain_downstream():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # 2 children per context → contexts exist
@@ -395,8 +370,8 @@ async def test_tree_batch_only():
 
     engine = Hush(g)
     result = await engine.run(inputs={"x": 5})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # No synthetic nodes
@@ -419,8 +394,8 @@ async def test_tree_no_yield_records():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 3})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # gen should appear exactly once (as generator), not 1+3 times
@@ -451,8 +426,8 @@ async def test_tree_nested_graph_batch():
 
     engine = Hush(g)
     result = await engine.run(inputs={"x": 3})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # sub should be kind=graph
@@ -483,8 +458,8 @@ async def test_tree_nested_graph_with_streaming():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # sub should appear with kind=graph, collapsed to s[0], s[1]
@@ -520,8 +495,8 @@ async def test_tree_streaming_inside_nested_graph():
 
     engine = Hush(g)
     result = await engine.run(inputs={"x": 2})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # inner should be kind=graph
@@ -554,8 +529,8 @@ async def test_tree_json_serializable():
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
 
     json_str = json.dumps(trace, default=str)
     assert len(json_str) > 0
@@ -638,8 +613,8 @@ async def test_callbot_streaming_trace():
 
     engine = Hush(g)
     result = await engine.run(inputs={"samples": 5})
-    collector = TraceCollector()
-    trace = collector.collect_tree(g, result["$state"])
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
     # 1. Root

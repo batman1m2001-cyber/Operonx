@@ -8,7 +8,7 @@ Demonstrates:
 
 Prerequisites:
 - LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST in .env
-- langfuse:default in resources.yaml
+- langfuse:hush in resources.yaml
 
 Run:
     cd tutorial && uv run python examples/19_streaming_tracing.py

@@ -6,7 +6,7 @@ Học được:
 - load_dotenv() để load API keys
 - PromptOp.of(): tạo messages cho LLM
 - LLMOp.of(): gọi LLM qua resource
-- ChainOp.of(): kết hợp prompt + LLM trong 1 op
+- chain(): kết hợp prompt + LLM trong 1 graph
 - @op + PromptOp.of() + LLMOp.of() pipeline (tiền xử lý → prompt → LLM)
 
 Chạy: cd tutorial && uv run python examples/03_llm_chat.py
@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops.transform.func_op import op
-from hush.providers import ChainOp, LLMOp, PromptOp
+from hush.providers import LLMOp, PromptOp, chain
 
 
 async def example_1_basic_chat():
@@ -51,14 +51,14 @@ async def example_1_basic_chat():
 
 
 async def example_2_chain_node():
-    """ChainOp.of() — All-in-one, gọn hơn."""
+    """chain() — All-in-one, gọn hơn."""
     print()
     print("=" * 50)
-    print("Ví dụ 2: ChainOp.of (all-in-one)")
+    print("Ví dụ 2: chain() (all-in-one)")
     print("=" * 50)
 
     with GraphOp(name="chain-chat") as graph:
-        chain = ChainOp.of(
+        chat = chain(
             resource="gpt-4o-mini",
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
@@ -67,7 +67,7 @@ async def example_2_chain_node():
             query=PARENT["query"],
             outputs={"content": PARENT["response"]},
         )
-        START >> chain >> END
+        START >> chat >> END
 
     engine = Hush(graph)
     result = await engine.run(inputs={"query": "Hush workflow engine là gì?"})

@@ -10,7 +10,7 @@ Location: `hush-providers/hush/providers/ops/`
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   ChainOp (GraphOp)                 │
+│                chain() (returns GraphOp)             │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
 │  │ PromptOp │→ │  LLMOp   │→ │ ParserOp │ (opt)    │
 │  └──────────┘  └──────────┘  └──────────┘          │
@@ -27,7 +27,7 @@ Location: `hush-providers/hush/providers/ops/`
 |----|---------|---------|-------------|-------------|
 | PromptOp | BaseOp | Format template thành messages | template, vars | messages |
 | LLMOp | BaseOp | Gọi LLM provider | messages | content, tokens_used |
-| ChainOp | GraphOp | Kết hợp Prompt→LLM→Parser | template, vars | content hoặc parsed fields |
+| chain() | returns GraphOp | Kết hợp Prompt→LLM→Parser | template, vars | content hoặc parsed fields |
 | EmbeddingOp | BaseOp | Generate embeddings | texts | embeddings |
 | RerankOp | BaseOp | Re-rank documents | query, documents | reranks |
 
@@ -38,14 +38,8 @@ Location: `hush-providers/hush/providers/ops/`
 Tất cả provider ops sử dụng `@shorthand` decorator để tạo `Op.of()` factory method:
 
 ```python
-# Shorthand (khuyên dùng)
-chat = ChainOp.of(resource="gpt-4o", template={"user": "{q}"}, q=PARENT["q"])
-
-# Tương đương với full constructor:
-chat = ChainOp(
-    resource="gpt-4o",
-    inputs={"template": {"user": "{q}"}, "q": PARENT["q"]},
-)
+# Factory function (khuyên dùng)
+chat = chain(resource="gpt-4o", template={"user": "{q}"}, q=PARENT["q"])
 ```
 
 `split_shorthand_kwargs()` tách kwargs thành:
@@ -154,8 +148,8 @@ Khi dùng `{"*": PARENT}`, PromptOp cần biết những biến nào sẽ đư�
 **Strategy 1: Static template** — Template là literal (str/dict/list), parse `{var}` placeholders:
 
 ```python
-# ChainOp._build_graph() tạo PromptOp(inputs={"*": PARENT})
-# ChainOp.inputs có template = {"user": "Hello {name}, age {age}"}
+# chain() builds internal graph with PromptOp(inputs={"*": PARENT})
+# chain() inputs có template = {"user": "Hello {name}, age {age}"}
 # → _infer_wildcard_vars parse template → {"name", "age"}
 # → Thêm "name", "age" vào input schema
 ```
@@ -166,12 +160,12 @@ Khi dùng `{"*": PARENT}`, PromptOp cần biết những biến nào sẽ đư�
 @graph
 def my_flow(template, transcript):
     # template và transcript là PARENT refs
-    chain = ChainOp.of(resource="gpt-4o", template=template, transcript=transcript)
-    START >> chain >> END
+    c = chain(resource="gpt-4o", template=template, transcript=transcript)
+    START >> c >> END
 
-# Bên trong ChainOp._build_graph():
+# Bên trong chain() graph building:
 #   PromptOp(inputs={"*": PARENT})
-#   PARENT (= ChainOp) có inputs: template (Ref), transcript (Ref)
+#   PARENT (= GraphOp returned by chain()) có inputs: template (Ref), transcript (Ref)
 #   → template là Ref → không parse placeholders
 #   → Fallback: lấy tất cả non-reserved keys từ source → {"transcript"}
 #   → Thêm "transcript" vào schema
@@ -288,9 +282,9 @@ LLMOp override `run()` (không chỉ dùng `core`):
 
 ---
 
-## ChainOp
+## chain()
 
-Composite op kế thừa `GraphOp`, tự động build internal graph:
+Factory function trả về `GraphOp`, tự động build internal graph:
 
 ### 2 Mode
 
@@ -306,23 +300,25 @@ PromptOp → LLMOp → ParserOp → Output
 
 ### Internal Graph Building
 
+`chain()` builds a `GraphOp` internally with the following structure:
+
 ```python
-def _build_graph(self):
-    with self:
-        _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
-        llm_inputs = {"messages": _prompt["messages"]}
+# Inside chain():
+with GraphOp(name=...) as graph:
+    _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
+    llm_inputs = {"messages": _prompt["messages"]}
 
-        if self.extract:
-            _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs)
-            _parser = ParserOp(name="parser", format=..., extract=...,
-                              inputs={"text": _llm["content"]}, outputs={"*": PARENT})
-            START >> _prompt >> _llm >> _parser >> END
-        else:
-            _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs,
-                         outputs={"*": PARENT})
-            START >> _prompt >> _llm >> END
+    if extract:
+        _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs)
+        _parser = ParserOp(name="parser", format=..., extract=...,
+                          inputs={"text": _llm["content"]}, outputs={"*": PARENT})
+        START >> _prompt >> _llm >> _parser >> END
+    else:
+        _llm = LLMOp(name="llm", resource=..., inputs=llm_inputs,
+                     outputs={"*": PARENT})
+        START >> _prompt >> _llm >> END
 
-    self.build()
+# Returns the built GraphOp
 ```
 
 ### Features
@@ -381,5 +377,5 @@ Tất cả provider ops wrap exception thành OpError subclass:
 - [Embedding Provider](embedding-provider.md) - BaseEmbedder interface
 - [Reranker Provider](reranker-provider.md) - BaseReranker interface
 - [Exception Hierarchy](../ops/exception-hierarchy.md) - Error types
-- [ParserOp](../ops/parser-op.md) - Parser trong ChainOp
+- [ParserOp](../ops/parser-op.md) - Parser trong chain()
 - [BaseOp Anatomy](../ops/base-op.md) - Param system

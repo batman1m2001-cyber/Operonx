@@ -7,9 +7,9 @@ Cấu hình và sử dụng LLM providers trong Hush workflows.
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
 >
-> | Syntax | Class | Ví dụ |
-> |--------|-------|-------|
-> | `ChainOp.of()` | `ChainOp` | `ChainOp.of(resource="gpt-4o", template={...}, query=PARENT["q"])` |
+> | Syntax | Loại | Ví dụ |
+> |--------|------|-------|
+> | `chain()` | Factory function | `chain(resource="gpt-4o", template={...}, query=PARENT["q"])` |
 > | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
 > | `PromptOp.of()` | `PromptOp` | `PromptOp.of(template={...}, var=PARENT["x"])` |
 
@@ -74,18 +74,18 @@ llm:or-claude-4-sonnet:
   model: anthropic/claude-sonnet-4
 ```
 
-## ChainOp.of() — Classmethod (khuyến nghị)
+## chain() — Factory function (khuyến nghị)
 
-Cách ngắn nhất để gọi LLM. Kết hợp prompt + LLM trong một op, auto-naming từ biến, `>> END` auto-forward outputs.
+Cách ngắn nhất để gọi LLM. Kết hợp prompt + LLM trong một graph, auto-naming từ biến, `>> END` auto-forward outputs.
 
 ```python
-from hush.providers import ChainOp
+from hush.providers import chain
 
 # String template
-summarize = ChainOp.of(resource="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
+summarize = chain(resource="gpt-4o", template="Tóm tắt văn bản sau: {text}", text=PARENT["text"])
 
 # Dict với system/user
-chat = ChainOp.of(
+chat = chain(
     resource="gpt-4o",
     template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
     task="tóm tắt văn bản",
@@ -93,7 +93,7 @@ chat = ChainOp.of(
 )
 
 # Với conversation history
-chat = ChainOp.of(
+chat = chain(
     resource="gpt-4o",
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     conversation_history=PARENT["history"],
@@ -106,7 +106,7 @@ START >> chat >> END  # auto-forward: result["content"], result["model_used"], .
 ### Structured output (JSON mode)
 
 ```python
-classifier = ChainOp.of(
+classifier = chain(
     resource="gpt-4o",
     template={"user": "Phân loại và trả về JSON: {text}"},
     text=PARENT["text"],
@@ -125,14 +125,14 @@ classifier = ChainOp.of(
 | `tool_calls` | list | Tool calls nếu có |
 | `finish_reason` | str | "stop", "tool_calls", etc. |
 
-## ChainOp.of() — Config nâng cao
+## chain() — Config nâng cao
 
 Khi cần config chi tiết hơn (load balancing, fallback, extract, v.v.):
 
 ```python
-from hush.providers import ChainOp
+from hush.providers import chain
 
-chain = ChainOp.of(
+chat = chain(
     resource=["gpt-4o", "gpt-4o-mini"],
     template={"system": "Bạn là assistant hữu ích.", "user": "{query}"},
     ratios=[0.7, 0.3],

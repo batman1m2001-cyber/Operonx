@@ -120,15 +120,15 @@ class LangfuseTracer(Tracer):
                 continue
             idx = parent_child_count.get(pk, 0)
             parent_child_count[pk] = idx + 1
-            if idx > 0:
-                # Get parent's start_time as base
-                base_iso = node_start.get(pk) or node.get("start_time") or now_iso
-                try:
-                    base = datetime.fromisoformat(base_iso.replace("Z", "+00:00"))
-                    bumped = base + timedelta(milliseconds=idx)
-                    node["start_time"] = bumped.isoformat().replace("+00:00", "Z")
-                except (ValueError, TypeError):
-                    pass
+            # Assign all children monotonic start_times: parent_start + idx*1ms
+            # so Langfuse preserves the execution order from collect_tree
+            base_iso = node_start.get(pk) or node.get("start_time") or now_iso
+            try:
+                base = datetime.fromisoformat(base_iso.replace("Z", "+00:00"))
+                bumped = base + timedelta(milliseconds=idx)
+                node["start_time"] = bumped.isoformat().replace("+00:00", "Z")
+            except (ValueError, TypeError):
+                pass
 
         for node in nodes:
             key = node["trace_key"]

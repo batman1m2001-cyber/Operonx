@@ -63,8 +63,8 @@ class TestTracerBase:
 # ---------------------------------------------------------------------------
 class TestTraceCollector:
     @pytest.mark.asyncio
-    async def test_collector_extracts_graph_structure(self):
-        """Collector extracts static metadata (op_type, parent_name) from graph."""
+    async def test_collector_extracts_nodes(self):
+        """Collector extracts nodes with op_name and display_name from graph."""
         with GraphOp(name="test-wf") as graph:
             node = FuncOp(
                 name="double",
@@ -78,21 +78,19 @@ class TestTraceCollector:
         result = await engine.run(inputs={"x": 5}, request_id="col-001")
         state = result["$state"]
 
-        collector = TraceCollector()
-        trace_data = collector.collect(graph, state)
+        collector = TraceCollector(graph)
+        trace_data = collector.collect(state)
 
-        # Check graph_structure
-        gs = {n["op_name"]: n for n in trace_data["graph_structure"]}
-        assert "test-wf" in gs
-        assert gs["test-wf"]["op_type"] == "graph"
-        assert gs["test-wf"]["parent_name"] is None
+        nodes = {n["op_name"]: n for n in trace_data["nodes"] if n["op_name"]}
+        assert "test-wf" in nodes
+        assert nodes["test-wf"]["node_type"] == "trace"
 
-        assert "test-wf.double" in gs
-        assert gs["test-wf.double"]["op_type"] == "code"
-        assert gs["test-wf.double"]["parent_name"] == "test-wf"
+        assert "test-wf.double" in nodes
+        assert nodes["test-wf.double"]["node_type"] == "span"
+        assert nodes["test-wf.double"]["parent_trace_key"] is not None
 
     @pytest.mark.asyncio
-    async def test_collector_extracts_records(self):
+    async def test_collector_extracts_io(self):
         """Collector extracts dynamic data (inputs, outputs, timing) from state."""
         with GraphOp(name="rec-wf") as graph:
             node = FuncOp(
@@ -107,17 +105,16 @@ class TestTraceCollector:
         result = await engine.run(inputs={"x": 5}, request_id="col-002")
         state = result["$state"]
 
-        collector = TraceCollector()
-        trace_data = collector.collect(graph, state)
+        collector = TraceCollector(graph)
+        trace_data = collector.collect(state)
 
         assert trace_data["request_id"] == "col-002"
         assert trace_data["workflow_name"] == "rec-wf"
 
-        # Find the add_ten record
-        records = {r["op_name"]: r for r in trace_data["records"]}
-        assert "rec-wf.add_ten" in records
+        nodes = {n["op_name"]: n for n in trace_data["nodes"] if n["op_name"]}
+        assert "rec-wf.add_ten" in nodes
 
-        rec = records["rec-wf.add_ten"]
+        rec = nodes["rec-wf.add_ten"]
         assert rec["inputs"]["x"] == 5
         assert rec["outputs"]["result"] == 15
         assert rec["duration_ms"] is not None
@@ -127,7 +124,7 @@ class TestTraceCollector:
 
     @pytest.mark.asyncio
     async def test_collector_preserves_execution_order(self):
-        """Records are in execution order (graph first, then children)."""
+        """Nodes are in topological order (step_a before step_b)."""
         with GraphOp(name="order-wf") as graph:
             a = FuncOp(
                 name="step_a",
@@ -146,16 +143,15 @@ class TestTraceCollector:
         result = await engine.run(inputs={"x": 0}, request_id="col-003")
         state = result["$state"]
 
-        collector = TraceCollector()
-        trace_data = collector.collect(graph, state)
+        collector = TraceCollector(graph)
+        trace_data = collector.collect(state)
 
-        op_names = [r["op_name"] for r in trace_data["records"]]
-        # graph records execution, then step_a, then step_b, then graph end
+        op_names = [n["op_name"] for n in trace_data["nodes"] if n["op_name"]]
         assert "order-wf.step_a" in op_names
         assert "order-wf.step_b" in op_names
         idx_a = op_names.index("order-wf.step_a")
         idx_b = op_names.index("order-wf.step_b")
-        assert idx_a < idx_b, "step_a should execute before step_b"
+        assert idx_a < idx_b, "step_a should appear before step_b"
 
     @pytest.mark.asyncio
     async def test_collector_with_dynamic_tags(self):
@@ -177,8 +173,8 @@ class TestTraceCollector:
         result = await engine.run(inputs={"x": 42}, request_id="col-004")
         state = result["$state"]
 
-        collector = TraceCollector()
-        trace_data = collector.collect(graph, state)
+        collector = TraceCollector(graph)
+        trace_data = collector.collect(state)
 
         assert "dynamic-one" in trace_data["tags"]
         assert "dynamic-two" in trace_data["tags"]
@@ -204,8 +200,8 @@ class TestTraceCollector:
         )
         state = result["$state"]
 
-        collector = TraceCollector()
-        trace_data = collector.collect(graph, state)
+        collector = TraceCollector(graph)
+        trace_data = collector.collect(state)
 
         assert trace_data["request_id"] == "req-abc"
         assert trace_data["user_id"] == "user-123"
@@ -249,7 +245,7 @@ class TestFlushWorker:
         tracer = CaptureTracer(tags=["static-tag"])
         worker = FlushWorker(max_workers=1)
         try:
-            worker.submit([tracer], graph, state)
+            worker.submit([tracer], TraceCollector(graph), state)
             tracer.wait_for_flush(timeout=5)
 
             assert len(tracer.flush_calls) == 1
@@ -284,7 +280,7 @@ class TestFlushWorker:
         tracer = CaptureTracer(tags=["static-tag"])
         worker = FlushWorker(max_workers=1)
         try:
-            worker.submit([tracer], graph, state)
+            worker.submit([tracer], TraceCollector(graph), state)
             tracer.wait_for_flush(timeout=5)
 
             tags = tracer.flush_calls[0]["tags"]
@@ -316,7 +312,7 @@ class TestFlushWorker:
 
         worker = FlushWorker(max_workers=1)
         try:
-            worker.submit([t1, t2], graph, state)
+            worker.submit([t1, t2], TraceCollector(graph), state)
             t1.wait_for_flush(timeout=5)
             t2.wait_for_flush(timeout=5)
 

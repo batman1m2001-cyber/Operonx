@@ -72,11 +72,11 @@ pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.
 
 ```python
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import ChainOp
+from hush.providers import chain
 
 async def main():
     with GraphOp(name="chat") as graph:
-        chat = ChainOp.of(
+        chat = chain(
             resource="gpt-4o",
             template={"system": "You are a helpful assistant.", "user": "{question}"},
             question=PARENT["question"],

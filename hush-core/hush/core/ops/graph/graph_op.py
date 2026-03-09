@@ -31,7 +31,7 @@ class LoopConfig:
     _compiled_until: Any = field(default=None, repr=False)
 
 
-from hush.core.ops.graph._algo import topo_sort
+from hush.core.utils.algo import topo_sort
 from hush.core.ops.graph.scheduler import Scheduler, _is_gen
 
 # Re-export validation types for backward compatibility

@@ -97,7 +97,7 @@ app.serve(port=8000, backend="rust")
 @app.endpoint("/chat")
 @graph
 def chatbot(query):
-    llm = ChainOp.of(resource="gpt-4o", template={"user": "{query}"}, query=query)
+    llm = chain(resource="gpt-4o", template={"user": "{query}"}, query=query)
     START >> llm >> END
 ```
 
