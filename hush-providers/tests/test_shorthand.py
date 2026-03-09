@@ -223,139 +223,138 @@ class TestRerankShorthand:
 
 
 # ============================================================
-# ChainOp.of() shorthand tests
+# chain() shorthand tests
 # ============================================================
 
 
 def _mock_resource_hub():
-    """Create a mock ResourceHub for ChainOp tests."""
+    """Create a mock ResourceHub for chain tests."""
     mock_hub = Mock()
     mock_hub.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
     return mock_hub
 
 
-class TestLLMChainShorthand:
-    """Test ChainOp.of() classmethod shorthand."""
+class TestChainShorthand:
+    """Test chain() factory function."""
 
-    def test_llmchain_shorthand_basic(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_basic(self):
+        from hush.core.ops import GraphOp
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of("gpt-4", "Hello {user}", user="world")
-            assert isinstance(node, ChainOp)
-            assert node.resource == "gpt-4"
+            node = chain(resource="gpt-4", template="Hello {user}", user="world")
+            assert isinstance(node, GraphOp)
             assert "prompt" in node._ops
             assert "llm" in node._ops
 
-    def test_llmchain_shorthand_dict_template(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_dict_template(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of(
-                "gpt-4", {"system": "You are {role}.", "user": "{query}"}, role="helpful"
+            node = chain(
+                resource="gpt-4",
+                template={"system": "You are {role}.", "user": "{query}"},
+                role="helpful",
             )
-            assert isinstance(node, ChainOp)
             assert "prompt" in node._ops
 
-    def test_llmchain_shorthand_auto_name(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_auto_name(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            my_chain = ChainOp.of("gpt-4", "Hello")
+            my_chain = chain(resource="gpt-4", template="Hello")
             assert my_chain.name == "my_chain"
 
-    def test_llmchain_shorthand_explicit_name(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_explicit_name(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of("gpt-4", "Hello", name="chat_chain")
+            node = chain(resource="gpt-4", template="Hello", name="chat_chain")
             assert node.name == "chat_chain"
 
-    def test_llmchain_shorthand_with_outputs(self):
+    def test_chain_with_outputs(self):
         from hush.core.ops.base import PARENT
 
-        from hush.providers.ops.chain import ChainOp
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of("gpt-4", "Hello", outputs={"*": PARENT})
+            node = chain(resource="gpt-4", template="Hello", outputs={"*": PARENT})
             assert "content" in node.outputs
 
-    def test_llmchain_shorthand_extract(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_extract(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of(
-                "gpt-4",
-                "Classify: {text}",
+            node = chain(
+                resource="gpt-4",
+                template="Classify: {text}",
                 extract=["category: str", "confidence: float"],
                 parser="xml",
                 text="sample",
             )
-            assert node.extract == ["category: str", "confidence: float"]
-            assert node.parser == "xml"
             assert "parser" in node._ops
 
-    def test_llmchain_shorthand_response_format(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_response_format(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of(
-                "gpt-4o",
-                {"user": "Return JSON: {text}"},
+            node = chain(
+                resource="gpt-4o",
+                template={"user": "Return JSON: {text}"},
                 response_format={"type": "json_object"},
                 text="sample",
             )
-            assert node.response_format == {"type": "json_object"}
+            llm_op = node._ops["llm"]
+            assert "response_format" in llm_op.inputs
 
-    def test_llmchain_shorthand_load_balancing(self):
-        from hush.providers.ops.chain import ChainOp
-
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
-            mock_cls.instance.return_value = _mock_resource_hub()
-
-            node = ChainOp.of(["gpt-4o", "gpt-4o-mini"], "Hello", ratios=[0.7, 0.3])
-            assert isinstance(node.resource, list)
-            assert node.ratios == [0.7, 0.3]
-
-    def test_llmchain_shorthand_fallback(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_load_balancing(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of("gpt-4o", "Hello", fallback=["claude-sonnet", "gpt-3.5-turbo"])
-            assert node.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
+            node = chain(resource=["gpt-4o", "gpt-4o-mini"], template="Hello", ratios=[0.7, 0.3])
+            llm_op = node._ops["llm"]
+            assert isinstance(llm_op.resource, list)
+            assert llm_op.ratios == [0.7, 0.3]
 
-    def test_llmchain_shorthand_enable_thinking(self):
-        from hush.providers.ops.chain import ChainOp
-
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
-            mock_cls.instance.return_value = _mock_resource_hub()
-
-            node = ChainOp.of("gpt-4o", "Hello", enable_thinking=True)
-            assert node.enable_thinking is True
-
-    def test_llmchain_shorthand_template_variables(self):
-        from hush.providers.ops.chain import ChainOp
+    def test_chain_fallback(self):
+        from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = ChainOp.of("gpt-4", "Hello {user}, do {task}", user="Alice", task="coding")
+            node = chain(
+                resource="gpt-4o",
+                template="Hello",
+                fallback=["claude-sonnet", "gpt-3.5-turbo"],
+            )
+            llm_op = node._ops["llm"]
+            assert llm_op.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
+
+    def test_chain_template_variables(self):
+        from hush.providers.ops.chain import chain
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+            mock_cls.instance.return_value = _mock_resource_hub()
+
+            node = chain(
+                resource="gpt-4", template="Hello {user}, do {task}", user="Alice", task="coding"
+            )
             # template vars should be in the chain's inputs
             assert "user" in node.inputs
             assert "task" in node.inputs

@@ -14,11 +14,11 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from hush.providers.auth import (
-    AuthFactory,
     KeycloakTokenConfig,
     KeycloakTokenProvider,
+    create_auth,
 )
-from hush.providers.registry import AuthPlugin
+from hush.providers.registry import auth_plugin
 
 # =============================================================================
 # KeycloakTokenConfig Tests
@@ -264,7 +264,7 @@ class TestAuthFactory:
             name="test_app",
             secret="test_secret",
         )
-        provider = AuthFactory.create(config)
+        provider = create_auth(config)
 
         assert isinstance(provider, KeycloakTokenProvider)
         assert provider.config == config
@@ -281,15 +281,15 @@ class TestAuthPlugin:
 
     def test_plugin_is_registered(self):
         """Test that plugin auto-registers on import."""
-        assert AuthPlugin._registered is True
+        assert auth_plugin._registered is True
         print("✓ Plugin is auto-registered")
 
     def test_plugin_register_idempotent(self):
         """Test that register() is idempotent."""
-        AuthPlugin.register()
-        AuthPlugin.register()
-        AuthPlugin.register()
-        assert AuthPlugin._registered is True
+        auth_plugin.register()
+        auth_plugin.register()
+        auth_plugin.register()
+        assert auth_plugin._registered is True
         print("✓ Plugin register is idempotent")
 
 

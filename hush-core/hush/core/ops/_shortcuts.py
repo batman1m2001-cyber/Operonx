@@ -22,6 +22,7 @@ _BASE_INIT_KEYS = frozenset(
         "start",
         "executor",
         "bound",
+        "contain_generation",
     }
 )
 

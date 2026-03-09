@@ -9,7 +9,7 @@ from hush.providers.llms.config import (
     LLMType,
     OpenAIConfig,
 )
-from hush.providers.llms.factory import LLMFactory
+from hush.providers.llms.factory import create_llm
 from hush.providers.llms.openai import OpenAISDKModel
 from hush.providers.llms.response import LLMGenerator
 
@@ -36,7 +36,7 @@ __all__ = [
     "OpenAIConfig",
     "AzureConfig",
     "GeminiConfig",
-    "LLMFactory",
+    "create_llm",
     "LLMGenerator",
     "OpenAISDKModel",
     "AzureSDKModel",

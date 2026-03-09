@@ -24,52 +24,49 @@ Example:
 
 from hush.core.loggings import LOGGER
 
+_registered = False
 
-class ObservabilityPlugin:
-    """Plugin for registering observability backends to ResourceHub."""
 
-    _registered = False
+def register():
+    """Register all observability config classes and factory handlers."""
+    global _registered
+    if _registered:
+        return
 
-    @classmethod
-    def register(cls):
-        """Register all observability config classes and factory handlers."""
-        if cls._registered:
-            return
+    try:
+        from hush.core.registry import REGISTRY
 
-        try:
-            from hush.core.registry import REGISTRY
+        # Register Langfuse
+        from hush.telemetry.backends.langfuse import (
+            LangfuseClient,
+            LangfuseConfig,
+        )
 
-            # Register Langfuse
-            from hush.telemetry.backends.langfuse import (
-                LangfuseClient,
-                LangfuseConfig,
-            )
+        REGISTRY.register(LangfuseConfig, lambda c: LangfuseClient(c))
 
-            REGISTRY.register(LangfuseConfig, lambda c: LangfuseClient(c))
+        # Register OpenTelemetry
+        from hush.telemetry.backends.otel import (
+            OTELClient,
+            OTELConfig,
+        )
 
-            # Register OpenTelemetry
-            from hush.telemetry.backends.otel import (
-                OTELClient,
-                OTELConfig,
-            )
+        REGISTRY.register(OTELConfig, lambda c: OTELClient(c))
 
-            REGISTRY.register(OTELConfig, lambda c: OTELClient(c))
+        _registered = True
+        LOGGER.debug("Observability plugin registered successfully")
 
-            cls._registered = True
-            LOGGER.debug("ObservabilityPlugin registered successfully")
+    except ImportError as e:
+        LOGGER.warning(
+            "Failed to register observability plugin: %s. "
+            "ResourceHub integration will not be available.",
+            str(e),
+        )
 
-        except ImportError as e:
-            LOGGER.warning(
-                "Failed to register ObservabilityPlugin: %s. "
-                "ResourceHub integration will not be available.",
-                str(e),
-            )
 
-    @classmethod
-    def is_registered(cls) -> bool:
-        """Check if plugin is registered."""
-        return cls._registered
+def is_registered() -> bool:
+    """Check if plugin is registered."""
+    return _registered
 
 
 # Auto-register on import
-ObservabilityPlugin.register()
+register()

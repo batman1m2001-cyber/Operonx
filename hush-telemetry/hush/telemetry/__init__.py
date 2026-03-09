@@ -22,17 +22,11 @@ Example:
     ```
 
     ```python
-    # Direct client access
-    from hush.core.registry import get_hub
+    # Prompt management (requires langfuse SDK)
+    from hush.telemetry import LangfusePromptManager, LangfuseConfig
 
-    # Langfuse client
-    langfuse = get_hub().langfuse("default")
-    prompt = langfuse.get_prompt("my-prompt")
-
-    # OpenTelemetry client
-    otel = get_hub().otel("jaeger")
-    with otel.start_span("my-operation") as span:
-        span.set_attribute("key", "value")
+    pm = LangfusePromptManager(config=LangfuseConfig.from_env())
+    prompt = pm["my-prompt"]
     ```
 """
 
@@ -43,10 +37,11 @@ from hush.core.tracing import Tracer
 from hush.telemetry.backends import (
     LangfuseClient,
     LangfuseConfig,
+    LangfusePromptManager,
     OTELClient,
     OTELConfig,
 )
-from hush.telemetry.plugin import ObservabilityPlugin  # noqa: F401
+import hush.telemetry.plugin  # noqa: F401 — auto-registers on import
 
 # Tracers
 from hush.telemetry.tracers import (
@@ -63,6 +58,7 @@ __all__ = [
     "OTELConfig",
     # Backends - Clients
     "LangfuseClient",
+    "LangfusePromptManager",
     "OTELClient",
     # Tracers
     "HushEyesTracer",

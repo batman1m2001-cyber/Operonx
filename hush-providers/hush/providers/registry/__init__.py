@@ -2,16 +2,15 @@
 
 This module provides plugins that extend hush-core's ResourceHub
 to support LLM, embedding, reranking, and auth resources.
+
+All plugins auto-register on import via module-level register() calls.
 """
 
-from .auth_plugin import AuthPlugin
-from .embedding_plugin import EmbeddingPlugin
-from .llm_plugin import LLMPlugin
-from .rerank_plugin import RerankPlugin
+from . import auth_plugin, embedding_plugin, llm_plugin, rerank_plugin  # noqa: F401
 
 __all__ = [
-    "LLMPlugin",
-    "EmbeddingPlugin",
-    "RerankPlugin",
-    "AuthPlugin",
+    "llm_plugin",
+    "embedding_plugin",
+    "rerank_plugin",
+    "auth_plugin",
 ]
