@@ -114,7 +114,6 @@ class BaseOp(ABC):
         "enabled",
         "executor",
         "bound",
-        "_stream_depths",
     ]
 
     _VALID_EXECUTORS = (None, "thread")
@@ -161,7 +160,6 @@ class BaseOp(ABC):
         self.targets: List[str] = targets or []
 
         self.core: Optional[Callable] = None
-        self._stream_depths = None  # Set by GraphOp.build() for streaming
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
         self.parent = get_current()
@@ -327,42 +325,6 @@ class BaseOp(ABC):
     def is_base_op(self) -> bool:
         return True
 
-    def _resolve_ctx(self, param, context_id, parent_context):
-        """Resolve lookup context for a single input param.
-
-        Returns the context to use when reading from state, based on
-        whether the param references PARENT, a sibling op at a different
-        stream depth, or is a plain value.
-        """
-        # PARENT ref → use parent_context or batch context for streaming
-        if isinstance(param.value, Ref) and param.value.raw_source is self.parent:
-            if parent_context is not None:
-                return parent_context
-            if self._stream_depths and isinstance(context_id, tuple) and len(context_id) > 1:
-                # PARENT ref in streaming context — broadcast to batch (root) context
-                return context_id[:1]
-            return context_id
-
-        # Streaming broadcast: read from source op's stream depth context
-        if (
-            self._stream_depths
-            and isinstance(param.value, Ref)
-            and param.value.raw_source is not self.parent
-        ):
-            source_op = param.value.raw_source
-            source_depth = self._stream_depths.get(source_op.name, 0)
-            my_depth = self._stream_depths.get(self.name, 0)
-            # Only broadcast for non-generator sources at lower depth.
-            # Generator outputs live at stream context (depth+1), not batch.
-            source_fn = getattr(source_op, "core", None)
-            source_is_gen = source_fn is not None and (
-                inspect.isgeneratorfunction(source_fn) or inspect.isasyncgenfunction(source_fn)
-            )
-            if source_depth < my_depth and isinstance(context_id, tuple) and not source_is_gen:
-                return context_id[: source_depth + 1]
-
-        return context_id
-
     def get_inputs(
         self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -376,7 +338,16 @@ class BaseOp(ABC):
         result = {}
 
         for var_name, param in self.inputs.items():
-            lookup_ctx = self._resolve_ctx(param, context_id, parent_context)
+            # PARENT refs use parent_context (for loop iterations); everything else
+            # uses context_id directly — Cell hierarchy fallback handles batch resolution.
+            if (
+                parent_context is not None
+                and isinstance(param.value, Ref)
+                and param.value.raw_source is self.parent
+            ):
+                lookup_ctx = parent_context
+            else:
+                lookup_ctx = context_id
 
             # Always read from state first (may have value from MemoryState inputs or Ref)
             value = state[self.full_name, var_name, lookup_ctx]

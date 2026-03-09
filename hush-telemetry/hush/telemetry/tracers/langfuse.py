@@ -211,7 +211,7 @@ class LangfuseTracer(Tracer):
                 )
 
             else:
-                # Span (batch, stream_context, stream_item, loop_iter, graph)
+                # Span (batch, generator, loop_iter, graph)
                 obs_id = str(uuid.uuid4())
                 obs_ids[key] = obs_id
 

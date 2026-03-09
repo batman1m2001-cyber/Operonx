@@ -1,11 +1,12 @@
-"""Tests for the streaming-aware TraceCollector.
+"""Tests for the TraceCollector.
 
 Covers:
-    - Batch-only workflows (no streaming, no regression)
-    - Streaming workflows (generator → downstream, kind derivation)
+    - Batch-only workflows (no streaming, no synthetic nodes)
+    - Streaming workflows (context grouping with synthetic [N] nodes)
+    - Skip pending (generators with yield_count==0 removed by default)
     - TraceSummary correctness
-    - Streaming metadata (spawned_by, depth)
-    - collect_tree(): named contexts, collapse, flatten, nested graphs, callbot
+    - Nested graphs (batch and streaming)
+    - Callbot pipeline (multi-level generators, skip pending)
 """
 
 import asyncio
@@ -58,13 +59,34 @@ def step_c(result_a: int):
 
 
 # =========================================================================
+# Helpers
+# =========================================================================
+
+
+def _nodes_by_kind(nodes, kind):
+    return [n for n in nodes if n["kind"] == kind]
+
+
+def _nodes_by_name(nodes, name):
+    return [n for n in nodes if n["display_name"] == name]
+
+
+def _children_of(nodes, parent_key):
+    return [n for n in nodes if n["parent_trace_key"] == parent_key]
+
+
+def _synthetic_nodes(nodes):
+    return [n for n in nodes if n["op_name"] is None]
+
+
+# =========================================================================
 # Test: Batch-only (no regression)
 # =========================================================================
 
 
 @pytest.mark.asyncio
 async def test_batch_only_trace():
-    """Batch workflow: all nodes should be kind='batch', no streaming metadata."""
+    """Batch workflow: all nodes should be kind='batch', no synthetic nodes."""
     with GraphOp(name="batch_wf") as g:
         d = double(x=PARENT["x"])
         a = add_one(value=d["result"])
@@ -82,7 +104,6 @@ async def test_batch_only_trace():
     assert trace["request_id"] is not None
 
     nodes = trace["nodes"]
-    # Root + 2 child ops
     real_nodes = [n for n in nodes if n["op_name"] is not None]
     assert len(real_nodes) == 3  # batch_wf, d, a
 
@@ -90,6 +111,9 @@ async def test_batch_only_trace():
     child_nodes = [n for n in real_nodes if n["node_type"] != "trace"]
     for n in child_nodes:
         assert n["kind"] == "batch", f"Expected batch, got {n['kind']} for {n['op_name']}"
+
+    # No synthetic nodes
+    assert len(_synthetic_nodes(nodes)) == 0
 
     # Summary
     summary = trace["summary"]
@@ -99,13 +123,13 @@ async def test_batch_only_trace():
 
 
 # =========================================================================
-# Test: Streaming workflow
+# Test: Streaming workflow with context grouping
 # =========================================================================
 
 
 @pytest.mark.asyncio
 async def test_streaming_trace():
-    """Streaming workflow: generator + downstream. Verify kind and metadata."""
+    """Streaming workflow: generator + downstream grouped under [N] contexts."""
     with GraphOp(name="stream_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
@@ -121,22 +145,29 @@ async def test_streaming_trace():
     trace = collector.collect(state)
     nodes = trace["nodes"]
 
-    # Find generator node
-    gen_nodes = [n for n in nodes if n["kind"] == "generator"]
-    assert len(gen_nodes) == 1, f"Expected 1 generator, got {len(gen_nodes)}"
+    # Generator node with correct yield_count
+    gen_nodes = _nodes_by_kind(nodes, "generator")
+    assert len(gen_nodes) == 1
     gen_node = gen_nodes[0]
     assert gen_node["op_name"] == "stream_wf.gen"
     assert gen_node["metadata"]["yield_count"] == 3
 
-    # Downstream proc nodes exist (collapsed as proc[0..2] since single child)
-    proc_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".proc")]
-    assert len(proc_nodes) == 3, f"Expected 3 proc nodes, got {len(proc_nodes)}"
+    # 3 synthetic context groups [0], [1], [2]
+    ctx_nodes = _nodes_by_kind(nodes, "stream_context")
+    assert len(ctx_nodes) == 3
+    ctx_names = sorted(n["display_name"] for n in ctx_nodes)
+    assert ctx_names == ["[0]", "[1]", "[2]"]
 
-    for pn in proc_nodes:
-        # spawned_by in metadata should point to the generator
-        assert pn["metadata"].get("spawned_by") == "stream_wf.gen"
-        # depth should be 1 (downstream of generator at depth 0)
-        assert pn["metadata"].get("depth") == 1
+    # Each context group has 1 proc child
+    for cn in ctx_nodes:
+        children = _children_of(nodes, cn["trace_key"])
+        assert len(children) == 1
+        assert children[0]["display_name"] == "proc"
+
+    # Context groups are children of the generator (not root)
+    gen_children = _children_of(nodes, gen_node["trace_key"])
+    gen_child_kinds = sorted(n["kind"] for n in gen_children)
+    assert gen_child_kinds == ["stream_context", "stream_context", "stream_context"]
 
     # Summary
     summary = trace["summary"]
@@ -174,102 +205,14 @@ async def test_summary_fields():
 
 
 # =========================================================================
-# Test: Streaming metadata correctness
+# Test: Context grouping structure
 # =========================================================================
 
 
 @pytest.mark.asyncio
-async def test_streaming_metadata():
-    """Verify spawned_by and depth are set correctly on stream items."""
-    with GraphOp(name="meta_wf") as g:
-        gen = gen_items(count=PARENT["count"])
-        proc = process_item(item=gen["item"])
-        START >> gen >> proc >> END
-
-    engine = Hush(g)
-    result = await engine.run(inputs={"count": 2})
-    state = result["$state"]
-
-    collector = TraceCollector(g)
-    trace = collector.collect(state)
-    nodes = trace["nodes"]
-
-    # proc nodes should have spawned_by and depth in metadata
-    proc_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".proc")]
-    assert len(proc_nodes) == 2
-    for pn in proc_nodes:
-        assert pn["metadata"]["spawned_by"] == "meta_wf.gen"
-        assert pn["metadata"]["depth"] == 1
-
-
-# =========================================================================
-# Test: Trace output serializable (for LocalTracer)
-# =========================================================================
-
-
-@pytest.mark.asyncio
-async def test_trace_json_serializable():
-    """Verify trace output can be serialized to JSON (for LocalTracer)."""
-    import json
-
-    with GraphOp(name="json_wf") as g:
-        gen = gen_items(count=PARENT["count"])
-        proc = process_item(item=gen["item"])
-        START >> gen >> proc >> END
-
-    engine = Hush(g)
-    result = await engine.run(inputs={"count": 2})
-    state = result["$state"]
-
-    collector = TraceCollector(g)
-    trace = collector.collect(state)
-
-    json_str = json.dumps(trace, default=str)
-    assert len(json_str) > 0
-
-    parsed = json.loads(json_str)
-    assert parsed["workflow_name"] == "json_wf"
-    assert len(parsed["nodes"]) >= 3
-
-
-# =========================================================================
-# Helper for collect_tree tests
-# =========================================================================
-
-
-def _collect_tree(graph_op, inputs):
-    """Run workflow and return collect_tree result."""
-
-    async def _run():
-        engine = Hush(graph_op)
-        result = await engine.run(inputs=inputs)
-        collector = TraceCollector(graph_op)
-        return collector.collect(result["$state"])
-
-    return asyncio.get_event_loop().run_until_complete(_run())
-
-
-def _nodes_by_kind(nodes, kind):
-    return [n for n in nodes if n["kind"] == kind]
-
-
-def _nodes_by_name(nodes, name):
-    return [n for n in nodes if n["display_name"] == name]
-
-
-def _children_of(nodes, parent_key):
-    return [n for n in nodes if n["parent_trace_key"] == parent_key]
-
-
-# =========================================================================
-# Phase 2: Basic collect_tree() tests
-# =========================================================================
-
-
-@pytest.mark.asyncio
-async def test_tree_single_downstream_collapsed():
-    """gen(yields=3) >> process >> END — single child per context → collapsed."""
-    with GraphOp(name="collapse_wf") as g:
+async def test_context_group_single_downstream():
+    """gen(yields=3) >> process >> END — each [N] has exactly 1 child."""
+    with GraphOp(name="flat_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
@@ -280,33 +223,23 @@ async def test_tree_single_downstream_collapsed():
     trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
-    # No stream_context nodes — all collapsed into child
+    # 3 context groups, each with 1 proc
     ctx_nodes = _nodes_by_kind(nodes, "stream_context")
-    assert len(ctx_nodes) == 0, (
-        f"Expected 0 stream_contexts, got {[n['display_name'] for n in ctx_nodes]}"
-    )
+    assert len(ctx_nodes) == 3
+    for cn in ctx_nodes:
+        children = _children_of(nodes, cn["trace_key"])
+        assert len(children) == 1
+        assert children[0]["display_name"] == "proc"
 
-    # process should appear as proc[0], proc[1], proc[2]
-    proc_nodes = [n for n in nodes if n["display_name"].startswith("proc[")]
-    assert len(proc_nodes) == 3
-    expected_names = {"proc[0]", "proc[1]", "proc[2]"}
-    assert {n["display_name"] for n in proc_nodes} == expected_names
-
-    # All proc nodes should be direct children of root
-    root = [n for n in nodes if n["parent_trace_key"] is None]
-    assert len(root) == 1
-    for pn in proc_nodes:
-        assert pn["parent_trace_key"] == root[0]["trace_key"]
-
-    # Generator node exists
+    # Generator with yield_count=3
     gen_nodes = _nodes_by_kind(nodes, "generator")
     assert len(gen_nodes) == 1
     assert gen_nodes[0]["metadata"]["yield_count"] == 3
 
 
 @pytest.mark.asyncio
-async def test_tree_multi_downstream_named():
-    """gen(yields=2) >> [step_a, step_b] >> END — named contexts with multiple children."""
+async def test_context_group_multi_downstream():
+    """gen(yields=2) >> [step_a, step_b] >> END — each [N] has 2 children."""
     with GraphOp(name="multi_wf") as g:
         gen = gen_items(count=PARENT["count"])
         sa = step_a(item=gen["item"])
@@ -319,23 +252,21 @@ async def test_tree_multi_downstream_named():
     trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
-    # Stream contexts should exist (multiple children → not collapsed)
+    # 2 context groups
     ctx_nodes = _nodes_by_kind(nodes, "stream_context")
     assert len(ctx_nodes) == 2
-    ctx_names = {n["display_name"] for n in ctx_nodes}
-    assert ctx_names == {"gen:0", "gen:1"}, f"Expected gen:0/gen:1, got {ctx_names}"
 
-    # Each context should have 2 children (step_a, step_b)
-    for ctx in ctx_nodes:
-        children = _children_of(nodes, ctx["trace_key"])
+    # Each context group has step_a and step_b
+    for cn in ctx_nodes:
+        children = _children_of(nodes, cn["trace_key"])
         child_names = {c["display_name"] for c in children}
-        assert "sa" in child_names, f"Missing sa in {child_names}"
-        assert "sb" in child_names, f"Missing sb in {child_names}"
+        assert "sa" in child_names
+        assert "sb" in child_names
 
 
 @pytest.mark.asyncio
-async def test_tree_chain_downstream():
-    """gen(yields=2) >> a >> b >> END — chain creates named contexts."""
+async def test_context_group_chain_downstream():
+    """gen(yields=2) >> a >> b >> END — each [N] has a >> b chain."""
     with GraphOp(name="chain_wf") as g:
         gen = gen_items(count=PARENT["count"])
         a = step_a(item=gen["item"])
@@ -348,20 +279,20 @@ async def test_tree_chain_downstream():
     trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
-    # 2 children per context → contexts exist
+    # 2 context groups
     ctx_nodes = _nodes_by_kind(nodes, "stream_context")
     assert len(ctx_nodes) == 2
-    ctx_names = {n["display_name"] for n in ctx_nodes}
-    assert ctx_names == {"gen:0", "gen:1"}
 
-    # Each context has 2 children (a, b)
-    for ctx in ctx_nodes:
-        children = _children_of(nodes, ctx["trace_key"])
-        assert len(children) == 2, f"Expected 2 children, got {len(children)}"
+    # Each context group has a and b
+    for cn in ctx_nodes:
+        children = _children_of(nodes, cn["trace_key"])
+        child_names = {c["display_name"] for c in children}
+        assert "a" in child_names
+        assert "b" in child_names
 
 
 @pytest.mark.asyncio
-async def test_tree_batch_only():
+async def test_batch_only_no_synthetics():
     """a >> b >> END — no streaming, no synthetic nodes."""
     with GraphOp(name="batch_tree_wf") as g:
         d = double(x=PARENT["x"])
@@ -375,8 +306,7 @@ async def test_tree_batch_only():
     nodes = trace["nodes"]
 
     # No synthetic nodes
-    syn_nodes = [n for n in nodes if n["op_name"] is None]
-    assert len(syn_nodes) == 0
+    assert len(_synthetic_nodes(nodes)) == 0
 
     # All real nodes are batch
     real_nodes = [n for n in nodes if n["op_name"] is not None and n["node_type"] != "trace"]
@@ -385,9 +315,9 @@ async def test_tree_batch_only():
 
 
 @pytest.mark.asyncio
-async def test_tree_no_yield_records():
-    """Generator yield records (generator re-executing in stream ctx) should be dropped."""
-    with GraphOp(name="yield_drop_wf") as g:
+async def test_generator_appears_once():
+    """Generator op appears once (as kind=generator), not duplicated per yield."""
+    with GraphOp(name="gen_once_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
@@ -398,19 +328,96 @@ async def test_tree_no_yield_records():
     trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
-    # gen should appear exactly once (as generator), not 1+3 times
     gen_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".gen")]
-    assert len(gen_nodes) == 1, f"Expected 1 gen node, got {len(gen_nodes)}"
+    assert len(gen_nodes) == 1
     assert gen_nodes[0]["kind"] == "generator"
+    assert gen_nodes[0]["metadata"]["yield_count"] == 3
 
 
 # =========================================================================
-# Phase 3: Nested graph tests
+# Test: Skip pending
 # =========================================================================
 
 
 @pytest.mark.asyncio
-async def test_tree_nested_graph_batch():
+async def test_skip_pending_removes_zero_yield_generators():
+    """Generators with yield_count==0 are removed by skip_pending=True."""
+
+    @op
+    async def sometimes_yields(x: int):
+        if x > 0:
+            yield {"val": x}
+        # else: yields nothing
+
+    with GraphOp(name="pending_wf") as g:
+        gen = gen_items(count=PARENT["count"])
+        maybe = sometimes_yields(x=gen["item"])
+        proc = process_item(item=maybe["val"])
+        START >> gen >> maybe >> proc >> END
+
+    engine = Hush(g)
+    result = await engine.run(inputs={"count": 3})
+    state = result["$state"]
+
+    collector = TraceCollector(g)
+
+    # With skip_pending=True (default): pending generators removed
+    trace = collector.collect(state, skip_pending=True)
+    nodes = trace["nodes"]
+    pending = [n for n in nodes if n.get("metadata", {}).get("status") == "pending"]
+    assert len(pending) == 0
+
+    # With skip_pending=False: pending generators kept with status
+    trace_all = collector.collect(state, skip_pending=False)
+    nodes_all = trace_all["nodes"]
+    pending_all = [n for n in nodes_all if n.get("metadata", {}).get("status") == "pending"]
+    assert len(pending_all) > 0
+    for p in pending_all:
+        assert p["metadata"]["yield_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_skip_pending_removes_empty_context_groups():
+    """Empty context groups (all children pending) are cascade-removed."""
+
+    @op
+    async def never_yields(x: int):
+        # Generator that yields nothing
+        if False:
+            yield {"val": x}
+
+    with GraphOp(name="empty_ctx_wf") as g:
+        gen = gen_items(count=PARENT["count"])
+        nope = never_yields(x=gen["item"])
+        proc = process_item(item=nope["val"])
+        START >> gen >> nope >> proc >> END
+
+    engine = Hush(g)
+    result = await engine.run(inputs={"count": 3})
+    state = result["$state"]
+
+    collector = TraceCollector(g)
+
+    # skip_pending=True: all context groups removed (all nope generators are pending)
+    trace = collector.collect(state, skip_pending=True)
+    nodes = trace["nodes"]
+    ctx_nodes = _nodes_by_kind(nodes, "stream_context")
+    assert len(ctx_nodes) == 0
+
+    # skip_pending=False: context groups exist
+    trace_all = collector.collect(state, skip_pending=False)
+    nodes_all = trace_all["nodes"]
+    ctx_all = _nodes_by_kind(nodes_all, "stream_context")
+    assert len(ctx_all) == 3  # [0], [1], [2] from gen_items
+
+
+# =========================================================================
+# Nested graph tests
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_nested_graph_batch():
     """prep >> sub_graph(a >> b) >> END — nested graph appears as kind=graph."""
 
     @graph
@@ -443,8 +450,8 @@ async def test_tree_nested_graph_batch():
 
 
 @pytest.mark.asyncio
-async def test_tree_nested_graph_with_streaming():
-    """gen(yields=2) >> sub_graph(proc) >> END — graph inside stream context."""
+async def test_nested_graph_with_streaming():
+    """gen(yields=2) >> sub_graph(proc) >> END — graph inside context group."""
 
     @graph
     def sub(val):
@@ -462,24 +469,33 @@ async def test_tree_nested_graph_with_streaming():
     trace = collector.collect(result["$state"])
     nodes = trace["nodes"]
 
-    # sub should appear with kind=graph, collapsed to s[0], s[1]
-    graph_nodes = _nodes_by_kind(nodes, "graph")
-    assert len(graph_nodes) == 2, f"Expected 2 graph nodes, got {len(graph_nodes)}"
-    graph_names = {n["display_name"] for n in graph_nodes}
-    assert graph_names == {"s[0]", "s[1]"}, f"Expected s[0]/s[1], got {graph_names}"
-
-    # No stream_context nodes (all collapsed)
+    # 2 context groups [0], [1]
     ctx_nodes = _nodes_by_kind(nodes, "stream_context")
-    assert len(ctx_nodes) == 0
+    assert len(ctx_nodes) == 2
 
-    for gn in graph_nodes:
+    # Each context group has sub (kind=graph) as child
+    for cn in ctx_nodes:
+        children = _children_of(nodes, cn["trace_key"])
+        graph_children = [c for c in children if c["kind"] == "graph"]
+        assert len(graph_children) == 1
+        assert graph_children[0]["display_name"] == "s"
+
         # Each graph should have process_item as child
-        children = _children_of(nodes, gn["trace_key"])
-        assert len(children) >= 1
+        for gc in graph_children:
+            grandchildren = _children_of(nodes, gc["trace_key"])
+            assert len(grandchildren) >= 1
+
+    # No orphaned nodes
+    all_keys = {n["trace_key"] for n in nodes}
+    for n in nodes:
+        if n["parent_trace_key"] is not None:
+            assert n["parent_trace_key"] in all_keys, (
+                f"Orphan: {n['display_name']} parent={n['parent_trace_key']}"
+            )
 
 
 @pytest.mark.asyncio
-async def test_tree_streaming_inside_nested_graph():
+async def test_streaming_inside_nested_graph():
     """outer: double >> inner_graph(gen >> process) >> END — streaming scoped to inner."""
 
     @graph
@@ -508,6 +524,13 @@ async def test_tree_streaming_inside_nested_graph():
     gen_nodes = _nodes_by_kind(nodes, "generator")
     assert len(gen_nodes) == 1
 
+    # Context groups should be children of the generator (inside inner graph)
+    ctx_nodes = _nodes_by_kind(nodes, "stream_context")
+    assert len(ctx_nodes) > 0
+    for cn in ctx_nodes:
+        # Context groups should be under the generator, not the graph directly
+        assert cn["parent_trace_key"] == gen_nodes[0]["trace_key"]
+
     # No orphaned nodes
     all_keys = {n["trace_key"] for n in nodes}
     for n in nodes:
@@ -517,30 +540,37 @@ async def test_tree_streaming_inside_nested_graph():
             )
 
 
+# =========================================================================
+# Test: JSON serializable
+# =========================================================================
+
+
 @pytest.mark.asyncio
-async def test_tree_json_serializable():
-    """collect_tree output should be JSON-serializable."""
+async def test_trace_json_serializable():
+    """Verify trace output can be serialized to JSON."""
     import json
 
-    with GraphOp(name="json_tree_wf") as g:
+    with GraphOp(name="json_wf") as g:
         gen = gen_items(count=PARENT["count"])
         proc = process_item(item=gen["item"])
         START >> gen >> proc >> END
 
     engine = Hush(g)
     result = await engine.run(inputs={"count": 2})
+    state = result["$state"]
+
     collector = TraceCollector(g)
-    trace = collector.collect(result["$state"])
+    trace = collector.collect(state)
 
     json_str = json.dumps(trace, default=str)
     assert len(json_str) > 0
     parsed = json.loads(json_str)
-    assert parsed["workflow_name"] == "json_tree_wf"
+    assert parsed["workflow_name"] == "json_wf"
     assert len(parsed["nodes"]) >= 3
 
 
 # =========================================================================
-# Phase 4: Callbot integration test
+# Callbot integration test
 # =========================================================================
 
 
@@ -590,10 +620,10 @@ async def test_callbot_streaming_trace():
     """Full callbot pipeline: audio → vad → stt → router → tts.
 
     Verifies:
-    - Named contexts (audio:N)
-    - Zero-yield pruning (silence chunks gone)
-    - Single-yield flattening (vad:0 inner ctx removed)
-    - Nested graph (router)
+    - Context grouping with synthetic [N] nodes
+    - Skip pending removes silence VAD generators and their empty contexts
+    - Generator nodes with correct yield counts
+    - Nested graph (router) inside context groups
     - No orphaned nodes
     """
 
@@ -622,48 +652,41 @@ async def test_callbot_streaming_trace():
     assert len(root) == 1
     assert root[0]["display_name"] == "callbot"
 
-    # 2. audio generator at root
-    gen_nodes = _nodes_by_kind(nodes, "generator")
-    audio_gens = [n for n in gen_nodes if n["display_name"] == "audio"]
-    assert len(audio_gens) == 1
-    assert audio_gens[0]["metadata"]["yield_count"] == 5
+    # 2. audio generator with yield_count=5
+    audio_nodes = [n for n in nodes if n["kind"] == "generator" and n["display_name"] == "audio"]
+    assert len(audio_nodes) == 1
+    assert audio_nodes[0]["metadata"]["yield_count"] == 5
 
-    # 3. Only 2 outer contexts (speech at chunks 2 and 4)
-    outer_ctx = [
-        n for n in nodes if n["kind"] == "stream_context" and n["display_name"].startswith("audio:")
-    ]
-    assert len(outer_ctx) == 2
-    assert {n["display_name"] for n in outer_ctx} == {"audio:2", "audio:4"}
-
-    # 4. Zero-yield VAD executions (silence chunks) are gone
+    # 3. With skip_pending=True (default), silence VADs are removed
+    # Only 2 speech VADs remain (chunks 2 and 4)
     vad_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".v")]
+    assert len(vad_nodes) == 2
     for vn in vad_nodes:
-        if vn["kind"] == "generator":
-            assert vn["metadata"].get("yield_count", 0) > 0
+        assert vn["kind"] == "generator"
+        assert vn["metadata"]["yield_count"] > 0
 
-    # 5. Inner contexts flattened (v yields=1 → no v:0 nesting)
-    inner_ctx = [
-        n for n in nodes if n["kind"] == "stream_context" and n["display_name"].startswith("v:")
+    # 4. Only 2 context groups remain ([2] and [4]), as children of audio
+    audio_ctx = [
+        n
+        for n in nodes
+        if n["kind"] == "stream_context" and n["parent_trace_key"] == audio_nodes[0]["trace_key"]
     ]
-    assert len(inner_ctx) == 0, f"Expected 0 inner v:N contexts, got {inner_ctx}"
+    assert len(audio_ctx) == 2
+    ctx_names = sorted(n["display_name"] for n in audio_ctx)
+    assert ctx_names == ["[2]", "[4]"]
 
-    # 6. Each audio:N context contains v, transcribe, router, speak
-    for ctx in outer_ctx:
-        children = _children_of(nodes, ctx["trace_key"])
-        child_names = {c["display_name"] for c in children}
-        assert "v" in child_names, f"Missing v in {child_names}"
-        assert "transcribe" in child_names, f"Missing transcribe in {child_names}"
-        assert "r" in child_names, f"Missing r in {child_names}"
-        assert "speak" in child_names, f"Missing speak in {child_names}"
+    # 5. 2 stt invocations (one per speech segment)
+    stt_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".transcribe")]
+    assert len(stt_nodes) == 2
 
-    # 7. router is kind=graph with nested children
+    # 6. router is kind=graph, inside nested context groups
     router_nodes = [n for n in nodes if n["kind"] == "graph" and n["display_name"] == "r"]
-    assert len(router_nodes) == 2  # one per speech chunk
+    assert len(router_nodes) == 2
     for rn in router_nodes:
         router_children = _children_of(nodes, rn["trace_key"])
         assert len(router_children) >= 2  # classify + handle
 
-    # 8. No orphaned nodes
+    # 7. No orphaned nodes
     all_keys = {n["trace_key"] for n in nodes}
     for n in nodes:
         if n["parent_trace_key"] is not None:
@@ -671,7 +694,54 @@ async def test_callbot_streaming_trace():
                 f"Orphan: {n['display_name']} parent={n['parent_trace_key']}"
             )
 
+    # 8. No pending nodes (they were removed by skip_pending)
+    pending = [n for n in nodes if n.get("metadata", {}).get("status") == "pending"]
+    assert len(pending) == 0
+
     # 9. JSON serializable
     import json
 
     json.dumps(trace, default=str)
+
+
+@pytest.mark.asyncio
+async def test_callbot_skip_pending_false():
+    """Callbot with skip_pending=False: all VADs and context groups kept."""
+
+    @graph
+    def router(transcript):
+        c = classify_op(transcript=transcript)
+        h = handle_op(intent=c["intent"], transcript=transcript)
+        START >> c >> h >> END
+
+    with GraphOp(name="callbot") as g:
+        audio = customer_audio(sample_count=PARENT["samples"])
+        v = vad_op(audio=audio["audio"], timestamp_ms=audio["timestamp_ms"])
+        transcribe = stt_op(segment=v["segment"], start_ms=v["start_ms"], end_ms=v["end_ms"])
+        r = router(transcript=transcribe["transcript"])
+        speak = tts_op(response=r["response"])
+        START >> audio >> v >> transcribe >> r >> speak >> END
+
+    engine = Hush(g)
+    result = await engine.run(inputs={"samples": 5})
+    collector = TraceCollector(g)
+    trace = collector.collect(result["$state"], skip_pending=False)
+    nodes = trace["nodes"]
+
+    # All 5 VAD generators present
+    vad_nodes = [n for n in nodes if n["op_name"] and n["op_name"].endswith(".v")]
+    assert len(vad_nodes) == 5
+
+    # 3 silence VADs have status=pending
+    pending_vads = [vn for vn in vad_nodes if vn["metadata"].get("status") == "pending"]
+    assert len(pending_vads) == 3
+
+    # All 5 context groups present, as children of audio
+    audio_nodes = [n for n in nodes if n["kind"] == "generator" and n["display_name"] == "audio"]
+    assert len(audio_nodes) == 1
+    audio_ctx = [
+        n
+        for n in nodes
+        if n["kind"] == "stream_context" and n["parent_trace_key"] == audio_nodes[0]["trace_key"]
+    ]
+    assert len(audio_ctx) == 5

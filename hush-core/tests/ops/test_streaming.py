@@ -56,9 +56,9 @@ class TestYieldSchemaExtraction:
 # =============================================================================
 
 
-class TestStreamDepthComputation:
-    def test_simple_chain_stream_depth(self):
-        """source (gen) >> process: depths are 0, 1."""
+class TestStreamPredecrements:
+    def test_simple_chain_has_no_predecrements(self):
+        """source (gen) >> process: no batch predecessors → no predecrements."""
 
         @op
         def source(items: list):
@@ -72,23 +72,21 @@ class TestStreamDepthComputation:
 
         g.build()
 
-        assert g._has_streaming_ops is True
-        assert g._stream_depths["s"] == 0
-        assert g._stream_depths["p"] == 1
+        # p only has s as predecessor (the generator itself), no batch predecessors
+        assert g._stream_predecrements == {}
 
-    def test_no_generators_no_streaming(self):
-        """Graph with no generators has _has_streaming_ops=False."""
+    def test_no_generators_no_predecrements(self):
+        """Graph with no generators has empty predecrements."""
         with GraphOp(name="test") as g:
             d = double(x=PARENT["x"])
             START >> d >> END
 
         g.build()
 
-        assert g._has_streaming_ops is False
-        assert g._stream_depths == {}
+        assert g._stream_predecrements == {}
 
-    def test_broadcast_depth(self):
-        """config (depth 0) + source (gen, depth 0) >> process (depth 1)."""
+    def test_broadcast_has_predecrements(self):
+        """config (batch) + source (gen) >> process → process needs predecrement for config."""
 
         @op
         def source(items: list):
@@ -108,12 +106,12 @@ class TestStreamDepthComputation:
 
         g.build()
 
-        assert g._stream_depths["cfg"] == 0
-        assert g._stream_depths["s"] == 0
-        assert g._stream_depths["p"] == 1
+        # p has cfg as batch predecessor (not reachable from s) → predecrement 1
+        assert "s" in g._stream_predecrements
+        assert g._stream_predecrements["s"]["p"] == 1
 
-    def test_nested_generators_depth(self):
-        """gen1 >> gen2 >> process: depths are 0, 1, 2."""
+    def test_nested_generators(self):
+        """gen1 >> gen2 >> process: gen2 is downstream of gen1, process downstream of gen2."""
 
         @op
         def gen1(items: list):
@@ -133,9 +131,10 @@ class TestStreamDepthComputation:
 
         g.build()
 
-        assert g._stream_depths["g1"] == 0
-        assert g._stream_depths["g2"] == 1
-        assert g._stream_depths["p"] == 2
+        # No batch predecessors outside the generator chains
+        # gen1's downstream: gen2, p — but gen2 only has gen1 as pred, p only has gen2
+        assert g._stream_predecrements.get("g1", {}).get("g2") is None
+        assert g._stream_predecrements.get("g2", {}).get("p") is None
 
 
 # =============================================================================

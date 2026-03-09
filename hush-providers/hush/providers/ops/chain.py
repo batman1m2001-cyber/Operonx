@@ -1,51 +1,52 @@
-"""chain() — factory function that builds PromptOp + LLMOp + optional ParserOp."""
+"""chain() — @graph factory that builds PromptOp + LLMOp + optional ParserOp."""
 
 from typing import Any, Dict, List, Optional, Union
 
-from hush.core.ops import END, PARENT, START, GraphOp, ParserOp
-from hush.core.ops.base import split_shorthand_kwargs
-from hush.core.utils.auto_name import register_skip
+from hush.core.ops import END, PARENT, START, ParserOp, graph
 from hush.providers.ops.llm import LLMOp
 from hush.providers.ops.prompt import PromptOp
 
 
+@graph
 def chain(
-    resource: Optional[Union[str, List[str]]] = None,
     template=None,
-    *,
+    resource: Optional[Union[str, List[str]]] = None,
     ratios: Optional[List[float]] = None,
     fallback: Optional[List[str]] = None,
     extract: Optional[List[str]] = None,
     parser: str = "xml",
     response_format: Optional[Dict[str, Any]] = None,
-    enable_thinking: bool = False,
-    **kwargs,
-) -> GraphOp:
-    """Build a PromptOp → LLMOp → (optional ParserOp) graph.
+):
+    """Build a PromptOp -> LLMOp -> (optional ParserOp) graph.
 
     The most common building block for LLM workflows. Operates in two modes:
 
-    * **Text mode** (no ``extract``): returns raw LLM output (content, role, …).
+    * **Text mode** (no ``extract``): returns raw LLM output (content, role, ...).
     * **Structured mode** (``extract`` provided): parses the LLM output into
       typed fields via ParserOp.
 
+    Config params (resource, extract, etc.) are static -- passed through by @graph.
+    Template variables (query=PARENT["q"]) arrive as graph inputs via PARENT
+    wildcard on PromptOp.
+
     Args:
+        template: Prompt template (str, dict, or list). See ``PromptOp``.
         resource: Resource key(s) for LLM in ResourceHub.
             - Single string: ``"gpt-4"``
             - List for load balancing: ``["gpt-4", "claude-3"]``
-        template: Prompt template (str, dict, or list). See ``PromptOp``.
         ratios: Weight ratios for load balancing (must sum to 1.0).
         fallback: Fallback resource keys, tried in order on failure.
         extract: Output fields for structured parsing
             (e.g., ``["category: str", "confidence: float"]``).
         parser: Parser format (``"xml"``, ``"json"``, ``"yaml"``).
         response_format: OpenAI response format for JSON mode.
-        enable_thinking: Whether to enable thinking mode in the LLM.
+
+    Keyword Args:
         **kwargs: Template variables (Ref or static) and init kwargs
-            (``name=``, ``outputs=``, ``stream=``, etc.).
+            (``name=``, ``outputs=``, ``contain_generation=``, etc.).
 
     Returns:
-        A GraphOp containing the prompt → LLM → (parser) pipeline.
+        A GraphOp containing the prompt -> LLM -> (parser) pipeline.
 
     Example::
 
@@ -63,57 +64,40 @@ def chain(
             text=PARENT["text"],
         )
     """
-    input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-    if template is not None:
-        input_mappings["template"] = template
-    init_kwargs.setdefault("contain_generation", True)
+    _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
 
-    stream = init_kwargs.get("stream", False)
+    llm_inputs: Dict[str, Any] = {"messages": _prompt["messages"]}
+    if response_format:
+        llm_inputs["response_format"] = response_format
 
-    g = GraphOp(inputs=input_mappings or None, **init_kwargs)
-    with g:
-        # Step 1: Prompt formatting — forwards all inputs from parent via wildcard
-        _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
+    if extract:
+        # Structured output: Prompt -> LLM -> Parser
+        _llm = LLMOp(
+            name="llm",
+            resource=resource,
+            ratios=ratios,
+            fallback=fallback,
+            inputs=llm_inputs,
+        )
 
-        # Step 2: LLM call
-        llm_inputs: Dict[str, Any] = {"messages": _prompt["messages"]}
-        if response_format:
-            llm_inputs["response_format"] = response_format
+        _parser = ParserOp(
+            name="parser",
+            format=parser,
+            extract=extract,
+            inputs={"text": _llm["content"]},
+            outputs={"*": PARENT},
+        )
 
-        if extract:
-            # Structured output pipeline: Prompt → LLM → Parser
-            _llm = LLMOp(
-                name="llm",
-                resource=resource,
-                ratios=ratios,
-                fallback=fallback,
-                inputs=llm_inputs,
-            )
+        START >> _prompt >> _llm >> _parser >> END
+    else:
+        # Text generation: Prompt -> LLM
+        _llm = LLMOp(
+            name="llm",
+            resource=resource,
+            ratios=ratios,
+            fallback=fallback,
+            inputs=llm_inputs,
+            outputs={"*": PARENT},
+        )
 
-            _parser = ParserOp(
-                name="parser",
-                format=parser,
-                extract=extract,
-                inputs={"text": _llm["content"]},
-                outputs={"*": PARENT},
-            )
-
-            START >> _prompt >> _llm >> _parser >> END
-        else:
-            # Simple text generation: Prompt → LLM
-            _llm = LLMOp(
-                name="llm",
-                resource=resource,
-                ratios=ratios,
-                fallback=fallback,
-                inputs=llm_inputs,
-                outputs={"*": PARENT},
-                stream=stream,
-            )
-
-            START >> _prompt >> _llm >> END
-
-    return g
-
-
-register_skip(chain)
+        START >> _prompt >> _llm >> END

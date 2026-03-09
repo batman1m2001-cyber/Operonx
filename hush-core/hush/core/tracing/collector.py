@@ -1,11 +1,11 @@
-"""TraceCollector — pure post-processing step for extracting trace data.
+"""TraceCollector — post-processing step for extracting trace data.
 
 The collector is completely separated from ops. Ops don't know about tracing.
 After workflow execution, the collector walks the compiled graph for static
 metadata and reads dynamic execution data from state.
 
-Streaming-aware: derives kind, context lineage, yield counts, and spawned_by
-from existing graph/scheduler data. Zero changes to core code required.
+Each (op, context) execution becomes a TraceNode. Streaming ops are grouped
+under synthetic [N] context nodes for hierarchical visualization.
 
 Usage:
     collector = TraceCollector(graph)   # precomputes graph metadata + topo order
@@ -13,26 +13,25 @@ Usage:
 """
 
 import logging
-from collections import defaultdict
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hush.core.ops.graph.scheduler import _is_gen
 from hush.core.tracing.models import TraceNode, TraceSummary
-from hush.core.utils.algo import build_children, collapse, prune_leaves, tree_walk
+from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
 
 LOGGER = logging.getLogger("hush.tracing")
 
 
-def _is_stream_segment(seg: str) -> bool:
-    """Check if a context segment is a stream segment like 's0', 's12'."""
-    return isinstance(seg, str) and len(seg) > 1 and seg[0] == "s" and seg[1:].isdigit()
-
-
 def _is_loop_segment(seg: str) -> bool:
     """Check if a context segment is a loop iteration like 'loop_0', 'loop_5'."""
     return isinstance(seg, str) and seg.startswith("loop_")
+
+
+def _is_stream_segment(seg: str) -> bool:
+    """Check if a context segment is a stream index like '[0]', '[12]'."""
+    return isinstance(seg, str) and seg.startswith("[") and seg.endswith("]")
 
 
 def _ctx_to_str(ctx: Tuple) -> Optional[str]:
@@ -42,15 +41,29 @@ def _ctx_to_str(ctx: Tuple) -> Optional[str]:
     return ".".join(str(s) for s in ctx)
 
 
+def _extract_stream_index(display_name: str) -> int:
+    """Extract numeric index from '[N]' display name. Returns 999999 on failure."""
+    try:
+        return int(display_name.strip("[]"))
+    except (ValueError, AttributeError):
+        return 999999
+
+
 class TraceCollector:
     """Extracts trace data from graph (static) + state (dynamic).
 
     Graph metadata is precomputed once in __init__. Each collect(state)
-    call only does the per-run state reading and tree building.
+    call does per-run state reading, context grouping, and tree building.
+
+    Features:
+        - Context grouping: streaming ops grouped under synthetic [N] nodes
+        - Skip pending: generators with yield_count==0 removed by default
+        - Flat trace for batch-only workflows (no synthetic nodes)
 
     Usage:
         collector = TraceCollector(graph)
         trace_data = collector.collect(state)
+        trace_data = collector.collect(state, skip_pending=False)  # keep all
     """
 
     def __init__(self, graph: Any):
@@ -67,16 +80,14 @@ class TraceCollector:
         self._op_map: Dict[str, Any] = {}
         self._build_op_map(graph, self._op_map)
 
-        # graph_meta: graph_full_name → {gen_ops, stream_depths, stream_contexts, prevs, ops}
+        # graph_meta: graph_full_name → {gen_ops, prevs, ops}
         self._graph_meta: Dict[str, Dict] = {}
         self._build_graph_meta(graph, self._graph_meta)
 
         # topo_rank: op_full_name → int (DAG ordering for sibling sorting)
         self._topo_ranks: Dict[str, int] = {}
         for _gname, meta in self._graph_meta.items():
-            self._topo_ranks.update(
-                compute_topo_rank(meta.get("ops", {}), meta.get("prevs", {}))
-            )
+            self._topo_ranks.update(compute_topo_rank(meta.get("ops", {}), meta.get("prevs", {})))
 
         # Per-op static info (doesn't change across runs)
         self._op_info: Dict[str, Dict[str, Any]] = {}
@@ -97,27 +108,15 @@ class TraceCollector:
                 "display_name": graph.name if is_root else short_name,
                 "contain_generation": op.contain_generation,
                 "gen_ops": gen_ops,
-                "stream_depths": meta.get("stream_depths", {}),
-                "stream_contexts": meta.get("stream_contexts", []),
-                "prevs": meta.get("prevs", {}),
-                "ops_in_graph": meta.get("ops", {}),
             }
 
-            # Precompute spawned_by (BFS through predecessors to find generator)
-            if not is_root:
-                self._op_info[op_name]["spawned_by"] = self._find_spawner(
-                    op.name, meta.get("prevs", {}), meta.get("ops", {}), gen_ops
-                )
-
-    def collect(self, state: Any) -> Dict[str, Any]:
+    def collect(self, state: Any, skip_pending: bool = True) -> Dict[str, Any]:
         """Extract trace data as a pre-computed tree of TraceNodes.
-
-        Returns a dict with ``nodes`` (List[dict]) where each node has
-        ``parent_trace_key`` already resolved. Tracers do a simple parent
-        lookup — zero heuristics.
 
         Args:
             state: MemoryState after execution completes.
+            skip_pending: If True (default), remove generators with
+                yield_count==0 and their empty context groups.
 
         Returns:
             Dict with request_id, workflow_name, nodes, summary.
@@ -128,17 +127,21 @@ class TraceCollector:
             for ctx, _ in state.iter_executed(op_name):
                 executed_pairs.add((op_name, ctx))
 
-        # 2. Scan state → raw TraceNodes
-        raw_info = self._scan_nodes(state, executed_pairs)
+        # 2. Scan state → TraceNodes with parents resolved
+        node_lookup, node_meta = self._scan_nodes(state, executed_pairs)
 
-        # 3. Create synthetic context nodes + resolve parents
-        node_lookup = self._create_synthetics(raw_info, executed_pairs)
-        self._resolve_parents(raw_info, node_lookup, executed_pairs)
+        # 3. Add synthetic context groups ([0], [1], ...)
+        self._add_context_groups(node_lookup, node_meta)
 
-        # 4. Tree transforms (drop, collapse, flatten, prune)
-        children_map = self._transform_tree(node_lookup)
+        # 4. Skip pending generators and empty context groups
+        if skip_pending:
+            self._remove_pending(node_lookup)
 
         # 5. Sort by DAG edge order → final list
+        children_map = build_children(
+            list(node_lookup.keys()),
+            lambda k: node_lookup[k].parent_trace_key,
+        )
         result = self._sort_by_edges(node_lookup, children_map)
 
         # 6. Summary + payload
@@ -165,15 +168,14 @@ class TraceCollector:
                 self._build_op_map(child, result)
 
     def _build_graph_meta(self, graph: Any, result: Dict[str, Dict]) -> None:
-        """Build per-graph streaming metadata for kind/lineage derivation."""
+        """Build per-graph metadata for kind/lineage derivation.
+
+        Note: stream_contexts are NOT stored here — they're read live from
+        the scheduler at collect() time via _get_stream_contexts().
+        """
         from hush.core.ops.graph.graph_op import GraphOp
 
         gen_ops: Set[str] = set()
-        stream_depths = getattr(graph, "_stream_depths", {})
-        stream_contexts: List[Tuple] = []
-        if graph._scheduler is not None:
-            stream_contexts = getattr(graph._scheduler, "stream_contexts", [])
-
         for name, op in graph._ops.items():
             if _is_gen(op):
                 gen_ops.add(op.full_name)
@@ -182,27 +184,70 @@ class TraceCollector:
 
         result[graph.full_name] = {
             "gen_ops": gen_ops,
-            "stream_depths": stream_depths,
-            "stream_contexts": stream_contexts,
             "prevs": dict(graph.prevs),
             "ops": graph._ops,
         }
 
     # =========================================================================
-    # Step 2: Scan state → raw TraceNodes
+    # Live state helpers
+    # =========================================================================
+
+    def _get_stream_contexts(self, parent_name: str) -> list:
+        """Get stream_contexts from live scheduler (populated during run).
+
+        Must read from the scheduler directly — not from init-time metadata —
+        because Scheduler._reset() creates a new list each run().
+        """
+        parent_op = self._op_map.get(parent_name)
+        if parent_op and hasattr(parent_op, "_scheduler") and parent_op._scheduler:
+            return getattr(parent_op._scheduler, "stream_contexts", [])
+        return []
+
+    def _resolve_parent(
+        self,
+        parent_name: Optional[str],
+        ctx: Tuple,
+        executed_pairs: Set[Tuple],
+    ) -> Tuple[Optional[str], Tuple]:
+        """Resolve parent trace_key and the matched parent context.
+
+        Walks up the context hierarchy to find the parent graph's
+        execution context.
+
+        Returns:
+            (parent_trace_key, matched_parent_ctx)
+        """
+        if not parent_name:
+            return None, ()
+        if not ctx:
+            return parent_name, ()
+        if (parent_name, ctx) in executed_pairs:
+            return f"{parent_name}:{_ctx_to_str(ctx)}", ctx
+        test_ctx = ctx
+        while test_ctx:
+            if (parent_name, test_ctx) in executed_pairs:
+                return f"{parent_name}:{_ctx_to_str(test_ctx)}", test_ctx
+            test_ctx = test_ctx[:-1]
+        return parent_name, ()
+
+    # =========================================================================
+    # Scan state → TraceNodes
     # =========================================================================
 
     def _scan_nodes(
         self,
         state: Any,
         executed_pairs: Set[Tuple],
-    ) -> list:
-        """Walk state and build raw_info list of (TraceNode, parent_name, ctx).
+    ) -> Tuple[Dict[str, TraceNode], Dict[str, Dict]]:
+        """Walk state and build TraceNodes with parent_trace_key resolved.
 
-        Applies Change B (skip generator yield records) and Change D
-        (upgrade generators/GraphOps in stream contexts).
+        Returns:
+            (node_lookup, node_meta) where node_meta maps trace_key to
+            context info needed for grouping:
+            {ctx, matched_parent_ctx, parent_graph_name}.
         """
-        raw_info: list = []
+        node_lookup: Dict[str, TraceNode] = {}
+        node_meta: Dict[str, Dict] = {}
 
         for op_name, info in self._op_info.items():
             op = info["op"]
@@ -210,20 +255,15 @@ class TraceCollector:
             is_root = info["is_root"]
             is_graph_op = info["is_graph_op"]
             is_gen = info["is_gen"]
-            gen_ops = info["gen_ops"]
-            stream_contexts = info["stream_contexts"]
-            stream_depths = info["stream_depths"]
             display_name = info["display_name"]
             contain_generation = info["contain_generation"]
 
-            for ctx, start_time in state.iter_executed(op_name):
-                kind = self._determine_kind(op_name, ctx, gen_ops)
+            # Get live stream_contexts from parent graph's scheduler
+            stream_contexts = self._get_stream_contexts(parent_name) if parent_name else []
 
-                # Change B: Skip generator yield records
-                if kind == "stream_item" and is_gen:
-                    parent_ctx = ctx[:-1] if ctx else ()
-                    if (op_name, parent_ctx) in executed_pairs:
-                        continue
+            for ctx, start_time in state.iter_executed(op_name):
+                # Determine kind
+                kind = self._determine_kind(ctx, is_gen, is_graph_op)
 
                 # Read I/O (exclude internal $-prefixed keys)
                 inputs = {
@@ -233,7 +273,7 @@ class TraceCollector:
                     v: state[op_name, v, ctx] for v in (op.outputs or {}) if not v.startswith("$")
                 }
 
-                # Aggregate outputs for generators
+                # Aggregate outputs for generators (collect from child contexts)
                 if is_gen and all(v is None for v in outputs.values()):
                     agg = {v: [] for v in outputs}
                     for sc in stream_contexts:
@@ -254,49 +294,44 @@ class TraceCollector:
                 usage = outputs.get("tokens_used") if contain_generation else None
                 cost = state[op_name, "cost_usd", ctx]
 
-                # Tree-specific fields
+                # Trace key
                 ctx_str = _ctx_to_str(ctx)
                 trace_key = f"{op_name}:{ctx_str}" if ctx_str else op_name
 
                 # node_type
                 if is_root:
                     node_type = "trace"
-                elif contain_generation and kind != "stream_item":
+                elif contain_generation:
                     node_type = "generation"
                 else:
                     node_type = "span"
 
-                # Change D: Upgrade generators/GraphOps in stream contexts
-                if kind == "stream_item" and is_gen:
-                    node_kind = "generator"
-                elif is_graph_op and kind in ("batch", "loop_iter", "stream_item"):
-                    node_kind = "graph"
-                elif kind == "loop_iter":
-                    node_kind = "batch"
-                else:
-                    node_kind = kind
-
                 # metadata
                 metadata: Dict[str, Any] = {}
-                if kind not in ("batch",):
+                if kind != "batch":
                     metadata["kind"] = kind
-                if node_kind == "generator":
-                    metadata["yield_count"] = self._count_yields(ctx, stream_contexts)
-                if kind == "stream_item" and node_kind != "generator":
-                    spawned_by = info.get("spawned_by")
-                    if spawned_by:
-                        metadata["spawned_by"] = spawned_by
-                depth = stream_depths.get(op.name, 0)
-                if depth > 0:
-                    metadata["depth"] = depth
+                if kind == "generator":
+                    yield_count = self._count_yields(ctx, stream_contexts)
+                    metadata["yield_count"] = yield_count
+                    if yield_count == 0:
+                        metadata["status"] = "pending"
+
+                # Parent resolution
+                if is_root:
+                    parent_trace_key = None
+                    matched_parent_ctx: Tuple = ()
+                else:
+                    parent_trace_key, matched_parent_ctx = self._resolve_parent(
+                        parent_name, ctx, executed_pairs
+                    )
 
                 node = TraceNode(
                     trace_key=trace_key,
-                    parent_trace_key=None,
+                    parent_trace_key=parent_trace_key,
                     op_name=op_name,
                     display_name=display_name,
                     node_type=node_type,
-                    kind=node_kind,
+                    kind=kind,
                     inputs=inputs,
                     outputs=outputs,
                     start_time=self._format_time(start_time),
@@ -307,230 +342,148 @@ class TraceCollector:
                     usage=usage,
                     cost=cost,
                 )
-                raw_info.append((node, parent_name, ctx))
+                node_lookup[trace_key] = node
+                node_meta[trace_key] = {
+                    "ctx": ctx,
+                    "matched_parent_ctx": matched_parent_ctx,
+                    "parent_graph_name": parent_name,
+                }
 
-        return raw_info
+        return node_lookup, node_meta
 
     # =========================================================================
-    # Step 3: Create synthetic context nodes
+    # Context grouping
     # =========================================================================
 
-    def _create_synthetics(
+    def _add_context_groups(
         self,
-        raw_info: list,
-        executed_pairs: Set[Tuple],
-    ) -> Dict[str, TraceNode]:
-        """Create $ctx: synthetic grouping nodes for stream/loop contexts.
-
-        Returns node_lookup populated with synthetic nodes only.
-        """
-        graph = self._graph
-        graph_meta = self._graph_meta
-
-        synthetic_contexts: Set[Tuple[str, Tuple]] = set()
-        for _node, parent_name, ctx in raw_info:
-            if not ctx:
-                continue
-            last = ctx[-1]
-            if not (_is_stream_segment(last) or _is_loop_segment(last)):
-                continue
-            owner = parent_name if parent_name else graph.full_name
-            for i in range(1, len(ctx) + 1):
-                sub = ctx[:i]
-                if _is_stream_segment(sub[-1]) or _is_loop_segment(sub[-1]):
-                    synthetic_contexts.add((owner, sub))
-
-        node_lookup: Dict[str, TraceNode] = {}
-
-        # Map graph op names → trace_keys for parent resolution
-        graph_trace_keys: Dict[str, str] = {}
-        for node, _parent_name, _ctx in raw_info:
-            if node.node_type == "trace" or node.kind == "graph":
-                graph_trace_keys[node.op_name] = node.trace_key
-
-        def _resolve_owner_trace_key(owner: str, ctx: Tuple) -> str:
-            if owner in graph_trace_keys:
-                return graph_trace_keys[owner]
-            owner_ctx = ctx
-            while owner_ctx and (
-                _is_stream_segment(owner_ctx[-1]) or _is_loop_segment(owner_ctx[-1])
-            ):
-                owner_ctx = owner_ctx[:-1]
-            owner_ctx_str = _ctx_to_str(owner_ctx)
-            return f"{owner}:{owner_ctx_str}" if owner_ctx_str else owner
-
-        for owner, ctx in sorted(synthetic_contexts, key=lambda x: (x[0], len(x[1]), x[1])):
-            ctx_str = _ctx_to_str(ctx)
-            ctx_key = f"$ctx:{owner}:{ctx_str}"
-            last = ctx[-1]
-
-            if _is_stream_segment(last):
-                idx = last[1:]
-                spawner = self._find_context_spawner(owner, ctx, executed_pairs)
-                spawner_short = spawner.rsplit(".", 1)[-1] if spawner else "ctx"
-                display_name = f"{spawner_short}:{idx}"
-                syn_kind = "stream_context"
-            else:
-                idx = last[5:]
-                display_name = f"[iter {idx}]"
-                syn_kind = "loop_iter"
-
-            if len(ctx) == 1:
-                syn_parent = _resolve_owner_trace_key(owner, ctx)
-            else:
-                parent_ctx = ctx[:-1]
-                if (owner, parent_ctx) in synthetic_contexts:
-                    parent_ctx_str = _ctx_to_str(parent_ctx)
-                    syn_parent = f"$ctx:{owner}:{parent_ctx_str}"
-                else:
-                    syn_parent = _resolve_owner_trace_key(owner, ctx)
-
-            node_lookup[ctx_key] = TraceNode(
-                trace_key=ctx_key,
-                parent_trace_key=syn_parent,
-                op_name=None,
-                display_name=display_name,
-                node_type="span",
-                kind=syn_kind,
-            )
-
-        return node_lookup
-
-    # =========================================================================
-    # Step 4: Resolve parents + timing
-    # =========================================================================
-
-    def _resolve_parents(
-        self,
-        raw_info: list,
         node_lookup: Dict[str, TraceNode],
-        executed_pairs: Set[Tuple],
+        node_meta: Dict[str, Dict],
     ) -> None:
-        """Set parent_trace_key for real nodes, compute synthetic timing."""
-        for node, parent_name, ctx in raw_info:
-            if parent_name is None:
-                node.parent_trace_key = None
-            elif not ctx:
-                node.parent_trace_key = parent_name
-            else:
-                ctx_str = _ctx_to_str(ctx)
-                if (parent_name, ctx) in executed_pairs:
-                    node.parent_trace_key = f"{parent_name}:{ctx_str}"
-                else:
-                    node.parent_trace_key = f"$ctx:{parent_name}:{ctx_str}"
-            node_lookup[node.trace_key] = node
+        """Create synthetic [N] context nodes and re-parent streaming ops.
 
-        # Compute timing for synthetic nodes from their children
-        for node, _parent_name, _ctx in raw_info:
-            pk = node.parent_trace_key
-            if pk and pk in node_lookup:
-                syn = node_lookup[pk]
-                if syn.op_name is None:
-                    if node.start_time:
-                        if syn.start_time is None or node.start_time < syn.start_time:
-                            syn.start_time = node.start_time
-                    if node.end_time:
-                        if syn.end_time is None or node.end_time > syn.end_time:
-                            syn.end_time = node.end_time
+        Each synthetic [N] node is parented to the generator that spawned it.
+        For example, if `audio` yields 5 items, contexts [0]-[4] become
+        children of `audio`, not siblings.
 
-    # =========================================================================
-    # Step 5: Tree transforms
-    # =========================================================================
-
-    def _transform_tree(
-        self,
-        node_lookup: Dict[str, TraceNode],
-    ) -> Dict[Optional[str], List[str]]:
-        """Apply Changes C, E, F and prune empty synthetics.
-
-        Returns the children_map for sorting.
+        Example trace tree:
+            callbot (trace)
+            ├── audio (generator, yields=5)
+            │   ├── [2] (stream_context)
+            │   │   ├── v (generator)
+            │   │   │   └── [0] (stream_context)
+            │   │   │       ├── transcribe
+            │   │   │       └── router (graph)
+            │   │   └── ...
+            │   └── [4] (stream_context)
+            │       └── ...
         """
+        # Build generator context map: (parent_graph, ctx) → trace_key
+        gen_ctx_map: Dict[Tuple, str] = {}
+        for trace_key, meta in node_meta.items():
+            node = node_lookup.get(trace_key)
+            if node and node.kind == "generator":
+                gen_ctx_map[(meta["parent_graph_name"], meta["ctx"])] = trace_key
 
-        # Change C: Drop zero-yield generators in stream contexts
-        to_drop = [
-            key
-            for key, node in node_lookup.items()
-            if node.kind == "generator"
-            and node.metadata.get("yield_count", -1) == 0
-            and node.parent_trace_key
-            and node.parent_trace_key.startswith("$ctx:")
-        ]
-        for key in to_drop:
-            del node_lookup[key]
+        synthetics: Dict[str, TraceNode] = {}
 
-        # Build children_map once, reuse for all transforms
-        children_map = build_children(
-            list(node_lookup.keys()),
-            lambda k: node_lookup[k].parent_trace_key,
-        )
-
-        # Change E: Single-child collapse — stream_context with 1 child
-        def _on_collapse_ctx(ctx_key: str, child_key: str) -> None:
-            ctx_node = node_lookup[ctx_key]
-            child = node_lookup[child_key]
-            parts = ctx_node.display_name.rsplit(":", 1)
-            idx = parts[1] if len(parts) == 2 else "0"
-            child.display_name = f"{child.display_name}[{idx}]"
-            child.parent_trace_key = ctx_node.parent_trace_key
-            if ctx_node.metadata.get("yield_output"):
-                child.metadata["yield_output"] = ctx_node.metadata["yield_output"]
-
-        collapsed = collapse(
-            children_map,
-            predicate=lambda k: k in node_lookup and node_lookup[k].kind == "stream_context",
-            on_collapse=_on_collapse_ctx,
-        )
-        for key in collapsed:
-            del node_lookup[key]
-
-        # Change F: Flatten single-yield inner contexts
-        to_remove: Set[str] = set()
-        for ctx_key in list(children_map.keys()):
-            if ctx_key is None or ctx_key not in node_lookup:
+        for trace_key, meta in node_meta.items():
+            node = node_lookup.get(trace_key)
+            if not node or node.node_type == "trace":
                 continue
-            ctx_node = node_lookup[ctx_key]
-            if ctx_node.kind != "stream_context":
+
+            ctx = meta["ctx"]
+            matched_parent_ctx = meta["matched_parent_ctx"]
+            parent_graph_name = meta["parent_graph_name"]
+
+            if not ctx or not matched_parent_ctx:
                 continue
-            kids = children_map.get(ctx_key, [])
-            has_single_yield_gen = any(
-                node_lookup[k].kind == "generator"
-                and node_lookup[k].metadata.get("yield_count") == 1
-                for k in kids
-                if k in node_lookup
+
+            # Compute relative segments beyond parent graph's context
+            relative = ctx[len(matched_parent_ctx) :]
+            if not relative:
+                continue
+
+            # Only group pure stream contexts ([N] segments only)
+            # Mixed contexts (loops + streams) stay flat for now
+            if not all(_is_stream_segment(s) for s in relative):
+                continue
+
+            # Build parent graph's trace_key (fallback if no spawning generator found)
+            parent_ctx_str = _ctx_to_str(matched_parent_ctx)
+            graph_trace_key = (
+                f"{parent_graph_name}:{parent_ctx_str}" if parent_ctx_str else parent_graph_name
             )
-            if not has_single_yield_gen:
-                continue
-            inner_ctx_key = next(
-                (k for k in kids if k in node_lookup and node_lookup[k].kind == "stream_context"),
-                None,
-            )
-            if inner_ctx_key and inner_ctx_key in children_map:
-                for grandchild_key in children_map[inner_ctx_key]:
-                    node_lookup[grandchild_key].parent_trace_key = ctx_key
-                children_map[ctx_key] = [
-                    k for k in kids if k != inner_ctx_key
-                ] + children_map[inner_ctx_key]
-                del children_map[inner_ctx_key]
-                to_remove.add(inner_ctx_key)
-        for key in to_remove:
-            del node_lookup[key]
 
-        # Prune empty synthetic nodes (recursive leaf removal)
-        pruned = prune_leaves(
-            children_map,
-            predicate=lambda k: (
-                k in node_lookup
-                and node_lookup[k].op_name is None
-                and node_lookup[k].kind in ("stream_context", "loop_iter")
-            ),
-        )
-        for key in pruned:
-            node_lookup.pop(key, None)
+            # Create synthetic nodes for each stream segment level
+            deepest_synthetic = None
+            for i in range(len(relative)):
+                prefix = relative[: i + 1]
+                full_ctx = matched_parent_ctx + prefix
+                ctx_str = _ctx_to_str(full_ctx)
+                synthetic_key = f"$ctx:{parent_graph_name}:{ctx_str}"
 
-        return children_map
+                if synthetic_key not in synthetics and synthetic_key not in node_lookup:
+                    # Find the spawning generator for this level.
+                    # The generator runs at: matched_parent_ctx + relative[:i]
+                    gen_ctx = matched_parent_ctx + relative[:i]
+                    spawner_key = gen_ctx_map.get((parent_graph_name, gen_ctx))
+                    parent_for_synthetic = spawner_key if spawner_key else graph_trace_key
+
+                    synthetics[synthetic_key] = TraceNode(
+                        trace_key=synthetic_key,
+                        parent_trace_key=parent_for_synthetic,
+                        op_name=None,
+                        display_name=relative[i],
+                        node_type="span",
+                        kind="stream_context",
+                    )
+
+                deepest_synthetic = synthetic_key
+
+            # Re-parent this node to the deepest synthetic
+            if deepest_synthetic:
+                node.parent_trace_key = deepest_synthetic
+
+        # Add synthetics to lookup and set timing from children
+        node_lookup.update(synthetics)
+        for key in synthetics:
+            syn_node = node_lookup[key]
+            children = [n for n in node_lookup.values() if n.parent_trace_key == key]
+            starts = [c.start_time for c in children if c.start_time]
+            ends = [c.end_time for c in children if c.end_time]
+            if starts:
+                syn_node.start_time = min(starts)
+            if ends:
+                syn_node.end_time = max(ends)
+
+    def _remove_pending(self, node_lookup: Dict[str, TraceNode]) -> None:
+        """Remove pending generators (yield_count==0) and empty context groups.
+
+        Pending generators have metadata.status == "pending". After removing
+        them, cascade-remove any synthetic context nodes left with no children.
+        """
+        # 1. Remove pending generators
+        pending_keys = [k for k, n in node_lookup.items() if n.metadata.get("status") == "pending"]
+        for k in pending_keys:
+            del node_lookup[k]
+
+        # 2. Cascade-remove empty synthetic context nodes
+        changed = True
+        while changed:
+            changed = False
+            parent_keys = {n.parent_trace_key for n in node_lookup.values()}
+            empty = [
+                k
+                for k, n in node_lookup.items()
+                if n.kind == "stream_context" and k not in parent_keys
+            ]
+            for k in empty:
+                del node_lookup[k]
+                changed = True
 
     # =========================================================================
-    # Step 6: Sort by DAG edge order
+    # Sort by DAG edge order
     # =========================================================================
 
     def _sort_by_edges(
@@ -538,21 +491,21 @@ class TraceCollector:
         node_lookup: Dict[str, TraceNode],
         children_map: Dict[Optional[str], List[str]],
     ) -> List[TraceNode]:
-        """Sort nodes by DAG topology, then DFS the tree."""
+        """Sort nodes by DAG topology, then DFS the tree.
+
+        Ordering: real ops by topo_rank, then synthetic context nodes
+        by stream index (so [0] < [1] < [2] < ... < [10]).
+        """
         ranks = self._topo_ranks
 
         def _child_sort_key(k: str):
             n = node_lookup[k]
+            if n.kind == "stream_context":
+                # Synthetic context nodes sort after real ops, by stream index
+                return (999998, _extract_stream_index(n.display_name), k)
             if n.op_name:
                 return (ranks.get(n.op_name, 999999), 0, k)
-            # Synthetic nodes sort after the generator/loop op that spawned them
-            if n.kind in ("stream_context", "loop_iter") and ":" in n.display_name:
-                spawner_short = n.display_name.rsplit(":", 1)[0]
-                for sib_key in children_map.get(n.parent_trace_key, []):
-                    sib = node_lookup[sib_key]
-                    if sib.op_name and sib.op_name.endswith("." + spawner_short):
-                        return (ranks.get(sib.op_name, 999999), 1, k)
-            return (999999, 1, k)
+            return (999999, 0, k)
 
         ordered_keys = tree_walk(
             children_map.get(None, []),
@@ -565,63 +518,24 @@ class TraceCollector:
     # Helpers
     # =========================================================================
 
-    def _determine_kind(self, op_full_name: str, ctx: Tuple, gen_ops: Set[str]) -> str:
+    def _determine_kind(self, ctx: Tuple, is_gen: bool, is_graph_op: bool) -> str:
         """Determine record kind from context shape and op type."""
-        if not ctx:
-            return "batch"
-        last_seg = ctx[-1]
-        if op_full_name in gen_ops and not _is_stream_segment(last_seg):
+        if is_gen:
             return "generator"
-        if _is_loop_segment(last_seg):
-            return "loop_iter"
-        if _is_stream_segment(last_seg):
-            return "stream_item"
+        if is_graph_op:
+            return "graph"
+        if ctx:
+            last_seg = ctx[-1]
+            if _is_loop_segment(last_seg):
+                return "loop_iter"
         return "batch"
 
-    def _find_spawner(
-        self,
-        op_short_name: str,
-        prevs: Dict[str, List[str]],
-        ops: Dict[str, Any],
-        gen_ops: Set[str],
-    ) -> Optional[str]:
-        """Walk predecessors (BFS) to find the nearest generator that spawned this context."""
-        visited: Set[str] = set()
-        queue = list(prevs.get(op_short_name, []))
-        while queue:
-            pred = queue.pop(0)
-            if pred in visited:
-                continue
-            visited.add(pred)
-            pred_op = ops.get(pred)
-            if pred_op and pred_op.full_name in gen_ops:
-                return pred_op.full_name
-            queue.extend(prevs.get(pred, []))
-        return None
-
-    def _count_yields(self, gen_ctx: Tuple, stream_contexts: List[Tuple]) -> int:
+    def _count_yields(self, gen_ctx: Tuple, stream_contexts: list) -> int:
         """Count how many stream contexts were spawned by a generator at gen_ctx."""
         prefix_len = len(gen_ctx)
         return sum(
             1 for sc in stream_contexts if len(sc) == prefix_len + 1 and sc[:prefix_len] == gen_ctx
         )
-
-    def _find_context_spawner(
-        self,
-        owner: str,
-        ctx: Tuple,
-        executed_pairs: Set[Tuple],
-    ) -> Optional[str]:
-        """Find which generator spawned a synthetic stream context."""
-        meta = self._graph_meta.get(owner, {})
-        gen_ops = meta.get("gen_ops", set())
-        parent_ctx = ctx[:-1] if ctx else ()
-        candidates = [g for g in gen_ops if (g, parent_ctx) in executed_pairs]
-        if len(candidates) == 1:
-            return candidates[0]
-        elif candidates:
-            return sorted(candidates)[0]
-        return None
 
     def _format_time(self, t: Any) -> Optional[str]:
         """Format a time value to ISO string with 'Z' suffix for UTC."""
@@ -643,15 +557,13 @@ class TraceCollector:
         stream_count = 0
 
         for n in nodes:
-            if n.op_name is None:
-                if n.kind == "loop_iter":
-                    loop_iterations += 1
-                continue
             if n.duration_ms:
                 total_duration += n.duration_ms
             if n.kind == "generator":
                 stream_count += 1
                 total_yields += n.metadata.get("yield_count", 0)
+            if n.kind == "loop_iter":
+                loop_iterations += 1
 
         real_count = sum(1 for n in nodes if n.op_name is not None)
         return TraceSummary(

@@ -128,13 +128,15 @@ class MemoryState:
         if ctx_key in cell:
             return cell[ctx_key]
 
-        # Pull ref? Pull 1 hop from source and cache
+        # Pull ref? Pull 1 hop from source and cache.
+        # Cell.__getitem__ walks up the context hierarchy automatically,
+        # so source_cell[("main", "[0]")] finds batch values at ("main",).
         pull_ref = self.schema._pull_refs[idx]
         if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
             source_cell = self._cells[pull_ref.idx]
-            # Check both context value and default_value (for static values)
-            if ctx_key in source_cell or source_cell.default_value is not None:
-                result = pull_ref._fn(source_cell[ctx_key])
+            source_val = source_cell[ctx_key]
+            if source_val is not None or source_cell.default_value is not None:
+                result = pull_ref._fn(source_val)
                 cell[ctx_key] = result  # Cache
                 return result
 

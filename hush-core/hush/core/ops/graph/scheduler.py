@@ -8,6 +8,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from hush.core.loggings import LOGGER
+from hush.core.ops import PENDING
 from hush.core.ops.base import END, BaseOp
 from hush.core.utils.context import _output_queue
 
@@ -24,12 +25,14 @@ def _is_gen(op_obj):
 class Scheduler:
     """Async event-driven scheduler for graph execution.
 
-    Handles both batch ops (run once) and streaming generators
-    (yield multiple outputs, each creating a new streaming context).
+    Handles both batch ops (run once) and generators (yield multiple
+    outputs, each creating a new context [n]).
 
-    The scheduler uses ready-count tracking: each op starts with a count
-    equal to its number of predecessors. When a predecessor completes,
-    the count decrements. When it reaches 0, the op is ready to run.
+    Ready-count tracking: each op starts with a count equal to its
+    number of predecessors. When a predecessor completes, the count
+    decrements. When it reaches 0, the op is ready to run.
+
+    Ops returning PENDING absorb input without triggering downstream.
 
     Init with graph topology only. Call run() with runtime params.
     """
@@ -129,16 +132,23 @@ class Scheduler:
         self.stream_contexts.append(stream_ctx)
 
     async def _run_op(self, name, op_obj, ctx, p_ctx):
-        """Run a batch or streaming downstream op, emit done event."""
+        """Run a batch or streaming downstream op, emit done event.
+
+        If op returns PENDING, emits done_pending so the scheduler
+        skips successor activation.
+        """
         is_stream = ctx != self.context_id
         if is_stream:
             await self.semaphore.acquire()
         try:
-            await op_obj.run(self.state, ctx, p_ctx)
+            result = await op_obj.run(self.state, ctx, p_ctx)
         finally:
             if is_stream:
                 self.semaphore.release()
-        await self.event_queue.put(("done", name, ctx))
+        if result is PENDING:
+            await self.event_queue.put(("done_pending", name, ctx))
+        else:
+            await self.event_queue.put(("done", name, ctx))
 
     async def _drive_generator(self, name, op_obj, ctx, p_ctx):
         """Drive a generator op, emitting yield/exhausted events."""
@@ -154,13 +164,13 @@ class Scheduler:
 
             if inspect.isasyncgenfunction(gen_fn):
                 async for result in gen_fn(**gen_inputs):
-                    stream_ctx = ctx + (f"s{yield_idx}",)
+                    stream_ctx = ctx + (f"[{yield_idx}]",)
                     op_obj.store_result(self.state, result, stream_ctx)
                     await self.event_queue.put(("yield", name, stream_ctx, result))
                     yield_idx += 1
             elif inspect.isgeneratorfunction(gen_fn):
                 for result in gen_fn(**gen_inputs):
-                    stream_ctx = ctx + (f"s{yield_idx}",)
+                    stream_ctx = ctx + (f"[{yield_idx}]",)
                     op_obj.store_result(self.state, result, stream_ctx)
                     await self.event_queue.put(("yield", name, stream_ctx, result))
                     yield_idx += 1
@@ -194,7 +204,9 @@ class Scheduler:
             self.active_count += 1
             asyncio.create_task(self._drive_generator(name, op_obj, ctx, p_ctx))
         elif self._can_inline(op_obj):
-            await op_obj.run(self.state, ctx, p_ctx)
+            result = await op_obj.run(self.state, ctx, p_ctx)
+            if result is PENDING:
+                return []  # Absorbed input, no downstream
             return self._activate_successors(name, ctx)
         else:
             self.active_count += 1
@@ -202,17 +214,29 @@ class Scheduler:
         return []
 
     def _collect_outputs(self) -> Dict[str, Any]:
-        """Collect final outputs from state after all ops complete."""
+        """Collect final outputs from state after all ops complete.
+
+        For batch graphs (no generators): return outputs from batch context.
+        For streaming graphs: collect all context results into lists.
+        """
         g = self.graph
+        has_generators = any(_is_gen(op) for op in g._ops.values())
         if self.stream_contexts:
-            max_depth = max(len(ctx) for ctx in self.stream_contexts)
-            leaf_contexts = [ctx for ctx in self.stream_contexts if len(ctx) == max_depth]
+            # Only collect from leaf contexts (not prefixes of deeper contexts)
+            ctx_set = set(self.stream_contexts)
+            leaf_ctxs = [
+                ctx
+                for ctx in self.stream_contexts
+                if not any(
+                    other != ctx and len(other) > len(ctx) and other[: len(ctx)] == ctx
+                    for other in ctx_set
+                )
+            ]
             outputs = {}
             for var_name in g.outputs:
-                outputs[var_name] = [
-                    self.state[g.full_name, var_name, ctx] for ctx in leaf_contexts
-                ]
-        elif g._has_streaming_ops:
+                outputs[var_name] = [self.state[g.full_name, var_name, ctx] for ctx in leaf_ctxs]
+        elif has_generators:
+            # Generator(s) yielded 0 items → return empty lists
             outputs = {var_name: [] for var_name in g.outputs}
         else:
             outputs = g.get_outputs(
@@ -259,6 +283,10 @@ class Scheduler:
                 self.active_count -= 1
                 ready = list(self._activate_successors(op_name, ctx))
                 await self._drain_ready(ready, ctx, self.parent_context)
+
+            elif event[0] == "done_pending":
+                # Op returned PENDING — absorbed input, no downstream
+                self.active_count -= 1
 
             elif event[0] == "yield":
                 _, gen_name, stream_ctx, result_data = event

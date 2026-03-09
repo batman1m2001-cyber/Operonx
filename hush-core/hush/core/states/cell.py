@@ -39,17 +39,25 @@ class Cell:
         self.contexts[context_id] = value
 
     def __getitem__(self, context_id: Optional[str] = None) -> Any:
-        """Get value from a specific context.
+        """Get value from a specific context, with parent fallback.
+
+        Walks up the context hierarchy until a value is found:
+        ("main", "[0]", "[1]") → ("main", "[0]") → ("main",)
 
         Args:
             context_id: Context ID (None = default context "main")
 
         Returns:
-            Context value or default_value if context doesn't exist
+            Context value, parent context value, or default_value
         """
         if context_id is None:
             context_id = DEFAULT_CONTEXT
-        return self.contexts.get(context_id, self.default_value)
+        ctx = context_id
+        while ctx:
+            if ctx in self.contexts:
+                return self.contexts[ctx]
+            ctx = ctx[:-1]
+        return self.default_value
 
     def pop_context(self, context_id: str) -> Any:
         """Remove a context and return its value.

@@ -31,7 +31,6 @@ class LoopConfig:
     _compiled_until: Any = field(default=None, repr=False)
 
 
-from hush.core.utils.algo import topo_sort
 from hush.core.ops.graph.scheduler import Scheduler, _is_gen
 
 # Re-export validation types for backward compatibility
@@ -80,7 +79,6 @@ class GraphOp(BaseOp):
         "_edges",
         "_is_building",
         "_compiled_adj",
-        "_has_streaming_ops",
         "_stream_predecrements",
         "_max_stream_concurrent",
         "_loop_config",
@@ -101,7 +99,6 @@ class GraphOp(BaseOp):
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
         self.has_soft_preds = set()  # Ops with soft predecessors
-        self._has_streaming_ops = False
         self._stream_predecrements = {}
         self._max_stream_concurrent = 64
         self._compiled_adj = {}
@@ -224,7 +221,7 @@ class GraphOp(BaseOp):
         result.raise_if_errors()
 
         self._build_adj()
-        self._build_streaming()
+        self._build_predecrements()
 
         # Compile loop until expression if needed
         if self._loop_config and isinstance(self._loop_config.until, str):
@@ -273,58 +270,49 @@ class GraphOp(BaseOp):
                 adj.append((successor, is_soft))
             self._compiled_adj[name] = adj
 
-    def _build_streaming(self):
-        """Compute stream depths via topological order (Kahn's algorithm).
+    def _build_predecrements(self):
+        """Pre-compute ready_count predecrements per generator.
 
-        Detects generator ops, assigns stream depths, and pre-computes
-        predecrements for the scheduler's streaming context creation.
+        When a generator yields and creates context [n], batch-level
+        predecessors of downstream ops have already completed. Their
+        ready_count contributions must be pre-decremented.
+
+        For each generator, identify downstream ops whose predecessors
+        include non-generator ops that won't re-run in the stream context.
         """
-        self._stream_depths = {}
-        self._has_streaming_ops = False
         self._stream_predecrements = {}
 
-        # Check if any ops are generators
-        has_gens = any(_is_gen(op) for op in self._ops.values())
-        if not has_gens:
+        gen_names = {name for name, op in self._ops.items() if _is_gen(op)}
+        if not gen_names:
             return
 
-        self._has_streaming_ops = True
+        # For each generator, find which downstream ops need predecrements
+        for gen_name in gen_names:
+            # Find all ops reachable from this generator (its downstream)
+            reachable = set()
+            queue = [gen_name]
+            while queue:
+                current = queue.pop(0)
+                for succ in self.nexts.get(current, []):
+                    if succ not in reachable:
+                        reachable.add(succ)
+                        queue.append(succ)
 
-        topological_order = topo_sort(list(self._ops.keys()), dict(self.nexts), dict(self.prevs))
-
-        # Compute stream depth for each op
-        for name in topological_order:
-            max_pred_depth = 0
-            for pred in self.prevs[name]:
-                pred_depth = self._stream_depths.get(pred, 0)
-                if _is_gen(self._ops[pred]):
-                    pred_depth += 1
-                max_pred_depth = max(max_pred_depth, pred_depth)
-            self._stream_depths[name] = max_pred_depth
-
-        # Store stream depths on each child op for get_inputs() access
-        for name, op_obj in self._ops.items():
-            op_obj._stream_depths = self._stream_depths
-
-        # Pre-compute stream predecrements per generator.
-        # When a streaming context is created, batch ops that already
-        # completed need their edges pre-decremented. Exclude the
-        # generator's own edges — those are handled by _activate_successors.
-        for name in self._ops:
-            if _is_gen(self._ops[name]):
-                predecrements = {}
-                for succ_name in self.initial_ready_count:
-                    decrement = 0
-                    for pred in self.prevs.get(succ_name, []):
-                        if pred == name:
-                            continue  # generator's own edge handled by _activate_successors
-                        if self._stream_depths.get(pred, 0) < self._stream_depths.get(succ_name, 0):
-                            edge = self._edges.get((pred, succ_name))
-                            if edge:
-                                decrement += 1
-                    if decrement > 0:
-                        predecrements[succ_name] = decrement
-                self._stream_predecrements[name] = predecrements
+            predecrements = {}
+            for succ_name in reachable:
+                decrement = 0
+                for pred in self.prevs.get(succ_name, []):
+                    if pred == gen_name:
+                        continue  # generator's own edge handled by _activate_successors
+                    if pred not in reachable:
+                        # pred is batch-level (not downstream of this generator)
+                        edge = self._edges.get((pred, succ_name))
+                        if edge:
+                            decrement += 1
+                if decrement > 0:
+                    predecrements[succ_name] = decrement
+            if predecrements:
+                self._stream_predecrements[gen_name] = predecrements
 
     def _cache_full_names(self) -> None:
         """Cache full_name for this op and all descendants after build."""
@@ -570,9 +558,7 @@ class GraphOp(BaseOp):
             _inputs = self.get_inputs(state, context_id=context_id, parent_context=parent_context)
 
             if self._is_building:
-                raise ValueError(
-                    f"Graph {self.name} not built. Must call graph.build() before execution!!"
-                )
+                self.build()
 
             _outputs, _ = await self._scheduler.run(state, context_id, parent_context, request_id)
 

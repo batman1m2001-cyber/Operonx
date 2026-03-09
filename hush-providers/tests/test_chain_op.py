@@ -121,8 +121,8 @@ class TestChain:
             # Should have parser node when extract is provided
             assert "parser" in node._ops
 
-    def test_contain_generation_default(self):
-        """Test contain_generation is True by default."""
+    def test_contain_generation_explicit(self):
+        """Test contain_generation can be set explicitly."""
         from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -134,6 +134,7 @@ class TestChain:
                 resource="gpt-4",
                 template="Test",
                 name="gen_test",
+                contain_generation=True,
             )
 
             assert node.contain_generation is True
