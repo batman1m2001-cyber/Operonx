@@ -581,7 +581,11 @@ class GraphOp(BaseOp):
                     state, context_id, parent_context, request_id, _outputs
                 )
 
+            # Pop _loop_metrics before store_result (not a schema variable)
+            loop_metrics = _outputs.pop("_loop_metrics", None)
             self.store_result(state, _outputs, context_id)
+            if loop_metrics is not None:
+                _outputs["_loop_metrics"] = loop_metrics
 
         except Exception:
             import sys
