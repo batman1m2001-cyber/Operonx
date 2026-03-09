@@ -30,6 +30,7 @@ from hush.core.loggings import LOGGER
 from hush.core.ops import (
     END,
     PARENT,
+    PENDING,
     START,
     BaseOp,
     BranchOp,
@@ -81,6 +82,7 @@ __all__ = [
     "START",
     "END",
     "PARENT",
+    "PENDING",
     # State
     "StateSchema",
     "MemoryState",

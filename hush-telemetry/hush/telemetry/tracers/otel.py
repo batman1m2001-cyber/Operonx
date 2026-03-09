@@ -156,11 +156,6 @@ class OTELTracer(Tracer):
                 metadata = node.get("metadata") or {}
                 if metadata.get("yield_count") is not None:
                     attributes["op.yield_count"] = metadata["yield_count"]
-                if metadata.get("spawned_by"):
-                    attributes["op.spawned_by"] = metadata["spawned_by"]
-                if metadata.get("depth", 0) > 0:
-                    attributes["op.depth"] = metadata["depth"]
-
                 # LLM-specific
                 if node_type == "generation":
                     attributes["llm.request.type"] = "generation"

@@ -112,52 +112,64 @@ class FlushWorker:
 
 
 def _sample_stream_nodes(nodes: List[Dict[str, Any]], limit: Optional[int]) -> List[Dict[str, Any]]:
-    """Apply stream_trace_limit sampling to stream_item nodes.
+    """Apply stream_trace_limit sampling to context groups per generator.
 
-    Caps stream_item nodes per spawned_by generator, then removes
-    orphaned stream_context synthetic nodes that lost all children.
+    For each graph that contains generators, caps the number of top-level
+    stream_context groups. Excess context groups and all their descendants
+    are removed.
 
     Args:
         nodes: Full list of TraceNode dicts (from collect_tree).
-        limit: Max stream_items to keep per spawned_by generator.
-            None = keep all, 0 = drop all stream_items.
+        limit: Max context groups to keep per generator parent.
+            None = keep all, 0 = drop all context groups.
 
     Returns:
-        Filtered node list. Non-stream_item nodes pass through unchanged
-        (unless they're orphaned synthetic contexts).
+        Filtered node list. Generator and non-stream nodes pass through
+        unchanged.
     """
     if limit is None:
         return nodes
 
-    # First pass: filter stream_items by spawner limit
-    counts: Dict[Optional[str], int] = defaultdict(int)
-    kept_keys: set = set()
-    filtered = []
+    # Find parents that contain generators
+    gen_parents: set = set()
     for n in nodes:
-        if n.get("kind") != "stream_item":
-            filtered.append(n)
-            kept_keys.add(n["trace_key"])
-            continue
-        spawner = (n.get("metadata") or {}).get("spawned_by")
-        counts[spawner] += 1
-        if counts[spawner] <= limit:
-            filtered.append(n)
-            kept_keys.add(n["trace_key"])
+        if n.get("kind") == "generator":
+            parent = n.get("parent_trace_key")
+            if parent:
+                gen_parents.add(parent)
 
-    # Second pass: remove orphaned stream_context nodes (no children kept)
-    result = []
-    for n in filtered:
-        if n.get("kind") == "stream_context":
-            has_child = any(
-                c["trace_key"] in kept_keys and c.get("parent_trace_key") == n["trace_key"]
-                for c in filtered
-                if c["trace_key"] != n["trace_key"]
-            )
-            if not has_child:
-                continue
-        result.append(n)
+    if not gen_parents:
+        return nodes
 
-    return result
+    # Count top-level stream_context groups per generator parent
+    counts: Dict[str, int] = defaultdict(int)
+    remove_keys: set = set()
+
+    for n in nodes:
+        if n.get("kind") == "stream_context" and n.get("parent_trace_key") in gen_parents:
+            parent = n["parent_trace_key"]
+            counts[parent] += 1
+            if counts[parent] > limit:
+                remove_keys.add(n["trace_key"])
+
+    if not remove_keys:
+        return nodes
+
+    # Cascade: remove all descendants of removed context groups
+    children_map: Dict[str, list] = defaultdict(list)
+    for n in nodes:
+        p = n.get("parent_trace_key")
+        if p:
+            children_map[p].append(n["trace_key"])
+
+    queue = list(remove_keys)
+    while queue:
+        k = queue.pop(0)
+        for child in children_map.get(k, []):
+            remove_keys.add(child)
+            queue.append(child)
+
+    return [n for n in nodes if n["trace_key"] not in remove_keys]
 
 
 def _merge_tags(dynamic_tags: List[str], static_tags: List[str]) -> List[str]:
