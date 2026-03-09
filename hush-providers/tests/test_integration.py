@@ -11,18 +11,18 @@ class TestNodeIntegration:
     def test_all_nodes_importable(self):
         """Test all nodes can be imported from hush.providers."""
         from hush.providers import (
-            ChainOp,
             EmbeddingOp,
             LLMOp,
             PromptOp,
             RerankOp,
+            chain,
         )
 
         assert LLMOp is not None
         assert EmbeddingOp is not None
         assert RerankOp is not None
         assert PromptOp is not None
-        assert ChainOp is not None
+        assert chain is not None
 
     def test_prompt_node_with_parent_outputs(self):
         """Test PromptOp with PARENT reference for outputs."""
@@ -71,11 +71,11 @@ class TestPluginAutoRegistration:
 
     def test_plugins_are_registered(self):
         """Test that plugins auto-register on import."""
-        from hush.providers.registry import EmbeddingPlugin, LLMPlugin, RerankPlugin
+        from hush.providers.registry import embedding_plugin, llm_plugin, rerank_plugin
 
-        assert LLMPlugin.is_registered()
-        assert EmbeddingPlugin.is_registered()
-        assert RerankPlugin.is_registered()
+        assert llm_plugin.is_registered()
+        assert embedding_plugin.is_registered()
+        assert rerank_plugin.is_registered()
 
     def test_config_classes_registered(self):
         """Test that config classes are registered in REGISTRY."""

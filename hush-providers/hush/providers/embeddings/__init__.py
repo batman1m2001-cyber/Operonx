@@ -2,7 +2,7 @@
 
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig, EmbeddingType
-from hush.providers.embeddings.factory import EmbeddingFactory
+from hush.providers.embeddings.factory import create_embedding
 from hush.providers.embeddings.huggingface import HFEmbedding
 from hush.providers.embeddings.onnx import ONNXEmbedding
 from hush.providers.embeddings.tei import TEIEmbedding
@@ -12,7 +12,7 @@ __all__ = [
     "BaseEmbedder",
     "EmbeddingType",
     "EmbeddingConfig",
-    "EmbeddingFactory",
+    "create_embedding",
     "VLLMEmbedding",
     "TEIEmbedding",
     "HFEmbedding",

@@ -1,6 +1,6 @@
 """Workflow nodes for AI providers."""
 
-from hush.providers.ops.chain import ChainOp
+from hush.providers.ops.chain import chain
 from hush.providers.ops.embedding import EmbeddingOp
 from hush.providers.ops.llm import LLMOp
 from hush.providers.ops.prompt import PromptOp
@@ -11,5 +11,5 @@ __all__ = [
     "EmbeddingOp",
     "RerankOp",
     "PromptOp",
-    "ChainOp",
+    "chain",
 ]

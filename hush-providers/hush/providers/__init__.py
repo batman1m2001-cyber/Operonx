@@ -8,25 +8,26 @@ This package provides AI provider integrations for the Hush workflow engine:
 - Workflow nodes for integrating providers into workflows
 """
 
-# LLM exports
 # Auth exports
 from hush.providers.auth import (
-    AuthFactory,
     KeycloakTokenConfig,
     KeycloakTokenProvider,
+    create_auth,
 )
 
 # Embedding exports
 from hush.providers.embeddings import (
     BaseEmbedder,
     EmbeddingConfig,
-    EmbeddingFactory,
     EmbeddingType,
     HFEmbedding,
     ONNXEmbedding,
     TEIEmbedding,
     VLLMEmbedding,
+    create_embedding,
 )
+
+# LLM exports
 from hush.providers.llms import (
     AzureConfig,
     AzureSDKModel,
@@ -34,29 +35,24 @@ from hush.providers.llms import (
     BaseLLM,
     GeminiConfig,
     LLMConfig,
-    LLMFactory,
     LLMGenerator,
     LLMType,
     OpenAIConfig,
     OpenAISDKModel,
+    create_llm,
 )
 
 # Node exports
 from hush.providers.ops import (
-    ChainOp,
     EmbeddingOp,
     LLMOp,
     PromptOp,
     RerankOp,
+    chain,
 )
 
-# Registry plugin exports
-from hush.providers.registry import (
-    AuthPlugin,
-    EmbeddingPlugin,
-    LLMPlugin,
-    RerankPlugin,
-)
+# Auto-register plugins on import
+import hush.providers.registry  # noqa: F401
 
 # Reranking exports
 from hush.providers.rerankers import (
@@ -65,10 +61,10 @@ from hush.providers.rerankers import (
     ONNXReranker,
     PineconeReranker,
     RerankingConfig,
-    RerankingFactory,
     RerankingType,
     TEIReranker,
     VLLMReranker,
+    create_reranking,
 )
 
 __version__ = "0.1.0"
@@ -81,7 +77,7 @@ __all__ = [
     "OpenAIConfig",
     "AzureConfig",
     "GeminiConfig",
-    "LLMFactory",
+    "create_llm",
     "LLMGenerator",
     "OpenAISDKModel",
     "AzureSDKModel",
@@ -89,7 +85,7 @@ __all__ = [
     "BaseEmbedder",
     "EmbeddingType",
     "EmbeddingConfig",
-    "EmbeddingFactory",
+    "create_embedding",
     "VLLMEmbedding",
     "TEIEmbedding",
     "HFEmbedding",
@@ -98,7 +94,7 @@ __all__ = [
     "BaseReranker",
     "RerankingType",
     "RerankingConfig",
-    "RerankingFactory",
+    "create_reranking",
     "VLLMReranker",
     "TEIReranker",
     "HFReranker",
@@ -109,14 +105,9 @@ __all__ = [
     "EmbeddingOp",
     "RerankOp",
     "PromptOp",
-    "ChainOp",
+    "chain",
     # Auth
     "KeycloakTokenConfig",
     "KeycloakTokenProvider",
-    "AuthFactory",
-    # Registry Plugins
-    "LLMPlugin",
-    "EmbeddingPlugin",
-    "RerankPlugin",
-    "AuthPlugin",
+    "create_auth",
 ]

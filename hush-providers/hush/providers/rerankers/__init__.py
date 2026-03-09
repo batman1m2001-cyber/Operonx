@@ -2,7 +2,7 @@
 
 from hush.providers.rerankers.base import BaseReranker
 from hush.providers.rerankers.config import RerankingConfig, RerankingType
-from hush.providers.rerankers.factory import RerankingFactory
+from hush.providers.rerankers.factory import create_reranking
 from hush.providers.rerankers.huggingface import HFReranker
 from hush.providers.rerankers.onnx import ONNXReranker
 from hush.providers.rerankers.pinecone import PineconeReranker
@@ -13,7 +13,7 @@ __all__ = [
     "BaseReranker",
     "RerankingType",
     "RerankingConfig",
-    "RerankingFactory",
+    "create_reranking",
     "VLLMReranker",
     "TEIReranker",
     "HFReranker",

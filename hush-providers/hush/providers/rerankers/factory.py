@@ -1,3 +1,5 @@
+"""Factory function for creating reranking backends."""
+
 from hush.providers.rerankers.base import BaseReranker
 from hush.providers.rerankers.config import RerankingConfig, RerankingType
 from hush.providers.rerankers.huggingface import HFReranker
@@ -7,25 +9,28 @@ from hush.providers.rerankers.tei import TEIReranker
 from hush.providers.rerankers.vllm import VLLMReranker
 
 
-class RerankingFactory:
-    r"""Factory class for reranking model backends
+def create_reranking(config: RerankingConfig) -> BaseReranker:
+    """Create a reranking backend from config.
+
+    Args:
+        config: RerankingConfig with api_type determining which backend to create.
+
+    Returns:
+        BaseReranker instance.
 
     Raises:
-        ValueError: in case the provided model type is unknown.
+        ValueError: If api_type is unsupported.
     """
-
-    @staticmethod
-    def create(config: RerankingConfig) -> BaseReranker:
-        if config.api_type == RerankingType.TEXT_EMBEDDING_INFERENCE:
-            model_class = TEIReranker
-        elif config.api_type == RerankingType.VLLM:
-            model_class = VLLMReranker
-        elif config.api_type == RerankingType.PINECONE:
-            model_class = PineconeReranker
-        elif config.api_type == RerankingType.HF:
-            model_class = HFReranker
-        elif config.api_type == RerankingType.ONNX:
-            model_class = ONNXReranker
-        else:
-            raise ValueError(f"Unsupported Model: {config.api_type}")
-        return model_class(config)
+    if config.api_type == RerankingType.TEXT_EMBEDDING_INFERENCE:
+        model_class = TEIReranker
+    elif config.api_type == RerankingType.VLLM:
+        model_class = VLLMReranker
+    elif config.api_type == RerankingType.PINECONE:
+        model_class = PineconeReranker
+    elif config.api_type == RerankingType.HF:
+        model_class = HFReranker
+    elif config.api_type == RerankingType.ONNX:
+        model_class = ONNXReranker
+    else:
+        raise ValueError(f"Unsupported Model: {config.api_type}")
+    return model_class(config)

@@ -1,20 +1,16 @@
-"""Factory for creating authentication providers."""
+"""Factory function for creating authentication providers."""
 
 from .config import KeycloakTokenConfig
 from .keycloak import KeycloakTokenProvider
 
 
-class AuthFactory:
-    """Factory for creating authentication providers."""
+def create_auth(config: KeycloakTokenConfig) -> KeycloakTokenProvider:
+    """Create a KeycloakTokenProvider from config.
 
-    @staticmethod
-    def create(config: KeycloakTokenConfig) -> KeycloakTokenProvider:
-        """Create a KeycloakTokenProvider from config.
+    Args:
+        config: KeycloakTokenConfig instance.
 
-        Args:
-            config: KeycloakTokenConfig instance
-
-        Returns:
-            KeycloakTokenProvider instance
-        """
-        return KeycloakTokenProvider(config)
+    Returns:
+        KeycloakTokenProvider instance.
+    """
+    return KeycloakTokenProvider(config)

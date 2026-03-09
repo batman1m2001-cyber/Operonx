@@ -1,104 +1,100 @@
-"""Tests for ChainOp functionality."""
+"""Tests for chain() factory function."""
 
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 
-class TestChainOp:
-    """Tests for ChainOp."""
+class TestChain:
+    """Tests for chain()."""
 
     def test_import(self):
-        """Test ChainOp can be imported."""
-        from hush.providers.ops import ChainOp
+        """Test chain can be imported."""
+        from hush.providers.ops import chain
 
-        assert ChainOp is not None
+        assert chain is not None
 
     def test_simple_chain_creation(self):
-        """Test creating a simple ChainOp (text generation mode)."""
-        from hush.providers.ops import ChainOp
+        """Test creating a simple chain (text generation mode)."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="simple_chain",
+            node = chain(
                 resource="gpt-4",
-                inputs={
-                    "template": {"system": "You are helpful.", "user": "Help with: {task}"},
-                    "task": "coding",
-                },
+                template={"system": "You are helpful.", "user": "Help with: {task}"},
+                name="simple_chain",
+                task="coding",
             )
 
             assert node.name == "simple_chain"
-            assert node.type == "graph"  # ChainOp is a GraphOp
-            assert node.resource == "gpt-4"
+            assert node.type == "graph"
 
     def test_structured_chain_creation(self):
-        """Test creating ChainOp with structured output (parser mode)."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with structured output (parser mode)."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="structured_chain",
+            node = chain(
                 resource="gpt-4",
-                inputs={"template": "Classify: {text}\n<category>...</category>", "text": "sample"},
+                template="Classify: {text}\n<category>...</category>",
+                name="structured_chain",
                 extract=["category: str", "confidence: float"],
                 parser="xml",
+                text="sample",
             )
 
-            assert node.extract == ["category: str", "confidence: float"]
-            assert node.parser == "xml"
+            assert "parser" in node._ops
 
     def test_chain_with_messages_template(self):
-        """Test creating ChainOp with complex messages_template."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with complex messages_template."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="vision_chain",
+            node = chain(
                 resource="gpt-4o",
-                inputs={
-                    "template": [
-                        {"role": "system", "content": "You are a vision expert."},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Analyze: {query}"},
-                                {"type": "image_url", "image_url": {"url": "{image_url}"}},
-                            ],
-                        },
-                    ],
-                    "query": "What is this?",
-                    "image_url": "https://...",
-                },
+                template=[
+                    {"role": "system", "content": "You are a vision expert."},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analyze: {query}"},
+                            {"type": "image_url", "image_url": {"url": "{image_url}"}},
+                        ],
+                    },
+                ],
+                name="vision_chain",
+                query="What is this?",
+                image_url="https://...",
             )
 
             assert node.name == "vision_chain"
 
     def test_chain_has_internal_nodes(self):
-        """Test that ChainOp creates internal nodes."""
-        from hush.providers.ops import ChainOp
+        """Test that chain creates internal nodes."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="internal_test",
+            node = chain(
                 resource="gpt-4",
-                inputs={"template": "Test {var}", "var": "value"},
+                template="Test {var}",
+                name="internal_test",
+                var="value",
             )
 
             # Should have internal nodes (prompt, llm)
@@ -106,163 +102,172 @@ class TestChainOp:
             assert "llm" in node._ops
 
     def test_chain_with_parser_has_parser_op(self):
-        """Test that ChainOp with extract has parser node."""
-        from hush.providers.ops import ChainOp
+        """Test that chain with extract has parser node."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="parser_test",
+            node = chain(
                 resource="gpt-4",
-                inputs={"template": "Extract: {text}", "text": "sample"},
+                template="Extract: {text}",
+                name="parser_test",
                 extract=["result: str"],
+                text="sample",
             )
 
             # Should have parser node when extract is provided
             assert "parser" in node._ops
 
-    def test_metadata(self):
-        """Test specific_metadata returns chain info."""
-        from hush.providers.ops import ChainOp
+    def test_contain_generation_default(self):
+        """Test contain_generation is True by default."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="metadata_test",
+            node = chain(
                 resource="gpt-4",
-                inputs={"template": {"system": "System", "user": "User {var}"}, "var": "value"},
-                extract=["field: str"],
-                parser="json",
+                template="Test",
+                name="gen_test",
             )
 
-            metadata = node.specific_metadata
-            assert metadata["resource"] == "gpt-4"
-            assert metadata["extract"] == ["field: str"]
-            assert metadata["parser"] == "json"
+            assert node.contain_generation is True
+
+    def test_auto_naming(self):
+        """Test auto-naming from assignment variable."""
+        from hush.providers.ops import chain
+
+        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+            mock_instance = Mock()
+            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
+            mock_hub.instance.return_value = mock_instance
+
+            my_chat = chain(resource="gpt-4", template="Hello")
+            assert my_chat.name == "my_chat"
 
 
-class TestChainOpLoadBalancing:
-    """Tests for ChainOp load balancing features."""
+class TestChainLoadBalancing:
+    """Tests for chain() load balancing features."""
 
     def test_load_balancing_creation(self):
-        """Test creating ChainOp with load balancing."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with load balancing."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="lb_chain",
+            node = chain(
                 resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
-                inputs={
-                    "template": {"system": "You are helpful.", "user": "Hello {name}"},
-                    "name": "Alice",
-                },
+                template={"system": "You are helpful.", "user": "Hello {user}"},
+                name="lb_chain",
+                user="Alice",
             )
 
-            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
-            assert node.ratios == [0.7, 0.3]
+            # Check LLMOp inside has the right config
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == ["gpt-4o", "gpt-4o-mini"]
+            assert llm_op.ratios == [0.7, 0.3]
 
-    def test_load_balancing_metadata(self):
-        """Test metadata includes load balancing info."""
-        from hush.providers.ops import ChainOp
+    def test_load_balancing_with_ratios(self):
+        """Test load balancing config is passed to internal LLMOp."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="lb_metadata_test",
+            node = chain(
                 resource=["gpt-4o", "claude-sonnet"],
                 ratios=[0.6, 0.4],
-                inputs={"template": "Test"},
+                template="Test",
+                name="lb_metadata_test",
             )
 
-            metadata = node.specific_metadata
-            assert metadata["resource"] == ["gpt-4o", "claude-sonnet"]
-            assert metadata["load_balancing"] is True
-            assert metadata["ratios"] == [0.6, 0.4]
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == ["gpt-4o", "claude-sonnet"]
+            assert llm_op.ratios == [0.6, 0.4]
 
 
-class TestChainOpFallback:
-    """Tests for ChainOp fallback features."""
+class TestChainFallback:
+    """Tests for chain() fallback features."""
 
     def test_fallback_creation(self):
-        """Test creating ChainOp with fallback."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with fallback."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="fallback_chain",
+            node = chain(
                 resource="gpt-4o",
                 fallback=["claude-sonnet", "gpt-3.5-turbo"],
-                inputs={"template": "Hello {name}", "name": "Alice"},
+                template="Hello {user}",
+                name="fallback_chain",
+                user="Alice",
             )
 
-            assert node.resource == "gpt-4o"
-            assert node.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == "gpt-4o"
+            assert llm_op.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
 
-    def test_fallback_metadata(self):
-        """Test metadata includes fallback info."""
-        from hush.providers.ops import ChainOp
+    def test_fallback_passed_to_llm(self):
+        """Test fallback is passed to internal LLMOp."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="fallback_metadata_test",
+            node = chain(
                 resource="gpt-4o",
                 fallback=["claude-sonnet"],
-                inputs={"template": "Test"},
+                template="Test",
+                name="fallback_metadata_test",
             )
 
-            metadata = node.specific_metadata
-            assert metadata["fallback"] == ["claude-sonnet"]
+            llm_op = node._ops["llm"]
+            assert llm_op.fallback == ["claude-sonnet"]
 
 
-class TestChainOpResponseFormat:
-    """Tests for ChainOp response_format (JSON mode) features."""
+class TestChainResponseFormat:
+    """Tests for chain() response_format (JSON mode) features."""
 
     def test_response_format_creation(self):
-        """Test creating ChainOp with response_format."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with response_format."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="json_chain",
+            node = chain(
                 resource="gpt-4o",
                 response_format={"type": "json_object"},
-                inputs={
-                    "template": {"system": "Return JSON.", "user": "Extract entities from: {text}"},
-                    "text": "sample",
-                },
+                template={"system": "Return JSON.", "user": "Extract entities from: {text}"},
+                name="json_chain",
+                text="sample",
             )
 
-            assert node.response_format == {"type": "json_object"}
+            # response_format should be in LLM's inputs
+            llm_op = node._ops["llm"]
+            assert "response_format" in llm_op.inputs
 
     def test_response_format_json_schema(self):
-        """Test creating ChainOp with JSON schema response_format."""
-        from hush.providers.ops import ChainOp
+        """Test creating chain with JSON schema response_format."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -285,263 +290,227 @@ class TestChainOpResponseFormat:
                 },
             }
 
-            node = ChainOp(
-                name="schema_chain",
+            node = chain(
                 resource="gpt-4o",
                 response_format=json_schema,
-                inputs={"template": "Classify: {text}", "text": "sample"},
+                template="Classify: {text}",
+                name="schema_chain",
+                text="sample",
             )
 
-            assert node.response_format == json_schema
-
-    def test_response_format_metadata(self):
-        """Test metadata includes response_format info."""
-        from hush.providers.ops import ChainOp
-
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
-            mock_instance = Mock()
-            mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
-            mock_hub.instance.return_value = mock_instance
-
-            node = ChainOp(
-                name="rf_metadata_test",
-                resource="gpt-4o",
-                response_format={"type": "json_object"},
-                inputs={"template": "Test"},
-            )
-
-            metadata = node.specific_metadata
-            assert metadata["response_format"] == {"type": "json_object"}
+            llm_op = node._ops["llm"]
+            assert "response_format" in llm_op.inputs
 
 
-class TestChainOpCombined:
-    """Tests for ChainOp with combined features."""
+class TestChainCombined:
+    """Tests for chain() with combined features."""
 
     def test_combined_load_balancing_and_fallback(self):
-        """Test ChainOp with both load balancing and fallback."""
-        from hush.providers.ops import ChainOp
+        """Test chain with both load balancing and fallback."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="combined_chain",
+            node = chain(
                 resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.8, 0.2],
                 fallback=["claude-sonnet"],
-                inputs={"template": "Hello {name}", "name": "Alice"},
+                template="Hello {user}",
+                name="combined_chain",
+                user="Alice",
             )
 
-            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
-            assert node.ratios == [0.8, 0.2]
-            assert node.fallback == ["claude-sonnet"]
-
-            metadata = node.specific_metadata
-            assert metadata["load_balancing"] is True
-            assert metadata["ratios"] == [0.8, 0.2]
-            assert metadata["fallback"] == ["claude-sonnet"]
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == ["gpt-4o", "gpt-4o-mini"]
+            assert llm_op.ratios == [0.8, 0.2]
+            assert llm_op.fallback == ["claude-sonnet"]
 
     def test_all_features_combined(self):
-        """Test ChainOp with all new features."""
-        from hush.providers.ops import ChainOp
+        """Test chain with all features."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="full_chain",
+            node = chain(
                 resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
                 fallback=["claude-sonnet"],
                 response_format={"type": "json_object"},
                 extract=["result: str"],
                 parser="json",
-                inputs={
-                    "template": {"system": "Return JSON.", "user": "Process: {text}"},
-                    "text": "sample",
-                },
+                template={"system": "Return JSON.", "user": "Process: {text}"},
+                name="full_chain",
+                text="sample",
             )
 
-            metadata = node.specific_metadata
-            assert metadata["resource"] == ["gpt-4o", "gpt-4o-mini"]
-            assert metadata["load_balancing"] is True
-            assert metadata["ratios"] == [0.7, 0.3]
-            assert metadata["fallback"] == ["claude-sonnet"]
-            assert metadata["response_format"] == {"type": "json_object"}
-            assert metadata["extract"] == ["result: str"]
-            assert metadata["parser"] == "json"
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == ["gpt-4o", "gpt-4o-mini"]
+            assert llm_op.ratios == [0.7, 0.3]
+            assert llm_op.fallback == ["claude-sonnet"]
+            assert "parser" in node._ops
 
 
-class TestChainOpUnifiedPrompt:
-    """Tests for ChainOp with unified prompt parameter."""
+class TestChainUnifiedPrompt:
+    """Tests for chain() with unified prompt parameter."""
 
     def test_string_prompt(self):
-        """Test ChainOp with string prompt (user message only)."""
-        from hush.providers.ops import ChainOp
+        """Test chain with string prompt (user message only)."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="string_prompt_chain",
+            node = chain(
                 resource="gpt-4",
-                inputs={
-                    "template": "Hello {name}, help me with {task}.",
-                    "name": "Alice",
-                    "task": "coding",
-                },
+                template="Hello {user}, help me with {task}.",
+                name="string_prompt_chain",
+                user="Alice",
+                task="coding",
             )
 
             assert node.name == "string_prompt_chain"
-            assert node.resource == "gpt-4"
 
     def test_dict_prompt_with_system_user(self):
-        """Test ChainOp with dict prompt containing system/user keys."""
-        from hush.providers.ops import ChainOp
+        """Test chain with dict prompt containing system/user keys."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="dict_prompt_chain",
+            node = chain(
                 resource="gpt-4",
-                inputs={
-                    "template": {"system": "You are a {role}.", "user": "Help with: {task}"},
-                    "role": "helpful assistant",
-                    "task": "coding",
-                },
+                template={"system": "You are a {role}.", "user": "Help with: {task}"},
+                name="dict_prompt_chain",
+                role="helpful assistant",
+                task="coding",
             )
 
             assert node.name == "dict_prompt_chain"
             assert "prompt" in node._ops
 
     def test_list_prompt_multimodal(self):
-        """Test ChainOp with list prompt (full messages array)."""
-        from hush.providers.ops import ChainOp
+        """Test chain with list prompt (full messages array)."""
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="list_prompt_chain",
+            node = chain(
                 resource="gpt-4o",
-                inputs={
-                    "template": [
-                        {"role": "system", "content": "You are a vision expert."},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Analyze: {query}"},
-                                {"type": "image_url", "image_url": {"url": "{image_url}"}},
-                            ],
-                        },
-                    ],
-                    "query": "What is this?",
-                    "image_url": "https://example.com/image.png",
-                },
+                template=[
+                    {"role": "system", "content": "You are a vision expert."},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analyze: {query}"},
+                            {"type": "image_url", "image_url": {"url": "{image_url}"}},
+                        ],
+                    },
+                ],
+                name="list_prompt_chain",
+                query="What is this?",
+                image_url="https://example.com/image.png",
             )
 
             assert node.name == "list_prompt_chain"
 
     def test_unified_prompt_with_load_balancing(self):
         """Test unified prompt with load balancing features."""
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="unified_lb_chain",
+            node = chain(
                 resource=["gpt-4o", "gpt-4o-mini"],
                 ratios=[0.7, 0.3],
                 fallback=["claude-sonnet"],
-                inputs={
-                    "template": {"system": "You are helpful.", "user": "{query}"},
-                    "query": "Hello",
-                },
+                template={"system": "You are helpful.", "user": "{query}"},
+                name="unified_lb_chain",
+                query="Hello",
             )
 
-            assert node.resource == ["gpt-4o", "gpt-4o-mini"]
-            assert node.ratios == [0.7, 0.3]
-            assert node.fallback == ["claude-sonnet"]
+            llm_op = node._ops["llm"]
+            assert llm_op.resource == ["gpt-4o", "gpt-4o-mini"]
+            assert llm_op.ratios == [0.7, 0.3]
+            assert llm_op.fallback == ["claude-sonnet"]
 
     def test_unified_prompt_with_json_mode(self):
         """Test unified prompt with JSON response_format."""
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="unified_json_chain",
+            node = chain(
                 resource="gpt-4o",
                 response_format={"type": "json_object"},
-                inputs={"template": {"user": "Classify and return JSON: {text}"}, "text": "sample"},
+                template={"user": "Classify and return JSON: {text}"},
+                name="unified_json_chain",
+                text="sample",
             )
 
-            assert node.response_format == {"type": "json_object"}
+            llm_op = node._ops["llm"]
+            assert "response_format" in llm_op.inputs
 
     def test_unified_prompt_with_extract(self):
         """Test unified prompt with structured output parsing."""
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = ChainOp(
-                name="unified_parser_chain",
+            node = chain(
                 resource="gpt-4",
-                inputs={
-                    "template": {"user": "Classify: {text}\n<category>...</category>"},
-                    "text": "sample",
-                },
+                template={"user": "Classify: {text}\n<category>...</category>"},
+                name="unified_parser_chain",
                 extract=["category: str", "confidence: float"],
                 parser="xml",
+                text="sample",
             )
 
-            assert node.extract == ["category: str", "confidence: float"]
             assert "parser" in node._ops
 
 
-class TestChainOpIntegration:
-    """Integration tests for ChainOp with real ResourceHub."""
+class TestChainIntegration:
+    """Integration tests for chain() with real ResourceHub."""
 
     @pytest.mark.asyncio
     async def test_chain_simple_generation(self, hub):
-        """Test ChainOp simple text generation with real LLM."""
+        """Test chain simple text generation with real LLM."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="simple_chain",
+        node = chain(
             resource="gpt-4o",
-            inputs={
-                "template": {
-                    "system": "You are a helpful assistant.",
-                    "user": "Say hello to {name} in one sentence.",
-                },
-                "name": "Alice",
+            template={
+                "system": "You are a helpful assistant.",
+                "user": "Say hello to {user} in one sentence.",
             },
+            name="simple_chain",
+            user="Alice",
         )
 
         schema = StateSchema(op=node)
@@ -550,31 +519,29 @@ class TestChainOpIntegration:
         result = await node.run(state)
 
         assert "content" in result
-        print(f"ChainOp response: {result['content']}")
+        print(f"chain response: {result['content']}")
 
     @pytest.mark.asyncio
     async def test_chain_structured_output(self, hub):
-        """Test ChainOp with structured output parsing."""
+        """Test chain with structured output parsing."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="structured_chain",
+        node = chain(
             resource="gpt-4o",
-            inputs={
-                "template": """Classify the sentiment of this text: "{text}"
+            template="""Classify the sentiment of this text: "{text}"
 
 Output your response in XML format:
 <sentiment>positive/negative/neutral</sentiment>
 <confidence>0.0-1.0</confidence>""",
-                "text": "I love this product! It's amazing!",
-            },
+            name="structured_chain",
             extract=["sentiment: str", "confidence: float"],
             parser="xml",
+            text="I love this product! It's amazing!",
         )
 
         schema = StateSchema(op=node)
@@ -588,26 +555,24 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_chain_json_mode(self, hub):
-        """Test ChainOp with JSON response_format."""
+        """Test chain with JSON response_format."""
         import json
 
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="json_chain",
+        node = chain(
             resource="gpt-4o",
             response_format={"type": "json_object"},
-            inputs={
-                "template": {
-                    "system": "You are a helpful assistant that always responds in JSON format.",
-                    "user": "List 3 programming languages with their year of creation. Return as JSON with 'languages' array.",
-                },
+            template={
+                "system": "You are a helpful assistant that always responds in JSON format.",
+                "user": "List 3 programming languages with their year of creation. Return as JSON with 'languages' array.",
             },
+            name="json_chain",
         )
 
         schema = StateSchema(op=node)
@@ -623,18 +588,17 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_chain_json_schema(self, hub):
-        """Test ChainOp with JSON schema response_format."""
+        """Test chain with JSON schema response_format."""
         import json
 
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="schema_chain",
+        node = chain(
             resource="gpt-4o",
             response_format={
                 "type": "json_schema",
@@ -653,7 +617,8 @@ Output your response in XML format:
                     },
                 },
             },
-            inputs={"template": "Give me info about Python programming language."},
+            template="Give me info about Python programming language.",
+            name="schema_chain",
         )
 
         schema = StateSchema(op=node)
@@ -670,20 +635,20 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_chain_load_balancing(self, hub):
-        """Test ChainOp with load balancing."""
+        """Test chain with load balancing."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
         # Use same model twice to test load balancing mechanism
-        node = ChainOp(
-            name="lb_chain",
+        node = chain(
             resource=["gpt-4o", "gpt-4o"],  # Same model for testing
             ratios=[0.5, 0.5],
-            inputs={"template": {"system": "You are helpful.", "user": "Say 'hello' in one word."}},
+            template={"system": "You are helpful.", "user": "Say 'hello' in one word."},
+            name="lb_chain",
         )
 
         schema = StateSchema(op=node)
@@ -698,20 +663,20 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_chain_with_fallback(self, hub):
-        """Test ChainOp with fallback configuration."""
+        """Test chain with fallback configuration."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
         # Primary should work, fallback shouldn't be needed
-        node = ChainOp(
-            name="fallback_chain",
+        node = chain(
             resource="gpt-4o",
             fallback=["gpt-4o"],  # Same as fallback for testing
-            inputs={"template": {"system": "You are helpful.", "user": "Say 'test' in one word."}},
+            template={"system": "You are helpful.", "user": "Say 'test' in one word."},
+            name="fallback_chain",
         )
 
         schema = StateSchema(op=node)
@@ -724,27 +689,25 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_chain_combined_features(self, hub):
-        """Test ChainOp with load balancing + JSON mode combined."""
+        """Test chain with load balancing + JSON mode combined."""
         import json
 
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="combined_chain",
+        node = chain(
             resource=["gpt-4o", "gpt-4o"],
             ratios=[0.5, 0.5],
             response_format={"type": "json_object"},
-            inputs={
-                "template": {
-                    "system": "You respond in JSON format only.",
-                    "user": "Return a JSON object with 'greeting' key containing 'hello'.",
-                }
+            template={
+                "system": "You respond in JSON format only.",
+                "user": "Return a JSON object with 'greeting' key containing 'hello'.",
             },
+            name="combined_chain",
         )
 
         schema = StateSchema(op=node)
@@ -759,18 +722,19 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_unified_string_prompt_generation(self, hub):
-        """Test ChainOp with unified string prompt."""
+        """Test chain with unified string prompt."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="string_prompt_chain",
+        node = chain(
             resource="gpt-4o",
-            inputs={"template": "Say hello to {name} in one sentence.", "name": "Bob"},
+            template="Say hello to {user} in one sentence.",
+            name="string_prompt_chain",
+            user="Bob",
         )
 
         schema = StateSchema(op=node)
@@ -783,25 +747,23 @@ Output your response in XML format:
 
     @pytest.mark.asyncio
     async def test_unified_dict_prompt_generation(self, hub):
-        """Test ChainOp with unified dict prompt (system + user)."""
+        """Test chain with unified dict prompt (system + user)."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="dict_prompt_chain",
+        node = chain(
             resource="gpt-4o",
-            inputs={
-                "template": {
-                    "system": "You are a friendly assistant who speaks like a {style}.",
-                    "user": "Greet {name}.",
-                },
-                "style": "pirate",
-                "name": "Captain Jack",
+            template={
+                "system": "You are a friendly assistant who speaks like a {style}.",
+                "user": "Greet {user}.",
             },
+            name="dict_prompt_chain",
+            style="pirate",
+            user="Captain Jack",
         )
 
         schema = StateSchema(op=node)
@@ -819,22 +781,20 @@ Output your response in XML format:
 
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="unified_json_chain",
+        node = chain(
             resource="gpt-4o",
             response_format={"type": "json_object"},
-            inputs={
-                "template": {
-                    "system": "You always respond in JSON format.",
-                    "user": "Return a JSON with 'message' key saying hello to {name}.",
-                },
-                "name": "World",
+            template={
+                "system": "You always respond in JSON format.",
+                "user": "Return a JSON with 'message' key saying hello to {user}.",
             },
+            name="unified_json_chain",
+            user="World",
         )
 
         schema = StateSchema(op=node)
@@ -852,19 +812,17 @@ Output your response in XML format:
         """Test unified prompt with load balancing."""
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured in resources.yaml")
 
-        node = ChainOp(
-            name="unified_lb_chain",
+        node = chain(
             resource=["gpt-4o", "gpt-4o"],
             ratios=[0.5, 0.5],
-            inputs={
-                "template": {"system": "You are helpful.", "user": "Say '{word}' in one word."},
-                "word": "test",
-            },
+            template={"system": "You are helpful.", "user": "Say '{word}' in one word."},
+            name="unified_lb_chain",
+            word="test",
         )
 
         schema = StateSchema(op=node)
@@ -877,8 +835,8 @@ Output your response in XML format:
         print(f"Unified LB response: {result['content']}")
 
 
-class TestChainOpRefTemplate:
-    """Tests for ChainOp when template is a Ref (e.g. inside @graph).
+class TestChainRefTemplate:
+    """Tests for chain() when template is a Ref (e.g. inside @graph).
 
     Regression tests for the bug where PromptOp's wildcard forwarding
     failed to discover template variables when the template itself was
@@ -890,7 +848,7 @@ class TestChainOpRefTemplate:
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -899,14 +857,14 @@ class TestChainOpRefTemplate:
 
             @graph
             def detect(template: str, transcript: str):
-                chain = ChainOp.of(
+                c = chain(
                     resource="gpt-4",
                     template=template,
-                    transcript=transcript,
                     extract=["result: str"],
                     parser="json",
+                    transcript=transcript,
                 )
-                START >> chain >> END
+                START >> c >> END
 
             node = detect(
                 template="Analyze this: {transcript}",
@@ -914,10 +872,10 @@ class TestChainOpRefTemplate:
             )
 
             # The internal PromptOp must know about 'transcript'
-            chain_op = node._ops["chain"]
+            chain_op = node._ops["c"]
             prompt_op = chain_op._ops["prompt"]
             assert "transcript" in prompt_op.inputs, (
-                "PromptOp should discover 'transcript' from ChainOp's inputs "
+                "PromptOp should discover 'transcript' from chain's inputs "
                 "even when template is a Ref"
             )
 
@@ -926,7 +884,7 @@ class TestChainOpRefTemplate:
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -935,16 +893,16 @@ class TestChainOpRefTemplate:
 
             @graph
             def detect(template: str, transcript: str, call_type: str, context: str):
-                chain = ChainOp.of(
+                c = chain(
                     resource="gpt-4",
                     template=template,
+                    extract=["result: str"],
+                    parser="json",
                     transcript=transcript,
                     call_type=call_type,
                     context=context,
-                    extract=["result: str"],
-                    parser="json",
                 )
-                START >> chain >> END
+                START >> c >> END
 
             node = detect(
                 template="Type: {call_type}\nContext: {context}\nTranscript: {transcript}",
@@ -953,7 +911,7 @@ class TestChainOpRefTemplate:
                 context="debt collection",
             )
 
-            prompt_op = node._ops["chain"]._ops["prompt"]
+            prompt_op = node._ops["c"]._ops["prompt"]
             assert "transcript" in prompt_op.inputs
             assert "call_type" in prompt_op.inputs
             assert "context" in prompt_op.inputs
@@ -963,7 +921,7 @@ class TestChainOpRefTemplate:
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -972,26 +930,26 @@ class TestChainOpRefTemplate:
 
             @graph
             def detect(transcript: str):
-                chain = ChainOp.of(
+                c = chain(
                     resource="gpt-4",
                     template="Analyze: {transcript}",
-                    transcript=transcript,
                     extract=["result: str"],
                     parser="json",
+                    transcript=transcript,
                 )
-                START >> chain >> END
+                START >> c >> END
 
             node = detect(transcript="Hello world")
 
-            prompt_op = node._ops["chain"]._ops["prompt"]
+            prompt_op = node._ops["c"]._ops["prompt"]
             assert "transcript" in prompt_op.inputs
 
     def test_nested_graph_with_ref_template(self):
-        """End-to-end: nested @graph passes Ref template to ChainOp, vars must propagate."""
+        """End-to-end: nested @graph passes Ref template to chain, vars must propagate."""
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import ChainOp
+        from hush.providers.ops import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -1000,14 +958,14 @@ class TestChainOpRefTemplate:
 
             @graph
             def inner(template: str, transcript: str):
-                chain = ChainOp.of(
+                c = chain(
                     resource="gpt-4",
                     template=template,
-                    transcript=transcript,
                     extract=["result: str"],
                     parser="json",
+                    transcript=transcript,
                 )
-                START >> chain >> END
+                START >> c >> END
 
             @graph
             def outer(transcript: str):
@@ -1021,7 +979,7 @@ class TestChainOpRefTemplate:
 
             # Navigate: outer → inner → chain → prompt
             inner_op = node._ops["sub"]
-            chain_op = inner_op._ops["chain"]
+            chain_op = inner_op._ops["c"]
             prompt_op = chain_op._ops["prompt"]
             assert "transcript" in prompt_op.inputs
 
