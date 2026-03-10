@@ -335,79 +335,84 @@ class LLMOp(BaseOp):
         """Estimate context size from messages (rough token count)."""
         return len(str(_inputs.get("messages", []))) // 4
 
+    @staticmethod
+    def _process_chunk(chunk, acc: dict) -> Optional[dict]:
+        """Process a single stream chunk, updating accumulator state.
+
+        Returns a yield dict {"content": ..., "role": "assistant"} if the chunk
+        has content, otherwise None.
+        """
+        if chunk.usage:
+            acc["tokens_used"] = chunk.usage.model_dump()
+
+        if not chunk.choices:
+            return None
+
+        choice = chunk.choices[0]
+
+        if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
+            acc["thinking_content"] += choice.delta.reasoning_content
+
+        if choice.delta.content:
+            acc["response"] += choice.delta.content
+            yield_dict = {"content": choice.delta.content, "role": "assistant"}
+        else:
+            yield_dict = None
+
+        if choice.finish_reason:
+            acc["finish_reason"] = choice.finish_reason
+
+        if choice.delta.tool_calls:
+            acc["tool_calls"].extend([tc.model_dump() for tc in choice.delta.tool_calls])
+
+        if hasattr(choice.delta, "refusal") and choice.delta.refusal:
+            acc["refusal"] = (acc["refusal"] or "") + choice.delta.refusal
+
+        return yield_dict
+
+    @staticmethod
+    def _new_stream_acc() -> dict:
+        """Create a fresh accumulator for streaming state."""
+        return {
+            "response": "",
+            "thinking_content": "",
+            "finish_reason": "stop",
+            "tokens_used": {},
+            "tool_calls": [],
+            "refusal": None,
+        }
+
     async def _stream_core(self, **inputs):
         """Async generator core for streaming mode.
 
         Yields per-token dicts as chunks arrive from the LLM backend.
-        The scheduler's _drive_generator() drives this, creating a stream
+        The scheduler's task_generator() drives this, creating a stream
         context per yield. The final yield contains complete metadata.
         """
         llm_params = self._build_llm_params(inputs)
         selected_llm = self._select_llm() if self._llms else self._llm
         resource = self._get_selected_resource(selected_llm) if selected_llm else self.resource
-
-        response = ""
-        thinking_content = ""
-        finish_reason = "stop"
-        tokens_used = {}
-        tool_calls = []
-        refusal = None
+        acc = self._new_stream_acc()
 
         try:
             async for chunk in selected_llm.stream(**llm_params):
-                if chunk.usage:
-                    tokens_used = chunk.usage.model_dump()
-
-                if chunk.choices:
-                    choice = chunk.choices[0]
-
-                    if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
-                        thinking_content += choice.delta.reasoning_content
-
-                    if choice.delta.content:
-                        response += choice.delta.content
-                        yield {"content": choice.delta.content, "role": "assistant"}
-
-                    if choice.finish_reason:
-                        finish_reason = choice.finish_reason
-
-                    if choice.delta.tool_calls:
-                        tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
-
-                    if hasattr(choice.delta, "refusal") and choice.delta.refusal:
-                        refusal = (refusal or "") + choice.delta.refusal
+                yield_dict = self._process_chunk(chunk, acc)
+                if yield_dict:
+                    yield yield_dict
 
         except Exception as e:
             LOGGER.error(f"Error streaming from {resource}: {e}")
 
-            # Try fallback LLMs
             if self._fallback_llms:
                 for idx, fallback_llm in enumerate(self._fallback_llms):
                     fallback_key = self.fallback[idx]
                     LOGGER.info(f"Trying streaming fallback {fallback_key}...")
                     try:
-                        response = ""
-                        thinking_content = ""
-                        tokens_used = {}
-                        tool_calls = []
-                        refusal = None
-
+                        acc = self._new_stream_acc()
                         async for chunk in fallback_llm.stream(**llm_params):
-                            if chunk.usage:
-                                tokens_used = chunk.usage.model_dump()
-                            if chunk.choices:
-                                choice = chunk.choices[0]
-                                if hasattr(choice.delta, "reasoning_content") and choice.delta.reasoning_content:
-                                    thinking_content += choice.delta.reasoning_content
-                                if choice.delta.content:
-                                    response += choice.delta.content
-                                    yield {"content": choice.delta.content, "role": "assistant"}
-                                if choice.finish_reason:
-                                    finish_reason = choice.finish_reason
-                                if choice.delta.tool_calls:
-                                    tool_calls.extend([tc.model_dump() for tc in choice.delta.tool_calls])
-                                if hasattr(choice.delta, "refusal") and choice.delta.refusal:
-                                    refusal = (refusal or "") + choice.delta.refusal
+                            yield_dict = self._process_chunk(chunk, acc)
+                            if yield_dict:
+                                yield yield_dict
 
                         resource = fallback_key
                         LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
@@ -420,15 +425,15 @@ class LLMOp(BaseOp):
 
         # Final yield with complete metadata
         yield {
-            "content": response,
+            "content": acc["response"],
             "role": "assistant",
-            "finish_reason": finish_reason,
+            "finish_reason": acc["finish_reason"],
             "model_used": resource,
-            "tokens_used": tokens_used,
-            "tool_calls": tool_calls,
-            "thinking_content": thinking_content or None,
+            "tokens_used": acc["tokens_used"],
+            "tool_calls": acc["tool_calls"],
+            "thinking_content": acc["thinking_content"] or None,
             "context_used": self._estimate_context(inputs),
-            "refusal": refusal,
+            "refusal": acc["refusal"],
             "logprobs": None,
         }
 

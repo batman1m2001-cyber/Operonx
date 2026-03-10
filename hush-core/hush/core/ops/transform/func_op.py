@@ -192,40 +192,43 @@ def parse_comment(comment: str) -> tuple:
     return Any, None, comment
 
 
-def _extract_dict_keys(dict_node: ast.Dict, source_lines: List[str]) -> Dict[str, Param]:
-    """Extract keys from an AST Dict node."""
+def _build_comment_map(source_lines: List[str]) -> Dict[str, str]:
+    """Build {key_name: comment_str} from source lines in one pass.
+
+    Scans for lines containing a quoted string key followed by #comment.
+    """
+    import re
+
+    comment_map = {}
+    pattern = re.compile(r"""['"](\w+)['"]\s*:.*#\s*(.+)""")
+    for line in source_lines:
+        m = pattern.search(line)
+        if m:
+            comment_map[m.group(1)] = m.group(2).strip()
+    return comment_map
+
+
+def _extract_dict_keys(dict_node: ast.Dict, comment_map: Dict[str, str]) -> Dict[str, Param]:
+    """Extract keys from an AST Dict node, using pre-built comment map for O(1) lookup."""
     schema = {}
     for key_node in dict_node.keys:
         if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
             key_name = key_node.value
-
-            # Trích xuất type, default, và description từ inline comment
-            param_type = Any
-            default = None
-            description = ""
-            for src_line in source_lines:
-                # Kiểm tra cả single và double quotes
-                if "#" in src_line and (f'"{key_name}"' in src_line or f"'{key_name}'" in src_line):
-                    comment = src_line.split("#", 1)[1].strip()
-                    param_type, default, description = parse_comment(comment)
-                    break
-
+            comment = comment_map.get(key_name)
+            if comment:
+                param_type, default, description = parse_comment(comment)
+            else:
+                param_type, default, description = Any, None, ""
             schema[key_name] = Param(type=param_type, default=default, description=description)
     return schema
 
 
 def extract_return_schema(func: Callable) -> Dict[str, Param]:
-    """Trích xuất return schema từ source code của function sử dụng AST.
+    """Extract return schema from function source code using AST.
 
-    Hỗ trợ:
-        # Function thông thường
-        return {"key": value}
-        return {"key": value,  # description}
-        return {"key": value,  # (type) description}
-
-        # Lambda function
-        lambda x: {"key": value}
-        lambda x: {"key": value,  # (type) description}
+    Supports return {"key": value}, lambda x: {"key": value},
+    and yield {"key": value} (streaming ops). Inline comments
+    after keys are parsed for type hints and descriptions.
     """
     try:
         source = inspect.getsource(func)
@@ -237,14 +240,11 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
         try:
             tree = ast.parse(cleaned_source)
         except SyntaxError:
-            # If direct parsing fails (e.g., lambda in function call on single line),
-            # try to extract just the lambda expression with proper brace matching
+            # Lambda in function call on single line — extract with brace matching
             lambda_idx = cleaned_source.find("lambda")
             if lambda_idx != -1:
-                # Find the opening brace after lambda
                 brace_start = cleaned_source.find("{", lambda_idx)
                 if brace_start != -1:
-                    # Count braces to find matching close
                     depth = 1
                     pos = brace_start + 1
                     while pos < len(cleaned_source) and depth > 0:
@@ -254,34 +254,33 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
                             depth -= 1
                         pos += 1
                     if depth == 0:
-                        lambda_source = cleaned_source[lambda_idx:pos]
                         try:
-                            tree = ast.parse(lambda_source)
+                            tree = ast.parse(cleaned_source[lambda_idx:pos])
                         except SyntaxError:
                             pass
 
         if tree is None:
             return {}
 
+        # Build comment map once, reuse for all dict nodes
+        comment_map = _build_comment_map(source_lines)
+
         schema = {}
         for node in ast.walk(tree):
-            # Xử lý câu lệnh return của function thông thường
-            if isinstance(node, ast.Return) and node.value:
-                if isinstance(node.value, ast.Dict):
-                    schema.update(_extract_dict_keys(node.value, source_lines))
+            dict_value = None
+            if isinstance(node, ast.Return) and node.value and isinstance(node.value, ast.Dict):
+                dict_value = node.value
+            elif isinstance(node, ast.Lambda) and isinstance(node.body, ast.Dict):
+                dict_value = node.body
+            elif isinstance(node, ast.Yield) and node.value and isinstance(node.value, ast.Dict):
+                dict_value = node.value
 
-            # Xử lý lambda expression (body là giá trị return)
-            elif isinstance(node, ast.Lambda):
-                if isinstance(node.body, ast.Dict):
-                    schema.update(_extract_dict_keys(node.body, source_lines))
-
-            # Xử lý generator yield (streaming ops)
-            elif isinstance(node, ast.Yield) and node.value:
-                if isinstance(node.value, ast.Dict):
-                    schema.update(_extract_dict_keys(node.value, source_lines))
+            if dict_value is not None:
+                schema.update(_extract_dict_keys(dict_value, comment_map))
 
         return schema
     except Exception:
+        LOGGER.debug("Failed to extract return schema for %s", getattr(func, "__name__", func))
         return {}
 
 
