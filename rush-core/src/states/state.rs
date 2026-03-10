@@ -125,6 +125,65 @@ impl EngineState {
         result
     }
 
+    /// Iterate all (context, start_time) pairs where an op was executed.
+    /// Used by TraceCollector to discover all execution records for a given op.
+    pub fn iter_executed(&self, full_name: &str) -> Vec<(String, String)> {
+        let k1 = match self.interner.get(full_name) {
+            Some(k) => k,
+            None => return vec![],
+        };
+        let k2 = match self.interner.get("$start_time") {
+            Some(k) => k,
+            None => return vec![],
+        };
+
+        let mut result = Vec::new();
+        for entry in self.values.iter() {
+            let (ek1, ek2, ek3) = entry.key();
+            if *ek1 == k1 && *ek2 == k2 {
+                let ctx = self.interner.resolve(ek3).to_string();
+                if let Value::String(ref s) = **entry.value() {
+                    result.push((ctx, s.clone()));
+                }
+            }
+        }
+        result
+    }
+
+    /// Get all non-$-prefixed var→value pairs for an op at a specific context.
+    /// Used by TraceCollector to build inputs/outputs for TraceNode.
+    pub fn get_vars_for_op(&self, full_name: &str, context: &str) -> Vec<(String, Value)> {
+        let k1 = match self.interner.get(full_name) {
+            Some(k) => k,
+            None => return Vec::new(),
+        };
+        let k3 = match self.interner.get(context) {
+            Some(k) => k,
+            None => return Vec::new(),
+        };
+
+        let mut result = Vec::new();
+        for entry in self.values.iter() {
+            let (ek1, ek2, ek3) = entry.key();
+            if *ek1 == k1 && *ek3 == k3 {
+                let var = self.interner.resolve(ek2);
+                if !var.starts_with('$') {
+                    result.push((var.to_string(), (**entry.value()).clone()));
+                }
+            }
+        }
+        result
+    }
+
+    /// Get a `$`-prefixed metadata value for an op at a specific context.
+    /// Used by TraceCollector for timing, cost, model, etc.
+    pub fn get_meta(&self, full_name: &str, meta_key: &str, context: &str) -> Option<Value> {
+        let k1 = self.interner.get(full_name)?;
+        let k2 = self.interner.get(meta_key)?;
+        let k3 = self.interner.get(context)?;
+        self.values.get(&(k1, k2, k3)).map(|v| (**v).clone())
+    }
+
     /// Snapshot all stored values as a nested JSON object.
     /// Format: {"op_name": {"var_name": {"context": value}}}.
     /// Used by engine.rs to build $state metadata for tracing.

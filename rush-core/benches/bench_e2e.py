@@ -27,7 +27,8 @@ import tracemalloc
 
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
-from hush.core.ops.iteration import Each, ForOp
+# ForOp/Each removed — iteration now uses GraphOp.loop
+# Pattern 5 (ForOp loop) is skipped
 
 BUILTIN_CRATE = None  # Built-in ops are now internal to rush-core
 
@@ -523,7 +524,7 @@ def build_cpu_chain(n: int, hash_iters: int):
 
 async def bench_python(graph_obj, inputs: dict, runs: int = 200):
     """Benchmark using hush-core's Python async engine."""
-    engine = Hush(graph_obj, mode="python")
+    engine = Hush(graph_obj)
 
     # Warmup
     for _ in range(5):
@@ -680,15 +681,7 @@ async def main():
     for n in [5, 10, 20]:
         await bench_one(f"branching(stages={n})", build_branching(n), {"score": 75})
 
-    # --- ForOp loop ---
-    print_header("ForOp sequential loop")
-    for n in [10, 50, 100]:
-        items = [f"item{i}" for i in range(n)]
-        await bench_one(
-            f"for_loop({n} items)",
-            build_for_loop(n),
-            {"items": items, "prefix": "test"},
-        )
+    # --- ForOp loop (SKIPPED - ForOp/Each removed, use GraphOp.loop) ---
 
     # --- Production-like ---
     print_header("Production-like (n parallel verify subgraphs -> aggregate -> post)")

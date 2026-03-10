@@ -17,7 +17,8 @@ use crate::state::{AppState, EndpointState};
 
 /// Build the Axum router from a server config.
 pub fn build_router(config: ServerConfig) -> Router {
-    let app_state = AppState::new();
+    let tracers = crate::execute::build_tracers(&config.tracers);
+    let app_state = AppState::new(tracers);
     let mut has_jobs = false;
     let mut endpoint_paths: Vec<String> = Vec::new();
 
@@ -56,7 +57,7 @@ pub fn build_router(config: ServerConfig) -> Router {
                     .ok_or_else(|| ServeError::Internal("endpoint not found".into()))?;
                 let request_id = uuid::Uuid::new_v4().to_string();
                 let result =
-                    crate::execute::run_workflow(&ep.graph_json, inputs, Some(request_id)).await?;
+                    crate::execute::run_workflow(&ep.graph_json, inputs, Some(request_id), sync_state.tracers.clone()).await?;
                 Ok::<Json<Value>, ServeError>(Json(sync_handler::filter_internal_keys(result)))
             }),
         );

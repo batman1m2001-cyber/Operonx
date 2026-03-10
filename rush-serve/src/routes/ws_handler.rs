@@ -46,7 +46,7 @@ pub async fn handle_ws(app: AppState, path: String, mut socket: WebSocket) {
                 };
 
                 let request_id = uuid::Uuid::new_v4().to_string();
-                match run_workflow(&ep.graph_json, inputs, Some(request_id)).await {
+                match run_workflow(&ep.graph_json, inputs, Some(request_id), app.tracers.clone()).await {
                     Ok(result) => {
                         let filtered = filter_internal_keys(result);
                         let msg = json!({"type": "result", "data": filtered});

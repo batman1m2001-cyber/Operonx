@@ -28,7 +28,7 @@ pub async fn handle_stream(
 
     // Run workflow (blocking in Rust mode — full result at once).
     // When rush-core supports incremental output, we'll stream chunks here.
-    let result = run_workflow(&graph_json, inputs, Some(request_id)).await?;
+    let result = run_workflow(&graph_json, inputs, Some(request_id), app.tracers.clone()).await?;
     let filtered = filter_internal_keys(result);
 
     // Emit as SSE: one "result" event with the full output.
