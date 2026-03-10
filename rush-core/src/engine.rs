@@ -4,12 +4,16 @@
 //! parses into Rust config structs, and runs the graph.
 //! Pure Rust — no PyO3, no GIL.
 
+use std::sync::Arc;
+
 use serde_json::Value;
 
 use crate::config::GraphConfig;
 use crate::error::RushError;
 use crate::ops::graph::graph_op;
 use crate::states::state::EngineState;
+use crate::tracing::flush_worker::FlushWorker;
+use crate::tracing::tracer::Tracer;
 
 /// Standalone Rust execution engine for Hush workflows.
 ///
@@ -17,19 +21,36 @@ use crate::states::state::EngineState;
 ///   let engine = Rush::new(config_json)?;
 ///   let result = engine.run_json(inputs, request_id, user_id, session_id)?;
 pub struct Rush {
-    config: GraphConfig,
+    config: Arc<GraphConfig>,
+    tracers: Vec<Arc<dyn Tracer>>,
+    flush_worker: FlushWorker,
 }
 
 impl Rush {
     /// Create a new Rush engine from a JSON config string.
     pub fn new(config_json: &str) -> Result<Self, RushError> {
         let config = GraphConfig::from_json(config_json)?;
-        Ok(Rush { config })
+        Ok(Rush {
+            config: Arc::new(config),
+            tracers: Vec::new(),
+            flush_worker: FlushWorker::new(),
+        })
+    }
+
+    /// Register a tracer for automatic flush after each run.
+    pub fn add_tracer(&mut self, tracer: impl Tracer + 'static) {
+        self.tracers.push(Arc::new(tracer));
+    }
+
+    /// Register a pre-wrapped Arc<dyn Tracer>.
+    pub fn add_tracer_arc(&mut self, tracer: Arc<dyn Tracer>) {
+        self.tracers.push(tracer);
     }
 
     /// Run the graph with JSON inputs and return JSON result.
     ///
     /// Pure Rust execution — no Python, no GIL.
+    /// If tracers are registered, auto-flushes traces in the background.
     pub fn run_json(
         &self,
         inputs: Value,
@@ -37,7 +58,7 @@ impl Rush {
         user_id: Option<String>,
         session_id: Option<String>,
     ) -> Result<Value, RushError> {
-        let state = EngineState::new();
+        let state = Arc::new(EngineState::new());
         let context = "main";
 
         if let Some(ref rid) = request_id {
@@ -76,6 +97,15 @@ impl Rush {
 
         if let Value::Object(ref mut map) = result {
             map.insert("$state".into(), Value::Object(state_meta));
+        }
+
+        // 5. Auto-flush traces if tracers registered
+        if !self.tracers.is_empty() {
+            self.flush_worker.submit(
+                self.tracers.clone(),
+                self.config.clone(),
+                state,
+            );
         }
 
         Ok(result)

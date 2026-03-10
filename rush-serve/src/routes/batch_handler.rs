@@ -42,7 +42,7 @@ pub async fn handle_batch(
         let gj = graph_json.clone();
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            match run_workflow(&gj, item, None).await {
+            match run_workflow(&gj, item, None, vec![]).await {
                 Ok(result) => filter_internal_keys(result),
                 Err(e) => json!({ "error": e.to_string() }),
             }

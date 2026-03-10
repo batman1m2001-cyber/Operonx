@@ -4,6 +4,7 @@ members = [
     "rush-core",
     "rush-providers",
     "rush-serve",
+    "rush-telemetry",
     "ui-hush-eyes",
 ]
 

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 rush-core = { path = "../rush-core" }
 rush-providers = { path = "../rush-providers" }
+rush-telemetry = { path = "../rush-telemetry" }
 
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }

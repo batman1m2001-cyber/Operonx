@@ -26,9 +26,10 @@ pub async fn handle_submit(
     let store = app.job_store.clone();
     let jid = job_id.clone();
 
+    let tracers = app.tracers.clone();
     tokio::spawn(async move {
         store.set_running(&jid);
-        match run_workflow(&graph_json, inputs, Some(jid.clone())).await {
+        match run_workflow(&graph_json, inputs, Some(jid.clone()), tracers).await {
             Ok(result) => store.set_completed(&jid, filter_internal_keys(result)),
             Err(e) => store.set_failed(&jid, e.to_string()),
         }

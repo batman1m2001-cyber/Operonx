@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
+use rush_core::tracing::Tracer;
+
 use crate::config::EndpointDef;
 use crate::jobs::JobStore;
 
@@ -20,13 +22,15 @@ pub struct EndpointState {
 pub struct AppState {
     pub endpoints: Arc<DashMap<String, Arc<EndpointState>>>,
     pub job_store: Arc<JobStore>,
+    pub tracers: Vec<Arc<dyn Tracer>>,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(tracers: Vec<Arc<dyn Tracer>>) -> Self {
         AppState {
             endpoints: Arc::new(DashMap::new()),
             job_store: Arc::new(JobStore::new()),
+            tracers,
         }
     }
 

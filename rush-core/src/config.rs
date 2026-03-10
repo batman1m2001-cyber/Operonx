@@ -87,6 +87,8 @@ pub struct OpConfig {
     pub inner_graph: Option<Box<GraphConfig>>,
     /// Provider config (for type == "llm", "embedding", "rerank").
     pub provider_config: Option<ProviderConfig>,
+    /// Whether this op contains an LLM generation (for tracing node_type="generation").
+    pub contain_generation: bool,
 }
 
 /// Branch op configuration — conditions and targets.
@@ -274,6 +276,7 @@ impl OpConfig {
         let verbose = get_bool(val, "verbose", false);
         let stream = get_bool(val, "stream", false);
         let is_generator = get_bool(val, "is_generator", false);
+        let contain_generation = get_bool(val, "contain_generation", false);
         let bound = match get_opt_string(val, "bound").as_deref() {
             Some("io") => OpBound::Io,
             _ => OpBound::Cpu,
@@ -315,6 +318,7 @@ impl OpConfig {
             branch_config,
             inner_graph,
             provider_config,
+            contain_generation,
         };
 
         // Build-time validation: reject ops that cannot run in Rust mode
