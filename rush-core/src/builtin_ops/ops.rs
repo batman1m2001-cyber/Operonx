@@ -664,3 +664,48 @@ pub fn maybe_fail(inputs: &Value) -> Value {
         serde_json::json!({"result": value * 10})
     }
 }
+
+// =============================================================================
+// Generator ops (return Vec<Value> — each item is one yield)
+// =============================================================================
+
+/// chunk_text: text, chunk_size → yields [{"chunk": str}, ...]
+/// Splits text into chunks of `chunk_size` characters.
+pub fn chunk_text(inputs: &Value) -> Vec<Value> {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let chunk_size = inputs["chunk_size"].as_u64().unwrap_or(100) as usize;
+
+    if text.is_empty() || chunk_size == 0 {
+        return Vec::new();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    chars
+        .chunks(chunk_size)
+        .enumerate()
+        .map(|(i, chunk)| {
+            let s: String = chunk.iter().collect();
+            serde_json::json!({"chunk": s, "index": i})
+        })
+        .collect()
+}
+
+/// range_gen: start, end, step → yields [{"value": n}, ...]
+/// Generates a range of integers.
+pub fn range_gen(inputs: &Value) -> Vec<Value> {
+    let start = inputs["start"].as_i64().unwrap_or(0);
+    let end = inputs["end"].as_i64().unwrap_or(0);
+    let step = inputs["step"].as_i64().unwrap_or(1);
+
+    if step == 0 || (step > 0 && start >= end) || (step < 0 && start <= end) {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let mut current = start;
+    while (step > 0 && current < end) || (step < 0 && current > end) {
+        result.push(serde_json::json!({"value": current}));
+        current += step;
+    }
+    result
+}

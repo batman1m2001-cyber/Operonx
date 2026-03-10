@@ -450,6 +450,7 @@ fn test_large_string_passthrough() {
 }
 
 #[test]
+#[ignore = "ForOp removed — rewrite as generator+streaming in Phase 10"]
 fn test_many_for_iterations() {
 
     let items: Vec<i64> = (0..100).collect();

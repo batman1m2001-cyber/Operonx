@@ -543,6 +543,7 @@ class BaseOp(ABC):
     def serialize(self) -> dict:
         """Serialize this op to a config dict for the Rust backend."""
         is_async = inspect.iscoroutinefunction(self.core)
+        is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
         # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→cpu)
         bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else "cpu")
         return {
@@ -552,6 +553,7 @@ class BaseOp(ABC):
             "rust_op": getattr(self.core, "_rust_op_name", None),
             "python_callable": self.core,
             "is_async": is_async,
+            "is_generator": is_gen,
             "executor": self.executor,
             "enabled": self.enabled,
             "verbose": self.verbose,

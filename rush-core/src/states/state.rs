@@ -2,8 +2,12 @@
 //!
 //! Mirrors Python's `states/state.py` (MemoryState).
 //! Maps (op_full_name, var_name, context_id) → Arc<serde_json::Value>.
-//! Default context is "" (empty string) for non-iteration code.
-//! Iteration contexts: "[0]", "[1]", nested: "[0].[0]", etc.
+//! Root context is "main". Stream contexts are dot-joined:
+//! "main", "main.[0]", "main.[0].[1]", etc.
+//!
+//! `get()` walks up the context hierarchy (Cell fallback):
+//! "main.[0].[1]" → "main.[0]" → "main" — so stream ops
+//! inherit values from parent contexts automatically.
 //!
 //! Uses DashMap for concurrent read/write (parallel op execution),
 //! lasso::ThreadedRodeo for string interning (zero-alloc key lookups),
@@ -44,13 +48,34 @@ impl EngineState {
         self.request_id.lock().unwrap().clone()
     }
 
-    /// Get a value from state. Zero heap allocations on cache hit.
-    /// Arc::clone() is O(1) regardless of value size.
+    /// Get a value from state with context hierarchy fallback.
+    ///
+    /// Tries exact context first, then walks up the dot-separated hierarchy:
+    /// `"main.[0].[1]"` → `"main.[0]"` → `"main"`.
+    /// This lets stream contexts inherit values from parent contexts.
     pub fn get(&self, full_name: &str, var: &str, context: &str) -> Option<Arc<Value>> {
         let k1 = self.interner.get(full_name)?;
         let k2 = self.interner.get(var)?;
-        let k3 = self.interner.get(context)?;
-        self.values.get(&(k1, k2, k3)).map(|entry| Arc::clone(entry.value()))
+
+        // 1. Exact match
+        if let Some(k3) = self.interner.get(context) {
+            if let Some(entry) = self.values.get(&(k1, k2, k3)) {
+                return Some(Arc::clone(entry.value()));
+            }
+        }
+
+        // 2. Walk up: "main.[0].[1]" → "main.[0]" → "main"
+        let mut ctx = context;
+        while let Some(dot_pos) = ctx.rfind('.') {
+            ctx = &ctx[..dot_pos];
+            if let Some(k3) = self.interner.get(ctx) {
+                if let Some(entry) = self.values.get(&(k1, k2, k3)) {
+                    return Some(Arc::clone(entry.value()));
+                }
+            }
+        }
+
+        None
     }
 
     /// Set a value in state. Interns key strings (allocs only on first-seen string).

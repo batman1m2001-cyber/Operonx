@@ -147,6 +147,76 @@ pub fn single_op_graph(
     })
 }
 
+/// Build a generator op config (is_generator = true).
+pub fn generator_op(
+    name: &str,
+    graph_name: &str,
+    rust_op: &str,
+    inputs: Vec<(String, Value)>,
+) -> Value {
+    let inputs_obj: serde_json::Map<String, Value> = inputs.into_iter().collect();
+    json!({
+        "type": "func",
+        "name": name,
+        "full_name": format!("{}.{}", graph_name, name),
+        "rust_op": rust_op,
+        "is_async": false,
+        "enabled": true,
+        "verbose": false,
+        "stream": false,
+        "bound": "cpu",
+        "is_generator": true,
+        "inputs": inputs_obj,
+        "outputs": {}
+    })
+}
+
+/// Build a graph config with stream_predecrements (for generator → downstream).
+pub fn streaming_graph(
+    graph_name: &str,
+    ops_list: Vec<(String, Value)>,
+    entries: Vec<&str>,
+    ready_count: Vec<(&str, i32)>,
+    adj: Vec<(&str, Vec<(&str, bool)>)>,
+    stream_predecrements: Value,
+) -> Value {
+    let mut ops_map = serde_json::Map::new();
+    for (name, op_val) in &ops_list {
+        ops_map.insert(name.clone(), op_val.clone());
+    }
+
+    let rc: serde_json::Map<String, Value> = ready_count
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), json!(v)))
+        .collect();
+
+    let adj_map: serde_json::Map<String, Value> = adj
+        .into_iter()
+        .map(|(from, targets)| {
+            let targets_val: Vec<Value> = targets
+                .into_iter()
+                .map(|(t, soft)| json!([t, soft]))
+                .collect();
+            (from.to_string(), json!(targets_val))
+        })
+        .collect();
+
+    let entries_val: Vec<Value> = entries.into_iter().map(|e| json!(e)).collect();
+
+    json!({
+        "name": graph_name,
+        "full_name": graph_name,
+        "ops": ops_map,
+        "entries": entries_val,
+        "initial_ready_count": rc,
+        "compiled_adj": adj_map,
+        "has_soft_preds": [],
+        "inputs": {},
+        "outputs": {},
+        "stream_predecrements": stream_predecrements
+    })
+}
+
 /// Build a linear chain graph: op1 -> op2 -> ... -> END.
 pub fn chain_graph(
     graph_name: &str,

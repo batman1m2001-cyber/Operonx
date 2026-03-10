@@ -38,7 +38,7 @@ impl Rush {
         session_id: Option<String>,
     ) -> Result<Value, RushError> {
         let state = EngineState::new();
-        let context = "";
+        let context = "main";
 
         if let Some(ref rid) = request_id {
             state.set_request_id(rid.clone());

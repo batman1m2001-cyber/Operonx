@@ -503,6 +503,15 @@ class GraphOp(BaseOp):
                     op: [[succ, soft] for succ, soft in successors]
                     for op, successors in self._compiled_adj.items()
                 },
+                "stream_predecrements": self._stream_predecrements,
+                "loop_config": {
+                    "until": self._loop_config.until if isinstance(self._loop_config.until, str) else None,
+                    "max_iterations": self._loop_config.max_iterations,
+                    "loop_vars": list(self._loop_config.initial_state.keys()),
+                }
+                if self._loop_config
+                else None,
+                "max_stream_concurrent": self._max_stream_concurrent,
             }
         )
         return base

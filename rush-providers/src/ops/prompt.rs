@@ -8,6 +8,7 @@
 //! Also handles conversation_history insertion and tool_results appending.
 //! This op is pure CPU — no HTTP calls, no auth needed.
 
+use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::http::{ProviderError, ProviderResult};
@@ -131,6 +132,9 @@ fn template_to_messages(
 }
 
 /// Format a string with {key} substitution from vars.
+///
+/// Raises an error if any `{var}` placeholders remain after substitution,
+/// matching Python's PromptError for missing template variables.
 fn format_string(
     template: &str,
     vars: &serde_json::Map<String, Value>,
@@ -141,6 +145,26 @@ fn format_string(
         let replacement = value_to_string(value);
         result = result.replace(&placeholder, &replacement);
     }
+
+    // Detect remaining unreplaced {var} placeholders
+    let re = Regex::new(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}").unwrap();
+    let missing: Vec<String> = re
+        .captures_iter(&result)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    if !missing.is_empty() {
+        return Err(ProviderError {
+            message: format!(
+                "Missing template variable(s): {}. Template: {:?}",
+                missing.join(", "),
+                template,
+            ),
+            status_code: None,
+            error_code: None,
+        });
+    }
+
     Ok(result)
 }
 
@@ -245,13 +269,15 @@ mod tests {
 
     #[test]
     fn test_string_template_missing_var() {
-        // Missing vars leave placeholder as-is
+        // Missing vars now raise an error (matches Python PromptError)
         let result = execute(json!({
             "template": "Hello {name}"
-        }))
-        .unwrap();
+        }));
 
-        assert_eq!(result["messages"][0]["content"], "Hello {name}");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("Missing template variable"));
+        assert!(err.message.contains("name"));
     }
 
     // =========================================================================

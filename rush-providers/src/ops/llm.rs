@@ -40,7 +40,7 @@ pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResul
 
     match execute_single(selected_config, &inputs).await {
         Ok(mut result) => {
-            add_metadata(&mut result, selected_config, &selected_resource, start_time);
+            add_metadata(&mut result, selected_config, &selected_resource, start_time, &inputs);
             Ok(result)
         }
         Err(primary_error) => {
@@ -76,7 +76,7 @@ pub async fn execute_streaming(
 
     match execute_single_streaming(selected_config, &inputs, chunk_tx).await {
         Ok(mut result) => {
-            add_metadata(&mut result, selected_config, &selected_resource, start_time);
+            add_metadata(&mut result, selected_config, &selected_resource, start_time, &inputs);
             Ok(result)
         }
         Err(primary_error) => {
@@ -119,7 +119,7 @@ async fn try_fallbacks(
 
         match execute_single(fallback_config, inputs).await {
             Ok(mut result) => {
-                add_metadata(&mut result, fallback_config, &fallback_key, start_time);
+                add_metadata(&mut result, fallback_config, &fallback_key, start_time, inputs);
                 return Ok(result);
             }
             Err(_) => continue,
@@ -218,9 +218,27 @@ fn select_backend(ratios: &[f64]) -> usize {
 }
 
 /// Add metadata to the LLM result (cost, duration, resource info).
-fn add_metadata(result: &mut Value, config: &LLMConfig, resource: &str, start_time: Instant) {
+///
+/// Mirrors Python's LLMOp output: model_used prefers the resource key,
+/// context_used is estimated from input messages.
+fn add_metadata(
+    result: &mut Value,
+    config: &LLMConfig,
+    resource: &str,
+    start_time: Instant,
+    inputs: &Value,
+) {
     let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
     result["duration_ms"] = json!(duration_ms);
+
+    // model_used: prefer resource key, fall back to API response model
+    if !resource.is_empty() {
+        result["model_used"] = json!(resource);
+    }
+
+    // context_used: estimate from messages (rough token count, ~4 chars per token)
+    let context_used = estimate_context(inputs);
+    result["context_used"] = json!(context_used);
 
     let base = match config {
         LLMConfig::OpenAI(c) => &c.base,
@@ -245,10 +263,12 @@ fn add_metadata(result: &mut Value, config: &LLMConfig, resource: &str, start_ti
             result["cost_usd"] = json!(cost_usd);
         }
     }
+}
 
-    if let Some(messages) = result.get("tokens_used").and_then(|t| t.get("prompt_tokens")) {
-        result["context_used"] = messages.clone();
-    }
-
-    let _ = resource;
+/// Estimate context size from messages (rough token count).
+/// Mirrors Python's `_estimate_context`: `len(str(messages)) // 4`.
+fn estimate_context(inputs: &Value) -> i64 {
+    let messages = inputs.get("messages").unwrap_or(&Value::Null);
+    let msg_str = messages.to_string();
+    (msg_str.len() / 4) as i64
 }
