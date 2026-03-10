@@ -193,14 +193,10 @@ class TraceCollector:
     # =========================================================================
 
     def _get_stream_contexts(self, parent_name: str) -> list:
-        """Get stream_contexts from live scheduler (populated during run).
-
-        Must read from the scheduler directly — not from init-time metadata —
-        because Scheduler._reset() creates a new list each run().
-        """
+        """Get stream_contexts from graph op (populated after run_scheduler)."""
         parent_op = self._op_map.get(parent_name)
-        if parent_op and hasattr(parent_op, "_scheduler") and parent_op._scheduler:
-            return getattr(parent_op._scheduler, "stream_contexts", [])
+        if parent_op:
+            return getattr(parent_op, "stream_contexts", [])
         return []
 
     def _resolve_parent(
