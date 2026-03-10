@@ -331,6 +331,55 @@ class ResourceHub:
             key = f"{prefix}:{key}"
         return self.get(key)
 
+    def _refresh_keycloak(self, instance) -> None:
+        """Refresh keycloak token on a cached LLM instance (if applicable)."""
+        if not hasattr(instance, "_keycloak_provider"):
+            return
+        fresh_token = instance._keycloak_provider.get_token()
+        if hasattr(instance, "client"):
+            instance.client.api_key = fresh_token
+        instance.config.api_key = fresh_token
+
+    def _resolve_keycloak(self, config: YamlModel) -> Optional[YamlModel]:
+        """If config has a keycloak:xxx api_key, resolve it and return new config.
+
+        Returns None if config doesn't use keycloak.
+        Raises KeyError if keycloak resolution fails.
+        """
+        if not (hasattr(config, "api_key") and isinstance(config.api_key, str)):
+            return None
+        if not config.api_key.startswith("keycloak:"):
+            return None
+
+        keycloak_name = config.api_key[9:]
+        try:
+            resolved_token = self._resolve_api_key(config.api_key)
+        except Exception as e:
+            raise KeyError(
+                f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})"
+            ) from e
+
+        config_dict = config.model_dump()
+        config_dict["api_key"] = resolved_token
+        return type(config).model_validate(config_dict)
+
+    def _create_and_cache(self, full_key: str, config: YamlModel) -> Any:
+        """Create instance from config, cache it, return it.
+
+        Raises KeyError with context on failure.
+        """
+        try:
+            instance = REGISTRY.create(config)
+        except Exception as e:
+            LOGGER.warning("Failed to create resource '%s': %s", full_key, e)
+            raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
+
+        if instance is None:
+            raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
+
+        self._cache[full_key].instance = instance
+        return instance
+
     def llm(self, key: str) -> "BaseLLM":
         """Get LLM instance by key.
 
@@ -342,37 +391,13 @@ class ResourceHub:
 
         Returns:
             BaseLLM instance with chat(), generate() methods
-
-        Example:
-            # With static api_key
-            llm = hub.llm("gpt-4")
-
-            # With keycloak reference (token resolved automatically)
-            llm = hub.llm("claude-4-sonnet")  # api_key: keycloak:myapp in config
         """
-        # Build full key with llm: prefix
-        full_key = key
-        for prefix in ["azure:", "openai:", "gemini:"]:
-            if key.startswith(prefix):
-                full_key = f"llm:{key}"
-                break
-        if not full_key.startswith("llm:"):
-            full_key = f"llm:{key}"
+        full_key = f"llm:{key}" if not key.startswith("llm:") else key
 
-        # Check cache first
+        # Cache hit → refresh keycloak if needed → return
         if full_key in self._cache and self._cache[full_key].instance is not None:
             instance = self._cache[full_key].instance
-
-            # Refresh token for keycloak-authenticated LLMs
-            if hasattr(instance, "_keycloak_provider"):
-                fresh_token = instance._keycloak_provider.get_token()
-                # Update the OpenAI client's api_key
-                if hasattr(instance, "client"):
-                    instance.client.api_key = fresh_token
-                # Also update config for consistency
-                instance.config.api_key = fresh_token
-                LOGGER.debug("Refreshed keycloak token for: %s", full_key)
-
+            self._refresh_keycloak(instance)
             return instance
 
         # Load config
@@ -380,65 +405,16 @@ class ResourceHub:
         if not config:
             raise KeyError(f"Resource '{full_key}' not found in registry")
 
-        # Check for keycloak reference in api_key
-        if hasattr(config, "api_key") and isinstance(config.api_key, str):
-            if config.api_key.startswith("keycloak:"):
-                keycloak_name = config.api_key[9:]
+        # Resolve keycloak token if configured
+        resolved_config = self._resolve_keycloak(config)
+        instance = self._create_and_cache(full_key, resolved_config or config)
 
-                try:
-                    # Resolve token from keycloak provider
-                    resolved_token = self._resolve_api_key(config.api_key)
-                except Exception as e:
-                    LOGGER.warning(
-                        "Failed to resolve keycloak token for '%s' (keycloak:%s): %s. "
-                        "Skipping this resource.",
-                        full_key,
-                        keycloak_name,
-                        e,
-                    )
-                    raise KeyError(
-                        f"Resource '{full_key}' unavailable: "
-                        f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})"
-                    ) from e
+        # Attach keycloak provider for future token refresh
+        if resolved_config is not None:
+            keycloak_name = config.api_key[9:]
+            instance._keycloak_provider = self.keycloak(keycloak_name)
+            instance._original_config = config
 
-                # Create modified config with resolved token
-                config_dict = config.model_dump()
-                config_dict["api_key"] = resolved_token
-                resolved_config = type(config).model_validate(config_dict)
-
-                # Create instance
-                try:
-                    instance = REGISTRY.create(resolved_config)
-                except Exception as e:
-                    LOGGER.warning("Failed to create LLM '%s': %s", full_key, e)
-                    raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
-
-                if instance is None:
-                    raise KeyError(
-                        f"Cannot create resource for '{full_key}': factory returned None"
-                    )
-
-                # Store keycloak provider reference on instance for potential refresh
-                instance._keycloak_provider = self.keycloak(keycloak_name)
-                instance._original_config = config
-
-                # Cache the instance (keycloak provider handles token refresh)
-                self._cache[full_key].instance = instance
-                LOGGER.debug("Lazy loaded LLM with keycloak auth: %s", full_key)
-                return instance
-
-        # Standard path for static api_key
-        try:
-            instance = REGISTRY.create(config)
-        except Exception as e:
-            LOGGER.warning("Failed to create LLM '%s': %s", full_key, e)
-            raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
-
-        if instance is None:
-            raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
-
-        self._cache[full_key].instance = instance
-        LOGGER.debug("Lazy loaded resource: %s", full_key)
         return instance
 
     def embedding(self, key: str) -> "BaseEmbedding":

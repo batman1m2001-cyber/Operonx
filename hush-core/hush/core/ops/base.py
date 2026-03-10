@@ -68,16 +68,13 @@ class BaseOp(ABC):
     contains the execution logic. Ops are wired together inside a ``GraphOp``
     using edge operators.
 
-    Inputs:
-        Defined per subclass via ``self.inputs: Dict[str, Param]``.
+    Sections (read top-to-bottom)::
 
-    Outputs:
-        Defined per subclass via ``self.outputs: Dict[str, Param]``.
-
-    Edge operators:
-        - ``>>``  : Hard edge (sequential dependency, counts toward ready_count).
-        - ``>>~`` : Soft edge (conditional, for branch merging — only one
-          predecessor needs to complete).
+        1. INIT            __init__, __slots__, param helpers
+        2. EDGE OPERATORS  >>, >>~, >, <, [], ~ — wiring ops in a graph
+        3. EXECUTE         run(), get_inputs/outputs, store_result, _exec_core
+        4. OBSERVABILITY   _log(), _store_metrics()
+        5. SERIALIZATION   serialize(), metadata — for Rust backend & tracing
 
     Example::
 
@@ -201,6 +198,10 @@ class BaseOp(ABC):
         """Merge schema (from parsing) with user-provided inputs/outputs."""
         return merge_params(schema, user_provided, self.parent)
 
+    # =========================================================================
+    # 1. INIT — identity, params, parent registration
+    # =========================================================================
+
     @property
     def full_name(self) -> str:
         """Fully-qualified hierarchical path of this op. Cached after build()."""
@@ -217,6 +218,10 @@ class BaseOp(ABC):
     def __getitem__(self, item) -> "Ref":
         """Allow ``op["var"]`` syntax to reference an output as a Ref."""
         return Ref(self, item)
+
+    # =========================================================================
+    # 2. EDGE OPERATORS — wiring ops inside a GraphOp
+    # =========================================================================
 
     def __invert__(self) -> "SoftEdge":
         """``~op``: mark this op for a soft-edge connection."""
@@ -302,6 +307,10 @@ class BaseOp(ABC):
                 add_edge(other.name, self.name, edge_type, soft=True)
             return self
         return NotImplemented
+
+    # =========================================================================
+    # 3. EXECUTE — run the op, read inputs, store outputs
+    # =========================================================================
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Quick-test: call the op directly with keyword inputs."""
@@ -395,6 +404,10 @@ class BaseOp(ABC):
 
         for key, value in result.items():
             state[self.full_name, key, context_id] = value
+
+    # =========================================================================
+    # 4. OBSERVABILITY — logging and metrics
+    # =========================================================================
 
     def _log(
         self,
@@ -524,7 +537,7 @@ class BaseOp(ABC):
             return _outputs
 
     # =========================================================================
-    # Serialization
+    # 5. SERIALIZATION — for Rust backend and tracing
     # =========================================================================
 
     def serialize(self) -> dict:
