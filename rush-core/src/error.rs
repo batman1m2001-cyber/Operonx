@@ -18,8 +18,8 @@ pub enum RushError {
     #[error("Config error: {0}")]
     ConfigError(String),
 
-    #[error("Iteration error: {0}")]
-    IterationError(String),
+    #[error("Loop error: {0}")]
+    LoopError(String),
 
     #[error("Branch error: {0}")]
     BranchError(String),

@@ -18,6 +18,7 @@ base64 = "0.22"
 ort = { version = "2.0.0-rc.9", features = ["ndarray"], optional = true }
 ndarray = { version = "0.16", optional = true }
 tokenizers = { version = "0.20", optional = true }
+regex = "1"
 serde_yaml = "0.9"
 quick-xml = "0.37"
 

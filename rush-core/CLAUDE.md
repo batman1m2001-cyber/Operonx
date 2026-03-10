@@ -9,23 +9,34 @@ rush-core/
 ├── src/
 │   ├── lib.rs              # Crate root (module declarations)
 │   ├── engine.rs           # Rush engine — new(json) + run_json(inputs) entry point
-│   ├── config.rs           # Config deserialization (GraphConfig, OpConfig, etc.)
-│   ├── builtin_ops.rs      # Built-in op dispatch (match on rust_name → direct function call)
+│   ├── config.rs           # Config deserialization (GraphConfig, OpConfig, LoopConfig, etc.)
+│   ├── runtime.rs          # Tokio runtime helpers (block_on_async)
+│   ├── builtin_ops/
+│   │   ├── mod.rs          # Dispatch: call() for regular ops, call_generator() for generators
+│   │   └── ops.rs          # Op implementations (regular + generator ops)
 │   ├── ops/
 │   │   ├── mod.rs
-│   │   ├── base.rs         # Leaf op execution, ref resolution
-│   │   ├── graph/
-│   │   │   └── graph_op.rs # Graph scheduling loop, batch parallel, nested graphs
-│   │   ├── iteration/
-│   │   │   ├── for_op.rs   # ForOp — iterate over lists
-│   │   │   └── while_op.rs # WhileOp — loop until condition
-│   │   └── transform/
-│   │       └── func_op.rs  # FuncOp execution (builtin dispatch or Python callback)
+│   │   ├── base.rs         # Leaf op execution, ref resolution, PENDING sentinel
+│   │   └── graph/
+│   │       ├── graph_op.rs # Async event-queue scheduler, generators, loops, nested graphs
+│   │       ├── loop_eval.rs # Loop condition evaluation (until expressions)
+│   │       └── mod.rs
 │   ├── refs/
 │   │   └── ref_transforms.rs # Ref transform chain evaluation (getitem, arithmetic, boolean, etc.)
 │   └── states/
-│       └── state.rs        # EngineState — concurrent DashMap state (pure serde_json::Value)
-├── tests/                  # Rust integration tests (95+ tests)
+│       └── state.rs        # EngineState — concurrent DashMap with context hierarchy fallback
+├── tests/                  # Rust integration tests (140 tests)
+│   ├── common/mod.rs       # Test helpers (config builders)
+│   ├── engine.rs           # Core engine tests (single ops, chains, branches, nested graphs)
+│   ├── builtin_ops.rs      # Builtin op unit tests
+│   ├── complex_graphs.rs   # Complex graph topologies
+│   ├── concurrency.rs      # Concurrent execution tests
+│   ├── provider_ops.rs     # Provider op tests
+│   ├── context_fallback.rs # Context hierarchy fallback tests
+│   ├── generator.rs        # Generator op tests (range_gen, chunk_text)
+│   ├── streaming.rs        # Full streaming pipeline tests
+│   ├── loop.rs             # Loop tests (counter, fibonacci, accumulator)
+│   └── pending.rs          # PENDING sentinel tests
 ├── benches/
 │   ├── bench_runner.rs     # Standalone Rust benchmark binary (rush-bench)
 │   └── bench_e2e.py        # Python↔Rust comparison via subprocess
@@ -36,10 +47,10 @@ rush-core/
 ## Key Files to Read First
 
 1. `src/engine.rs` — Entry point: `Rush::new(json_str)` + `Rush::run_json(inputs, req_id, user_id, session_id)`
-2. `src/ops/graph/graph_op.rs` — Scheduler: batch-aware parallel execution
-3. `src/states/state.rs` — Concurrent state: DashMap + Mutex
-4. `src/ops/base.rs` — Leaf op execution, ref resolution
-5. `src/config.rs` — Config deserialization from Python dict
+2. `src/ops/graph/graph_op.rs` — Async event-queue scheduler (1:1 port of Python scheduler.py)
+3. `src/states/state.rs` — Concurrent state with context hierarchy fallback
+4. `src/ops/base.rs` — Leaf op execution, ref resolution, PENDING sentinel
+5. `src/config.rs` — Config deserialization (GraphConfig, OpConfig, LoopConfig)
 
 ## Architecture
 
@@ -53,53 +64,88 @@ Python (build time)             Rust (run time)
 GraphOp DSL                     Rush(config)
   │                               │
   ▼                               ▼
-graph.serialize() ──dict──→  GraphConfig::from_dict()
+graph.serialize() ──dict──→  GraphConfig::from_json()
                                │
                                ▼
-                           run_graph() scheduler
+                           run_graph() → run_scheduler() [async event-queue]
                                │
-                               ▼
-                           execute_leaf_op() / nested / for / while
+                               ├── CPU-bound ops → inline execution
+                               ├── IO-bound ops → tokio::spawn_blocking
+                               ├── Nested graphs → tokio::spawn (async)
+                               ├── Generator ops → tokio::spawn (yield items)
+                               └── Branch ops → inline condition evaluation
 ```
+
+### Async Event-Queue Scheduler
+
+The scheduler uses tokio channels as the event queue (1:1 mapping with Python's asyncio.Queue):
+
+```rust
+enum SchedulerEvent {
+    Done(op_name, context),           // Op completed — propagate to successors
+    DonePending(op_name, context),    // Op returned PENDING — no propagation
+    Yield(gen_name, stream_ctx, data), // Generator yielded — create stream context
+    Exhausted(gen_name),              // Generator done — decrement active_count
+}
+```
+
+**Dispatch classification:**
+- CPU-bound builtin ops → inline execution (no task spawn)
+- IO-bound / provider ops → `tokio::task::spawn_blocking`
+- Nested graph ops → `tokio::spawn` (calls `run_scheduler` directly — avoids deadlock)
+- Generator ops → `tokio::spawn` (iterates items, emits Yield events)
+- Branch ops → inline condition evaluation
+
+### Context Hierarchy Fallback
+
+`EngineState.get()` walks up the dot-separated context hierarchy:
+```
+"main.[0].[1]" → "main.[0]" → "main"
+```
+
+This lets stream context ops inherit values from parent (batch) contexts automatically.
+Root context is `"main"` (matches Python's `DEFAULT_CONTEXT = ("main",)`).
+
+### Generator Ops
+
+Three types of generators, all using the same scheduler event flow:
+
+| Type | Implementation | Scheduler Event |
+|------|---------------|-----------------|
+| Built-in generator | `call_generator()` → `Vec<Value>` → iterate | Yield per item, then Exhausted |
+| Provider streaming (LLM) | `execute_streaming()` via `std::sync::mpsc::Sender` | Yield per chunk, then Exhausted |
+| Custom generator | `Vec<Value>` return | Same as built-in |
+
+**Stream predecrements:** When a generator yields, batch predecessors are already done. Their edges are pre-subtracted from fresh ready_counts so downstream ops become ready immediately after the gen→successor edge is decremented by propagate.
+
+### Loop Support (GraphOp.loop)
+
+Replaces WhileOp. A graph with `loop_config` runs repeatedly until `until` condition met or `max_iterations` reached:
+
+```rust
+struct LoopConfig {
+    until: Option<String>,      // e.g., "new_counter >= 5"
+    max_iterations: usize,
+    loop_vars: Vec<String>,     // Variables fed back between iterations
+}
+```
+
+Loop contexts: `"main"` (iteration 0), `"main.loop_1"`, `"main.loop_2"`, etc.
+Final outputs are copied back to base context for the parent graph.
+
+### PENDING Sentinel
+
+Ops can return `{"__pending__": true}` to absorb input without triggering downstream propagation. The scheduler emits `DonePending` instead of `Done`.
 
 ### Concurrent State (DashMap)
 
-`EngineState` uses `DashMap<(String, String, String), serde_json::Value>` for lock-free concurrent reads/writes.
-
-```rust
-// Thread-safe — no &mut needed
-state.set(op_name, var_name, context, value);
-let val = state.get(op_name, var_name, context);  // Returns cloned Value
-```
+`EngineState` uses `DashMap<(Spur, Spur, Spur), Arc<Value>>` for lock-free concurrent reads/writes with string interning.
 
 Key API:
-- `get(full_name, var, context) -> Option<Value>` — cloned value
+- `get(full_name, var, context) -> Option<Arc<Value>>` — with hierarchy fallback
 - `set(full_name, var, context, value)` — takes `&self` (not `&mut self`)
 - `add_tags(tags)` — internally locked
 - `values_snapshot()` — collect all entries for export
-
-### Batch-Aware Parallel Scheduler
-
-The `run_graph()` scheduler drains all ready ops into a batch each iteration:
-
-```
-queue: [A, B, C]  →  drain batch
-                      │
-                      ├── batch.len() == 1  → execute directly
-                      │
-                      └── batch.len() > 1   → parallel via rayon
-                                              batch.par_iter().for_each(|op| {
-                                                execute_leaf_op(op, &state, &config)
-                                              })
-```
-
-**Heuristic**: Parallel mode activates when `batch.len() > 1`. All ops execute via rayon without GIL constraints.
-
-**Why this is safe**:
-- Batch ops are independent (`ready_count == 0`) — no data dependencies
-- `GraphConfig` is `&` (shared immutable)
-- `EngineState` uses DashMap — concurrent access is lock-free for different keys
-- Successor activation happens sequentially AFTER all parallel ops complete
 
 ### Dependencies
 
@@ -107,11 +153,10 @@ queue: [A, B, C]  →  drain batch
 |-------|---------|
 | `ahash 0.8` | Fast HashMap for scheduling (ready_count, soft_satisfied) |
 | `dashmap 6` | Concurrent HashMap for EngineState (thread-safe values store) |
-| `rayon 1.10` | Work-stealing thread pool for batch parallel execution |
+| `lasso 0.7` | String interning for zero-alloc key lookups |
 | `smallvec 1` | Stack-allocated small vectors |
-| `builtin_ops` (internal module) | Built-in Rust op implementations |
 | `serde / serde_json 1` | JSON serialization |
-| `tokio 1` | Async runtime |
+| `tokio 1` | Async runtime (scheduler event loop, task spawning) |
 | `chrono 0.4` | Timestamp metadata |
 | `rush-providers` | Native provider implementations |
 
@@ -161,16 +206,27 @@ Built-in Rust ops are an internal module of rush-core -- no external crate, no d
 ### 1. Add the op function to `src/builtin_ops/ops.rs`:
 
 ```rust
+// Regular op (returns single Value)
 pub fn my_op(inputs: &serde_json::Value) -> serde_json::Value {
     let x = inputs["x"].as_i64().unwrap();
     serde_json::json!({"result": x * 2})
 }
+
+// Generator op (returns Vec<Value> — each item is one yield)
+pub fn my_gen(inputs: &serde_json::Value) -> Vec<serde_json::Value> {
+    let n = inputs["n"].as_i64().unwrap_or(3);
+    (0..n).map(|i| serde_json::json!({"value": i})).collect()
+}
 ```
 
-### 2. Add a dispatch arm in `src/builtin_ops/mod.rs`:
+### 2. Add dispatch arms in `src/builtin_ops/mod.rs`:
 
 ```rust
+// In call():
 "my_op" => ops::my_op(inputs),
+
+// In call_generator():
+"my_gen" => ops::my_gen(inputs),
 ```
 
 ### 3. Use in Python:
@@ -184,31 +240,19 @@ def my_op(x: int):
 ### Dispatch Architecture
 
 - **Op implementations** (`src/builtin_ops/ops.rs`): Plain `pub fn(&Value) -> Value` functions
+- **Generator implementations** (`src/builtin_ops/ops.rs`): `pub fn(&Value) -> Vec<Value>` functions
 - **Dispatch** (`src/builtin_ops/mod.rs`): Match on `rust_name` string, call the corresponding function directly
 - **No dynamic loading**: builtin_ops is an internal module of rush-core
 
-## Performance (Benchmark Results)
-
-Release build, Python 3.13, comparing `mode="python"` vs `mode="rust"`:
-
-| Pattern | Speedup | Py mean | Rs mean |
-|---------|---------|---------|---------|
-| Linear chain (50-500 ops) | 1.9x – 2.4x | 0.31–3.02ms | 0.13–1.27ms |
-| Nested @graph (2-20 stages) | 3.6x – 3.9x | 0.20–1.87ms | 0.06–0.48ms |
-| Parallel fan-out (5-50 branches) | 2.8x – 3.0x | 0.17–1.39ms | 0.06–0.46ms |
-| Branching (5-20 stages) | 2.1x – 2.4x | 0.16–0.65ms | 0.08–0.28ms |
-| ForOp loop (10-100 items) | 3.2x | 0.19–1.61ms | 0.06–0.51ms |
-| Production-like (3-10 cases) | 2.4x – 2.5x | 0.18–0.44ms | 0.08–0.18ms |
-| CPU contention (hash chains) | 4.7x – 6.0x | 18–97ms | 3–17ms |
-| Production + CPU | 4.9x – 6.2x | 19–75ms | 3–15ms |
-| Pure CPU chain (sequential) | 1.1x – 2.7x | 20–75ms | 8–68ms |
-
 ## Gotchas
 
-1. **MapOp not supported** — use ForOp in Rust mode (MapOp is asyncio-based)
-2. **Timing metadata** — uses `$`-prefixed keys (`$start_time`, `$end_time`, `$duration_ms`)
-3. **Branch output refs** — must target parent graph (`output_ref("g", key)` not `output_ref("g.a", key)`)
-4. **Ref transforms** — Python handles operator overloading at build time, Rust evaluates the serialized transforms chain
+1. **Nested graph deadlock** — nested graphs MUST call `run_scheduler()` directly from async context, NOT go through `run_graph()` → `block_on_async()` which deadlocks from inside `tokio::spawn`
+2. **Stream predecrements** — only for OTHER batch predecessors already done, NOT for the generator's own edge (handled by propagate)
+3. **Timing metadata** — uses `$`-prefixed keys (`$start_time`, `$end_time`, `$duration_ms`)
+4. **Branch output refs** — must target parent graph (`output_ref("g", key)` not `output_ref("g.a", key)`)
+5. **Ref transforms** — Python handles operator overloading at build time, Rust evaluates the serialized transforms chain
+6. **Provider streaming** — uses `std::sync::mpsc::Sender` (NOT tokio channel) because `execute_streaming` expects it
+7. **Loop output context** — loop final outputs are copied back to base_context so caller finds them
 
 ## Deep Documentation Links
 

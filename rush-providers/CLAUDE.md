@@ -40,8 +40,9 @@ rush-providers/src/
     ├── llm.rs          # LLMOp: select_backend → llms::chat_completion
     ├── embedding.rs    # EmbeddingOp: embeddings::embed
     ├── rerank.rs       # RerankOp: rerankers::rerank
-    ├── prompt.rs       # PromptOp: template formatting (string/dict/list)
-    └── chain.rs        # ChainOp: prompt + LLM combined
+    ├── prompt.rs       # PromptOp: template formatting (string/dict/list) + missing var detection
+    ├── parser.rs       # ParserOp: extract structured data (JSON/XML/YAML)
+    └── chain.rs        # ChainOp: prompt + LLM + optional parser (extract mode)
 ```
 
 ## Key Files to Read First

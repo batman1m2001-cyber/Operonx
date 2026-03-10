@@ -11,7 +11,7 @@ use std::time::Instant;
 use chrono::Utc;
 use serde_json::Value;
 
-use crate::config::{IterParamConfig, OpConfig, ParamConfig, RefConfig};
+use crate::config::{OpConfig, ParamConfig, RefConfig};
 use crate::error::RushError;
 use crate::refs::ref_transforms::evaluate_ref_transforms;
 use crate::runtime;
@@ -21,6 +21,26 @@ use crate::states::state::EngineState;
 // Leaf op execution (BaseOp.run equivalent)
 // =============================================================================
 
+/// Op execution result — indicates whether downstream propagation should happen.
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpResult {
+    /// Op completed normally — propagate to successors.
+    Done,
+    /// Op returned PENDING — no propagation.
+    Pending,
+}
+
+/// Check if a result contains the PENDING sentinel.
+fn is_pending(result: &Option<Value>) -> bool {
+    match result {
+        Some(Value::Object(map)) => map
+            .get("__pending__")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 /// Execute a leaf op: resolve inputs → call op → store outputs → push refs.
 /// Includes error resilience: catches op errors, stores in state, continues.
 /// Includes observability: enabled check, timing, logging.
@@ -28,9 +48,9 @@ pub(crate) fn run(
     op: &OpConfig,
     state: &EngineState,
     context: &str,
-) -> Result<(), RushError> {
+) -> Result<OpResult, RushError> {
     if !op.enabled {
-        return Ok(());
+        return Ok(OpResult::Done);
     }
 
     // Start timing
@@ -38,6 +58,7 @@ pub(crate) fn run(
     let perf_start = Instant::now();
 
     // Try: resolve inputs → execute → store outputs
+    let mut pending = false;
     let exec_result: Result<(), RushError> = (|| {
         let mut inputs = serde_json::Map::new();
         for param in &op.inputs {
@@ -47,6 +68,13 @@ pub(crate) fn run(
         }
 
         let result_obj = execute_op(op, inputs, state, context)?;
+
+        // Check for PENDING sentinel before storing
+        if is_pending(&result_obj) {
+            pending = true;
+            return Ok(());
+        }
+
         store_result(op, result_obj, state, context)?;
 
         Ok(())
@@ -72,11 +100,11 @@ pub(crate) fn run(
         );
     }
 
-    if exec_result.is_ok() {
+    if exec_result.is_ok() && !pending {
         push_output_refs(op, state, context)?;
     }
 
-    Ok(())
+    Ok(if pending { OpResult::Pending } else { OpResult::Done })
 }
 
 // =============================================================================
@@ -271,25 +299,6 @@ fn resolve_ref_with_parent(
         }
         None => Ok(None),
     }
-}
-
-/// Resolve an iteration parameter (each or broadcast) to its value.
-pub(crate) fn resolve_iter_param(
-    param: &IterParamConfig,
-    state: &EngineState,
-    context: &str,
-) -> Result<Option<Value>, RushError> {
-    if let Some(ref ref_config) = param.ref_config {
-        if let Some(value) = resolve_ref(ref_config, state, context)? {
-            return Ok(Some(value));
-        }
-    }
-
-    if let Some(ref literal) = param.literal {
-        return Ok(Some(literal.clone()));
-    }
-
-    Ok(None)
 }
 
 // =============================================================================

@@ -1,7 +1,8 @@
-//! ChainOp — prompt template formatting + LLM call in a single op.
+//! ChainOp — prompt template formatting + LLM call + optional parsing.
 //!
 //! Mirrors hush-providers/hush/providers/ops/chain.py.
-//! Combines PromptOp (template → messages) with LLMOp (messages → content).
+//! Combines PromptOp (template → messages) with LLMOp (messages → content),
+//! and optionally ParserOp (content → structured fields) when `extract` is present.
 
 use std::sync::mpsc::Sender;
 
@@ -50,11 +51,54 @@ fn build_llm_inputs(inputs: &Value) -> ProviderResult<(Value, Value)> {
     Ok((llm_inputs, messages))
 }
 
-/// Execute a chain op: format template → call LLM → return merged result.
+/// If the LLM result has content and the inputs specify `parser_extract`,
+/// run the content through ParserOp and merge parsed fields into the result.
+///
+/// Mirrors Python's chain() structured mode: Prompt → LLM → ParserOp.
+fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
+    let extract = match inputs.get("parser_extract").and_then(|v| v.as_array()) {
+        Some(arr) if !arr.is_empty() => arr.clone(),
+        _ => return Ok(()),
+    };
+
+    let format = inputs
+        .get("parser_format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("xml");
+
+    let content = result
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    let parser_inputs = json!({
+        "text": content,
+        "parser_format": format,
+        "parser_extract": extract,
+    });
+
+    let parsed = crate::ops::parser::execute(parser_inputs)?;
+
+    // Merge parsed fields into result
+    if let Some(obj) = parsed.as_object() {
+        for (k, v) in obj {
+            result[k] = v.clone();
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute a chain op: format template → call LLM → optional parse → return merged result.
 pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
     let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
     let mut result = crate::ops::llm::execute(llm_inputs, config).await?;
     result["messages"] = messages;
+    maybe_parse(&mut result, &inputs)?;
     Ok(result)
 }
 
@@ -67,5 +111,6 @@ pub async fn execute_streaming(
     let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
     let mut result = crate::ops::llm::execute_streaming(llm_inputs, config, chunk_tx).await?;
     result["messages"] = messages;
+    maybe_parse(&mut result, &inputs)?;
     Ok(result)
 }

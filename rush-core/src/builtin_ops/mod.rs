@@ -7,6 +7,18 @@ mod ops;
 
 use serde_json::Value;
 
+/// Call a builtin generator op by name.
+/// Returns `Some(Vec<Value>)` — each item is one yield.
+/// Returns `None` if the name is not a known generator.
+pub fn call_generator(name: &str, inputs: &Value) -> Option<Vec<Value>> {
+    let result = match name {
+        "chunk_text" => ops::chunk_text(inputs),
+        "range_gen" => ops::range_gen(inputs),
+        _ => return None,
+    };
+    Some(result)
+}
+
 /// Call a builtin op by name. Returns `Some(result)` if found, `None` if unknown.
 pub fn call(name: &str, inputs: &Value) -> Option<Value> {
     let result = match name {

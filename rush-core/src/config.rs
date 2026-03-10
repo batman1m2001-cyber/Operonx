@@ -28,6 +28,13 @@ pub struct AdjEntry {
     pub is_soft: bool,
 }
 
+/// Loop configuration (replaces WhileOp — graph runs repeatedly until condition met).
+pub struct LoopConfig {
+    pub until: Option<String>,
+    pub max_iterations: usize,
+    pub loop_vars: Vec<String>,
+}
+
 /// Parsed graph configuration.
 pub struct GraphConfig {
     pub name: String,
@@ -39,6 +46,13 @@ pub struct GraphConfig {
     pub has_soft_preds: AHashSet<String>,
     pub inputs: Vec<ParamConfig>,
     pub outputs: Vec<ParamConfig>,
+    /// Stream predecrements: when a generator yields, batch predecessors already done.
+    /// Map of op_name → {predecessor → predecrement_count}.
+    pub stream_predecrements: AHashMap<String, AHashMap<String, i32>>,
+    /// Loop config (GraphOp.loop) — replaces WhileOp.
+    pub loop_config: Option<LoopConfig>,
+    /// Max concurrent stream contexts (backpressure). Default 64.
+    pub max_stream_concurrent: usize,
 }
 
 /// Execution bound hint — tells the scheduler how to schedule this op.
@@ -59,18 +73,18 @@ pub struct OpConfig {
     pub is_async: bool,
     pub enabled: bool,
     pub verbose: bool,
-    /// Whether this op uses streaming mode (disabled in rust mode v1).
+    /// Whether this op uses streaming mode.
     pub stream: bool,
+    /// Whether this op is a generator (yields items into stream context).
+    pub is_generator: bool,
     /// Execution bound hint for scheduler dispatch.
     pub bound: OpBound,
     pub inputs: Vec<ParamConfig>,
     pub outputs: Vec<ParamConfig>,
     /// Branch-specific config (only for type == "branch").
     pub branch_config: Option<BranchConfig>,
-    /// Nested graph config (for type == "graph", "for", "while", "map").
+    /// Nested graph config (for type == "graph").
     pub inner_graph: Option<Box<GraphConfig>>,
-    /// Iteration config (for type == "for", "while", "map").
-    pub iteration_config: Option<IterationConfig>,
     /// Provider config (for type == "llm", "embedding", "rerank").
     pub provider_config: Option<ProviderConfig>,
 }
@@ -85,24 +99,6 @@ pub struct BranchConfig {
 pub struct BranchCase {
     pub condition: RefConfig,
     pub target: String,
-}
-
-/// Iteration op configuration (ForOp, WhileOp, MapOp).
-pub struct IterationConfig {
-    pub each: Vec<IterParamConfig>,
-    pub broadcast: Vec<IterParamConfig>,
-    pub fail_fast: bool,
-    pub until: Option<String>,
-    pub max_iterations: Option<usize>,
-    /// Max concurrent iterations (MapOp). Defaults to CPU count.
-    pub max_concurrency: Option<usize>,
-}
-
-/// A single iteration parameter (each or broadcast).
-pub struct IterParamConfig {
-    pub var_name: String,
-    pub ref_config: Option<RefConfig>,
-    pub literal: Option<Value>,
 }
 
 /// A single input/output parameter.
@@ -206,6 +202,48 @@ impl GraphConfig {
         let inputs = parse_params(val, "inputs")?;
         let outputs = parse_params(val, "outputs")?;
 
+        // Parse stream_predecrements: {"op_name": {"pred_name": count}}
+        let mut stream_predecrements = AHashMap::new();
+        if let Some(sp_obj) = val.get("stream_predecrements").and_then(|v| v.as_object()) {
+            for (op_name, preds_val) in sp_obj {
+                let mut preds = AHashMap::new();
+                if let Some(preds_obj) = preds_val.as_object() {
+                    for (pred_name, count) in preds_obj {
+                        if let Some(n) = count.as_i64() {
+                            preds.insert(pred_name.clone(), n as i32);
+                        }
+                    }
+                }
+                stream_predecrements.insert(op_name.clone(), preds);
+            }
+        }
+
+        // Parse loop_config
+        let loop_config = if let Some(lc) = val.get("loop_config").filter(|v| !v.is_null()) {
+            let until = get_opt_string(lc, "until");
+            let max_iterations = lc
+                .get("max_iterations")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100) as usize;
+            let loop_vars = lc
+                .get("loop_vars")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            Some(LoopConfig {
+                until,
+                max_iterations,
+                loop_vars,
+            })
+        } else {
+            None
+        };
+
+        let max_stream_concurrent = val
+            .get("max_stream_concurrent")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(64) as usize;
+
         Ok(GraphConfig {
             name,
             full_name,
@@ -216,6 +254,9 @@ impl GraphConfig {
             has_soft_preds,
             inputs,
             outputs,
+            stream_predecrements,
+            loop_config,
+            max_stream_concurrent,
         })
     }
 }
@@ -232,6 +273,7 @@ impl OpConfig {
         let enabled = get_bool(val, "enabled", true);
         let verbose = get_bool(val, "verbose", false);
         let stream = get_bool(val, "stream", false);
+        let is_generator = get_bool(val, "is_generator", false);
         let bound = match get_opt_string(val, "bound").as_deref() {
             Some("io") => OpBound::Io,
             _ => OpBound::Cpu,
@@ -247,17 +289,9 @@ impl OpConfig {
             None
         };
 
-        // Parse inner graph (for "graph", "for", "while", "map" types)
-        // These ops' serialized dicts ARE GraphConfig — they have ops, entries, etc.
-        let inner_graph = if matches!(op_type.as_str(), "graph" | "for" | "while" | "map") {
+        // Parse inner graph (for "graph" type — nested GraphOp)
+        let inner_graph = if op_type == "graph" {
             Some(Box::new(GraphConfig::from_value(val)?))
-        } else {
-            None
-        };
-
-        // Parse iteration config (for "for", "while", "map" types)
-        let iteration_config = if matches!(op_type.as_str(), "for" | "while" | "map") {
-            Some(parse_iteration_config(val, &op_type)?)
         } else {
             None
         };
@@ -274,12 +308,12 @@ impl OpConfig {
             enabled,
             verbose,
             stream,
+            is_generator,
             bound,
             inputs,
             outputs,
             branch_config,
             inner_graph,
-            iteration_config,
             provider_config,
         };
 
@@ -293,27 +327,8 @@ impl OpConfig {
     /// Returns an error for unsupported ops, giving the user a clear message
     /// at config parse time rather than a cryptic runtime failure.
     fn validate(&self) -> Result<(), RushError> {
-        // Reject AIterOp (streaming iteration)
-        if self.op_type == "stream" {
-            return Err(RushError::UnsupportedOp(format!(
-                "Op '{}': AIterOp (stream) is not supported in rust mode. Use MapOp instead.",
-                self.full_name
-            )));
-        }
-
-        // Reject streaming LLM ops
-        if self.stream {
-            return Err(RushError::UnsupportedOp(format!(
-                "Op '{}': streaming (stream=true) is not supported in rust mode.",
-                self.full_name
-            )));
-        }
-
-        // Structural ops (graph, for, while, map, branch) are always valid
-        if matches!(
-            self.op_type.as_str(),
-            "graph" | "for" | "while" | "map" | "branch"
-        ) {
+        // Structural ops (graph, branch) are always valid
+        if matches!(self.op_type.as_str(), "graph" | "branch") {
             return Ok(());
         }
 
@@ -364,76 +379,6 @@ fn parse_branch_config(val: &Value) -> Result<BranchConfig, RushError> {
     let default = get_opt_string(val, "default");
 
     Ok(BranchConfig { cases, default })
-}
-
-// =============================================================================
-// Iteration config parsing
-// =============================================================================
-
-fn parse_iteration_config(val: &Value, op_type: &str) -> Result<IterationConfig, RushError> {
-    let each = parse_iter_params(val, "each")?;
-    let broadcast = parse_iter_params(val, "broadcast")?;
-
-    let fail_fast = if matches!(op_type, "for" | "map") {
-        get_bool(val, "fail_fast", false)
-    } else {
-        false
-    };
-
-    let until = if op_type == "while" {
-        get_opt_string(val, "until")
-    } else {
-        None
-    };
-
-    let max_iterations = if op_type == "while" {
-        val.get("max_iterations").and_then(|v| v.as_u64()).map(|n| n as usize)
-    } else {
-        None
-    };
-
-    let max_concurrency = if op_type == "map" {
-        val.get("max_concurrency").and_then(|v| v.as_u64()).map(|n| n as usize)
-    } else {
-        None
-    };
-
-    Ok(IterationConfig {
-        each,
-        broadcast,
-        fail_fast,
-        until,
-        max_iterations,
-        max_concurrency,
-    })
-}
-
-/// Parse an "each" or "broadcast" dict into Vec<IterParamConfig>.
-/// Format: {"var_name": {"ref": {...}|null, "literal": ...|null}}
-fn parse_iter_params(parent: &Value, key: &str) -> Result<Vec<IterParamConfig>, RushError> {
-    let obj = match parent.get(key).and_then(|v| v.as_object()) {
-        Some(o) => o,
-        None => return Ok(Vec::new()),
-    };
-
-    let mut result = Vec::with_capacity(obj.len());
-    for (var_name, entry) in obj {
-        let ref_config = entry
-            .get("ref")
-            .filter(|v| !v.is_null())
-            .map(|v| parse_ref_config(v))
-            .transpose()?;
-
-        let literal = entry.get("literal").filter(|v| !v.is_null()).cloned();
-
-        result.push(IterParamConfig {
-            var_name: var_name.clone(),
-            ref_config,
-            literal,
-        });
-    }
-
-    Ok(result)
 }
 
 // =============================================================================

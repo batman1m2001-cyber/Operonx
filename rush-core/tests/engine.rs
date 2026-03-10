@@ -793,6 +793,7 @@ fn for_op(
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_simple_for_literal_each() {
 
     let inner_node = func_op(
@@ -839,6 +840,7 @@ fn test_simple_for_literal_each() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_for_with_broadcast() {
 
     let inner_node = func_op(
@@ -893,6 +895,7 @@ fn test_for_with_broadcast() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_for_multiple_each_zip() {
 
     let inner_node = func_op(
@@ -940,6 +943,7 @@ fn test_for_multiple_each_zip() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_for_empty_list() {
 
     let inner_node = func_op(
@@ -982,6 +986,7 @@ fn test_for_empty_list() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_for_with_upstream_ref() {
 
     // Source op: make_list() -> {"items": [10, 20, 30]}
@@ -1095,6 +1100,7 @@ fn while_op(
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_while_simple_counter() {
 
     let inner_step = func_op(
@@ -1155,6 +1161,7 @@ fn test_while_simple_counter() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_while_max_iterations() {
 
     let inner_step = func_op(
@@ -1208,6 +1215,7 @@ fn test_while_max_iterations() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_while_accumulator() {
 
     let inner_step = func_op(
@@ -1267,6 +1275,7 @@ fn test_while_accumulator() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_while_fibonacci() {
 
     let inner_step = func_op(
@@ -1434,6 +1443,7 @@ fn test_error_in_op_stored_in_state() {
 }
 
 #[test]
+#[ignore = "Iteration ops removed — rewrite in Phase 10"]
 fn test_for_op_error_in_iteration() {
 
     let inner_node = func_op(
