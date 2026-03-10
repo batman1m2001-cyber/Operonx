@@ -11,10 +11,9 @@ class TestHushAppConstruction:
     def test_default_config(self):
         app = HushApp()
         assert app._config.title == "Hush API"
-        assert app._config.mode == "python"
 
     def test_custom_config(self):
-        app = HushApp(title="My API", mode="python", version="1.0.0")
+        app = HushApp(title="My API", version="1.0.0")
         assert app._config.title == "My API"
         assert app._config.version == "1.0.0"
 
@@ -37,7 +36,7 @@ class TestEndpointRegistration:
         assert len(app._endpoints) == 2
 
     def test_endpoint_config_override(self, double_graph):
-        app = HushApp(mode="python")
+        app = HushApp()
         app.endpoint("/double", graph=double_graph, batch=False, jobs=True)
         ep = app._endpoints[0]
         assert ep.config.batch is False
