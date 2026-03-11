@@ -1,0 +1,13 @@
+[package]
+name = "example-ops"
+version = "0.1.0"
+edition = "2021"
+description = "Example custom Rust ops for Hush workflows"
+license = "Apache-2.0"
+repository = "https://github.com/batman1m2001-cyber/Hush-ai"
+
+[lib]
+name = "example_ops"
+
+[dependencies]
+serde_json = "1"

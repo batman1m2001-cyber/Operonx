@@ -10,7 +10,7 @@ Học được:
 - LangfuseTracer: gửi traces lên cloud
 - Truy cập $state sau khi run
 
-Chạy: cd tutorial && uv run python examples/06_tracing.py
+Chạy: uv run python examples/06_tracing.py
 Trước khi chạy: cd ui-hush-eyes && cargo run  (khởi chạy ui-hush-eyes server)
 """
 
@@ -30,7 +30,7 @@ from hush.telemetry import HushEyesTracer
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::analytics::analyze_text")
 def analyze_text(text: str):
     """Phân tích text và thêm dynamic tags."""
     words = text.split()
@@ -49,7 +49,7 @@ def analyze_text(text: str):
     }
 
 
-@op
+@op(rust="./rust_ops::analytics::classify_by_count")
 def classify(word_count: int):
     """Phân loại dựa trên word count."""
     if word_count > 20:
@@ -95,16 +95,28 @@ async def example_1_hush_eyes_tracer():
         session_id="session-456",
     )
 
-    print(f"  Word count: {result['word_count']}")
-    print(f"  Category:   {result['category']}")
+    print(f"  Python mode:")
+    print(f"    Word count: {result['word_count']}")
+    print(f"    Category:   {result['category']}")
 
     # Truy cập $state để debug
     state = result["$state"]
-    print(f"  User ID:    {state.user_id}")
-    print(f"  Request ID: {state.request_id}")
-    print(f"  Tags:       {state.tags}")
+    print(f"    User ID:    {state.user_id}")
+    print(f"    Request ID: {state.request_id}")
+    print(f"    Tags:       {state.tags}")
     # Tags sẽ gồm: ['analyzed', 'short-text', 'category:sentence']
-    print("  → Mở http://localhost:8420 để xem trace")
+    print("    → Mở http://localhost:8420 để xem trace")
+
+    # Rust mode
+    result_rs = await Hush(graph, mode="rust").run(
+        inputs={"text": "Hush là async workflow engine cho GenAI applications"},
+        tracer=tracer,
+        user_id="user-123",
+        session_id="session-456",
+    )
+    print(f"  Rust mode:")
+    print(f"    Word count: {result_rs['word_count']}")
+    print(f"    Category:   {result_rs['category']}")
 
 
 async def example_2_multiple_traces():

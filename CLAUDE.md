@@ -319,6 +319,36 @@ loop["final_answer"] >> PARENT["answer"]
 step = process(x=PARENT["x"], outputs={"*": PARENT})
 ```
 
+### Iteration Patterns (ForOp/MapOp/WhileOp removed)
+
+The old `ForOp`, `MapOp`, `Each` classes were replaced by two patterns:
+
+**1. Generator ops (replaces ForOp/MapOp)** — use `yield` to iterate:
+```python
+@op
+def each_item(items: list):
+    for item in items:
+        yield {"value": item}
+
+@op
+def double(value: int):
+    return {"result": value * 2}
+
+with GraphOp(name="iterate") as graph:
+    gen = each_item(items=PARENT["numbers"])
+    step = double(value=gen["value"])
+    START >> gen >> step >> END
+# Downstream ops run in parallel per yield (streaming scheduler default)
+```
+
+**2. `GraphOp.loop()` / `@graph.loop()` (replaces WhileOp)** — feedback loops:
+```python
+with GraphOp.loop(until="count >= 5", count=0) as loop:
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> END
+```
+
 ## Exception Hierarchy
 
 All op errors inherit from `OpError` in `python/hush-core/hush/core/exceptions.py`:

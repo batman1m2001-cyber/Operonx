@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use rush_core::config::GraphConfig;
 use rush_core::engine::Rush;
 use rush_core::tracing::Tracer;
 
@@ -65,20 +66,17 @@ pub fn build_tracers(config: &Option<TracerConfig>) -> Vec<Arc<dyn Tracer>> {
     tracers
 }
 
-/// Run a workflow on a blocking thread (rush-core is sync/rayon-based).
+/// Run a workflow on a blocking thread using a pre-parsed config.
 ///
-/// Creates a Rush engine from JSON config, attaches tracers, runs the graph,
-/// and returns the result. Each invocation creates a fresh engine.
+/// Uses Rush::from_config() to skip JSON parsing — config was parsed once at startup.
 pub async fn run_workflow(
-    graph_json: &str,
+    config: Arc<GraphConfig>,
     inputs: Value,
     request_id: Option<String>,
     tracers: Vec<Arc<dyn Tracer>>,
 ) -> Result<Value, ServeError> {
-    let gj = graph_json.to_string();
-
     let result = tokio::task::spawn_blocking(move || {
-        let mut engine = Rush::new(&gj).map_err(|e| ServeError::Execution(e.to_string()))?;
+        let mut engine = Rush::from_config(config);
 
         for tracer in tracers {
             engine.add_tracer_arc(tracer);

@@ -9,7 +9,7 @@ Học được:
 - So sánh OTELTracer vs LangfuseTracer (cùng workflow, khác tracer)
 - Raw OTEL SDK: gửi spans trực tiếp không qua Hush
 
-Chạy: cd tutorial && uv run python examples/09_otel_tracing.py
+Chạy: uv run python examples/09_otel_tracing.py
 """
 
 import asyncio
@@ -55,13 +55,13 @@ def create_langfuse_otel_config(service_name: str = "tutorial"):
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::pipeline::validate_input")
 def validate(x: int):
     """Validate input."""
     return {"validated_x": x, "$tags": ["validated"]}
 
 
-@op
+@op(rust="./rust_ops::math::multiply_xy_tagged")
 def multiply(x: int, y: int):
     """Nhân hai số."""
     product = x * y
@@ -71,13 +71,13 @@ def multiply(x: int, y: int):
     return {"product": product, "$tags": tags}
 
 
-@op
+@op(rust="./rust_ops::analytics::summarize_products")
 def summarize(products: list):
     """Tổng hợp kết quả."""
     return {"total": sum(products) if products else 0}
 
 
-@op
+@op(rust="./rust_ops::iteration::halve_until_threshold")
 def halve_until_small(value: int, threshold: int = 5):
     """Chia đôi giá trị cho đến khi nhỏ hơn threshold (thay thế WhileOp)."""
     while value >= threshold:
@@ -93,14 +93,14 @@ def halve_until_small(value: int, threshold: int = 5):
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::iteration::each_x")
 def each_x(xs: list):
     """Yield từng x — thay thế outer ForOp."""
     for x in xs:
         yield {"x": x}
 
 
-@op
+@op(rust="./rust_ops::iteration::each_y")
 def each_y(ys: list):
     """Yield từng y — thay thế inner ForOp."""
     for y in ys:

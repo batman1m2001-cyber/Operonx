@@ -12,7 +12,7 @@ Example 1-2: No API keys needed (local trace tree + stream mode)
 Example 3: Requires LANGFUSE_HUSH_* keys in .env + langfuse:hush in resources.yaml
 
 Run:
-    cd tutorial && uv run python examples/20_callbot_streaming.py
+    uv run python examples/18_callbot_streaming.py
 """
 
 import asyncio
@@ -31,7 +31,7 @@ from hush.core.tracing.collector import TraceCollector
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::streaming::customer_audio")
 async def customer_audio(sample_count: int):
     """Simulate microphone input — yields fixed-size 32ms audio chunks.
 
@@ -43,7 +43,7 @@ async def customer_audio(sample_count: int):
         yield {"audio": f"chunk_{i}", "timestamp_ms": i * 32}
 
 
-@op
+@op(rust="./rust_ops::streaming::vad")
 async def vad(audio: str, timestamp_ms: int):
     """Voice Activity Detection — N-to-M generator.
 
@@ -64,7 +64,7 @@ async def vad(audio: str, timestamp_ms: int):
     # Silence chunks → yield nothing → zero-yield generator execution
 
 
-@op
+@op(rust="./rust_ops::streaming::stt")
 def stt(segment: str, start_ms: int, end_ms: int):
     """Speech-to-Text — transcribe a VAD segment.
 
@@ -73,7 +73,7 @@ def stt(segment: str, start_ms: int, end_ms: int):
     return {"transcript": f"Hello from {segment} [{start_ms}-{end_ms}ms]"}
 
 
-@op
+@op(rust="./rust_ops::analytics::classify_intent")
 def classify_intent(transcript: str):
     """Classify user intent from transcript.
 
@@ -84,7 +84,7 @@ def classify_intent(transcript: str):
     return {"intent": "general", "confidence": 0.8}
 
 
-@op
+@op(rust="./rust_ops::pipeline::handle_intent")
 def handle_intent(intent: str, transcript: str):
     """Generate a response based on intent.
 
@@ -107,7 +107,7 @@ def llm_router(transcript):
     START >> c >> h >> END
 
 
-@op
+@op(rust="./rust_ops::streaming::tts")
 async def tts(response: str):
     """Text-to-Speech — yields audio chunks word by word.
 
@@ -288,6 +288,23 @@ async def example_run_and_trace():
         if n["parent_trace_key"] is not None and n["parent_trace_key"] not in all_keys
     ]
     print(f"Orphaned nodes: {orphans if orphans else 'none'}")
+    print()
+
+    # Rust mode — same pipeline, Rust execution backend
+    print("-" * 60)
+    print("Rust mode — same pipeline")
+    print("-" * 60)
+    callbot_rs = build_callbot()
+    engine_rs = Hush(callbot_rs, mode="rust")
+    result_rs = await engine_rs.run(inputs={"samples": 5})
+
+    tts_rs = result_rs.get("audio_out", [])
+    print(f"  TTS chunks (Rust): {len(tts_rs) if isinstance(tts_rs, list) else '?'}")
+    if isinstance(tts_rs, list):
+        for chunk in tts_rs[:5]:
+            print(f"    {chunk}")
+        if len(tts_rs) > 5:
+            print(f"    ... and {len(tts_rs) - 5} more")
     print()
 
 

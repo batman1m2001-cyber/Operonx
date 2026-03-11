@@ -9,7 +9,7 @@ Học được:
 - Fallback chain: tự động switch model khi primary fails
 - Ensemble + voting: judge model chọn best answer
 
-Chạy: cd tutorial && uv run python examples/12_multi_model.py
+Chạy: uv run python examples/12_multi_model.py
 """
 
 import asyncio
@@ -40,7 +40,7 @@ async def example_1_parallel_models():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    @op
+    @op(rust="./rust_ops::pipeline::merge_results")
     def compare(a, b):
         return {
             "gpt4o": a,
@@ -252,7 +252,7 @@ async def example_5_ensemble():
         print("  Skipped — OPENAI_API_KEY chưa set")
         return
 
-    @op
+    @op(rust="./rust_ops::pipeline::select_answer")
     def select(choice, a1, a2):
         return {
             "answer": a1 if "1" in choice else a2,

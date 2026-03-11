@@ -66,6 +66,10 @@ fn test_range_gen_basic() {
     assert_eq!(state["g.dbl"]["result"]["main.[0]"], json!(0));
     assert_eq!(state["g.dbl"]["result"]["main.[1]"], json!(2));
     assert_eq!(state["g.dbl"]["result"]["main.[2]"], json!(4));
+
+    // Verify stream aggregation in top-level output
+    let output = filter_internal(result);
+    assert_eq!(output["result"], json!([0, 2, 4]));
 }
 
 #[test]

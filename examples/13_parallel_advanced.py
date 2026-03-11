@@ -10,7 +10,7 @@ Học được:
 - Parallel LLM calls: nhiều prompts cùng lúc
 - Batch LLM với generator ops: process list of queries
 
-Chạy: cd tutorial && uv run python examples/13_parallel_advanced.py
+Chạy: uv run python examples/13_parallel_advanced.py
 """
 
 import asyncio
@@ -28,7 +28,7 @@ from hush.core.ops import op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::analytics::analyze_sentiment")
 def analyze_sentiment(text: str):
     """Phân tích sentiment (giả lập)."""
     positive = sum(
@@ -44,7 +44,7 @@ def analyze_sentiment(text: str):
     }
 
 
-@op
+@op(rust="./rust_ops::text::extract_keywords")
 def extract_keywords(text: str):
     """Trích keywords (giả lập)."""
     stop_words = {
@@ -68,7 +68,7 @@ def extract_keywords(text: str):
     return {"keywords": keywords[:5]}
 
 
-@op
+@op(rust="./rust_ops::analytics::count_stats")
 def count_stats(text: str):
     """Đếm thống kê text."""
     words = text.split()
@@ -85,7 +85,7 @@ async def example_1_fan_out_fan_in():
     print("Ví dụ 1: Fan-out / Fan-in")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::pipeline::merge_analysis")
     def merge(s, k, wc, cc, awl):
         return {
             "analysis": {
@@ -116,15 +116,28 @@ async def example_1_fan_out_fan_in():
         # [sent, kw, st] chạy song song
         START >> [sent, kw, st] >> m >> END
 
+    text_input = {"text": "This is a great excellent product with good quality and love it"}
+
+    # Python mode
     engine = Hush(graph)
-    result = await engine.run(
-        inputs={"text": "This is a great excellent product with good quality and love it"}
-    )
+    result = await engine.run(inputs=text_input)
     analysis = result["analysis"]
-    print(f"  Sentiment:    {analysis['sentiment']}")
-    print(f"  Keywords:     {analysis['keywords']}")
-    print(f"  Word count:   {analysis['word_count']}")
-    print(f"  Avg word len: {analysis['avg_word_len']}")
+    print(f"  Python mode:")
+    print(f"    Sentiment:    {analysis['sentiment']}")
+    print(f"    Keywords:     {analysis['keywords']}")
+    print(f"    Word count:   {analysis['word_count']}")
+    print(f"    Avg word len: {analysis['avg_word_len']}")
+
+    # Rust mode — same graph, Rust execution backend
+    result_rs = await Hush(graph, mode="rust").run(inputs=text_input)
+    analysis_rs = result_rs["analysis"]
+    print(f"  Rust mode:")
+    print(f"    Sentiment:    {analysis_rs['sentiment']}")
+    print(f"    Keywords:     {analysis_rs['keywords']}")
+    print(f"    Word count:   {analysis_rs['word_count']}")
+    print(f"    Avg word len: {analysis_rs['avg_word_len']}")
+    assert analysis == analysis_rs, "Python and Rust results must match"
+    print("  Results match!")
 
 
 # =============================================================================
@@ -132,14 +145,14 @@ async def example_1_fan_out_fan_in():
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::iteration::each_item")
 def each_item(items: list):
     """Yield từng item — thay thế MapOp + Each."""
     for item in items:
         yield {"item": item}
 
 
-@op
+@op(rust="./rust_ops::pipeline::process_item_squared")
 def process_item(item: int):
     """Process 1 item (giả lập I/O với sleep)."""
     import time
@@ -187,14 +200,14 @@ async def example_3_partial_failure():
     print("Ví dụ 3: Partial Failure Handling")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::pipeline::safe_process")
     def safe_process(item: int):
         """Process that returns error for even numbers instead of raising."""
         if item % 2 != 0:
             return {"result": item * 10, "error": None}
         return {"result": None, "error": f"Even number: {item}"}
 
-    @op
+    @op(rust="./rust_ops::pipeline::filter_results")
     def filter_results(results, errors):
         return {
             "successful": [r for r, e in zip(results, errors) if e is None],
@@ -244,7 +257,7 @@ async def example_4_parallel_llm():
     # --- Part A: Parallel prompts (different tasks, same input) ---
     print("\n  A) Parallel prompts (summary + keywords from same text):")
 
-    @op
+    @op(rust="./rust_ops::pipeline::merge_results")
     def merge_results(s, k):
         return {"summary": s, "keywords": k}
 
@@ -284,7 +297,7 @@ async def example_4_parallel_llm():
     # --- Part B: Batch LLM via generator op ---
     print("\n  B) Batch LLM (multiple queries via generator op):")
 
-    @op
+    @op(rust="./rust_ops::iteration::each_query")
     def each_query(queries: list):
         """Yield từng query — thay thế MapOp + Each."""
         for query in queries:

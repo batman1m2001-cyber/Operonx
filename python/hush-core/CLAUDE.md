@@ -342,9 +342,48 @@ How it works: `auto_name()` in `utils/auto_name.py` walks the call stack (skippi
 
 Use `register_skip(fn)` to skip your factory function's frame during auto-naming.
 
-### Loops via `GraphOp.loop()` / `@graph.loop()`
+### Iteration Patterns (ForOp/MapOp/WhileOp removed)
 
-Loops are built using `GraphOp.loop()` or the `@graph.loop()` decorator (ForOp/WhileOp were removed):
+The old `ForOp`, `MapOp`, `Each` classes were replaced. ForOp/MapOp were GraphOp-like containers
+with child ops inside — now a regular `GraphOp` + generator op replaces them entirely.
+
+**1. Generator ops inside GraphOp (replaces ForOp/MapOp)**
+
+A generator `@op` with `yield` acts as the iterator source. Downstream ops in the same GraphOp
+process each yielded item. The GraphOp serves as the container (the role ForOp/MapOp used to fill):
+
+```python
+@op
+def each_item(items: list):
+    for item in items:
+        yield {"value": item}
+
+@op
+def double(value: int):
+    return {"result": value * 2}
+
+# GraphOp = container, generator op = iterator, downstream ops = per-item processing
+with GraphOp(name="iterate") as graph:
+    gen = each_item(items=PARENT["numbers"])
+    step = double(value=gen["value"])
+    START >> gen >> step >> END
+
+result = await Hush(graph).run(inputs={"numbers": [1, 2, 3]})
+# result["result"] == [2, 4, 6]
+# Downstream ops run concurrently per yield (streaming scheduler default)
+```
+
+Broadcast (batch op value shared across all yields):
+```python
+with GraphOp(name="multiply_loop") as g:
+    cfg = get_config()                                    # batch op → {"multiplier": 10}
+    src = each_item(items=PARENT["items"])                # generator
+    m = multiply(value=src["value"], multiplier=cfg["multiplier"])  # per-item
+    START >> [cfg, src]
+    [cfg, src] >> m >> END
+```
+
+**2. `GraphOp.loop()` / `@graph.loop()` (replaces WhileOp)** — feedback loops:
 
 ```python
 # Class method style

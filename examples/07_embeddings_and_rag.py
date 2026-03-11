@@ -106,7 +106,7 @@ async def example_2_simple_rag():
     print(f"  Embedded {len(doc_vectors)} documents ({len(doc_vectors[0])} dims)")
 
     # RAG workflow
-    @op
+    @op(rust="./rust_ops::search::retrieve")
     def retrieve(query_vec, doc_vectors, documents):
         return {"context_docs": cosine_search(query_vec[0], doc_vectors, documents, top_k=3)}
 

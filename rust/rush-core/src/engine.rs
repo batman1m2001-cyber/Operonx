@@ -42,6 +42,18 @@ impl Rush {
         })
     }
 
+    /// Create a new Rush engine from a pre-parsed config.
+    /// Avoids JSON parsing overhead — use for hot paths (e.g. per-request in rush-serve).
+    pub fn from_config(config: Arc<GraphConfig>) -> Self {
+        Rush {
+            config,
+            tracers: Vec::new(),
+            middleware: Vec::new(),
+            flush_worker: FlushWorker::new(),
+            _force_timestamps: false,
+        }
+    }
+
     /// Register a tracer for automatic flush after each run.
     pub fn add_tracer(&mut self, tracer: impl Tracer + 'static) {
         self.tracers.push(Arc::new(tracer));
@@ -98,8 +110,8 @@ impl Rush {
         }
 
         // 2. Run graph
-        match graph_op::run_graph(&self.config, &state, context) {
-            Ok(()) => {}
+        let stream_contexts = match graph_op::run_graph(&self.config, &state, context) {
+            Ok(sc) => sc,
             Err(e) => {
                 // on_error middleware (in reverse order)
                 for mw in self.middleware.iter().rev() {
@@ -107,10 +119,10 @@ impl Rush {
                 }
                 return Err(e);
             }
-        }
+        };
 
-        // 3. Collect outputs
-        let mut result = graph_op::get_outputs(&self.config, &state, context)?;
+        // 3. Collect outputs (aggregates from stream contexts if generators were used)
+        let mut result = graph_op::get_outputs(&self.config, &state, context, &stream_contexts)?;
 
         // 4. Build $state metadata
         let mut state_meta = serde_json::Map::new();

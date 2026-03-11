@@ -11,7 +11,7 @@ Học được:
 - Graceful degradation với fallback value
 - Retry với exponential backoff
 
-Chạy: cd tutorial && uv run python examples/10_error_handling.py
+Chạy: uv run python examples/10_error_handling.py
 """
 
 import asyncio
@@ -35,7 +35,7 @@ async def example_1_error_capture():
     print("Ví dụ 1: Error capture trong state")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::pipeline::fetch_data")
     def failing():
         return {"result": 1 / 0}  # ZeroDivisionError!
 
@@ -58,7 +58,7 @@ async def example_1_error_capture():
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::math::safe_divide")
 def safe_divide(a: int, b: int):
     """Chia an toàn — trả success/error thay vì throw."""
     try:
@@ -68,13 +68,13 @@ def safe_divide(a: int, b: int):
         return {"success": False, "result": None, "error": "Cannot divide by zero"}
 
 
-@op
+@op(rust="./rust_ops::text::handle_success")
 def handle_success(result: float):
     """Xử lý kết quả thành công."""
     return {"output": f"Result: {result}"}
 
 
-@op
+@op(rust="./rust_ops::text::handle_error")
 def handle_error(error: str):
     """Xử lý lỗi."""
     return {"output": f"Error occurred: {error}"}
@@ -120,7 +120,7 @@ async def example_2_branch_error_routing():
 _call_count = 0
 
 
-@op
+@op(rust="./rust_ops::pipeline::step_a")
 def unreliable_api(query: str):
     """API giả lập — fail 2 lần đầu, thành công lần thứ 3."""
     global _call_count
@@ -130,7 +130,7 @@ def unreliable_api(query: str):
     return {"answer": f"Result for: {query}"}
 
 
-@op
+@op(rust="./rust_ops::pipeline::step_a")
 def retry_with_backoff(query: str):
     """Retry với exponential backoff."""
     import time
@@ -161,7 +161,7 @@ def retry_with_backoff(query: str):
     }
 
 
-@op
+@op(rust="./rust_ops::pipeline::with_fallback")
 def with_fallback(primary_result: str, success: bool):
     """Dùng kết quả hoặc fallback."""
     if success:

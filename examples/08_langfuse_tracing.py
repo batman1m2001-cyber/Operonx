@@ -10,7 +10,7 @@ Học được:
 - user_id, session_id, request_id: correlation trong Langfuse UI
 - Truy cập $state sau khi run
 
-Chạy: cd tutorial && uv run python examples/08_langfuse_tracing.py
+Chạy: uv run python examples/08_langfuse_tracing.py
 """
 
 import asyncio
@@ -28,7 +28,7 @@ from hush.core.ops import op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::text::preprocess")
 def preprocess(text: str):
     """Tiền xử lý text, thêm dynamic tags."""
     cleaned = text.strip().lower()
@@ -38,7 +38,7 @@ def preprocess(text: str):
     return {"cleaned": cleaned, "$tags": tags}
 
 
-@op
+@op(rust="./rust_ops::analytics::tokenize")
 def tokenize(text: str):
     """Tách text thành tokens."""
     tokens = text.split()
@@ -48,20 +48,20 @@ def tokenize(text: str):
     return {"tokens": tokens, "count": len(tokens), "$tags": tags}
 
 
-@op
+@op(rust="./rust_ops::iteration::each_token")
 def each_token(tokens: list):
     """Yield từng token — thay thế MapOp + Each."""
     for token in tokens:
         yield {"token": token}
 
 
-@op
+@op(rust="./rust_ops::math::score_token")
 def score_token(token: str, multiplier: int):
     """Tính score cho 1 token."""
     return {"score": len(token) * multiplier}
 
 
-@op
+@op(rust="./rust_ops::analytics::aggregate_stats")
 def aggregate(scores: list):
     """Tổng hợp scores."""
     total = sum(scores) if scores else 0
@@ -72,7 +72,7 @@ def aggregate(scores: list):
     return {"total": total, "average": avg, "$tags": tags}
 
 
-@op
+@op(rust="./rust_ops::analytics::classify_by_score")
 def classify(score: float):
     """Phân loại dựa trên score."""
     if score > 50:

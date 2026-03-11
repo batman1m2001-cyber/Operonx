@@ -4,11 +4,12 @@ Không cần API key. Chỉ dùng hush-core.
 
 Học được:
 - Pipeline nhiều bước: fetch → transform → aggregate
-- @op decorator: định nghĩa op từ function
+- @op(rust="..."): tag Rust implementation, Python body là fallback
 - step["key"]: truyền data giữa sibling ops
 - PARENT["key"]: đọc external inputs
+- mode="rust": chạy workflow bằng Rust backend
 
-Chạy: cd tutorial && uv run python examples/02_data_pipeline.py
+Chạy: uv run python examples/02_data_pipeline.py
 """
 
 import asyncio
@@ -18,22 +19,23 @@ from hush.core.ops.transform.func_op import op
 
 # =============================================================================
 # Định nghĩa functions cho các ops
+# Mỗi op có rust= tag → chạy được cả Python mode và Rust mode
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::pipeline::fetch_data")
 def fetch_data():
     """Bước 1: Lấy data (giả lập)."""
     return {"data": [1, 2, 3, 4, 5]}
 
 
-@op
+@op(rust="./rust_ops::pipeline::transform_double")
 def transform(data: list):
     """Bước 2: Nhân đôi mỗi phần tử."""
     return {"transformed": [x * 2 for x in data]}
 
 
-@op
+@op(rust="./rust_ops::analytics::aggregate_data")
 def aggregate(data: list):
     """Bước 3: Tính tổng và trung bình."""
     return {
@@ -48,14 +50,14 @@ def aggregate(data: list):
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::text::clean_text")
 def clean_text(text: str):
     """Tiền xử lý: loại bỏ whitespace thừa, lowercase."""
     cleaned = " ".join(text.split()).strip().lower()
     return {"cleaned_text": cleaned}
 
 
-@op
+@op(rust="./rust_ops::analytics::count_words")
 def count_words(text: str):
     """Đếm số từ."""
     words = text.split()
@@ -66,7 +68,7 @@ def count_words(text: str):
     }
 
 
-@op
+@op(rust="./rust_ops::analytics::summarize_stats")
 def summarize_stats(word_count: int, unique_words: int, cleaned_text: str):
     """Tổng hợp thống kê."""
     return {
@@ -93,12 +95,22 @@ async def main():
 
         START >> f >> t >> a >> END
 
+    # Python mode
     engine = Hush(graph)
     result = await engine.run(inputs={})
 
-    print(f"Tổng:           {result['total']}")
-    print(f"Trung bình:     {result['average']}")
-    print(f"Số phần tử:     {result['count']}")
+    print(f"Python mode:")
+    print(f"  Tổng:           {result['total']}")
+    print(f"  Trung bình:     {result['average']}")
+    print(f"  Số phần tử:     {result['count']}")
+
+    # Rust mode
+    result_rs = await Hush(graph, mode="rust").run(inputs={})
+
+    print(f"Rust mode:")
+    print(f"  Tổng:           {result_rs['total']}")
+    print(f"  Trung bình:     {result_rs['average']}")
+    print(f"  Số phần tử:     {result_rs['count']}")
 
     # =========================================================================
     # Pipeline 2: Text processing
