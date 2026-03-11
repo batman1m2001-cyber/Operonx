@@ -10,6 +10,7 @@
 //!       → event loop: Done / DonePending / Yield / Exhausted
 //!       → collect outputs
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
@@ -210,7 +211,7 @@ async fn run_scheduler(
     // ── Helper: drain ready queue ─────────────────────────────────
     // Process queue of ready ops: dispatch each, append newly ready successors.
     let drain_ready =
-        |queue: &mut Vec<String>,
+        |queue: &mut VecDeque<String>,
          ctx: &str,
          active_count: &mut usize,
          ready_counts: &mut AHashMap<String, AHashMap<String, i32>>,
@@ -218,8 +219,7 @@ async fn run_scheduler(
          event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
          semaphore: &Arc<Semaphore>|
          -> Result<(), RushError> {
-            while let Some(op_name) = queue.first().cloned() {
-                queue.remove(0);
+            while let Some(op_name) = queue.pop_front() {
                 match dispatch_op(
                     &op_name,
                     ctx,
@@ -239,7 +239,7 @@ async fn run_scheduler(
         };
 
     // ── 1. Start entry ops ────────────────────────────────────────
-    let mut queue: Vec<String> = config.entries.clone();
+    let mut queue: VecDeque<String> = config.entries.iter().cloned().collect();
     drain_ready(
         &mut queue,
         context_id,
@@ -260,7 +260,7 @@ async fn run_scheduler(
         match event {
             SchedulerEvent::Done(op_name, ctx) => {
                 active_count -= 1;
-                let mut newly_ready = propagate(&op_name, &ctx, &mut ready_counts, &mut soft_satisfied)?;
+                let mut newly_ready: VecDeque<String> = propagate(&op_name, &ctx, &mut ready_counts, &mut soft_satisfied)?.into();
                 drain_ready(
                     &mut newly_ready,
                     &ctx,
@@ -277,20 +277,16 @@ async fn run_scheduler(
             }
 
             SchedulerEvent::Yield(gen_name, stream_ctx, _result_data) => {
-                // Create stream context with pre-decremented ready counts
-                let mut rc = config.initial_ready_count.clone();
-                if let Some(predecs) = config.stream_predecrements.get(&gen_name) {
-                    for (op_name, dec) in predecs {
-                        if let Some(count) = rc.get_mut(op_name) {
-                            *count -= dec;
-                        }
-                    }
-                }
+                // Create stream context with pre-computed ready counts (predecrements already applied).
+                let rc = config.stream_ready_counts
+                    .get(&gen_name)
+                    .cloned()
+                    .unwrap_or_else(|| config.initial_ready_count.clone());
                 ready_counts.insert(stream_ctx.clone(), rc);
                 stream_contexts.push(stream_ctx.clone());
 
-                let mut newly_ready =
-                    propagate(&gen_name, &stream_ctx, &mut ready_counts, &mut soft_satisfied)?;
+                let mut newly_ready: VecDeque<String> =
+                    propagate(&gen_name, &stream_ctx, &mut ready_counts, &mut soft_satisfied)?.into();
                 drain_ready(
                     &mut newly_ready,
                     &stream_ctx,

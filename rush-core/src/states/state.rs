@@ -26,6 +26,10 @@ pub struct EngineState {
     tags: Mutex<Vec<String>>,
     /// Request ID for tracing (set by engine.run()).
     request_id: Mutex<Option<String>>,
+    /// When true, store $start_time/$end_time/$duration_ms per op.
+    /// Set to true when tracers are registered. Avoids Utc::now() syscalls
+    /// and 3 DashMap writes per op when nobody consumes timing data.
+    pub needs_timestamps: bool,
 }
 
 impl EngineState {
@@ -35,6 +39,7 @@ impl EngineState {
             values: DashMap::new(),
             tags: Mutex::new(Vec::new()),
             request_id: Mutex::new(None),
+            needs_timestamps: false,
         }
     }
 

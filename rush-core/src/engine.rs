@@ -24,6 +24,7 @@ pub struct Rush {
     config: Arc<GraphConfig>,
     tracers: Vec<Arc<dyn Tracer>>,
     flush_worker: FlushWorker,
+    _force_timestamps: bool,
 }
 
 impl Rush {
@@ -34,6 +35,7 @@ impl Rush {
             config: Arc::new(config),
             tracers: Vec::new(),
             flush_worker: FlushWorker::new(),
+            _force_timestamps: false,
         })
     }
 
@@ -47,6 +49,12 @@ impl Rush {
         self.tracers.push(tracer);
     }
 
+    /// Force per-op timing metadata ($start_time, $end_time, $duration_ms)
+    /// even when no tracers are registered. Useful for debugging/profiling.
+    pub fn enable_timestamps(&mut self) {
+        self._force_timestamps = true;
+    }
+
     /// Run the graph with JSON inputs and return JSON result.
     ///
     /// Pure Rust execution — no Python, no GIL.
@@ -58,7 +66,9 @@ impl Rush {
         user_id: Option<String>,
         session_id: Option<String>,
     ) -> Result<Value, RushError> {
-        let state = Arc::new(EngineState::new());
+        let mut raw_state = EngineState::new();
+        raw_state.needs_timestamps = !self.tracers.is_empty() || self._force_timestamps;
+        let state = Arc::new(raw_state);
         let context = "main";
 
         if let Some(ref rid) = request_id {
