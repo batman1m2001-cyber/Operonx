@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 # Load .env file from package root
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-# Also try loading from monorepo root
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+# Also try loading from monorepo root (Hush-ai/)
+# __file__ = python/hush-telemetry/tests/conftest.py → 4 parents to reach Hush-ai/
+load_dotenv(Path(__file__).parent.parent.parent.parent / ".env")
 
 # Get config path from environment, resolve relative paths by walking up
 _raw_config = os.environ.get("HUSH_CONFIG", "")

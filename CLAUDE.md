@@ -6,20 +6,26 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 
 ```
 Hush-ai/
-├── hush-core/          # Core workflow engine (ops, state, tracing)
-├── rush-core/          # High-performance Rust execution backend (pure rlib, rayon + DashMap)
-├── hush-providers/     # LLM, embedding, reranking integrations (Python)
-├── rush-providers/     # Rust provider implementations (native HTTP, ONNX, per-provider modules)
-├── hush-serve/         # HTTP API server from workflow graphs (Python, FastAPI + uvicorn)
-├── rush-serve/         # Standalone Rust HTTP server for workflows (Axum + rush-core)
-├── hush-telemetry/     # External tracing backends (Langfuse, OTEL)
-├── tutorial/           # Documentation (Vietnamese) and examples
-├── ui-hush-eyes/       # Standalone Rust server for trace visualization (Axum + SQLite)
-├── architecture/       # Deep technical documentation
-├── .github/            # CI/CD workflows, issue/PR templates
-├── env.example         # Environment variables template
-├── CONTRIBUTING.md     # Contributor guide
-└── SECURITY.md         # Security policy
+├── python/                # Python packages
+│   ├── hush-core/         # Core workflow engine (ops, state, tracing)
+│   ├── hush-providers/    # LLM, embedding, reranking integrations
+│   ├── hush-serve/        # HTTP API server (FastAPI + uvicorn)
+│   └── hush-telemetry/    # External tracing backends (Langfuse, OTEL)
+├── rust/                  # Rust crates
+│   ├── Cargo.toml         # Workspace root
+│   ├── rush-core/         # High-performance execution backend (pure rlib, DashMap)
+│   ├── rush-providers/    # Native HTTP providers, ONNX inference
+│   ├── rush-serve/        # Standalone HTTP server (Axum + rush-core)
+│   ├── rush-telemetry/    # Rust telemetry backends
+│   └── ui-hush-eyes/     # Trace visualization server (Axum + SQLite)
+├── examples/              # Runnable Python examples
+├── docs/                  # All documentation
+│   ├── guide/             # User guide (Vietnamese, 00-12 chapters)
+│   └── architecture/      # Deep technical documentation
+├── .github/               # CI/CD workflows, issue/PR templates
+├── env.example            # Environment variables template
+├── CONTRIBUTING.md        # Contributor guide
+└── SECURITY.md            # Security policy
 ```
 
 ## Documentation System
@@ -30,29 +36,29 @@ Hush-ai/
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  Layer 1: CLAUDE.md (Quick Reference - for AI & developers)     │
-│  ├── /CLAUDE.md              → Monorepo overview, conventions   │
-│  ├── /hush-core/CLAUDE.md    → Core patterns, how to extend     │
-│  ├── /hush-providers/CLAUDE.md → Provider patterns              │
-│  ├── /hush-telemetry/CLAUDE.md → Tracer patterns            │
-│  ├── /tutorial/CLAUDE.md → Doc conventions                 │
-│  ├── /ui-hush-eyes/CLAUDE.md → Rust server patterns     │
-│  ├── /rush-core/CLAUDE.md  → Rust backend patterns              │
-│  ├── /rush-providers/CLAUDE.md → Rust provider patterns         │
-│  ├── /hush-serve/CLAUDE.md → Python serve patterns              │
-│  └── /rush-serve/CLAUDE.md → Rust serve patterns                │
+│  ├── /CLAUDE.md                        → Monorepo overview      │
+│  ├── /python/hush-core/CLAUDE.md       → Core patterns          │
+│  ├── /python/hush-providers/CLAUDE.md  → Provider patterns      │
+│  ├── /python/hush-telemetry/CLAUDE.md  → Tracer patterns        │
+│  ├── /python/hush-serve/CLAUDE.md      → Python serve patterns  │
+│  ├── /rust/rush-core/CLAUDE.md         → Rust backend patterns  │
+│  ├── /rust/rush-providers/CLAUDE.md    → Rust provider patterns │
+│  ├── /rust/rush-serve/CLAUDE.md        → Rust serve patterns    │
+│  ├── /rust/rush-telemetry/CLAUDE.md    → Rust telemetry         │
+│  └── /rust/ui-hush-eyes/CLAUDE.md      → Trace server patterns  │
 │                                                                  │
-│  Layer 2: architecture/ (Deep Documentation - for learning)     │
+│  Layer 2: docs/architecture/ (Deep Documentation)               │
 │  ├── engine/      → Execution, compilation, scheduling          │
 │  ├── state/       → StateSchema, MemoryState, indexer           │
-│  ├── ops/       → Op internals, creating custom ops            │
+│  ├── ops/         → Op internals, creating custom ops           │
 │  ├── providers/   → Provider abstractions                       │
 │  ├── resources/   → ResourceHub                                 │
 │  ├── tracing/     → Tracer internals, data model                │
 │  └── contributing/ → Dev setup, code style, testing             │
 │                                                                  │
-│  Layer 3: tutorial/ (User Guide - for end users)           │
-│  ├── docs/        → Vietnamese documentation (00-12 chapters)   │
-│  └── examples/    → Runnable Python examples (01-15)            │
+│  Layer 3: docs/guide/ + examples/ (User Guide + Examples)       │
+│  ├── docs/guide/  → Vietnamese documentation (00-13 chapters)   │
+│  └── examples/    → Runnable Python examples (01-20)            │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -63,23 +69,23 @@ Hush-ai/
 |------|-------|
 | Quick reference while coding | `CLAUDE.md` in relevant package |
 | "How do I add X?" | `CLAUDE.md` |
-| "Why does X work this way?" | `architecture/` |
-| Deep dive into internals | `architecture/` |
-| Learning from scratch | `architecture/index.md` → reading order |
-| User-facing docs (Vietnamese) | `tutorial/docs/` |
-| Runnable examples | `tutorial/examples/` |
-| Teaching someone Hush | `tutorial/docs/00-tong-quan.md` → reading order |
+| "Why does X work this way?" | `docs/architecture/` |
+| Deep dive into internals | `docs/architecture/` |
+| Learning from scratch | `docs/architecture/index.md` → reading order |
+| User-facing docs (Vietnamese) | `docs/guide/` |
+| Runnable examples | `examples/` |
+| Teaching someone Hush | `docs/guide/00-tong-quan.md` → reading order |
 
 ## Documentation Update Rules
 
 ### When to Update What
 
-| Change Type | CLAUDE.md | architecture/ | tutorial/ |
-|-------------|-----------|---------------|----------------|
-| New op type | ✓ How to use | ✓ How it works internally | ✓ Add to docs/03 + example |
-| New provider | ✓ Integration pattern | ✓ Abstraction design | ✓ Add to docs/04 or 06 + example |
-| New tracer | ✓ Usage pattern | ✓ Implementation details | ✓ Add to docs/09 + example |
-| API change | ✓ Update examples | ✓ Update explanations | ✓ Update docs + examples |
+| Change Type | CLAUDE.md | docs/architecture/ | docs/guide/ + examples/ |
+|-------------|-----------|---------------------|-------------------------|
+| New op type | ✓ How to use | ✓ How it works internally | ✓ Add to guide/03 + example |
+| New provider | ✓ Integration pattern | ✓ Abstraction design | ✓ Add to guide/04 or 06 + example |
+| New tracer | ✓ Usage pattern | ✓ Implementation details | ✓ Add to guide/09 + example |
+| API change | ✓ Update examples | ✓ Update explanations | ✓ Update guide + examples |
 | Internal refactor (same API) | - | ✓ If algorithm changes | - |
 | Bug fix | - | - | - |
 | Adding tests | - | - | - |
@@ -88,23 +94,23 @@ Hush-ai/
 
 When making significant changes:
 1. Update CLAUDE.md with new patterns/examples
-2. Update architecture/ with detailed explanations
-3. **Update tutorial/docs/ with user-facing documentation (Vietnamese)**
-4. **Update/add tutorial/examples/ with runnable examples**
+2. Update docs/architecture/ with detailed explanations
+3. **Update docs/guide/ with user-facing documentation (Vietnamese)**
+4. **Update/add examples/ with runnable examples**
 5. Ensure cross-references are correct
 6. Verify code examples match actual API
 
-### tutorial Sync Mapping
+### Guide Sync Mapping
 
-| Code Location | docs/ Update | examples/ Update |
-|---------------|--------------|------------------|
-| hush-core/ops/ | 03-core-concepts.md | 01-02, 05 |
-| hush-core/engine.py | 03-core-concepts.md | 01-02 |
-| hush-providers/llm/ | 04-llm-integration.md | 03-04 |
-| hush-providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
-| hush-providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
-| hush-core/tracing/ | 09-tracing-observability.md | 06 |
-| hush-telemetry/tracers/ | 09-tracing-observability.md | 08, 09 |
+| Code Location | docs/guide/ Update | examples/ Update |
+|---------------|--------------------|------------------|
+| python/hush-core/hush/core/ops/ | 03-core-concepts.md | 01-02, 05 |
+| python/hush-core/hush/core/engine.py | 03-core-concepts.md | 01-02 |
+| python/hush-providers/hush/providers/llm/ | 04-llm-integration.md | 03-04 |
+| python/hush-providers/hush/providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
+| python/hush-providers/hush/providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
+| python/hush-core/hush/core/tracing/ | 09-tracing-observability.md | 06 |
+| python/hush-telemetry/hush/telemetry/tracers/ | 09-tracing-observability.md | 08, 09 |
 | Control flow (For/While/Branch) | 05-loops-branches.md | 05 |
 | Error handling | 07-error-handling.md | 10 |
 | Parallel patterns | 08-parallel-execution.md | 13 |
@@ -115,7 +121,7 @@ When making significant changes:
 
 **In CLAUDE.md** → link to architecture/ for deep dives:
 ```markdown
-For details on state indexing, see [architecture/state/indexer.md](architecture/state/indexer.md)
+For details on state indexing, see [docs/architecture/state/indexer.md](docs/architecture/state/indexer.md)
 ```
 
 **In architecture/** → note that CLAUDE.md has quick patterns:
@@ -126,33 +132,33 @@ For quick usage patterns, see the package's CLAUDE.md file.
 ## Package Dependencies
 
 ```
-hush-core (foundation - no hush dependencies)
+python/hush-core (foundation - no hush dependencies)
     ↓
-hush-providers (depends on hush-core)
+python/hush-providers (depends on hush-core)
     ↓
-hush-telemetry (depends on hush-core)
+python/hush-telemetry (depends on hush-core)
     ↓
-hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
+python/hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
 
-rush-core (Pure Rust engine - standalone rlib, built via cargo build)
-rush-providers (Rust crate - used by rush-core, built via cargo build)
-rush-serve (Rust binary - depends on rush-core + rush-providers)
+rust/rush-core (Pure Rust engine - standalone rlib, built via cargo build)
+rust/rush-providers (Rust crate - used by rush-core, built via cargo build)
+rust/rush-serve (Rust binary - depends on rush-core + rush-providers)
 ```
 
 ## When to Modify Which Package
 
 | Task | Package |
 |------|---------|
-| New op type | hush-core/hush/core/ops/ |
-| New LLM/embedding/reranker provider (Python) | hush-providers/hush/providers/ |
-| New LLM/embedding/reranker provider (Rust) | rush-providers/src/ |
-| New tracing backend | hush-telemetry/hush/telemetry/ |
-| Rust execution backend | rush-core/src/ |
-| HTTP API server (Python) | hush-serve/hush/serve/ |
-| HTTP API server (Rust) | rush-serve/src/ |
-| New built-in Rust op | rush-core/src/builtin_ops/ops.rs + dispatch in rush-core/src/builtin_ops/mod.rs |
-| Documentation or examples | tutorial/ |
-| Trace visualization server | ui-hush-eyes/ |
+| New op type | python/hush-core/hush/core/ops/ |
+| New LLM/embedding/reranker provider (Python) | python/hush-providers/hush/providers/ |
+| New LLM/embedding/reranker provider (Rust) | rust/rush-providers/src/ |
+| New tracing backend | python/hush-telemetry/hush/telemetry/ |
+| Rust execution backend | rust/rush-core/src/ |
+| HTTP API server (Python) | python/hush-serve/hush/serve/ |
+| HTTP API server (Rust) | rust/rush-serve/src/ |
+| New built-in Rust op | rust/rush-core/src/builtin_ops/ops.rs + dispatch in rust/rush-core/src/builtin_ops/mod.rs |
+| Documentation or examples | docs/guide/ + examples/ |
+| Trace visualization server | rust/ui-hush-eyes/ |
 
 ## Global Coding Conventions
 
@@ -165,9 +171,9 @@ rush-serve (Rust binary - depends on rush-core + rush-providers)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust (rush-core, rush-providers, ui-hush-eyes)
+### Rust (rust/rush-core, rust/rush-providers, rust/ui-hush-eyes)
 
-- **rush-core**: Pure Rust library crate (`rlib`), built via `cargo build --release`
+- **rush-core**: Pure Rust library crate (`rlib`), built via `cd rust && cargo build --release`
   - DashMap for concurrent state, rayon for parallel execution
   - Standalone engine: `Rush::new(json_str)` + `Rush::run_json(inputs)`
 - **rush-providers**: Rust crate with per-provider modules (llms/, embeddings/, rerankers/)
@@ -180,7 +186,7 @@ rush-serve (Rust binary - depends on rush-core + rush-providers)
 
 ### Rust Built-in Ops
 
-Built-in Rust ops live in `rush-core/src/builtin_ops/` as an internal module. Dispatch is handled via a match statement in `rush-core/src/builtin_ops/mod.rs` -- no dynamic loading, no C ABI.
+Built-in Rust ops live in `rust/rush-core/src/builtin_ops/` as an internal module. Dispatch is handled via a match statement in `rust/rush-core/src/builtin_ops/mod.rs` -- no dynamic loading, no C ABI.
 
 ```python
 # Reference the Rust op by function name
@@ -190,8 +196,8 @@ def double(x: int):
 ```
 
 **Adding a new built-in op:**
-1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `rush-core/src/builtin_ops/ops.rs`
-2. Add a match arm in `rush-core/src/builtin_ops/mod.rs` to dispatch to it
+1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `rust/rush-core/src/builtin_ops/ops.rs`
+2. Add a match arm in `rust/rush-core/src/builtin_ops/mod.rs` to dispatch to it
 3. Reference via `@op(rust="func_name")`
 
 ### Naming Conventions
@@ -217,31 +223,31 @@ When a core API doesn't work as expected (e.g., `op >> END` not auto-forwarding 
 
 ```bash
 # hush-core
-cd hush-core && uv pip install -e ".[dev]" && uv run -m pytest
+cd python/hush-core && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-providers
-cd hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
+cd python/hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-telemetry
-cd hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
-
-# rush-core (Rust execution backend)
-cargo test -p rush-core
-
-# rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
-cargo test -p rush-providers
-
-# All Rust crates (workspace)
-cargo test --workspace
+cd python/hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-serve (Python HTTP server)
-cd hush-serve && uv sync --all-extras && uv run -m pytest
+cd python/hush-serve && uv sync --all-extras && uv run -m pytest
+
+# rush-core (Rust execution backend)
+cd rust && cargo test -p rush-core
+
+# rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
+cd rust && cargo test -p rush-providers
+
+# All Rust crates (workspace)
+cd rust && cargo test --workspace
 
 # rush-serve (Rust HTTP server)
-cargo build -p rush-serve --release
+cd rust && cargo build -p rush-serve --release
 
 # ui-hush-eyes (Rust trace server)
-cargo build -p hush-eyes --release
+cd rust && cargo build -p hush-eyes --release
 ```
 
 ## Development Workflow
@@ -402,22 +408,22 @@ step = process(x=PARENT["x"], outputs={"*": PARENT})
 
 ## Exception Hierarchy
 
-All op errors inherit from `OpError` in `hush-core/hush/core/exceptions.py`:
+All op errors inherit from `OpError` in `python/hush-core/hush/core/exceptions.py`:
 - `ParserError`, `CodeError`, `BranchError`, `ConditionError`, `IterationError`
 - `PromptError`, `EmbeddingError`, `RerankError`
 
 ## Deep Documentation Links
 
-For detailed explanations, see [architecture/](architecture/):
+For detailed explanations, see [docs/architecture/](docs/architecture/):
 
-| Topic | Quick (CLAUDE.md) | Deep (architecture/) |
-|-------|-------------------|---------------------|
-| Execution flow | - | [engine/execution-flow.md](architecture/engine/execution-flow.md) |
-| Auto-naming | hush-core/CLAUDE.md | [ops/auto-naming.md](architecture/ops/auto-naming.md) |
-| State system | hush-core/CLAUDE.md | [state/overview.md](architecture/state/overview.md) |
-| Op internals | hush-core/CLAUDE.md | [ops/base-op.md](architecture/ops/base-op.md) |
-| Creating ops | hush-core/CLAUDE.md | [ops/creating-custom-op.md](architecture/ops/creating-custom-op.md) |
-| Adding providers | hush-providers/CLAUDE.md | [providers/adding-new-provider.md](architecture/providers/adding-new-provider.md) |
+| Topic | Quick (CLAUDE.md) | Deep (docs/architecture/) |
+|-------|-------------------|--------------------------|
+| Execution flow | - | [engine/execution-flow.md](docs/architecture/engine/execution-flow.md) |
+| Auto-naming | python/hush-core/CLAUDE.md | [ops/auto-naming.md](docs/architecture/ops/auto-naming.md) |
+| State system | python/hush-core/CLAUDE.md | [state/overview.md](docs/architecture/state/overview.md) |
+| Op internals | python/hush-core/CLAUDE.md | [ops/base-op.md](docs/architecture/ops/base-op.md) |
+| Creating ops | python/hush-core/CLAUDE.md | [ops/creating-custom-op.md](docs/architecture/ops/creating-custom-op.md) |
+| Adding providers | python/hush-providers/CLAUDE.md | [providers/adding-new-provider.md](docs/architecture/providers/adding-new-provider.md) |
 
 ## Local Development with uv
 

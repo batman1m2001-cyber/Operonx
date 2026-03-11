@@ -34,9 +34,9 @@ dev = [
 
 [tool.uv.sources]
 # Use local packages for development
-hush-core = { path = "../hush-core", editable = true }
-hush-providers = { path = "../hush-providers", editable = true }
-hush-telemetry = { path = "../hush-telemetry", editable = true }
+hush-core = { path = "../python/hush-core", editable = true }
+hush-providers = { path = "../python/hush-providers", editable = true }
+hush-telemetry = { path = "../python/hush-telemetry", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["examples"]

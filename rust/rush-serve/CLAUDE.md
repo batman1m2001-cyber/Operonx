@@ -124,6 +124,6 @@ cargo build --release
 
 | Topic | File |
 |-------|------|
-| Python serve layer | [hush-serve/CLAUDE.md](../hush-serve/CLAUDE.md) |
+| Python serve layer | [python/hush-serve/CLAUDE.md](../../python/hush-serve/CLAUDE.md) |
 | Rust engine | [rush-core/CLAUDE.md](../rush-core/CLAUDE.md) |
 | Rust providers | [rush-providers/CLAUDE.md](../rush-providers/CLAUDE.md) |

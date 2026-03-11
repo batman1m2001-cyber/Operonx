@@ -99,7 +99,6 @@ members = [
 
 Create `MODULE_MAP.md` at root — the Rosetta Stone between Python and Rust:
 
-```markdown
 # Module Map: Python ↔ Rust
 
 | Domain | Python | Rust | Notes |
@@ -122,7 +121,6 @@ Create `MODULE_MAP.md` at root — the Rosetta Stone between Python and Rust:
 | **OTEL** | `python/hush-telemetry/hush/telemetry/tracers/otel.py` | `rust/rush-telemetry/src/otel/` | |
 | **HushEyes** | `python/hush-telemetry/hush/telemetry/tracers/hush_eyes.py` | `rust/rush-telemetry/src/hush_eyes.rs` | |
 | **HTTP serve** | `python/hush-serve/hush/serve/` | `rust/rush-serve/src/` | |
-```
 
 ### Phase 1.6: Verify everything builds
 
