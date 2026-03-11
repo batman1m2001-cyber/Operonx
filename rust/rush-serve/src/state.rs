@@ -4,14 +4,15 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
+use rush_core::config::GraphConfig;
 use rush_core::tracing::Tracer;
 
 use crate::config::EndpointDef;
 
-/// Per-endpoint runtime state: parsed config + metadata.
+/// Per-endpoint runtime state: pre-parsed config + metadata.
 pub struct EndpointState {
-    /// The raw graph config JSON string (for Rush::new()).
-    pub graph_json: String,
+    /// Pre-parsed graph config (parsed once at startup, reused per request).
+    pub config: Arc<GraphConfig>,
     /// Endpoint definition from the config file.
     pub def: EndpointDef,
 }

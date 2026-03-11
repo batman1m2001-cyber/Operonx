@@ -11,7 +11,7 @@ Học được:
 - Two-stage retrieval: retrieve top 20 → rerank to top 5
 - RerankOp: cross-encoder reranking
 
-Chạy: cd tutorial && uv run python examples/14_rag_advanced.py
+Chạy: uv run python examples/14_rag_advanced.py
 """
 
 import asyncio
@@ -99,15 +99,15 @@ async def example_1_keyword_rrf():
     print("Ví dụ 1: Keyword Search + RRF")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::search::keyword_search")
     def search_original(query, docs):
         return {"results": keyword_search(query, docs, top_k=5)}
 
-    @op
+    @op(rust="./rust_ops::search::keyword_search_expanded")
     def search_expanded(query, docs):
         return {"results": keyword_search(query + " thành phố du lịch", docs, top_k=5)}
 
-    @op
+    @op(rust="./rust_ops::search::rrf_merge")
     def merge(r1, r2):
         return {"merged": reciprocal_rank_fusion([r1, r2])[:5]}
 
@@ -176,15 +176,15 @@ async def example_2_hybrid_rag():
     print(f"  Embedded {len(doc_vectors)} documents")
 
     # Hybrid RAG workflow
-    @op
+    @op(rust="./rust_ops::search::keyword_search")
     def kw_search_fn(query, docs):
         return {"results": keyword_search(query, docs, top_k=8)}
 
-    @op
+    @op(rust="./rust_ops::search::cosine_search")
     def vec_search_fn(qv, docs, dvs):
         return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
 
-    @op
+    @op(rust="./rust_ops::search::rrf_merge")
     def merge_results(kw, vec):
         return {"context_docs": reciprocal_rank_fusion([kw, vec])[:5]}
 
@@ -279,7 +279,7 @@ async def example_3_rerank():
 
     from hush.providers import LLMOp, PromptOp, RerankOp
 
-    @op
+    @op(rust="./rust_ops::search::keyword_retrieve")
     def retrieve(query, docs):
         return {"candidates": keyword_search(query, docs, top_k=8)}
 

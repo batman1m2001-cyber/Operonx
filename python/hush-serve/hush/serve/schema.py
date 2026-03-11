@@ -44,7 +44,7 @@ def build_request_model(graph: GraphOp) -> Type[BaseModel]:
 
     model_name = f"{_to_pascal(graph.name)}Request"
     if not fields:
-        fields["__placeholder__"] = (Any, Field(default=None, exclude=True))
+        fields["placeholder_"] = (Any, Field(default=None, exclude=True))
     return create_model(model_name, **fields)
 
 

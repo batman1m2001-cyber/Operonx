@@ -6,6 +6,7 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Json;
 use axum::routing::{get, post};
 use axum::Router;
+use rush_core::config::GraphConfig;
 use serde_json::{json, Value};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -24,10 +25,15 @@ pub fn build_router(config: ServerConfig) -> Router {
         let path = ep_def.path.clone();
         endpoint_paths.push(path.clone());
 
+        // Pre-parse the graph config once at startup (not per-request)
         let graph_json = serde_json::to_string(&ep_def.graph).unwrap_or_default();
+        let graph_config = GraphConfig::from_json(&graph_json).unwrap_or_else(|e| {
+            eprintln!("Failed to parse graph config for {}: {}", path, e);
+            std::process::exit(1);
+        });
 
         let ep_state = Arc::new(EndpointState {
-            graph_json,
+            config: Arc::new(graph_config),
             def: ep_def,
         });
         app_state.endpoints.insert(path.clone(), ep_state);
@@ -51,7 +57,7 @@ pub fn build_router(config: ServerConfig) -> Router {
                     .ok_or_else(|| ServeError::Internal("endpoint not found".into()))?;
                 let request_id = uuid::Uuid::new_v4().to_string();
                 let result =
-                    crate::execute::run_workflow(&ep.graph_json, inputs, Some(request_id), sync_state.tracers.clone()).await?;
+                    crate::execute::run_workflow(ep.config.clone(), inputs, Some(request_id), sync_state.tracers.clone()).await?;
                 Ok::<Json<Value>, ServeError>(Json(sync_handler::filter_internal_keys(result)))
             }),
         );

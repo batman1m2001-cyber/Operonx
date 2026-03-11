@@ -1,0 +1,666 @@
+//! Pipeline ops — workflow step functions for Hush example pipelines.
+//!
+//! Each function takes a `&serde_json::Value` (the op's inputs as JSON)
+//! and returns a `serde_json::Value` (the op's outputs as JSON).
+//!
+//! Convention: input keys match the Python function's parameter names.
+
+use serde_json::{json, Value};
+
+// ---------------------------------------------------------------------------
+// 1. step_a
+// ---------------------------------------------------------------------------
+
+/// step_a: () → {"a_result": "Kết quả A"}
+pub fn step_a(_inputs: &Value) -> Value {
+    json!({"a_result": "Kết quả A"})
+}
+
+// ---------------------------------------------------------------------------
+// 2. step_b
+// ---------------------------------------------------------------------------
+
+/// step_b: () → {"b_result": "Kết quả B"}
+pub fn step_b(_inputs: &Value) -> Value {
+    json!({"b_result": "Kết quả B"})
+}
+
+// ---------------------------------------------------------------------------
+// 3. merge_two
+// ---------------------------------------------------------------------------
+
+/// merge_two: a, b → {"combined": "{a} + {b}"}
+pub fn merge_two(inputs: &Value) -> Value {
+    let a = inputs["a"].as_str().unwrap_or("");
+    let b = inputs["b"].as_str().unwrap_or("");
+    json!({"combined": format!("{} + {}", a, b)})
+}
+
+// ---------------------------------------------------------------------------
+// 4. fetch_data
+// ---------------------------------------------------------------------------
+
+/// fetch_data: () → {"data": [1, 2, 3, 4, 5]}
+pub fn fetch_data(_inputs: &Value) -> Value {
+    json!({"data": [1, 2, 3, 4, 5]})
+}
+
+// ---------------------------------------------------------------------------
+// 5. transform_double
+// ---------------------------------------------------------------------------
+
+/// transform_double: data (array) → {"transformed": [x*2 for x in data]}
+pub fn transform_double(inputs: &Value) -> Value {
+    let transformed: Vec<Value> = inputs["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|v| {
+                    if let Some(n) = v.as_i64() {
+                        json!(n * 2)
+                    } else if let Some(n) = v.as_f64() {
+                        json!(n * 2.0)
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({"transformed": transformed})
+}
+
+// ---------------------------------------------------------------------------
+// 6. merge_analysis
+// ---------------------------------------------------------------------------
+
+/// merge_analysis: s, k, wc, cc, awl → {"analysis": {...}}
+pub fn merge_analysis(inputs: &Value) -> Value {
+    json!({
+        "analysis": {
+            "sentiment": inputs["s"].clone(),
+            "keywords": inputs["k"].clone(),
+            "word_count": inputs["wc"].clone(),
+            "char_count": inputs["cc"].clone(),
+            "avg_word_len": inputs["awl"].clone(),
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 7. merge_results
+// ---------------------------------------------------------------------------
+
+/// merge_results: s, k → {"summary": s, "keywords": k}
+pub fn merge_results(inputs: &Value) -> Value {
+    json!({
+        "summary": inputs["s"].clone(),
+        "keywords": inputs["k"].clone(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 8. safe_process
+// ---------------------------------------------------------------------------
+
+/// safe_process: item → if odd: {"result": item*10, "error": null}
+///                       else:  {"result": null, "error": "Even number: {item}"}
+pub fn safe_process(inputs: &Value) -> Value {
+    let item = inputs["item"].as_i64().unwrap_or(0);
+    if item % 2 != 0 {
+        json!({"result": item * 10, "error": null})
+    } else {
+        json!({"result": null, "error": format!("Even number: {}", item)})
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. filter_results
+// ---------------------------------------------------------------------------
+
+/// filter_results: results, errors → {"successful": [...], "failed": [...]}
+///
+/// Pairs up results and errors by index.
+/// If error is null, the corresponding result goes into "successful".
+/// Otherwise, the error string goes into "failed".
+pub fn filter_results(inputs: &Value) -> Value {
+    let results = inputs["results"].as_array();
+    let errors = inputs["errors"].as_array();
+
+    let mut successful = Vec::new();
+    let mut failed = Vec::new();
+
+    if let (Some(results), Some(errors)) = (results, errors) {
+        for (r, e) in results.iter().zip(errors.iter()) {
+            if e.is_null() {
+                successful.push(r.clone());
+            } else {
+                failed.push(e.clone());
+            }
+        }
+    }
+
+    json!({"successful": successful, "failed": failed})
+}
+
+// ---------------------------------------------------------------------------
+// 10. process_response_tool
+// ---------------------------------------------------------------------------
+
+/// process_response_tool: content, tool_calls → {"has_tool_call": bool, "tool_result": ..., "llm_response": content}
+///
+/// If tool_calls is a non-empty array, has_tool_call=true and we simulate tool execution.
+/// If a tool_call has function.name == "calculator", compute result from args.
+pub fn process_response_tool(inputs: &Value) -> Value {
+    let content = inputs["content"].as_str().unwrap_or("");
+    let tool_calls = inputs["tool_calls"].as_array();
+
+    match tool_calls {
+        Some(calls) if !calls.is_empty() => {
+            let mut tool_result: Value = Value::Null;
+
+            for call in calls {
+                let func_name = call["function"]["name"].as_str().unwrap_or("");
+                if func_name == "calculator" {
+                    let args = &call["function"]["arguments"];
+                    let a = args["a"].as_f64().unwrap_or(0.0);
+                    let b = args["b"].as_f64().unwrap_or(0.0);
+                    let op = args["operation"].as_str().unwrap_or("add");
+                    let result = match op {
+                        "add" => a + b,
+                        "subtract" => a - b,
+                        "multiply" => a * b,
+                        "divide" => {
+                            if b != 0.0 {
+                                a / b
+                            } else {
+                                f64::NAN
+                            }
+                        }
+                        _ => a + b,
+                    };
+                    tool_result = json!(result);
+                } else {
+                    tool_result = json!(format!("Simulated result for {}", func_name));
+                }
+            }
+
+            json!({
+                "has_tool_call": true,
+                "tool_result": tool_result,
+                "llm_response": content,
+            })
+        }
+        _ => {
+            json!({
+                "has_tool_call": false,
+                "tool_result": null,
+                "llm_response": content,
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 11. update_history
+// ---------------------------------------------------------------------------
+
+/// update_history: history, message, response → {"new_history": history + [user msg, assistant msg]}
+pub fn update_history(inputs: &Value) -> Value {
+    let mut new_history: Vec<Value> = inputs["history"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    let message = inputs["message"].as_str().unwrap_or("");
+    let response = inputs["response"].as_str().unwrap_or("");
+
+    new_history.push(json!({"role": "user", "content": message}));
+    new_history.push(json!({"role": "assistant", "content": response}));
+
+    json!({"new_history": new_history})
+}
+
+// ---------------------------------------------------------------------------
+// 12. validate_input
+// ---------------------------------------------------------------------------
+
+/// validate_input: x → {"validated_x": x, "$tags": ["validated"]}
+pub fn validate_input(inputs: &Value) -> Value {
+    json!({
+        "validated_x": inputs["x"].clone(),
+        "$tags": ["validated"],
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 13. with_fallback
+// ---------------------------------------------------------------------------
+
+/// with_fallback: primary_result, success → if success: {"output": primary_result, "used_fallback": false}
+///                                          else:        {"output": "Fallback result", "used_fallback": true}
+pub fn with_fallback(inputs: &Value) -> Value {
+    let success = inputs["success"].as_bool().unwrap_or(false);
+    if success {
+        json!({
+            "output": inputs["primary_result"].clone(),
+            "used_fallback": false,
+        })
+    } else {
+        json!({
+            "output": "Fallback result",
+            "used_fallback": true,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 14. init_agent
+// ---------------------------------------------------------------------------
+
+/// init_agent: query → {"messages": [...], "done": false, "answer": ""}
+pub fn init_agent(inputs: &Value) -> Value {
+    let query = inputs["query"].as_str().unwrap_or("");
+    json!({
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant. Answer concisely."},
+            {"role": "user", "content": query},
+        ],
+        "done": false,
+        "answer": "",
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 15. process_agent_response
+// ---------------------------------------------------------------------------
+
+/// process_agent_response: content, tool_calls, messages → process response, update messages, return done/answer
+pub fn process_agent_response(inputs: &Value) -> Value {
+    let content = inputs["content"].as_str().unwrap_or("");
+    let tool_calls = inputs["tool_calls"].as_array();
+    let mut messages: Vec<Value> = inputs["messages"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    match tool_calls {
+        Some(calls) if !calls.is_empty() => {
+            // Append assistant message with tool calls
+            messages.push(json!({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": calls,
+            }));
+
+            // Simulate tool results
+            for call in calls {
+                let func_name = call["function"]["name"].as_str().unwrap_or("");
+                let tool_result = format!("Simulated result for {}", func_name);
+                messages.push(json!({
+                    "role": "tool",
+                    "content": tool_result,
+                    "tool_call_id": call["id"].as_str().unwrap_or(""),
+                }));
+            }
+
+            json!({
+                "messages": messages,
+                "done": false,
+                "answer": "",
+            })
+        }
+        _ => {
+            // No tool calls — final answer
+            messages.push(json!({
+                "role": "assistant",
+                "content": content,
+            }));
+
+            json!({
+                "messages": messages,
+                "done": true,
+                "answer": content,
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 16. excellent
+// ---------------------------------------------------------------------------
+
+/// excellent: () → {"grade": "A", "message": "Xuất sắc!"}
+pub fn excellent(_inputs: &Value) -> Value {
+    json!({"grade": "A", "message": "Xuất sắc!"})
+}
+
+// ---------------------------------------------------------------------------
+// 17. good
+// ---------------------------------------------------------------------------
+
+/// good: () → {"grade": "B", "message": "Tốt!"}
+pub fn good(_inputs: &Value) -> Value {
+    json!({"grade": "B", "message": "Tốt!"})
+}
+
+// ---------------------------------------------------------------------------
+// 18. average_grade
+// ---------------------------------------------------------------------------
+
+/// average_grade: () → {"grade": "C", "message": "Trung bình"}
+pub fn average_grade(_inputs: &Value) -> Value {
+    json!({"grade": "C", "message": "Trung bình"})
+}
+
+// ---------------------------------------------------------------------------
+// 19. fail_grade
+// ---------------------------------------------------------------------------
+
+/// fail_grade: () → {"grade": "F", "message": "Cần cải thiện"}
+pub fn fail_grade(_inputs: &Value) -> Value {
+    json!({"grade": "F", "message": "Cần cải thiện"})
+}
+
+// ---------------------------------------------------------------------------
+// 20. get_config
+// ---------------------------------------------------------------------------
+
+/// get_config: () → {"multiplier": 10}
+pub fn get_config(_inputs: &Value) -> Value {
+    json!({"multiplier": 10})
+}
+
+// ---------------------------------------------------------------------------
+// 21. handle_intent
+// ---------------------------------------------------------------------------
+
+/// handle_intent: intent, transcript → response based on intent
+pub fn handle_intent(inputs: &Value) -> Value {
+    let intent = inputs["intent"].as_str().unwrap_or("");
+    let transcript = inputs["transcript"].as_str().unwrap_or("");
+
+    if intent == "greeting" {
+        json!({
+            "response": format!("Xin chào! Bạn nói: '{}'", transcript),
+            "intent": "greeting",
+        })
+    } else {
+        json!({
+            "response": format!("Tôi hiểu bạn muốn nói: '{}'", transcript),
+            "intent": "general",
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 22. process_item_squared
+// ---------------------------------------------------------------------------
+
+/// process_item_squared: item → {"result": item*item, "status": "ok"}
+pub fn process_item_squared(inputs: &Value) -> Value {
+    let item = inputs["item"].as_i64().unwrap_or(0);
+    json!({"result": item * item, "status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// 23. select_answer
+// ---------------------------------------------------------------------------
+
+/// select_answer: choice, a1, a2 → {"answer": ..., "chosen": ...}
+///
+/// Selects between two answers based on choice string containing "1".
+pub fn select_answer(inputs: &Value) -> Value {
+    let choice = inputs["choice"].as_str().unwrap_or("");
+    let a1 = &inputs["a1"];
+    let a2 = &inputs["a2"];
+    if choice.contains('1') {
+        json!({"answer": a1.clone(), "chosen": "gpt-4o"})
+    } else {
+        json!({"answer": a2.clone(), "chosen": "gpt-4o-mini"})
+    }
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_step_a() {
+        let result = step_a(&json!({}));
+        assert_eq!(result["a_result"], "Kết quả A");
+    }
+
+    #[test]
+    fn test_step_b() {
+        let result = step_b(&json!({}));
+        assert_eq!(result["b_result"], "Kết quả B");
+    }
+
+    #[test]
+    fn test_merge_two() {
+        let result = merge_two(&json!({"a": "Hello", "b": "World"}));
+        assert_eq!(result["combined"], "Hello + World");
+    }
+
+    #[test]
+    fn test_fetch_data() {
+        let result = fetch_data(&json!({}));
+        assert_eq!(result["data"], json!([1, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn test_transform_double() {
+        let result = transform_double(&json!({"data": [1, 2, 3, 4, 5]}));
+        assert_eq!(result["transformed"], json!([2, 4, 6, 8, 10]));
+    }
+
+    #[test]
+    fn test_merge_analysis() {
+        let result = merge_analysis(&json!({
+            "s": "positive",
+            "k": ["rust", "hush"],
+            "wc": 100,
+            "cc": 500,
+            "awl": 5.0,
+        }));
+        assert_eq!(result["analysis"]["sentiment"], "positive");
+        assert_eq!(result["analysis"]["keywords"], json!(["rust", "hush"]));
+        assert_eq!(result["analysis"]["word_count"], 100);
+        assert_eq!(result["analysis"]["char_count"], 500);
+        assert_eq!(result["analysis"]["avg_word_len"], 5.0);
+    }
+
+    #[test]
+    fn test_merge_results() {
+        let result = merge_results(&json!({"s": "A summary", "k": ["key1", "key2"]}));
+        assert_eq!(result["summary"], "A summary");
+        assert_eq!(result["keywords"], json!(["key1", "key2"]));
+    }
+
+    #[test]
+    fn test_safe_process_odd() {
+        let result = safe_process(&json!({"item": 3}));
+        assert_eq!(result["result"], 30);
+        assert!(result["error"].is_null());
+    }
+
+    #[test]
+    fn test_safe_process_even() {
+        let result = safe_process(&json!({"item": 4}));
+        assert!(result["result"].is_null());
+        assert_eq!(result["error"], "Even number: 4");
+    }
+
+    #[test]
+    fn test_filter_results() {
+        let result = filter_results(&json!({
+            "results": [10, null, 30],
+            "errors": [null, "Even number: 2", null],
+        }));
+        assert_eq!(result["successful"], json!([10, 30]));
+        assert_eq!(result["failed"], json!(["Even number: 2"]));
+    }
+
+    #[test]
+    fn test_process_response_tool_no_tools() {
+        let result = process_response_tool(&json!({
+            "content": "Hello!",
+            "tool_calls": [],
+        }));
+        assert_eq!(result["has_tool_call"], false);
+        assert!(result["tool_result"].is_null());
+        assert_eq!(result["llm_response"], "Hello!");
+    }
+
+    #[test]
+    fn test_process_response_tool_calculator() {
+        let result = process_response_tool(&json!({
+            "content": "",
+            "tool_calls": [{
+                "function": {
+                    "name": "calculator",
+                    "arguments": {"a": 3, "b": 4, "operation": "multiply"}
+                }
+            }],
+        }));
+        assert_eq!(result["has_tool_call"], true);
+        assert_eq!(result["tool_result"], 12.0);
+    }
+
+    #[test]
+    fn test_update_history() {
+        let result = update_history(&json!({
+            "history": [{"role": "system", "content": "You are helpful."}],
+            "message": "Hi",
+            "response": "Hello!",
+        }));
+        let history = result["new_history"].as_array().unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1]["role"], "user");
+        assert_eq!(history[1]["content"], "Hi");
+        assert_eq!(history[2]["role"], "assistant");
+        assert_eq!(history[2]["content"], "Hello!");
+    }
+
+    #[test]
+    fn test_validate_input() {
+        let result = validate_input(&json!({"x": 42}));
+        assert_eq!(result["validated_x"], 42);
+        assert_eq!(result["$tags"], json!(["validated"]));
+    }
+
+    #[test]
+    fn test_with_fallback_success() {
+        let result = with_fallback(&json!({"primary_result": "data", "success": true}));
+        assert_eq!(result["output"], "data");
+        assert_eq!(result["used_fallback"], false);
+    }
+
+    #[test]
+    fn test_with_fallback_failure() {
+        let result = with_fallback(&json!({"primary_result": "data", "success": false}));
+        assert_eq!(result["output"], "Fallback result");
+        assert_eq!(result["used_fallback"], true);
+    }
+
+    #[test]
+    fn test_init_agent() {
+        let result = init_agent(&json!({"query": "What is Rust?"}));
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["content"], "What is Rust?");
+        assert_eq!(result["done"], false);
+        assert_eq!(result["answer"], "");
+    }
+
+    #[test]
+    fn test_process_agent_response_final() {
+        let result = process_agent_response(&json!({
+            "content": "Rust is a systems language.",
+            "tool_calls": [],
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "What is Rust?"},
+            ],
+        }));
+        assert_eq!(result["done"], true);
+        assert_eq!(result["answer"], "Rust is a systems language.");
+        assert_eq!(result["messages"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_process_agent_response_tool_call() {
+        let result = process_agent_response(&json!({
+            "content": "",
+            "tool_calls": [{"id": "call_1", "function": {"name": "search", "arguments": {}}}],
+            "messages": [
+                {"role": "user", "content": "Search for X"},
+            ],
+        }));
+        assert_eq!(result["done"], false);
+        assert_eq!(result["answer"], "");
+        // messages: original 1 + assistant + tool = 3
+        assert_eq!(result["messages"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_excellent() {
+        let result = excellent(&json!({}));
+        assert_eq!(result["grade"], "A");
+        assert_eq!(result["message"], "Xuất sắc!");
+    }
+
+    #[test]
+    fn test_good() {
+        let result = good(&json!({}));
+        assert_eq!(result["grade"], "B");
+        assert_eq!(result["message"], "Tốt!");
+    }
+
+    #[test]
+    fn test_average_grade() {
+        let result = average_grade(&json!({}));
+        assert_eq!(result["grade"], "C");
+        assert_eq!(result["message"], "Trung bình");
+    }
+
+    #[test]
+    fn test_fail_grade() {
+        let result = fail_grade(&json!({}));
+        assert_eq!(result["grade"], "F");
+        assert_eq!(result["message"], "Cần cải thiện");
+    }
+
+    #[test]
+    fn test_get_config() {
+        let result = get_config(&json!({}));
+        assert_eq!(result["multiplier"], 10);
+    }
+
+    #[test]
+    fn test_handle_intent_greeting() {
+        let result = handle_intent(&json!({"intent": "greeting", "transcript": "xin chào"}));
+        assert_eq!(result["intent"], "greeting");
+        assert!(result["response"].as_str().unwrap().contains("xin chào"));
+    }
+
+    #[test]
+    fn test_handle_intent_general() {
+        let result = handle_intent(&json!({"intent": "question", "transcript": "thời tiết"}));
+        assert_eq!(result["intent"], "general");
+        assert!(result["response"].as_str().unwrap().contains("thời tiết"));
+    }
+
+    #[test]
+    fn test_process_item_squared() {
+        let result = process_item_squared(&json!({"item": 7}));
+        assert_eq!(result["result"], 49);
+        assert_eq!(result["status"], "ok");
+    }
+}

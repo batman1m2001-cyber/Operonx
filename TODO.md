@@ -6,8 +6,10 @@ Three interconnected refactors to improve maintainability and scalability:
 1. **Project restructure** — group by language (`python/`, `rust/`)
 2. **Engine + Serve redesign** — middleware system, `engine.serve()`, run modes
 3. **Documentation overhaul** — auto-generated API docs, doctests, collapse layers
+4. **CI/CD** — PyPI + crates.io publishing pipelines
+5. **Examples refactor** — folder-per-example, merge Rust mode demos, fix broken APIs
 
-Estimated scope: ~20 phases across 4 milestones.
+Estimated scope: ~25 phases across 5 milestones.
 
 ---
 
@@ -836,6 +838,189 @@ Add to `.github/workflows/tests.yaml`:
 
 ---
 
+## Milestone 5: Examples Refactor — Rust Ops Crate + Merge Rust Demos
+
+### Motivation
+
+Examples 17 (`rust_mode`) and 18 (`rust_plugin_ops`) are standalone Rust demos that duplicate patterns already shown in other examples. They also reference removed APIs (`ForOp`, `MapOp`, `Each`). Instead of separate Rust examples, Rust mode should be demonstrated naturally within relevant examples.
+
+More importantly, the examples should teach users the **real convention** for structuring a project with both Python and Rust: one Rust crate for custom ops, organized by domain, referenced from Python workflows. This mirrors how a real Hush user project would look:
+
+```
+my-project/
+├── pyproject.toml
+├── workflows/
+│   ├── pipeline.py
+│   └── agent.py
+├── rust_ops/                # ONE crate for all custom ops
+│   ├── Cargo.toml           # depends on rush-core
+│   └── src/
+│       ├── lib.rs           # pub mod math; pub mod text;
+│       ├── math.rs          # double, add, square, sum, mean
+│       └── text.rs          # greet, upper, template, concat
+```
+
+### Phase 5.1: Create `examples/rust_ops/` crate
+
+**New files:**
+```
+examples/
+├── rust_ops/
+│   ├── Cargo.toml           # [lib] crate, depends on rush-core
+│   └── src/
+│       ├── lib.rs           # pub mod math; pub mod text; pub mod crypto;
+│       ├── math.rs          # double, add, square, sum, mean, multiply
+│       ├── text.rs          # greet, upper, template, concat
+│       └── crypto.rs        # hash_chain
+├── 01_hello_world.py        # flat .py files stay flat
+├── ...
+└── pyproject.toml
+```
+
+**`Cargo.toml`:**
+```toml
+[package]
+name = "example-ops"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rush-core = { path = "../../rust/rush-core" }
+serde_json = "1"
+```
+
+**`src/lib.rs`:**
+```rust
+pub mod math;
+pub mod text;
+pub mod crypto;
+```
+
+**`src/math.rs`** — domain-grouped ops:
+```rust
+use serde_json::{json, Value};
+
+pub fn double(input: &Value) -> Value {
+    let x = input["x"].as_i64().unwrap_or(0);
+    json!({"result": x * 2})
+}
+
+pub fn add(input: &Value) -> Value {
+    let a = input["a"].as_i64().unwrap_or(0);
+    let b = input["b"].as_i64().unwrap_or(0);
+    json!({"result": a + b})
+}
+
+pub fn math_sum(input: &Value) -> Value {
+    let values = input["values"].as_array().unwrap();
+    let total: i64 = values.iter().filter_map(|v| v.as_i64()).sum();
+    json!({"result": total})
+}
+```
+
+### Phase 5.2: Delete old Rust examples, renumber
+
+- **Delete** `17_rust_mode.py` and `18_rust_plugin_ops.py`
+- **Renumber** `19_streaming_tracing.py` → `17_streaming_tracing.py`
+- **Renumber** `20_callbot_streaming.py` → `18_callbot_streaming.py`
+
+### Phase 5.3: Merge Rust mode content into relevant examples
+
+Add a "Rust Mode" section at the end of pure-computation examples. Each section shows:
+1. Same workflow with `mode="rust"` for backend comparison
+2. `@op(rust="func_name")` for custom Rust ops with Python fallback
+3. Comment pointing to `rust_ops/src/*.rs` for the Rust implementation
+
+| Example | Rust content merged from | What to add |
+|---------|------------------------|-------------|
+| `01_hello_world` | ex17 basic, ex18 basic plugin | `mode="rust"` comparison, `@op(rust="greet")` with fallback |
+| `02_data_pipeline` | ex17 fan-out, ex18 math ops | Fan-out in Rust mode, `@op(rust="math_sum")` plugin ops |
+| `05_loops_and_branches` | ex17 loop examples | Generator iteration with `mode="rust"` |
+| `13_parallel_advanced` | ex17 benchmark | Benchmark: Python vs Rust mode performance |
+| `16_graph` | ex18 mixed ops | Nested graphs with custom Rust ops |
+
+**Pattern for merged sections:**
+```python
+# =============================================================================
+# Rust Mode — custom Rust ops with Python fallback
+# =============================================================================
+# Rust implementations: see rust_ops/src/math.rs
+
+@op(rust="double")
+def double(x: int):
+    """Python fallback — used when rush-core is not built."""
+    return {"result": x * 2}
+
+# Run with Rust backend
+engine_rs = Hush(graph, mode="rust")
+result_rs = await engine_rs.run(inputs={...})
+```
+
+### Phase 5.4: Fix broken APIs in all examples
+
+Update all examples to use current APIs (post-streaming-architecture):
+- Replace `ForOp.of(x=Each(...))` → generator `@op` with `yield` inside `GraphOp`
+- Replace `MapOp.of(...)` → generator `@op` with `yield` (scheduler runs downstream concurrently by default)
+- Remove `from hush.core.ops import Each, ForOp, MapOp` imports
+- Update docstring headers (remove `cd tutorial &&` prefix from run instructions)
+
+### Phase 5.5: Update CI and cross-references
+
+**CI (`tests.yaml`):**
+```yaml
+- name: Run example smoke tests (no API keys needed)
+  working-directory: examples
+  run: |
+    uv run python 01_hello_world.py
+    uv run python 02_data_pipeline.py
+```
+
+**CI (`rust-runtime.yaml`):**
+```yaml
+- name: Build example Rust ops
+  run: cargo build -p example-ops
+```
+
+**Other updates:**
+- `rust/Cargo.toml` — add `"../examples/rust_ops"` to workspace members
+- `CLAUDE.md` — update examples description, add rust_ops convention
+- `docs/mkdocs.yml` — update any example references
+- `examples/pyproject.toml` — no structural changes (flat .py files unchanged)
+
+**Final structure:**
+```
+examples/
+├── rust_ops/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── math.rs
+│       ├── text.rs
+│       └── crypto.rs
+├── 01_hello_world.py          # + Rust mode section
+├── 02_data_pipeline.py        # + Rust mode section
+├── 03_llm_chat.py
+├── 04_llm_advanced.py
+├── 05_loops_and_branches.py   # + Rust mode section
+├── 06_tracing.py
+├── 07_embeddings_and_rag.py
+├── 08_langfuse_tracing.py
+├── 09_otel_tracing.py
+├── 10_error_handling.py
+├── 11_agent_workflow.py
+├── 12_multi_model.py
+├── 13_parallel_advanced.py    # + Rust mode section
+├── 14_rag_advanced.py
+├── 15_shorthand_syntax.py
+├── 16_graph.py                # + Rust mode section
+├── 17_streaming_tracing.py    # renumbered from 19
+├── 18_callbot_streaming.py    # renumbered from 20
+├── __init__.py
+└── pyproject.toml
+```
+
+---
+
 ## Execution Order
 
 The phases have dependencies. Recommended order:
@@ -858,6 +1043,8 @@ Phase 2.4      (resource lifecycle)            ← after 2.1
 Phase 2.5      (Rust mirror)                   ← after 2.1–2.4
     ↓
 Phase 4.1–4.3  (CI/CD publish)                 ← after 1.x (paths settled)
+    ↓
+Phase 5.1–5.5  (examples refactor)              ← after 4.x (CI settled), fixes broken APIs
 ```
 
 **Suggested batching for PRs:**
@@ -872,6 +1059,7 @@ Phase 4.1–4.3  (CI/CD publish)                 ← after 1.x (paths settled)
 | PR 6 | 2.4 | Resource lifecycle |
 | PR 7 | 2.5 | Rust engine mirror |
 | PR 8 | 4.1–4.3 | CI/CD publish pipeline |
+| PR 9 | 5.1–5.5 | Examples refactor (folder-per-example, merge Rust mode) |
 
 ---
 
@@ -891,7 +1079,10 @@ Hush-ai/
 │   ├── rush-telemetry/         # Rust telemetry mirror
 │   ├── rush-serve/             # Rust HTTP server
 │   └── hush-eyes/              # Trace visualization
-├── examples/                   # Runnable examples (from tutorial/examples/, tested in CI)
+├── examples/                   # Runnable examples (flat .py + rust_ops/ crate)
+│   ├── rust_ops/               # Custom Rust ops crate (teaches project convention)
+│   ├── 01_hello_world.py       # 18 example scripts (some with Rust mode sections)
+│   ├── ...
 │   └── pyproject.toml          # Depends on python/hush-* packages
 ├── docs/                       # All documentation
 │   ├── mkdocs.yml

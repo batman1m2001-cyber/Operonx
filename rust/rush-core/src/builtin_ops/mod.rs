@@ -14,6 +14,10 @@ pub fn call_generator(name: &str, inputs: &Value) -> Option<Vec<Value>> {
     let result = match name {
         "chunk_text" => ops::chunk_text(inputs),
         "range_gen" => ops::range_gen(inputs),
+        // Example 05 generators
+        "each_item_with_prefix" => ops::each_item_with_prefix(inputs),
+        "each_number" => ops::each_number(inputs),
+        "halve_until" => ops::halve_until(inputs),
         _ => return None,
     };
     Some(result)
@@ -31,6 +35,7 @@ pub fn call(name: &str, inputs: &Value) -> Option<Value> {
         "square" => ops::square(inputs),
         "increment" => ops::increment(inputs),
         "greet" => ops::greet(inputs),
+        "greet_vi" => ops::greet_vi(inputs),
         "make_dict" => ops::make_dict(inputs),
         "to_upper" => ops::to_upper(inputs),
         "join_strings" => ops::join_strings(inputs),
@@ -93,6 +98,22 @@ pub fn call(name: &str, inputs: &Value) -> Option<Value> {
         "accumulate_step" => ops::accumulate_step(inputs),
         "raise_op" => ops::raise_op(inputs),
         "maybe_fail" => ops::maybe_fail(inputs),
+        // Example 05 ops
+        "process_item_text" => ops::process_item_text(inputs),
+        "square_named" => ops::square_named(inputs),
+        "excellent" => ops::excellent(inputs),
+        "good" => ops::good(inputs),
+        "average_grade" => ops::average_grade(inputs),
+        "fail_grade" => ops::fail_grade(inputs),
+        // Pipeline ops (examples 01 & 02)
+        "step_a" => ops::step_a(inputs),
+        "step_b" => ops::step_b(inputs),
+        "fetch_data" => ops::fetch_data(inputs),
+        "transform_double" => ops::transform_double(inputs),
+        "aggregate_data" => ops::aggregate_data(inputs),
+        "clean_text" => ops::clean_text(inputs),
+        "count_words" => ops::count_words(inputs),
+        "summarize_stats" => ops::summarize_stats(inputs),
         _ => return None,
     };
     Some(result)

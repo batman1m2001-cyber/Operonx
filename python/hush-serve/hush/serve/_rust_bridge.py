@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from hush.serve.app import HushApp
 
 # Default location of the rush-serve crate relative to hush-serve package
-_RUSH_SERVE_CRATE = Path(__file__).resolve().parents[3] / ".." / "rush-serve"
+_RUSH_SERVE_CRATE = Path(__file__).resolve().parents[3] / ".." / "rust" / "rush-serve"
 
 
 class RustBackendConfig:
@@ -102,8 +102,10 @@ def find_rush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
     else:
         binary_name = "rush-serve"
 
-    release_bin = crate / "target" / "release" / binary_name
-    debug_bin = crate / "target" / "debug" / binary_name
+    # Cargo workspace puts binaries in the workspace root target dir
+    workspace_target = crate.parent / "target"
+    release_bin = workspace_target / "release" / binary_name
+    debug_bin = workspace_target / "debug" / binary_name
 
     # Prefer release build if it exists
     if release_bin.exists():
@@ -111,11 +113,12 @@ def find_rush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
     if debug_bin.exists():
         return debug_bin
 
-    # Build from source
-    print(f"Building rush-serve from {crate}...")
+    # Build from source (run from workspace root)
+    workspace_root = crate.parent
+    print(f"Building rush-serve from {workspace_root}...")
     result = subprocess.run(
-        ["cargo", "build", "--release"],
-        cwd=str(crate),
+        ["cargo", "build", "--release", "-p", "rush-serve"],
+        cwd=str(workspace_root),
         capture_output=True,
         text=True,
     )

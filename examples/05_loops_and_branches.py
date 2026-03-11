@@ -10,7 +10,7 @@ Học được:
 - Broadcast: op thường chạy 1 lần, kết quả broadcast cho stream items
 - Soft edge (~): merge sau branch
 
-Chạy: cd tutorial && uv run python examples/05_loops_and_branches.py
+Chạy: uv run python examples/05_loops_and_branches.py
 """
 
 import asyncio
@@ -23,33 +23,33 @@ from hush.core.ops import if_, op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::iteration::each_item_with_prefix")
 def each_item(items: list, prefix: str):
     """Yield từng item — downstream ops tự động chạy per item."""
     for item in items:
         yield {"item": item, "prefix": prefix}
 
 
-@op
+@op(rust="./rust_ops::text::process_item_text")
 def process_item(item: str, prefix: str):
     """Xử lý 1 item."""
     return {"result": f"{prefix}: {item}"}
 
 
-@op
+@op(rust="./rust_ops::iteration::each_number")
 def each_number(numbers: list):
     """Yield từng số — scheduler tự động song song hóa."""
     for x in numbers:
         yield {"x": x}
 
 
-@op
+@op(rust="./rust_ops::math::square_named")
 def square(x: int):
     """Bình phương số."""
     return {"squared": x * x}
 
 
-@op
+@op(rust="./rust_ops::iteration::halve_until")
 def halve_until(value: int):
     """Chia đôi cho đến khi < 5 — while loop trong generator."""
     while value >= 5:
@@ -73,6 +73,7 @@ async def example_1_for_loop():
         step = process_item(item=src["item"], prefix=src["prefix"])
         START >> src >> step >> END
 
+    # Python mode
     engine = Hush(graph)
     result = await engine.run(
         inputs={
@@ -80,8 +81,16 @@ async def example_1_for_loop():
             "prefix": "Fruit",
         }
     )
+    print(f"  Python mode: {result['result']}")
 
-    print(f"  Results: {result['result']}")
+    # Rust mode
+    result_rs = await Hush(graph, mode="rust").run(
+        inputs={
+            "items": ["apple", "banana", "cherry"],
+            "prefix": "Fruit",
+        }
+    )
+    print(f"  Rust mode:   {result_rs['result']}")
     # ['Fruit: apple', 'Fruit: banana', 'Fruit: cherry']
 
 
@@ -131,19 +140,19 @@ async def example_4_branch_op():
     print("Ví dụ 4: if_() (conditional routing)")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::pipeline::excellent")
     def excellent():
         return {"grade": "A", "message": "Xuất sắc!"}
 
-    @op
+    @op(rust="./rust_ops::pipeline::good")
     def good():
         return {"grade": "B", "message": "Tốt!"}
 
-    @op
+    @op(rust="./rust_ops::pipeline::average_grade")
     def average():
         return {"grade": "C", "message": "Trung bình"}
 
-    @op
+    @op(rust="./rust_ops::pipeline::fail_grade")
     def fail():
         return {"grade": "F", "message": "Cần cải thiện"}
 
@@ -179,13 +188,13 @@ async def example_5_nested_loops():
     print("Ví dụ 5: Nested Generators (thay Nested ForLoops)")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::iteration::outer_iter")
     def outer_iter(xs: list):
         """Yield từng x — tạo outer stream."""
         for x in xs:
             yield {"x": x}
 
-    @op
+    @op(rust="./rust_ops::iteration::inner_iter")
     def inner_iter(ys: list, x: int):
         """Yield từng y kết hợp với x — tạo inner stream."""
         for y in ys:

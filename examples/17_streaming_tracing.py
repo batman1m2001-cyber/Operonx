@@ -11,7 +11,7 @@ Prerequisites:
 - langfuse:hush in resources.yaml
 
 Run:
-    cd tutorial && uv run python examples/19_streaming_tracing.py
+    uv run python examples/17_streaming_tracing.py
 """
 
 import asyncio
@@ -29,7 +29,7 @@ from hush.core import END, PARENT, START, GraphOp, Hush, op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::streaming::chunk_text")
 def chunk_text(text: str, chunk_size: int):
     """Generator: splits text into chunks, yielding each one."""
     words = text.split()
@@ -38,7 +38,7 @@ def chunk_text(text: str, chunk_size: int):
         yield {"chunk": chunk, "index": i // chunk_size}
 
 
-@op
+@op(rust="./rust_ops::analytics::analyze_chunk")
 def analyze_chunk(chunk: str, index: int):
     """Analyze a single chunk — runs once per yield from chunk_text.
 
@@ -56,7 +56,7 @@ def analyze_chunk(chunk: str, index: int):
 # =============================================================================
 # Async generator op
 # =============================================================================
-@op
+@op(rust="./rust_ops::streaming::async_counter")
 async def async_counter(n: int):
     """Async generator: yields numbers 1..n with a simulated delay."""
     for i in range(1, n + 1):
@@ -64,7 +64,7 @@ async def async_counter(n: int):
         yield {"number": i, "squared": i * i}
 
 
-@op
+@op(rust="./rust_ops::streaming::format_square")
 def format_square(number: int, squared: int):
     """Format a single squared value — runs once per yield from async_counter."""
     return {"label": f"{number}^2 = {squared}"}
@@ -122,6 +122,22 @@ async def example_run():
 
     print(f"  Chunks analyzed: {len(result['result'])}")
     for line in result["result"]:
+        print(f"    {line}")
+    print()
+
+    # Rust mode — same pipeline, Rust execution backend
+    engine_rs = Hush(build_text_pipeline(), mode="rust")
+    result_rs = await engine_rs.run(
+        inputs={
+            "text": "The streaming architecture enables real-time token delivery "
+            "from generator ops through an event queue scheduler with "
+            "tuple contexts and proper EOF propagation",
+            "chunk_size": 3,
+        },
+    )
+    print("  Rust mode:")
+    print(f"  Chunks analyzed: {len(result_rs['result'])}")
+    for line in result_rs["result"]:
         print(f"    {line}")
     print()
 

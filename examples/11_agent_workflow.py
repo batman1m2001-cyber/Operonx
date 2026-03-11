@@ -9,7 +9,7 @@ Hoc duoc:
 - Process tool_calls va feed results back vao messages
 - max_iterations de tranh infinite loops
 
-Chay: cd tutorial && uv run python examples/11_agent_workflow.py
+Chay: uv run python examples/11_agent_workflow.py
 """
 
 import asyncio
@@ -93,7 +93,7 @@ TOOL_DESCRIPTIONS = [
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::pipeline::init_agent")
 def init_agent(query: str):
     """Khoi tao agent state."""
     return {
@@ -110,7 +110,7 @@ def init_agent(query: str):
     }
 
 
-@op
+@op(rust="./rust_ops::pipeline::process_agent_response")
 def process_response(content, tool_calls, messages):
     """Xu ly response tu LLM: execute tools hoac return final answer."""
     new_messages = list(messages)

@@ -9,8 +9,11 @@ Hoc duoc:
 - Chain graphs (chuoi nhieu graph noi tiep)
 - Output renaming trong graph
 - Graph long nhau (nested)
+- @op(rust="..."): mix Python va Rust ops trong @graph
 
-Chay: cd tutorial && uv run python examples/16_graph.py
+Rust ops: see rust_ops/src/math.rs (double, add)
+
+Chay: uv run python examples/16_graph.py
 """
 
 import asyncio
@@ -24,19 +27,19 @@ from hush.core.ops.transform.func_op import op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::math::double")
 def double(x: int):
-    """Nhan doi gia tri."""
+    """Nhan doi gia tri. Python fallback for Rust op."""
     return {"result": x * 2}
 
 
-@op
+@op(rust="./rust_ops::math::add")
 def add(a: int, b: int):
-    """Cong hai so."""
+    """Cong hai so. Python fallback for Rust op."""
     return {"result": a + b}
 
 
-@op
+@op(rust="./rust_ops::text::add_prefix")
 def format_result(value: int, label: str):
     """Format ket qua voi label."""
     return {"formatted": f"{label}: {value}"}
@@ -158,12 +161,16 @@ async def example_4_multi_params():
         calc = add_and_double(a=PARENT["x"], b=PARENT["y"])
         START >> calc >> END
 
-    engine = Hush(graph)
-    result = await engine.run(inputs={"x": 3, "y": 7})
-
+    # Python mode
+    result_py = await Hush(graph).run(inputs={"x": 3, "y": 7})
     print("  Input:  x=3, y=7")
     print("  Logic:  (3 + 7) * 2 = 20")
-    print(f"  Output: {result['result']}")  # 20
+    print(f"  Python mode: {result_py['result']}")  # 20
+
+    # Rust mode — same graph, Rust execution backend
+    result_rs = await Hush(graph, mode="rust").run(inputs={"x": 3, "y": 7})
+    print(f"  Rust mode:   {result_rs['result']}")  # 20
+    assert result_py["result"] == result_rs["result"]
 
 
 # =============================================================================
@@ -287,6 +294,7 @@ async def main():
   3. >> END auto-forward outputs len parent graph
   4. Ho tro name=, outputs=, description= kwargs
   5. Co the chain, nest, va tai su dung nhieu lan
+  6. @op(rust="...") works inside @graph — same Python/Rust dual-mode
     """)
 
 

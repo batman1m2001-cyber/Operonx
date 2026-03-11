@@ -14,6 +14,7 @@ authors = [
 dependencies = [
     "hush-core>=0.1.0",
     "hush-providers>=0.1.0",
+    "hush-serve>=0.1.0",
     "hush-telemetry[all]>=0.1.0",
     "python-dotenv>=1.0.0",
 ]
@@ -36,6 +37,7 @@ dev = [
 # Use local packages for development
 hush-core = { path = "../python/hush-core", editable = true }
 hush-providers = { path = "../python/hush-providers", editable = true }
+hush-serve = { path = "../python/hush-serve", editable = true }
 hush-telemetry = { path = "../python/hush-telemetry", editable = true }
 
 [tool.hatch.build.targets.wheel]

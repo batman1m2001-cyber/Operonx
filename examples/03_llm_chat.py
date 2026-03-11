@@ -9,7 +9,7 @@ Học được:
 - chain(): kết hợp prompt + LLM trong 1 graph
 - @op + PromptOp.of() + LLMOp.of() pipeline (tiền xử lý → prompt → LLM)
 
-Chạy: cd tutorial && uv run python examples/03_llm_chat.py
+Chạy: uv run python examples/03_llm_chat.py
 """
 
 import asyncio
@@ -81,7 +81,7 @@ async def example_3_text_summarization():
     print("Ví dụ 3: Text Summarization Pipeline")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::text::clean_text")
     def clean_text(text: str):
         cleaned = " ".join(text.split()).strip()
         return {"cleaned_text": cleaned}

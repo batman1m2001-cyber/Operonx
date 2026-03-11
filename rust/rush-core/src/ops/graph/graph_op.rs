@@ -62,7 +62,7 @@ pub(crate) fn run_graph(
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
-) -> Result<(), RushError> {
+) -> Result<Vec<String>, RushError> {
     runtime::block_on_async(run_scheduler(config, state, context))
 }
 
@@ -77,7 +77,7 @@ async fn run_scheduler(
     config: &GraphConfig,
     state: &EngineState,
     context_id: &str,
-) -> Result<(), RushError> {
+) -> Result<Vec<String>, RushError> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<SchedulerEvent>();
     let mut active_count: usize = 0;
 
@@ -304,10 +304,8 @@ async fn run_scheduler(
         }
     }
 
-    // ── 3. Outputs already collected by get_outputs in caller ─────
-    // (engine.rs calls get_outputs after run_graph)
-
-    Ok(())
+    // ── 3. Return stream contexts for output aggregation ──────────
+    Ok(stream_contexts)
 }
 
 // =============================================================================
@@ -635,8 +633,8 @@ async fn run_loop(
     let mut iteration = 0;
 
     loop {
-        // Collect current outputs
-        let outputs = get_outputs(config, state, &current_ctx)?;
+        // Collect current outputs (loops don't use stream aggregation at loop level)
+        let outputs = get_outputs(config, state, &current_ctx, &[])?;
         let outputs_map = match &outputs {
             Value::Object(m) => m,
             _ => return Err(RushError::LoopError("Loop outputs not an object".into())),
@@ -688,8 +686,8 @@ async fn run_loop(
             }
         }
 
-        // Run next iteration
-        run_scheduler(config, state, &next_ctx).await?;
+        // Run next iteration (ignore stream_contexts for loop iterations)
+        let _sc = run_scheduler(config, state, &next_ctx).await?;
         current_ctx = next_ctx;
     }
 }
@@ -740,25 +738,92 @@ pub(crate) fn get_outputs(
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
+    stream_contexts: &[String],
 ) -> Result<Value, RushError> {
     let mut result = serde_json::Map::new();
 
+    // Determine leaf stream contexts (not a prefix of any other stream context)
+    let leaf_contexts: Vec<&String> = if stream_contexts.is_empty() {
+        Vec::new()
+    } else {
+        stream_contexts
+            .iter()
+            .filter(|sc| {
+                !stream_contexts
+                    .iter()
+                    .any(|other| other != *sc && other.starts_with(sc.as_str()))
+            })
+            .collect()
+    };
+
+    let has_streaming = !leaf_contexts.is_empty();
+
     if !config.outputs.is_empty() {
-        // Explicit output mappings
-        for param in &config.outputs {
-            if let Some(value) = base::resolve_param(param, state, context)? {
-                result.insert(param.var_name.clone(), value);
-            } else if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
-                let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-                result.insert(param.var_name.clone(), value);
+        if has_streaming {
+            // Explicit outputs + streaming: aggregate from leaf contexts as lists
+            for param in &config.outputs {
+                // Try to find the source op/var from ref_config
+                if let Some(ref ref_config) = param.ref_config {
+                    let src_full_name = &ref_config.source;
+                    let src_var = &ref_config.var;
+                    let mut values = Vec::new();
+                    for sc in &leaf_contexts {
+                        if let Some(arc_val) = state.get(src_full_name, src_var, sc) {
+                            values.push((*arc_val).clone());
+                        }
+                    }
+                    if !values.is_empty() {
+                        result.insert(param.var_name.clone(), Value::Array(values));
+                    }
+                } else {
+                    // No ref — try reading from graph state at batch context
+                    if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
+                        let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+                        result.insert(param.var_name.clone(), value);
+                    }
+                }
+            }
+        } else {
+            // Explicit output mappings (no streaming)
+            for param in &config.outputs {
+                if let Some(value) = base::resolve_param(param, state, context)? {
+                    result.insert(param.var_name.clone(), value);
+                } else if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
+                    let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
+                    result.insert(param.var_name.clone(), value);
+                }
             }
         }
     } else {
-        // Auto-forward: collect all values from terminal ops (ops → __end__)
-        for (op_name, adj_list) in &config.compiled_adj {
-            let is_terminal = adj_list.iter().any(|e| e.target == "__end__");
-            if is_terminal {
-                if let Some(op) = config.ops.get(op_name) {
+        if has_streaming {
+            // Auto-forward + streaming: find terminal ops, aggregate from leaf contexts
+            let terminal_ops = find_terminal_ops(config);
+            for op_name in &terminal_ops {
+                if let Some(op) = config.ops.get(op_name.as_str()) {
+                    // Discover vars from the first leaf context
+                    let first_vars: Vec<(String, Value)> =
+                        state.get_all_with_prefix(&op.full_name, &leaf_contexts[0]);
+                    for (key, _) in &first_vars {
+                        if key.starts_with('$') {
+                            continue;
+                        }
+                        let mut values = Vec::new();
+                        for sc in &leaf_contexts {
+                            if let Some(arc_val) = state.get(&op.full_name, key, sc) {
+                                values.push((*arc_val).clone());
+                            }
+                        }
+                        if !values.is_empty() {
+                            result.insert(key.clone(), Value::Array(values));
+                        }
+                    }
+                }
+            }
+        } else {
+            // Auto-forward: collect all values from terminal ops (ops → __end__)
+            let terminal_ops = find_terminal_ops(config);
+            for op_name in &terminal_ops {
+                if let Some(op) = config.ops.get(op_name.as_str()) {
                     let prefix = &op.full_name;
                     for (key, value) in state.get_all_with_prefix(prefix, context) {
                         if !key.starts_with('$') {
@@ -771,6 +836,18 @@ pub(crate) fn get_outputs(
     }
 
     Ok(Value::Object(result))
+}
+
+/// Find terminal ops: ops with edges to `__end__` OR ops with empty adjacency lists.
+fn find_terminal_ops(config: &GraphConfig) -> Vec<String> {
+    let mut terminals = Vec::new();
+    for (op_name, adj_list) in &config.compiled_adj {
+        let is_terminal = adj_list.is_empty() || adj_list.iter().any(|e| e.target == "__end__");
+        if is_terminal {
+            terminals.push(op_name.clone());
+        }
+    }
+    terminals
 }
 
 // =============================================================================
@@ -801,7 +878,7 @@ async fn run_nested_graph_async(
     }
 
     // 2. Run inner graph scheduling loop (async — no block_on needed)
-    run_scheduler(inner, state, context).await?;
+    let stream_contexts = run_scheduler(inner, state, context).await?;
 
     // 2b. If this graph has a loop_config, run feedback loop
     if let Some(ref loop_config) = inner.loop_config {
@@ -809,7 +886,7 @@ async fn run_nested_graph_async(
     }
 
     // 3. Collect inner graph outputs
-    collect_nested_outputs(op, inner, state, context)?;
+    collect_nested_outputs(op, inner, state, context, &stream_contexts)?;
 
     // 4. Push output refs
     base::push_output_refs(op, state, context)?;
@@ -823,8 +900,19 @@ fn collect_nested_outputs(
     inner: &GraphConfig,
     state: &EngineState,
     context: &str,
+    stream_contexts: &[String],
 ) -> Result<(), RushError> {
-    if !inner.outputs.is_empty() {
+    if !stream_contexts.is_empty() {
+        // Streaming: delegate to get_outputs which handles aggregation
+        let aggregated = get_outputs(inner, state, context, stream_contexts)?;
+        if let Value::Object(map) = aggregated {
+            for (key, value) in map {
+                if !key.starts_with('$') {
+                    state.set(&op.full_name, &key, context, value);
+                }
+            }
+        }
+    } else if !inner.outputs.is_empty() {
         for param in &inner.outputs {
             if let Some(value) = base::resolve_param(param, state, context)? {
                 state.set(&op.full_name, &param.var_name, context, value);

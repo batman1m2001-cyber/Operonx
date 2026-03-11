@@ -5,52 +5,56 @@ Không cần API key. Chỉ dùng hush-core.
 Học được:
 - GraphOp: container chứa workflow
 - @op: decorator tạo op từ Python function
+- @op(rust="..."): tag Rust implementation, Python body là fallback
 - PARENT: truy cập data từ parent state
 - START >> step >> END: kết nối ops
-- Hush engine: chạy workflow
+- Hush engine: chạy workflow bằng Python
+- engine.serve(): serve workflow qua HTTP (Python hoặc Rust backend)
 
-Chạy: cd tutorial && uv run python examples/01_hello_world.py
+Chạy: uv run python examples/01_hello_world.py
 """
 
 import asyncio
+import sys
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops.transform.func_op import op
 
 # =============================================================================
 # Định nghĩa code ops với @op decorator
+# Mỗi op có rust= tag → khi serve(backend="rust"), Rust implementation được dùng
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::text::greet_vi")
 def greet(name: str):
     """Tạo greeting từ tên."""
     return {"greeting": f"Xin chào, {name}!"}
 
 
-@op
+@op(rust="./rust_ops::text::greet")
 def greet_en(name: str):
     """Tạo greeting tiếng Anh."""
     return {"greeting": f"Hello, {name}!"}
 
 
-@op
+@op(rust="./rust_ops::text::to_upper")
 def upper(text: str):
     """Chuyển thành uppercase."""
     return {"result": text.upper()}
 
 
-@op
+@op(rust="./rust_ops::pipeline::step_a")
 def step_a():
     return {"a_result": "Kết quả A"}
 
 
-@op
+@op(rust="./rust_ops::pipeline::step_b")
 def step_b():
     return {"b_result": "Kết quả B"}
 
 
-@op
+@op(rust="./rust_ops::pipeline::merge_two")
 def merge(a: str, b: str):
     return {"combined": f"{a} + {b}"}
 
@@ -67,11 +71,10 @@ async def main():
         g = greet(name=PARENT["name"])
         START >> g >> END
 
+    # Chạy workflow bằng Python engine
     engine = Hush(graph)
     result = await engine.run(inputs={"name": "Hush"})
-
-    print(f"Kết quả: {result['greeting']}")
-    # Output: Xin chào, Hush!
+    print(f"Result: {result['greeting']}")
 
     # =========================================================================
     # Ví dụ 2: Hai ops nối tiếp
@@ -117,6 +120,19 @@ async def main():
     result = await engine.run(inputs={})
 
     print(f"Combined: {result['combined']}")
+
+    # =========================================================================
+    # Serve workflow qua HTTP
+    # =========================================================================
+    #
+    # Python backend (FastAPI + uvicorn):
+    #   engine.serve(port=8000)
+    #
+    # Rust backend (Axum — dùng rust= tag trong mỗi @op):
+    #   engine.serve(port=8000, backend="rust")
+    #
+    # Cả hai đều expose cùng API:
+    #   POST / {"name": "Hush"} → {"greeting": "Xin chào, Hush!"}
 
 
 if __name__ == "__main__":

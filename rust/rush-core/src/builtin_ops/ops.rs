@@ -105,6 +105,12 @@ pub fn greet(inputs: &Value) -> Value {
     serde_json::json!({"greeting": format!("Hello, {}!", name)})
 }
 
+/// greet_vi: name → greeting = "Xin chào, {name}!"
+pub fn greet_vi(inputs: &Value) -> Value {
+    let name = inputs["name"].as_str().unwrap_or("World");
+    serde_json::json!({"greeting": format!("Xin chào, {}!", name)})
+}
+
 /// make_dict: key, value → {key: value}
 pub fn make_dict(inputs: &Value) -> Value {
     let key = inputs["key"].as_str().unwrap_or("key").to_string();
@@ -666,6 +672,104 @@ pub fn maybe_fail(inputs: &Value) -> Value {
 }
 
 // =============================================================================
+// Pipeline ops (for examples 01 & 02)
+// =============================================================================
+
+/// step_a: () → {"a_result": "Kết quả A"}
+pub fn step_a(_inputs: &Value) -> Value {
+    serde_json::json!({"a_result": "Kết quả A"})
+}
+
+/// step_b: () → {"b_result": "Kết quả B"}
+pub fn step_b(_inputs: &Value) -> Value {
+    serde_json::json!({"b_result": "Kết quả B"})
+}
+
+/// fetch_data: () → {"data": [1, 2, 3, 4, 5]}
+pub fn fetch_data(_inputs: &Value) -> Value {
+    serde_json::json!({"data": [1, 2, 3, 4, 5]})
+}
+
+/// transform_double: data (array) → {"transformed": [x*2 for x in data]}
+pub fn transform_double(inputs: &Value) -> Value {
+    let transformed: Vec<Value> = inputs["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|v| {
+                    if let Some(n) = v.as_i64() {
+                        serde_json::json!(n * 2)
+                    } else if let Some(n) = v.as_f64() {
+                        serde_json::json!(n * 2.0)
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!({"transformed": transformed})
+}
+
+/// aggregate_data: data (array) → {total, average, count}
+pub fn aggregate_data(inputs: &Value) -> Value {
+    let nums: Vec<f64> = inputs["data"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+        .unwrap_or_default();
+    let count = nums.len();
+    let total: f64 = nums.iter().sum();
+    let average = if count > 0 { total / count as f64 } else { 0.0 };
+    serde_json::json!({"total": total, "average": average, "count": count})
+}
+
+/// clean_text: text → cleaned_text (strip, normalize whitespace, lowercase)
+pub fn clean_text(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let cleaned: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    serde_json::json!({"cleaned_text": cleaned})
+}
+
+/// count_words: text → {word_count, unique_words, words}
+pub fn count_words(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let word_count = words.len();
+    let unique_words = {
+        let mut seen = std::collections::HashSet::new();
+        for w in &words {
+            seen.insert(*w);
+        }
+        seen.len()
+    };
+    serde_json::json!({
+        "word_count": word_count,
+        "unique_words": unique_words,
+        "words": words,
+    })
+}
+
+/// summarize_stats: word_count, unique_words, cleaned_text → {report}
+pub fn summarize_stats(inputs: &Value) -> Value {
+    let word_count = inputs["word_count"].as_u64().unwrap_or(0);
+    let unique_words = inputs["unique_words"].as_u64().unwrap_or(0);
+    let pct = if word_count > 0 {
+        (unique_words as f64 / word_count as f64 * 100.0).round() as u64
+    } else {
+        0
+    };
+    let report = format!(
+        "Văn bản có {} từ, {} từ unique, tỉ lệ unique: {}%",
+        word_count, unique_words, pct
+    );
+    serde_json::json!({"report": report})
+}
+
+// =============================================================================
 // Generator ops (return Vec<Value> — each item is one yield)
 // =============================================================================
 
@@ -708,4 +812,75 @@ pub fn range_gen(inputs: &Value) -> Vec<Value> {
         current += step;
     }
     result
+}
+
+// =============================================================================
+// Example 05 — Loops & Branches ops
+// =============================================================================
+
+/// each_item_with_prefix: items, prefix → yields {item, prefix} per item
+pub fn each_item_with_prefix(inputs: &Value) -> Vec<Value> {
+    let items = inputs["items"].as_array().cloned().unwrap_or_default();
+    let prefix = inputs["prefix"].as_str().unwrap_or("");
+    items
+        .into_iter()
+        .map(|item| serde_json::json!({"item": item, "prefix": prefix}))
+        .collect()
+}
+
+/// process_item_text: item, prefix → result = "{prefix}: {item}"
+pub fn process_item_text(inputs: &Value) -> Value {
+    let item = inputs["item"].as_str().unwrap_or("");
+    let prefix = inputs["prefix"].as_str().unwrap_or("");
+    serde_json::json!({"result": format!("{}: {}", prefix, item)})
+}
+
+/// each_number: numbers → yields {x} per number
+pub fn each_number(inputs: &Value) -> Vec<Value> {
+    let numbers = inputs["numbers"].as_array().cloned().unwrap_or_default();
+    numbers
+        .into_iter()
+        .map(|x| serde_json::json!({"x": x}))
+        .collect()
+}
+
+/// square_named: x → squared = x * x
+pub fn square_named(inputs: &Value) -> Value {
+    let x = inputs["x"].as_i64().unwrap_or(0);
+    serde_json::json!({"squared": x * x})
+}
+
+/// halve_until: value → yields {value} while value >= 5, halving each time
+pub fn halve_until(inputs: &Value) -> Vec<Value> {
+    let mut value = inputs["value"].as_i64().unwrap_or(0);
+    let mut result = Vec::new();
+    while value >= 5 {
+        value /= 2;
+        result.push(serde_json::json!({"value": value}));
+    }
+    result
+}
+
+/// excellent: → grade="A", message="Xuất sắc!"
+pub fn excellent(inputs: &Value) -> Value {
+    let _ = inputs;
+    serde_json::json!({"grade": "A", "message": "Xuất sắc!"})
+}
+
+/// good: → grade="B", message="Tốt!"
+pub fn good(inputs: &Value) -> Value {
+    let _ = inputs;
+    serde_json::json!({"grade": "B", "message": "Tốt!"})
+}
+
+/// average_grade: → grade="C", message="Trung bình"
+pub fn average_grade(inputs: &Value) -> Value {
+    let _ = inputs;
+    serde_json::json!({"grade": "C", "message": "Trung bình"})
+}
+
+/// fail_grade: → grade="F", message="Cần cải thiện"
+pub fn fail_grade(inputs: &Value) -> Value {
+    let _ = inputs;
+    serde_json::json!({"grade": "F", "message": "Cần cải thiện"})
 }

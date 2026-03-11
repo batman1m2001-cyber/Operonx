@@ -8,7 +8,7 @@ Học được:
 - Multi-turn conversation — giữ history qua nhiều lượt
 - Generation parameters — temperature, max_tokens
 
-Chạy: cd tutorial && uv run python examples/04_llm_advanced.py
+Chạy: uv run python examples/04_llm_advanced.py
 """
 
 import asyncio
@@ -111,7 +111,7 @@ async def example_2_tool_calling():
         except Exception as e:
             return f"Error: {e}"
 
-    @op
+    @op(rust="./rust_ops::pipeline::process_response_tool")
     def process_response(content, tool_calls):
         return {
             "has_tool_call": bool(tool_calls),
@@ -160,7 +160,7 @@ async def example_3_multi_turn_chat():
     print("Ví dụ 3: Multi-turn Chat")
     print("=" * 50)
 
-    @op
+    @op(rust="./rust_ops::pipeline::update_history")
     def update_history(history, message, response):
         return {
             "new_history": history

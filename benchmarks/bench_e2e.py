@@ -1,17 +1,17 @@
 """End-to-end benchmark: Python backend vs Rust backend.
 
 Stress tests with nested @graph subgraphs, parallel branches,
-if_() routing, ForOp loops, CPU-bound contention — mirroring real production patterns.
+if_() routing, CPU-bound contention — mirroring real production patterns.
 
 Python backend: hush-core's async Python engine (Hush + GraphOp.run)
 Rust backend:   rush-core's native Rust engine (Rush::run_json via rush-bench binary)
 
 Usage:
-    cd rush-core && uv run python benches/bench_e2e.py
+    cd benchmarks && uv run python bench_e2e.py
 
 Requirements:
     hush-core must be installed (for Python backend + graph serialization).
-    rush-bench binary must be built: cargo build --release --bin rush-bench
+    rush-bench binary must be built: cd ../rust && cargo build --release --bin rush-bench
 """
 
 import asyncio
@@ -27,12 +27,8 @@ import tracemalloc
 
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import Branch
-# ForOp/Each removed — iteration now uses GraphOp.loop
-# Pattern 5 (ForOp loop) is skipped
 
-BUILTIN_CRATE = None  # Built-in ops are now internal to rush-core
-
-# Path to the rush-bench binary (built from rush-core/benches/bench_runner.rs)
+# Path to the rush-bench binary (built from rust/rush-core/benches/bench_runner.rs)
 RUSH_BENCH_BIN = None
 
 
@@ -40,17 +36,23 @@ def find_rush_bench():
     """Find and optionally build the rush-bench binary."""
     global RUSH_BENCH_BIN
 
-    rush_core_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    bench_dir = os.path.abspath(os.path.dirname(__file__))
+    rust_dir = os.path.join(bench_dir, "..", "rust")
 
-    # Check release binary first, then debug
-    for profile in ["release", "debug"]:
-        if sys.platform == "win32":
-            candidate = os.path.join(rush_core_dir, "target", profile, "rush-bench.exe")
-        else:
-            candidate = os.path.join(rush_core_dir, "target", profile, "rush-bench")
-        if os.path.isfile(candidate):
-            RUSH_BENCH_BIN = candidate
-            return
+    # Check both possible target locations:
+    # 1. benchmarks/target/ (standalone cargo build)
+    # 2. rust/target/ (workspace build)
+    search_dirs = [bench_dir, os.path.abspath(rust_dir)]
+
+    for base in search_dirs:
+        for profile in ["release", "debug"]:
+            if sys.platform == "win32":
+                candidate = os.path.join(base, "target", profile, "rush-bench.exe")
+            else:
+                candidate = os.path.join(base, "target", profile, "rush-bench")
+            if os.path.isfile(candidate):
+                RUSH_BENCH_BIN = candidate
+                return
 
     # Not found — try building
     print(
@@ -58,7 +60,7 @@ def find_rush_bench():
     )
     result = subprocess.run(
         ["cargo", "build", "--release", "--bin", "rush-bench"],
-        cwd=rush_core_dir,
+        cwd=bench_dir,
         capture_output=True,
         text=True,
     )
@@ -67,11 +69,9 @@ def find_rush_bench():
         sys.exit(1)
 
     if sys.platform == "win32":
-        RUSH_BENCH_BIN = os.path.join(
-            rush_core_dir, "target", "release", "rush-bench.exe"
-        )
+        RUSH_BENCH_BIN = os.path.join(bench_dir, "target", "release", "rush-bench.exe")
     else:
-        RUSH_BENCH_BIN = os.path.join(rush_core_dir, "target", "release", "rush-bench")
+        RUSH_BENCH_BIN = os.path.join(bench_dir, "target", "release", "rush-bench")
 
     if not os.path.isfile(RUSH_BENCH_BIN):
         print(f"  [error] rush-bench binary not found at {RUSH_BENCH_BIN}")
@@ -85,12 +85,12 @@ def find_rush_bench():
 # =============================================================================
 
 
-@op(rust=f"{BUILTIN_CRATE}::bench_noop")
+@op(rust="bench_noop")
 def noop(x: int):
     return {"x": x}
 
 
-@op(rust=f"{BUILTIN_CRATE}::classify")
+@op(rust="classify")
 def classify(score: int):
     """Classify score into grade bucket."""
     if score >= 90:
@@ -104,28 +104,28 @@ def classify(score: int):
     return {"grade": grade, "score": score}
 
 
-@op(rust=f"{BUILTIN_CRATE}::process_grade")
+@op(rust="process_grade")
 def process_grade(grade: str, score: int):
     return {"result": f"{grade}:{score}"}
 
 
-@op(rust=f"{BUILTIN_CRATE}::aggregate")
+@op(rust="aggregate")
 def aggregate(results: list):
     return {"summary": len(results or [])}
 
 
-@op(rust=f"{BUILTIN_CRATE}::bench_transform")
+@op(rust="bench_transform")
 def transform(item: str, prefix: str):
     return {"output": f"{prefix}-{item}"}
 
 
-@op(rust=f"{BUILTIN_CRATE}::merge_two")
+@op(rust="merge_two")
 def merge_two(a, b):
     """Merge two values into a single output."""
     return {"merged": a, "x": a}
 
 
-@op(rust=f"{BUILTIN_CRATE}::combine_all")
+@op(rust="combine_all")
 def combine_all(
     r1: dict = None,
     r2: dict = None,
@@ -143,7 +143,7 @@ def combine_all(
 # =============================================================================
 
 
-@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_hash_chain")
+@op(executor="thread", rust="cpu_hash_chain")
 def cpu_hash_chain(x: int, iterations: int):
     """Chain SHA-256 hashes — pure CPU, no I/O."""
     data = str(x).encode()
@@ -152,7 +152,7 @@ def cpu_hash_chain(x: int, iterations: int):
     return {"hash": data.hex()[:16], "x": x}
 
 
-@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_prime_sieve")
+@op(executor="thread", rust="cpu_prime_sieve")
 def cpu_prime_sieve(limit: int):
     """Sieve of Eratosthenes up to limit — heavy memory + CPU."""
     sieve = [True] * (limit + 1)
@@ -165,7 +165,7 @@ def cpu_prime_sieve(limit: int):
     return {"prime_count": count}
 
 
-@op(executor="thread", rust=f"{BUILTIN_CRATE}::cpu_matrix_mult")
+@op(executor="thread", rust="cpu_matrix_mult")
 def cpu_matrix_mult(size: int):
     """Naive matrix multiplication — O(n^3) CPU burn."""
     a = [[float(i + j) for j in range(size)] for i in range(size)]
@@ -180,7 +180,7 @@ def cpu_matrix_mult(size: int):
     return {"trace": sum(c[i][i] for i in range(size))}
 
 
-@op(rust=f"{BUILTIN_CRATE}::cpu_fibonacci")
+@op(rust="cpu_fibonacci")
 def cpu_fibonacci(n: int):
     """Iterative fibonacci — lightweight CPU."""
     a, b = 0, 1
@@ -326,28 +326,7 @@ def build_branching(n: int):
 
 
 # =============================================================================
-# Pattern 5: ForOp sequential loop with nested graph body
-# =============================================================================
-
-
-def build_for_loop(n: int):
-    """ForOp iterating over n items sequentially."""
-    with GraphOp(name=f"for_loop_{n}") as g:
-        with ForOp(
-            name="loop",
-            inputs={"item": Each(PARENT["items"]), "prefix": PARENT["prefix"]},
-        ) as loop:
-            t = transform(item=PARENT["item"], prefix=PARENT["prefix"], name="xform")
-            t["output"] >> PARENT["output"]
-            START >> t >> END
-
-        loop["output"] >> PARENT["results"]
-        START >> loop >> END
-    return g
-
-
-# =============================================================================
-# Pattern 6: Production-like workflow
+# Pattern 5: Production-like workflow
 #   init -> [5 parallel verification @graph subgraphs] -> aggregate -> post-process
 #   Each verification = classify -> branch -> 2 paths -> merge (5-7 nodes)
 #   Total: ~40-50 nodes
@@ -399,7 +378,7 @@ def build_production(n: int):
 
 
 # =============================================================================
-# Pattern 7: CPU-bound parallel contention
+# Pattern 6: CPU-bound parallel contention
 #   n parallel CPU-heavy ops (hash chains) running alongside lightweight ops
 #   Tests scheduler throughput under real CPU pressure
 # =============================================================================
@@ -450,7 +429,7 @@ def build_cpu_contention(n_heavy: int, n_light: int, hash_iters: int):
 
 
 # =============================================================================
-# Pattern 8: Production-like with CPU-bound stages
+# Pattern 7: Production-like with CPU-bound stages
 #   init -> [parallel verify + CPU ops] -> aggregate -> CPU post-process
 #   Simulates real workload: verification logic + heavy computation
 # =============================================================================
@@ -499,7 +478,7 @@ def build_production_cpu(n: int, hash_iters: int):
 
 
 # =============================================================================
-# Pattern 9: Pure CPU stress — linear chain of heavy ops
+# Pattern 8: Pure CPU stress — linear chain of heavy ops
 #   Tests scheduler overhead when every op is CPU-bound
 # =============================================================================
 
@@ -657,7 +636,7 @@ async def main():
         "  End-to-End Benchmark: Python backend (hush-core) vs Rust backend (rush-core)"
     )
     print(
-        "  Patterns: linear, nested, parallel, branching, ForOp, production, CPU-contention, CPU-production, CPU-chain"
+        "  Patterns: linear, nested, parallel, branching, production, CPU-contention, CPU-production, CPU-chain"
     )
     print("=" * 120)
 
@@ -680,8 +659,6 @@ async def main():
     print_header("if_() branching (4 paths per stage)")
     for n in [5, 10, 20]:
         await bench_one(f"branching(stages={n})", build_branching(n), {"score": 75})
-
-    # --- ForOp loop (SKIPPED - ForOp/Each removed, use GraphOp.loop) ---
 
     # --- Production-like ---
     print_header("Production-like (n parallel verify subgraphs -> aggregate -> post)")

@@ -9,7 +9,7 @@ Learn:
 - if_(): BranchOp fluent syntax
 - Combining generators for nested iteration
 
-Run: cd tutorial && uv run python examples/15_shorthand_syntax.py
+Run: uv run python examples/15_shorthand_syntax.py
 """
 
 import asyncio
@@ -23,19 +23,19 @@ from hush.core.ops import if_, op
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::text::add_prefix")
 def add_prefix(text: str, prefix: str):
     """Add prefix to text."""
     return {"result": f"{prefix}: {text}"}
 
 
-@op
+@op(rust="./rust_ops::math::square_named")
 def square(x: int):
     """Square a number."""
     return {"squared": x * x}
 
 
-@op
+@op(rust="./rust_ops::text::grade_to_message")
 def grade_to_message(grade: str):
     """Convert grade to message."""
     messages = {
@@ -52,28 +52,28 @@ def grade_to_message(grade: str):
 # =============================================================================
 
 
-@op
+@op(rust="./rust_ops::iteration::each_fruit")
 def each_fruit():
     """Yield fruits one at a time (replaces ForOp with static list)."""
     for fruit in ["apple", "banana", "cherry"]:
         yield {"item": fruit}
 
 
-@op
+@op(rust="./rust_ops::iteration::each_number")
 def each_number(numbers: list):
     """Yield numbers from a list (replaces ForOp with dynamic input)."""
     for n in numbers:
         yield {"x": n}
 
 
-@op
+@op(rust="./rust_ops::iteration::each_value")
 def each_item(items: list):
     """Generic item iterator."""
     for item in items:
         yield {"value": item}
 
 
-@op
+@op(rust="./rust_ops::iteration::halve_until_threshold")
 def halve_until(value: int, threshold: int):
     """Halve value until below threshold (replaces WhileOp)."""
     while value >= threshold:
@@ -225,23 +225,23 @@ async def example_6_combined():
     print("Example 6: Combined generators (nested iteration + broadcast)")
     print("=" * 60)
 
-    @op
+    @op(rust="./rust_ops::iteration::each_outer")
     def each_outer(values: list):
         """Outer iterator."""
         for v in values:
             yield {"outer": v}
 
-    @op
+    @op(rust="./rust_ops::iteration::each_inner")
     def each_inner(values: list):
         """Inner iterator."""
         for v in values:
             yield {"inner": v}
 
-    @op
+    @op(rust="./rust_ops::math::multiply_xy")
     def multiply(x: int, y: int):
         return {"product": x * y}
 
-    @op
+    @op(rust="./rust_ops::math::sum_list")
     def sum_list(numbers: list):
         return {"total": sum(numbers) if numbers else 0}
 
@@ -301,16 +301,16 @@ async def example_7_comparison():
     #     START >> loop >> END
 
     # --- New style (generator @op) ---
-    @op
+    @op(rust="./rust_ops::iteration::emit_items")
     def emit_items(items: list):
         for item in items:
             yield {"x": item}
 
-    @op
+    @op(rust="./rust_ops::math::calc")
     def calc(x: int, multiplier: int):
         return {"result": x * multiplier}
 
-    @op
+    @op(rust="./rust_ops::pipeline::get_config")
     def get_config():
         """Non-generator: runs once, output is broadcast to stream items."""
         return {"multiplier": 10}
