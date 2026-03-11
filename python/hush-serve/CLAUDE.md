@@ -123,5 +123,5 @@ uv run -m pytest
 | Topic | File |
 |-------|------|
 | Core engine | [hush-core/CLAUDE.md](../hush-core/CLAUDE.md) |
-| Rust backend | [rush-serve/CLAUDE.md](../rush-serve/CLAUDE.md) |
+| Rust backend | [rush-serve/CLAUDE.md](../../rust/rush-serve/CLAUDE.md) |
 | Provider ops | [hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) |

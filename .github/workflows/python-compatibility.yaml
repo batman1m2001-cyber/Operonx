@@ -19,9 +19,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
         package:
-          - hush-core
-          - hush-providers
-          - hush-telemetry
+          - python/hush-core
+          - python/hush-providers
+          - python/hush-telemetry
 
     steps:
       - uses: actions/checkout@v4

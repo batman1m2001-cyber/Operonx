@@ -18,9 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - hush-core
-          - hush-providers
-          - hush-telemetry
+          - python/hush-core
+          - python/hush-providers
+          - python/hush-telemetry
 
     steps:
       - uses: actions/checkout@v4
@@ -56,16 +56,16 @@ jobs:
         run: uv python install 3.10
 
       - name: Install hush-core with dev dependencies
-        working-directory: hush-core
+        working-directory: python/hush-core
         run: uv sync --all-extras
 
       - name: Run coverage
-        working-directory: hush-core
+        working-directory: python/hush-core
         run: uv run pytest --cov=hush --cov-report=xml -m "not integration"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: hush-core/coverage.xml
+          files: python/hush-core/coverage.xml
           fail_ci_if_error: false

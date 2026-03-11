@@ -103,10 +103,10 @@ pub async fn chat_completion(config: &LLMConfig, inputs: &Value, token: Option<&
 
 ```bash
 # Build (as part of rush-core)
-cd rush-core && cargo build --release
+cargo build --release
 
 # Run Rust tests
-cd rush-core && cargo test -p rush-providers
+cargo test -p rush-providers
 ```
 
 ## Adding a New Provider
@@ -121,6 +121,6 @@ cd rush-core && cargo test -p rush-providers
 
 | Topic | File |
 |-------|------|
-| Provider abstractions | [architecture/providers/adding-new-provider.md](../architecture/providers/adding-new-provider.md) |
-| Workflow ops design | [architecture/providers/workflow-ops.md](../architecture/providers/workflow-ops.md) |
+| Provider abstractions | [docs/architecture/providers/adding-new-provider.md](../../docs/architecture/providers/adding-new-provider.md) |
+| Workflow ops design | [docs/architecture/providers/workflow-ops.md](../../docs/architecture/providers/workflow-ops.md) |
 | Rust backend overview | [rush-core/CLAUDE.md](../rush-core/CLAUDE.md) |

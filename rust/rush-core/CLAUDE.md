@@ -258,7 +258,7 @@ def my_op(x: int):
 
 | Topic | File |
 |-------|------|
-| Python scheduling (asyncio) | [architecture/engine/scheduling.md](../architecture/engine/scheduling.md) |
-| Python execution flow | [architecture/engine/execution-flow.md](../architecture/engine/execution-flow.md) |
-| State system design | [architecture/state/overview.md](../architecture/state/overview.md) |
-| Op internals | [architecture/ops/base-op.md](../architecture/ops/base-op.md) |
+| Python scheduling (asyncio) | [docs/architecture/engine/scheduling.md](../../docs/architecture/engine/scheduling.md) |
+| Python execution flow | [docs/architecture/engine/execution-flow.md](../../docs/architecture/engine/execution-flow.md) |
+| State system design | [docs/architecture/state/overview.md](../../docs/architecture/state/overview.md) |
+| Op internals | [docs/architecture/ops/base-op.md](../../docs/architecture/ops/base-op.md) |
