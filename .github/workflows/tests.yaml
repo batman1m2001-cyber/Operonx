@@ -41,6 +41,29 @@ jobs:
         working-directory: ${{ matrix.package }}
         run: uv run pytest --tb=short -q -m "not integration"
 
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        working-directory: examples
+        run: uv sync --all-extras
+
+      - name: Run example smoke tests (no API keys needed)
+        working-directory: examples
+        run: |
+          uv run python 01_hello_world.py
+          uv run python 02_data_pipeline.py
+
   coverage:
     runs-on: ubuntu-latest
     needs: test
@@ -69,3 +92,30 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: python/hush-core/coverage.xml
           fail_ci_if_error: false
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install Python packages (for mkdocstrings)
+        run: |
+          cd python/hush-core && uv sync --all-extras && cd ../..
+          cd python/hush-providers && uv sync --all-extras && cd ../..
+          cd python/hush-telemetry && uv sync --all-extras && cd ../..
+          cd python/hush-serve && uv sync --all-extras && cd ../..
+
+      - name: Install mkdocs
+        run: pip install mkdocs-material "mkdocstrings[python]"
+
+      - name: Build docs (strict mode — fails on broken refs)
+        working-directory: docs
+        run: mkdocs build --strict

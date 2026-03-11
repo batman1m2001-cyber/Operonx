@@ -27,6 +27,7 @@ from hush.core.configs import (
 )
 from hush.core.engine import Hush
 from hush.core.loggings import LOGGER
+from hush.core.middleware import Middleware
 from hush.core.ops import (
     END,
     PARENT,
@@ -68,6 +69,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Main engine
     "Hush",
+    "Middleware",
     # Nodes
     "BaseOp",
     "DummyOp",

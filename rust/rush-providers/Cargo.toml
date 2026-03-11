@@ -3,6 +3,8 @@ name = "rush-providers"
 version = "0.1.0"
 edition = "2021"
 description = "Provider configs and native op implementations for the Hush workflow engine"
+license = "Apache-2.0"
+repository = "https://github.com/batman1m2001-cyber/Hush-ai"
 
 [lib]
 name = "rush_providers"

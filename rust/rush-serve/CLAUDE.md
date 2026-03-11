@@ -10,16 +10,13 @@ rush-serve/src/
 ├── config.rs            # Cli (clap), ServerConfig, EndpointDef (serde)
 ├── router.rs            # build_router() — Axum route generation from config
 ├── execute.rs           # run_workflow() — spawn_blocking + Rush::new/run_json
-├── state.rs             # AppState (DashMap<path, EndpointState>), JobStore ref
-├── jobs.rs              # In-memory JobStore (Mutex<HashMap>) with TTL cleanup
+├── state.rs             # AppState (DashMap<path, EndpointState>)
 ├── error.rs             # ServeError enum (Execution, Internal)
 └── routes/
     ├── mod.rs             # Route module declarations
     ├── sync_handler.rs    # POST /path → JSON result
     ├── stream_handler.rs  # POST /path/stream → SSE text/event-stream
-    ├── ws_handler.rs      # WS /path/ws → bidirectional WebSocket
-    ├── batch_handler.rs   # POST /path/batch → concurrent batch execution
-    └── job_handler.rs     # POST /path/submit + GET /jobs/{job_id}
+    └── ws_handler.rs      # WS /path/ws → bidirectional WebSocket
 ```
 
 ## Key Files to Read First
@@ -67,9 +64,6 @@ Same pattern as hush-serve (Python). For each endpoint in config:
 | `POST /path` | Always |
 | `POST /path/stream` | `stream: true` |
 | `WS /path/ws` | `websocket: true` |
-| `POST /path/batch` | `batch: true` (default) |
-| `POST /path/submit` | `jobs: true` |
-| `GET /jobs/{job_id}` | Any endpoint has `jobs: true` |
 
 Plus: `GET /health`, `GET /endpoints`.
 

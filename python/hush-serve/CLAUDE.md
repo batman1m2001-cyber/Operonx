@@ -1,6 +1,6 @@
 # hush-serve
 
-Auto-generate HTTP API servers from Hush workflow graphs. Built on FastAPI with support for sync, SSE streaming, WebSocket, batch, and background job endpoints. Dual-backend: Python (FastAPI/uvicorn) or Rust (spawns rush-serve binary).
+Auto-generate HTTP API servers from Hush workflow graphs. Built on FastAPI with support for sync, SSE streaming, and WebSocket endpoints. Dual-backend: Python (FastAPI/uvicorn) or Rust (spawns rush-serve binary).
 
 ## Module Structure
 
@@ -12,15 +12,12 @@ hush-serve/hush/serve/
 ├── endpoint.py          # Endpoint — binds GraphOp to route config + Hush engine
 ├── schema.py            # Auto-generate Pydantic request/response models from graph metadata
 ├── middleware.py         # RequestIDMiddleware, TimingMiddleware
-├── jobs.py              # In-memory JobStore with TTL cleanup
 ├── errors.py            # Error handling
 ├── _rust_bridge.py      # backend="rust" — serialize config, spawn rush-serve binary
 └── routes/
     ├── sync_handler.py    # POST /path → JSON result
     ├── stream_handler.py  # POST /path/stream → SSE text/event-stream
-    ├── ws_handler.py      # WS /path/ws → bidirectional WebSocket
-    ├── batch_handler.py   # POST /path/batch → concurrent batch execution
-    └── job_handler.py     # POST /path/submit + GET /jobs/{job_id}
+    └── ws_handler.py      # WS /path/ws → bidirectional WebSocket
 ```
 
 ## Key Files to Read First
@@ -54,9 +51,6 @@ Each `app.endpoint("/path", graph=g)` auto-generates:
 | `POST /path` | sync_handler | Always |
 | `POST /path/stream` | stream_handler | `stream=True` or auto-detected |
 | `WS /path/ws` | ws_handler | `websocket=True` |
-| `POST /path/batch` | batch_handler | `batch=True` (default) |
-| `POST /path/submit` | job_handler | `jobs=True` |
-| `GET /jobs/{job_id}` | job_handler | Any endpoint has `jobs=True` |
 
 Plus system routes: `GET /health`, `GET /endpoints`.
 

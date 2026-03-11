@@ -70,9 +70,7 @@ def serialize_for_rust(app: "HushApp") -> RustBackendConfig:
             path=ep.config.path,
             graph_config=graph_config,
             stream=ep.config.stream,
-            batch=ep.config.batch,
             websocket=ep.config.websocket,
-            jobs=ep.config.jobs,
         )
 
     return config

@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::config::GraphConfig;
 use crate::error::RushError;
+use crate::middleware::Middleware;
 use crate::ops::graph::graph_op;
 use crate::states::state::EngineState;
 use crate::tracing::flush_worker::FlushWorker;
@@ -23,6 +24,7 @@ use crate::tracing::tracer::Tracer;
 pub struct Rush {
     config: Arc<GraphConfig>,
     tracers: Vec<Arc<dyn Tracer>>,
+    middleware: Vec<Box<dyn Middleware>>,
     flush_worker: FlushWorker,
     _force_timestamps: bool,
 }
@@ -34,6 +36,7 @@ impl Rush {
         Ok(Rush {
             config: Arc::new(config),
             tracers: Vec::new(),
+            middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
             _force_timestamps: false,
         })
@@ -47,6 +50,12 @@ impl Rush {
     /// Register a pre-wrapped Arc<dyn Tracer>.
     pub fn add_tracer_arc(&mut self, tracer: Arc<dyn Tracer>) {
         self.tracers.push(tracer);
+    }
+
+    /// Add middleware to the engine. Returns &mut self for chaining.
+    pub fn use_middleware(&mut self, mw: impl Middleware + 'static) -> &mut Self {
+        self.middleware.push(Box::new(mw));
+        self
     }
 
     /// Force per-op timing metadata ($start_time, $end_time, $duration_ms)
@@ -66,6 +75,12 @@ impl Rush {
         user_id: Option<String>,
         session_id: Option<String>,
     ) -> Result<Value, RushError> {
+        // Apply before_run middleware (in order)
+        let mut inputs = inputs;
+        for mw in &self.middleware {
+            mw.before_run(&mut inputs)?;
+        }
+
         let mut raw_state = EngineState::new();
         raw_state.needs_timestamps = !self.tracers.is_empty() || self._force_timestamps;
         let state = Arc::new(raw_state);
@@ -83,7 +98,16 @@ impl Rush {
         }
 
         // 2. Run graph
-        graph_op::run_graph(&self.config, &state, context)?;
+        match graph_op::run_graph(&self.config, &state, context) {
+            Ok(()) => {}
+            Err(e) => {
+                // on_error middleware (in reverse order)
+                for mw in self.middleware.iter().rev() {
+                    mw.on_error(&e);
+                }
+                return Err(e);
+            }
+        }
 
         // 3. Collect outputs
         let mut result = graph_op::get_outputs(&self.config, &state, context)?;
@@ -116,6 +140,11 @@ impl Rush {
                 self.config.clone(),
                 state,
             );
+        }
+
+        // Apply after_run middleware (in reverse order)
+        for mw in self.middleware.iter().rev() {
+            mw.after_run(&mut result)?;
         }
 
         Ok(result)

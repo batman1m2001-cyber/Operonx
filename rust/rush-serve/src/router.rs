@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::Path;
 use axum::response::Json;
 use axum::routing::{get, post};
 use axum::Router;
@@ -12,14 +11,13 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::ServerConfig;
 use crate::error::ServeError;
-use crate::routes::{batch_handler, job_handler, stream_handler, sync_handler, ws_handler};
+use crate::routes::{stream_handler, sync_handler, ws_handler};
 use crate::state::{AppState, EndpointState};
 
 /// Build the Axum router from a server config.
 pub fn build_router(config: ServerConfig) -> Router {
     let tracers = crate::execute::build_tracers(&config.tracers);
     let app_state = AppState::new(tracers);
-    let mut has_jobs = false;
     let mut endpoint_paths: Vec<String> = Vec::new();
 
     for ep_def in config.endpoints {
@@ -27,10 +25,6 @@ pub fn build_router(config: ServerConfig) -> Router {
         endpoint_paths.push(path.clone());
 
         let graph_json = serde_json::to_string(&ep_def.graph).unwrap_or_default();
-
-        if ep_def.jobs {
-            has_jobs = true;
-        }
 
         let ep_state = Arc::new(EndpointState {
             graph_json,
@@ -100,55 +94,6 @@ pub fn build_router(config: ServerConfig) -> Router {
                 }),
             );
         }
-
-        // POST /path/batch — batch
-        let has_batch = ep_state_for_check
-            .as_ref()
-            .map(|e| e.def.batch)
-            .unwrap_or(true);
-
-        if has_batch {
-            let batch_path = format!("{}/batch", p);
-            let batch_state = state.clone();
-            let bp = p.clone();
-            router = router.route(
-                &batch_path,
-                post(
-                    move |Json(batch): Json<batch_handler::BatchRequest>| async move {
-                        batch_handler::handle_batch(batch_state, bp, batch).await
-                    },
-                ),
-            );
-        }
-
-        // POST /path/submit — job submission
-        let has_job = ep_state_for_check
-            .as_ref()
-            .map(|e| e.def.jobs)
-            .unwrap_or(false);
-
-        if has_job {
-            let submit_path = format!("{}/submit", p);
-            let submit_state = state.clone();
-            let jp = p.clone();
-            router = router.route(
-                &submit_path,
-                post(move |Json(inputs): Json<Value>| async move {
-                    job_handler::handle_submit(submit_state, jp, inputs).await
-                }),
-            );
-        }
-    }
-
-    // GET /jobs/{job_id} — job status
-    if has_jobs {
-        let job_store = app_state.job_store.clone();
-        router = router.route(
-            "/jobs/:job_id",
-            get(move |Path(job_id): Path<String>| async move {
-                job_handler::handle_job_status(job_store, job_id).await
-            }),
-        );
     }
 
     // GET /health
@@ -176,9 +121,7 @@ pub fn build_router(config: ServerConfig) -> Router {
                     infos.push(json!({
                         "path": p,
                         "stream": ep.def.stream,
-                        "batch": ep.def.batch,
                         "websocket": ep.def.websocket,
-                        "jobs": ep.def.jobs,
                     }));
                 }
             }

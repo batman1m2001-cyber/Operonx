@@ -1,4 +1,4 @@
-"""StateSchema - định nghĩa cấu trúc state của workflow."""
+"""StateSchema — compile-time state structure definition for workflows."""
 
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
 
@@ -11,27 +11,35 @@ __all__ = ["StateSchema"]
 
 
 class StateSchema:
-    """Định nghĩa cấu trúc state của workflow với độ phân giải O(1).
+    """Compile-time state structure for a workflow with O(1) resolution.
 
-    Mỗi cặp (op, var) có slot duy nhất. Refs định nghĩa luồng dữ liệu:
-        - pull_ref: Khi đọc biến, pull giá trị từ source (1 hop)
-        - push_ref: Khi ghi biến, push giá trị đến target (1 hop)
+    Each (op, var) pair gets a unique storage slot. Refs define data flow:
 
-    Cấu trúc dữ liệu:
-        _var_to_idx: {(op, var): idx} - ánh xạ biến sang index
-        _defaults: [value, ...] - giá trị mặc định theo index
-        _pull_refs: [Ref, ...] - pull data từ source khi đọc (None nếu không pull)
-        _push_refs: [Ref, ...] - push data đến target khi ghi (None nếu không push)
+    - ``pull_ref``: When reading a variable, pull value from source (1 hop).
+    - ``push_ref``: When writing a variable, push value to target (1 hop).
+
+    Internal data structures:
+
+    - ``_var_to_idx``: Maps ``(op_name, var_name)`` to storage index.
+    - ``_defaults``: Default values by index.
+    - ``_pull_refs``: Pull source refs (``None`` if no pull).
+    - ``_push_refs``: Push target refs (``None`` if no push).
+
+    Example::
+
+        schema = StateSchema(graph)
+        state = schema.create_state(inputs={"x": 5})
+        schema.show()  # Display all variable mappings
     """
 
     __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs")
 
     def __init__(self, op=None, name: str = None):
-        """Khởi tạo schema.
+        """Initialize the schema.
 
         Args:
-            node: Node tùy chọn để load các connection
-            name: Tên workflow tùy chọn (suy ra từ node nếu không cung cấp)
+            op: Optional graph op to load connections from.
+            name: Optional workflow name (inferred from op if not provided).
         """
         self._var_to_idx: Dict[Tuple[str, str], int] = {}
         self._defaults: List[Any] = []

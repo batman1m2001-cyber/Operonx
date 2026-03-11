@@ -121,6 +121,5 @@ cargo test -p rush-providers
 
 | Topic | File |
 |-------|------|
-| Provider abstractions | [docs/architecture/providers/adding-new-provider.md](../../docs/architecture/providers/adding-new-provider.md) |
-| Workflow ops design | [docs/architecture/providers/workflow-ops.md](../../docs/architecture/providers/workflow-ops.md) |
 | Rust backend overview | [rush-core/CLAUDE.md](../rush-core/CLAUDE.md) |
+| Rust-Python split | [docs/architecture/rust-python-split.md](../../docs/architecture/rust-python-split.md) |

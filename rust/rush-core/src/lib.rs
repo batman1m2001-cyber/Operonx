@@ -6,6 +6,7 @@
 //!   - Output: JSON result (serde_json::Value)
 
 pub mod builtin_ops;
+pub mod middleware;
 pub mod config;
 pub mod engine;
 pub mod error;

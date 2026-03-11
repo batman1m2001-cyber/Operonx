@@ -258,7 +258,7 @@ def my_op(x: int):
 
 | Topic | File |
 |-------|------|
-| Python scheduling (asyncio) | [docs/architecture/engine/scheduling.md](../../docs/architecture/engine/scheduling.md) |
-| Python execution flow | [docs/architecture/engine/execution-flow.md](../../docs/architecture/engine/execution-flow.md) |
-| State system design | [docs/architecture/state/overview.md](../../docs/architecture/state/overview.md) |
-| Op internals | [docs/architecture/ops/base-op.md](../../docs/architecture/ops/base-op.md) |
+| Execution flow | [docs/architecture/execution-flow.md](../../docs/architecture/execution-flow.md) |
+| State model | [docs/architecture/state-model.md](../../docs/architecture/state-model.md) |
+| Streaming design | [docs/architecture/streaming.md](../../docs/architecture/streaming.md) |
+| Rust-Python split | [docs/architecture/rust-python-split.md](../../docs/architecture/rust-python-split.md) |
