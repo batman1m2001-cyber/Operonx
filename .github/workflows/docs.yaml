@@ -1,0 +1,62 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths: [docs/**, python/**]
+  pull_request:
+    branches: [main]
+    paths: [docs/**, python/**]
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install Python packages (for mkdocstrings)
+        run: |
+          cd python/hush-core && uv sync --all-extras && cd ../..
+          cd python/hush-providers && uv sync --all-extras && cd ../..
+          cd python/hush-telemetry && uv sync --all-extras && cd ../..
+          cd python/hush-serve && uv sync --all-extras && cd ../..
+
+      - name: Install mkdocs
+        run: pip install mkdocs-material "mkdocstrings[python]"
+
+      - name: Build docs
+        working-directory: docs
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

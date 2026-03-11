@@ -17,117 +17,27 @@ Hush-ai/
 │   ├── rush-providers/    # Native HTTP providers, ONNX inference
 │   ├── rush-serve/        # Standalone HTTP server (Axum + rush-core)
 │   ├── rush-telemetry/    # Rust telemetry backends
-│   └── ui-hush-eyes/     # Trace visualization server (Axum + SQLite)
+│   └── hush-eyes/         # Trace visualization server (Axum + SQLite)
 ├── examples/              # Runnable Python examples
 ├── docs/                  # All documentation
-│   ├── guide/             # User guide (Vietnamese, 00-12 chapters)
-│   └── architecture/      # Deep technical documentation
+│   ├── guide/             # User guide (Vietnamese, 00-13 chapters)
+│   ├── api/               # Auto-generated API reference (mkdocstrings)
+│   └── architecture/      # 4 core design docs
 ├── .github/               # CI/CD workflows, issue/PR templates
 ├── env.example            # Environment variables template
 ├── CONTRIBUTING.md        # Contributor guide
 └── SECURITY.md            # Security policy
 ```
 
-## Documentation System
+## Documentation
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Documentation Layers                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Layer 1: CLAUDE.md (Quick Reference - for AI & developers)     │
-│  ├── /CLAUDE.md                        → Monorepo overview      │
-│  ├── /python/hush-core/CLAUDE.md       → Core patterns          │
-│  ├── /python/hush-providers/CLAUDE.md  → Provider patterns      │
-│  ├── /python/hush-telemetry/CLAUDE.md  → Tracer patterns        │
-│  ├── /python/hush-serve/CLAUDE.md      → Python serve patterns  │
-│  ├── /rust/rush-core/CLAUDE.md         → Rust backend patterns  │
-│  ├── /rust/rush-providers/CLAUDE.md    → Rust provider patterns │
-│  ├── /rust/rush-serve/CLAUDE.md        → Rust serve patterns    │
-│  ├── /rust/rush-telemetry/CLAUDE.md    → Rust telemetry         │
-│  └── /rust/ui-hush-eyes/CLAUDE.md      → Trace server patterns  │
-│                                                                  │
-│  Layer 2: docs/architecture/ (Deep Documentation)               │
-│  ├── engine/      → Execution, compilation, scheduling          │
-│  ├── state/       → StateSchema, MemoryState, indexer           │
-│  ├── ops/         → Op internals, creating custom ops           │
-│  ├── providers/   → Provider abstractions                       │
-│  ├── resources/   → ResourceHub                                 │
-│  ├── tracing/     → Tracer internals, data model                │
-│  └── contributing/ → Dev setup, code style, testing             │
-│                                                                  │
-│  Layer 3: docs/guide/ + examples/ (User Guide + Examples)       │
-│  ├── docs/guide/  → Vietnamese documentation (00-13 chapters)   │
-│  └── examples/    → Runnable Python examples (01-20)            │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### When to Use Each Layer
-
-| Need | Go to |
-|------|-------|
-| Quick reference while coding | `CLAUDE.md` in relevant package |
-| "How do I add X?" | `CLAUDE.md` |
-| "Why does X work this way?" | `docs/architecture/` |
-| Deep dive into internals | `docs/architecture/` |
-| Learning from scratch | `docs/architecture/index.md` → reading order |
-| User-facing docs (Vietnamese) | `docs/guide/` |
-| Runnable examples | `examples/` |
-| Teaching someone Hush | `docs/guide/00-tong-quan.md` → reading order |
-
-## Documentation Update Rules
-
-### When to Update What
-
-| Change Type | CLAUDE.md | docs/architecture/ | docs/guide/ + examples/ |
-|-------------|-----------|---------------------|-------------------------|
-| New op type | ✓ How to use | ✓ How it works internally | ✓ Add to guide/03 + example |
-| New provider | ✓ Integration pattern | ✓ Abstraction design | ✓ Add to guide/04 or 06 + example |
-| New tracer | ✓ Usage pattern | ✓ Implementation details | ✓ Add to guide/09 + example |
-| API change | ✓ Update examples | ✓ Update explanations | ✓ Update guide + examples |
-| Internal refactor (same API) | - | ✓ If algorithm changes | - |
-| Bug fix | - | - | - |
-| Adding tests | - | - | - |
-
-### Sync Rules
-
-When making significant changes:
-1. Update CLAUDE.md with new patterns/examples
-2. Update docs/architecture/ with detailed explanations
-3. **Update docs/guide/ with user-facing documentation (Vietnamese)**
-4. **Update/add examples/ with runnable examples**
-5. Ensure cross-references are correct
-6. Verify code examples match actual API
-
-### Guide Sync Mapping
-
-| Code Location | docs/guide/ Update | examples/ Update |
-|---------------|--------------------|------------------|
-| python/hush-core/hush/core/ops/ | 03-core-concepts.md | 01-02, 05 |
-| python/hush-core/hush/core/engine.py | 03-core-concepts.md | 01-02 |
-| python/hush-providers/hush/providers/llm/ | 04-llm-integration.md | 03-04 |
-| python/hush-providers/hush/providers/embedding/ | 06-embeddings-rag.md | 07, 14 |
-| python/hush-providers/hush/providers/reranker/ | 06-embeddings-rag.md | 07, 14 |
-| python/hush-core/hush/core/tracing/ | 09-tracing-observability.md | 06 |
-| python/hush-telemetry/hush/telemetry/tracers/ | 09-tracing-observability.md | 08, 09 |
-| Control flow (For/While/Branch) | 05-loops-branches.md | 05 |
-| Error handling | 07-error-handling.md | 10 |
-| Parallel patterns | 08-parallel-execution.md | 13 |
-| Agent patterns | 10-agent-workflow.md | 11 |
-| Multi-model | 11-multi-model.md | 12 |
-
-### Cross-Reference Convention
-
-**In CLAUDE.md** → link to architecture/ for deep dives:
-```markdown
-For details on state indexing, see [docs/architecture/state/indexer.md](docs/architecture/state/indexer.md)
-```
-
-**In architecture/** → note that CLAUDE.md has quick patterns:
-```markdown
-For quick usage patterns, see the package's CLAUDE.md file.
-```
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| CLAUDE.md | Per-package | Quick reference, conventions, recipes |
+| docs/api/ | Auto-generated | API reference from docstrings (mkdocstrings) |
+| docs/architecture/ | 4 design docs | Execution flow, state model, streaming, Rust-Python split |
+| docs/guide/ | Vietnamese (00-13) | User-facing tutorial |
+| examples/ | Runnable Python (01-20) | Learning by example |
 
 ## Package Dependencies
 
@@ -158,7 +68,7 @@ rust/rush-serve (Rust binary - depends on rush-core + rush-providers)
 | HTTP API server (Rust) | rust/rush-serve/src/ |
 | New built-in Rust op | rust/rush-core/src/builtin_ops/ops.rs + dispatch in rust/rush-core/src/builtin_ops/mod.rs |
 | Documentation or examples | docs/guide/ + examples/ |
-| Trace visualization server | rust/ui-hush-eyes/ |
+| Trace visualization server | rust/hush-eyes/ |
 
 ## Global Coding Conventions
 
@@ -278,8 +188,11 @@ Workflows run automatically on every PR:
 | Workflow | File | Purpose |
 |----------|------|---------|
 | Format & Lint | `.github/workflows/format.yaml` | Ruff format/lint check |
-| Tests | `.github/workflows/tests.yaml` | Pytest for all packages |
+| Tests | `.github/workflows/tests.yaml` | Pytest for all packages + example smoke tests + docs build |
 | Python Compatibility | `.github/workflows/python-compatibility.yaml` | Python 3.10-3.12 matrix |
+| Rust Runtime | `.github/workflows/rust-runtime.yaml` | Rust workspace build + tests |
+| Docs | `.github/workflows/docs.yaml` | Build mkdocs + deploy to GitHub Pages |
+| Publish | `.github/workflows/publish.yaml` | PyPI + crates.io (on version bump) |
 
 ### Git Commits
 
@@ -364,7 +277,7 @@ chat = chain("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 
 ### Edge Types
 - `>>` : Hard edge (sequential, counts toward ready_count)
-- `>>~` or `>` : Soft edge (conditional, for branch outputs)
+- `>>~` : Soft edge (conditional, for branch outputs)
 
 ### State References — PARENT vs op["key"]
 
@@ -414,16 +327,12 @@ All op errors inherit from `OpError` in `python/hush-core/hush/core/exceptions.p
 
 ## Deep Documentation Links
 
-For detailed explanations, see [docs/architecture/](docs/architecture/):
-
-| Topic | Quick (CLAUDE.md) | Deep (docs/architecture/) |
-|-------|-------------------|--------------------------|
-| Execution flow | - | [engine/execution-flow.md](docs/architecture/engine/execution-flow.md) |
-| Auto-naming | python/hush-core/CLAUDE.md | [ops/auto-naming.md](docs/architecture/ops/auto-naming.md) |
-| State system | python/hush-core/CLAUDE.md | [state/overview.md](docs/architecture/state/overview.md) |
-| Op internals | python/hush-core/CLAUDE.md | [ops/base-op.md](docs/architecture/ops/base-op.md) |
-| Creating ops | python/hush-core/CLAUDE.md | [ops/creating-custom-op.md](docs/architecture/ops/creating-custom-op.md) |
-| Adding providers | python/hush-providers/CLAUDE.md | [providers/adding-new-provider.md](docs/architecture/providers/adding-new-provider.md) |
+| Topic | File |
+|-------|------|
+| Execution flow | [docs/architecture/execution-flow.md](docs/architecture/execution-flow.md) |
+| State model | [docs/architecture/state-model.md](docs/architecture/state-model.md) |
+| Streaming | [docs/architecture/streaming.md](docs/architecture/streaming.md) |
+| Rust-Python split | [docs/architecture/rust-python-split.md](docs/architecture/rust-python-split.md) |
 
 ## Local Development with uv
 

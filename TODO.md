@@ -11,9 +11,9 @@ Estimated scope: ~20 phases across 4 milestones.
 
 ---
 
-## Milestone 1: Project Restructure
+## Milestone 1: Project Restructure ✅ COMPLETED
 
-### Phase 1.1: Move Python packages into `python/`
+### Phase 1.1: Move Python packages into `python/` ✅
 
 **Move:**
 ```
@@ -47,7 +47,7 @@ tutorial/pyproject.toml → examples/pyproject.toml (update paths)
 
 **Delete:** `rush-core/pyproject.toml` (Python benchmarking shim — move bench_e2e.py to `rust/rush-core/benches/` and run with `uv run --directory python/hush-core`)
 
-### Phase 1.2: Move Rust crates into `rust/`
+### Phase 1.2: Move Rust crates into `rust/` ✅
 
 **Move:**
 ```
@@ -79,7 +79,7 @@ members = [
 **Update `rust/rush-core/benches/bench_e2e.py`:**
 - Update paths to find Python packages at `../../python/hush-core/` etc.
 
-### Phase 1.3: Update CI/CD workflows
+### Phase 1.3: Update CI/CD workflows ✅
 
 **Files to update:**
 - `.github/workflows/format.yaml` — ruff paths: `hush-core/` → `python/hush-core/`
@@ -87,7 +87,7 @@ members = [
 - `.github/workflows/python-compatibility.yaml` — same path updates
 - `.github/workflows/rust-runtime.yaml` — add `working-directory: rust` or update cargo commands with `--manifest-path rust/Cargo.toml`
 
-### Phase 1.4: Update root config files
+### Phase 1.4: Update root config files ✅
 
 - `.pre-commit-config.yaml` — update ruff paths
 - Root `CLAUDE.md` — update all path references
@@ -95,7 +95,7 @@ members = [
 - `architecture/` — update file path references
 - `.gitignore` — update `target/` → `rust/target/`
 
-### Phase 1.5: Add MODULE_MAP.md
+### Phase 1.5: Add MODULE_MAP.md ✅
 
 Create `MODULE_MAP.md` at root — the Rosetta Stone between Python and Rust:
 
@@ -122,7 +122,7 @@ Create `MODULE_MAP.md` at root — the Rosetta Stone between Python and Rust:
 | **HushEyes** | `python/hush-telemetry/hush/telemetry/tracers/hush_eyes.py` | `rust/rush-telemetry/src/hush_eyes.rs` | |
 | **HTTP serve** | `python/hush-serve/hush/serve/` | `rust/rush-serve/src/` | |
 
-### Phase 1.6: Verify everything builds
+### Phase 1.6: Verify everything builds ✅
 
 ```bash
 # Python
@@ -139,9 +139,12 @@ cd rust && cargo test --workspace
 
 ---
 
-## Milestone 2: Engine + Serve Redesign
+## Milestone 2: Engine + Serve Redesign ✅ COMPLETED
 
-### Phase 2.1: Middleware system for Hush engine
+### Phase 2.1: Middleware system for Hush engine ✅
+
+> **Implemented:** Base `Middleware` class (`middleware.py`), `engine.use()` chaining, before_run/after_run/on_error hooks in `run()` and `stream()`, backward-compat `tracer=` with `DeprecationWarning`, 10 tests in `test_middleware.py`. Exported from `hush.core.__init__`.
+> **Deferred:** Built-in middleware (TracingMiddleware, RetryMiddleware, CacheMiddleware, TimingMiddleware, ValidationMiddleware) — not yet created, only the base class and engine hooks.
 
 **File:** `python/hush-core/hush/core/middleware.py` (new)
 
@@ -208,7 +211,10 @@ class Hush:
 
 **Backward compatibility:** Keep `tracer=` arg in `run()` — internally wraps as `TracingMiddleware`. Deprecation warning if used alongside `engine.use(TracingMiddleware(...))`.
 
-### Phase 2.2: Migrate hush-serve into engine.serve()
+### Phase 2.2: Migrate hush-serve into engine.serve() ✅
+
+> **Implemented:** Removed batch/job routes from both Python (`hush-serve`) and Rust (`rush-serve`). Deleted `batch_handler`, `job_handler`, `jobs.py/.rs` and their tests. Added `engine.serve()` method with lazy import of `HushApp`. Simplified `EndpointConfig` (removed batch/jobs fields).
+> **Deferred:** `Hush.app()` multi-graph builder not yet implemented.
 
 **Goal:** `HushApp` becomes internal. Users call `engine.serve()`.
 
@@ -272,7 +278,9 @@ app.serve(port=8000)
 - `python/hush-core/pyproject.toml` — add optional `[serve]` extra: `hush-serve`
 - `python/hush-serve/` — simplify internally (drop batch/jobs), `Hush.serve()` is the public API
 
-### Phase 2.3: Run modes
+### Phase 2.3: Run modes ✅
+
+> **Implemented:** `batch()` (concurrent with `asyncio.Semaphore`), `cli()` (stdin/stdout JSON), `input_schema()`, `output_schema()`, `_params_to_schema()` (Param → JSON Schema), `show()` (debug display).
 
 **New methods on `Hush`:**
 
@@ -308,7 +316,10 @@ class Hush:
         ...
 ```
 
-### Phase 2.4: Resource lifecycle + env loading
+### Phase 2.4: Resource lifecycle + env loading ✅
+
+> **Implemented:** `Hush.__init__` now accepts `env: Union[str, bool] = True` and `resources: Optional[str] = None`. Added `_load_env()` (find_dotenv walk-up) and `_load_resources()` (ResourceHub.from_yaml). `resources` attribute on engine.
+> **Deferred:** `resources.starter.yaml` template not yet created. Error message improvements for missing resources/env vars not yet done. `HUSH_CONFIG` env var removal not yet done.
 
 **Current problems:**
 - `ResourceHub` is a global singleton via `get_hub()` — no per-engine isolation
@@ -416,7 +427,10 @@ cp resources.starter.yaml resources.yaml
 - Improve `ResourceHub.get()` error messages to include fix instructions
 - Improve provider error messages to name the exact missing env var
 
-### Phase 2.5: Mirror in Rust (rush-core engine)
+### Phase 2.5: Mirror in Rust (rush-core engine) ✅
+
+> **Implemented:** `Middleware` trait (`rush-core/src/middleware.rs`) with `before_run`, `after_run`, `on_error` hooks. `Rush` engine updated with `middleware: Vec<Box<dyn Middleware>>`, `use_middleware()` method, hooks wired into `run_json()`. Batch/job routes removed from `rush-serve` (router, config, state, error).
+> **Deferred:** `Rush::serve()` and `Rush::input_schema()` not yet implemented.
 
 **Update `rust/rush-core/src/engine.rs`:**
 - Add middleware support (trait-based)
@@ -437,11 +451,13 @@ impl Rush {
 }
 ```
 
+> **Test results (Milestone 2):** hush-core 636 passed, hush-serve 49 passed, hush-telemetry 53 passed, Rust workspace all passing (263+ tests). 60 deprecation warnings expected from existing `tracer=` usage.
+
 ---
 
-## Milestone 3: Documentation Overhaul
+## Milestone 3: Documentation Overhaul ✅ COMPLETED
 
-### Phase 3.1: Set up mkdocs + mkdocstrings
+### Phase 3.1: Set up mkdocs + mkdocstrings ✅
 
 **New files:**
 ```
@@ -529,7 +545,7 @@ nav:
     - Rust-Python Split: architecture/rust-python-split.md
 ```
 
-### Phase 3.2: Write key docstrings (public API only)
+### Phase 3.2: Write key docstrings (public API only) ✅
 
 **Priority docstrings (the ~15 classes/functions users actually import):**
 
@@ -575,7 +591,7 @@ class Hush:
     """
 ```
 
-### Phase 3.3: Set up doctests in CI
+### Phase 3.3: Set up doctests in CI (deferred)
 
 **Add to each package's `pyproject.toml`:**
 ```toml
@@ -595,7 +611,7 @@ uv run pytest --doctest-modules python/hush-core/hush/core/engine.py
   run: uv run pytest --doctest-modules --tb=short -q
 ```
 
-### Phase 3.4: Collapse architecture/ docs
+### Phase 3.4: Collapse architecture/ docs ✅
 
 **Keep (move to `docs/architecture/`):**
 
@@ -642,7 +658,7 @@ uv run pytest --doctest-modules python/hush-core/hush/core/engine.py
 
 **Result:** `architecture/` goes from ~30 files → 4 focused design docs.
 
-### Phase 3.5: Examples (already moved in Phase 1.1)
+### Phase 3.5: Examples (already moved in Phase 1.1) ✅
 
 Examples are already at `examples/` from Phase 1.1 (dissolved `tutorial/`).
 
@@ -655,7 +671,7 @@ Examples are already at `examples/` from Phase 1.1 (dissolved `tutorial/`).
     done
 ```
 
-### Phase 3.6: GitHub Pages deployment
+### Phase 3.6: GitHub Pages deployment ✅
 
 **New workflow: `.github/workflows/docs.yaml`**
 
@@ -688,7 +704,7 @@ jobs:
       - uses: actions/deploy-pages@v4
 ```
 
-### Phase 3.7: Trim CLAUDE.md files
+### Phase 3.7: Trim CLAUDE.md files ✅
 
 After docstrings are written, CLAUDE.md files can be trimmed. Remove API details that are now in docstrings. Keep only:
 - Module structure overview (directory tree)
@@ -697,11 +713,15 @@ After docstrings are written, CLAUDE.md files can be trimmed. Remove API details
 - Gotchas / non-obvious behavior
 - Cross-references to other packages
 
+> **Implemented:** mkdocs-material site with mkdocstrings auto-generated API docs (`docs/mkdocs.yml`). 7 API stub pages (engine, ops, state, middleware, providers, telemetry, serve). 4 architecture docs (execution-flow, state-model, streaming, rust-python-split) collapsed from ~30 files. Vietnamese guide chapters linked in nav. English docstrings for Ref and StateSchema. GitHub Pages deploy workflow (`docs.yaml`). Example smoke tests added to CI (`tests.yaml`). Old `architecture/` subdirectories deleted. Stale root-level `hush-core/`, `target/`, `Cargo.lock` cleaned up. CLAUDE.md trimmed (simplified doc table, removed `>` soft edge, updated links).
+> **Deferred:** Phase 3.3 doctests — needs import-safe examples first.
+> **Test results:** hush-core 636 passed, hush-serve 49 passed, hush-telemetry 53 passed, Rust workspace all passing.
+
 ---
 
-## Milestone 4: CI/CD — Publish Packages
+## Milestone 4: CI/CD — Publish Packages ✅ COMPLETED
 
-### Phase 4.1: PyPI publishing (trusted publishing)
+### Phase 4.1: PyPI publishing (trusted publishing) ✅
 
 **One-time setup on pypi.org:**
 - Register 4 packages: `hush-core`, `hush-providers`, `hush-telemetry`, `hush-serve`
@@ -776,7 +796,7 @@ jobs:
           cargo publish -p rush-serve --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 ```
 
-### Phase 4.2: Update Cargo.toml for crates.io
+### Phase 4.2: Update Cargo.toml for crates.io ✅
 
 Add `version` to path dependencies (required by crates.io):
 
@@ -799,7 +819,7 @@ license = "Apache-2.0"
 repository = "https://github.com/batman1m2001-cyber/Hush-ai"
 ```
 
-### Phase 4.3: Docs CI check
+### Phase 4.3: Docs CI check ✅
 
 Add to `.github/workflows/tests.yaml`:
 ```yaml
@@ -810,6 +830,9 @@ Add to `.github/workflows/tests.yaml`:
       - run: pip install mkdocs-material mkdocstrings[python]
       - run: mkdocs build --strict  # fails on broken refs
 ```
+
+> **Implemented:** `publish.yaml` workflow — separate Python/Rust version checks, PyPI trusted publishing (OIDC, `max-parallel: 1` for dependency order), crates.io publishing via `CARGO_REGISTRY_TOKEN`. All 5 Rust crates updated with `license = "Apache-2.0"` and `repository` fields. Path dependencies now include `version = "0.1.0"` for crates.io compatibility. Docs build check (`mkdocs build --strict`) added to `tests.yaml`.
+> **Manual setup done:** PyPI connected via GitHub, `CARGO_REGISTRY_TOKEN` added to GitHub secrets (publish-new + publish-update scopes, unrestricted crates), `pypi` environment created.
 
 ---
 

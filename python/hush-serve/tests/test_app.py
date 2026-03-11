@@ -37,10 +37,9 @@ class TestEndpointRegistration:
 
     def test_endpoint_config_override(self, double_graph):
         app = HushApp()
-        app.endpoint("/double", graph=double_graph, batch=False, jobs=True)
+        app.endpoint("/double", graph=double_graph, websocket=True)
         ep = app._endpoints[0]
-        assert ep.config.batch is False
-        assert ep.config.jobs is True
+        assert ep.config.websocket is True
 
     def test_decorator_style(self):
         @op

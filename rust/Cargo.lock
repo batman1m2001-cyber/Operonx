@@ -324,7 +324,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2331,7 +2330,6 @@ name = "rush-serve"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
- "chrono",
  "clap",
  "dashmap",
  "env_logger",

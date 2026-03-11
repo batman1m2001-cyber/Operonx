@@ -10,10 +10,7 @@ from hush.core import PARENT, GraphOp
 from hush.core.tracing import Tracer
 from hush.serve.config import AppConfig, EndpointConfig
 from hush.serve.endpoint import Endpoint
-from hush.serve.jobs import JobStore
 from hush.serve.middleware import RequestIDMiddleware, TimingMiddleware
-from hush.serve.routes.batch_handler import create_batch_handler
-from hush.serve.routes.job_handler import create_job_status_handler, create_submit_handler
 from hush.serve.routes.stream_handler import create_stream_handler
 from hush.serve.routes.sync_handler import create_sync_handler
 from hush.serve.routes.ws_handler import create_ws_handler
@@ -60,7 +57,6 @@ class HushApp:
         )
         self._tracer = tracer
         self._endpoints: List[Endpoint] = []
-        self._job_store = JobStore()
         self._fastapi: Optional[FastAPI] = None
 
     def endpoint(
@@ -69,8 +65,6 @@ class HushApp:
         *,
         graph: Optional[GraphOp] = None,
         stream: Optional[bool] = None,
-        batch: bool = True,
-        jobs: bool = False,
         websocket: bool = False,
         methods: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
@@ -92,8 +86,6 @@ class HushApp:
         config = EndpointConfig(
             path=path,
             stream=stream,
-            batch=batch,
-            jobs=jobs,
             websocket=websocket,
             methods=methods or ["POST"],
             tags=tags or [],
@@ -157,7 +149,6 @@ class HushApp:
 
         # Global routes
         endpoints_info = []
-        has_jobs = False
 
         for ep in self._endpoints:
             path = ep.config.path
@@ -165,9 +156,7 @@ class HushApp:
             info = graph_schema_info(ep.graph)
             info["path"] = path
             info["stream"] = ep.config.stream
-            info["batch"] = ep.config.batch
             info["websocket"] = ep.config.websocket
-            info["jobs"] = ep.config.jobs
             endpoints_info.append(info)
 
             # POST /path — sync handler (always)
@@ -193,37 +182,6 @@ class HushApp:
             # WS /path/ws — WebSocket (if enabled)
             if ep.config.websocket:
                 app.add_websocket_route(f"{path}/ws", create_ws_handler(ep))
-
-            # POST /path/batch — batch (if enabled)
-            if ep.config.batch:
-                app.add_api_route(
-                    f"{path}/batch",
-                    create_batch_handler(ep),
-                    methods=["POST"],
-                    tags=tags,
-                    summary=f"Batch execute {ep.graph.name}",
-                )
-
-            # POST /path/submit — job submission (if enabled)
-            if ep.config.jobs:
-                has_jobs = True
-                app.add_api_route(
-                    f"{path}/submit",
-                    create_submit_handler(ep, self._job_store),
-                    methods=["POST"],
-                    tags=tags,
-                    summary=f"Submit {ep.graph.name} as background job",
-                )
-
-        # GET /jobs/{job_id} — job status (if any endpoint has jobs)
-        if has_jobs:
-            app.add_api_route(
-                "/jobs/{job_id}",
-                create_job_status_handler(self._job_store),
-                methods=["GET"],
-                tags=["jobs"],
-                summary="Get job status",
-            )
 
         # GET /health
         @app.get("/health", tags=["system"])

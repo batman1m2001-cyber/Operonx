@@ -1,4 +1,4 @@
-"""Kiểu Ref cho liên kết biến zero-copy với khả năng chain transform."""
+"""Ref type for zero-copy variable references with chainable transforms."""
 
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -9,25 +9,36 @@ __all__ = ["Ref"]
 
 
 class Ref:
-    """Tham chiếu đến biến khác với khả năng chain các transform.
+    """Reference to another op's variable with chainable transforms.
 
-    Các transform được ghi lại và compile thành callable để thực thi nhanh.
-    Ref cho phép truy cập dữ liệu từ node khác mà không cần copy,
-    đồng thời hỗ trợ transform dữ liệu thông qua các phép biến đổi như
-    getitem, getattr, arithmetic, comparison, v.v.
+    Transforms are recorded and compiled into a callable for fast execution.
+    Ref enables zero-copy data access from other ops, with support for
+    getitem, getattr, arithmetic, comparison, and other transforms.
 
-    Supports compound boolean operations với & và |:
+    Supports compound boolean operations with ``&`` and ``|``::
+
         (PARENT["x"] > 10) & (PARENT["y"] == "active")
         (node["a"]) | (node["b"])
         ~(node["flag"])  # negation
 
+    Example::
+
+        # Access another op's output
+        ref = op["output_var"]
+
+        # Chain transforms
+        ref = PARENT["data"]["key"].upper()
+
+        # Output mapping
+        op["src"] >> PARENT["dest"]
+
     Attributes:
-        _node: Node nguồn (có thể là string hoặc BaseOp)
-        var: Tên biến nguồn
-        _transforms: Danh sách các transform đã ghi
-        _fn: Function đã compile từ transforms (signature: fn(value, context) -> result)
-        idx: Index trong schema (được set bởi StateSchema._build())
-        is_output: True nếu đây là output ref (đẩy giá trị ra ngoài)
+        _source: Source node (BaseOp or string name).
+        var: Source variable name.
+        _transforms: List of recorded transforms.
+        _fn: Compiled transform function (signature: ``fn(value, context) -> result``).
+        idx: Storage index in schema (set by ``StateSchema._build()``).
+        is_output: True if this is an output ref (pushes value outward).
     """
 
     __slots__ = ("_source", "var", "_transforms", "_fn", "idx", "is_output")
@@ -62,12 +73,12 @@ class Ref:
         _fn: Optional[Callable] = None,
         is_output: bool = False,
     ) -> None:
-        """Khởi tạo Ref.
+        """Initialize a Ref.
 
         Args:
-            node: Node nguồn (BaseOp hoặc string tên node)
-            var: Tên biến nguồn
-            _transforms: Danh sách transform (dùng cho deserialization)
+            node: Source node (BaseOp or string node name).
+            var: Source variable name.
+            _transforms: Transform list (used for deserialization).
             _fn: Function đã compile (dùng cho clone)
             is_output: True nếu là output ref
         """

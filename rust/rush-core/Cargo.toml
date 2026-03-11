@@ -3,6 +3,8 @@ name = "rush-core"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance Rust executor for the Hush workflow engine (Rust + Hush = Rush)"
+license = "Apache-2.0"
+repository = "https://github.com/batman1m2001-cyber/Hush-ai"
 autobenches = false
 
 [lib]
@@ -21,7 +23,7 @@ thiserror = "2"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 chrono = "0.4"
 log = "0.4"
-rush-providers = { path = "../rush-providers" }
+rush-providers = { path = "../rush-providers", version = "0.1.0" }
 
 [[bin]]
 name = "rush-bench"

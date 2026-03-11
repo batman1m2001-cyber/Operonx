@@ -40,8 +40,7 @@ hush/core/
 1. Create file in appropriate subdirectory under `ops/`:
    - `transform/` - Data transformation ops
    - `flow/` - Control flow ops (branch)
-   - `iteration/` - Loop ops (for, map, while, async_iter)
-   - `graph/` - Container ops
+   - `graph/` - Container ops (GraphOp, loops via `GraphOp.loop()` / `@graph.loop()`)
 
 2. Inherit from `BaseOp`:
 ```python
@@ -343,26 +342,25 @@ How it works: `auto_name()` in `utils/auto_name.py` walks the call stack (skippi
 
 Use `register_skip(fn)` to skip your factory function's frame during auto-naming.
 
-### Shorthand via `Op.of()`
+### Loops via `GraphOp.loop()` / `@graph.loop()`
 
-For concise op creation, use the `.of()` classmethod:
+Loops are built using `GraphOp.loop()` or the `@graph.loop()` decorator (ForOp/WhileOp were removed):
+
 ```python
-from hush.core import op, ForOp, MapOp, WhileOp
+# Class method style
+with GraphOp.loop(until="count >= 5", max_iterations=100) as loop:
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> END
 
-@op
-def process(x: int) -> dict:
-    return {"result": x * 2}
+# Decorator style
+@graph.loop(until="count >= 5")
+def counter(count):
+    inc = increment(counter=count)
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> END
 
-# Iteration ops use .of()
-with ForOp.of(x=Each([1, 2, 3])) as loop:
-    step = process(x=PARENT["x"])
-    START >> step >> END
-
-# WhileOp — loop until condition is met
-with WhileOp.of(counter=0, until="counter >= 5") as loop:
-    step = increment(counter=PARENT["counter"])
-    step["new_counter"] >> PARENT["counter"]
-    START >> step >> END
+loop = counter(count=0)
 ```
 
 ### Wildcard Forwarding

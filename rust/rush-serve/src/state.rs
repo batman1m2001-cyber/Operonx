@@ -7,7 +7,6 @@ use dashmap::DashMap;
 use rush_core::tracing::Tracer;
 
 use crate::config::EndpointDef;
-use crate::jobs::JobStore;
 
 /// Per-endpoint runtime state: parsed config + metadata.
 pub struct EndpointState {
@@ -21,7 +20,6 @@ pub struct EndpointState {
 #[derive(Clone)]
 pub struct AppState {
     pub endpoints: Arc<DashMap<String, Arc<EndpointState>>>,
-    pub job_store: Arc<JobStore>,
     pub tracers: Vec<Arc<dyn Tracer>>,
 }
 
@@ -29,7 +27,6 @@ impl AppState {
     pub fn new(tracers: Vec<Arc<dyn Tracer>>) -> Self {
         AppState {
             endpoints: Arc::new(DashMap::new()),
-            job_store: Arc::new(JobStore::new()),
             tracers,
         }
     }

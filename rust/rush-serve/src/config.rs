@@ -77,26 +77,6 @@ pub struct EndpointDef {
     pub graph: serde_json::Value,
     #[serde(default)]
     pub stream: Option<bool>,
-    #[serde(default = "default_true")]
-    pub batch: bool,
     #[serde(default)]
     pub websocket: bool,
-    #[serde(default)]
-    pub jobs: bool,
-    #[serde(default = "default_batch_size")]
-    pub max_batch_size: usize,
-    #[serde(default = "default_batch_concurrency")]
-    pub batch_concurrency: usize,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_batch_size() -> usize {
-    100
-}
-
-fn default_batch_concurrency() -> usize {
-    10
 }
