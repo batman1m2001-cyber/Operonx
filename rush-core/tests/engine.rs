@@ -1367,7 +1367,8 @@ fn test_disabled_op_skipped() {
 }
 
 #[test]
-fn test_timing_metadata() {
+fn test_timing_metadata_no_tracers() {
+    // Without tracers, timing metadata is skipped (no Utc::now() syscalls)
     let config = single_op_graph(
         "g",
         "d",
@@ -1382,7 +1383,31 @@ fn test_timing_metadata() {
     let state = &result["$state"];
     let values = &state["values"];
     assert!(values["g.d"].is_object());
-    assert!(values["g.d"]["$duration_ms"].is_object() || values["g.d"]["$start_time"].is_object());
+    // No timing metadata when needs_timestamps is false
+    assert!(values["g.d"]["$duration_ms"].is_null());
+    assert!(values["g.d"]["$start_time"].is_null());
+}
+
+#[test]
+fn test_timing_metadata_with_timestamps_enabled() {
+    // enable_timestamps() forces timing metadata without needing actual tracers
+    let config = single_op_graph(
+        "g",
+        "d",
+        "double",
+        vec![ref_input("x", parent_ref("g", "x"))],
+        vec![],
+    );
+    let mut engine = make_rush(config);
+    engine.enable_timestamps();
+    let result = run_full(&engine, json!({"x": 5}), None);
+
+    assert_eq!(result["result"], 10);
+    let state = &result["$state"];
+    let values = &state["values"];
+    assert!(values["g.d"].is_object());
+    assert!(values["g.d"]["$duration_ms"].is_object());
+    assert!(values["g.d"]["$start_time"].is_object());
 }
 
 #[test]

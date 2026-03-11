@@ -53,9 +53,10 @@ pub(crate) fn run(
         return Ok(OpResult::Done);
     }
 
-    // Start timing
-    let start_time = Utc::now();
+    // Start timing — Instant::now() is cheap (monotonic), always used for slow-op warnings.
+    // Utc::now() is a syscall — only pay for it when tracers need timestamps.
     let perf_start = Instant::now();
+    let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
 
     // Try: resolve inputs → execute → store outputs
     let mut pending = false;
@@ -81,7 +82,11 @@ pub(crate) fn run(
     })();
 
     // "finally" block — always runs
-    let duration_ms = store_timing(op, state, context, start_time, perf_start);
+    let duration_ms = if let Some(st) = start_time {
+        store_timing(op, state, context, st, perf_start)
+    } else {
+        perf_start.elapsed().as_secs_f64() * 1000.0
+    };
 
     if let Err(ref err) = exec_result {
         log_error(op, state, context, &format!("{}", err));

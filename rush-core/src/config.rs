@@ -49,6 +49,10 @@ pub struct GraphConfig {
     /// Stream predecrements: when a generator yields, batch predecessors already done.
     /// Map of op_name → {predecessor → predecrement_count}.
     pub stream_predecrements: AHashMap<String, AHashMap<String, i32>>,
+    /// Pre-computed ready_counts for stream contexts, per generator.
+    /// = initial_ready_count with predecrements already applied.
+    /// Avoids cloning + looping on every Yield event.
+    pub stream_ready_counts: AHashMap<String, AHashMap<String, i32>>,
     /// Loop config (GraphOp.loop) — replaces WhileOp.
     pub loop_config: Option<LoopConfig>,
     /// Max concurrent stream contexts (backpressure). Default 64.
@@ -246,6 +250,19 @@ impl GraphConfig {
             .and_then(|v| v.as_u64())
             .unwrap_or(64) as usize;
 
+        // Pre-compute stream ready_counts: initial_ready_count with predecrements applied per generator.
+        // Avoids cloning + looping on every Yield event at runtime.
+        let mut stream_ready_counts = AHashMap::with_capacity(stream_predecrements.len());
+        for (gen_name, predecs) in &stream_predecrements {
+            let mut rc = initial_ready_count.clone();
+            for (op_name, dec) in predecs {
+                if let Some(count) = rc.get_mut(op_name) {
+                    *count -= dec;
+                }
+            }
+            stream_ready_counts.insert(gen_name.clone(), rc);
+        }
+
         Ok(GraphConfig {
             name,
             full_name,
@@ -257,6 +274,7 @@ impl GraphConfig {
             inputs,
             outputs,
             stream_predecrements,
+            stream_ready_counts,
             loop_config,
             max_stream_concurrent,
         })
