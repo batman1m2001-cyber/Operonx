@@ -6,13 +6,12 @@ Chạy:
   cd examples && uv run python 04_llm_advanced/serve_python.py
 
 Test:
-  uv run python 04_llm_advanced/client.py
+  uv run python 04_llm_advanced/bench.py
 """
 
 import os
 
 from hush.core import Hush
-
 from workflow import build_structured_output
 
 engine = Hush(build_structured_output())

@@ -36,7 +36,8 @@ class Endpoint:
         self.config = config
         self.tracer = tracer
 
-        self.engine = Hush(graph)
+        # env/resources already loaded by HushApp.__init__
+        self.engine = Hush(graph, env=False)
 
         self.request_model: Type[BaseModel] = build_request_model(graph)
         self.response_model: Type[BaseModel] = build_response_model(graph)

@@ -6,7 +6,7 @@ from typing import Callable, List, Optional, Union
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from hush.core import PARENT, GraphOp
+from hush.core import PARENT, GraphOp, Hush
 from hush.core.tracing import Tracer
 from hush.serve.config import AppConfig, EndpointConfig
 from hush.serve.endpoint import Endpoint
@@ -47,6 +47,8 @@ class HushApp:
         tracer: Optional[Union[Tracer, List[Tracer]]] = None,
         cors: bool = True,
         cors_origins: Optional[List[str]] = None,
+        env: Union[str, bool] = True,
+        resources: Optional[str] = None,
     ):
         self._config = AppConfig(
             title=title,
@@ -58,6 +60,10 @@ class HushApp:
         self._tracer = tracer
         self._endpoints: List[Endpoint] = []
         self._fastapi: Optional[FastAPI] = None
+
+        # Load env/resources upfront so graph factories can eagerly resolve
+        Hush._load_env(env)
+        Hush._load_resources(resources)
 
     def endpoint(
         self,

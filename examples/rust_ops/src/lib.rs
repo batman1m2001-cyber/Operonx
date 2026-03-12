@@ -96,6 +96,8 @@ rush_plugin::rush_plugin! {
         "handle_intent" => pipeline::handle_intent,
         "process_item_squared" => pipeline::process_item_squared,
         "select_answer" => pipeline::select_answer,
+        "failing_op" => pipeline::failing_op,
+        "retry_with_backoff" => pipeline::retry_with_backoff,
         // search
         "keyword_search" => search::keyword_search,
         "keyword_search_expanded" => search::keyword_search_expanded,

@@ -25,7 +25,7 @@ import asyncio
 import json
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
 from hush.core.middleware import Middleware
@@ -77,17 +77,21 @@ class Hush:
 
     def __init__(
         self,
-        graph: GraphOp,
+        graph: Union[GraphOp, Callable[..., GraphOp]],
         *,
+        params: Optional[Dict[str, Any]] = None,
         env: Union[str, bool] = True,
         resources: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ):
-        """Initialize Hush engine with a GraphOp.
+        """Initialize Hush engine with a GraphOp or a graph factory.
 
         Args:
-            graph: The GraphOp workflow to execute.
-                   Must be defined (context manager exited).
+            graph: A GraphOp workflow, or a callable that returns one.
+                   When a callable is passed, env/resources are loaded first,
+                   then the callable is invoked with ``**params``.
+            params: Keyword arguments passed to the graph factory. Ignored
+                    when *graph* is already a GraphOp. Defaults to ``{}``.
             env: Path to .env file, True to auto-find, or False to skip.
             resources: Path to resources.yaml. None = no resources loaded.
             tracer: Default tracer(s) for all run() calls. Can be overridden per-run.
@@ -98,6 +102,10 @@ class Hush:
 
         # 2. Load resources (if provided)
         self.resources = self._load_resources(resources)
+
+        # 3. Resolve graph — call factory after env/resources are loaded
+        if callable(graph) and not isinstance(graph, GraphOp):
+            graph = graph(**(params or {}))
 
         self.graph = graph
         self.name = graph.name
@@ -415,8 +423,7 @@ class Hush:
             from hush.serve import HushApp
         except ImportError:
             raise ImportError(
-                "hush-serve is required for engine.serve(). "
-                "Install it with: pip install hush-serve"
+                "hush-serve is required for engine.serve(). Install it with: pip install hush-serve"
             ) from None
 
         app = HushApp(tracer=self._tracer)
@@ -473,7 +480,14 @@ class Hush:
         for name, param in params.items():
             prop: Dict[str, Any] = {}
             if param.annotation is not None:
-                type_map = {int: "integer", float: "number", str: "string", bool: "boolean", list: "array", dict: "object"}
+                type_map = {
+                    int: "integer",
+                    float: "number",
+                    str: "string",
+                    bool: "boolean",
+                    list: "array",
+                    dict: "object",
+                }
                 prop["type"] = type_map.get(param.annotation, "string")
             if param.description:
                 prop["description"] = param.description

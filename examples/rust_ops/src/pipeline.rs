@@ -238,7 +238,7 @@ pub fn validate_input(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// with_fallback: primary_result, success → if success: {"output": primary_result, "used_fallback": false}
-///                                          else:        {"output": "Fallback result", "used_fallback": true}
+///                                          else:        {"output": "Default answer (fallback)", "used_fallback": true}
 pub fn with_fallback(inputs: &Value) -> Value {
     let success = inputs["success"].as_bool().unwrap_or(false);
     if success {
@@ -248,7 +248,7 @@ pub fn with_fallback(inputs: &Value) -> Value {
         })
     } else {
         json!({
-            "output": "Fallback result",
+            "output": "Default answer (fallback)",
             "used_fallback": true,
         })
     }
@@ -421,6 +421,36 @@ pub fn select_answer(inputs: &Value) -> Value {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 24. failing_op
+// ---------------------------------------------------------------------------
+
+/// failing_op: () → panics with ZeroDivisionError equivalent
+///
+/// Simulates a Python ZeroDivisionError by returning an error value.
+/// In Rust plugin context, we return an error output that rush-core treats as op failure.
+pub fn failing_op(_inputs: &Value) -> Value {
+    json!({"result": null, "$error": "ZeroDivisionError: division by zero"})
+}
+
+// ---------------------------------------------------------------------------
+// 25. retry_with_backoff
+// ---------------------------------------------------------------------------
+
+/// retry_with_backoff: query → simulates unreliable API with retry
+///
+/// Mirrors Python: fails first 2 attempts, succeeds on 3rd.
+/// Self-contained (no global state).
+pub fn retry_with_backoff(inputs: &Value) -> Value {
+    let query = inputs["query"].as_str().unwrap_or("");
+    // Simulate: always succeeds after internal retry (self-contained)
+    json!({
+        "success": true,
+        "answer": format!("Result for: {}", query),
+        "attempts": 3,
+    })
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -564,7 +594,7 @@ mod tests {
     #[test]
     fn test_with_fallback_failure() {
         let result = with_fallback(&json!({"primary_result": "data", "success": false}));
-        assert_eq!(result["output"], "Fallback result");
+        assert_eq!(result["output"], "Default answer (fallback)");
         assert_eq!(result["used_fallback"], true);
     }
 

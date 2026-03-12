@@ -832,18 +832,27 @@ pub(crate) fn get_outputs(
                         result.insert(param.var_name.clone(), Value::Array(values));
                     }
                 } else {
-                    // No ref — search terminal ops for this var across leaf contexts
-                    let terminal_ops = find_terminal_ops(config);
+                    // No ref — first check graph's own state (populated by push_output_refs),
+                    // then fall back to searching terminal ops for this var.
                     let mut values = Vec::new();
-                    for t_name in &terminal_ops {
-                        if let Some(t_op) = config.ops.get(t_name.as_str()) {
-                            for sc in &leaf_contexts {
-                                if let Some(arc_val) = state.get(&t_op.full_name, &param.var_name, sc) {
-                                    values.push((*arc_val).clone());
+                    for sc in &leaf_contexts {
+                        if let Some(arc_val) = state.get(&config.full_name, &param.var_name, sc) {
+                            values.push((*arc_val).clone());
+                        }
+                    }
+                    if values.is_empty() {
+                        // Fall back: search terminal ops for this var across leaf contexts
+                        let terminal_ops = find_terminal_ops(config);
+                        for t_name in &terminal_ops {
+                            if let Some(t_op) = config.ops.get(t_name.as_str()) {
+                                for sc in &leaf_contexts {
+                                    if let Some(arc_val) = state.get(&t_op.full_name, &param.var_name, sc) {
+                                        values.push((*arc_val).clone());
+                                    }
                                 }
-                            }
-                            if !values.is_empty() {
-                                break;
+                                if !values.is_empty() {
+                                    break;
+                                }
                             }
                         }
                     }

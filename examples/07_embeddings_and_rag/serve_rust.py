@@ -12,7 +12,7 @@ Chạy:
   cd examples && uv run python 07_embeddings_and_rag/serve_rust.py
 
 Test:
-  uv run python 07_embeddings_and_rag/client.py
+  uv run python 07_embeddings_and_rag/bench.py
 """
 
 import os
@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.serve import HushApp
-
 from workflow import build_basic_embedding, build_simple_rag
 
 app = HushApp()

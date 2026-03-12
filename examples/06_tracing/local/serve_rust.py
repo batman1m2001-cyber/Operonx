@@ -8,14 +8,13 @@ Chạy:
   cd examples && uv run python 06_tracing/local/serve_rust.py
 
 Test:
-  uv run python 06_tracing/local/client.py
+  uv run python 06_tracing/local/bench.py
 """
 
 import os
 
 from hush.core import Hush
 from hush.core.tracing import LocalTracer
-
 from workflow import build_text_analyzer
 
 engine = Hush(build_text_analyzer(), tracer=LocalTracer(tags=["serve"]))

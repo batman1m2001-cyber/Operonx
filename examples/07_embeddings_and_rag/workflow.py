@@ -1,12 +1,11 @@
 """Shared workflow definitions for 07_embeddings_and_rag.
 
-Defines ops and graphs — imported by run.py, serve_python.py, serve_rust.py.
+Defines ops and graphs — imported by demo.py, serve_python.py, serve_rust.py.
 
 Cần: OPENAI_API_KEY trong .env + resources.yaml (embedding:openai, llm:gpt-4o-mini)
 """
 
 import numpy as np
-
 from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops import op
 from hush.providers import EmbeddingOp, LLMOp, PromptOp
