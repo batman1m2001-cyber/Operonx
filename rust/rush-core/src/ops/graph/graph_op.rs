@@ -776,10 +776,23 @@ pub(crate) fn get_outputs(
                         result.insert(param.var_name.clone(), Value::Array(values));
                     }
                 } else {
-                    // No ref — try reading from graph state at batch context
-                    if let Some(arc_val) = state.get(&config.full_name, &param.var_name, context) {
-                        let value = Arc::try_unwrap(arc_val).unwrap_or_else(|arc| (*arc).clone());
-                        result.insert(param.var_name.clone(), value);
+                    // No ref — search terminal ops for this var across leaf contexts
+                    let terminal_ops = find_terminal_ops(config);
+                    let mut values = Vec::new();
+                    for t_name in &terminal_ops {
+                        if let Some(t_op) = config.ops.get(t_name.as_str()) {
+                            for sc in &leaf_contexts {
+                                if let Some(arc_val) = state.get(&t_op.full_name, &param.var_name, sc) {
+                                    values.push((*arc_val).clone());
+                                }
+                            }
+                            if !values.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                    if !values.is_empty() {
+                        result.insert(param.var_name.clone(), Value::Array(values));
                     }
                 }
             }

@@ -22,7 +22,8 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 PORT_PY = 9001
 PORT_RS = 9002
-N_REQUESTS = 5
+N_REQUESTS = 10
+N_WARMUP = 3
 
 ENDPOINTS = [
     ("/for-loop", {"items": ["apple", "banana", "cherry"], "prefix": "Fruit"}, "For Loop"),
@@ -102,7 +103,8 @@ def test_serve(label, script, port):
     try:
         for path, payload, name in ENDPOINTS:
             # Warmup
-            post(port, path, payload)
+            for _ in range(N_WARMUP):
+                post(port, path, payload)
             # Measure N requests, report median
             times = []
             for _ in range(N_REQUESTS):
