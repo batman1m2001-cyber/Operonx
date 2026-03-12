@@ -11,13 +11,17 @@
 mod config;
 mod error;
 mod execute;
+mod plugin;
 mod router;
 mod routes;
 mod state;
 
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use clap::Parser;
 use config::{Cli, ServerConfig};
-use std::net::SocketAddr;
+use rush_core::registry::OpRegistry;
 
 #[tokio::main]
 async fn main() {
@@ -44,6 +48,23 @@ async fn main() {
         server_config.port = port;
     }
 
+    // Load plugin if specified
+    let registry: Option<Arc<dyn OpRegistry>> = if let Some(ref plugin_path) = cli.plugin {
+        let path = std::path::Path::new(plugin_path);
+        if !path.exists() {
+            eprintln!("Plugin file not found: {}", plugin_path);
+            std::process::exit(1);
+        }
+        let plugin = plugin::PluginRegistry::load(path).unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        });
+        println!("Loaded plugin: {}", plugin_path);
+        Some(Arc::new(plugin))
+    } else {
+        None
+    };
+
     let addr: SocketAddr = format!("{}:{}", server_config.host, server_config.port)
         .parse()
         .unwrap_or_else(|e| {
@@ -52,7 +73,7 @@ async fn main() {
         });
 
     let n_endpoints = server_config.endpoints.len();
-    let app = router::build_router(server_config);
+    let app = router::build_router(server_config, registry);
 
     println!("rush-serve running at http://{}", addr);
     println!("Endpoints: {}", n_endpoints);
@@ -64,8 +85,34 @@ async fn main() {
             std::process::exit(1);
         });
 
-    axum::serve(listener, app).await.unwrap_or_else(|e| {
-        eprintln!("Server error: {}", e);
-        std::process::exit(1);
-    });
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Server error: {}", e);
+            std::process::exit(1);
+        });
+
+    println!("rush-serve shut down.");
+}
+
+/// Wait for Ctrl+C or SIGTERM to trigger graceful shutdown.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        tokio::select! {
+            _ = ctrl_c => { println!("\nReceived Ctrl+C, shutting down..."); }
+            _ = sigterm.recv() => { println!("\nReceived SIGTERM, shutting down..."); }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+        println!("\nReceived Ctrl+C, shutting down...");
+    }
 }

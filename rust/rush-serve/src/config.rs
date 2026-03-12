@@ -18,6 +18,10 @@ pub struct Cli {
     /// Bind port (overrides config file).
     #[arg(long, env = "RUSH_SERVE_PORT")]
     pub port: Option<u16>,
+
+    /// Path to a cdylib plugin (.dll/.so/.dylib) providing custom Rust ops.
+    #[arg(long, env = "RUSH_SERVE_PLUGIN")]
+    pub plugin: Option<String>,
 }
 
 /// Tracer configuration section.

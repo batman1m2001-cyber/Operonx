@@ -84,11 +84,9 @@ impl TraceCollector {
         if skip_pending {
             Self::remove_pending(&mut node_lookup);
         }
-
         // 6. Sort by DAG edge order → final list
         let children_map = build_children(&node_lookup);
         let result = self.sort_by_edges(&node_lookup, &children_map);
-
         // 7. Summary + payload
         let summary = self.build_summary(&result);
         let nodes_json: Vec<Value> = result

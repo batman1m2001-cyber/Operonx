@@ -1,0 +1,9 @@
+[package]
+name = "rush-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Macro for building Hush workflow op plugins as cdylib crates"
+license = "Apache-2.0"
+
+[dependencies]
+serde_json = "1"

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 
 use rush_core::config::GraphConfig;
+use rush_core::registry::OpRegistry;
 use rush_core::tracing::Tracer;
 
 use crate::config::EndpointDef;
@@ -22,13 +23,15 @@ pub struct EndpointState {
 pub struct AppState {
     pub endpoints: Arc<DashMap<String, Arc<EndpointState>>>,
     pub tracers: Vec<Arc<dyn Tracer>>,
+    pub registry: Option<Arc<dyn OpRegistry>>,
 }
 
 impl AppState {
-    pub fn new(tracers: Vec<Arc<dyn Tracer>>) -> Self {
+    pub fn new(tracers: Vec<Arc<dyn Tracer>>, registry: Option<Arc<dyn OpRegistry>>) -> Self {
         AppState {
             endpoints: Arc::new(DashMap::new()),
             tracers,
+            registry,
         }
     }
 

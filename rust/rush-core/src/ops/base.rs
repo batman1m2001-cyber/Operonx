@@ -14,6 +14,7 @@ use serde_json::Value;
 use crate::config::{OpConfig, ParamConfig, RefConfig};
 use crate::error::RushError;
 use crate::refs::ref_transforms::evaluate_ref_transforms;
+use crate::registry::OpRegistry;
 use crate::runtime;
 use crate::states::state::EngineState;
 
@@ -48,6 +49,7 @@ pub(crate) fn run(
     op: &OpConfig,
     state: &EngineState,
     context: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<OpResult, RushError> {
     if !op.enabled {
         return Ok(OpResult::Done);
@@ -68,7 +70,7 @@ pub(crate) fn run(
             }
         }
 
-        let result_obj = execute_op(op, inputs, state, context)?;
+        let result_obj = execute_op(op, inputs, state, context, registry)?;
 
         // Check for PENDING sentinel before storing
         if is_pending(&result_obj) {
@@ -154,6 +156,7 @@ fn execute_op(
     inputs: serde_json::Map<String, Value>,
     _state: &EngineState,
     _context: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<Option<Value>, RushError> {
     match classify_op(op) {
         OpRoute::StreamingProvider => Err(RushError::UnsupportedOp(
@@ -164,7 +167,7 @@ fn execute_op(
         )),
         OpRoute::Provider => execute_provider_op(op, inputs),
         OpRoute::NativeTransform => execute_native_transform_op(&op.op_type, inputs),
-        OpRoute::Builtin(spec) => execute_builtin_op(spec, inputs),
+        OpRoute::Builtin(spec) => execute_registry_op(spec, inputs, registry),
         OpRoute::Unsupported => {
             // Branch ops are handled separately by dispatch_op, not here.
             // If we get here, the op truly has no Rust implementation.
@@ -358,24 +361,31 @@ pub(crate) fn push_output_refs(
 }
 
 // =============================================================================
-// Builtin op execution
+// Registry op execution
 // =============================================================================
 
-/// Execute a builtin op via the builtin_ops module (direct function call).
+/// Execute an op via the OpRegistry.
 /// Accepts both "path::func" format (extracts func name) and plain "func" names.
-fn execute_builtin_op(
+fn execute_registry_op(
     spec: &str,
     inputs: serde_json::Map<String, Value>,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<Option<Value>, RushError> {
-    // Extract function name: "path::func" → "func", or plain "func" → "func"
     let func_name = spec.rsplit("::").next().unwrap_or(spec);
-
     let input_value = Value::Object(inputs);
-    crate::builtin_ops::call(func_name, &input_value)
+
+    let reg = registry.as_ref().ok_or_else(|| {
+        RushError::RegistryError(format!(
+            "No op registry loaded. Cannot dispatch rust_op='{}'. Load a plugin via --plugin or set_registry().",
+            spec
+        ))
+    })?;
+
+    reg.call(func_name, &input_value)
         .map(Some)
         .ok_or_else(|| {
-            RushError::BuiltinOpError(format!(
-                "Unknown builtin op function: '{}' (from rust_op='{}')",
+            RushError::RegistryError(format!(
+                "Unknown op function: '{}' (from rust_op='{}')",
                 func_name, spec
             ))
         })

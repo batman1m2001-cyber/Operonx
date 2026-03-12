@@ -884,3 +884,33 @@ pub fn fail_grade(inputs: &Value) -> Value {
     let _ = inputs;
     serde_json::json!({"grade": "F", "message": "Cần cải thiện"})
 }
+
+// =============================================================================
+// Example 06 ops (tracing)
+// =============================================================================
+
+/// analyze_text: text → word_count, preview
+pub fn analyze_text(inputs: &Value) -> Value {
+    let text = inputs["text"].as_str().unwrap_or("");
+    let word_count = text.split_whitespace().count();
+    let preview = if text.len() > 50 { &text[..50] } else { text };
+    serde_json::json!({
+        "word_count": word_count,
+        "preview": preview,
+    })
+}
+
+/// classify_by_count: word_count → category
+pub fn classify_by_count(inputs: &Value) -> Value {
+    let word_count = inputs["word_count"].as_i64().unwrap_or(0);
+    let category = if word_count > 20 {
+        "article"
+    } else if word_count > 5 {
+        "sentence"
+    } else {
+        "phrase"
+    };
+    serde_json::json!({
+        "category": category,
+    })
+}

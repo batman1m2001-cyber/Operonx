@@ -7,6 +7,7 @@ use axum::response::Json;
 use axum::routing::{get, post};
 use axum::Router;
 use rush_core::config::GraphConfig;
+use rush_core::registry::OpRegistry;
 use serde_json::{json, Value};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -16,9 +17,9 @@ use crate::routes::{stream_handler, sync_handler, ws_handler};
 use crate::state::{AppState, EndpointState};
 
 /// Build the Axum router from a server config.
-pub fn build_router(config: ServerConfig) -> Router {
+pub fn build_router(config: ServerConfig, registry: Option<Arc<dyn OpRegistry>>) -> Router {
     let tracers = crate::execute::build_tracers(&config.tracers);
-    let app_state = AppState::new(tracers);
+    let app_state = AppState::new(tracers, registry);
     let mut endpoint_paths: Vec<String> = Vec::new();
 
     for ep_def in config.endpoints {
@@ -57,7 +58,7 @@ pub fn build_router(config: ServerConfig) -> Router {
                     .ok_or_else(|| ServeError::Internal("endpoint not found".into()))?;
                 let request_id = uuid::Uuid::new_v4().to_string();
                 let result =
-                    crate::execute::run_workflow(ep.config.clone(), inputs, Some(request_id), sync_state.tracers.clone()).await?;
+                    crate::execute::run_workflow(ep.config.clone(), inputs, Some(request_id), sync_state.tracers.clone(), sync_state.registry.clone()).await?;
                 Ok::<Json<Value>, ServeError>(Json(sync_handler::filter_internal_keys(result)))
             }),
         );

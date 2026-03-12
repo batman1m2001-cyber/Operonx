@@ -12,6 +12,7 @@ use crate::config::GraphConfig;
 use crate::error::RushError;
 use crate::middleware::Middleware;
 use crate::ops::graph::graph_op;
+use crate::registry::OpRegistry;
 use crate::states::state::EngineState;
 use crate::tracing::flush_worker::FlushWorker;
 use crate::tracing::tracer::Tracer;
@@ -20,9 +21,11 @@ use crate::tracing::tracer::Tracer;
 ///
 /// Usage:
 ///   let engine = Rush::new(config_json)?;
+///   engine.set_registry(my_registry);
 ///   let result = engine.run_json(inputs, request_id, user_id, session_id)?;
 pub struct Rush {
     config: Arc<GraphConfig>,
+    registry: Option<Arc<dyn OpRegistry>>,
     tracers: Vec<Arc<dyn Tracer>>,
     middleware: Vec<Box<dyn Middleware>>,
     flush_worker: FlushWorker,
@@ -35,6 +38,7 @@ impl Rush {
         let config = GraphConfig::from_json(config_json)?;
         Ok(Rush {
             config: Arc::new(config),
+            registry: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
@@ -47,11 +51,17 @@ impl Rush {
     pub fn from_config(config: Arc<GraphConfig>) -> Self {
         Rush {
             config,
+            registry: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
             _force_timestamps: false,
         }
+    }
+
+    /// Register an external op registry for custom Rust op dispatch.
+    pub fn set_registry(&mut self, registry: Arc<dyn OpRegistry>) {
+        self.registry = Some(registry);
     }
 
     /// Register a tracer for automatic flush after each run.
@@ -109,8 +119,15 @@ impl Rush {
             }
         }
 
-        // 2. Run graph
-        let stream_contexts = match graph_op::run_graph(&self.config, &state, context) {
+        // 2. Run graph (with timing for root graph node)
+        let graph_start = if state.needs_timestamps {
+            Some(chrono::Utc::now())
+        } else {
+            None
+        };
+        let graph_perf_start = std::time::Instant::now();
+
+        let stream_contexts = match graph_op::run_graph(&self.config, &state, context, &self.registry) {
             Ok(sc) => sc,
             Err(e) => {
                 // on_error middleware (in reverse order)
@@ -120,6 +137,24 @@ impl Rush {
                 return Err(e);
             }
         };
+
+        // Store timing for root graph (TraceCollector needs $start_time to detect execution)
+        if let Some(start) = graph_start {
+            let end = chrono::Utc::now();
+            let duration_ms = graph_perf_start.elapsed().as_secs_f64() * 1000.0;
+            state.set(
+                &self.config.full_name, "$start_time", context,
+                Value::String(start.to_rfc3339()),
+            );
+            state.set(
+                &self.config.full_name, "$end_time", context,
+                Value::String(end.to_rfc3339()),
+            );
+            state.set(
+                &self.config.full_name, "$duration_ms", context,
+                serde_json::json!(duration_ms),
+            );
+        }
 
         // 3. Collect outputs (aggregates from stream contexts if generators were used)
         let mut result = graph_op::get_outputs(&self.config, &state, context, &stream_contexts)?;

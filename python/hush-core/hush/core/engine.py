@@ -25,7 +25,6 @@ import asyncio
 import json
 import sys
 import uuid
-import warnings
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER
@@ -74,7 +73,7 @@ class Hush:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "resources"]
+    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "_tracer", "resources"]
 
     def __init__(
         self,
@@ -82,6 +81,7 @@ class Hush:
         *,
         env: Union[str, bool] = True,
         resources: Optional[str] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ):
         """Initialize Hush engine with a GraphOp.
 
@@ -90,6 +90,8 @@ class Hush:
                    Must be defined (context manager exited).
             env: Path to .env file, True to auto-find, or False to skip.
             resources: Path to resources.yaml. None = no resources loaded.
+            tracer: Default tracer(s) for all run() calls. Can be overridden per-run.
+                    Useful for serve() where tracer applies to every request.
         """
         # 1. Load .env
         self._load_env(env)
@@ -99,6 +101,7 @@ class Hush:
 
         self.graph = graph
         self.name = graph.name
+        self._tracer = tracer
 
         # Build graph and create schema immediately
         self.graph.build()
@@ -193,7 +196,7 @@ class Hush:
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
             tracer: Optional tracer or list of tracers for observability.
-                    Deprecated — use ``engine.use(TracingMiddleware(...))`` instead.
+                    Overrides the default tracer set in ``Hush(..., tracer=...)``.
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -204,18 +207,10 @@ class Hush:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        # Normalize tracer to list (backward compat)
-        if tracer is not None:
-            warnings.warn(
-                "The 'tracer' argument is deprecated. "
-                "Use engine.use(TracingMiddleware(tracer=...)) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if isinstance(tracer, list):
-                tracers = tracer
-            else:
-                tracers = [tracer]
+        # Resolve tracers: per-run overrides engine default
+        effective = tracer if tracer is not None else self._tracer
+        if effective is not None:
+            tracers = effective if isinstance(effective, list) else [effective]
         else:
             tracers = []
 
@@ -292,7 +287,8 @@ class Hush:
             user_id: Optional user identifier
             session_id: Optional session identifier
             request_id: Optional request identifier
-            tracer: Deprecated — use ``engine.use(TracingMiddleware(...))``
+            tracer: Optional tracer or list of tracers for observability.
+                    Overrides the default tracer set in ``Hush(..., tracer=...)``.
 
         Yields:
             Dicts with "type" key:
@@ -303,18 +299,10 @@ class Hush:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        # Normalize tracer (backward compat)
-        if tracer is not None:
-            warnings.warn(
-                "The 'tracer' argument is deprecated. "
-                "Use engine.use(TracingMiddleware(tracer=...)) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if isinstance(tracer, list):
-                tracers = tracer
-            else:
-                tracers = [tracer]
+        # Resolve tracers: per-run overrides engine default
+        effective = tracer if tracer is not None else self._tracer
+        if effective is not None:
+            tracers = effective if isinstance(effective, list) else [effective]
         else:
             tracers = []
 
@@ -431,7 +419,7 @@ class Hush:
                 "Install it with: pip install hush-serve"
             ) from None
 
-        app = HushApp()
+        app = HushApp(tracer=self._tracer)
         app.endpoint(path, graph=self.graph, stream=stream, websocket=websocket)
         app.serve(host=host, port=port, backend=backend, **kwargs)
 

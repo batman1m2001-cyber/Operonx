@@ -5,6 +5,7 @@ members = [
     "rush-providers",
     "rush-serve",
     "rush-telemetry",
+    "rush-plugin",
     "ui-hush-eyes",
 ]
 

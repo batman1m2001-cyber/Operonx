@@ -207,6 +207,8 @@ class HushApp:
         reload: bool = False,
         log_level: str = "info",
         backend: str = "python",
+        rust_ops: str | None = None,
+        plugin: str | None = None,
     ) -> None:
         """Start the API server.
 
@@ -216,12 +218,14 @@ class HushApp:
             workers: Number of uvicorn workers.
             reload: Enable auto-reload (dev mode).
             log_level: Logging level.
-            backend: "python" (FastAPI/uvicorn) or "rust" (Axum, future).
+            backend: "python" (FastAPI/uvicorn) or "rust" (Axum).
+            rust_ops: Path to a Rust ops crate (auto-builds cdylib plugin).
+            plugin: Path to a pre-built cdylib plugin (.dll/.so/.dylib).
         """
         if backend == "rust":
             from hush.serve._rust_bridge import serve_rust
 
-            serve_rust(self, host, port)
+            serve_rust(self, host, port, rust_ops=rust_ops, plugin=plugin)
             return
 
         import uvicorn
