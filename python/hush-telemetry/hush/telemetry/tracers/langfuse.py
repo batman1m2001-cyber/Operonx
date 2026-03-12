@@ -146,6 +146,7 @@ class LangfuseTracer(Tracer):
                     "output": node.get("outputs") or None,
                     "metadata": metadata or None,
                     "tags": clean_tags if clean_tags else None,
+                    "environment": "default",
                 }
                 if user_id:
                     body["userId"] = user_id

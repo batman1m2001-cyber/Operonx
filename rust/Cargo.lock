@@ -1376,6 +1376,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2306,6 +2316,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-plugin"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "rush-providers"
 version = "0.1.0"
 dependencies = [
@@ -2334,6 +2351,7 @@ dependencies = [
  "dashmap",
  "env_logger",
  "futures",
+ "libloading",
  "log",
  "rush-core",
  "rush-providers",

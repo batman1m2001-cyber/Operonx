@@ -12,8 +12,8 @@ pub enum RushError {
     #[error("Provider error: {0}")]
     ProviderError(String),
 
-    #[error("Builtin op error: {0}")]
-    BuiltinOpError(String),
+    #[error("Registry op error: {0}")]
+    RegistryError(String),
 
     #[error("Config error: {0}")]
     ConfigError(String),

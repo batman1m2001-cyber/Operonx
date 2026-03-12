@@ -5,13 +5,13 @@
 //!   - Input: JSON inputs (serde_json::Value)
 //!   - Output: JSON result (serde_json::Value)
 
-pub mod builtin_ops;
 pub mod middleware;
 pub mod config;
 pub mod engine;
 pub mod error;
 pub mod ops;
 pub mod refs;
+pub mod registry;
 pub mod runtime;
 pub mod states;
 pub mod tracing;

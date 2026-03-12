@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use rush_core::config::GraphConfig;
 use rush_core::engine::Rush;
+use rush_core::registry::OpRegistry;
 use rush_core::tracing::Tracer;
 
 use crate::config::TracerConfig;
@@ -74,12 +75,17 @@ pub async fn run_workflow(
     inputs: Value,
     request_id: Option<String>,
     tracers: Vec<Arc<dyn Tracer>>,
+    registry: Option<Arc<dyn OpRegistry>>,
 ) -> Result<Value, ServeError> {
     let result = tokio::task::spawn_blocking(move || {
         let mut engine = Rush::from_config(config);
 
         for tracer in tracers {
             engine.add_tracer_arc(tracer);
+        }
+
+        if let Some(reg) = registry {
+            engine.set_registry(reg);
         }
 
         engine

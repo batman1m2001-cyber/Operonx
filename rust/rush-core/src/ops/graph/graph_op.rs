@@ -21,6 +21,7 @@ use crate::config::{GraphConfig, LoopConfig, OpBound, OpConfig};
 use crate::error::RushError;
 use crate::ops::base;
 use crate::ops::graph::loop_eval;
+use crate::registry::OpRegistry;
 use crate::runtime;
 use crate::states::state::EngineState;
 
@@ -62,8 +63,9 @@ pub(crate) fn run_graph(
     config: &GraphConfig,
     state: &EngineState,
     context: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<Vec<String>, RushError> {
-    runtime::block_on_async(run_scheduler(config, state, context))
+    runtime::block_on_async(run_scheduler(config, state, context, registry))
 }
 
 // =============================================================================
@@ -77,6 +79,7 @@ async fn run_scheduler(
     config: &GraphConfig,
     state: &EngineState,
     context_id: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<Vec<String>, RushError> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<SchedulerEvent>();
     let mut active_count: usize = 0;
@@ -168,17 +171,26 @@ async fn run_scheduler(
             .get(op_name)
             .ok_or_else(|| RushError::ConfigError(format!("Op '{}' not found", op_name)))?;
 
-        // Generator ops → spawn generator task
+        // Generator ops
         if op.is_generator {
+            // Built-in generators run inline (no tokio::spawn overhead).
+            // call_generator() returns Vec<Value> synchronously — just send
+            // Yield + Exhausted events to the channel for the main loop.
+            if op.rust_op.is_some() {
+                *active_count += 1;
+                run_builtin_generator_inline(op, state, ctx, event_tx, registry);
+                return Ok(DispatchResult::Spawned);
+            }
+            // Provider streaming / other generators → spawn async task
             *active_count += 1;
-            spawn_generator_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore));
+            spawn_generator_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
             return Ok(DispatchResult::Spawned);
         }
 
         // Graph ops → spawn async task (recursive scheduler)
         if op.op_type == "graph" {
             *active_count += 1;
-            spawn_graph_task(op, config, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore));
+            spawn_graph_task(op, config, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
             return Ok(DispatchResult::Spawned);
         }
 
@@ -192,12 +204,12 @@ async fn run_scheduler(
         // IO-bound ops → spawn_blocking for parallel fan-out
         if op.bound == OpBound::Io || op.provider_config.is_some() {
             *active_count += 1;
-            spawn_blocking_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore));
+            spawn_blocking_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
             return Ok(DispatchResult::Spawned);
         }
 
         // CPU-bound / simple ops → inline execution
-        let result = base::run(op, state, ctx)?;
+        let result = base::run(op, state, ctx, registry)?;
 
         // PENDING sentinel — absorb input without triggering downstream
         if result == base::OpResult::Pending {
@@ -324,12 +336,14 @@ fn spawn_graph_task(
     context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
     semaphore: Arc<Semaphore>,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const OpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let ctx_id = context_id.to_string();
     let op_name = op.name.clone();
+    let registry = registry.clone();
 
     tokio::spawn(async move {
         let is_stream = ctx != ctx_id;
@@ -344,7 +358,7 @@ fn spawn_graph_task(
         let state = unsafe { &*(state_addr as *const EngineState) };
 
         // Must call async version directly — block_on from async context deadlocks
-        match run_nested_graph_async(op, state, &ctx).await {
+        match run_nested_graph_async(op, state, &ctx, &registry).await {
             Ok(()) => {
                 let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
             }
@@ -367,12 +381,14 @@ fn spawn_blocking_task(
     context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
     semaphore: Arc<Semaphore>,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const OpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let ctx_id = context_id.to_string();
     let op_name = op.name.clone();
+    let registry = registry.clone();
 
     tokio::task::spawn_blocking(move || {
         // Acquire semaphore for stream contexts (backpressure).
@@ -390,7 +406,7 @@ fn spawn_blocking_task(
         let op = unsafe { &*(op_addr as *const OpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        match base::run(op, state, &ctx) {
+        match base::run(op, state, &ctx, &registry) {
             Ok(base::OpResult::Pending) => {
                 let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
             }
@@ -419,12 +435,14 @@ fn spawn_generator_task(
     context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
     _semaphore: Arc<Semaphore>,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const OpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let _ctx_id = context_id.to_string();
     let op_name = op.name.clone();
+    let registry = registry.clone();
 
     tokio::spawn(async move {
         // SAFETY: op and state are alive — caller awaits all tasks
@@ -449,8 +467,8 @@ fn spawn_generator_task(
 
         // Dispatch based on generator kind
         if let Some(ref rust_op) = op.rust_op {
-            // Built-in generator: call_generator → Vec<Value>
-            run_builtin_generator(op, state, &ctx, rust_op, &input_value, &op_name, &event_tx);
+            // Registry generator: call_generator → Vec<Value>
+            run_registry_generator(op, state, &ctx, rust_op, &input_value, &op_name, &event_tx, &registry);
         } else if op.provider_config.is_some() && op.stream {
             // Provider streaming (LLM): use execute_streaming with channel
             run_provider_streaming(op, state, &ctx, &input_value, &op_name, &event_tx).await;
@@ -462,8 +480,40 @@ fn spawn_generator_task(
     });
 }
 
-/// Run a built-in generator: call_generator → iterate Vec<Value> → emit Yield per item.
-fn run_builtin_generator(
+/// Run a built-in generator inline (no tokio::spawn).
+///
+/// Resolves inputs, calls call_generator() synchronously, sends Yield events
+/// to the channel, then sends Exhausted. Eliminates thread scheduling overhead
+/// for CPU-bound generators (avoids Windows 15.6ms timer quantum spikes).
+fn run_builtin_generator_inline(
+    op: &OpConfig,
+    state: &EngineState,
+    ctx: &str,
+    event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
+    registry: &Option<Arc<dyn OpRegistry>>,
+) {
+    // Resolve inputs
+    let mut inputs = serde_json::Map::new();
+    for param in &op.inputs {
+        match base::resolve_param(param, state, ctx) {
+            Ok(Some(value)) => { inputs.insert(param.var_name.clone(), value); }
+            Ok(None) => {}
+            Err(e) => {
+                log::error!("[rush] Error resolving generator inputs for {}: {}", op.full_name, e);
+                let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
+                return;
+            }
+        }
+    }
+
+    let input_value = Value::Object(inputs);
+    let rust_op = op.rust_op.as_ref().unwrap();
+    run_registry_generator(op, state, ctx, rust_op, &input_value, &op.name, event_tx, registry);
+    let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
+}
+
+/// Run a generator via the registry: call_generator → iterate Vec<Value> → emit Yield per item.
+fn run_registry_generator(
     op: &OpConfig,
     state: &EngineState,
     ctx: &str,
@@ -471,10 +521,15 @@ fn run_builtin_generator(
     input_value: &Value,
     op_name: &str,
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let func_name = rust_op.rsplit("::").next().unwrap_or(rust_op);
 
-    match crate::builtin_ops::call_generator(func_name, input_value) {
+    let items = registry
+        .as_ref()
+        .and_then(|r| r.call_generator(func_name, input_value));
+
+    match items {
         Some(items) => {
             for (idx, result) in items.into_iter().enumerate() {
                 let stream_ctx = format!("{}.[{}]", ctx, idx);
@@ -497,7 +552,7 @@ fn run_builtin_generator(
         }
         None => {
             log::error!(
-                "[rush] Unknown builtin generator: '{}' (from rust_op='{}')",
+                "[rush] Unknown generator: '{}' (from rust_op='{}') — no registry loaded or op not found",
                 func_name, rust_op
             );
         }
@@ -628,6 +683,7 @@ async fn run_loop(
     loop_config: &LoopConfig,
     state: &EngineState,
     base_context: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<(), RushError> {
     let mut current_ctx = base_context.to_string();
     let mut iteration = 0;
@@ -687,7 +743,7 @@ async fn run_loop(
         }
 
         // Run next iteration (ignore stream_contexts for loop iterations)
-        let _sc = run_scheduler(config, state, &next_ctx).await?;
+        let _sc = run_scheduler(config, state, &next_ctx, registry).await?;
         current_ctx = next_ctx;
     }
 }
@@ -875,6 +931,7 @@ async fn run_nested_graph_async(
     op: &OpConfig,
     state: &EngineState,
     context: &str,
+    registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<(), RushError> {
     let inner = op.inner_graph.as_ref().ok_or_else(|| {
         RushError::ConfigError(format!(
@@ -891,11 +948,11 @@ async fn run_nested_graph_async(
     }
 
     // 2. Run inner graph scheduling loop (async — no block_on needed)
-    let stream_contexts = run_scheduler(inner, state, context).await?;
+    let stream_contexts = run_scheduler(inner, state, context, registry).await?;
 
     // 2b. If this graph has a loop_config, run feedback loop
     if let Some(ref loop_config) = inner.loop_config {
-        run_loop(inner, loop_config, state, context).await?;
+        run_loop(inner, loop_config, state, context, registry).await?;
     }
 
     // 3. Collect inner graph outputs
