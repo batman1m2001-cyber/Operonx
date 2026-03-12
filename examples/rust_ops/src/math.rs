@@ -128,7 +128,7 @@ pub fn safe_divide(inputs: &Value) -> Value {
     let a = inputs["a"].as_f64().unwrap_or(0.0);
     let b = inputs["b"].as_f64().unwrap_or(0.0);
     if b == 0.0 {
-        json!({"success": false, "result": null, "error": "Division by zero"})
+        json!({"success": false, "result": null, "error": "Cannot divide by zero"})
     } else {
         json!({"success": true, "result": a / b, "error": null})
     }

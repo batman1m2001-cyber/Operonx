@@ -12,13 +12,12 @@ Chạy:
   cd examples && uv run python 02_data_pipeline/serve_rust.py
 
 Test:
-  uv run python 02_data_pipeline/client.py
+  uv run python 02_data_pipeline/bench.py
 """
 
 import os
 
 from hush.serve import HushApp
-
 from workflow import build_data_pipeline, build_text_pipeline
 
 app = HushApp()

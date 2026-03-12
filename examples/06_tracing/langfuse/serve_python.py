@@ -4,11 +4,10 @@ Chạy:
   cd examples && uv run python 06_tracing/langfuse/serve_python.py
 
 Test:
-  uv run python 06_tracing/langfuse/client.py
+  uv run python 06_tracing/langfuse/bench.py
 """
 
 import os
-import sys
 
 from workflow import build_text_analyzer
 

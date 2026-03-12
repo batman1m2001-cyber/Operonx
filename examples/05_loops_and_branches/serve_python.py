@@ -10,13 +10,12 @@ Chạy:
   cd examples && uv run python 05_loops_and_branches/serve_python.py
 
 Test:
-  uv run python 05_loops_and_branches/client.py
+  uv run python 05_loops_and_branches/bench.py
 """
 
 import os
 
 from hush.serve import HushApp
-
 from workflow import build_branch, build_for_loop, build_map_op, build_while_loop
 
 app = HushApp()

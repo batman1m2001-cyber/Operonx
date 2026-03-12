@@ -1,6 +1,6 @@
 """Shared workflow definitions for 03_llm_chat.
 
-Defines LLM chat graphs — imported by run.py, serve_python.py, serve_rust.py.
+Defines LLM chat graphs — imported by demo.py, serve_python.py, serve_rust.py.
 
 Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env
 """

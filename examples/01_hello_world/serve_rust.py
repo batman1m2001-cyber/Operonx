@@ -8,13 +8,12 @@ Chạy:
   cd examples && uv run python 01_hello_world/serve_rust.py
 
 Test:
-  uv run python 01_hello_world/client.py
+  uv run python 01_hello_world/bench.py
 """
 
 import os
 
 from hush.core import Hush
-
 from workflow import build_hello
 
 engine = Hush(build_hello())

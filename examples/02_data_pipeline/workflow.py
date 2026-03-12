@@ -1,11 +1,10 @@
 """Shared workflow definitions for 02_data_pipeline.
 
-Defines ops and graphs — imported by run.py, serve_python.py, serve_rust.py.
+Defines ops and graphs — imported by demo.py, serve_python.py, serve_rust.py.
 """
 
 from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op
-
 
 # =============================================================================
 # Pipeline 1: Data transformation ops

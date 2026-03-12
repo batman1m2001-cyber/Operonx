@@ -1,6 +1,6 @@
 """Shared workflow definition for 01_hello_world.
 
-Defines the graph and ops — imported by run.py, serve_python.py, serve_rust.py.
+Defines the graph and ops — imported by demo.py, serve_python.py, serve_rust.py.
 """
 
 from hush.core import END, PARENT, START, GraphOp
