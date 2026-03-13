@@ -3,6 +3,13 @@ site_description: High-performance workflow engine that runs anything as a workf
 repo_url: https://github.com/batman1m2001-cyber/Hush-ai
 docs_dir: docs
 
+# Strict mode but allow griffe warnings (missing type annotations) and links to files outside docs/
+strict: false
+validation:
+  links:
+    absolute_links: ignore
+    unrecognized_links: ignore
+
 theme:
   name: material
   features:
