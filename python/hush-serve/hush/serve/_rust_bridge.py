@@ -119,21 +119,31 @@ def _extract_tracer_configs(tracer) -> Optional[Dict[str, Any]]:
 def find_hush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
     """Find or build the hush-serve binary.
 
-    Looks for a pre-built binary first, then builds from source if needed.
+    Search order:
+    1. Pre-built binary in crate_dir (monorepo development)
+    2. hush-serve on PATH (installed via ``cargo install hush-serve``)
+    3. Build from source if crate_dir exists
 
     Returns:
         Path to the hush-serve binary.
 
     Raises:
-        FileNotFoundError: If the crate directory doesn't exist.
+        FileNotFoundError: If hush-serve cannot be found anywhere.
         RuntimeError: If cargo build fails.
     """
+    import shutil
+
     crate = (crate_dir or _HUSH_SERVE_CRATE).resolve()
 
     if not crate.exists():
+        # Crate dir not found — check PATH (e.g. installed via cargo install)
+        on_path = shutil.which("hush-serve")
+        if on_path:
+            return Path(on_path)
         raise FileNotFoundError(
-            f"hush-serve crate not found at {crate}. "
-            f"Ensure the hush-serve directory exists in the monorepo."
+            "hush-serve binary not found. Either:\n"
+            "  - Install it: cargo install hush-serve\n"
+            "  - Or ensure the hush-serve crate exists in the monorepo"
         )
 
     # Check for pre-built binary
