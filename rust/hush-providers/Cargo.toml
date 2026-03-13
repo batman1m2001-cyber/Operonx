@@ -1,6 +1,6 @@
 [package]
 name = "hush-providers"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Provider configs and native op implementations for the Hush workflow engine"
 license = "Apache-2.0"
