@@ -15,5 +15,5 @@
 ## Documentation
 
 - [ ] Updated relevant `CLAUDE.md` if API changed
-- [ ] Updated `tutorial/docs/` if user-facing change
-- [ ] Updated `architecture/` if internal design changed
+- [ ] Updated `docs/guide/` if user-facing change
+- [ ] Updated `docs/architecture/` if internal design changed

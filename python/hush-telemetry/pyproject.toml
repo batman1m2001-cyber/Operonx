@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hush-telemetry"
+version = "0.1.0"
+description = "Observability, tracing, and telemetry framework for Hush"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Hush Team" }
+]
+dependencies = [
+    "hush-icore>=0.1.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+langfuse = [
+    "langfuse>=2.6.0,<3.0.0",  # Only needed for prompt management via LangfuseClient
+]
+otel = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+]
+all = [
+    "langfuse>=2.6.0,<3.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hush"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/hush",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # Line too long
+    "E402",  # Module level import not at top (needed for load_dotenv pattern)
+    "E721",  # Type comparison (intentional in some cases)
+    "E722",  # Bare except
+    "E731",  # Lambda assignment
+    "F841",  # Unused variable
+]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: marks tests as integration tests (may require external services)",
+]
+
+[tool.uv.sources]
+hush-icore = { path = "../hush-icore", editable = true }
+hush-providers = { path = "../hush-providers", editable = true }
+
+[dependency-groups]
+dev = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=0.24.0",
+    "python-dotenv>=1.0.0",
+]

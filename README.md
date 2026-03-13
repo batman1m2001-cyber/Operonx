@@ -35,8 +35,8 @@
 ## Quick Start
 
 ```bash
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
-# Or with uv: uv pip install "hush-core @ git+..."
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
+# Or with uv: uv pip install "hush-icore @ git+..."
 ```
 
 ```python
@@ -62,7 +62,7 @@ asyncio.run(main())
 > **Core philosophy:** `GraphOp`, `FuncOp`, and `BranchOp` handle nearly every workflow pattern.
 > LLM, embedding, and other specialized nodes are optional add-ons — install and learn them as needed.
 
-> Want more? See the [quickstart guide](tutorial/docs/02-quickstart.md) or [runnable examples](tutorial/examples/).
+> Want more? See the [quickstart guide](docs/guide/02-quickstart.md) or [runnable examples](examples/).
 
 ## LLM Integration
 
@@ -72,11 +72,11 @@ pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.
 
 ```python
 from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.providers import ChainOp
+from hush.providers import chain
 
 async def main():
     with GraphOp(name="chat") as graph:
-        chat = ChainOp.of(
+        chat = chain(
             resource="gpt-4o",
             template={"system": "You are a helpful assistant.", "user": "{question}"},
             question=PARENT["question"],
@@ -88,7 +88,7 @@ async def main():
     print(result["content"])
 ```
 
-> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](tutorial/docs/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
+> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](docs/guide/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
 
 ## Installation
 
@@ -98,10 +98,10 @@ Hush is a monorepo with 3 separate packages. Install what you need:
 
 ```bash
 # Core only (workflow engine, no LLM)
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 
 # Core + LLM providers + Langfuse tracing
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
@@ -110,28 +110,29 @@ pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cybe
 
 ```bash
 # Core only
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 
 # Core + LLM providers + Langfuse tracing
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
 
-> **Note:** `hush-providers` and `hush-telemetry` depend on `hush-core`, so always install `hush-core` first.
+> **Note:** `hush-providers` and `hush-telemetry` depend on `hush-icore`, so always install `hush-icore` first.
 
-See [installation guide](tutorial/docs/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
+See [installation guide](docs/guide/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [hush-core](hush-core/) | Core workflow engine — nodes, state, tracing, execution |
-| [rush-core](rush-core/) | High-performance Rust execution backend (1.9x–6.2x speedup) |
+| [hush-icore](hush-icore/) | Core workflow engine — nodes, state, tracing, execution |
+| [hush-icore (Rust)](rust/hush-icore/) | High-performance Rust execution backend (1.9x–6.2x speedup) |
 | [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations (Python) |
-| [rush-providers](rush-providers/) | Rust provider implementations (native HTTP, ONNX, per-provider) |
+| [hush-providers (Rust)](rust/hush-providers/) | Rust provider implementations (native HTTP, ONNX, per-provider) |
 | [hush-telemetry](hush-telemetry/) | External tracing backends (Langfuse, OpenTelemetry) |
-| [tutorial](tutorial/) | Documentation (Vietnamese) and runnable examples |
+| [docs](docs/) | Documentation (guide + architecture) |
+| [examples](examples/) | Runnable Python examples |
 | [ui-hush-eyes](ui-hush-eyes/) | Standalone Rust server for trace visualization |
 
 ## Trace Viewer
@@ -148,9 +149,9 @@ cd ui-hush-eyes && cargo build --release
 
 | Need | Go to |
 |------|-------|
-| Learning from scratch | [tutorial/docs/](tutorial/docs/) |
-| Runnable examples | [tutorial/examples/](tutorial/examples/) |
-| Deep internals | [architecture/](architecture/) |
+| Learning from scratch | [docs/guide/](docs/guide/) |
+| Runnable examples | [examples/](examples/) |
+| Deep internals | [docs/architecture/](docs/architecture/) |
 
 ## Contributing
 
@@ -158,7 +159,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instr
 
 ```bash
 git clone https://github.com/batman1m2001-cyber/Hush-ai.git
-cd Hush-ai/hush-core && uv sync --all-extras && uv run pytest
+cd Hush-ai/hush-icore && uv sync --all-extras && uv run pytest
 ```
 
 ## License
