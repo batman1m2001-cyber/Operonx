@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
 - **`HushApp(env=, resources=)`**: Load env/resources upfront in `HushApp.__init__` so subsequent `app.endpoint("/path", graph=build_xxx())` calls work with eager LLM resolution.
 - **Rust generator output aggregation fix**: When graph outputs have `ref: null` (populated by `push_output_refs`), `get_outputs()` now checks the graph's own state before falling back to terminal ops. Fixes Rust returning `{}` for generator workflows with `>> PARENT["key"]` forwarding.
 
+### Fixed
+
+- **Rust `halve_until` op**: Yielded value before halving instead of after, causing Python/Rust output mismatch in example 05 While Loop.
+
 ### Changed
 
 - **Example 09 serve scripts**: Use factory pattern `Hush(build_agent, env=..., resources=...)` instead of `Hush(build_agent(), env=..., resources=...)`.
