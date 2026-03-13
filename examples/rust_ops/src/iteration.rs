@@ -67,8 +67,8 @@ pub fn halve_until(inputs: &Value) -> Value {
     let mut v = inputs["value"].as_i64().unwrap_or(0);
     let mut results = Vec::new();
     while v >= 5 {
-        results.push(json!({"value": v}));
         v /= 2;
+        results.push(json!({"value": v}));
     }
     results.into()
 }
@@ -158,7 +158,7 @@ mod tests {
         let result = halve_until(&json!({"value": 40}));
         assert_eq!(
             result,
-            json!([{"value": 40}, {"value": 20}, {"value": 10}, {"value": 5}])
+            json!([{"value": 20}, {"value": 10}, {"value": 5}, {"value": 2}])
         );
     }
 
