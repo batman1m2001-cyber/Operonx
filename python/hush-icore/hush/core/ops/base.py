@@ -9,7 +9,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from hush.core.loggings import LOGGER, format_log_data
+from hush.core.loggings import LOGGER, format_event, format_log_data
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
 from hush.core.states.ref import Ref
 from hush.core.utils.auto_name import auto_name, unique_name
@@ -420,16 +420,19 @@ class BaseOp(ABC):
         """Log execution summary with inputs, outputs, and duration."""
         # Check both verbose flag and logger level before formatting
         if self.verbose and LOGGER.isEnabledFor(20):  # 20 = INFO level
-            LOGGER.info(
-                "[title]\\[%s][/title] [bold]%s[/bold]: [highlight]%s[/highlight] [muted]\\[%s][/muted] [muted](%.1fms)[/muted] %s -> %s",
-                request_id or "unknown",
-                self.type.upper() if isinstance(self.type, str) else str(self.type).upper(),
-                self.full_name,
-                ".".join(context_id) if isinstance(context_id, tuple) else (context_id or "main"),
-                duration_ms,
-                format_log_data(inputs),
-                format_log_data(outputs),
+            msg = format_event(
+                "op_done",
+                request_id=request_id or "unknown",
+                op_type=self.type.upper() if isinstance(self.type, str) else str(self.type).upper(),
+                full_name=self.full_name,
+                context=".".join(context_id)
+                if isinstance(context_id, tuple)
+                else (context_id or "main"),
+                duration_ms=f"{duration_ms:.1f}",
+                inputs=format_log_data(inputs),
+                outputs=format_log_data(outputs),
             )
+            LOGGER.info(msg)
 
     def _store_metrics(
         self,
@@ -506,10 +509,12 @@ class BaseOp(ABC):
                 else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             )
             LOGGER.error(
-                "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
-                request_id,
-                self.name,
-                error_msg.rstrip(),
+                format_event(
+                    "op_error",
+                    request_id=request_id or "unknown",
+                    name=self.name,
+                    error=error_msg.rstrip(),
+                ),
             )
 
         finally:
@@ -528,10 +533,12 @@ class BaseOp(ABC):
             # Performance monitoring: log slow ops (>100ms)
             if duration_ms > 100 and LOGGER.isEnabledFor(30):
                 LOGGER.warning(
-                    "[title]\\[%s][/title] Slow op [highlight]%s[/highlight]: [red]%.1fms[/red]",
-                    request_id,
-                    self.full_name,
-                    duration_ms,
+                    format_event(
+                        "op_slow",
+                        request_id=request_id or "unknown",
+                        full_name=self.full_name,
+                        duration_ms=f"{duration_ms:.1f}",
+                    ),
                 )
 
             return _outputs

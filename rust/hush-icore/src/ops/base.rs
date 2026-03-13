@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde_json::Value;
 
 use crate::config::{OpConfig, ParamConfig, RefConfig};
+use crate::logging;
 use crate::error::RushError;
 use crate::refs::ref_transforms::evaluate_ref_transforms;
 use crate::registry::OpRegistry;
@@ -62,15 +63,16 @@ pub(crate) fn run(
 
     // Try: resolve inputs → execute → store outputs
     let mut pending = false;
+    let mut input_map = serde_json::Map::new();
+    let mut result_obj_for_log: Option<Value> = None;
     let exec_result: Result<(), RushError> = (|| {
-        let mut inputs = serde_json::Map::new();
         for param in &op.inputs {
             if let Some(value) = resolve_param(param, state, context)? {
-                inputs.insert(param.var_name.clone(), value);
+                input_map.insert(param.var_name.clone(), value);
             }
         }
 
-        let result_obj = execute_op(op, inputs, state, context, registry)?;
+        let result_obj = execute_op(op, input_map.clone(), state, context, registry)?;
 
         // Check for PENDING sentinel before storing
         if is_pending(&result_obj) {
@@ -78,6 +80,7 @@ pub(crate) fn run(
             return Ok(());
         }
 
+        result_obj_for_log = result_obj.clone();
         store_result(op, result_obj, state, context)?;
 
         Ok(())
@@ -95,16 +98,30 @@ pub(crate) fn run(
     }
 
     if duration_ms > 100.0 {
-        log::warn!("[hush] Slow op {}: {:.1}ms", op.full_name, duration_ms);
+        let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+        log::warn!("{}", logging::format_event("op_slow", &[
+            ("request_id", &req_id),
+            ("full_name", &op.full_name),
+            ("duration_ms", &format!("{:.1}", duration_ms)),
+        ]));
     }
 
     if op.verbose {
-        log::info!(
-            "[hush] {}: {} ({:.1}ms)",
-            op.op_type.to_uppercase(),
-            op.full_name,
-            duration_ms
-        );
+        let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+        let input_summary = logging::format_data(&Value::Object(input_map), 80, 8);
+        let output_summary = match &result_obj_for_log {
+            Some(v) => logging::format_data(v, 80, 8),
+            None => "{}".to_string(),
+        };
+        log::info!("{}", logging::format_event("op_done", &[
+            ("request_id", &req_id),
+            ("op_type", &op.op_type.to_uppercase()),
+            ("full_name", &op.full_name),
+            ("context", context),
+            ("duration_ms", &format!("{:.1}", duration_ms)),
+            ("inputs", &input_summary),
+            ("outputs", &output_summary),
+        ]));
     }
 
     if exec_result.is_ok() && !pending {
@@ -224,7 +241,12 @@ fn log_error(op: &OpConfig, state: &EngineState, context: &str, error_msg: &str)
         context,
         Value::String(error_msg.to_string()),
     );
-    log::error!("[hush] Error in op {}: {}", op.full_name, error_msg);
+    let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+    log::error!("{}", logging::format_event("op_error", &[
+        ("request_id", &req_id),
+        ("name", &op.full_name),
+        ("error", error_msg),
+    ]));
 }
 
 // =============================================================================

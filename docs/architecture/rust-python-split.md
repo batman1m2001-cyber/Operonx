@@ -45,7 +45,7 @@ graph.serialize() ──JSON──→   GraphConfig::from_json()
 | Tracing | `python/hush-icore/hush/core/tracing/` | `rust/hush-icore/src/tracing/` |
 | HTTP serve | `python/hush-serve/` | `rust/hush-serve/` |
 
-See [MODULE_MAP.md](../../MODULE_MAP.md) for the complete mapping.
+See `MODULE_MAP.md` in the repository root for the complete mapping.
 
 ## Key Differences
 

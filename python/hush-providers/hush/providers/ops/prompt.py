@@ -64,7 +64,9 @@ class PromptOp(BaseOp):
         "messages": Param(type=list, required=True),
     }
 
-    def __init__(self, inputs: Dict[str, Any] = None, outputs: Dict[str, Any] = None, **kwargs):
+    def __init__(
+        self, inputs: Dict[str, Any] = None, outputs: Dict[str, Any] = None, **kwargs: Any
+    ):
         """Initialize PromptOp.
 
         Args:

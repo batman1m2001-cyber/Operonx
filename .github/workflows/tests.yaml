@@ -117,5 +117,5 @@ jobs:
       - name: Install mkdocs
         run: pip install mkdocs-material "mkdocstrings[python]"
 
-      - name: Build docs
-        run: mkdocs build
+      - name: Build docs (strict mode)
+        run: mkdocs build --strict

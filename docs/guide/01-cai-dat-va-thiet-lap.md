@@ -316,7 +316,7 @@ cp env.example .env
 - Mỗi người dùng tự tạo file `.env` riêng với keys của mình.
 - Phải gọi `load_dotenv()` ở đầu code **trước** khi tạo op dùng provider.
 
-Xem đầy đủ template: [`env.example`](../../env.example)
+Xem đầy đủ template: `env.example` ở thư mục gốc của repository.
 
 ---
 
@@ -330,7 +330,7 @@ Khi bạn viết `LLMOp.of(resource="gpt-4o", ...)`, ResourceHub tìm key `llm:g
 
 ### Copy từ template có sẵn
 
-Repo đã có file [`resources.yaml`](../../resources.yaml) ở thư mục gốc — đây là template đầy đủ với tất cả providers (LLM, embedding, reranking, Langfuse, OTEL, Keycloak).
+Repo đã có file `resources.yaml` ở thư mục gốc — đây là template đầy đủ với tất cả providers (LLM, embedding, reranking, Langfuse, OTEL, Keycloak).
 
 ```bash
 # Nếu làm việc trong monorepo

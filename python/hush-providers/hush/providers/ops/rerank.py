@@ -45,7 +45,7 @@ class RerankOp(BaseOp):
         resource: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize RerankOp.
 

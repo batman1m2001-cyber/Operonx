@@ -42,6 +42,7 @@ import logging
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
 from .config import HandlerConfig, LogConfig
+from .events import format_data, format_event, get_template
 from .formatters import LOG_INDENT, format_log_data, log_break
 from .handlers import (
     ConsoleHandlerConfig,
@@ -211,6 +212,9 @@ __all__ = [
     "remove_handlers",
     "register_handler",
     "format_log_data",
+    "format_data",
+    "format_event",
+    "get_template",
     "log_break",
     "LOG_INDENT",
     # Theme

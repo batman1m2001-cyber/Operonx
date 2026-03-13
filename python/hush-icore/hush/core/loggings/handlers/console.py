@@ -29,12 +29,19 @@ def _parse_use_rich(value: str) -> Union[bool, str]:
 from ..theme import LOGGING_THEME
 
 # Regex để strip Rich markup tags
+_ESCAPED_BRACKET = re.compile(r"\\\[")
 _MARKUP_PATTERN = re.compile(r"\[/?[^\]]+\]")
 
 
 def strip_markup(text: str) -> str:
-    """Strip Rich markup tags từ text."""
-    return _MARKUP_PATTERN.sub("", text)
+    """Strip Rich markup tags từ text, preserving escaped brackets."""
+    # First: convert Rich escape sequences \[...] to a placeholder
+    placeholder = "\x00LBRACKET\x00"
+    text = _ESCAPED_BRACKET.sub(placeholder, text)
+    # Strip genuine Rich markup tags
+    text = _MARKUP_PATTERN.sub("", text)
+    # Restore escaped brackets as literal [
+    return text.replace(placeholder, "[")
 
 
 class ConsoleHandlerConfig(HandlerConfig):

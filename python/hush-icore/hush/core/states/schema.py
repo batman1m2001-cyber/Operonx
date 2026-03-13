@@ -34,7 +34,7 @@ class StateSchema:
 
     __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs")
 
-    def __init__(self, op=None, name: str = None):
+    def __init__(self, op: Any = None, name: Optional[str] = None):
         """Initialize the schema.
 
         Args:
