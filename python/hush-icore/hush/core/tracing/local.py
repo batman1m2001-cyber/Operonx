@@ -39,9 +39,7 @@ class LocalTracer(Tracer):
         tags: Optional[List[str]] = None,
     ):
         super().__init__(tags=tags, stream_trace_limit=None)
-        self._path = Path(
-            path or os.environ.get("HUSH_TRACES_DIR", "~/.hush/traces")
-        ).expanduser()
+        self._path = Path(path or os.environ.get("HUSH_TRACES_DIR", "~/.hush/traces")).expanduser()
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Write trace data to a JSON file.
@@ -52,7 +50,10 @@ class LocalTracer(Tracer):
         self._path.mkdir(parents=True, exist_ok=True)
         request_id = trace_data.get("request_id", "unknown")
         filepath = self._path / f"{request_id}.json"
-        filepath.write_text(json.dumps(trace_data, indent=2, default=str))
+        # Atomic write: write to tmp then rename so readers never see partial content
+        tmp = filepath.with_suffix(".tmp")
+        tmp.write_text(json.dumps(trace_data, indent=2, default=str))
+        tmp.rename(filepath)
         LOGGER.info("Trace written to %s", filepath)
 
     def __repr__(self) -> str:

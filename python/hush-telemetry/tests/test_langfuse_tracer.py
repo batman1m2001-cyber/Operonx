@@ -18,9 +18,12 @@ import pytest
 # Langfuse cloud credentials (for integration tests) - loaded from environment
 # Prefer LANGFUSE_HUSH_* keys (Langfuse Cloud) over LANGFUSE_* (VPBank internal)
 LANGFUSE_CONFIG = {
-    "public_key": os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY") or os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
-    "secret_key": os.environ.get("LANGFUSE_HUSH_SECRET_KEY") or os.environ.get("LANGFUSE_SECRET_KEY", ""),
-    "host": os.environ.get("LANGFUSE_HUSH_BASE_URL") or os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+    "public_key": os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY")
+    or os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+    "secret_key": os.environ.get("LANGFUSE_HUSH_SECRET_KEY")
+    or os.environ.get("LANGFUSE_SECRET_KEY", ""),
+    "host": os.environ.get("LANGFUSE_HUSH_BASE_URL")
+    or os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 }
 
 

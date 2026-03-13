@@ -19,13 +19,8 @@ from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
 from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, PARENT, START, BaseOp
-from hush.core.states import MemoryState, Ref
-from hush.core.states.cell import DEFAULT_CONTEXT
-from hush.core.utils.common import Param
-from hush.core.utils.context import _current_graph
-
 from hush.core.ops.graph._loop import LoopConfig, run_loop
-from hush.core.ops.graph.scheduler import run_scheduler, _is_gen
+from hush.core.ops.graph.scheduler import _is_gen, run_scheduler
 
 # Re-export validation types for backward compatibility
 from hush.core.ops.graph.validation import (  # noqa: E402, F401
@@ -35,6 +30,10 @@ from hush.core.ops.graph.validation import (  # noqa: E402, F401
     ValidationResult,
     validate_graph,
 )
+from hush.core.states import MemoryState, Ref
+from hush.core.states.cell import DEFAULT_CONTEXT
+from hush.core.utils.common import Param
+from hush.core.utils.context import _current_graph
 
 
 class GraphOp(BaseOp):
@@ -437,7 +436,9 @@ class GraphOp(BaseOp):
             if self._is_building:
                 self.build()
 
-            _outputs, stream_ctxs = await run_scheduler(self, state, context_id, parent_context, request_id)
+            _outputs, stream_ctxs = await run_scheduler(
+                self, state, context_id, parent_context, request_id
+            )
             self.stream_contexts = stream_ctxs
 
             if self._loop_config:
@@ -505,7 +506,9 @@ class GraphOp(BaseOp):
                 },
                 "stream_predecrements": self._stream_predecrements,
                 "loop_config": {
-                    "until": self._loop_config.until if isinstance(self._loop_config.until, str) else None,
+                    "until": self._loop_config.until
+                    if isinstance(self._loop_config.until, str)
+                    else None,
                     "max_iterations": self._loop_config.max_iterations,
                     "loop_vars": list(self._loop_config.initial_state.keys()),
                 }

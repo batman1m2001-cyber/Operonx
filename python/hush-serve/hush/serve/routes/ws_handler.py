@@ -49,9 +49,7 @@ def create_ws_handler(endpoint) -> Callable:
                     if event["type"] == "token":
                         await websocket.send_json({"type": "token", "data": event["data"]})
                     elif event["type"] == "done":
-                        output = {
-                            k: v for k, v in event["data"].items() if not k.startswith("$")
-                        }
+                        output = {k: v for k, v in event["data"].items() if not k.startswith("$")}
                         await websocket.send_json({"type": "result", "data": output})
 
         except WebSocketDisconnect:

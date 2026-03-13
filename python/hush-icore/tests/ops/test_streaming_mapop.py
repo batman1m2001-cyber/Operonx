@@ -65,6 +65,8 @@ async def test_streaming_concurrent_fanout():
     ends = result["process_end"]
     # If concurrent, the gap between first start and last start should be small
     start_spread = max(starts) - min(starts)
-    print(f"Process start spread: {start_spread:.2f}s (should be ~2s if streaming, ~0s if all at once)")
+    print(
+        f"Process start spread: {start_spread:.2f}s (should be ~2s if streaming, ~0s if all at once)"
+    )
     # All 10 should start within the ~2s yield window, not sequentially
     assert start_spread < 5, f"Start spread {start_spread:.2f}s — not concurrent enough"

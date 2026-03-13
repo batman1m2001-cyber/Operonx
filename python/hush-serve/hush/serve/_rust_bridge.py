@@ -258,9 +258,7 @@ def _build_cdylib(rust_ops_path: Path) -> Path:
 
     cdylib = _find_cdylib(rust_ops_path)
     if cdylib is None:
-        raise RuntimeError(
-            f"Build succeeded but no cdylib found in {rust_ops_path / 'target'}"
-        )
+        raise RuntimeError(f"Build succeeded but no cdylib found in {rust_ops_path / 'target'}")
     return cdylib
 
 

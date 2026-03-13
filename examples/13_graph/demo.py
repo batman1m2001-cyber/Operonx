@@ -17,8 +17,9 @@ import sys
 from hush.core import END, PARENT, START, GraphOp, Hush
 from workflow import add_and_double, double_flow, double_renamed, quad_flow
 
-
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 async def example_1_basic():
     """@graph cơ bản — auto-naming và >> END auto-forward."""
     print("=" * 55)

@@ -91,9 +91,7 @@ class TestCcuLinearGraph:
             START >> a >> b >> END
 
         engine = Hush(g)
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": i}) for i in range(CCU)
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": i}) for i in range(CCU)])
 
         for i, r in enumerate(results):
             expected = (i * 2) + 10
@@ -118,9 +116,7 @@ class TestCcuParallelForkJoin:
             [b, c] >> d >> END
 
         engine = Hush(g)
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": i}) for i in range(CCU)
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": i}) for i in range(CCU)])
 
         for i, r in enumerate(results):
             doubled = i * 2
@@ -148,9 +144,7 @@ class TestCcuBranch:
 
         engine = Hush(g)
         inputs = [-2, -1, 0, 1, 2]
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": x}) for x in inputs
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": x}) for x in inputs])
 
         for x, r in zip(inputs, results):
             if x >= 0:
@@ -180,9 +174,7 @@ class TestCcuNestedGraph:
             START >> d1 >> d2 >> END
 
         engine = Hush(g)
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": i}) for i in range(CCU)
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": i}) for i in range(CCU)])
 
         for i, r in enumerate(results):
             expected = i * 4  # doubled twice
@@ -211,9 +203,7 @@ class TestCcuLoop:
 
         engine = Hush(g)
         targets = [1, 2, 3, 4, 5]
-        results = await asyncio.gather(*[
-            engine.run(inputs={"target": t}) for t in targets
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"target": t}) for t in targets])
 
         for t, r in zip(targets, results):
             assert r["counter"] == t, f"target={t}: expected counter={t}, got {r['counter']}"
@@ -236,9 +226,7 @@ class TestCcuStreaming:
 
         engine = Hush(g)
         counts = [1, 2, 3, 4, 5]
-        results = await asyncio.gather(*[
-            engine.run(inputs={"n": n}) for n in counts
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"n": n}) for n in counts])
 
         for n, r in zip(counts, results):
             expected = sorted([i * 10 for i in range(n)])
@@ -260,9 +248,7 @@ class TestCcuAsyncOps:
             START >> step >> END
 
         engine = Hush(g)
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": i}) for i in range(CCU)
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": i}) for i in range(CCU)])
 
         for i, r in enumerate(results):
             assert r["result"] == i * 2, f"request {i}: expected {i * 2}, got {r['result']}"

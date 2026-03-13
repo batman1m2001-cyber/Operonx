@@ -9,8 +9,9 @@ import sys
 from hush.core import Hush
 from workflow import build_basic_chat, build_chain_chat, build_summarize
 
-
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 async def main():
     print("=" * 50)
     print("1. Basic Chat (PromptOp.of + LLMOp.of)")
