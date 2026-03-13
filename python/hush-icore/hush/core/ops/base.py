@@ -1,0 +1,637 @@
+"""BaseOp — base class for all ops in a workflow."""
+
+import asyncio
+import inspect
+import traceback
+import uuid
+from abc import ABC
+from datetime import datetime
+from time import perf_counter
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+from hush.core.loggings import LOGGER, format_event, format_log_data
+from hush.core.ops._params import merge_params, normalize_params, resolve_value
+from hush.core.states.ref import Ref
+from hush.core.utils.auto_name import auto_name, unique_name
+from hush.core.utils.common import Param
+from hush.core.utils.context import get_current
+
+if TYPE_CHECKING:
+    from hush.core.states import MemoryState
+
+
+def _has_explicit_outputs(op) -> bool:
+    """Check whether the op has user-defined explicit output mappings.
+
+    Returns True if any output Param has a non-None value (user-set).
+    Returns False if outputs are absent, empty, or all auto-parsed.
+    """
+    if not hasattr(op, "outputs") or op.outputs is None:
+        return False
+    if len(op.outputs) == 0:
+        return False
+    for param in op.outputs.values():
+        if hasattr(param, "value") and param.value is not None:
+            return True
+    return False
+
+
+def _set_wildcard_outputs(target_op):
+    """Auto-set wildcard outputs for ops connecting to END.
+
+    For each output key with no explicit value, sets it to Ref(parent, key)
+    so the op's outputs are automatically forwarded to the parent graph.
+    """
+    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
+        if target_op.outputs is None:
+            target_op.outputs = {}
+        parent_op = getattr(target_op, "parent", None) or PARENT
+        for key in target_op.outputs:
+            param = target_op.outputs[key]
+            if hasattr(param, "value") and param.value is None:
+                param.value = Ref(parent_op, key)
+
+
+# Re-export shorthand utilities for backward compatibility
+from hush.core.ops._shortcuts import (  # noqa: F401, E402
+    _BASE_INIT_KEYS,
+    shorthand,
+    split_shorthand_kwargs,
+)
+
+
+class BaseOp(ABC):
+    """Base class for all ops in a workflow.
+
+    An op is the fundamental processing unit. Each op declares typed inputs
+    and outputs (via ``Param``), and implements a ``core()`` method that
+    contains the execution logic. Ops are wired together inside a ``GraphOp``
+    using edge operators.
+
+    Sections (read top-to-bottom)::
+
+        1. INIT            __init__, __slots__, param helpers
+        2. EDGE OPERATORS  >>, >>~, >, <, [], ~ — wiring ops in a graph
+        3. EXECUTE         run(), get_inputs/outputs, store_result, _exec_core
+        4. OBSERVABILITY   _log(), _store_metrics()
+        5. SERIALIZATION   serialize(), metadata — for Rust backend & tracing
+
+    Example::
+
+        from hush.core import GraphOp, op, START, END, PARENT
+
+        @op
+        def double(x: int):
+            return {"result": x * 2}
+
+        with GraphOp(name="main") as graph:
+            d = double(x=PARENT["x"])
+            START >> d >> END
+    """
+
+    INNER_PROCESS = "__inner__"
+
+    __slots__ = [
+        "id",
+        "name",
+        "_full_name",
+        "description",
+        "type",
+        "stream",
+        "start",
+        "end",
+        "verbose",
+        "sources",
+        "targets",
+        "inputs",
+        "outputs",
+        "core",
+        "parent",
+        "contain_generation",
+        "enabled",
+        "executor",
+        "bound",
+    ]
+
+    _VALID_EXECUTORS = (None, "thread")
+    _VALID_BOUNDS = (None, "io", "cpu")
+
+    def __init__(
+        self,
+        id: str = None,
+        name: str = None,
+        description: str = "",
+        inputs: Dict[str, Any] = None,
+        outputs: Dict[str, Any] = None,
+        sources: List[str] = None,
+        targets: List[str] = None,
+        stream: bool = False,
+        start: bool = False,
+        end: bool = False,
+        contain_generation: bool = False,
+        verbose: bool = True,
+        enabled: bool = True,
+        executor: Optional[str] = None,
+        bound: Optional[str] = None,
+    ):
+        if executor not in self._VALID_EXECUTORS:
+            raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
+        if bound not in self._VALID_BOUNDS:
+            raise ValueError(f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}")
+        self.executor = executor
+        self.bound = bound
+        self.id = id or uuid.uuid4().hex
+        if name is None:
+            name = auto_name()
+        self.name = name or unique_name()
+        self._full_name = None  # Cached at build time by GraphOp.build()
+        self.description = description
+
+        self.stream = stream
+        self.start = start
+        self.end = end
+        self.verbose = verbose
+        self.enabled = enabled
+
+        self.sources: List[str] = sources or []
+        self.targets: List[str] = targets or []
+
+        self.core: Optional[Callable] = None
+        self.contain_generation = contain_generation
+        # Đăng ký vào graph cha
+        self.parent = get_current()
+        # Use getattr to avoid hasattr's double lookup
+        add_op = getattr(self.parent, "add_op", None)
+        if add_op is not None:
+            add_op(self)
+
+        # Validate op name
+        if self.name and not self.name.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(
+                f"Op name '{self.name}' may only contain alphanumeric characters, underscores, and hyphens"
+            )
+
+        # Normalize inputs/outputs to Dict[str, Param]
+        self.inputs: Dict[str, Param] = self._normalize_params(inputs)
+        self.outputs: Dict[str, Param] = self._normalize_params(outputs)
+
+        # Error if there are overlapping keys between inputs and outputs
+        if self.inputs and self.outputs:
+            overlapping_keys = set(self.inputs.keys()) & set(self.outputs.keys())
+            if overlapping_keys:
+                raise ValueError(
+                    f"Op '{self.name}' has overlapping input/output keys: {overlapping_keys}. "
+                    "Input and output variable names must be different."
+                )
+
+    def _resolve_value(self, key: str, value: Any) -> Any:
+        """Convert value to a Ref or keep as a literal."""
+        return resolve_value(key, value, self.parent)
+
+    def _normalize_params(self, params: Any) -> Dict[str, Param]:
+        """Normalize inputs/outputs to Dict[str, Param]."""
+        return normalize_params(params, self.parent)
+
+    def _merge_params(
+        self, schema: Dict[str, Param], user_provided: Dict[str, Any]
+    ) -> Dict[str, Param]:
+        """Merge schema (from parsing) with user-provided inputs/outputs."""
+        return merge_params(schema, user_provided, self.parent)
+
+    # =========================================================================
+    # 1. INIT — identity, params, parent registration
+    # =========================================================================
+
+    @property
+    def full_name(self) -> str:
+        """Fully-qualified hierarchical path of this op. Cached after build()."""
+        if self._full_name is not None:
+            return self._full_name
+        if self.parent:
+            return f"{self.parent.full_name}.{self.name}"
+        return self.name
+
+    def _cache_full_name(self) -> None:
+        """Cache full_name as stored attribute. Called at build time."""
+        self._full_name = self.full_name
+
+    def __getitem__(self, item) -> "Ref":
+        """Allow ``op["var"]`` syntax to reference an output as a Ref."""
+        return Ref(self, item)
+
+    # =========================================================================
+    # 2. EDGE OPERATORS — wiring ops inside a GraphOp
+    # =========================================================================
+
+    def __invert__(self) -> "SoftEdge":
+        """``~op``: mark this op for a soft-edge connection."""
+        return SoftEdge(self)
+
+    def __rshift__(self, other):
+        """``op >> other``: connect this op to *other* with a hard edge."""
+        edge_type = "condition" if self.type == "branch" else "normal"
+        add_edge = getattr(self.parent, "add_edge", None)
+
+        # Handle SoftEdge marker: a >> ~b
+        if isinstance(other, SoftEdge):
+            if add_edge is not None:
+                add_edge(self.name, other.op.name, edge_type, soft=True)
+            return other.op  # Return unwrapped op for chaining
+
+        if isinstance(other, list):
+            if add_edge is not None:
+                for item in other:
+                    # Check if item is SoftEdge
+                    if isinstance(item, SoftEdge):
+                        add_edge(self.name, item.op.name, edge_type, soft=True)
+                    else:
+                        add_edge(self.name, item.name, edge_type)
+            return other
+        elif getattr(other, "name", None) is not None:
+            # Check if other is END - auto-set wildcard outputs
+            if getattr(other, "name", None) == "__END__":
+                _set_wildcard_outputs(self)
+            if add_edge is not None:
+                add_edge(self.name, other.name, edge_type)
+            return other
+        return NotImplemented
+
+    def __rrshift__(self, other):
+        """``[op1, op2] >> self``: connect a list of ops to this op."""
+        edge_type = "condition" if self.type == "branch" else "normal"
+        add_edge = getattr(self.parent, "add_edge", None)
+
+        if isinstance(other, list):
+            if add_edge is not None:
+                for item in other:
+                    add_edge(item.name, self.name, edge_type)
+        return self
+
+    def __gt__(self, other):
+        """``op > other``: soft edge (does not count toward ready_count).
+
+        Used after a branch — only one predecessor needs to complete.
+        Note: Python's chained comparison means ``a > b > c`` is
+        ``(a > b) and (b > c)``, so split into separate statements.
+        """
+        edge_type = "condition" if self.type == "branch" else "normal"
+        add_edge = getattr(self.parent, "add_edge", None)
+
+        if isinstance(other, list):
+            if add_edge is not None:
+                for item in other:
+                    add_edge(self.name, item.name, edge_type, soft=True)
+            return other
+        elif getattr(other, "name", None) is not None:
+            if add_edge is not None:
+                add_edge(self.name, other.name, edge_type, soft=True)
+            return other
+        return NotImplemented
+
+    def __lt__(self, other):
+        """``op < other``: reverse soft edge.
+
+        Also invoked by Python when ``[a, b] > self`` (list.__gt__
+        returns NotImplemented, so Python falls back to self.__lt__).
+        """
+        edge_type = "condition" if self.type == "branch" else "normal"
+        add_edge = getattr(self.parent, "add_edge", None)
+
+        if isinstance(other, list):
+            if add_edge is not None:
+                for item in other:
+                    add_edge(item.name, self.name, edge_type, soft=True)
+            return self  # Return self to continue chaining: [a, b] > self > next
+        elif getattr(other, "name", None) is not None:
+            if add_edge is not None:
+                add_edge(other.name, self.name, edge_type, soft=True)
+            return self
+        return NotImplemented
+
+    # =========================================================================
+    # 3. EXECUTE — run the op, read inputs, store outputs
+    # =========================================================================
+
+    def __call__(self, **kwargs) -> Dict[str, Any]:
+        """Quick-test: call the op directly with keyword inputs."""
+        from hush.core.states import MemoryState, StateSchema
+
+        # Auto-build unbuilt GraphOps
+        if hasattr(self, "_is_building") and self._is_building and hasattr(self, "build"):
+            self.build()
+
+        state = MemoryState(StateSchema(op=self), inputs=kwargs)
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = pool.submit(asyncio.run, self.run(state)).result()
+        except RuntimeError:
+            result = asyncio.run(self.run(state))
+        return result
+
+    def is_base_op(self) -> bool:
+        return True
+
+    def get_inputs(
+        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Retrieve input values from state based on connection mappings.
+
+        Args:
+            state: Workflow state.
+            context_id: Context of this op.
+            parent_context: Context used to resolve PARENT refs (for iteration ops).
+        """
+        result = {}
+
+        for var_name, param in self.inputs.items():
+            # PARENT refs use parent_context (for loop iterations); everything else
+            # uses context_id directly — Cell hierarchy fallback handles batch resolution.
+            if (
+                parent_context is not None
+                and isinstance(param.value, Ref)
+                and param.value.raw_source is self.parent
+            ):
+                lookup_ctx = parent_context
+            else:
+                lookup_ctx = context_id
+
+            # Always read from state first (may have value from MemoryState inputs or Ref)
+            value = state[self.full_name, var_name, lookup_ctx]
+
+            if value is not None:
+                result[var_name] = value
+            elif param.value is not None and not isinstance(param.value, Ref):
+                # Fallback: literal value in Param.value
+                result[var_name] = param.value
+            elif param.default is not None:
+                # Fallback: default value
+                result[var_name] = param.default
+
+        return result
+
+    def get_outputs(
+        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Read output values from state.
+
+        Reads directly from this op's output variables. Output connections
+        (outputs={...}) are resolved by the schema at build time —
+        they create refs at the destination, not at this op.
+
+        Args:
+            state: Workflow state.
+            context_id: Context of this op.
+            parent_context: Context of PARENT (for API consistency).
+        """
+        return {var: state[self.full_name, var, context_id] for var in self.outputs}
+
+    def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
+        """Store result dict into state.
+
+        Uses state[op, var, ctx] = value for O(1) index-based storage.
+        Extracts $tags special key for dynamic tagging.
+        """
+        if not result:
+            return
+
+        # Extract $tags before storing (don't store as output variable)
+        tags = result.pop("$tags", None)
+        if tags:
+            state.add_tags(tags)
+
+        for key, value in result.items():
+            state[self.full_name, key, context_id] = value
+
+    # =========================================================================
+    # 4. OBSERVABILITY — logging and metrics
+    # =========================================================================
+
+    def _log(
+        self,
+        request_id: str,
+        context_id: Optional[str],
+        inputs: Dict[str, Any],
+        outputs: Dict[str, Any],
+        duration_ms: float,
+    ) -> None:
+        """Log execution summary with inputs, outputs, and duration."""
+        # Check both verbose flag and logger level before formatting
+        if self.verbose and LOGGER.isEnabledFor(20):  # 20 = INFO level
+            msg = format_event(
+                "op_done",
+                request_id=request_id or "unknown",
+                op_type=self.type.upper() if isinstance(self.type, str) else str(self.type).upper(),
+                full_name=self.full_name,
+                context=".".join(context_id)
+                if isinstance(context_id, tuple)
+                else (context_id or "main"),
+                duration_ms=f"{duration_ms:.1f}",
+                inputs=format_log_data(inputs),
+                outputs=format_log_data(outputs),
+            )
+            LOGGER.info(msg)
+
+    def _store_metrics(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str],
+        *,
+        error: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        duration_ms: float = 0,
+    ) -> None:
+        """Store execution metrics (timing, errors) to state."""
+        if error:
+            state[self.full_name, "error", context_id] = error
+        state[self.full_name, "start_time", context_id] = start_time
+        state[self.full_name, "end_time", context_id] = end_time
+        state[self.full_name, "duration_ms", context_id] = duration_ms
+
+    async def _exec_core(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch core function based on its type (async, threaded, sync).
+
+        Rejects generator functions — those must be driven by the
+        GraphOp scheduler, not called directly.
+        """
+        if inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core):
+            raise TypeError(
+                f"Generator op '{self.name}' cannot be called via run() directly. "
+                "Use it inside a GraphOp where the scheduler drives the generator."
+            )
+
+        if inspect.iscoroutinefunction(self.core):
+            return await self.core(**inputs)
+        elif self.executor == "thread":
+            return await asyncio.to_thread(self.core, **inputs)
+        else:
+            return self.core(**inputs)
+
+    async def run(
+        self,
+        state: "MemoryState",
+        context_id: Optional[str] = None,
+        parent_context: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute this op.
+
+        Args:
+            state: Workflow state.
+            context_id: Context for this op's own variables.
+            parent_context: Context used to resolve PARENT refs.
+        """
+        # Skip disabled ops
+        if not self.enabled:
+            LOGGER.debug("Skipped disabled op: %s", self.full_name)
+            return {}
+
+        request_id = state.request_id
+        start_time = datetime.now()
+        perf_start = perf_counter()
+        _inputs = {}
+        _outputs = {}
+        error_msg = None
+
+        try:
+            _inputs = self.get_inputs(state, context_id, parent_context)
+            _outputs = await self._exec_core(_inputs)
+            self.store_result(state, _outputs, context_id)
+
+        except Exception:
+            import sys
+
+            error_msg = (
+                traceback.format_exc()
+                if LOGGER.isEnabledFor(40)
+                else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+            )
+            LOGGER.error(
+                format_event(
+                    "op_error",
+                    request_id=request_id or "unknown",
+                    name=self.name,
+                    error=error_msg.rstrip(),
+                ),
+            )
+
+        finally:
+            end_time = datetime.now()
+            duration_ms = (perf_counter() - perf_start) * 1000
+            self._log(request_id, context_id, _inputs, _outputs, duration_ms)
+            self._store_metrics(
+                state,
+                context_id,
+                error=error_msg,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
+            )
+
+            # Performance monitoring: log slow ops (>100ms)
+            if duration_ms > 100 and LOGGER.isEnabledFor(30):
+                LOGGER.warning(
+                    format_event(
+                        "op_slow",
+                        request_id=request_id or "unknown",
+                        full_name=self.full_name,
+                        duration_ms=f"{duration_ms:.1f}",
+                    ),
+                )
+
+            return _outputs
+
+    # =========================================================================
+    # 5. SERIALIZATION — for Rust backend and tracing
+    # =========================================================================
+
+    def serialize(self) -> dict:
+        """Serialize this op to a config dict for the Rust backend."""
+        is_async = inspect.iscoroutinefunction(self.core)
+        is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
+        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→cpu)
+        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else "cpu")
+        return {
+            "type": self.type,
+            "full_name": self.full_name,
+            "name": self.name,
+            "rust_op": getattr(self.core, "_rust_op_name", None),
+            "python_callable": self.core,
+            "is_async": is_async,
+            "is_generator": is_gen,
+            "executor": self.executor,
+            "enabled": self.enabled,
+            "verbose": self.verbose,
+            "stream": self.stream,
+            "bound": bound,
+            "inputs": self._serialize_params(self.inputs),
+            "outputs": self._serialize_params(self.outputs),
+        }
+
+    def _serialize_params(self, params: Dict[str, "Param"]) -> dict:
+        """Serialize a dict of Params."""
+        if not params:
+            return {}
+        result = {}
+        for name, param in params.items():
+            entry = {
+                "default": param.default,
+                "required": param.required,
+                "ref": None,
+                "literal": None,
+            }
+            if isinstance(param.value, Ref):
+                entry["ref"] = param.value.serialize()
+            elif param.value is not None:
+                entry["literal"] = param.value
+            result[name] = entry
+        return result
+
+    @property
+    def specific_metadata(self) -> Dict[str, Any]:
+        """Return subclass-specific metadata. Override in subclasses."""
+        return {}
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Build a metadata dictionary for this op."""
+
+        def get_connect_key(param: Param):
+            if isinstance(param.value, Ref):
+                return {param.value.source: param.value.var}
+            return param.value
+
+        result = {
+            "id": self.id,
+            "name": self.full_name,
+            "type": self.type,  # Already a lowercase string (Literal type)
+        }
+
+        if self.description:
+            result["description"] = self.description
+
+        if self.inputs:
+            result["input_connects"] = {k: get_connect_key(v) for k, v in self.inputs.items()}
+
+        if self.outputs:
+            result["output_connects"] = {k: get_connect_key(v) for k, v in self.outputs.items()}
+
+        if self.sources:
+            result["sources"] = f"<- ({','.join(self.sources)})"
+
+        if self.targets:
+            result["targets"] = f"-> ({','.join(self.targets)})"
+
+        for flag in ["stream", "start", "end"]:
+            if getattr(self, flag, False):
+                result[flag] = True
+
+        result.update({k: v for k, v in self.specific_metadata.items() if v})
+
+        return result
+
+
+# Re-export edge classes and singletons for backward compatibility
+from hush.core.ops._edges import END, PARENT, START, DummyOp, SoftEdge  # noqa: E402, F401

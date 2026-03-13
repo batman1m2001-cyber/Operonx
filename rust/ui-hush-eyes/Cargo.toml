@@ -1,0 +1,17 @@
+[package]
+name = "hush-eyes"
+version = "0.1.0"
+edition = "2021"
+description = "Hush trace visualization server"
+license = "Apache-2.0"
+repository = "https://github.com/batman1m2001-cyber/Hush-ai"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+dirs = "6"

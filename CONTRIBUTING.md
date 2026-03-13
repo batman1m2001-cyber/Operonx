@@ -15,13 +15,13 @@ Thank you for your interest in contributing to Hush! This guide will help you ge
 git clone https://github.com/batman1m2001-cyber/Hush-ai.git
 cd Hush-ai
 
-# Install hush-core (foundation)
-cd hush-core && uv sync --all-extras && cd ..
+# Install hush-icore (foundation)
+cd hush-icore && uv sync --all-extras && cd ..
 
-# Install hush-providers (depends on hush-core)
+# Install hush-providers (depends on hush-icore)
 cd hush-providers && uv sync --all-extras && cd ..
 
-# Install hush-telemetry (depends on hush-core)
+# Install hush-telemetry (depends on hush-icore)
 cd hush-telemetry && uv sync --all-extras && cd ..
 ```
 
@@ -64,10 +64,10 @@ We use pytest with pytest-asyncio:
 
 ```bash
 # Run tests for a package
-cd hush-core && uv run pytest
+cd hush-icore && uv run pytest
 
 # Run with coverage
-cd hush-core && uv run pytest --cov=hush
+cd hush-icore && uv run pytest --cov=hush
 ```
 
 ## Pull Request Workflow
@@ -96,11 +96,11 @@ When making changes, update the appropriate documentation:
 
 | Change Type | Update |
 |-------------|--------|
-| New op type | `hush-core/CLAUDE.md`, `tutorial/docs/03-core-concepts.md` |
-| New provider | `hush-providers/CLAUDE.md`, `tutorial/docs/04-llm-integration.md` |
-| New tracer | `hush-telemetry/CLAUDE.md`, `tutorial/docs/09-tracing-observability.md` |
-| API change | Relevant `CLAUDE.md` + tutorial docs |
-| Internal refactor | `architecture/` if algorithm changes |
+| New op type | `hush-icore/CLAUDE.md`, `docs/guide/03-core-concepts.md` |
+| New provider | `hush-providers/CLAUDE.md`, `docs/guide/04-llm-integration.md` |
+| New tracer | `hush-telemetry/CLAUDE.md`, `docs/guide/09-tracing-observability.md` |
+| API change | Relevant `CLAUDE.md` + guide docs |
+| Internal refactor | `docs/architecture/` if algorithm changes |
 
 See [CLAUDE.md](CLAUDE.md) for the complete sync mapping.
 
@@ -108,34 +108,41 @@ See [CLAUDE.md](CLAUDE.md) for the complete sync mapping.
 
 ```
 Hush-ai/
-├── hush-core/          # Core workflow engine
-├── rush-core/          # Rust execution backend (PyO3 + rayon)
-├── hush-providers/     # LLM, embedding, reranking (Python)
-├── rush-providers/     # Rust provider implementations (native HTTP, ONNX)
-├── hush-telemetry/     # Tracing backends (Langfuse, OTEL)
-├── tutorial/      # Docs (Vietnamese) + examples
-├── ui-hush-eyes/          # Standalone Rust server for trace visualization
-├── architecture/       # Deep technical docs
-└── CLAUDE.md           # Quick reference
+├── python/
+│   ├── hush-icore/         # Core workflow engine
+│   ├── hush-providers/     # LLM, embedding, reranking (Python)
+│   ├── hush-telemetry/     # Tracing backends (Langfuse, OTEL)
+│   └── hush-serve/         # HTTP API server (FastAPI + uvicorn)
+├── rust/
+│   ├── hush-icore/         # Rust execution backend (DashMap + rayon)
+│   ├── hush-providers/     # Rust provider implementations (native HTTP, ONNX)
+│   ├── hush-serve/         # Rust HTTP server (Axum)
+│   ├── hush-plugin/        # Plugin SDK (cdylib)
+│   └── hush-eyes/          # Trace visualization server
+├── examples/               # Runnable Python examples
+├── docs/
+│   ├── guide/              # User guide (Vietnamese)
+│   └── architecture/       # Deep technical docs
+└── CLAUDE.md               # Quick reference
 ```
 
 ## Package Dependencies
 
 ```
-hush-core (foundation - no hush dependencies)
+hush-icore (foundation - no hush dependencies)
     ↓
-hush-providers (depends on hush-core)
+hush-providers (depends on hush-icore)
     ↓
-hush-telemetry (depends on hush-core)
+hush-telemetry (depends on hush-icore)
 
-rush-core (Rust backend - depends on hush-core at runtime)
-rush-providers (Rust crate - used by rush-core)
+hush-icore (Rust backend - depends on hush-icore at runtime)
+hush-providers (Rust crate - used by hush-icore)
 ```
 
 ## Questions?
 
 - Open a [Question issue](https://github.com/batman1m2001-cyber/Hush-ai/issues/new?template=3-question.yml)
-- Check existing documentation in `tutorial/docs/`
+- Check existing documentation in `docs/guide/`
 
 ## License
 
