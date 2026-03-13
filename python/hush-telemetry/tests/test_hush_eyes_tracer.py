@@ -3,9 +3,9 @@
 import time
 
 import pytest
-
 from hush.core import END, PARENT, START, GraphOp, Hush
 from hush.core.ops import FuncOp
+
 from hush.telemetry import HushEyesTracer
 
 

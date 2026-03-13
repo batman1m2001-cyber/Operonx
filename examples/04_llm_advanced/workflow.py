@@ -16,7 +16,6 @@ from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op
 from hush.providers import LLMOp, PromptOp
 
-
 # --- Tool calling helpers ---
 
 CALC_TOOLS = [

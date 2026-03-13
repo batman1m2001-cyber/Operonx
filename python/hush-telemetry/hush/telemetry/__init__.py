@@ -32,6 +32,7 @@ Example:
 """
 
 # Auto-register backends to ResourceHub on import
+import hush.telemetry.plugin  # noqa: F401 — auto-registers on import
 from hush.core.tracing import Tracer
 
 # Backends (configs + clients)
@@ -42,7 +43,6 @@ from hush.telemetry.backends import (
     OTELClient,
     OTELConfig,
 )
-import hush.telemetry.plugin  # noqa: F401 — auto-registers on import
 
 # Tracers
 from hush.telemetry.tracers import (

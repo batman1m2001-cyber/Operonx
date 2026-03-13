@@ -239,6 +239,7 @@ class TestChainShorthand:
 
     def test_chain_basic(self):
         from hush.core.ops import GraphOp
+
         from hush.providers.ops.chain import chain
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:

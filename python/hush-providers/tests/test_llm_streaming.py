@@ -301,7 +301,7 @@ class TestStreamingFallback:
 
         async def failing_stream(**kwargs):
             raise ConnectionError("primary down")
-            yield  # noqa: unreachable — makes this an async gen
+            yield  # noqa: F541 — unreachable yield makes this an async gen
 
         failing_llm.stream = failing_stream
 

@@ -14,6 +14,11 @@ Key difference:
 
 import asyncio
 
+from hush.core.ops.iteration.base import Each
+from hush.core.ops.iteration.for_op import ForOp
+from hush.core.ops.iteration.map_op import MapOp
+from hush.core.ops.iteration.while_op import WhileOp
+
 from hush.core import (
     END,
     PARENT,
@@ -22,10 +27,6 @@ from hush.core import (
     StateSchema,
     op,
 )
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.map_op import MapOp
-from hush.core.ops.iteration.while_op import WhileOp
 
 # ============================================================================
 # Example 1: MapOp with WhileLoop Inside (Parallel Outer Loop)
