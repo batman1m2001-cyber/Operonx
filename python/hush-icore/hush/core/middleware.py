@@ -17,7 +17,9 @@ class Middleware:
     reverse order (after_run, on_error).
     """
 
-    async def before_run(self, graph, inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def before_run(
+        self, graph, inputs: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Called before graph execution. Can modify inputs.
 
         Args:
@@ -30,7 +32,9 @@ class Middleware:
         """
         return inputs
 
-    async def after_run(self, graph, inputs: Dict[str, Any], result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def after_run(
+        self, graph, inputs: Dict[str, Any], result: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Called after graph execution. Can modify result.
 
         Args:
@@ -44,7 +48,9 @@ class Middleware:
         """
         return result
 
-    async def on_error(self, graph, inputs: Dict[str, Any], error: Exception, context: Dict[str, Any]) -> None:
+    async def on_error(
+        self, graph, inputs: Dict[str, Any], error: Exception, context: Dict[str, Any]
+    ) -> None:
         """Called when graph execution fails.
 
         Default behavior re-raises the error. Override to add

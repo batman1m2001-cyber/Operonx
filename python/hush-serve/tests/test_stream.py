@@ -4,8 +4,8 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-
 from hush.core import END, PARENT, START, GraphOp, op
+
 from hush.serve import HushApp
 
 
@@ -111,7 +111,7 @@ class TestStreamWithGenerator:
                 # Next non-empty line should be data:
                 for j in range(i + 1, len(lines)):
                     if lines[j].startswith("data:"):
-                        data = json.loads(lines[j][len("data:"):].strip())
+                        data = json.loads(lines[j][len("data:") :].strip())
                         token_values.append(data.get("value"))
                         break
 
@@ -132,7 +132,7 @@ class TestStreamWithGenerator:
             if line.startswith("event: done"):
                 for j in range(i + 1, len(lines)):
                     if lines[j].startswith("data:"):
-                        data = json.loads(lines[j][len("data:"):].strip())
+                        data = json.loads(lines[j][len("data:") :].strip())
                         assert sorted(data["result"]) == [2, 4, 6]
                         return
         pytest.fail("No done event found")

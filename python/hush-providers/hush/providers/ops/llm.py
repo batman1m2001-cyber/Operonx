@@ -490,9 +490,7 @@ class LLMOp(BaseOp):
                     LOGGER.info(f"Trying fallback model {fallback_key}...")
                     try:
                         completion = await fallback_llm.generate(**llm_params)
-                        _outputs = self._extract_completion_data(
-                            completion, _inputs, fallback_key
-                        )
+                        _outputs = self._extract_completion_data(completion, _inputs, fallback_key)
 
                         selected_llm = fallback_llm
                         selected_resource = fallback_key

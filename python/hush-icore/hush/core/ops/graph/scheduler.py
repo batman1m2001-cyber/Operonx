@@ -205,8 +205,12 @@ async def run_scheduler(
             ms = (perf_counter() - gen_perf) * 1000
             op_obj._log(request_id, ctx, gen_inputs, {}, ms)
             op_obj._store_metrics(
-                state, ctx, error=gen_error,
-                start_time=gen_start, end_time=datetime.now(), duration_ms=ms,
+                state,
+                ctx,
+                error=gen_error,
+                start_time=gen_start,
+                end_time=datetime.now(),
+                duration_ms=ms,
             )
 
         await event_queue.put(("exhausted", name))

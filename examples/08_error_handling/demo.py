@@ -7,8 +7,8 @@ Chạy: cd examples && uv run python 08_error_handling/demo.py
 """
 
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,8 +23,9 @@ from workflow import (
     build_retry_fallback,
 )
 
-
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 async def main():
     # 1. Error capture — workflow doesn't crash
     print("=" * 50)

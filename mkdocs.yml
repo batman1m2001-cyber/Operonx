@@ -1,7 +1,7 @@
 site_name: Hush
 site_description: High-performance workflow engine that runs anything as a workflow
 repo_url: https://github.com/batman1m2001-cyber/Hush-ai
-docs_dir: .
+docs_dir: docs
 
 theme:
   name: material
@@ -33,10 +33,10 @@ plugins:
       handlers:
         python:
           paths:
-            - ../python/hush-icore
-            - ../python/hush-providers
-            - ../python/hush-telemetry
-            - ../python/hush-serve
+            - python/hush-icore
+            - python/hush-providers
+            - python/hush-telemetry
+            - python/hush-serve
           options:
             show_source: true
             show_root_heading: true

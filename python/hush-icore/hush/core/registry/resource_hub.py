@@ -355,9 +355,7 @@ class ResourceHub:
         try:
             resolved_token = self._resolve_api_key(config.api_key)
         except Exception as e:
-            raise KeyError(
-                f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})"
-            ) from e
+            raise KeyError(f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})") from e
 
         config_dict = config.model_dump()
         config_dict["api_key"] = resolved_token

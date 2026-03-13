@@ -9,8 +9,8 @@ Chạy: cd examples && uv run python 10_multi_model/demo.py
 """
 
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -26,8 +26,9 @@ from workflow import (
     build_parallel_comparison,
 )
 
-
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 async def main():
     if not os.environ.get("OPENAI_API_KEY"):
         print("Skipped — OPENAI_API_KEY chưa set")

@@ -2,13 +2,10 @@
 
 import inspect
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 from hush.core import END, PARENT, START, GraphOp, Hush
-from hush.core.states.schema import StateSchema
-
 
 # =============================================================================
 # Mock Helpers
@@ -97,7 +94,10 @@ class TestStreamCoreYields:
         chunks = [
             make_chunk(content="Hello"),
             make_chunk(content=" world"),
-            make_chunk(finish_reason="stop", usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}),
+            make_chunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            ),
         ]
 
         op = LLMOp(name="test", resource="gpt-4o", stream=True)
@@ -166,7 +166,10 @@ class TestStreamingLLMInGraph:
         chunks = [
             make_chunk(content="Hello"),
             make_chunk(content=" world"),
-            make_chunk(finish_reason="stop", usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}),
+            make_chunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            ),
         ]
 
         with GraphOp(name="llm_stream") as g:
@@ -213,7 +216,10 @@ class TestStreamingLLMInGraph:
         chunks = [
             make_chunk(content="Hello"),
             make_chunk(content=" world"),
-            make_chunk(finish_reason="stop", usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}),
+            make_chunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            ),
         ]
 
         with GraphOp(name="llm_run") as g:
