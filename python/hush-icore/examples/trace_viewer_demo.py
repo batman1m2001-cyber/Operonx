@@ -13,6 +13,11 @@ Generates traces to HUSH_TRACES_DB (default: ~/.hush/traces.db).
 import asyncio
 from time import sleep
 
+from hush.core.ops.iteration.base import Each
+from hush.core.ops.iteration.for_op import ForOp
+from hush.core.ops.iteration.map_op import MapOp
+from hush.core.ops.iteration.while_op import WhileOp
+
 from hush.core import (
     END,
     PARENT,
@@ -20,10 +25,6 @@ from hush.core import (
     GraphOp,
     Hush,
 )
-from hush.core.ops.iteration.base import Each
-from hush.core.ops.iteration.for_op import ForOp
-from hush.core.ops.iteration.map_op import MapOp
-from hush.core.ops.iteration.while_op import WhileOp
 from hush.core.ops.transform.func_op import op
 from hush.core.tracing import LocalTracer
 

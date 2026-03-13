@@ -9,6 +9,8 @@ This package provides AI provider integrations for the Hush workflow engine:
 """
 
 # Auth exports
+# Auto-register plugins on import
+import hush.providers.registry  # noqa: F401
 from hush.providers.auth import (
     KeycloakTokenConfig,
     KeycloakTokenProvider,
@@ -50,9 +52,6 @@ from hush.providers.ops import (
     RerankOp,
     chain,
 )
-
-# Auto-register plugins on import
-import hush.providers.registry  # noqa: F401
 
 # Reranking exports
 from hush.providers.rerankers import (
