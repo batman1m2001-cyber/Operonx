@@ -18,7 +18,7 @@ git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
 uv pip install -e hush-core -e hush-providers
 ```
 
-Xem chi tiết tại [Cài đặt và Thiết lập](../tutorial/docs/01-cai-dat-va-thiet-lap.md).
+Xem chi tiết tại [Cài đặt và Thiết lập](../docs/guide/01-cai-dat-va-thiet-lap.md).
 
 ## Quick Start
 
@@ -92,7 +92,7 @@ embedding:bge-m3:
 
 ## Documentation
 
-- [User Docs](../tutorial/docs/) - Tutorials và guides
+- [User Docs](../docs/guide/) - Tutorials và guides
 - [Architecture](../architecture/providers/) - Internal documentation
   - [LLM Abstraction](../architecture/providers/llm-abstraction.md)
   - [Embedding Provider](../architecture/providers/embedding-provider.md)

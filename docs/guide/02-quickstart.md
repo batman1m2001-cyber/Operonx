@@ -2,9 +2,9 @@
 
 Hướng dẫn chạy workflow đầu tiên với Hush.
 
-> **Ví dụ chạy được**: `examples/01_hello_world.py`, `examples/02_data_pipeline.py`
+> **Ví dụ chạy được**: `examples/01_hello_world/demo.py`, `examples/02_data_pipeline/demo.py`
 
-> **Yêu cầu trước khi bắt đầu:** Hoàn thành [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) — bao gồm cài packages, tạo `.env`, và có `resources.yaml`. Mục 2-3 dưới đây chỉ cần `hush-core`. Mục 4 (LLM) cần `.env` + `resources.yaml` đã thiết lập.
+> **Yêu cầu trước khi bắt đầu:** Hoàn thành [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md) — bao gồm cài packages, tạo `.env`, và có `resources.yaml`. Mục 2-3 dưới đây chỉ cần `hush-icore`. Mục 4 (LLM) cần `.env` + `resources.yaml` đã thiết lập.
 
 ## 1. Cài đặt
 

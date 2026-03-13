@@ -4,7 +4,7 @@
 
 `Hush` là execution engine chính, điều phối việc thực thi workflows.
 
-Location: `hush-core/hush/core/engine.py`
+Location: `hush-icore/hush/core/engine.py`
 
 ## Hush Class
 
@@ -109,24 +109,25 @@ result["$state"] = state
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Rust Mode (rush-core)
+## Rust Mode (hush-icore)
 
-When `mode="rust"` is passed to `engine.run()`, execution bypasses the Python asyncio scheduler entirely and runs in a compiled Rust engine:
+When `backend="rust"` is used via `engine.serve()`, execution bypasses the Python asyncio scheduler entirely and runs in a compiled Rust engine (hush-serve):
 
 ```python
-result = await engine.run(inputs={"x": 5}, mode="rust")
+engine = Hush(graph)
+engine.serve(port=8000, backend="rust", rust_ops="rust_ops")
 ```
 
 ### Rust Execution Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Rush.run() (Rust)                        │
+│                     Hush.run() (Rust)                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  1. graph.serialize() → config dict (Python side)            │
 │                          |                                   │
-│  2. Rush(config) → GraphConfig::from_dict() (Rust side)      │
+│  2. Hush(config) → GraphConfig::from_dict() (Rust side)      │
 │                          |                                   │
 │  3. Store inputs into EngineState (DashMap)                   │
 │                          |                                   │
@@ -161,7 +162,7 @@ result = await engine.run(inputs={"x": 5}, mode="rust")
 | Op execution | Async dispatch | Direct function call |
 | Performance | Baseline | 2-6x faster |
 
-For detailed Rust architecture, see `rush-core/CLAUDE.md`.
+For detailed Rust architecture, see `hush-icore/CLAUDE.md`.
 
 ## Multiple Runs
 
@@ -222,7 +223,8 @@ result = await engine.run(inputs)
 from hush.telemetry import LangfuseTracer
 
 tracer = LangfuseTracer()
-result = await engine.run(inputs, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs)
 
 # Traces được flush non-blocking sau khi run hoàn thành
 ```

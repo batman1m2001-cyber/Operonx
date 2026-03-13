@@ -7,16 +7,16 @@ Hush is a high-performance workflow engine that runs anything as a workflow—fr
 ```
 Hush-ai/
 ├── python/                # Python packages
-│   ├── hush-core/         # Core workflow engine (ops, state, tracing)
+│   ├── hush-icore/        # Core workflow engine (ops, state, tracing)
 │   ├── hush-providers/    # LLM, embedding, reranking integrations
 │   ├── hush-serve/        # HTTP API server (FastAPI + uvicorn)
 │   └── hush-telemetry/    # External tracing backends (Langfuse, OTEL)
 ├── rust/                  # Rust crates
 │   ├── Cargo.toml         # Workspace root
-│   ├── rush-core/         # High-performance execution backend (pure rlib, DashMap)
-│   ├── rush-providers/    # Native HTTP providers, ONNX inference
-│   ├── rush-serve/        # Standalone HTTP server (Axum + rush-core)
-│   ├── rush-telemetry/    # Rust telemetry backends
+│   ├── hush-icore/        # High-performance execution backend (pure rlib, DashMap)
+│   ├── hush-providers/    # Native HTTP providers, ONNX inference
+│   ├── hush-serve/        # Standalone HTTP server (Axum + hush-icore)
+│   ├── hush-telemetry/    # Rust telemetry backends
 │   └── hush-eyes/         # Trace visualization server (Axum + SQLite)
 ├── examples/              # Runnable Python examples
 ├── docs/                  # All documentation
@@ -42,37 +42,37 @@ Hush-ai/
 ## Package Dependencies
 
 ```
-python/hush-core (foundation - no hush dependencies)
+python/hush-icore (foundation - no hush dependencies)
     ↓
-python/hush-providers (depends on hush-core)
+python/hush-providers (depends on hush-icore)
     ↓
-python/hush-telemetry (depends on hush-core)
+python/hush-telemetry (depends on hush-icore)
     ↓
-python/hush-serve (depends on hush-core, optional: hush-providers, hush-telemetry)
+python/hush-serve (depends on hush-icore, optional: hush-providers, hush-telemetry)
 
-rust/rush-core (Pure Rust engine - standalone rlib, built via cargo build)
-rust/rush-providers (Rust crate - used by rush-core, built via cargo build)
-rust/rush-serve (Rust binary - depends on rush-core + rush-providers)
+rust/hush-icore (Pure Rust engine - standalone rlib, built via cargo build)
+rust/hush-providers (Rust crate - used by hush-icore, built via cargo build)
+rust/hush-serve (Rust binary - depends on hush-icore + hush-providers)
 ```
 
 ## When to Modify Which Package
 
 | Task | Package |
 |------|---------|
-| New op type | python/hush-core/hush/core/ops/ |
+| New op type | python/hush-icore/hush/core/ops/ |
 | New LLM/embedding/reranker provider (Python) | python/hush-providers/hush/providers/ |
-| New LLM/embedding/reranker provider (Rust) | rust/rush-providers/src/ |
+| New LLM/embedding/reranker provider (Rust) | rust/hush-providers/src/ |
 | New tracing backend | python/hush-telemetry/hush/telemetry/ |
-| Rust execution backend | rust/rush-core/src/ |
+| Rust execution backend | rust/hush-icore/src/ |
 | HTTP API server (Python) | python/hush-serve/hush/serve/ |
-| HTTP API server (Rust) | rust/rush-serve/src/ |
-| New built-in Rust op | rust/rush-core/src/builtin_ops/ops.rs + dispatch in rust/rush-core/src/builtin_ops/mod.rs |
+| HTTP API server (Rust) | rust/hush-serve/src/ |
+| New Rust plugin op | Create cdylib crate with `hush_plugin!` macro, reference via `@op(rust="./crate::module::func")` |
 | Documentation or examples | docs/guide/ + examples/ |
 | Trace visualization server | rust/hush-eyes/ |
 
 ## Global Coding Conventions
 
-### Python (hush-core, hush-providers, hush-telemetry)
+### Python (hush-icore, hush-providers, hush-telemetry)
 
 - **Python**: 3.10+
 - **Async-first**: All I/O operations use asyncio
@@ -81,40 +81,43 @@ rust/rush-serve (Rust binary - depends on rush-core + rush-providers)
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust (rust/rush-core, rust/rush-providers, rust/ui-hush-eyes)
+### Rust (rust/hush-icore, rust/hush-providers, rust/ui-hush-eyes)
 
-- **rush-core**: Pure Rust library crate (`rlib`), built via `cd rust && cargo build --release`
+- **hush-icore**: Pure Rust library crate (`rlib`), built via `cd rust && cargo build --release`
   - DashMap for concurrent state, rayon for parallel execution
-  - Standalone engine: `Rush::new(json_str)` + `Rush::run_json(inputs)`
-- **rush-providers**: Rust crate with per-provider modules (llms/, embeddings/, rerankers/)
+  - Standalone engine: `Hush::new(json_str)` + `Hush::run_json(inputs)`
+- **hush-providers**: Rust crate with per-provider modules (llms/, embeddings/, rerankers/)
   - Native HTTP providers (OpenAI, Azure, Gemini, Cohere, Pinecone, vLLM)
   - ONNX inference via `ort` crate
-  - Built as part of rush-core via `cargo build`
+  - Built as part of hush-icore via `cargo build`
 - **ui-hush-eyes**: Standalone binary, built via `cargo build --release`
   - Axum HTTP framework, rusqlite for SQLite storage
   - CLI via clap (--host, --port, --db-path)
 
-### Rust Built-in Ops
+### Rust Plugin Ops (cdylib)
 
-Built-in Rust ops live in `rust/rush-core/src/builtin_ops/` as an internal module. Dispatch is handled via a match statement in `rust/rush-core/src/builtin_ops/mod.rs` -- no dynamic loading, no C ABI.
+All Rust ops are dispatched via the `OpRegistry` trait in `hush-icore/src/registry.rs`. Custom ops are written in cdylib crates and loaded at runtime by hush-serve via `libloading`.
 
 ```python
-# Reference the Rust op by function name
-@op(rust="double")
+# Reference plugin op by crate::module::function path
+@op(rust="./rust_ops::pipeline::double")
 def double(x: int):
     return {"result": x * 2}  # Python fallback
 ```
 
-**Adding a new built-in op:**
-1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in `rust/rush-core/src/builtin_ops/ops.rs`
-2. Add a match arm in `rust/rush-core/src/builtin_ops/mod.rs` to dispatch to it
-3. Reference via `@op(rust="func_name")`
+**Adding a new Rust op:**
+1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in your cdylib crate
+2. Export via `hush_plugin!(func_name)` macro (from `hush-plugin` crate)
+3. Reference via `@op(rust="./crate::module::func")`
 
 ### Naming Conventions
 
-**Packages** follow the `hush-*` / `rush-*` pattern:
-- `hush-*` — Python packages (hush-core, hush-providers, hush-telemetry)
-- `rush-*` — Rust packages (rush-core, rush-providers)
+**Packages** follow the `hush-*` pattern:
+- `hush-icore` — Core engine (Python + Rust)
+- `hush-providers` — Provider integrations (Python + Rust)
+- `hush-telemetry` — Tracing backends (Python + Rust)
+- `hush-serve` — HTTP server (Python + Rust)
+- `hush-plugin` — Rust plugin SDK
 
 ### Code Style
 
@@ -132,8 +135,8 @@ When a core API doesn't work as expected (e.g., `op >> END` not auto-forwarding 
 **IMPORTANT:** Always use `uv run` to execute Python tools (pytest, ruff, etc.) — never call them directly.
 
 ```bash
-# hush-core
-cd python/hush-core && uv pip install -e ".[dev]" && uv run -m pytest
+# hush-icore
+cd python/hush-icore && uv pip install -e ".[dev]" && uv run -m pytest
 
 # hush-providers
 cd python/hush-providers && uv pip install -e ".[dev]" && uv run -m pytest
@@ -144,17 +147,17 @@ cd python/hush-telemetry && uv pip install -e ".[dev]" && uv run -m pytest
 # hush-serve (Python HTTP server)
 cd python/hush-serve && uv sync --all-extras && uv run -m pytest
 
-# rush-core (Rust execution backend)
-cd rust && cargo test -p rush-core
+# hush-icore (Rust execution backend)
+cd rust && cargo test -p hush-icore
 
-# rush-providers (Rust provider crate — built with rush-core, tests are Rust-only)
-cd rust && cargo test -p rush-providers
+# hush-providers (Rust provider crate — built with hush-icore, tests are Rust-only)
+cd rust && cargo test -p hush-providers
 
 # All Rust crates (workspace)
 cd rust && cargo test --workspace
 
-# rush-serve (Rust HTTP server)
-cd rust && cargo build -p rush-serve --release
+# hush-serve (Rust HTTP server)
+cd rust && cargo build -p hush-serve --release
 
 # ui-hush-eyes (Rust trace server)
 cd rust && cargo build -p hush-eyes --release
@@ -351,7 +354,7 @@ with GraphOp.loop(until="count >= 5", count=0) as loop:
 
 ## Exception Hierarchy
 
-All op errors inherit from `OpError` in `python/hush-core/hush/core/exceptions.py`:
+All op errors inherit from `OpError` in `python/hush-icore/hush/core/exceptions.py`:
 - `ParserError`, `CodeError`, `BranchError`, `ConditionError`, `IterationError`
 - `PromptError`, `EmbeddingError`, `RerankError`
 
@@ -369,5 +372,5 @@ All op errors inherit from `OpError` in `python/hush-core/hush/core/exceptions.p
 Packages use editable installs via uv.sources in pyproject.toml:
 ```toml
 [tool.uv.sources]
-hush-core = { path = "../hush-core", editable = true }
+hush-icore = { path = "../hush-icore", editable = true }
 ```

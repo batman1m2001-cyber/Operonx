@@ -1,10 +1,10 @@
-# Rush-Core vs Python Backend — Benchmark Results
+# Hush-icore vs Python Backend — Benchmark Results
 
 **Date:** 2026-03-10
 **Platform:** Windows 10 (MSYS_NT-10.0-26100), x86_64
 **Rust build:** release (LTO)
 **Python:** hush-core async engine
-**Benchmark:** `rush-core/benches/bench_e2e.py`
+**Benchmark:** `hush-icore/benches/bench_e2e.py`
 
 ## Summary
 
@@ -104,5 +104,5 @@
 
 - Pattern 5 (ForOp loop) was skipped — `ForOp`/`Each` have been replaced by `GraphOp.loop`.
 - Each pattern runs multiple iterations; the range shows min–max speedup across runs.
-- Rust backend uses `Rush::new(json)` + `Rush::run_json(inputs)` via the `rush-bench` binary.
+- Rust backend uses `Hush::new(json)` + `Hush::run_json(inputs)` via the `hush-bench` binary.
 - Python backend uses `Hush(graph)` + `engine.run(inputs)` with the default async engine.

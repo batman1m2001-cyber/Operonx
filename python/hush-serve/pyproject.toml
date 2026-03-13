@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Hush Team" }]
 keywords = ["workflow", "api", "server", "fastapi", "sse", "websocket"]
 dependencies = [
-    "hush-core>=0.1.0",
+    "hush-icore>=0.1.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
@@ -44,6 +44,6 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.uv.sources]
-hush-core = { path = "../hush-core", editable = true }
+hush-icore = { path = "../hush-icore", editable = true }
 hush-providers = { path = "../hush-providers", editable = true }
 hush-telemetry = { path = "../hush-telemetry", editable = true }

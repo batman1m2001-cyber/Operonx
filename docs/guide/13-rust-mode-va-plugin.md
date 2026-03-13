@@ -1,8 +1,8 @@
 # Rust Mode và Plugin Ops
 
-Tăng tốc workflow 2-6x với Rust execution backend và tạo Rust plugin ops riêng.
+Tăng tốc workflow với Rust execution backend và tạo Rust plugin ops riêng.
 
-> **Ví dụ chạy được**: `examples/17_rust_mode.py`, `examples/18_rust_plugin_ops.py`
+> **Ví dụ chạy được**: Tất cả examples có `serve_rust.py` (01-12) đều chạy được ở Rust mode.
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -11,65 +11,48 @@ Tăng tốc workflow 2-6x với Rust execution backend và tạo Rust plugin ops
 > |--------|-------|-------|
 > | `@op` | `FuncOp` | `@op` decorator trên function |
 > | `@op(rust=...)` | `FuncOp` | Rust plugin op với Python fallback |
-> | `MapOp.of()` | `MapOp` | `MapOp.of(x=Each([1,2,3]))` |
-> | `ForOp.of()` | `ForOp` | `ForOp.of(x=Each([1,2,3]))` |
 
 ## Giới thiệu
 
-**Rust mode** là execution backend thay thế cho Python mode mặc định. Thay vì dùng Python asyncio để schedule ops, Rust mode dùng **rush-core** (viết bằng Rust + PyO3) với:
+**Rust mode** là execution backend thay thế cho Python mode mặc định. Thay vì dùng Python asyncio để schedule ops, Rust mode dùng **hush-icore** (viết bằng Rust) với:
 
 - **DashMap** cho concurrent state — thread-safe, lock-free reads
 - **rayon** cho parallel execution — fan-out/fan-in chạy thật song song
 - **tokio** cho async I/O — LLM calls, embeddings chạy concurrent
 
-Kết quả: **2-6x nhanh hơn** cho hầu hết workflow patterns.
-
-## Cài đặt rush-core
+## Cài đặt hush-icore
 
 ```bash
-cd rush-core && cargo build --release
+cd rust && cargo build --release
 ```
 
 > **Lưu ý:** Cần Rust toolchain (`rustup`).
 
 ## Sử dụng Rust mode
 
-Chỉ cần thêm `mode="rust"` khi khởi tạo `Hush` engine:
+Dùng `engine.serve(backend="rust")` để chạy workflow trên Rust backend (hush-serve + Axum):
 
 ```python
 from hush.core import Hush, GraphOp, op, START, END, PARENT
 
-@op
+@op(rust="./rust_ops::math::double")
 def double(x: int):
     return {"result": x * 2}
 
-async def main():
-    with GraphOp(name="demo") as graph:
-        step = double(x=PARENT["x"])
-        START >> step >> END
+with GraphOp(name="demo") as graph:
+    step = double(x=PARENT["x"])
+    START >> step >> END
 
-    # Python mode (mặc định)
-    engine_py = Hush(graph)
-    result = await engine_py.run(inputs={"x": 5})
+engine = Hush(graph)
 
-    # Rust mode — nhanh hơn 2-6x
-    engine_rs = Hush(graph, mode="rust")
-    result = await engine_rs.run(inputs={"x": 5})
-    # Kết quả giống nhau: {"result": 10}
+# Python backend (mặc định) — FastAPI + uvicorn
+engine.serve(port=8000)
+
+# Rust backend — Axum + hush-serve
+engine.serve(port=8000, backend="rust", rust_ops="rust_ops")
 ```
 
-> **Fallback tự động:** Nếu rush-core chưa cài, engine tự chuyển về Python mode và log warning.
-
-### Benchmark so sánh
-
-| Pattern | Tốc độ Rust vs Python |
-|---------|----------------------|
-| Linear chain (50-500 ops) | 2.3x – 2.7x |
-| Nested @graph (2-20 stages) | 3.4x – 3.9x |
-| Parallel fan-out (5-50 branches) | 2.9x – 3.2x |
-| ForOp loop (10-100 items) | 3.0x – 3.3x |
-| MapOp parallel (10-50 items) | 2.5x – 3.0x |
-| CPU contention | 2.4x – 6.1x |
+> **Lưu ý:** `backend="rust"` yêu cầu hush-serve binary đã build (`cd rust && cargo build --release -p hush-serve`) và plugin cdylib đã build.
 
 ### Parallel execution trong Rust mode
 
@@ -81,62 +64,33 @@ Rust mode sử dụng **batch-aware scheduler**:
 
 ## Rust Plugin Ops
 
-Ngoài Rust mode (tăng tốc scheduling), bạn có thể viết **Rust plugin ops** — các op được compile thành shared library (.so/.dylib) và load tại runtime.
+Để dùng Rust mode, **mọi `@op` / FuncOp trong graph đều phải có Rust version** — nếu bất kỳ op nào thiếu `rust="..."`, Rust mode sẽ không thể kích hoạt. Rust plugin ops được compile thành shared library (.so/.dylib/.dll) và load tại runtime qua **cdylib plugin system**.
 
-### Tại sao dùng Rust plugin ops?
+### Tại sao cần Rust plugin ops?
 
-- **CPU-bound tasks** — hash chains, data processing, tính toán nặng
-- **Không cần GIL** — chạy song song thực sự trong Rust mode
-- **Python fallback** — cùng function body chạy được ở cả Python mode
+- **Bắt buộc cho Rust mode** — mọi custom op phải có Rust implementation
+- **CPU-bound tasks** — hash chains, data processing, tính toán nặng chạy ngoài GIL
+- **Python fallback** — cùng function body vẫn chạy được ở Python mode khi không cần Rust
 
 ### Cách sử dụng
 
 Dùng `@op(rust="<path>::<func>")` decorator:
 
 ```python
-@op(rust="double")
+# Plugin op — path tương đối đến crate::module::function
+@op(rust="./rust_ops::pipeline::my_function")
+def my_function(x: int):
+    return {"result": x + 1}  # Python fallback
+
+# Hoặc chỉ function name nếu crate mặc định
+@op(rust="./rust_ops::math::double")
 def double(x: int):
-    return {"result": x * 2}  # Python fallback
+    return {"result": x * 2}
 ```
 
-- `"double"` — tên function trong rush-core built-in ops
+Tất cả Rust ops đều được dispatch qua `OpRegistry` trait — không có built-in ops riêng biệt. Mọi custom op phải được viết trong một cdylib plugin crate.
 
-### Built-in Rust ops
-
-Hush đi kèm các built-in ops trong `rush-core/src/builtin_ops/`:
-
-| Category | Op | Input → Output |
-|----------|----|---------------|
-| **Core** | `double` | `x → result = x * 2` |
-| | `add` | `a, b → result = a + b` |
-| | `hash_chain` | `data, iterations → hash` (CPU-heavy) |
-| **String** | `string_concat` | `parts: list[str] → result: str` |
-| | `string_split` | `text, delimiter → parts: list[str]` |
-| | `string_template` | `template, vars: dict → result` |
-| **JSON** | `json_parse` | `text → data` (parse JSON string) |
-| | `json_extract` | `data, path → value` (dot-separated path) |
-| | `json_merge` | `a: dict, b: dict → result` (shallow merge) |
-| **Math** | `math_sum` | `values: list → result` |
-| | `math_mean` | `values: list → result` |
-| | `math_max` | `values: list → result` |
-| | `math_min` | `values: list → result` |
-
-Ví dụ:
-
-```python
-@op(rust="math_sum")
-def sum_values(values: list):
-    return {"result": sum(values)}
-
-@op(rust="string_template")
-def render(template: str, vars: dict):
-    result = template
-    for k, v in vars.items():
-        result = result.replace(f"{{{k}}}", str(v))
-    return {"result": result}
-```
-
-## Tạo Rust Plugin
+## Tạo Rust Plugin (cdylib)
 
 ### Bước 1: Tạo crate
 
@@ -156,7 +110,7 @@ edition = "2021"
 crate-type = ["cdylib"]   # Bắt buộc: compile thành shared library
 
 [dependencies]
-rush-ops-sdk = { path = "../rush-core/sdk" }
+hush-plugin = { version = "0.1.0" }  # Plugin SDK
 serde_json = "1"
 ```
 
@@ -165,7 +119,7 @@ serde_json = "1"
 ### Bước 3: Viết ops (src/lib.rs)
 
 ```rust
-use rush_ops_sdk::{export_ops, serde_json};
+use hush_plugin::{hush_plugin, serde_json};
 use serde_json::Value;
 
 /// Nhân hai số
@@ -181,17 +135,31 @@ fn uppercase(inputs: &Value) -> Value {
     serde_json::json!({"result": text.to_uppercase()})
 }
 
-// Export qua C ABI — tự động tạo rush_op_multiply, rush_op_uppercase
-export_ops!(multiply, uppercase);
+// Export via OpRegistry trait — hush-serve loads at runtime
+hush_plugin!(multiply, uppercase);
 ```
 
 **Quy tắc:**
 - Signature: `fn(&serde_json::Value) -> serde_json::Value`
 - Input: JSON object, đọc fields bằng `inputs["key"]`
 - Output: JSON object, thường là `{"result": value}` hoặc `{"error": msg}`
-- `export_ops!` nhận danh sách function names, phân cách bằng dấu phẩy
+- `hush_plugin!` macro tạo `OpRegistry` implementation, export qua C ABI
 
-### Bước 4: Sử dụng trong Python
+### Bước 4: Build và load
+
+```bash
+cd my-ops && cargo build --release
+```
+
+Plugin được load tự động bởi `hush-serve` khi chỉ định `--plugin`:
+
+```bash
+hush-serve --plugin ./target/release/libmy_ops.so
+```
+
+Hoặc trong Python, `_rust_bridge.py` tự detect và pass `--plugin` khi spawning hush-serve.
+
+### Bước 5: Sử dụng trong Python
 
 ```python
 from hush.core import Hush, GraphOp, op, START, END, PARENT
@@ -210,32 +178,46 @@ async def main():
         u = uppercase(text=PARENT["text"])
         START >> [m, u] >> END
 
-    # Rust mode — dùng compiled plugin, tự build lần đầu
-    engine = Hush(graph, mode="rust")
-    result = await engine.run(inputs={"x": 3, "y": 4, "text": "hello"})
-    print(result["result"])  # Từ uppercase: "HELLO"
-
-    # Python mode — dùng Python fallback body
     engine = Hush(graph)
-    result = await engine.run(inputs={"x": 3, "y": 4, "text": "hello"})
-    # Kết quả giống nhau
+
+    # Rust backend — dùng compiled plugin
+    engine.serve(port=8000, backend="rust", rust_ops="my-ops")
+
+    # Python backend — dùng Python fallback body
+    engine.serve(port=8000)
 ```
 
-> **Auto-build:** Lần đầu chạy với `mode="rust"`, engine tự phát hiện crate directory, chạy `cargo build --release`, và cache đường dẫn library. Lần sau sẽ load trực tiếp.
+## Plugin System Architecture
 
-## Kết hợp Python ops và Rust plugin ops
+```
+hush-plugin crate
+├── OpRegistry trait       # Interface cho plugin ops
+├── hush_plugin! macro     # Auto-generate registry + C ABI exports
+└── C ABI functions        # rush_create_registry(), rush_destroy_registry()
 
-Bạn có thể mix Python ops và Rust ops trong cùng workflow:
+hush-serve
+├── --plugin flag          # Load .so/.dylib/.dll at runtime
+├── libloading             # Dynamic library loading
+└── OpRegistry dispatch    # Route ops to plugin functions
+
+_rust_bridge.py
+├── Auto-detect plugins    # Scan for cdylib crates in workspace
+└── --plugin passthrough   # Pass plugin paths to hush-serve
+```
+
+## Mọi op đều phải có Rust version
+
+Khi dùng `backend="rust"`, **tất cả** `@op` trong graph phải có `rust="..."`. Nếu thiếu bất kỳ op nào, Rust mode sẽ không kích hoạt được:
 
 ```python
-@op
+@op(rust="./rust_ops::io::fetch_data")
 def fetch_data():
-    """Python op — I/O bound, không cần Rust."""
+    """I/O bound — Python fallback cũng chạy được."""
     return {"data": [1, 2, 3, 4, 5]}
 
-@op(rust="math_sum")
+@op(rust="./rust_ops::math::sum_values")
 def sum_values(values: list):
-    """Rust plugin — CPU bound, hưởng lợi từ Rust."""
+    """CPU bound — chạy ngoài GIL trong Rust mode."""
     return {"result": sum(values)}
 
 with GraphOp(name="mixed") as graph:
@@ -243,10 +225,11 @@ with GraphOp(name="mixed") as graph:
     s = sum_values(values=f["data"])
     START >> f >> s >> END
 
-engine = Hush(graph, mode="rust")
-result = await engine.run(inputs={})
-# fetch_data chạy Python (qua GIL callback)
-# sum_values chạy Rust plugin (ngoài GIL)
+engine = Hush(graph)
+# Rust backend — cả 2 ops đều có rust version → OK
+engine.serve(port=8000, backend="rust", rust_ops="rust_ops")
+# Python backend — dùng Python fallback body
+engine.serve(port=8000)
 ```
 
 ## Bound hints (`bound="io"` / `bound="cpu"`)
@@ -257,10 +240,7 @@ Scheduler hint cho Rust mode biết cách schedule op:
 @op(bound="io")
 async def call_api(url: str):
     """I/O-bound: schedule qua tokio async runtime."""
-    import aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            return {"data": await resp.json()}
+    ...
 
 @op(bound="cpu")
 def heavy_compute(data: list):
@@ -286,11 +266,12 @@ def heavy_compute(data: list):
 
 ## Hạn chế hiện tại
 
-- **Async ops** chạy sync-style trong Rust scheduler (tokio handles concurrency, nhưng khác với Python asyncio)
+- **Ref.apply() không hỗ trợ Rust mode**: Python callables không thể cross FFI boundary. Dùng `@op(rust="...")` thay thế. `_serialize_transforms()` raise `ValueError` rõ ràng khi serialize.
+- **Async ops** chạy sync-style trong Rust scheduler (tokio handles concurrency)
 - **Streaming** hỗ trợ cho LLM ops, nhưng chưa hỗ trợ cho custom plugin ops
-- Cần **Rust toolchain** để build plugins (auto-build cần `cargo` trong PATH)
+- Cần **Rust toolchain** để build plugins (`cargo` trong PATH)
 
 ## Tiếp theo
 
-- [Parallel Execution](08-parallel-execution.md) — Fan-out/fan-in, MapOp
+- [Parallel Execution](08-parallel-execution.md) — Fan-out/fan-in, generator iteration
 - [Tracing & Observability](09-tracing-observability.md) — Debug workflows (hỗ trợ cả Rust mode)

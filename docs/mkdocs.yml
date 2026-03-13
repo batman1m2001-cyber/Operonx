@@ -33,7 +33,7 @@ plugins:
       handlers:
         python:
           paths:
-            - ../python/hush-core
+            - ../python/hush-icore
             - ../python/hush-providers
             - ../python/hush-telemetry
             - ../python/hush-serve

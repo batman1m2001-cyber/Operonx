@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "hush-core>=0.1.0",
+    "hush-icore>=0.1.0",
     "pydantic>=2.0",
     "openai>=1.0",
     "aiohttp>=3.8",
@@ -115,4 +115,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.uv.sources]
-hush-core = { path = "../hush-core", editable = true }
+hush-icore = { path = "../hush-icore", editable = true }

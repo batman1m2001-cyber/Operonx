@@ -18,9 +18,10 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - python/hush-core
+          - python/hush-icore
           - python/hush-providers
           - python/hush-telemetry
+          - python/hush-serve
 
     steps:
       - uses: actions/checkout@v4
@@ -61,8 +62,8 @@ jobs:
       - name: Run example smoke tests (no API keys needed)
         working-directory: examples
         run: |
-          uv run python 01_hello_world.py
-          uv run python 02_data_pipeline.py
+          uv run python 01_hello_world/demo.py
+          uv run python 02_data_pipeline/demo.py
 
   coverage:
     runs-on: ubuntu-latest
@@ -78,19 +79,19 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Install hush-core with dev dependencies
-        working-directory: python/hush-core
+      - name: Install hush-icore with dev dependencies
+        working-directory: python/hush-icore
         run: uv sync --all-extras
 
       - name: Run coverage
-        working-directory: python/hush-core
+        working-directory: python/hush-icore
         run: uv run pytest --cov=hush --cov-report=xml -m "not integration"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: python/hush-core/coverage.xml
+          files: python/hush-icore/coverage.xml
           fail_ci_if_error: false
 
   docs:
@@ -108,7 +109,7 @@ jobs:
 
       - name: Install Python packages (for mkdocstrings)
         run: |
-          cd python/hush-core && uv sync --all-extras && cd ../..
+          cd python/hush-icore && uv sync --all-extras && cd ../..
           cd python/hush-providers && uv sync --all-extras && cd ../..
           cd python/hush-telemetry && uv sync --all-extras && cd ../..
           cd python/hush-serve && uv sync --all-extras && cd ../..

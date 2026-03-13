@@ -35,7 +35,8 @@ hush/telemetry/
 from hush.telemetry import LangfuseTracer
 
 tracer = LangfuseTracer(resource="langfuse:default", tags=["prod"])
-result = await engine.run(inputs={...}, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs={...})
 ```
 
 ### With Direct Config (Simple)
@@ -44,7 +45,8 @@ from hush.telemetry import LangfuseTracer, LangfuseConfig
 
 config = LangfuseConfig.from_env()
 tracer = LangfuseTracer(config=config)
-result = await engine.run(inputs={...}, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs={...})
 ```
 
 ### HushEyesTracer (ui-hush-eyes)
@@ -52,7 +54,8 @@ result = await engine.run(inputs={...}, tracer=tracer)
 from hush.telemetry import HushEyesTracer
 
 tracer = HushEyesTracer(tags=["dev"])
-result = await engine.run(inputs={...}, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs={...})
 # Open http://localhost:8420 to view traces
 ```
 
@@ -60,10 +63,8 @@ result = await engine.run(inputs={...}, tracer=tracer)
 ```python
 from hush.telemetry import HushEyesTracer, LangfuseTracer
 
-result = await engine.run(
-    inputs={...},
-    tracer=[HushEyesTracer(), LangfuseTracer(resource="langfuse:default")],
-)
+engine = Hush(graph, tracer=[HushEyesTracer(), LangfuseTracer(resource="langfuse:default")])
+result = await engine.run(inputs={...})
 ```
 
 ## Adding a New Tracing Backend

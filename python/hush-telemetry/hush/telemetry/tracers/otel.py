@@ -29,7 +29,8 @@ class OTELTracer(Tracer):
         tracer = OTELTracer(resource="otel:jaeger", tags=["prod"])
 
         # Use with workflow engine
-        result = await engine.run(inputs={...}, tracer=tracer)
+        engine = Hush(graph, tracer=tracer)
+        result = await engine.run(inputs={...})
         ```
     """
 

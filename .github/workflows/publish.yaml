@@ -27,13 +27,13 @@ jobs:
           PYTHON_CHANGED="false"
           RUST_CHANGED="false"
 
-          for pkg in python/hush-core python/hush-providers python/hush-telemetry python/hush-serve; do
+          for pkg in python/hush-icore python/hush-providers python/hush-telemetry python/hush-serve; do
             OLD=$(git show HEAD~1:$pkg/pyproject.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $pkg/pyproject.toml | head -1)
             if [ "$OLD" != "$NEW" ]; then PYTHON_CHANGED="true"; fi
           done
 
-          for crate in rust/rush-core rust/rush-providers rust/rush-telemetry rust/rush-serve rust/ui-hush-eyes; do
+          for crate in rust/hush-plugin rust/hush-icore rust/hush-providers rust/hush-telemetry rust/hush-serve rust/ui-hush-eyes; do
             OLD=$(git show HEAD~1:$crate/Cargo.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $crate/Cargo.toml | head -1)
             if [ "$OLD" != "$NEW" ]; then RUST_CHANGED="true"; fi
@@ -52,7 +52,15 @@ jobs:
     strategy:
       max-parallel: 1
       matrix:
-        package: [hush-core, hush-providers, hush-telemetry, hush-serve]
+        include:
+          - package: hush-icore
+            directory: python/hush-icore
+          - package: hush-providers
+            directory: python/hush-providers
+          - package: hush-telemetry
+            directory: python/hush-telemetry
+          - package: hush-serve
+            directory: python/hush-serve
     steps:
       - uses: actions/checkout@v4
 
@@ -65,13 +73,13 @@ jobs:
         run: uv python install 3.10
 
       - name: Build package
-        working-directory: python/${{ matrix.package }}
+        working-directory: ${{ matrix.directory }}
         run: uv build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: python/${{ matrix.package }}/dist/
+          packages-dir: ${{ matrix.directory }}/dist/
 
   publish-crates:
     needs: [test, check-version]
@@ -83,13 +91,28 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: rust-publish-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+
       - name: Publish to crates.io
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p rush-providers
-          cargo publish -p rush-core
-          cargo publish -p rush-telemetry
-          cargo publish -p rush-serve
+          cargo publish -p hush-plugin
+          sleep 30
+          cargo publish -p hush-providers
+          sleep 30
+          cargo publish -p hush-icore
+          sleep 30
+          cargo publish -p hush-telemetry
+          sleep 30
+          cargo publish -p hush-serve
+          sleep 30
           cargo publish -p hush-eyes

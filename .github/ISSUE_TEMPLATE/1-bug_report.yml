@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Hush Version
-      description: Which version of hush-core/hush-providers are you using?
+      description: Which version of hush-icore/hush-providers are you using?
       placeholder: "0.1.0"
     validations:
       required: true

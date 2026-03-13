@@ -2,7 +2,7 @@
 
 Debug và monitor workflows với HushEyesTracer, Langfuse, và OpenTelemetry.
 
-> **Ví dụ chạy được**: `examples/06_tracing.py`, `examples/08_langfuse_tracing.py`, `examples/09_otel_tracing.py`
+> **Ví dụ chạy được**: `examples/06_tracing/demo.py`
 
 ## Tại sao cần Tracing?
 
@@ -97,11 +97,12 @@ tracer = LangfuseTracer(
     tags=["production"]
 )
 
-result = await engine.run(inputs={...}, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs={...})
 # Trace URL được log tự động
 ```
 
-Xem ví dụ đầy đủ tại `examples/08_langfuse_tracing.py`.
+Xem ví dụ đầy đủ tại `examples/06_tracing/demo.py` (Langfuse tracing is configured via env vars).
 
 ## OTelTracer (OpenTelemetry)
 
@@ -125,10 +126,11 @@ otel:default:
 from hush.telemetry import OTelTracer
 
 tracer = OTelTracer(resource="otel:default")
-result = await engine.run(inputs={...}, tracer=tracer)
+engine = Hush(graph, tracer=tracer)
+result = await engine.run(inputs={...})
 ```
 
-Xem ví dụ đầy đủ tại `examples/09_otel_tracing.py`.
+Xem ví dụ đầy đủ tại `examples/06_tracing/demo.py` (OTEL tracing is configured via env vars).
 
 ## Multiple Tracers
 
@@ -138,13 +140,12 @@ Gửi traces đến nhiều backends cùng lúc:
 from hush.telemetry import HushEyesTracer
 from hush.telemetry import LangfuseTracer
 
-result = await engine.run(
-    inputs={...},
-    tracer=[
-        HushEyesTracer(tags=["dev"]),
-        LangfuseTracer(resource="langfuse:hush", tags=["prod"]),
-    ],
-)
+tracers = [
+    HushEyesTracer(tags=["dev"]),
+    LangfuseTracer(resource="langfuse:hush", tags=["prod"]),
+]
+engine = Hush(graph, tracer=tracers)
+result = await engine.run(inputs={...})
 # Mỗi tracer nhận cùng trace_data, flush trong thread riêng
 ```
 
@@ -199,11 +200,11 @@ FlushWorker merge tags cho mỗi tracer:
 Truyền user_id và session_id để filter traces:
 
 ```python
+engine = Hush(graph, tracer=tracer)
 result = await engine.run(
     inputs={...},
-    tracer=tracer,
     user_id=request.user.id,
-    session_id=request.session.id
+    session_id=request.session.id,
 )
 ```
 
@@ -219,7 +220,8 @@ if os.getenv("ENABLE_TRACING") == "true":
 else:
     tracers = []
 
-result = await engine.run(inputs={...}, tracer=tracers)
+engine = Hush(graph, tracer=tracers)
+result = await engine.run(inputs={...})
 ```
 
 ### Sampling

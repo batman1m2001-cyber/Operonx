@@ -1,7 +1,7 @@
 """Shared workflow definitions for 13_graph.
 
 Defines ops and @graph-decorated reusable graph builders.
-No API key required — uses hush-core only.
+No API key required — uses hush-icore only.
 """
 
 from hush.core import END, PARENT, START

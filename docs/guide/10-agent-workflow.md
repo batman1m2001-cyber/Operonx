@@ -1,8 +1,8 @@
 # Agent Workflow
 
-Xây dựng AI agent với tool calling và WhileOp.
+Xây dựng AI agent với tool calling và `@graph.loop()`.
 
-> **Ví dụ chạy được**: `examples/11_agent_workflow.py`
+> **Ví dụ chạy được**: `examples/09_agent_workflow/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -10,16 +10,16 @@ Xây dựng AI agent với tool calling và WhileOp.
 > | Syntax | Class | Ví dụ |
 > |--------|-------|-------|
 > | `@op` | `FuncOp` | `@op` decorator trên function |
-> | `WhileOp.of()` | `WhileOp` | `WhileOp.of(counter=0, until="counter >= 5")` |
-> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])` |
+> | `@graph.loop()` | Loop GraphOp | `@graph.loop(until="done == True", max_iterations=10)` |
+> | `LLMOp.of()` | `LLMOp` | `LLMOp.of(resource="gpt-4o", messages=..., tools=...)` |
 
 ## Kiến trúc Agent
 
 ```
-Init → WhileOp.of(not done):
-         → LLMOp.of() → Check tool_calls
-           → Nếu có: Execute tools → Update messages → Loop
-           → Nếu không: Done → Exit
+Init → @graph.loop(until="done == True"):
+         → LLMOp.of(tools=...) → process_response
+           → Có tool_calls: Execute tools → Update messages → Loop
+           → Không tool_calls: Done → Exit
 ```
 
 ## Tool-calling Agent
@@ -27,151 +27,160 @@ Init → WhileOp.of(not done):
 ### Bước 1: Định nghĩa tools
 
 ```python
-tools = [
+import json
+
+TOOLS = {
+    "calculator": lambda expr: {"result": str(eval(expr, {"__builtins__": {}}, {}))},
+    "search": lambda query: {"result": "Mock search result for: " + query},
+}
+
+TOOL_DESCRIPTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_weather",
-            "description": "Lấy thông tin thời tiết",
+            "name": "calculator",
+            "description": "Evaluate mathematical expressions",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "Tên thành phố"}
+                    "expression": {"type": "string", "description": "Math expression"}
                 },
-                "required": ["location"]
-            }
-        }
-    }
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search for information",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 ```
 
-### Bước 2: Implement tool execution
+### Bước 2: Implement agent ops
 
 ```python
-import json
-
-def execute_tools(tool_calls, messages):
-    """Thực thi tool calls và append kết quả vào messages."""
-    new_messages = messages + [{"role": "assistant", "tool_calls": tool_calls}]
-
-    for tc in tool_calls:
-        fn_name = tc["function"]["name"]
-        args = json.loads(tc["function"]["arguments"])
-
-        if fn_name == "get_weather":
-            result = f"Thời tiết tại {args['location']}: 25°C, nắng"
-        else:
-            result = f"Unknown tool: {fn_name}"
-
-        new_messages.append({
-            "role": "tool",
-            "tool_call_id": tc["id"],
-            "content": result
-        })
-
-    return new_messages
-```
-
-### Bước 3: Agent workflow với WhileOp.of()
-
-```python
-from hush.core import Hush, GraphOp, op, START, END, PARENT
-from hush.core import WhileOp
+from hush.core import graph, op, START, END, PARENT, GraphOp
 from hush.providers import LLMOp
 
 @op
 def init_agent(query: str):
+    """Khởi tạo agent state."""
     return {
         "messages": [
-            {"role": "system", "content": "Bạn là assistant có thể tra cứu thời tiết."},
-            {"role": "user", "content": query}
+            {"role": "system", "content": "You are a helpful assistant with access to tools."},
+            {"role": "user", "content": query},
         ],
-        "iteration": 0,
         "done": False,
-        "final_answer": ""
+        "answer": "",
     }
 
 @op
-def process(content, tool_calls, messages, iteration):
-    return process_response(tool_calls, content, messages, iteration)
+def process_response(content, tool_calls, messages):
+    """Xử lý response từ LLM: execute tools hoặc return final answer."""
+    new_messages = list(messages)
+    assistant_msg = {"role": "assistant", "content": content or ""}
+    if tool_calls:
+        assistant_msg["tool_calls"] = tool_calls
+    new_messages.append(assistant_msg)
 
-with GraphOp(name="agent") as graph:
-    init = init_agent(
-        query=PARENT["query"],
-        outputs={"*": PARENT},  # Forward all init outputs to graph state
+    if tool_calls:
+        for tc in tool_calls:
+            func_name = tc["function"]["name"]
+            args = json.loads(tc["function"]["arguments"])
+            result = TOOLS.get(func_name, lambda **kw: {"error": f"Unknown: {func_name}"})(**args)
+            new_messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result),
+            })
+        return {"messages": new_messages, "done": False, "answer": ""}
+    else:
+        return {"messages": new_messages, "done": True, "answer": content or ""}
+```
+
+### Bước 3: Agent workflow với @graph.loop()
+
+```python
+@graph.loop(until="done == True", max_iterations=10)
+def agent_loop(messages, done, answer):
+    """Repeat LLM -> process until done == True."""
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        messages=messages,
+        tools=TOOL_DESCRIPTIONS,
     )
 
-    # Agent loop
-    with WhileOp.of(
-        messages=PARENT["messages"],
-        iteration=PARENT["iteration"],
-        done=PARENT["done"],
-        final_answer=PARENT["final_answer"],
-        until="done == True or iteration >= 5",
-        max_iterations=10,
-    ) as loop:
-        llm = LLMOp.of(
-            resource="gpt-4o",
-            messages=PARENT["messages"],
-            tools=tools,
+    proc = process_response(
+        content=llm["content"],
+        tool_calls=llm["tool_calls"],
+        messages=messages,
+    )
+
+    # Update loop state cho iteration tiếp theo
+    proc["messages"] >> PARENT["messages"]
+    proc["done"] >> PARENT["done"]
+    proc["answer"] >> PARENT["answer"]
+
+    START >> llm >> proc >> END
+
+
+def build_agent():
+    """Graph: init agent → loop (LLM + tools) → answer."""
+    with GraphOp(name="agent") as g:
+        init = init_agent(query=PARENT["query"])
+
+        loop = agent_loop(
+            messages=init["messages"],
+            done=init["done"],
+            answer=init["answer"],
         )
-        proc = process(
-            content=llm["content"],
-            tool_calls=llm["tool_calls"],
-            messages=PARENT["messages"],
-            iteration=PARENT["iteration"],
-        )
 
-        # Update loop state via >> operator
-        proc["new_messages"] >> PARENT["messages"]
-        proc["new_iteration"] >> PARENT["iteration"]
-        proc["is_done"] >> PARENT["done"]
-        proc["answer"] >> PARENT["final_answer"]
-
-        START >> llm >> proc >> END
-
-    loop["final_answer"] >> PARENT["answer"]
-    START >> init >> loop >> END
+        loop["answer"] >> PARENT["answer"]
+        START >> init >> loop >> END
+    return g
 ```
 
-### process_response logic
+### Giải thích @graph.loop
+
+- `@graph.loop(until="done == True")` — Loop cho đến khi `done` state == `True`
+- `max_iterations=10` — Safety net tránh infinite loop
+- Function params (`messages`, `done`, `answer`) là loop state — carry qua mỗi iteration
+- `proc["messages"] >> PARENT["messages"]` — Update loop state sau mỗi iteration
+- `loop["answer"] >> PARENT["answer"]` — Map loop output ra graph output
+
+### Luồng thực thi
+
+```
+Iteration 1: LLM trả về tool_calls → process_response execute tools → done=False → loop
+Iteration 2: LLM nhận tool results → trả lời trực tiếp → done=True → exit
+Result: loop["answer"] chứa câu trả lời cuối cùng
+```
+
+## Rust Mode
+
+Agent workflow chạy được ở cả Python và Rust mode. Dùng `@op(rust="...")` để viết Rust ops cho phần init và process:
 
 ```python
-def process_response(tool_calls, content, messages, iteration):
-    new_messages = messages + [{"role": "assistant", "content": content,
-                                **({"tool_calls": tool_calls} if tool_calls else {})}]
-    if tool_calls:
-        # Có tool calls → execute tools → continue loop
-        for tc in tool_calls:
-            new_messages.append({"role": "tool", "tool_call_id": tc["id"],
-                                 "content": execute_tool(tc)})
-        return {
-            "new_messages": new_messages,
-            "new_iteration": iteration + 1,
-            "is_done": False,
-            "answer": None,
-        }
-    else:
-        # Không có tool calls → LLM trả lời trực tiếp → done
-        return {
-            "new_messages": new_messages,
-            "new_iteration": iteration + 1,
-            "is_done": True,
-            "answer": content,
-        }
+@op(rust="./rust_ops::pipeline::init_agent")
+def init_agent(query: str):
+    return {"messages": [...], "done": False, "answer": ""}
+
+@op(rust="./rust_ops::pipeline::process_agent_response")
+def process_response(content, tool_calls, messages):
+    ...  # Python fallback
 ```
 
-## Parallel Tool Execution
-
-Khi LLM gọi nhiều tools cùng lúc, có thể execute song song:
-
-```python
-import asyncio
-
-async def execute_tools_parallel(tool_calls):
-    tasks = [execute_single_tool(tc) for tc in tool_calls]
-    return await asyncio.gather(*tasks)
-```
+Rust plugin phải **thực sự compute tool results** — không được simulate. LLM cần kết quả chính xác để quyết định dừng loop.
 
 ## Best Practices
 
@@ -179,6 +188,7 @@ async def execute_tools_parallel(tool_calls):
 2. **Tool validation** — Validate tool arguments trước khi execute
 3. **Error handling** — Catch tool execution errors, trả error message cho LLM
 4. **Tracing** — Dùng tracer để debug agent reasoning
+5. **Rust ops phải compute thật** — Đặc biệt trong agent loops, tool results phải chính xác
 
 ## Tiếp theo
 

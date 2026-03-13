@@ -1,6 +1,6 @@
-//! Rush benchmark runner — standalone binary for Python↔Rust comparison.
+//! Hush benchmark runner — standalone binary for Python↔Rust comparison.
 //!
-//! Reads JSON benchmark requests from stdin, runs them through Rush::run_json(),
+//! Reads JSON benchmark requests from stdin, runs them through Hush::run_json(),
 //! and outputs timing results as JSON to stdout.
 //!
 //! Protocol (one JSON object per line on stdin):
@@ -13,8 +13,8 @@ use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
-use rush_core::engine::Rush;
-use rush_core::registry::OpRegistry;
+use hush_icore::engine::Hush;
+use hush_icore::registry::OpRegistry;
 use serde_json::{json, Value};
 
 // =============================================================================
@@ -77,18 +77,18 @@ fn combine_all(inputs: &Value) -> Value {
 }
 
 fn cpu_hash_chain(inputs: &Value) -> Value {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use sha2::{Sha256, Digest};
 
     let x = inputs["x"].as_i64().unwrap_or(0);
     let iterations = inputs["iterations"].as_i64().unwrap_or(1000) as usize;
-    let mut val = x as u64;
+    let mut data = x.to_string().into_bytes();
     for _ in 0..iterations {
-        let mut hasher = DefaultHasher::new();
-        val.hash(&mut hasher);
-        val = hasher.finish();
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        data = hasher.finalize().to_vec();
     }
-    json!({"hash": format!("{:016x}", val), "x": x})
+    let hex: String = data.iter().take(8).map(|b| format!("{:02x}", b)).collect();
+    json!({"hash": hex, "x": x})
 }
 
 fn cpu_prime_sieve(inputs: &Value) -> Value {
@@ -220,10 +220,10 @@ fn main() {
         let config_json = serde_json::to_string(config).unwrap();
 
         // Create engine with BenchRegistry
-        let mut engine = match Rush::new(&config_json) {
+        let mut engine = match Hush::new(&config_json) {
             Ok(e) => e,
             Err(e) => {
-                let err = json!({"error": format!("Rush::new failed: {}", e)});
+                let err = json!({"error": format!("Hush::new failed: {}", e)});
                 let _ = writeln!(stdout, "{}", err);
                 let _ = stdout.flush();
                 continue;
@@ -236,12 +236,16 @@ fn main() {
             let _ = engine.run_json(inputs.clone(), None, None, None);
         }
 
-        // Timed runs
+        // Timed runs — capture the last run's output for correctness verification
         let mut times_ns: Vec<u128> = Vec::with_capacity(runs);
+        let mut last_output: Value = Value::Null;
         for _ in 0..runs {
             let start = Instant::now();
-            let _ = engine.run_json(inputs.clone(), None, None, None);
+            let out = engine.run_json(inputs.clone(), None, None, None);
             times_ns.push(start.elapsed().as_nanos());
+            if let Ok(v) = out {
+                last_output = v;
+            }
         }
 
         // Compute statistics
@@ -262,6 +266,7 @@ fn main() {
             "p99_ms": p99,
             "min_ms": min,
             "max_ms": max,
+            "output": last_output,
         });
 
         let _ = writeln!(stdout, "{}", result);

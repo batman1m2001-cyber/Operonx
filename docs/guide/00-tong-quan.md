@@ -26,7 +26,7 @@ async def main():
 asyncio.run(main())
 ```
 
-> Ví dụ trên chỉ dùng `hush-core`, không cần API key. Để dùng LLM, embedding, tracing — xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).
+> Ví dụ trên chỉ dùng `hush-icore`, không cần API key. Để dùng LLM, embedding, tracing — xem [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).
 
 ## Kiến trúc 3 lớp
 
@@ -38,14 +38,14 @@ asyncio.run(main())
 │                     hush-providers                       │
 │    (LLMOp, PromptOp, EmbeddingOp, RerankOp)      │
 ├─────────────────────────────────────────────────────────┤
-│                       hush-core                          │
+│                       hush-icore                         │
 │  (GraphOp, FuncOp, BranchOp, State, ResourceHub)   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 | Package | Mô tả |
 |---------|-------|
-| `hush-core` | **Nền tảng** — `@op`, `ForOp.of()`, `MapOp.of()`, `WhileOp.of()`, `if_()` đủ cho gần như mọi workflow |
+| `hush-icore` | **Nền tảng** — `@op`, `@graph`, `@graph.loop()`, `if_()`, generator ops (yield) đủ cho gần như mọi workflow |
 | `hush-providers` | Add-on — `LLMOp.of()`, `PromptOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()` (cài khi cần) |
 | `hush-telemetry` | Add-on — Tracing backends: Langfuse, OTEL (cài khi cần) |
 
@@ -55,10 +55,10 @@ asyncio.run(main())
 
 ```bash
 # Với pip
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 
 # Với uv (nhanh hơn)
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 ```
 
 Xem chi tiết tại [Cài đặt và Thiết lập](01-cai-dat-va-thiet-lap.md).
@@ -81,41 +81,41 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Quickstart](02-quickstart.md) | `01_hello_world.py`, `02_data_pipeline.py` | Hello world, data pipeline |
-| [Core Concepts](03-core-concepts.md) | `01_hello_world.py`, `02_data_pipeline.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
+| [Quickstart](02-quickstart.md) | `01_hello_world/demo.py`, `02_data_pipeline/demo.py` | Hello world, data pipeline |
+| [Core Concepts](03-core-concepts.md) | `01_hello_world/demo.py`, `02_data_pipeline/demo.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
 
 ### LLM & AI
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [LLM Integration](04-llm-integration.md) | `03_llm_chat.py`, `04_llm_advanced.py` | PromptOp, LLMOp, providers, tools, structured output |
-| [Embeddings & RAG](06-embeddings-rag.md) | `07_embeddings_and_rag.py`, `14_rag_advanced.py` | Embedding, reranking, RAG pipeline, hybrid search |
-| [Multi-model](11-multi-model.md) | `12_multi_model.py` | Load balancing, fallback, ensemble, cost routing |
-| [Agent Workflow](10-agent-workflow.md) | `11_agent_workflow.py` | Tool-calling agent, WhileOp |
+| [LLM Integration](04-llm-integration.md) | `03_llm_chat/demo.py`, `04_llm_advanced/demo.py` | PromptOp, LLMOp, providers, tools, structured output |
+| [Embeddings & RAG](06-embeddings-rag.md) | `07_embeddings_and_rag/demo.py`, `12_rag_advanced/demo.py` | Embedding, reranking, RAG pipeline, hybrid search |
+| [Multi-model](11-multi-model.md) | `10_multi_model/demo.py` | Load balancing, fallback, ensemble, cost routing |
+| [Agent Workflow](10-agent-workflow.md) | `09_agent_workflow/demo.py` | Tool-calling agent, @graph.loop |
 
 ### Flow Control
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Loops & Branches](05-loops-branches.md) | `05_loops_and_branches.py` | ForLoop, MapOp, WhileLoop, BranchOp |
-| [Parallel Execution](08-parallel-execution.md) | `13_parallel_advanced.py` | Fan-out/fan-in, MapOp, partial failure |
-| [Error Handling](07-error-handling.md) | `10_error_handling.py` | Error capture, retry, fallback, BranchOp routing |
+| [Loops & Branches](05-loops-branches.md) | `05_loops_and_branches/demo.py` | Generator ops (yield), @graph.loop, BranchOp |
+| [Parallel Execution](08-parallel-execution.md) | `11_parallel_advanced/demo.py` | Fan-out/fan-in, generator iteration, partial failure |
+| [Error Handling](07-error-handling.md) | `08_error_handling/demo.py` | Error capture, retry, fallback, BranchOp routing |
 
 ### Performance
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Rust Mode & Plugin Ops](13-rust-mode-va-plugin.md) | `17_rust_mode.py`, `18_rust_plugin_ops.py` | Rust execution backend, Rust plugin ops, tạo plugin |
+| [Rust Mode & Plugin Ops](13-rust-mode-va-plugin.md) | All examples with `serve_rust.py` | Rust execution backend, cdylib plugin system |
 
 ### Production
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Tracing & Observability](09-tracing-observability.md) | `06_tracing.py`, `08_langfuse_tracing.py`, `09_otel_tracing.py` | HushEyesTracer, Langfuse, OTEL, tags, cost tracking |
+| [Tracing & Observability](09-tracing-observability.md) | `06_tracing/demo.py` | HushEyesTracer, Langfuse, OTEL, tags, cost tracking |
 
 ## Chạy ví dụ
 
 ```bash
-cd tutorial
-uv run python examples/01_hello_world.py
+cd examples
+uv run python 01_hello_world/demo.py
 ```
