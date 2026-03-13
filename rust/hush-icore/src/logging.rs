@@ -8,10 +8,12 @@ use std::sync::LazyLock;
 
 use serde_json::Value;
 
-/// Shared log templates — embedded at compile time from the Python package's JSON file.
+/// Shared log templates — embedded at compile time.
+/// NOTE: This is a copy of python/hush-icore/hush/core/loggings/log_templates.json.
+/// Keep both files in sync when changing log formats.
 static TEMPLATES: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     let json_str =
-        include_str!("../../../python/hush-icore/hush/core/loggings/log_templates.json");
+        include_str!("log_templates.json");
     serde_json::from_str(json_str).expect("Invalid log_templates.json")
 });
 
