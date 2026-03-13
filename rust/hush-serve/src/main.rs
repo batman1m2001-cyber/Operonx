@@ -25,7 +25,23 @@ use hush_icore::registry::OpRegistry;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    // Unified log level: respect RUST_LOG if set, otherwise read LOG_LEVEL (shared with Python)
+    if std::env::var("RUST_LOG").is_ok() {
+        env_logger::init();
+    } else {
+        let filter = match std::env::var("LOG_LEVEL") {
+            Ok(level) => match level.to_uppercase().as_str() {
+                "DEBUG" => "hush=debug",
+                "INFO" => "hush=info",
+                "WARNING" | "WARN" => "hush=warn",
+                "ERROR" | "CRITICAL" => "hush=error",
+                _ => "hush=warn",
+            }
+            .to_string(),
+            Err(_) => "hush=warn".to_string(),
+        };
+        env_logger::Builder::new().parse_filters(&filter).init();
+    }
 
     let cli = Cli::parse();
 

@@ -17,7 +17,13 @@ if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def op(func=None, *, executor=None, rust=None, bound=None):
+def op(
+    func: Optional[Callable] = None,
+    *,
+    executor: Optional[str] = None,
+    rust: Optional[str] = None,
+    bound: Optional[str] = None,
+):
     """Decorator that turns a plain function into a FuncOp factory.
 
     Can be used bare or with keyword arguments::

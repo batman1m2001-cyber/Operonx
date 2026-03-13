@@ -27,7 +27,7 @@ import sys
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
-from hush.core.loggings import LOGGER
+from hush.core.loggings import LOGGER, format_event
 from hush.core.middleware import Middleware
 from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
@@ -243,11 +243,7 @@ class Hush:
         for mw in self._middleware:
             inputs = await mw.before_run(self.graph, inputs, context)
 
-        LOGGER.info(
-            "[title]\\[%s][/title] Running workflow [highlight]%s[/highlight]",
-            request_id,
-            self.name,
-        )
+        LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 
         # Create fresh state for this run
         state = self._schema.create_state(
@@ -272,11 +268,7 @@ class Hush:
 
             get_flush_worker().submit(tracers, self._collector, state)
 
-        LOGGER.info(
-            "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] completed",
-            request_id,
-            self.name,
-        )
+        LOGGER.info(format_event("workflow_done", request_id=request_id, graph_name=self.name))
 
         # Include state in result for debugging/tracing access
         result["$state"] = state
@@ -336,9 +328,7 @@ class Hush:
             inputs = await mw.before_run(self.graph, inputs, context)
 
         LOGGER.info(
-            "[title]\\[%s][/title] Streaming workflow [highlight]%s[/highlight]",
-            request_id,
-            self.name,
+            format_event("workflow_stream_start", request_id=request_id, graph_name=self.name)
         )
 
         state = self._schema.create_state(
@@ -378,9 +368,7 @@ class Hush:
             get_flush_worker().submit(tracers, self._collector, state)
 
         LOGGER.info(
-            "[title]\\[%s][/title] Workflow [highlight]%s[/highlight] stream completed",
-            request_id,
-            self.name,
+            format_event("workflow_stream_done", request_id=request_id, graph_name=self.name)
         )
 
         result["$state"] = state
@@ -414,7 +402,7 @@ class Hush:
         stream: Optional[bool] = None,
         websocket: bool = False,
         backend: str = "python",
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Serve this workflow as an HTTP API.
 
@@ -446,7 +434,7 @@ class Hush:
         inputs_list: List[Dict[str, Any]],
         *,
         concurrency: int = 10,
-        **kwargs,
+        **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         """Run the workflow concurrently on multiple inputs.
 

@@ -107,7 +107,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
-from hush.core.loggings import LOGGER
+from hush.core.loggings import LOGGER, format_event
 from hush.core.ops import PENDING
 from hush.core.ops.base import END
 from hush.core.utils.context import _output_queue
@@ -200,7 +200,14 @@ async def run_scheduler(
 
         except Exception:
             gen_error = traceback.format_exc()
-            LOGGER.error("[%s] Error in generator op %s:\n%s", request_id, name, gen_error.rstrip())
+            LOGGER.error(
+                format_event(
+                    "gen_error",
+                    request_id=request_id or "unknown",
+                    name=name,
+                    error=gen_error.rstrip(),
+                )
+            )
         finally:
             ms = (perf_counter() - gen_perf) * 1000
             op_obj._log(request_id, ctx, gen_inputs, {}, ms)

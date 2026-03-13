@@ -9,14 +9,14 @@ from hush.providers.ops.prompt import PromptOp
 
 @graph
 def chain(
-    template=None,
+    template: Any = None,
     resource: Optional[Union[str, List[str]]] = None,
     ratios: Optional[List[float]] = None,
     fallback: Optional[List[str]] = None,
     extract: Optional[List[str]] = None,
     parser: str = "xml",
     response_format: Optional[Dict[str, Any]] = None,
-):
+) -> Any:
     """Build a PromptOp -> LLMOp -> (optional ParserOp) graph.
 
     The most common building block for LLM workflows. Operates in two modes:
@@ -40,10 +40,6 @@ def chain(
             (e.g., ``["category: str", "confidence: float"]``).
         parser: Parser format (``"xml"``, ``"json"``, ``"yaml"``).
         response_format: OpenAI response format for JSON mode.
-
-    Keyword Args:
-        **kwargs: Template variables (Ref or static) and init kwargs
-            (``name=``, ``outputs=``, ``contain_generation=``, etc.).
 
     Returns:
         A GraphOp containing the prompt -> LLM -> (parser) pipeline.

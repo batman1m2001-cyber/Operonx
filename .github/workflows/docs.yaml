@@ -37,7 +37,7 @@ jobs:
         run: pip install mkdocs-material "mkdocstrings[python]"
 
       - name: Build docs
-        run: mkdocs build
+        run: mkdocs build --strict
 
       - name: Upload Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -5,6 +5,7 @@
 //!   - Input: JSON inputs (serde_json::Value)
 //!   - Output: JSON result (serde_json::Value)
 
+pub mod logging;
 pub mod middleware;
 pub mod config;
 pub mod engine;

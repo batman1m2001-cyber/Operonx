@@ -13,7 +13,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime
 from time import perf_counter
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
@@ -120,7 +120,13 @@ class GraphOp(BaseOp):
             self._setup_schema()
 
     @classmethod
-    def loop(cls, name=None, until=None, max_iterations=100, **initial_state):
+    def loop(
+        cls,
+        name: Optional[str] = None,
+        until: Optional[Union[str, Callable]] = None,
+        max_iterations: int = 100,
+        **initial_state: Any,
+    ):
         """Create a GraphOp configured for feedback-loop execution.
 
         Each iteration re-runs the graph's scheduler, carrying forward outputs

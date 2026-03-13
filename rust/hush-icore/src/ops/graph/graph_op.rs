@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, Semaphore};
 
 use crate::config::{GraphConfig, LoopConfig, OpBound, OpConfig};
 use crate::error::RushError;
+use crate::logging;
 use crate::ops::base;
 use crate::ops::graph::loop_eval;
 use crate::registry::OpRegistry;
@@ -364,7 +365,12 @@ fn spawn_graph_task(
             }
             Err(e) => {
                 state.set(&op.full_name, "error", &ctx, Value::String(format!("{}", e)));
-                log::error!("[hush] Error in graph op {}: {}", op.full_name, e);
+                let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+                log::error!("{}", logging::format_event("op_error", &[
+                    ("request_id", &req_id),
+                    ("name", &op.full_name),
+                    ("error", &format!("{}", e)),
+                ]));
                 let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
             }
         }
@@ -415,7 +421,12 @@ fn spawn_blocking_task(
             }
             Err(e) => {
                 state.set(&op.full_name, "error", &ctx, Value::String(format!("{}", e)));
-                log::error!("[hush] Error in op {}: {}", op.full_name, e);
+                let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+                log::error!("{}", logging::format_event("op_error", &[
+                    ("request_id", &req_id),
+                    ("name", &op.full_name),
+                    ("error", &format!("{}", e)),
+                ]));
                 let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
             }
         }
@@ -456,7 +467,12 @@ fn spawn_generator_task(
                 Ok(Some(value)) => { inputs.insert(param.var_name.clone(), value); }
                 Ok(None) => {}
                 Err(e) => {
-                    log::error!("[hush] Error resolving generator inputs for {}: {}", op.full_name, e);
+                    let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+                    log::error!("{}", logging::format_event("gen_error", &[
+                        ("request_id", &req_id),
+                        ("name", &op.full_name),
+                        ("error", &format!("Error resolving inputs: {}", e)),
+                    ]));
                     let _ = event_tx.send(SchedulerEvent::Exhausted(op_name));
                     return;
                 }
@@ -473,7 +489,12 @@ fn spawn_generator_task(
             // Provider streaming (LLM): use execute_streaming with channel
             run_provider_streaming(op, state, &ctx, &input_value, &op_name, &event_tx).await;
         } else {
-            log::error!("[hush] Generator op '{}' has no rust_op or streaming provider", op.full_name);
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("gen_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", "Generator op has no rust_op or streaming provider"),
+            ]));
         }
 
         let _ = event_tx.send(SchedulerEvent::Exhausted(op_name));
@@ -551,10 +572,12 @@ fn run_registry_generator(
             }
         }
         None => {
-            log::error!(
-                "[hush] Unknown generator: '{}' (from rust_op='{}') — no registry loaded or op not found",
-                func_name, rust_op
-            );
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("gen_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", &format!("Unknown generator '{}' (from rust_op='{}') — no registry loaded or op not found", func_name, rust_op)),
+            ]));
         }
     }
 }
@@ -660,10 +683,20 @@ async fn run_provider_streaming(
                 ctx,
                 Value::String(format!("Streaming provider error: {}", e)),
             );
-            log::error!("[hush] Streaming error in op {}: {}", op.full_name, e);
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("op_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", &format!("Streaming provider error: {}", e)),
+            ]));
         }
         Err(e) => {
-            log::error!("[hush] Provider task panicked for {}: {}", op.full_name, e);
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("op_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", &format!("Provider task panicked: {}", e)),
+            ]));
         }
         Ok(Ok(_)) => {}
     }

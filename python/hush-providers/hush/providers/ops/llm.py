@@ -71,7 +71,7 @@ class LLMOp(BaseOp):
         seed: Optional[int] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize LLMOp.
 
