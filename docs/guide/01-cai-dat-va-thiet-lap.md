@@ -33,11 +33,11 @@ Hush là **monorepo** với 3 packages riêng biệt:
 
 | Package | Mô tả | Khi nào cần |
 |---------|--------|-------------|
-| `hush-core` | Workflow engine (GraphOp, FuncOp, BranchOp) | **Luôn cần** — đây là nền tảng |
+| `hush-icore` | Workflow engine (GraphOp, FuncOp, BranchOp) | **Luôn cần** — đây là nền tảng |
 | `hush-providers` | LLM, embedding, reranking providers | Khi dùng LLM, embedding, hoặc reranking |
 | `hush-telemetry` | Langfuse, OpenTelemetry tracing | Khi cần tracing với backend bên ngoài |
 
-> **Quan trọng:** `hush-providers` và `hush-telemetry` phụ thuộc vào `hush-core`, nên luôn cài `hush-core` trước.
+> **Quan trọng:** `hush-providers` và `hush-telemetry` phụ thuộc vào `hush-icore`, nên luôn cài `hush-icore` trước.
 
 #### Extras — kết hợp tuỳ ý
 
@@ -83,10 +83,10 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 ```bash
 # Tối thiểu — chỉ workflow engine
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 
 # Core + LLM providers + Langfuse tracing
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
@@ -97,7 +97,7 @@ Tạo file `requirements.txt` trong thư mục project:
 
 ```txt
 # requirements.txt
-hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core
+hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore
 hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers
 hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry
 ```
@@ -108,7 +108,7 @@ Sau đó cài đặt:
 pip install -r requirements.txt
 ```
 
-> Bỏ dòng nào không cần. Chỉ `hush-core` là bắt buộc.
+> Bỏ dòng nào không cần. Chỉ `hush-icore` là bắt buộc.
 
 ---
 
@@ -126,10 +126,10 @@ uv init my-hush-project && cd my-hush-project
 
 ```bash
 # Tối thiểu — chỉ workflow engine
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 
 # Core + LLM providers + Langfuse tracing
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
 uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
 ```
@@ -144,13 +144,13 @@ name = "my-hush-project"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "hush-core",
+    "hush-icore",
     "hush-providers",
     "hush-telemetry[langfuse]",
 ]
 
 [tool.uv.sources]
-hush-core = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-core" }
+hush-icore = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-icore" }
 hush-providers = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-providers" }
 hush-telemetry = { git = "https://github.com/batman1m2001-cyber/Hush-ai.git", subdirectory = "hush-telemetry" }
 ```
@@ -161,14 +161,14 @@ Sau đó cài đặt:
 uv sync
 ```
 
-> Bỏ dòng nào không cần trong `dependencies` và `[tool.uv.sources]`. Chỉ `hush-core` là bắt buộc.
+> Bỏ dòng nào không cần trong `dependencies` và `[tool.uv.sources]`. Chỉ `hush-icore` là bắt buộc.
 
 ---
 
 Kết quả mong đợi:
 
 ```
-Successfully installed hush-core-0.1.0 ...
+Successfully installed hush-icore-0.1.0 ...
 Successfully installed hush-providers-0.1.0 ...
 Successfully installed hush-telemetry-0.1.0 ...
 ```
@@ -176,7 +176,7 @@ Successfully installed hush-telemetry-0.1.0 ...
 ### 2.3 Kiểm tra cài đặt cơ bản
 
 ```bash
-python3 -c "from hush.core import Hush, GraphOp; print('hush-core OK')"
+python3 -c "from hush.core import Hush, GraphOp; print('hush-icore OK')"
 python3 -c "from hush.providers import LLMOp; print('hush-providers OK')"
 python3 -c "from hush.telemetry import LangfuseTracer; print('hush-telemetry OK')"
 ```
@@ -184,7 +184,7 @@ python3 -c "from hush.telemetry import LangfuseTracer; print('hush-telemetry OK'
 Kết quả mong đợi:
 
 ```
-hush-core OK
+hush-icore OK
 hush-providers OK
 hush-telemetry OK
 ```
@@ -343,7 +343,7 @@ cp resources.yaml /path/to/my-project/resources.yaml
 Hoặc dùng phiên bản nhẹ hơn (chỉ OpenAI + OpenRouter + Langfuse):
 
 ```bash
-cp tutorial/docs/resources.starter.yaml /path/to/my-project/resources.yaml
+cp docs/guide/resources.starter.yaml /path/to/my-project/resources.yaml
 ```
 
 ### Cấu trúc file
@@ -492,8 +492,8 @@ async def main():
         START >> step >> END
 
     tracer = LangfuseTracer(resource='langfuse:hush')
-    engine = Hush(graph)
-    result = await engine.run(inputs={}, tracer=tracer)
+    engine = Hush(graph, tracer=tracer)
+    result = await engine.run(inputs={})
     print(f'Result: {result[\"message\"]}')
     print('Check Langfuse dashboard for the trace.')
 
@@ -521,7 +521,7 @@ Bạn chưa cài packages hoặc chưa activate virtual environment:
 
 ```bash
 source .venv/bin/activate
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
+uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
 ```
 
 ### `WARNING: Environment variable OPENAI_API_KEY not found`

@@ -23,8 +23,8 @@ class HushEyesTracer(Tracer):
         from hush.telemetry import HushEyesTracer
 
         tracer = HushEyesTracer(tags=["dev", "testing"])
-        engine = Hush(graph)
-        result = await engine.run({"x": 5}, tracer=tracer)
+        engine = Hush(graph, tracer=tracer)
+        result = await engine.run({"x": 5})
         # Open http://localhost:8420 to view traces
     """
 

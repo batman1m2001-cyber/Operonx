@@ -1,6 +1,6 @@
 """Auth resource plugin for ResourceHub.
 
-Auto-registers Keycloak config classes and factory handlers with hush-core.
+Auto-registers Keycloak config classes and factory handlers with hush-icore.
 """
 
 from hush.core.registry import REGISTRY

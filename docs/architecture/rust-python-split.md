@@ -7,7 +7,7 @@ Hush uses a **builder-executor split**: Python builds graphs via DSL, serializes
 ```
 Python (build time)              Rust (run time)
 ─────────────────                ──────────────
-GraphOp DSL                      Rush(config_json)
+GraphOp DSL                      Hush(config_json)
   │                                │
   ▼                                ▼
 graph.serialize() ──JSON──→   GraphConfig::from_json()
@@ -37,13 +37,13 @@ graph.serialize() ──JSON──→   GraphConfig::from_json()
 
 | Domain | Python | Rust |
 |--------|--------|------|
-| Engine | `python/hush-core/hush/core/engine.py` | `rust/rush-core/src/engine.rs` |
-| Graph scheduler | `python/hush-core/hush/core/ops/graph/scheduler.py` | `rust/rush-core/src/ops/graph/graph_op.rs` |
-| State | `python/hush-core/hush/core/states/state.py` | `rust/rush-core/src/states/state.rs` |
-| Config | `python/hush-core/hush/core/configs/` | `rust/rush-core/src/config.rs` |
-| Providers | `python/hush-providers/` | `rust/rush-providers/` |
-| Tracing | `python/hush-core/hush/core/tracing/` | `rust/rush-core/src/tracing/` |
-| HTTP serve | `python/hush-serve/` | `rust/rush-serve/` |
+| Engine | `python/hush-icore/hush/core/engine.py` | `rust/hush-icore/src/engine.rs` |
+| Graph scheduler | `python/hush-icore/hush/core/ops/graph/scheduler.py` | `rust/hush-icore/src/ops/graph/graph_op.rs` |
+| State | `python/hush-icore/hush/core/states/state.py` | `rust/hush-icore/src/states/state.rs` |
+| Config | `python/hush-icore/hush/core/configs/` | `rust/hush-icore/src/config.rs` |
+| Providers | `python/hush-providers/` | `rust/hush-providers/` |
+| Tracing | `python/hush-icore/hush/core/tracing/` | `rust/hush-icore/src/tracing/` |
+| HTTP serve | `python/hush-serve/` | `rust/hush-serve/` |
 
 See [MODULE_MAP.md](../../MODULE_MAP.md) for the complete mapping.
 
@@ -57,16 +57,46 @@ See [MODULE_MAP.md](../../MODULE_MAP.md) for the complete mapping.
 | Op dispatch | Dynamic (async/sync, executor) | Static match on `rust_name` or provider type |
 | Context IDs | Tuple `("main", "[0]")` | Dot-separated `"main.[0]"` |
 
+## cdylib Plugin System
+
+Custom Rust ops are compiled as shared libraries (`.so`/`.dylib`/`.dll`) and loaded at runtime via `libloading`.
+
+### Architecture
+
+```
+hush-plugin crate
+├── OpRegistry trait       # Interface for plugin ops
+├── hush_plugin! macro     # Auto-generate registry + C ABI exports
+└── C ABI functions        # rush_create_registry(), rush_destroy_registry()
+
+hush-serve
+├── --plugin flag          # Load shared libraries at runtime
+├── libloading             # Dynamic library loading
+└── OpRegistry dispatch    # Route ops to plugin functions
+```
+
+### Flow
+
+1. Plugin author writes `fn(&Value) -> Value` functions in a `cdylib` crate
+2. `hush_plugin!` macro generates `OpRegistry` impl + C ABI export functions
+3. `hush-serve --plugin ./target/release/libmy_ops.so` loads the library
+4. Python's `_rust_bridge.py` auto-detects plugin crates and passes `--plugin` when spawning hush-serve
+5. Ops referenced via `@op(rust="./my-crate::func")` dispatch to the plugin at runtime
+
+### Op dispatch
+
+All Rust ops are dispatched via the `OpRegistry` trait in `hush-icore/src/registry.rs`. There are no built-in ops — every custom op must be provided by a cdylib plugin crate. All ops use the same `fn(&Value) -> Value` signature.
+
 ## Usage
 
 ```python
-# Python mode (default)
+# Python backend (default) — FastAPI + uvicorn
 engine = Hush(graph)
-result = await engine.run(inputs={"x": 5})
+engine.serve(port=8000)
 
-# Rust mode
-result = await engine.run(inputs={"x": 5}, mode="rust")
+# Rust backend — Axum + hush-serve
+engine.serve(port=8000, backend="rust", rust_ops="rust_ops")
 
 # Standalone Rust (no Python)
-# rush-serve --config graph.json
+# hush-serve --config graph.json --plugin ./target/release/libmy_ops.so
 ```

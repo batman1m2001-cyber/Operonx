@@ -1,6 +1,6 @@
 # hush-serve
 
-Auto-generate HTTP API servers from Hush workflow graphs. Built on FastAPI with support for sync, SSE streaming, and WebSocket endpoints. Dual-backend: Python (FastAPI/uvicorn) or Rust (spawns rush-serve binary).
+Auto-generate HTTP API servers from Hush workflow graphs. Built on FastAPI with support for sync, SSE streaming, and WebSocket endpoints. Dual-backend: Python (FastAPI/uvicorn) or Rust (spawns hush-serve binary).
 
 ## Module Structure
 
@@ -13,7 +13,7 @@ hush-serve/hush/serve/
 ├── schema.py            # Auto-generate Pydantic request/response models from graph metadata
 ├── middleware.py         # RequestIDMiddleware, TimingMiddleware
 ├── errors.py            # Error handling
-├── _rust_bridge.py      # backend="rust" — serialize config, spawn rush-serve binary
+├── _rust_bridge.py      # backend="rust" — serialize config, spawn hush-serve binary
 └── routes/
     ├── sync_handler.py    # POST /path → JSON result
     ├── stream_handler.py  # POST /path/stream → SSE text/event-stream
@@ -25,7 +25,7 @@ hush-serve/hush/serve/
 1. `app.py` — `HushApp` class: endpoint registration, FastAPI builder, `serve()` entry point
 2. `endpoint.py` — `Endpoint`: binds a `GraphOp` to config, creates `Hush` engine
 3. `schema.py` — Auto-generates Pydantic models from `graph.inputs`/`graph.outputs`
-4. `_rust_bridge.py` — `backend="rust"` path: serialize + spawn rush-serve
+4. `_rust_bridge.py` — `backend="rust"` path: serialize + spawn hush-serve
 
 ## Architecture
 
@@ -38,7 +38,7 @@ HushApp.serve(backend="python")     HushApp.serve(backend="rust")
     FastAPI + uvicorn                  serialize_for_rust()
     (Python handlers)                         │
                                               ▼
-                                       spawn rush-serve binary
+                                       spawn hush-serve binary
                                        (Axum, pure Rust)
 ```
 
@@ -81,7 +81,7 @@ app.endpoint("/double", graph=graph)
 # Python backend (default)
 app.serve(port=8000)
 
-# Rust backend (spawns rush-serve binary)
+# Rust backend (spawns hush-serve binary)
 app.serve(port=8000, backend="rust")
 ```
 
@@ -97,7 +97,7 @@ def chatbot(query):
 
 ## Dependencies
 
-- `hush-core` — workflow engine
+- `hush-icore` — workflow engine
 - `fastapi` — HTTP framework
 - `uvicorn` — ASGI server
 - `websockets` — WebSocket support
@@ -116,6 +116,6 @@ uv run -m pytest
 
 | Topic | File |
 |-------|------|
-| Core engine | [hush-core/CLAUDE.md](../hush-core/CLAUDE.md) |
-| Rust backend | [rush-serve/CLAUDE.md](../../rust/rush-serve/CLAUDE.md) |
+| Core engine | [hush-icore/CLAUDE.md](../hush-icore/CLAUDE.md) |
+| Rust backend | [hush-serve/CLAUDE.md](../../rust/hush-serve/CLAUDE.md) |
 | Provider ops | [hush-providers/CLAUDE.md](../hush-providers/CLAUDE.md) |

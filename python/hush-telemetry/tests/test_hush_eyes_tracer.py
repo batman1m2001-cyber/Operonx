@@ -52,12 +52,11 @@ class TestHushEyesIntegration:
             START >> node >> END
 
         tracer = HushEyesTracer(tags=["integration-test"])
-        engine = Hush(graph)
+        engine = Hush(graph, tracer=tracer)
 
         result = await engine.run(
             inputs={"x": 21},
             request_id="eyes-integration-001",
-            tracer=tracer,
         )
 
         assert result["result"] == 42

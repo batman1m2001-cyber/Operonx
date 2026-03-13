@@ -249,7 +249,7 @@ async def test_llm_op():
 
 ## Error Handling
 
-Use exception classes from hush-core:
+Use exception classes from hush-icore:
 - `PromptError` - Template formatting failures
 - `EmbeddingError` - Embedding provider failures
 - `RerankError` - Reranking failures

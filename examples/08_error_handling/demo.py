@@ -7,6 +7,7 @@ Chạy: cd examples && uv run python 08_error_handling/demo.py
 """
 
 import asyncio
+import sys
 import os
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from workflow import (
 )
 
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 async def main():
     # 1. Error capture — workflow doesn't crash
     print("=" * 50)

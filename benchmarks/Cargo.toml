@@ -1,14 +1,15 @@
 [package]
-name = "rush-bench"
+name = "hush-bench"
 version = "0.1.0"
 edition = "2021"
 description = "Benchmark runner for Python vs Rust backend comparison"
 publish = false
 
 [[bin]]
-name = "rush-bench"
+name = "hush-bench"
 path = "src/bin/bench_runner.rs"
 
 [dependencies]
-rush-core = { path = "../rust/rush-core" }
+hush-icore = { path = "../rust/hush-icore" }
 serde_json = "1"
+sha2 = "0.10"

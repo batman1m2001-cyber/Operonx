@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hush-icore"
+version = "0.1.0"
+description = "Hush workflow engine core - A powerful async workflow orchestration framework"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Hush Team" }
+]
+keywords = ["workflow", "orchestration", "async", "dag", "pipeline"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0.3",
+    "rich>=13.0",
+    "orjson>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/batman1m2001-cyber/Hush-ai"
+Documentation = "https://github.com/batman1m2001-cyber/Hush-ai#readme"
+Repository = "https://github.com/batman1m2001-cyber/Hush-ai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hush"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/hush",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # Line too long
+    "E402",  # Module level import not at top (needed for load_dotenv pattern)
+    "E712",  # Comparison to True/False (intentional for clarity in some cases)
+    "E721",  # Type comparison (intentional in some cases)
+    "E722",  # Bare except
+    "E731",  # Lambda assignment
+    "F401",  # Unused imports (in __init__.py for re-exports)
+    "F541",  # f-string without placeholders
+    "F841",  # Unused variable
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (may require external services)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1",
+]

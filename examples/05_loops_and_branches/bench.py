@@ -26,8 +26,8 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 PORT_PY = 9001
 PORT_RS = 9002
-TOTAL = 200
-CCU = 20
+TOTAL = 20
+CCU = 5
 N_WARMUP = 5
 
 ENDPOINTS = [

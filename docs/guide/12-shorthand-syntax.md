@@ -1,8 +1,8 @@
 # Shorthand Syntax
 
-Hush cung cấp các `.of()` classmethod và decorator để viết workflow ngắn gọn hơn. Thay vì dùng class đầy đủ với `inputs={}`, bạn có thể truyền trực tiếp các tham số.
+Hush cung cấp các `.of()` classmethod, decorator, và factory functions để viết workflow ngắn gọn hơn. Thay vì dùng class đầy đủ với `inputs={}`, bạn có thể truyền trực tiếp các tham số.
 
-> **Ví dụ chạy được**: `examples/15_shorthand_syntax.py`, `examples/16_graph.py`
+> **Ví dụ chạy được**: `examples/05_loops_and_branches/demo.py`, `examples/09_agent_workflow/demo.py`
 
 ## Tổng quan
 
@@ -10,10 +10,8 @@ Hush cung cấp các `.of()` classmethod và decorator để viết workflow ng�
 |------------|-----------|-------|
 | `FuncOp(...)` | `@op` | Decorator tạo FuncOp từ function |
 | `GraphOp(...)` + manual setup | `@graph` | Decorator tạo reusable workflow module |
-| `ForOp(inputs={...})` | `ForOp.of(item=Each(...), ...)` | Iterate tuần tự |
-| `MapOp(inputs={...})` | `MapOp.of(item=Each(...), ...)` | Iterate song song |
-| `WhileOp(inputs={...})` | `WhileOp.of(counter=0, until=...)` | Loop với điều kiện |
-| `AIterOp(inputs={...})` | `AIterOp.of(chunk=Each(stream), ...)` | Xử lý async streaming |
+| *(yield trong @op)* | Generator op | `yield {"item": item}` — iterate + parallel |
+| *(GraphOp with loop)* | `@graph.loop()` | `@graph.loop(until="done == True")` — feedback loop |
 | `BranchOp(...)` | `if_(...).else_(...)` | Routing có điều kiện |
 | *(verbose graph)* | `chain(resource="gpt-4o", template=..., ...)` | Prompt + LLM all-in-one |
 | `LLMOp(inputs={...})` | `LLMOp.of(resource="gpt-4o", messages=...)` | Gọi LLM |
@@ -28,7 +26,7 @@ Biến Python function thành FuncOp.
 ### So sánh
 
 ```python
-# ❌ Verbose: dùng FuncOp class
+# Verbose: dùng FuncOp class
 def clean_text(text: str) -> dict:
     return {"cleaned": text.strip().lower()}
 
@@ -39,7 +37,7 @@ step = FuncOp(
     outputs={"cleaned": PARENT}
 )
 
-# ✅ Shorthand: dùng @op decorator
+# Shorthand: dùng @op decorator
 from hush.core.ops import op
 
 @op
@@ -48,7 +46,7 @@ def clean_text(text: str):
 
 step = clean_text(
     name="clean",
-    text=PARENT["text"],           # Input trực tiếp
+    text=PARENT["text"],
     outputs={"cleaned": PARENT}
 )
 ```
@@ -64,189 +62,89 @@ def process(x: int):
 step = process(name="proc", x=PARENT["value"], outputs={"*": PARENT})
 ```
 
-## ForOp.of() — ForOp Classmethod
+## Generator ops — Iteration bằng yield
 
-Iterate tuần tự qua collection.
+Dùng `yield` trong `@op` function để iterate — thay thế ForOp/MapOp.
 
-### So sánh
-
-```python
-from hush.core import ForOp, Each
-
-# ❌ Verbose
-with ForOp(
-    name="loop",
-    inputs={
-        "item": Each(PARENT["items"]),
-        "prefix": PARENT["prefix"]
-    }
-) as loop:
-    ...
-
-# ✅ Classmethod
-with ForOp.of(
-    name="loop",
-    item=Each(PARENT["items"]),   # Each() = iterate
-    prefix=PARENT["prefix"]        # Không có Each() = broadcast
-) as loop:
-    ...
-```
-
-### Ví dụ đầy đủ
+### Sequential iteration
 
 ```python
-from hush.core import ForOp, Each, op
+@op
+def each_item(items: list, prefix: str):
+    """Yield từng item — downstream ops chạy per item."""
+    for item in items:
+        yield {"item": item, "prefix": prefix}
 
 @op
-def double(x: int):
-    return {"result": x * 2}
+def process_item(item: str, prefix: str):
+    return {"result": f"{prefix}: {item}"}
 
-with GraphOp(name="demo") as graph:
-    with ForOp.of(item=Each([1, 2, 3, 4, 5])) as loop:
-        step = double(name="double", x=PARENT["item"], outputs={"*": PARENT})
-        START >> step >> END
-
-    loop["result"] >> PARENT["results"]
-    START >> loop >> END
-
-# result["results"] = [2, 4, 6, 8, 10]
+with GraphOp(name="for-loop") as graph:
+    src = each_item(items=PARENT["items"], prefix=PARENT["prefix"])
+    step = process_item(item=src["item"], prefix=src["prefix"])
+    START >> src >> step >> END
 ```
 
-## MapOp.of() — MapOp Classmethod
-
-Iterate song song với giới hạn concurrency.
-
-### So sánh
+### Parallel map
 
 ```python
-from hush.core import MapOp, Each
+@op
+def each_number(numbers: list):
+    for x in numbers:
+        yield {"x": x}
 
-# ❌ Verbose
-with MapOp(
-    name="parallel",
-    inputs={"url": Each(PARENT["urls"]), "timeout": 30},
-    max_concurrency=10
-) as map_op:
-    ...
-
-# ✅ Classmethod
-with MapOp.of(
-    name="parallel",
-    url=Each(PARENT["urls"]),
-    timeout=30,                    # Broadcast
-    max_concurrency=10             # Config option
-) as map_op:
-    ...
-```
-
-### Ví dụ đầy đủ
-
-```python
 @op
 def square(x: int):
     return {"squared": x * x}
 
-with GraphOp(name="parallel-demo") as graph:
-    with MapOp.of(x=Each([1, 2, 3, 4, 5]), max_concurrency=3) as loop:
-        step = square(name="square", x=PARENT["x"], outputs={"*": PARENT})
-        START >> step >> END
-
-    loop["squared"] >> PARENT["results"]
-    START >> loop >> END
-
-# result["results"] = [1, 4, 9, 16, 25]
+with GraphOp(name="map-op") as graph:
+    src = each_number(numbers=PARENT["numbers"])
+    step = square(x=src["x"])
+    START >> src >> step >> END
+# Downstream ops tự động chạy song song per yield
 ```
 
-## WhileOp.of() — WhileOp Classmethod
-
-Loop cho đến khi điều kiện dừng.
-
-### So sánh
-
-```python
-from hush.core import WhileOp
-
-# ❌ Verbose
-with WhileOp(
-    name="countdown",
-    inputs={"count": PARENT["start"]},
-    until="count <= 0",
-    max_iterations=100
-) as loop:
-    ...
-
-# ✅ Classmethod
-with WhileOp.of(
-    name="countdown",
-    count=PARENT["start"],          # Input variable
-    until="count <= 0",    # Điều kiện dừng (string expression)
-    max_iterations=100
-) as loop:
-    ...
-```
-
-### Ví dụ đầy đủ
+### While loop trong generator
 
 ```python
 @op
-def halve(value: int):
-    return {"new_value": value // 2}
+def halve_until(value: int):
+    while value >= 5:
+        value = value // 2
+        yield {"value": value}
 
-with GraphOp(name="halve-demo") as graph:
-    with WhileOp.of(value=256, until="value < 10", max_iterations=20) as loop:
-        step = halve(name="halve", value=PARENT["value"])
-        step["new_value"] >> PARENT["value"]
-        START >> step >> END
-
-    loop["value"] >> PARENT["final"]
-    START >> loop >> END
-
-# 256 → 128 → 64 → 32 → 16 → 8 (dừng vì < 10)
+with GraphOp(name="while-loop") as graph:
+    src = halve_until(value=PARENT["start_value"])
+    START >> src >> END
 ```
 
-## AIterOp.of() — AIterOp Classmethod
+## @graph.loop() — Feedback Loop
 
-Xử lý async streaming data với concurrent processing.
-
-### So sánh
+Khi cần feedback loop (output iteration N → input iteration N+1), dùng `@graph.loop()`:
 
 ```python
-from hush.core import AIterOp, Each
+from hush.core import graph, op, START, END, PARENT
+from hush.providers import LLMOp
 
-# ❌ Verbose
-with AIterOp(
-    name="stream_processor",
-    inputs={"chunk": Each(async_stream)},
-    callback=handle_result,
-    max_concurrency=5
-) as stream:
-    ...
-
-# ✅ Classmethod
-with AIterOp.of(
-    name="stream_processor",
-    chunk=Each(async_stream),
-    callback=handle_result,
-    max_concurrency=5
-) as stream:
-    ...
+@graph.loop(until="done == True", max_iterations=10)
+def agent_loop(messages, done, answer):
+    """Agent loop: LLM → process → update state → repeat."""
+    llm = LLMOp.of(resource="gpt-4o-mini", messages=messages, tools=TOOL_DESCRIPTIONS)
+    proc = process_response(
+        content=llm["content"],
+        tool_calls=llm["tool_calls"],
+        messages=messages,
+    )
+    proc["messages"] >> PARENT["messages"]
+    proc["done"] >> PARENT["done"]
+    proc["answer"] >> PARENT["answer"]
+    START >> llm >> proc >> END
 ```
 
-### Ví dụ với LLM streaming
-
-```python
-async def process_llm_stream():
-    with GraphOp(name="stream-demo") as graph:
-        with AIterOp.of(
-            chunk=Each(llm_stream),
-            callback=lambda r: print(r["text"], end=""),
-            max_concurrency=1
-        ) as stream:
-            process = op(...)
-            START >> process >> END
-
-        START >> stream >> END
-```
+- `until="done == True"` — Điều kiện dừng (string expression)
+- `max_iterations=10` — Safety net
+- Function params = loop state, carry qua mỗi iteration
+- Dùng `>>` để update state: `proc["done"] >> PARENT["done"]`
 
 ## if_() — BranchOp Shorthand
 
@@ -257,17 +155,17 @@ Routing có điều kiện với fluent syntax.
 ```python
 from hush.core.ops import BranchOp, Branch, if_
 
-# ❌ Verbose
+# Verbose
 router = BranchOp(
     name="router",
     cases=[
         Branch(condition=PARENT["score"] >= 90, target="excellent"),
         Branch(condition=PARENT["score"] >= 70, target="good"),
-        Branch(condition=True, target="fail")  # default
+        Branch(condition=True, target="fail")
     ]
 )
 
-# ✅ Shorthand (fluent chaining)
+# Shorthand (fluent chaining)
 router = (if_(PARENT["score"] >= 90, "excellent")
           .if_(PARENT["score"] >= 70, "good")
           .else_("fail"))
@@ -277,19 +175,20 @@ router = (if_(PARENT["score"] >= 90, "excellent")
 
 ```python
 with GraphOp(name="grade-workflow") as graph:
-    # Fluent syntax tự động lấy tên từ biến (grade_router)
-    grade_router = (if_(PARENT["score"] >= 90, "excellent")
-                    .if_(PARENT["score"] >= 70, "good")
-                    .if_(PARENT["score"] >= 50, "average")
-                    .else_("fail"))
+    grade_router = (
+        if_(PARENT["score"] >= 90, "ex")
+        .if_(PARENT["score"] >= 70, "gd")
+        .if_(PARENT["score"] >= 50, "av")
+        .else_("fl")
+    )
 
-    excellent = FuncOp(name="excellent", code_fn=lambda: {"grade": "A"}, outputs={"grade": PARENT})
-    good = FuncOp(name="good", code_fn=lambda: {"grade": "B"}, outputs={"grade": PARENT})
-    average = FuncOp(name="average", code_fn=lambda: {"grade": "C"}, outputs={"grade": PARENT})
-    fail = FuncOp(name="fail", code_fn=lambda: {"grade": "F"}, outputs={"grade": PARENT})
+    ex = excellent(outputs={"grade": PARENT, "message": PARENT})
+    gd = good(outputs={"grade": PARENT, "message": PARENT})
+    av = average(outputs={"grade": PARENT, "message": PARENT})
+    fl = fail(outputs={"grade": PARENT, "message": PARENT})
 
-    START >> grade_router >> [excellent, good, average, fail]
-    [excellent, good, average, fail] >> ~END  # Soft edge vì chỉ 1 nhánh chạy
+    START >> grade_router >> [ex, gd, av, fl]
+    [ex, gd, av, fl] >> ~END  # Soft edge vì chỉ 1 nhánh chạy
 ```
 
 ## LLMOp.of() — LLMOp Classmethod
@@ -301,25 +200,20 @@ Gọi LLM với syntax ngắn gọn.
 ```python
 from hush.providers import LLMOp
 
-# ❌ Verbose
+# Verbose
 llm = LLMOp(
     name="chat",
     resource="gpt-4o",
-    inputs={
-        "messages": PARENT["messages"],
-        "temperature": 0.7,
-        "max_tokens": 1000
-    },
+    inputs={"messages": PARENT["messages"], "temperature": 0.7},
     outputs={"content": PARENT["response"]}
 )
 
-# ✅ Classmethod
+# Classmethod
 llm = LLMOp.of(
     resource="gpt-4o",
     name="chat",
-    messages=PARENT["messages"],   # Input trực tiếp
+    messages=PARENT["messages"],
     temperature=0.7,
-    max_tokens=1000,
     outputs={"content": PARENT["response"]}
 )
 ```
@@ -327,20 +221,18 @@ llm = LLMOp.of(
 ### Load Balancing
 
 ```python
-# Multiple models với weight ratios
 llm = LLMOp.of(
     resource=["gpt-4o", "gpt-4o-mini"],
     ratios=[0.3, 0.7],
     name="balanced",
     messages=PARENT["messages"],
-    seed=42  # Reproducible selection
+    seed=42
 )
 ```
 
 ### Fallback
 
 ```python
-# Tự động fallback khi primary fails
 llm = LLMOp.of(
     resource="gpt-4o",
     fallback=["azure-gpt4", "gemini"],
@@ -349,51 +241,19 @@ llm = LLMOp.of(
 )
 ```
 
-### Batch Mode
-
-```python
-# OpenAI Batch API (50% cheaper)
-llm = LLMOp.of(
-    resource="gpt-4o",
-    batch_mode=True,
-    name="batch_llm",
-    messages=PARENT["messages"]
-)
-```
-
 ## chain() — Factory Function
 
-Prompt + LLM all-in-one. Ngắn nhất có thể. `chain()` là một factory function (không phải class), trả về `GraphOp`.
-
-### Cách dùng
+Prompt + LLM all-in-one. `chain()` là một factory function, trả về `GraphOp`.
 
 ```python
 from hush.providers import chain
 
-# ✅ Factory function (auto-name + >> END auto-forward)
 chat = chain(
     resource="gpt-4o",
-    template={"system": "Bạn là assistant.", "user": "{query}"},
+    template={"system": "You are a helpful assistant.", "user": "{query}"},
     query=PARENT["query"],
 )
 START >> chat >> END  # result["content"], result["model_used"], ...
-```
-
-### String template
-
-```python
-summarize = chain(resource="gpt-4o", template="Tóm tắt: {text}", text=PARENT["text"])
-```
-
-### Structured output
-
-```python
-classifier = chain(
-    resource="gpt-4o",
-    template={"user": "Phân loại: {text}"},
-    text=PARENT["text"],
-    response_format={"type": "json_object"},
-)
 ```
 
 ### Load Balancing + Fallback
@@ -416,12 +276,12 @@ Tạo messages từ template, dùng khi cần tách riêng prompt và LLM.
 from hush.providers import PromptOp
 
 # String → [{"role": "user", "content": "..."}]
-p = PromptOp.of(template="Tóm tắt: {text}", text=PARENT["text"])
+p = PromptOp.of(template="Summarize: {text}", text=PARENT["text"])
 
 # Dict → system + user messages
 p = PromptOp.of(
-    template={"system": "Bạn là assistant chuyên {task}.", "user": "{query}"},
-    task="tóm tắt",
+    template={"system": "You are a {task} expert.", "user": "{query}"},
+    task="summarization",
     query=PARENT["query"],
 )
 ```
@@ -461,14 +321,14 @@ from hush.core import graph, op, GraphOp, START, END, PARENT
 def double(x: int):
     return {"result": x * 2}
 
-# ❌ Verbose: tạo GraphOp thủ công
+# Verbose: tạo GraphOp thủ công
 with GraphOp(name="main") as main:
     with GraphOp(name="double_flow", inputs={"val": PARENT["input"]}) as sub:
         step = double(x=PARENT["val"])
         START >> step >> END
     START >> sub >> END
 
-# ✅ Shorthand: @graph decorator
+# Shorthand: @graph decorator
 @graph
 def double_flow(val):
     step = double(x=val)        # val = PARENT["val"] (injected)
@@ -484,7 +344,7 @@ with GraphOp(name="main") as main:
 ```python
 with GraphOp(name="chain") as main:
     d1 = double_flow(val=PARENT["input"])
-    d2 = double_flow(val=d1["result"])      # chain output
+    d2 = double_flow(val=d1["result"])
     START >> d1 >> d2 >> END
 
 # input=3 → 3*2=6 → 6*2=12
@@ -496,91 +356,20 @@ with GraphOp(name="chain") as main:
 @graph
 def double_flow(val):
     step = double(x=val)
-    step["result"] >> PARENT["doubled"]     # rename output key
+    step["result"] >> PARENT["doubled"]
     START >> step >> END
 
 with GraphOp(name="main") as main:
     d = double_flow(val=PARENT["input"])
-    d["doubled"] >> PARENT["answer"]        # map to graph output
+    d["doubled"] >> PARENT["answer"]
     START >> d >> END
-
-# result["answer"] == 14 (input=7)
-```
-
-### Zero-param graph
-
-```python
-@graph
-def static_flow():
-    step = double(x=PARENT["val"])          # manual PARENT reference
-    START >> step >> END
-
-g = static_flow(val=10)                     # val là input mapping
-```
-
-### Explicit name và config
-
-```python
-d = double_flow(val=PARENT["input"], name="custom_name")
-d = double_flow(val=PARENT["input"], outputs={"result": PARENT["answer"]})
 ```
 
 ## Best Practices
 
-### 1. Khi nào dùng .of() classmethod
+### Auto-naming
 
-```python
-# ✅ Dùng .of() classmethod cho cases đơn giản
-with ForOp.of(item=Each(items), multiplier=10) as loop:
-    ...
-
-# ✅ Dùng class đầy đủ khi cần nhiều config
-with ForOp(
-    name="complex_loop",
-    inputs={
-        "item": Each(PARENT["items"]),
-        "context": PARENT["context"],
-        "settings": PARENT["settings"]
-    },
-    outputs={
-        "results": PARENT["processed"],
-        "errors": PARENT["failed"]
-    }
-) as loop:
-    ...
-```
-
-### 2. Mix .of() classmethod và verbose
-
-```python
-# OK: mix trong cùng workflow
-with GraphOp(name="mixed") as graph:
-    # Classmethod cho simple ops
-    with ForOp.of(item=Each(PARENT["items"])) as loop:
-        step = process(name="step", x=PARENT["item"], outputs={"*": PARENT})
-        START >> step >> END
-
-    # Verbose cho complex ops
-    final = FuncOp(
-        name="aggregate",
-        code_fn=aggregate_results,
-        inputs={
-            "results": loop["result"],
-            "config": PARENT["config"],
-            "metadata": PARENT["metadata"]
-        },
-        outputs={
-            "summary": PARENT["summary"],
-            "stats": PARENT["stats"]
-        }
-    )
-
-    START >> loop >> final >> END
-```
-
-### 3. Auto-naming
-
-`.of()` classmethods sử dụng variable name làm op name khi không chỉ định:
+`.of()` classmethods và `@graph` sử dụng variable name làm op name khi không chỉ định:
 
 ```python
 # Tên op sẽ là "grade_router" (từ variable name)
@@ -590,47 +379,29 @@ grade_router = if_(PARENT["score"] >= 90, "a").else_("b")
 router = if_(PARENT["score"] >= 90, "a", name="my_router").else_("b")
 ```
 
-### 4. Auto-forward outputs với >> END
+### Auto-forward outputs với >> END
 
 Khi op kết nối trực tiếp đến END mà không định nghĩa `outputs`, tất cả outputs sẽ tự động forward lên parent:
 
 ```python
-# ❌ Verbose: phải viết outputs
-step = FuncOp(
-    name="compute",
-    code_fn=lambda: {"a": 1, "b": 2},
-    outputs={"a": PARENT, "b": PARENT}
-)
-START >> step >> END
-
-# ✅ Shorthand: auto-forward tất cả outputs
-step = FuncOp(
-    name="compute",
-    code_fn=lambda: {"a": 1, "b": 2}
-)
-START >> step >> END  # result["a"] == 1, result["b"] == 2
-
-# Với @op decorator
 @op
 def compute():
     return {"a": 1, "b": 2}
 
-step = compute(name="step")  # Không cần outputs
-START >> step >> END         # Auto-forward
+step = compute()
+START >> step >> END  # result["a"] == 1, result["b"] == 2
 ```
 
 ## Tổng kết
 
 | Shorthand | Config Options | Khi nào dùng |
 |-----------|----------------|--------------|
-| `@op` | - | Tạo op từ function |
+| `@op` | `rust="..."`, `bound="io"/"cpu"` | Tạo op từ function |
+| `yield` trong `@op` | - | Iterate list, parallel map |
 | `@graph` | `name`, `outputs`, `description` | Tạo reusable workflow module |
-| `ForOp.of(...)` | - | Sequential iteration |
-| `MapOp.of(...)` | `max_concurrency` | Parallel iteration |
-| `WhileOp.of(...)` | `until`, `max_iterations` | Conditional loop |
-| `AIterOp.of(...)` | `max_concurrency`, `callback`, `batch_fn` | Async streaming |
+| `@graph.loop()` | `until`, `max_iterations` | Feedback loop (agent, convergence) |
 | `if_(...).else_(...)` | - | Conditional routing |
-| `chain(...)` | `ratios`, `fallback`, `response_format`, `extract` | Prompt + LLM all-in-one |
+| `chain(...)` | `ratios`, `fallback`, `response_format` | Prompt + LLM all-in-one |
 | `LLMOp.of(...)` | `ratios`, `fallback`, `batch_mode`, `seed` | LLM calls |
 | `PromptOp.of(...)` | - | Tạo messages từ template |
 | `EmbeddingOp.of(...)` | - | Tạo embeddings |

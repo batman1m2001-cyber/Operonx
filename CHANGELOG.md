@@ -19,11 +19,11 @@ All notable changes to this project will be documented in this file.
 
 ### Previous
 
-- **Plugin system (rush-plugin)**: New `rush-plugin` crate with `rush_plugin!` macro for building cdylib plugins. Replaces hardcoded `builtin_ops` with dynamic op registry (`OpRegistry` trait). rush-serve loads plugins at runtime via `--plugin` flag using `libloading`.
-- **Tracing tests**: 13 TraceCollector tests in rush-core (covering the root graph timing bug) + 19 Langfuse batch format tests in rush-telemetry.
+- **Plugin system (hush-plugin)**: New `hush-plugin` crate with `hush_plugin!` macro for building cdylib plugins. Replaces hardcoded `builtin_ops` with dynamic op registry (`OpRegistry` trait). hush-serve loads plugins at runtime via `--plugin` flag using `libloading`.
+- **Tracing tests**: 13 TraceCollector tests in hush-icore (covering the root graph timing bug) + 19 Langfuse batch format tests in hush-telemetry.
 - **Example folder restructure**: Converted examples 03, 04, 06, 07 from single files to standard folder layout (`workflow.py`, `run.py`, `serve_python.py`, `serve_rust.py`, `client.py`).
-- **Rust serve plugin loading**: `--plugin` CLI argument in rush-serve to load cdylib op plugins. `PluginRegistry` implements `OpRegistry` via FFI calls.
-- **Python bridge plugin support**: `_rust_bridge.py` auto-detects and passes `--plugin` when spawning rush-serve with `rust_ops` parameter.
+- **Rust serve plugin loading**: `--plugin` CLI argument in hush-serve to load cdylib op plugins. `PluginRegistry` implements `OpRegistry` via FFI calls.
+- **Python bridge plugin support**: `_rust_bridge.py` auto-detects and passes `--plugin` when spawning hush-serve with `rust_ops` parameter.
 - **Benchmarks**: Extended `bench_runner.rs` with plugin-aware benchmarks.
 
 ### Fixed
@@ -34,12 +34,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- **`builtin_ops` → `registry`**: Replaced `rush-core/src/builtin_ops/` module with `OpRegistry` trait in `registry.rs`. All op dispatch now goes through the registry. Test ops moved to `TestRegistry` in `tests/common/mod.rs`.
+- **`builtin_ops` → `registry`**: Replaced `hush-icore/src/builtin_ops/` module with `OpRegistry` trait in `registry.rs`. All op dispatch now goes through the registry. Test ops moved to `TestRegistry` in `tests/common/mod.rs`.
 - **Error variant rename**: `RushError::BuiltinOpError` → `RushError::RegistryError`.
-- **rush-serve state**: `AppState` now stores `Option<Arc<dyn OpRegistry>>` and threads it through to the engine.
+- **hush-serve state**: `AppState` now stores `Option<Arc<dyn OpRegistry>>` and threads it through to the engine.
 
 ### Removed
 
-- `rust/rush-core/src/builtin_ops/mod.rs` and `ops.rs` (replaced by plugin system)
-- `rust/rush-core/tests/builtin_ops.rs` (replaced by `test_ops.rs` using `TestRegistry`)
+- `rust/hush-icore/src/builtin_ops/mod.rs` and `ops.rs` (replaced by plugin system)
+- `rust/hush-icore/tests/builtin_ops.rs` (replaced by `test_ops.rs` using `TestRegistry`)
 - `examples/07_embeddings_and_rag.py` single file (replaced by folder)

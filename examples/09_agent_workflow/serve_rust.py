@@ -3,8 +3,8 @@
 Endpoints:
   POST /agent   — {query} → {answer}
 
-Requires rush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p rush-serve
+Requires hush-serve binary and rust_ops cdylib to be built:
+  cd rust && cargo build --release -p hush-serve
   cd examples/rust_ops && cargo build --release
 
 Chạy:

@@ -91,13 +91,18 @@ pub fn merge_analysis(inputs: &Value) -> Value {
 // 7. merge_results
 // ---------------------------------------------------------------------------
 
-/// merge_results: s, k → {"summary": s, "keywords": k}
+/// merge_results: a, b → {"gpt4o": a, "gpt4o_mini": b, "same_length": abs(len(a)-len(b)) < 50}
 pub fn merge_results(inputs: &Value) -> Value {
+    let a = inputs["a"].as_str().unwrap_or("");
+    let b = inputs["b"].as_str().unwrap_or("");
+    let same_length = (a.len() as i64 - b.len() as i64).unsigned_abs() < 50;
     json!({
-        "summary": inputs["s"].clone(),
-        "keywords": inputs["k"].clone(),
+        "gpt4o": a,
+        "gpt4o_mini": b,
+        "same_length": same_length,
     })
 }
+
 
 // ---------------------------------------------------------------------------
 // 8. safe_process
@@ -144,7 +149,20 @@ pub fn filter_results(inputs: &Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// 10. process_response_tool
+// 10. classify_simple
+// ---------------------------------------------------------------------------
+
+/// classify_simple: classification → {"is_simple": bool}
+///
+/// Checks if the classification string contains "SIMPLE" (case-insensitive).
+pub fn classify_simple(inputs: &Value) -> Value {
+    let classification = inputs["classification"].as_str().unwrap_or("");
+    let is_simple = classification.to_uppercase().contains("SIMPLE");
+    json!({"is_simple": is_simple})
+}
+
+// ---------------------------------------------------------------------------
+// 11. process_response_tool
 // ---------------------------------------------------------------------------
 
 /// process_response_tool: content, tool_calls → {"has_tool_call": bool, "tool_result": ..., "llm_response": content}
@@ -293,10 +311,11 @@ pub fn process_agent_response(inputs: &Value) -> Value {
                 "tool_calls": calls,
             }));
 
-            // Simulate tool results
+            // Execute tools and append results
             for call in calls {
                 let func_name = call["function"]["name"].as_str().unwrap_or("");
-                let tool_result = format!("Simulated result for {}", func_name);
+                let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+                let tool_result = execute_tool(func_name, args_str);
                 messages.push(json!({
                     "role": "tool",
                     "content": tool_result,
@@ -324,6 +343,109 @@ pub fn process_agent_response(inputs: &Value) -> Value {
             })
         }
     }
+}
+
+/// Execute a tool by name. Mirrors the Python TOOLS dict in workflow.py.
+fn execute_tool(name: &str, args_json: &str) -> String {
+    let args: Value = serde_json::from_str(args_json).unwrap_or(json!({}));
+    match name {
+        "calculator" => {
+            let expr = args["expression"].as_str().unwrap_or("");
+            // Simple math eval: parse with f64 arithmetic
+            match eval_math(expr) {
+                Ok(result) => json!({"result": result.to_string()}).to_string(),
+                Err(e) => json!({"error": e}).to_string(),
+            }
+        }
+        "search" => {
+            let query = args["query"].as_str().unwrap_or("").to_lowercase();
+            let knowledge = [
+                ("python", "Python is a high-level programming language created by Guido van Rossum in 1991."),
+                ("hush", "Hush is an async workflow orchestration engine for GenAI applications."),
+                ("vietnam", "Vietnam is a country in Southeast Asia. Capital: Hanoi. Population: ~100 million."),
+                ("machine learning", "Machine learning is a subset of AI that learns patterns from data."),
+            ];
+            let result = knowledge.iter()
+                .find(|(key, _)| query.contains(key))
+                .map(|(_, v)| *v)
+                .unwrap_or("No information found.");
+            json!({"result": result}).to_string()
+        }
+        _ => json!({"error": format!("Unknown tool: {}", name)}).to_string(),
+    }
+}
+
+/// Minimal math expression evaluator for calculator tool.
+/// Handles +, -, *, / with operator precedence.
+fn eval_math(expr: &str) -> Result<f64, String> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err("Empty expression".to_string());
+    }
+
+    // Tokenize
+    let mut tokens: Vec<String> = Vec::new();
+    let mut num_buf = String::new();
+    for ch in expr.chars() {
+        if ch.is_ascii_digit() || ch == '.' || (ch == '-' && num_buf.is_empty() && (tokens.is_empty() || matches!(tokens.last().map(|s| s.as_str()), Some("+"|"-"|"*"|"/"|"(")))) {
+            num_buf.push(ch);
+        } else if ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '(' || ch == ')' {
+            if !num_buf.is_empty() {
+                tokens.push(std::mem::take(&mut num_buf));
+            }
+            tokens.push(ch.to_string());
+        } else if ch.is_whitespace() {
+            if !num_buf.is_empty() {
+                tokens.push(std::mem::take(&mut num_buf));
+            }
+        } else {
+            return Err(format!("Invalid character: {}", ch));
+        }
+    }
+    if !num_buf.is_empty() {
+        tokens.push(num_buf);
+    }
+
+    // Shunting-yard → RPN
+    let mut output: Vec<String> = Vec::new();
+    let mut ops: Vec<String> = Vec::new();
+    let precedence = |op: &str| -> i32 {
+        match op { "+" | "-" => 1, "*" | "/" => 2, _ => 0 }
+    };
+    for tok in &tokens {
+        match tok.as_str() {
+            "+" | "-" | "*" | "/" => {
+                while let Some(top) = ops.last() {
+                    if top != "(" && precedence(top) >= precedence(tok) {
+                        output.push(ops.pop().unwrap());
+                    } else { break; }
+                }
+                ops.push(tok.clone());
+            }
+            "(" => ops.push(tok.clone()),
+            ")" => {
+                while let Some(top) = ops.pop() {
+                    if top == "(" { break; }
+                    output.push(top);
+                }
+            }
+            _ => output.push(tok.clone()),
+        }
+    }
+    while let Some(op) = ops.pop() { output.push(op); }
+
+    // Evaluate RPN
+    let mut stack: Vec<f64> = Vec::new();
+    for tok in &output {
+        match tok.as_str() {
+            "+" => { let b = stack.pop().ok_or("Stack underflow")?; let a = stack.pop().ok_or("Stack underflow")?; stack.push(a + b); }
+            "-" => { let b = stack.pop().ok_or("Stack underflow")?; let a = stack.pop().ok_or("Stack underflow")?; stack.push(a - b); }
+            "*" => { let b = stack.pop().ok_or("Stack underflow")?; let a = stack.pop().ok_or("Stack underflow")?; stack.push(a * b); }
+            "/" => { let b = stack.pop().ok_or("Stack underflow")?; let a = stack.pop().ok_or("Stack underflow")?; if b == 0.0 { return Err("Division by zero".to_string()); } stack.push(a / b); }
+            _ => { let n: f64 = tok.parse().map_err(|_| format!("Invalid number: {}", tok))?; stack.push(n); }
+        }
+    }
+    stack.pop().ok_or("Empty expression".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -428,7 +550,7 @@ pub fn select_answer(inputs: &Value) -> Value {
 /// failing_op: () → panics with ZeroDivisionError equivalent
 ///
 /// Simulates a Python ZeroDivisionError by returning an error value.
-/// In Rust plugin context, we return an error output that rush-core treats as op failure.
+/// In Rust plugin context, we return an error output that hush-icore treats as op failure.
 pub fn failing_op(_inputs: &Value) -> Value {
     json!({"result": null, "$error": "ZeroDivisionError: division by zero"})
 }
@@ -507,9 +629,10 @@ mod tests {
 
     #[test]
     fn test_merge_results() {
-        let result = merge_results(&json!({"s": "A summary", "k": ["key1", "key2"]}));
-        assert_eq!(result["summary"], "A summary");
-        assert_eq!(result["keywords"], json!(["key1", "key2"]));
+        let result = merge_results(&json!({"a": "Response A", "b": "Response B"}));
+        assert_eq!(result["gpt4o"], "Response A");
+        assert_eq!(result["gpt4o_mini"], "Response B");
+        assert_eq!(result["same_length"], true);
     }
 
     #[test]
@@ -628,15 +751,43 @@ mod tests {
     fn test_process_agent_response_tool_call() {
         let result = process_agent_response(&json!({
             "content": "",
-            "tool_calls": [{"id": "call_1", "function": {"name": "search", "arguments": {}}}],
+            "tool_calls": [{"id": "call_1", "function": {"name": "calculator", "arguments": "{\"expression\": \"25 * 4 + 100\"}"}}],
             "messages": [
-                {"role": "user", "content": "Search for X"},
+                {"role": "user", "content": "What is 25 * 4 + 100?"},
             ],
         }));
         assert_eq!(result["done"], false);
         assert_eq!(result["answer"], "");
         // messages: original 1 + assistant + tool = 3
         assert_eq!(result["messages"].as_array().unwrap().len(), 3);
+        // Verify tool actually computed the result
+        let tool_msg = &result["messages"][2];
+        assert_eq!(tool_msg["role"], "tool");
+        let tool_content: Value = serde_json::from_str(tool_msg["content"].as_str().unwrap()).unwrap();
+        assert_eq!(tool_content["result"], "200");
+    }
+
+    #[test]
+    fn test_process_agent_response_search() {
+        let result = process_agent_response(&json!({
+            "content": "",
+            "tool_calls": [{"id": "call_2", "function": {"name": "search", "arguments": "{\"query\": \"python\"}"}}],
+            "messages": [
+                {"role": "user", "content": "Tell me about Python"},
+            ],
+        }));
+        assert_eq!(result["done"], false);
+        let tool_msg = &result["messages"][2];
+        let tool_content: Value = serde_json::from_str(tool_msg["content"].as_str().unwrap()).unwrap();
+        assert!(tool_content["result"].as_str().unwrap().contains("Guido van Rossum"));
+    }
+
+    #[test]
+    fn test_eval_math() {
+        assert_eq!(eval_math("25 * 4 + 100").unwrap(), 200.0);
+        assert_eq!(eval_math("15 * 7").unwrap(), 105.0);
+        assert_eq!(eval_math("(2 + 3) * 4").unwrap(), 20.0);
+        assert_eq!(eval_math("10 / 3").unwrap(), 10.0 / 3.0);
     }
 
     #[test]

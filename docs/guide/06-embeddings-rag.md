@@ -2,7 +2,7 @@
 
 Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 
-> **Ví dụ chạy được**: `examples/07_embeddings_and_rag.py`, `examples/14_rag_advanced.py`
+> **Ví dụ chạy được**: `examples/07_embeddings_and_rag/demo.py`, `examples/12_rag_advanced/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -206,29 +206,31 @@ with GraphOp(name="hybrid-rag") as graph:
     [kw, vs] >> m >> END
 ```
 
-Xem ví dụ đầy đủ tại `examples/14_rag_advanced.py`.
+Xem ví dụ đầy đủ tại `examples/12_rag_advanced/demo.py`.
 
 ## Batch Embedding
 
 ```python
-from hush.core import MapOp, Each
-
 @op
 def make_batches(docs):
     return {"batches": [docs[i:i+100] for i in range(0, len(docs), 100)]}
+
+@op
+def each_batch(batches: list):
+    """Yield từng batch — downstream ops chạy song song."""
+    for batch in batches:
+        yield {"batch": batch}
 
 @op
 def flatten(batches):
     return {"all_embeddings": [e for b in batches for e in b]}
 
 with GraphOp(name="batch-embed") as graph:
-    batch = make_batches(docs=PARENT["documents"])
-    with MapOp.of(batch=Each(batch["batches"]), max_concurrency=5) as map_op:
-        embed = EmbeddingOp.of(resource="openai", texts=PARENT["batch"])
-        START >> embed >> END
-
-    flat = flatten(batches=map_op["embeddings"])
-    START >> batch >> map_op >> flat >> END
+    b = make_batches(docs=PARENT["documents"])
+    src = each_batch(batches=b["batches"])
+    embed = EmbeddingOp.of(resource="openai", texts=src["batch"])
+    flat = flatten(batches=embed["embeddings"])
+    START >> b >> src >> embed >> flat >> END
 ```
 
 ## Best Practices
@@ -236,7 +238,7 @@ with GraphOp(name="batch-embed") as graph:
 1. **Retrieval top_k > Rerank top_k** — Retrieve 20, rerank to 5
 2. **Chunk size**: 200-500 tokens với 10-20% overlap
 3. **Cache embeddings** — Pre-compute cho knowledge base
-4. **Batch embedding** — Dùng MapOp với max_concurrency cho throughput
+4. **Batch embedding** — Dùng generator ops (yield) cho parallel throughput
 
 ## Tiếp theo
 

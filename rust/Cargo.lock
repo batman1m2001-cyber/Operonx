@@ -995,6 +995,90 @@ dependencies = [
 ]
 
 [[package]]
+name = "hush-icore"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "chrono",
+ "dashmap",
+ "hush-providers",
+ "lasso",
+ "log",
+ "rayon",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "hush-plugin"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "hush-providers"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "ndarray 0.16.1",
+ "ort",
+ "quick-xml",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokenizers",
+ "tokio",
+]
+
+[[package]]
+name = "hush-serve"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.8",
+ "clap",
+ "dashmap",
+ "env_logger",
+ "futures",
+ "hush-icore",
+ "hush-providers",
+ "hush-telemetry",
+ "libloading",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "uuid",
+]
+
+[[package]]
+name = "hush-telemetry"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "hush-icore",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "hyper"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2295,90 +2379,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rush-core"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "chrono",
- "dashmap",
- "lasso",
- "log",
- "rayon",
- "rush-providers",
- "serde",
- "serde_json",
- "smallvec",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "rush-plugin"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "rush-providers"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "jsonwebtoken",
- "ndarray 0.16.1",
- "ort",
- "quick-xml",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokenizers",
- "tokio",
-]
-
-[[package]]
-name = "rush-serve"
-version = "0.1.0"
-dependencies = [
- "axum 0.8.8",
- "clap",
- "dashmap",
- "env_logger",
- "futures",
- "libloading",
- "log",
- "rush-core",
- "rush-providers",
- "rush-telemetry",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tower-http",
- "uuid",
-]
-
-[[package]]
-name = "rush-telemetry"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "reqwest",
- "rush-core",
- "serde",
- "serde_json",
- "uuid",
 ]
 
 [[package]]

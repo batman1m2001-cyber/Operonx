@@ -6,56 +6,56 @@ Rosetta Stone for navigating between Python and Rust implementations.
 
 | Python | Rust | Purpose |
 |--------|------|---------|
-| `python/hush-core/` | `rust/rush-core/` | Core engine, ops, state, scheduling |
-| `python/hush-providers/` | `rust/rush-providers/` | LLM, embedding, reranking providers |
-| `python/hush-telemetry/` | `rust/rush-telemetry/` | Tracing backends (Langfuse, OTEL) |
-| `python/hush-serve/` | `rust/rush-serve/` | HTTP server (REST, WebSocket, SSE) |
+| `python/hush-icore/` | `rust/hush-icore/` | Core engine, ops, state, scheduling |
+| `python/hush-providers/` | `rust/hush-providers/` | LLM, embedding, reranking providers |
+| `python/hush-telemetry/` | `rust/hush-telemetry/` | Tracing backends (Langfuse, OTEL) |
+| `python/hush-serve/` | `rust/hush-serve/` | HTTP server (REST, WebSocket, SSE) |
 | — | `rust/ui-hush-eyes/` | Trace visualization (Rust-only) |
 
 ## Core Engine
 
 | Concept | Python | Rust |
 |---------|--------|------|
-| Engine entry point | `hush/core/engine.py` | `rush-core/src/engine.rs` |
-| Graph config | `hush/core/ops/graph/config.py` | `rush-core/src/config.rs` |
-| Scheduler | `hush/core/ops/graph/scheduler.py` | `rush-core/src/ops/graph/graph_op.rs` |
-| Base op execution | `hush/core/ops/base.py` | `rush-core/src/ops/base.rs` |
-| State store | `hush/core/states/state.py` | `rush-core/src/states/state.rs` |
-| State schema | `hush/core/states/schema.py` | `rush-core/src/config.rs` (OpConfig) |
-| Ref resolution | `hush/core/refs/` | `rush-core/src/refs/ref_transforms.rs` |
-| Loop evaluation | `hush/core/ops/graph/scheduler.py` | `rush-core/src/ops/graph/loop_eval.rs` |
-| Built-in ops | `@op` decorated functions | `rush-core/src/builtin_ops/ops.rs` |
-| Op dispatch | Dynamic (Python callables) | `rush-core/src/builtin_ops/mod.rs` (match) |
+| Engine entry point | `hush/core/engine.py` | `hush-icore/src/engine.rs` |
+| Graph config | `hush/core/ops/graph/config.py` | `hush-icore/src/config.rs` |
+| Scheduler | `hush/core/ops/graph/scheduler.py` | `hush-icore/src/ops/graph/graph_op.rs` |
+| Base op execution | `hush/core/ops/base.py` | `hush-icore/src/ops/base.rs` |
+| State store | `hush/core/states/state.py` | `hush-icore/src/states/state.rs` |
+| State schema | `hush/core/states/schema.py` | `hush-icore/src/config.rs` (OpConfig) |
+| Ref resolution | `hush/core/refs/` | `hush-icore/src/refs/ref_transforms.rs` |
+| Loop evaluation | `hush/core/ops/graph/scheduler.py` | `hush-icore/src/ops/graph/loop_eval.rs` |
+| Plugin ops | `@op(rust="...")` decorated functions | cdylib crate via `hush-plugin` |
+| Op dispatch | Dynamic (Python callables) | `hush-icore/src/registry.rs` (OpRegistry trait) |
 
 ## Providers
 
 | Concept | Python | Rust |
 |---------|--------|------|
-| LLM base | `hush/providers/llm/base.py` | `rush-providers/src/llms/` |
-| Embedding base | `hush/providers/embedding/base.py` | `rush-providers/src/embeddings/` |
-| Reranker base | `hush/providers/reranker/base.py` | `rush-providers/src/rerankers/` |
-| Provider factory | `hush/providers/*/factory.py` | `rush-providers/src/lib.rs` (dispatch) |
+| LLM base | `hush/providers/llm/base.py` | `hush-providers/src/llms/` |
+| Embedding base | `hush/providers/embedding/base.py` | `hush-providers/src/embeddings/` |
+| Reranker base | `hush/providers/reranker/base.py` | `hush-providers/src/rerankers/` |
+| Provider factory | `hush/providers/*/factory.py` | `hush-providers/src/lib.rs` (dispatch) |
 
 ## Telemetry
 
 | Concept | Python | Rust |
 |---------|--------|------|
-| Tracer interface | `hush/core/tracing/base.py` | `rush-core/src/tracing/tracer.rs` |
-| Trace collector | `hush/core/tracing/collector.py` | `rush-core/src/tracing/collector.rs` |
-| Flush worker | `hush/core/tracing/flush_worker.py` | `rush-core/src/tracing/flush_worker.rs` |
-| HushEyes tracer | `hush/telemetry/tracers/hush_eyes.py` | `rush-telemetry/src/hush_eyes.rs` |
-| Langfuse tracer | `hush/telemetry/tracers/langfuse.py` | `rush-telemetry/src/langfuse/` |
-| OTEL tracer | `hush/telemetry/tracers/otel.py` | `rush-telemetry/src/otel/` |
+| Tracer interface | `hush/core/tracing/base.py` | `hush-icore/src/tracing/tracer.rs` |
+| Trace collector | `hush/core/tracing/collector.py` | `hush-icore/src/tracing/collector.rs` |
+| Flush worker | `hush/core/tracing/flush_worker.py` | `hush-icore/src/tracing/flush_worker.rs` |
+| HushEyes tracer | `hush/telemetry/tracers/hush_eyes.py` | `hush-telemetry/src/hush_eyes.rs` |
+| Langfuse tracer | `hush/telemetry/tracers/langfuse.py` | `hush-telemetry/src/langfuse/` |
+| OTEL tracer | `hush/telemetry/tracers/otel.py` | `hush-telemetry/src/otel/` |
 
 ## Serve
 
 | Concept | Python | Rust |
 |---------|--------|------|
-| App setup | `hush/serve/app.py` | `rush-serve/src/main.rs` |
-| Config | `hush/serve/config.py` | `rush-serve/src/config.rs` |
-| REST handler | `hush/serve/routes/sync_handler.py` | `rush-serve/src/routes/sync_handler.rs` |
-| WebSocket handler | `hush/serve/routes/ws_handler.py` | `rush-serve/src/routes/ws_handler.rs` |
-| SSE stream handler | `hush/serve/routes/stream_handler.py` | `rush-serve/src/routes/stream_handler.rs` |
+| App setup | `hush/serve/app.py` | `hush-serve/src/main.rs` |
+| Config | `hush/serve/config.py` | `hush-serve/src/config.rs` |
+| REST handler | `hush/serve/routes/sync_handler.py` | `hush-serve/src/routes/sync_handler.rs` |
+| WebSocket handler | `hush/serve/routes/ws_handler.py` | `hush-serve/src/routes/ws_handler.rs` |
+| SSE stream handler | `hush/serve/routes/stream_handler.py` | `hush-serve/src/routes/stream_handler.rs` |
 
 ## Key Differences
 

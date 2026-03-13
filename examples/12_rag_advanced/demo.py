@@ -10,7 +10,10 @@ Chạy: cd examples && uv run python 12_rag_advanced/demo.py
 
 import asyncio
 import os
+import sys
 from pathlib import Path
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from dotenv import load_dotenv
 

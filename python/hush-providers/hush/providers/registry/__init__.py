@@ -1,6 +1,6 @@
 """Resource registry plugins for hush-providers.
 
-This module provides plugins that extend hush-core's ResourceHub
+This module provides plugins that extend hush-icore's ResourceHub
 to support LLM, embedding, reranking, and auth resources.
 
 All plugins auto-register on import via module-level register() calls.

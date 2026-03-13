@@ -13,6 +13,12 @@ from hush.providers import LLMOp, PromptOp
 # =============================================================================
 
 
+@op(rust="./rust_ops::pipeline::classify_simple")
+def is_simple(classification: str):
+    """Check if classification indicates SIMPLE."""
+    return {"is_simple": "SIMPLE" in classification.upper()}
+
+
 @op(rust="./rust_ops::pipeline::merge_results")
 def compare(a, b):
     """Compare outputs from two models."""
@@ -67,8 +73,10 @@ def build_cost_routing():
             outputs={"content": PARENT["classification"]},
         )
 
+        check = is_simple(classification=PARENT["classification"])
+
         router = if_(
-            PARENT["classification"].apply(lambda c: "SIMPLE" in c.upper()),
+            check["is_simple"],
             "simple_prompt",
         ).else_("complex_prompt")
 
@@ -92,7 +100,7 @@ def build_cost_routing():
             outputs={"content": PARENT["answer"]},
         )
 
-        START >> cls_p >> classifier >> router
+        START >> cls_p >> classifier >> check >> router
         router >> simple_prompt >> simple_llm
         router >> complex_prompt >> complex_llm
         [simple_llm, complex_llm] >> ~END

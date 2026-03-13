@@ -9,6 +9,7 @@ Chạy: cd examples && uv run python 10_multi_model/demo.py
 """
 
 import asyncio
+import sys
 import os
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from workflow import (
 )
 
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 async def main():
     if not os.environ.get("OPENAI_API_KEY"):
         print("Skipped — OPENAI_API_KEY chưa set")
@@ -71,7 +73,7 @@ async def main():
     # 4. Fallback chain
     print()
     print("=" * 55)
-    print("4. Fallback Chain (gpt-4o → gpt-4o-mini)")
+    print("4. Fallback Chain (gpt-4o -> gpt-4o-mini)")
     print("=" * 55)
     engine = Hush(build_fallback())
     result = await engine.run(inputs={"query": "What is Python?"})

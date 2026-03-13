@@ -2,18 +2,18 @@
 
 This module handles the `backend="rust"` path for HushApp.serve().
 When selected, the Python side serializes graph definitions + endpoint
-configs to JSON and spawns a standalone Rust HTTP server (rush-serve)
+configs to JSON and spawns a standalone Rust HTTP server (hush-serve)
 that executes workflows natively without Python.
 
 Architecture:
-    Python (hush-serve)              Rust (rush-serve)
+    Python (hush-serve)              Rust (hush-serve)
     |- Define graphs via @graph      |- Parse workflow JSON
     |- Register endpoints            |- Load cdylib plugins
     |- Serialize to JSON ----------> |- Build Axum routes
     |- Spawn Rust binary             |- Serve HTTP + SSE + WS
     '- Wait for process              '- Return JSON results
 
-The Rust binary (rush-serve) is a separate crate that:
+The Rust binary (hush-serve) is a separate crate that:
   - Accepts a config JSON file via --config CLI arg
   - Loads cdylib plugin via --plugin CLI arg
   - Creates Axum routes matching the endpoint definitions
@@ -35,8 +35,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from hush.serve.app import HushApp
 
-# Default location of the rush-serve crate relative to hush-serve package
-_RUSH_SERVE_CRATE = Path(__file__).resolve().parents[3] / ".." / "rust" / "rush-serve"
+# Default location of the hush-serve crate relative to hush-serve package
+_HUSH_SERVE_CRATE = Path(__file__).resolve().parents[3] / ".." / "rust" / "hush-serve"
 
 
 class RustBackendConfig:
@@ -116,31 +116,31 @@ def _extract_tracer_configs(tracer) -> Optional[Dict[str, Any]]:
     return result if result else None
 
 
-def find_rush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
-    """Find or build the rush-serve binary.
+def find_hush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
+    """Find or build the hush-serve binary.
 
     Looks for a pre-built binary first, then builds from source if needed.
 
     Returns:
-        Path to the rush-serve binary.
+        Path to the hush-serve binary.
 
     Raises:
         FileNotFoundError: If the crate directory doesn't exist.
         RuntimeError: If cargo build fails.
     """
-    crate = (crate_dir or _RUSH_SERVE_CRATE).resolve()
+    crate = (crate_dir or _HUSH_SERVE_CRATE).resolve()
 
     if not crate.exists():
         raise FileNotFoundError(
-            f"rush-serve crate not found at {crate}. "
-            f"Ensure the rush-serve directory exists in the monorepo."
+            f"hush-serve crate not found at {crate}. "
+            f"Ensure the hush-serve directory exists in the monorepo."
         )
 
     # Check for pre-built binary
     if sys.platform == "win32":
-        binary_name = "rush-serve.exe"
+        binary_name = "hush-serve.exe"
     else:
-        binary_name = "rush-serve"
+        binary_name = "hush-serve"
 
     # Cargo workspace puts binaries in the workspace root target dir
     workspace_target = crate.parent / "target"
@@ -155,16 +155,16 @@ def find_rush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
 
     # Build from source (run from workspace root)
     workspace_root = crate.parent
-    print(f"Building rush-serve from {workspace_root}...")
+    print(f"Building hush-serve from {workspace_root}...")
     result = subprocess.run(
-        ["cargo", "build", "--release", "-p", "rush-serve"],
+        ["cargo", "build", "--release", "-p", "hush-serve"],
         cwd=str(workspace_root),
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to build rush-serve:\n{result.stderr}")
-    print("rush-serve built successfully.")
+        raise RuntimeError(f"Failed to build hush-serve:\n{result.stderr}")
+    print("hush-serve built successfully.")
 
     if not release_bin.exists():
         raise RuntimeError(f"Build succeeded but binary not found at {release_bin}")
@@ -276,7 +276,7 @@ def serve_rust(
 
     1. Serializes all registered endpoints to JSON config
     2. Writes config to a temp file
-    3. Finds or builds the rush-serve binary
+    3. Finds or builds the hush-serve binary
     4. Optionally builds and loads a cdylib plugin
     5. Spawns the binary and waits for it
 
@@ -284,7 +284,7 @@ def serve_rust(
         app: The HushApp instance with registered endpoints.
         host: Bind address.
         port: Bind port.
-        crate_dir: Optional path to rush-serve crate (auto-detected if None).
+        crate_dir: Optional path to hush-serve crate (auto-detected if None).
         rust_ops: Optional path to a Rust ops crate (auto-builds cdylib).
         plugin: Optional path to a pre-built cdylib plugin (.dll/.so/.dylib).
     """
@@ -309,7 +309,7 @@ def serve_rust(
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".json",
-        prefix="rush-serve-config-",
+        prefix="hush-serve-config-",
         delete=False,
     ) as f:
         f.write(config_json)
@@ -317,10 +317,10 @@ def serve_rust(
 
     try:
         # 3. Find or build binary
-        binary = find_rush_serve_binary(crate_dir)
+        binary = find_hush_serve_binary(crate_dir)
 
         # 4. Spawn and wait
-        print(f"Starting rush-serve (Rust backend) at http://{host}:{port}")
+        print(f"Starting hush-serve (Rust backend) at http://{host}:{port}")
         print(f"Binary: {binary}")
         print(f"Config: {config_path}")
         if plugin_path:

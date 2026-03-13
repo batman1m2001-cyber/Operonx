@@ -1,6 +1,6 @@
 """Embedding resource plugin for ResourceHub.
 
-Auto-registers embedding config classes and factory handlers with hush-core.
+Auto-registers embedding config classes and factory handlers with hush-icore.
 """
 
 from hush.core.registry import REGISTRY

@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python packages (for mkdocstrings)
         run: |
-          cd python/hush-core && uv sync --all-extras && cd ../..
+          cd python/hush-icore && uv sync --all-extras && cd ../..
           cd python/hush-providers && uv sync --all-extras && cd ../..
           cd python/hush-telemetry && uv sync --all-extras && cd ../..
           cd python/hush-serve && uv sync --all-extras && cd ../..

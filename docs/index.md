@@ -26,7 +26,7 @@ print(result["result"])  # 10
 
 - **DAG-based workflows** — define ops, wire them with `>>`, run with `engine.run()`
 - **Async-first** — built on asyncio for IO-bound tasks
-- **Rust backend** — optional native execution via rush-core for CPU-bound workloads
+- **Rust backend** — optional native execution via hush-icore for CPU-bound workloads
 - **Streaming** — generator ops yield tokens in real-time
 - **Middleware** — extensible hooks for tracing, retry, caching, validation
 - **Observability** — built-in tracing with Langfuse, OpenTelemetry, and HushEyes backends
@@ -48,7 +48,7 @@ print(result["result"])  # 10
 ```
 Python (build time)              Rust (run time, optional)
 ─────────────────                ──────────────────────────
-GraphOp DSL                      Rush(config)
+GraphOp DSL                      Hush(config)
   │                                │
   ▼                                ▼
 graph.serialize() ──JSON──→   GraphConfig::from_json()

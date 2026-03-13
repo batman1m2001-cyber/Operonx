@@ -8,6 +8,7 @@ Chạy: cd examples && uv run python 09_agent_workflow/demo.py
 """
 
 import asyncio
+import sys
 import os
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from hush.core import Hush
 from workflow import build_agent
 
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 async def main():
     if not os.environ.get("OPENAI_API_KEY"):
         print("Skipped — OPENAI_API_KEY chưa set")

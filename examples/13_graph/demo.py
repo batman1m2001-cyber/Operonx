@@ -1,6 +1,6 @@
 """13 @graph — Modular, reusable workflow components.
 
-No API key required. Uses hush-core only.
+No API key required. Uses hush-icore only.
 
 Learn:
 - @graph: decorator to create reusable GraphOp from function
@@ -12,11 +12,13 @@ Chạy: cd examples && uv run python 13_graph/demo.py
 """
 
 import asyncio
+import sys
 
 from hush.core import END, PARENT, START, GraphOp, Hush
 from workflow import add_and_double, double_flow, double_renamed, quad_flow
 
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 async def example_1_basic():
     """@graph cơ bản — auto-naming và >> END auto-forward."""
     print("=" * 55)

@@ -1,6 +1,6 @@
 """Reranking resource plugin for ResourceHub.
 
-Auto-registers reranking config classes and factory handlers with hush-core.
+Auto-registers reranking config classes and factory handlers with hush-icore.
 """
 
 from hush.core.registry import REGISTRY

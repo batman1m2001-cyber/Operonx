@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "rush-core",
-    "rush-providers",
-    "rush-serve",
-    "rush-telemetry",
-    "rush-plugin",
+    "hush-icore",
+    "hush-providers",
+    "hush-serve",
+    "hush-telemetry",
+    "hush-plugin",
     "ui-hush-eyes",
 ]
 

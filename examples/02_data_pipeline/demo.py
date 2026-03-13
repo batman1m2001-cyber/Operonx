@@ -4,11 +4,13 @@ Chạy: cd examples && uv run python 02_data_pipeline/demo.py
 """
 
 import asyncio
+import sys
 
 from hush.core import Hush
 from workflow import build_data_pipeline, build_text_pipeline
 
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 async def main():
     print("=" * 50)
     print("Pipeline 1: Data Transformation")

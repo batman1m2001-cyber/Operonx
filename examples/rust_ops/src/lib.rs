@@ -24,7 +24,7 @@
 //! ## Usage from Python
 //!
 //! ```python
-//! # Python fallback runs when rush-core is not available.
+//! # Python fallback runs when hush-icore is not available.
 //! # When mode="rust", the Rust implementation is used instead.
 //! @op(rust="double")
 //! def double(x: int):
@@ -40,7 +40,7 @@ pub mod search;
 pub mod streaming;
 pub mod text;
 
-rush_plugin::rush_plugin! {
+hush_plugin::hush_plugin! {
     call: {
         // analytics
         "analyze_sentiment" => analytics::analyze_sentiment,
