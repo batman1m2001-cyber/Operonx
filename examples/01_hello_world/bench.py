@@ -18,8 +18,8 @@ import aiohttp
 
 PORT_PY = 9001
 PORT_RS = 9002
-TOTAL = 20
-CCU = 5
+TOTAL = 100
+CCU = 20
 N_WARMUP = 5
 
 ENDPOINTS = [
