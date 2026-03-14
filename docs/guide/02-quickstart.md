@@ -78,11 +78,11 @@ llm:gpt-4o:
   model: gpt-4o
 ```
 
-### Bước 2: Đặt biến môi trường
+### Bước 2: Đặt API key trong `.env`
 
-```bash
-export OPENAI_API_KEY=sk-your-api-key
-export HUSH_CONFIG=/path/to/resources.yaml
+```dotenv
+# .env
+OPENAI_API_KEY=sk-your-api-key
 ```
 
 ### Bước 3: Workflow với LLM
@@ -101,7 +101,8 @@ async def main():
         )
         START >> chat >> END
 
-    engine = Hush(graph)
+    # env=True (mặc định) tự load .env, resources= chỉ định file provider
+    engine = Hush(graph, resources="resources.yaml")
     result = await engine.run(inputs={"question": "Python là gì?"})
     print(f"Trả lời: {result['content']}")
 
