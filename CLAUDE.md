@@ -33,11 +33,12 @@ Hush-ai/
 
 | Layer | Location | Purpose |
 |-------|----------|---------|
-| CLAUDE.md | Per-package | Quick reference, conventions, recipes |
+| .claude/rules/ | Path-scoped | Per-package module maps, patterns, gotchas (loaded on demand) |
+| .claude/skills/ | On-demand | Repeatable workflows: /publish, /bench, /example |
 | docs/api/ | Auto-generated | API reference from docstrings (mkdocstrings) |
 | docs/architecture/ | 4 design docs | Execution flow, state model, streaming, Rust-Python split |
 | docs/guide/ | Vietnamese (00-13) | User-facing tutorial |
-| examples/ | Runnable Python (01-20) | Learning by example |
+| examples/ | Runnable Python (01-15) | Learning by example |
 
 ## Package Dependencies
 
