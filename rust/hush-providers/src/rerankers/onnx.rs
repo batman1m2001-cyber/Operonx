@@ -8,6 +8,7 @@
 //! - Filters by threshold, sorts descending, limits to top_k
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use ndarray::Array2;
 use ort::session::{builder::GraphOptimizationLevel, Session};
@@ -158,65 +159,59 @@ fn rerank_sync(
 
     // 4. Build inputs — check if model expects token_type_ids
     let input_ids_tensor =
-        Tensor::from_array(input_ids).map_err(|e| ort_error("input_ids tensor", e))?;
-    let attention_mask_tensor =
-        Tensor::from_array(attention_mask).map_err(|e| ort_error("attention_mask tensor", e))?;
+        Tensor::from_array(input_ids.into_dyn()).map_err(|e| ort_error("input_ids tensor", e))?;
+    let attention_mask_tensor = Tensor::from_array(attention_mask.into_dyn())
+        .map_err(|e| ort_error("attention_mask tensor", e))?;
 
-    let model_input_names: Vec<String> =
-        session.inputs.iter().map(|i| i.name.clone()).collect();
-    let needs_token_type_ids = model_input_names
+    let needs_token_type_ids = session
+        .inputs()
         .iter()
-        .any(|name| name == "token_type_ids");
+        .any(|i| i.name() == "token_type_ids");
+
+    // Get output names before run (borrow checker: run() takes &mut self)
+    let first_output_name: String = session.outputs()[0].name().to_string();
+
+    let mut session = Mutex::new(session);
+    let sess = session.get_mut().unwrap();
 
     let outputs = if needs_token_type_ids {
         let token_type_ids = Array2::<i64>::zeros((batch_size, seq_len));
-        let token_type_ids_tensor = Tensor::from_array(token_type_ids)
+        let token_type_ids_tensor = Tensor::from_array(token_type_ids.into_dyn())
             .map_err(|e| ort_error("token_type_ids tensor", e))?;
 
-        session
-            .run(
-                ort::inputs![
-                    "input_ids" => input_ids_tensor,
-                    "attention_mask" => attention_mask_tensor,
-                    "token_type_ids" => token_type_ids_tensor
-                ]
-                .map_err(|e| ort_error("build inputs", e))?,
-            )
-            .map_err(|e| ort_error("session.run", e))?
+        sess.run(ort::inputs![
+            "input_ids" => input_ids_tensor,
+            "attention_mask" => attention_mask_tensor,
+            "token_type_ids" => token_type_ids_tensor
+        ])
+        .map_err(|e| ort_error("session.run", e))?
     } else {
-        session
-            .run(
-                ort::inputs![
-                    "input_ids" => input_ids_tensor,
-                    "attention_mask" => attention_mask_tensor
-                ]
-                .map_err(|e| ort_error("build inputs", e))?,
-            )
-            .map_err(|e| ort_error("session.run", e))?
+        sess.run(ort::inputs![
+            "input_id" => input_ids_tensor,
+            "attention_mask" => attention_mask_tensor
+        ])
+        .map_err(|e| ort_error("session.run", e))?
     };
 
     // 5. Extract logits
-    let output_key = session.outputs[0].name.as_str();
-    let logits = outputs[output_key]
+    let (shape, logit_data) = outputs[first_output_name.as_str()]
         .try_extract_tensor::<f32>()
         .map_err(|e| ort_error("extract logits", e))?;
-
-    let shape = logits.shape();
 
     // 6. Handle output shapes and apply sigmoid
     let scores: Vec<f64> = match shape.len() {
         // 1D: [batch_size] — raw logits
-        1 => logits.iter().map(|&x| sigmoid(x as f64)).collect(),
+        1 => logit_data.iter().map(|&x| sigmoid(x as f64)).collect(),
         // 2D: [batch_size, num_classes]
         2 => {
-            let num_classes = shape[1];
+            let num_classes = shape[1] as usize;
             (0..batch_size)
                 .map(|i| {
                     let logit = if num_classes == 1 {
-                        logits[[i, 0]] as f64
+                        logit_data[i * num_classes] as f64
                     } else {
                         // Take the last class (positive class)
-                        logits[[i, num_classes - 1]] as f64
+                        logit_data[i * num_classes + num_classes - 1] as f64
                     };
                     sigmoid(logit)
                 })
@@ -241,7 +236,7 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
-fn ort_error(context: &str, e: ort::Error) -> ProviderError {
+fn ort_error(context: &str, e: impl std::fmt::Display) -> ProviderError {
     ProviderError {
         message: format!("ONNX Runtime error ({}): {}", context, e),
         status_code: None,

@@ -6,8 +6,7 @@ Endpoints:
   POST /retry-fallback   — retry with backoff + graceful degradation
   POST /llm-fallback     — LLM fallback chain (gpt-4o → gpt-4o-mini)
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -32,4 +31,8 @@ app.endpoint("/error-capture", graph=build_error_capture())
 app.endpoint("/error-routing", graph=build_error_routing())
 app.endpoint("/retry-fallback", graph=build_retry_fallback())
 app.endpoint("/llm-fallback", graph=build_llm_fallback())
-app.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+app.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

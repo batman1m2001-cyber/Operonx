@@ -5,38 +5,29 @@
 <p align="center">
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/tests.yaml/badge.svg" alt="Tests"></a>
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/format.yaml/badge.svg" alt="Format"></a>
-  <a href="https://codecov.io/gh/batman1m2001-cyber/hush-ai"><img src="https://codecov.io/gh/batman1m2001-cyber/hush-ai/branch/main/graph/badge.svg" alt="Codecov"></a>
+  <a href="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/rust-runtime.yaml"><img src="https://github.com/batman1m2001-cyber/Hush-ai/actions/workflows/rust-runtime.yaml/badge.svg" alt="Rust"></a>
+  <a href="https://pypi.org/project/hush-icore/"><img src="https://img.shields.io/pypi/v/hush-icore?label=PyPI" alt="PyPI"></a>
+  <a href="https://crates.io/crates/hush-icore"><img src="https://img.shields.io/crates/v/hush-icore?label=crates.io" alt="crates.io"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python">
   <a href="https://github.com/batman1m2001-cyber/Hush-ai/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
 </p>
 
-## ⚡ Hush: High-Performance Workflow Engine for AI
+## Hush: High-Performance Workflow Engine for AI
 
-**Hush** is a high-performance workflow engine for building AI applications. Orchestrate LLMs, agents, embeddings, and CPU-bound workloads as DAG-based pipelines — with async execution, built-in tracing, and provider-agnostic design.
+**Hush** is a workflow engine that runs anything as a workflow — from IO-bound AI tasks (LLMs, agents, RAG) to CPU-bound workloads needing native performance. Define complex pipelines as DAGs with async execution, built-in tracing, and a dual Python/Rust backend.
 
-> Want to dive right in? Jump to the [Quick Start](#quick-start).
+### Why Hush?
 
-## Why Hush?
-
-- **DAG-based workflows** — define complex pipelines with nodes and edges, inspired by Airflow operators
-- **Async-first** — native async execution with automatic parallel processing
-- **Built-in tracing** — full observability via ui-hush-eyes server + external backends (Langfuse, OpenTelemetry)
+- **DAG-based workflows** — nodes and edges, inspired by Airflow operators
+- **Dual backend** — Python (FastAPI) for flexibility, Rust (Axum) for raw speed (~8x faster on pure-compute)
+- **Built-in tracing** — ui-hush-eyes local viewer + Langfuse + OpenTelemetry
 - **Provider agnostic** — OpenAI, Azure, Gemini, vLLM, ONNX — swap with one line
-- **Type-safe state** — O(1) state access with compile-time validation, zero magic
-
-## What You Can Build
-
-- **LLM pipelines** — chain prompts, parsers, and tools into reliable workflows
-- **AI agents** — loops, branches, and dynamic routing with full observability
-- **RAG systems** — embeddings, reranking, and retrieval in a single graph
-- **Multi-model workflows** — mix OpenAI, Gemini, vLLM, ONNX — swap with one line
-- **CPU-bound tasks** — data processing, transformations, and custom code nodes
+- **Type-safe state** — O(1) state access with compile-time validation
 
 ## Quick Start
 
 ```bash
-pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
-# Or with uv: uv pip install "hush-icore @ git+..."
+pip install hush-icore
 ```
 
 ```python
@@ -52,22 +43,16 @@ async def main():
         step = greet(name=PARENT["name"])
         START >> step >> END
 
-    engine = Hush(graph)
-    result = await engine.run(inputs={"name": "World"})
+    result = await Hush(graph).run(inputs={"name": "World"})
     print(result["message"])  # Hello, World!
 
 asyncio.run(main())
 ```
 
-> **Core philosophy:** `GraphOp`, `FuncOp`, and `BranchOp` handle nearly every workflow pattern.
-> LLM, embedding, and other specialized nodes are optional add-ons — install and learn them as needed.
-
-> Want more? See the [quickstart guide](docs/guide/02-quickstart.md) or [runnable examples](examples/).
-
 ## LLM Integration
 
 ```bash
-pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
+pip install hush-providers
 ```
 
 ```python
@@ -83,83 +68,109 @@ async def main():
         )
         START >> chat >> END
 
-    engine = Hush(graph)
-    result = await engine.run(inputs={"question": "What is Python?"})
+    result = await Hush(graph).run(inputs={"question": "What is Python?"})
     print(result["content"])
 ```
 
-> **Requires setup:** `.env` (API keys) + `resources.yaml` (provider config). See the [setup guide](docs/guide/01-cai-dat-va-thiet-lap.md#3-hiểu-resourcehub--trung-tâm-cấu-hình-của-hush).
+## Serve as HTTP API
+
+```bash
+pip install hush-serve
+```
+
+```python
+from hush.serve import HushApp
+
+app = HushApp()
+app.endpoint("/greet", graph=graph)
+
+# Python backend (FastAPI + uvicorn)
+app.serve(port=8000)
+
+# Rust backend (Axum — ~8x faster)
+app.serve(port=8000, backend="rust")
+```
 
 ## Installation
 
-Hush is a monorepo with 3 separate packages. Install what you need:
-
-**With pip:**
+All packages are on [PyPI](https://pypi.org/search/?q=hush-):
 
 ```bash
-# Core only (workflow engine, no LLM)
-pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
-
-# Core + LLM providers + Langfuse tracing
-pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
-pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
+pip install hush-icore                     # Core workflow engine
+pip install hush-providers                 # LLM, embedding, reranking
+pip install hush-telemetry                 # Langfuse, OpenTelemetry tracing
+pip install hush-serve                     # HTTP API server
 ```
 
-**With uv (recommended):**
+Rust crates are on [crates.io](https://crates.io/search?q=hush-):
 
 ```bash
-# Core only
-uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
-
-# Core + LLM providers + Langfuse tracing
-uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-icore"
-uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-uv pip install "hush-telemetry[langfuse] @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-telemetry"
+cargo install hush-serve                   # Standalone Rust HTTP server
 ```
-
-> **Note:** `hush-providers` and `hush-telemetry` depend on `hush-icore`, so always install `hush-icore` first.
-
-See [installation guide](docs/guide/01-cai-dat-va-thiet-lap.md) for details on extras, `requirements.txt` / `pyproject.toml` templates, and project setup.
 
 ## Packages
 
+### Python (PyPI)
+
 | Package | Description |
 |---------|-------------|
-| [hush-icore](hush-icore/) | Core workflow engine — nodes, state, tracing, execution |
-| [hush-icore (Rust)](rust/hush-icore/) | High-performance Rust execution backend (1.9x–6.2x speedup) |
-| [hush-providers](hush-providers/) | LLM, embedding, reranking provider integrations (Python) |
-| [hush-providers (Rust)](rust/hush-providers/) | Rust provider implementations (native HTTP, ONNX, per-provider) |
-| [hush-telemetry](hush-telemetry/) | External tracing backends (Langfuse, OpenTelemetry) |
-| [docs](docs/) | Documentation (guide + architecture) |
-| [examples](examples/) | Runnable Python examples |
-| [ui-hush-eyes](ui-hush-eyes/) | Standalone Rust server for trace visualization |
+| [hush-icore](https://pypi.org/project/hush-icore/) | Core workflow engine — ops, state, tracing, execution |
+| [hush-providers](https://pypi.org/project/hush-providers/) | LLM, embedding, reranking integrations |
+| [hush-telemetry](https://pypi.org/project/hush-telemetry/) | External tracing backends (Langfuse, OTEL) |
+| [hush-serve](https://pypi.org/project/hush-serve/) | HTTP API server (Python + Rust backends) |
+
+### Rust (crates.io)
+
+| Crate | Description |
+|-------|-------------|
+| [hush-icore](https://crates.io/crates/hush-icore) | High-performance execution backend (DashMap, tokio) |
+| [hush-providers](https://crates.io/crates/hush-providers) | Native HTTP providers + ONNX inference |
+| [hush-serve](https://crates.io/crates/hush-serve) | Standalone Axum HTTP server |
+| [hush-telemetry](https://crates.io/crates/hush-telemetry) | Rust tracing backends |
+| [hush-plugin](https://crates.io/crates/hush-plugin) | Plugin SDK for custom Rust ops |
+| [hush-eyes](https://crates.io/crates/hush-eyes) | Trace visualization server (SQLite) |
 
 ## Trace Viewer
 
-Run the [ui-hush-eyes](ui-hush-eyes/) server to visualize workflow traces:
-
 ```bash
-cd ui-hush-eyes && cargo build --release
-./target/release/ui-hush-eyes serve --port 8420
+cargo install hush-eyes
+hush-eyes --port 8420
 # Open http://localhost:8420
 ```
+
+Or use Langfuse / OpenTelemetry:
+
+```python
+from hush.telemetry import LangfuseTracer
+
+engine = Hush(graph, tracer=LangfuseTracer(resource="langfuse:default"))
+```
+
+## Benchmarks
+
+Pure-compute workflows (1000 requests, 50 concurrent):
+
+| Example | Python (FastAPI) | Rust (Axum) | Speedup |
+|---------|-----------------|-------------|---------|
+| Hello World | 20.5ms avg | 2.4ms avg | ~8.4x |
+| Data Pipeline | 2.5ms avg | 0.6ms avg | ~4.2x |
 
 ## Documentation
 
 | Need | Go to |
 |------|-------|
-| Learning from scratch | [docs/guide/](docs/guide/) |
+| Learning from scratch | [docs/guide/](docs/guide/) (Vietnamese) |
 | Runnable examples | [examples/](examples/) |
 | Deep internals | [docs/architecture/](docs/architecture/) |
+| Standalone examples | [hush-examples](https://github.com/batman1m2001-cyber/hush-examples) |
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
 
 ```bash
 git clone https://github.com/batman1m2001-cyber/Hush-ai.git
-cd Hush-ai/hush-icore && uv sync --all-extras && uv run pytest
+cd Hush-ai/python/hush-icore && uv sync --all-extras && uv run -m pytest
 ```
 
 ## License

@@ -6,8 +6,7 @@ Endpoints:
   POST /while-loop    — generator while conditional loop
   POST /branch        — if_() conditional routing
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -27,4 +26,8 @@ app.endpoint("/for-loop", graph=build_for_loop())
 app.endpoint("/map-op", graph=build_map_op())
 app.endpoint("/while-loop", graph=build_while_loop())
 app.endpoint("/branch", graph=build_branch())
-app.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+app.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

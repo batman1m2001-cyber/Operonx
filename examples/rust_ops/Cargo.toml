@@ -6,10 +6,11 @@ description = "Example custom Rust ops for Hush workflows"
 license = "Apache-2.0"
 repository = "https://github.com/batman1m2001-cyber/Hush-ai"
 
-[lib]
-name = "example_ops"
-crate-type = ["cdylib"]
+[[bin]]
+name = "example-ops"
+path = "src/main.rs"
 
 [dependencies]
 serde_json = "1"
-hush-plugin = { path = "../../rust/hush-plugin" }
+hush-serve = { path = "../../rust/hush-serve" }
+env_logger = "0.11"

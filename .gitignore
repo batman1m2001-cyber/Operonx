@@ -75,8 +75,10 @@ secrets.yaml
 # Local traces database
 .hush/
 
-# Claude Code local settings
-.claude/
+# Claude Code — track shared context, ignore personal state
+.claude/*
+!.claude/rules/
+!.claude/skills/
 
 # Cache
 .cache/
