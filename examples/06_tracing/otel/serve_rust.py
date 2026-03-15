@@ -1,7 +1,6 @@
 """06 Tracing / OTEL — Serve with OTELTracer + Rust backend.
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -39,4 +38,8 @@ from hush.core import Hush
 
 tracer = _make_tracer()
 engine = Hush(build_text_analyzer(), **({} if tracer is None else {"tracer": tracer}))
-engine.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+engine.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

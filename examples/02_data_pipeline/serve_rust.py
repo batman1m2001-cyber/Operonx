@@ -4,8 +4,7 @@ Endpoints:
   POST /data-pipeline   — fetch → transform → aggregate
   POST /text-pipeline    — clean → count_words → summarize
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -23,4 +22,8 @@ from workflow import build_data_pipeline, build_text_pipeline
 app = HushApp()
 app.endpoint("/data-pipeline", graph=build_data_pipeline())
 app.endpoint("/text-pipeline", graph=build_text_pipeline())
-app.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+app.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

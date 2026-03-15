@@ -1,7 +1,6 @@
 """06 Tracing / Local — Serve with LocalTracer + Rust backend.
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -18,4 +17,8 @@ from hush.core.tracing import LocalTracer
 from workflow import build_text_analyzer
 
 engine = Hush(build_text_analyzer(), tracer=LocalTracer(tags=["serve"]))
-engine.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+engine.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)
