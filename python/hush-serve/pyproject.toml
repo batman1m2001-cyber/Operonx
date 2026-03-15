@@ -4,23 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-serve"
-version = "0.1.2"
+version = "0.1.3"
 description = "Auto-generate API servers from Hush workflow graphs"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Hush Team" }]
 keywords = ["workflow", "api", "server", "fastapi", "sse", "websocket"]
 dependencies = [
-    "hush-icore>=0.1.1",
+    "hush-icore>=0.1.3",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
 ]
 
 [project.optional-dependencies]
-providers = ["hush-providers>=0.1.1"]
-telemetry = ["hush-telemetry>=0.1.1"]
-all = ["hush-providers>=0.1.1", "hush-telemetry>=0.1.1"]
+providers = ["hush-providers>=0.1.3"]
+telemetry = ["hush-telemetry>=0.1.3"]
+all = ["hush-providers>=0.1.3", "hush-telemetry>=0.1.3"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
