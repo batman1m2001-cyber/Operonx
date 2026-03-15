@@ -1,7 +1,6 @@
 """01 Hello World — Serve workflow with Rust backend (Axum).
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -20,5 +19,5 @@ engine = Hush(build_hello())
 engine.serve(
     port=int(os.environ.get("PORT", 8000)),
     backend="rust",
-    rust_ops="rust_ops",
+    binary="rust_ops/target/release/example-ops",
 )

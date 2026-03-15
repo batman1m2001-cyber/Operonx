@@ -3,8 +3,7 @@
 Endpoints:
   POST /keyword-rrf  — keyword search + RRF merge (no API key needed)
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -21,4 +20,8 @@ from workflow import build_keyword_rrf
 
 app = HushApp()
 app.endpoint("/keyword-rrf", graph=build_keyword_rrf())
-app.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+app.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

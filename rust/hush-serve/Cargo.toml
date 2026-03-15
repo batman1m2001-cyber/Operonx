@@ -6,6 +6,10 @@ description = "Standalone Rust HTTP server for Hush workflows (Axum)"
 license = "Apache-2.0"
 repository = "https://github.com/batman1m2001-cyber/Hush-ai"
 
+[lib]
+name = "hush_serve"
+path = "src/lib.rs"
+
 [[bin]]
 name = "hush-serve"
 path = "src/main.rs"

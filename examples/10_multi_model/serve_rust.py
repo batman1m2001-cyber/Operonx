@@ -7,8 +7,7 @@ Endpoints:
   POST /fallback   — fallback chain
   POST /ensemble   — ensemble with judge
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -37,4 +36,8 @@ app.endpoint("/routing", graph=build_cost_routing())
 app.endpoint("/balanced", graph=build_load_balanced())
 app.endpoint("/fallback", graph=build_fallback())
 app.endpoint("/ensemble", graph=build_ensemble())
-app.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+app.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)

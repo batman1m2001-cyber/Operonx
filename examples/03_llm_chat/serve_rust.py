@@ -1,7 +1,6 @@
 """03 LLM Chat — Serve workflow with Rust backend (Axum).
 
-Requires hush-serve binary and rust_ops cdylib to be built:
-  cd rust && cargo build --release -p hush-serve
+Requires example-ops binary to be built:
   cd examples/rust_ops && cargo build --release
 
 Chạy:
@@ -17,4 +16,8 @@ from hush.core import Hush
 from workflow import build_basic_chat
 
 engine = Hush(build_basic_chat())
-engine.serve(port=int(os.environ.get("PORT", 8000)), backend="rust", rust_ops="rust_ops")
+engine.serve(
+    port=int(os.environ.get("PORT", 8000)),
+    backend="rust",
+    binary="rust_ops/target/release/example-ops",
+)
