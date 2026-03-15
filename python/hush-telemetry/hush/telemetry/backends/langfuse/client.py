@@ -62,9 +62,9 @@ class LangfuseClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Basic {self._auth}",
-                "x_langfuse_sdk_name": "python",
-                "x_langfuse_sdk_version": "hush",
-                "x_langfuse_public_key": self._config.public_key,
+                "X-Langfuse-Sdk-Name": "python",
+                "X-Langfuse-Sdk-Version": "hush",
+                "X-Langfuse-Public-Key": self._config.public_key,
             },
             method="POST",
         )

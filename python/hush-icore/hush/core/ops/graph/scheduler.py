@@ -103,7 +103,7 @@ Key concepts
 import asyncio
 import inspect
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
@@ -175,7 +175,7 @@ async def run_scheduler(
         stream context ctx + ("[n]",). Emits ("exhausted", name) when done.
         Handles errors gracefully — partial yields are kept, metrics logged.
         """
-        gen_start = datetime.now()
+        gen_start = datetime.now(timezone.utc)
         gen_perf = perf_counter()
         gen_error = None
         gen_inputs = {}
@@ -216,7 +216,7 @@ async def run_scheduler(
                 ctx,
                 error=gen_error,
                 start_time=gen_start,
-                end_time=datetime.now(),
+                end_time=datetime.now(timezone.utc),
                 duration_ms=ms,
             )
 
