@@ -199,34 +199,56 @@ Trước khi thiết lập files, cần hiểu cách Hush kết nối đến LLM
 
 ### Luồng khởi tạo
 
-Khi bạn tạo một op dùng provider (`LLMOp.of()`, `EmbeddingOp.of()`, `RerankOp.of()`...), Hush tự động gọi `get_hub()` để tìm cấu hình:
+Khi tạo `Hush` engine, bạn truyền `resources=` để chỉ định file cấu hình provider:
+
+```python
+engine = Hush(graph, resources="resources.yaml")
+```
+
+Engine tự động thực hiện:
 
 ```
-Code: LLMOp.of(resource="gpt-4o", messages=...)
+Hush(graph, env=True, resources="resources.yaml")
   ↓
-get_hub()  →  singleton ResourceHub
+1. env=True  →  tự tìm và load .env (python-dotenv)
   ↓
-Tìm resources.yaml theo thứ tự:
-  1. HUSH_CONFIG env var  (nếu có)
-  2. ./resources.yaml     (thư mục hiện tại)
-  3. ~/.hush/resources.yaml
+2. resources="resources.yaml"  →  đọc YAML, thay ${OPENAI_API_KEY} bằng os.environ
   ↓
-Đọc YAML → thay ${OPENAI_API_KEY} bằng os.environ
+3. Tạo ResourceHub global  →  các op tra cứu provider từ đây
   ↓
-hub.llm("gpt-4o")  →  tìm key "llm:gpt-4o" → tạo LLM client
+4. LLMOp.of(resource="gpt-4o")  →  hub.llm("gpt-4o")  →  tạo LLM client
 ```
+
+### Tham số `Hush()`
+
+| Tham số | Mặc định | Mô tả |
+|---------|----------|-------|
+| `env` | `True` | `True`: tự tìm `.env` từ thư mục hiện tại trở lên. `"path/to/.env"`: load file cụ thể. `False`: không load |
+| `resources` | `None` | Đường dẫn đến `resources.yaml`. `None` = không load (chỉ dùng cho workflow không cần provider) |
+| `tracer` | `None` | Tracer mặc định cho mọi `run()` call |
 
 ### Điều này có nghĩa là gì?
 
-**3 thứ phải có trước khi chạy bất kỳ workflow nào dùng LLM/embedding/tracing:**
+**2 thứ phải có trước khi chạy workflow dùng LLM/embedding/tracing:**
 
 | # | Cần gì | File | Chi tiết |
 |---|--------|------|----------|
-| 1 | **API keys + Hush config** | `.env` | API keys cho providers, đường dẫn `HUSH_CONFIG`, `HUSH_TRACES_DB`... |
+| 1 | **API keys** | `.env` | API keys cho providers — engine tự load khi `env=True` |
 | 2 | **Provider config** | `resources.yaml` | Định nghĩa từng provider: model nào, endpoint nào, dùng key nào |
-| 3 | **Load env trước khi tạo op** | Trong code | Gọi `load_dotenv()` **trước** khi import/tạo op dùng provider |
 
-> **Nếu thiếu bất kỳ thứ nào:** bạn sẽ gặp `RuntimeError: Cannot initialize global ResourceHub` hoặc `WARNING: Environment variable ... not found`.
+> **Không cần gọi `load_dotenv()` thủ công** — `Hush(graph, env=True)` đã tự load `.env`.
+>
+> **Nếu thiếu file:** bạn sẽ gặp `FileNotFoundError: Resources file not found` hoặc `WARNING: Environment variable ... not found`.
+
+### Fallback: Auto-discovery (không truyền `resources=`)
+
+Nếu bạn không truyền `resources=` vào `Hush()`, các op sẽ tự tìm `resources.yaml` qua `get_hub()`:
+
+1. Biến môi trường `HUSH_CONFIG` (nếu có)
+2. `./resources.yaml` (thư mục hiện tại)
+3. `~/.hush/resources.yaml`
+
+> **Khuyến nghị:** Luôn truyền `resources=` cho rõ ràng. Auto-discovery phù hợp cho prototyping nhanh.
 
 ---
 
@@ -314,7 +336,7 @@ cp env.example .env
 
 - **KHÔNG commit file `.env` lên git.** File `.gitignore` của Hush đã bao gồm `.env`.
 - Mỗi người dùng tự tạo file `.env` riêng với keys của mình.
-- Phải gọi `load_dotenv()` ở đầu code **trước** khi tạo op dùng provider.
+- **Không cần gọi `load_dotenv()` thủ công** — `Hush(graph)` tự load `.env` (mặc định `env=True`).
 
 Xem đầy đủ template: `env.example` ở thư mục gốc của repository.
 
@@ -376,15 +398,21 @@ base_url: ${MY_URL:http://default}  # Tuỳ chọn — dùng default nếu chưa
 
 ### ResourceHub tìm resources.yaml ở đâu?
 
-Theo thứ tự ưu tiên (code: `_get_global_hub()` trong `hush.core.registry`):
+**Cách 1 (khuyến nghị):** Truyền trực tiếp vào engine:
+
+```python
+engine = Hush(graph, resources="resources.yaml")
+```
+
+**Cách 2 (fallback):** Nếu không truyền `resources=`, các op tự tìm qua `get_hub()`:
 
 1. Biến môi trường `HUSH_CONFIG` (nếu có)
-2. `./resources.yaml` (thư mục hiện tại — **phổ biến nhất**)
+2. `./resources.yaml` (thư mục hiện tại)
 3. `~/.hush/resources.yaml` (thư mục home)
 
-> **Tip:** Nếu chạy code từ thư mục khác với nơi đặt `resources.yaml`, set `HUSH_CONFIG` trong `.env`:
-> ```dotenv
-> HUSH_CONFIG=/path/to/resources.yaml
+> **Tip:** Nếu chạy code từ thư mục khác với nơi đặt `resources.yaml`, dùng đường dẫn tuyệt đối:
+> ```python
+> engine = Hush(graph, resources="/path/to/resources.yaml")
 > ```
 
 ---
@@ -443,9 +471,6 @@ Result: Hello from Hush!
 ```bash
 python3 -c "
 import asyncio
-from dotenv import load_dotenv
-load_dotenv()  # BẮT BUỘC: load env vars trước khi tạo op
-
 from hush.core import Hush, GraphOp, START, END, PARENT
 from hush.providers import chain
 
@@ -457,7 +482,8 @@ async def main():
         )
         START >> chat >> END
 
-    engine = Hush(graph)
+    # env=True (mặc định) tự load .env, resources= chỉ định file provider
+    engine = Hush(graph, resources='resources.yaml')
     result = await engine.run(inputs={})
     print(f'LLM response: {result[\"content\"]}')
 
@@ -476,9 +502,6 @@ LLM response: Hello, dear friend!
 ```bash
 python3 -c "
 import asyncio
-from dotenv import load_dotenv
-load_dotenv()
-
 from hush.core import Hush, GraphOp, op, START, END, PARENT
 from hush.telemetry import LangfuseTracer
 
@@ -492,7 +515,7 @@ async def main():
         START >> step >> END
 
     tracer = LangfuseTracer(resource='langfuse:hush')
-    engine = Hush(graph, tracer=tracer)
+    engine = Hush(graph, resources='resources.yaml', tracer=tracer)
     result = await engine.run(inputs={})
     print(f'Result: {result[\"message\"]}')
     print('Check Langfuse dashboard for the trace.')
@@ -511,9 +534,9 @@ Mở [cloud.langfuse.com](https://cloud.langfuse.com) → Traces → bạn sẽ 
 
 ResourceHub không tìm được `resources.yaml`. Kiểm tra:
 
-1. File `resources.yaml` có ở thư mục hiện tại không? (`ls resources.yaml`)
-2. Hoặc set `HUSH_CONFIG` trong `.env` trỏ đến đúng đường dẫn
-3. Đã gọi `load_dotenv()` trước khi import op chưa?
+1. Đã truyền `resources=` vào `Hush()`? Ví dụ: `Hush(graph, resources="resources.yaml")`
+2. File `resources.yaml` có tồn tại ở đường dẫn đó không?
+3. Nếu không dùng `resources=`, file `resources.yaml` có ở thư mục hiện tại không?
 
 ### `ModuleNotFoundError: No module named 'hush'`
 
@@ -526,10 +549,11 @@ uv pip install "hush-icore @ git+https://github.com/batman1m2001-cyber/Hush-ai.g
 
 ### `WARNING: Environment variable OPENAI_API_KEY not found`
 
-File `.env` chưa được tạo hoặc chưa load. Kiểm tra:
+File `.env` chưa được tạo hoặc engine chưa load được. Kiểm tra:
 
 1. File `.env` có tồn tại ở thư mục gốc project không?
-2. Code có gọi `load_dotenv()` **trước** khi tạo op dùng provider không?
+2. `Hush(graph, env=True)` (mặc định) — engine tự tìm `.env` từ CWD trở lên
+3. Nếu `.env` ở nơi khác, truyền đường dẫn: `Hush(graph, env="/path/to/.env")`
 
 ### `openai.AuthenticationError: Incorrect API key`
 

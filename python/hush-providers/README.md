@@ -1,28 +1,19 @@
-# Hush Providers
+# hush-providers
 
-> LLM, embedding và reranking providers cho Hush workflow engine.
+LLM, embedding, and reranking provider integrations for Hush workflows.
 
-## Cài đặt
+[![PyPI](https://img.shields.io/pypi/v/hush-providers)](https://pypi.org/project/hush-providers/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
+
+## Installation
 
 ```bash
-# Với pip
-pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
-pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-
-# Với uv
-uv pip install "hush-core @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-core"
-uv pip install "hush-providers @ git+https://github.com/batman1m2001-cyber/Hush-ai.git#subdirectory=hush-providers"
-
-# Editable (cho development)
-git clone https://github.com/batman1m2001-cyber/Hush-ai.git && cd Hush-ai
-uv pip install -e hush-core -e hush-providers
+pip install hush-providers
 ```
-
-Xem chi tiết tại [Cài đặt và Thiết lập](../docs/guide/01-cai-dat-va-thiet-lap.md).
 
 ## Quick Start
 
-### LLM Op
+### LLM (chain = prompt + LLM combined)
 
 ```python
 from hush.core import Hush, GraphOp, START, END, PARENT
@@ -32,16 +23,16 @@ async def main():
     with GraphOp(name="chat") as graph:
         chat = chain(
             resource="gpt-4o",
-            template={"system": "Bạn là trợ lý AI.", "user": "{question}"},
+            template={"system": "You are a helpful assistant.", "user": "{question}"},
             question=PARENT["question"],
         )
         START >> chat >> END
 
-    engine = Hush(graph)
-    result = await engine.run(inputs={"question": "Hello!"})
+    result = await Hush(graph).run(inputs={"question": "What is Python?"})
+    print(result["content"])
 ```
 
-### Embedding Op
+### Embedding
 
 ```python
 from hush.providers import EmbeddingOp
@@ -49,7 +40,7 @@ from hush.providers import EmbeddingOp
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["documents"])
 ```
 
-### Rerank Op
+### Reranking
 
 ```python
 from hush.providers import RerankOp
@@ -61,44 +52,52 @@ rerank = RerankOp.of(resource="bge-reranker", query=PARENT["query"], documents=P
 
 | Type | Providers |
 |------|-----------|
-| LLM | OpenAI, Azure, Gemini, vLLM |
-| Embedding | vLLM, TEI, HuggingFace, ONNX |
-| Reranking | vLLM, Pinecone, HuggingFace, ONNX |
+| **LLM** | OpenAI, Azure OpenAI, Google Gemini, vLLM |
+| **Embedding** | OpenAI/vLLM, TEI, HuggingFace, ONNX |
+| **Reranking** | vLLM, Pinecone, Cohere, HuggingFace, ONNX |
 
 ## Configuration
 
+Providers are configured via YAML resource files:
+
 ```yaml
 # resources.yaml
-llm:gpt-4o:
-  _class: OpenAIConfig
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1
-  model: gpt-4o
+llm:
+  gpt-4o:
+    type: openai
+    model: gpt-4o
+    api_key: ${OPENAI_API_KEY}
 
-embedding:bge-m3:
-  _class: EmbeddingConfig
-  api_type: vllm
-  base_url: http://localhost:8000/v1
-  model: BAAI/bge-m3
+embeddings:
+  bge-m3:
+    type: onnx
+    model_path: /models/bge-m3
 ```
 
-## Features
+## Feature Flags
 
-- Streaming và non-streaming responses
-- Token counting và usage tracking
-- Multimodal input (images)
-- Tool/function calling
-- Batch processing
+Install only the providers you need:
 
-## Documentation
+```bash
+pip install "hush-providers[openai]"       # OpenAI + Azure
+pip install "hush-providers[gemini]"       # Google Gemini
+pip install "hush-providers[onnx]"         # ONNX Runtime
+pip install "hush-providers[all-light]"    # All without PyTorch
+pip install "hush-providers[all]"          # Everything
+```
 
-- [User Docs](../docs/guide/) - Tutorials và guides
-- [Architecture](../architecture/providers/) - Internal documentation
-  - [LLM Abstraction](../architecture/providers/llm-abstraction.md)
-  - [Embedding Provider](../architecture/providers/embedding-provider.md)
-  - [Reranker Provider](../architecture/providers/reranker-provider.md)
-  - [Adding New Provider](../architecture/providers/adding-new-provider.md)
+## Rust Backend
+
+All providers have native Rust implementations via [hush-providers (crate)](https://crates.io/crates/hush-providers) — direct HTTP calls without Python overhead.
+
+## Related Packages
+
+| Package | Description |
+|---------|-------------|
+| [hush-icore](https://pypi.org/project/hush-icore/) | Core workflow engine (required) |
+| [hush-telemetry](https://pypi.org/project/hush-telemetry/) | Tracing with token/cost tracking |
+| [hush-serve](https://pypi.org/project/hush-serve/) | Serve workflows as HTTP APIs |
 
 ## License
 
-MIT
+Apache 2.0

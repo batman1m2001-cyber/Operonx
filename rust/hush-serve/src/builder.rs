@@ -1,0 +1,269 @@
+//! Server builder — fluent API for configuring and running a Hush HTTP server.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use hush_serve::HushServer;
+//! use serde_json::{json, Value};
+//!
+//! fn main() {
+//!     HushServer::builder()
+//!         .register_op("double", |v: &Value| {
+//!             let x = v["x"].as_i64().unwrap_or(0);
+//!             json!({"result": x * 2})
+//!         })
+//!         .from_cli()
+//!         .serve()
+//!         .unwrap();
+//! }
+//! ```
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use serde_json::Value;
+
+use hush_icore::registry::OpRegistry;
+
+use crate::config::{Cli, ServerConfig};
+use crate::fn_registry::{CompositeRegistry, FnRegistry};
+use crate::plugin::PluginRegistry;
+
+/// Builder for configuring and running a Hush HTTP server.
+pub struct HushServerBuilder {
+    registry: FnRegistry,
+    config: Option<ServerConfig>,
+    plugin_path: Option<String>,
+    host_override: Option<String>,
+    port_override: Option<u16>,
+}
+
+impl HushServerBuilder {
+    pub fn new() -> Self {
+        HushServerBuilder {
+            registry: FnRegistry::new(),
+            config: None,
+            plugin_path: None,
+            host_override: None,
+            port_override: None,
+        }
+    }
+
+    /// Register a regular op by name.
+    ///
+    /// The closure receives `&serde_json::Value` (op inputs) and returns `Value` (op outputs).
+    /// Closures can capture shared state via `Arc`:
+    ///
+    /// ```rust,ignore
+    /// let pool = Arc::new(MyPool::new());
+    /// let p = pool.clone();
+    /// builder.register_op("my_op", move |inputs| {
+    ///     p.do_work(inputs)
+    /// })
+    /// ```
+    pub fn register_op<F>(mut self, name: &str, f: F) -> Self
+    where
+        F: Fn(&Value) -> Value + Send + Sync + 'static,
+    {
+        self.registry.register_op(name, f);
+        self
+    }
+
+    /// Register a generator op by name (returns `Vec<Value>`).
+    ///
+    /// The closure returns `Vec<Value>` — one entry per yield.
+    pub fn register_generator<F>(mut self, name: &str, f: F) -> Self
+    where
+        F: Fn(&Value) -> Vec<Value> + Send + Sync + 'static,
+    {
+        self.registry.register_generator(name, f);
+        self
+    }
+
+    /// Register a generator op that returns a JSON array `Value`.
+    ///
+    /// This matches the cdylib convention where generators return `Value::Array`.
+    /// The array is unwrapped automatically.
+    pub fn register_generator_value<F>(mut self, name: &str, f: F) -> Self
+    where
+        F: Fn(&Value) -> Value + Send + Sync + 'static,
+    {
+        self.registry.register_generator_value(name, f);
+        self
+    }
+
+    /// Load server config from a JSON file.
+    pub fn config_file(mut self, path: &str) -> Self {
+        let config_str = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("Failed to read config file '{}': {}", path, e);
+            std::process::exit(1);
+        });
+        let config: ServerConfig = serde_json::from_str(&config_str).unwrap_or_else(|e| {
+            eprintln!("Failed to parse config: {}", e);
+            std::process::exit(1);
+        });
+        self.config = Some(config);
+        self
+    }
+
+    /// Load server config from a JSON string.
+    pub fn config_json(mut self, json: &str) -> Self {
+        let config: ServerConfig = serde_json::from_str(json).unwrap_or_else(|e| {
+            eprintln!("Failed to parse config: {}", e);
+            std::process::exit(1);
+        });
+        self.config = Some(config);
+        self
+    }
+
+    /// Parse CLI arguments: `--config`, `--host`, `--port`, `--plugin`.
+    ///
+    /// This is the standard entry point for binaries spawned by the Python bridge.
+    pub fn from_cli(mut self) -> Self {
+        use clap::Parser;
+        let cli = Cli::parse();
+
+        // Read config file
+        let config_str = std::fs::read_to_string(&cli.config).unwrap_or_else(|e| {
+            eprintln!("Failed to read config file '{}': {}", cli.config, e);
+            std::process::exit(1);
+        });
+        let config: ServerConfig = serde_json::from_str(&config_str).unwrap_or_else(|e| {
+            eprintln!("Failed to parse config: {}", e);
+            std::process::exit(1);
+        });
+        self.config = Some(config);
+
+        // CLI overrides
+        if let Some(host) = cli.host {
+            self.host_override = Some(host);
+        }
+        if let Some(port) = cli.port {
+            self.port_override = Some(port);
+        }
+        if let Some(plugin) = cli.plugin {
+            self.plugin_path = Some(plugin);
+        }
+
+        self
+    }
+
+    /// Override the bind host.
+    pub fn host(mut self, h: &str) -> Self {
+        self.host_override = Some(h.to_string());
+        self
+    }
+
+    /// Override the bind port.
+    pub fn port(mut self, p: u16) -> Self {
+        self.port_override = Some(p);
+        self
+    }
+
+    /// Build and run the HTTP server (blocking).
+    ///
+    /// This starts a Tokio runtime, binds the server, and blocks until shutdown.
+    pub fn serve(self) -> Result<(), Box<dyn std::error::Error>> {
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(self.serve_async())
+    }
+
+    /// Build and run the HTTP server (async).
+    pub async fn serve_async(self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = self.config.ok_or("No config provided. Use .config_file(), .config_json(), or .from_cli()")?;
+
+        // Apply overrides
+        if let Some(host) = self.host_override {
+            config.host = host;
+        }
+        if let Some(port) = self.port_override {
+            config.port = port;
+        }
+
+        // Build registry: FnRegistry + optional PluginRegistry
+        let registry: Option<Arc<dyn OpRegistry>> = {
+            let has_fn_ops = !self.registry.is_empty();
+            let fn_reg: Arc<dyn OpRegistry> = Arc::new(self.registry);
+
+            // Load plugin if specified (backward compat)
+            let plugin_reg: Option<Arc<dyn OpRegistry>> = if let Some(ref plugin_path) = self.plugin_path {
+                let path = std::path::Path::new(plugin_path);
+                if !path.exists() {
+                    return Err(format!("Plugin file not found: {}", plugin_path).into());
+                }
+                let plugin = PluginRegistry::load(path)
+                    .map_err(|e| format!("{}", e))?;
+                println!("Loaded plugin: {}", plugin_path);
+                Some(Arc::new(plugin))
+            } else {
+                None
+            };
+
+            match (has_fn_ops, plugin_reg) {
+                (true, Some(plugin)) => {
+                    Some(Arc::new(CompositeRegistry::new(fn_reg, plugin)))
+                }
+                (true, None) => Some(fn_reg),
+                (false, Some(plugin)) => Some(plugin),
+                (false, None) => None,
+            }
+        };
+
+        let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
+        let n_endpoints = config.endpoints.len();
+        let app = crate::router::build_router(config, registry);
+
+        println!("hush-serve running at http://{}", addr);
+        println!("Endpoints: {}", n_endpoints);
+
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+
+        println!("hush-serve shut down.");
+        Ok(())
+    }
+
+    /// Build the Axum Router without starting the server (for testing or embedding).
+    pub fn into_router(self) -> Result<axum::Router, Box<dyn std::error::Error>> {
+        let config = self.config.ok_or("No config provided")?;
+
+        let has_fn_ops = !self.registry.is_empty();
+        let registry: Option<Arc<dyn OpRegistry>> = if has_fn_ops {
+            Some(Arc::new(self.registry))
+        } else {
+            None
+        };
+
+        Ok(crate::router::build_router(config, registry))
+    }
+}
+
+impl Default for HushServerBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Wait for Ctrl+C or SIGTERM to trigger graceful shutdown.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        tokio::select! {
+            _ = ctrl_c => { println!("\nReceived Ctrl+C, shutting down..."); }
+            _ = sigterm.recv() => { println!("\nReceived SIGTERM, shutting down..."); }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+        println!("\nReceived Ctrl+C, shutting down...");
+    }
+}

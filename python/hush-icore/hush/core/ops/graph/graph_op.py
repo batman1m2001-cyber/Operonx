@@ -11,7 +11,7 @@ Package layout::
 
 import traceback
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -430,7 +430,7 @@ class GraphOp(BaseOp):
             context_id = DEFAULT_CONTEXT
 
         request_id = state.request_id
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
@@ -474,7 +474,7 @@ class GraphOp(BaseOp):
             )
 
         finally:
-            end_time = datetime.now()
+            end_time = datetime.now(timezone.utc)
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             self._store_metrics(

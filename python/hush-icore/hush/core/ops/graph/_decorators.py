@@ -13,14 +13,15 @@ from hush.core.utils.auto_name import register_skip
 def _build_fn_args(input_mappings, param_names):
     """Build function arguments from input mappings.
 
-    Ref values become PARENT[key] refs (resolved at runtime from graph inputs).
-    Static values are passed through as-is for use at graph build time.
+    Ref values and bare PARENT become PARENT[key] refs (resolved at runtime
+    from graph inputs). Static values are passed through as-is for use at
+    graph build time.
     """
     args = {}
     for key, value in input_mappings.items():
         if key not in param_names:
             continue
-        if isinstance(value, Ref):
+        if isinstance(value, Ref) or value is PARENT:
             args[key] = PARENT[key]
         else:
             args[key] = value

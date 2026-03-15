@@ -279,34 +279,28 @@ def serve_rust(
     crate_dir: Optional[Path] = None,
     rust_ops: Optional[str] = None,
     plugin: Optional[str] = None,
+    binary: Optional[str] = None,
 ):
     """Spawn the Rust backend server.
 
-    1. Serializes all registered endpoints to JSON config
-    2. Writes config to a temp file
-    3. Finds or builds the hush-serve binary
-    4. Optionally builds and loads a cdylib plugin
-    5. Spawns the binary and waits for it
+    Two modes:
+
+    **Custom binary** (recommended for custom ops):
+        Pass ``binary=`` pointing to a Rust binary built with ``hush-serve`` as a library.
+        The binary already has all ops compiled in — no cdylib/plugin needed.
+
+    **Default binary + plugin** (legacy):
+        Uses the generic ``hush-serve`` binary with an optional cdylib plugin.
 
     Args:
         app: The HushApp instance with registered endpoints.
         host: Bind address.
         port: Bind port.
         crate_dir: Optional path to hush-serve crate (auto-detected if None).
-        rust_ops: Optional path to a Rust ops crate (auto-builds cdylib).
-        plugin: Optional path to a pre-built cdylib plugin (.dll/.so/.dylib).
+        rust_ops: Optional path to a Rust ops crate (auto-builds cdylib). Legacy.
+        plugin: Optional path to a pre-built cdylib plugin (.dll/.so/.dylib). Legacy.
+        binary: Optional path to a custom Rust binary (built with hush-serve as library).
     """
-    # Resolve plugin path
-    plugin_path: Optional[str] = None
-    if plugin:
-        plugin_path = str(Path(plugin).resolve())
-    elif rust_ops:
-        ops_path = Path(rust_ops)
-        cdylib = _find_cdylib(ops_path)
-        if cdylib is None:
-            cdylib = _build_cdylib(ops_path)
-        plugin_path = str(cdylib)
-
     # 1. Serialize config
     config = serialize_for_rust(app)
     config.host = host
@@ -324,19 +318,40 @@ def serve_rust(
         config_path = f.name
 
     try:
-        # 3. Find or build binary
-        binary = find_hush_serve_binary(crate_dir)
+        if binary:
+            # Custom binary mode: ops are compiled in, no plugin needed
+            bin_path = Path(binary).resolve()
+            if not bin_path.exists():
+                raise FileNotFoundError(f"Custom binary not found: {binary}")
 
-        # 4. Spawn and wait
-        print(f"Starting hush-serve (Rust backend) at http://{host}:{port}")
-        print(f"Binary: {binary}")
-        print(f"Config: {config_path}")
-        if plugin_path:
-            print(f"Plugin: {plugin_path}")
+            print(f"Starting custom Rust backend at http://{host}:{port}")
+            print(f"Binary: {bin_path}")
+            print(f"Config: {config_path}")
 
-        cmd = [str(binary), "--config", config_path]
-        if plugin_path:
-            cmd.extend(["--plugin", plugin_path])
+            cmd = [str(bin_path), "--config", config_path]
+        else:
+            # Default binary mode: find hush-serve + optional plugin
+            plugin_path: Optional[str] = None
+            if plugin:
+                plugin_path = str(Path(plugin).resolve())
+            elif rust_ops:
+                ops_path = Path(rust_ops)
+                cdylib = _find_cdylib(ops_path)
+                if cdylib is None:
+                    cdylib = _build_cdylib(ops_path)
+                plugin_path = str(cdylib)
+
+            bin_path = find_hush_serve_binary(crate_dir)
+
+            print(f"Starting hush-serve (Rust backend) at http://{host}:{port}")
+            print(f"Binary: {bin_path}")
+            print(f"Config: {config_path}")
+            if plugin_path:
+                print(f"Plugin: {plugin_path}")
+
+            cmd = [str(bin_path), "--config", config_path]
+            if plugin_path:
+                cmd.extend(["--plugin", plugin_path])
 
         proc = subprocess.Popen(
             cmd,

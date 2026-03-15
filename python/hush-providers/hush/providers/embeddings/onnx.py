@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import struct
 from functools import lru_cache
-from typing import Any, Dict, List, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -9,16 +11,38 @@ from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
 
+def _fnv1a_hash(text: str) -> int:
+    """FNV-1a hash matching the Rust implementation."""
+    h = 0xCBF29CE484222325
+    for b in text.encode("utf-8"):
+        h ^= b
+        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
 class ONNXEmbedding(BaseEmbedder):
     """ONNX-based embedding using ONNX Runtime.
 
     This embedder runs ONNX models locally using onnxruntime.
+    Supports optional in-memory cache with binary file persistence.
+    Cache format is compatible with the Rust OnnxEmbedder.
+
     Requires: pip install onnxruntime tokenizers
     """
 
-    __slots__ = ["config", "session", "tokenizer", "_output_dim", "_device"]
+    __slots__ = [
+        "config",
+        "session",
+        "tokenizer",
+        "_output_dim",
+        "_device",
+        "_cache",
+        "_cache_path",
+    ]
 
-    def __init__(self, config: EmbeddingConfig) -> None:
+    def __init__(self, config: EmbeddingConfig, cache_path: Optional[str] = None) -> None:
+        # cache_path from explicit param or from config
+        cache_path = cache_path or getattr(config, "cache_path", None)
         """Initialize the ONNX embedding client with the provided configuration.
 
         Args:
@@ -91,6 +115,58 @@ class ONNXEmbedding(BaseEmbedder):
         except Exception as e:
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 
+        # Embedding cache: in-memory dict with optional file persistence
+        self._cache: Dict[int, List[float]] = {}
+        self._cache_path = cache_path
+        if cache_path:
+            self._load_cache()
+
+    def _load_cache(self) -> None:
+        """Load cache from binary file (compatible with Rust OnnxEmbedder format)."""
+        path = Path(self._cache_path)
+        if not path.exists():
+            return
+        try:
+            data = path.read_bytes()
+            if len(data) < 8:
+                return
+            (count,) = struct.unpack_from("<Q", data, 0)
+            offset = 8
+            for _ in range(count):
+                if offset + 12 > len(data):
+                    break
+                (h,) = struct.unpack_from("<Q", data, offset)
+                offset += 8
+                (dim,) = struct.unpack_from("<I", data, offset)
+                offset += 4
+                float_bytes = dim * 4
+                if offset + float_bytes > len(data):
+                    break
+                floats = list(struct.unpack_from(f"<{dim}f", data, offset))
+                offset += float_bytes
+                self._cache[h] = floats
+        except Exception:
+            self._cache = {}
+
+    def save_cache(self) -> int:
+        """Save in-memory cache to binary file. Returns number of entries saved."""
+        if not self._cache_path or not self._cache:
+            return 0
+        path = Path(self._cache_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        buf = struct.pack("<Q", len(self._cache))
+        for h, emb in self._cache.items():
+            buf += struct.pack("<Q", h)
+            buf += struct.pack("<I", len(emb))
+            buf += struct.pack(f"<{len(emb)}f", *emb)
+        path.write_bytes(buf)
+        return len(self._cache)
+
+    @property
+    def cache_size(self) -> int:
+        """Number of cached embeddings."""
+        return len(self._cache)
+
     def _mean_pooling(self, token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
         """Apply mean pooling to get sentence embeddings.
 
@@ -151,14 +227,35 @@ class ONNXEmbedding(BaseEmbedder):
             max_length = kwargs.get("max_length", 512)
             truncation = kwargs.get("truncation", True)
 
+            # Check cache for all texts
+            results: list[list[float] | None] = [None] * len(texts)
+            uncached_indices = []
+            uncached_texts = []
+
+            if self._cache_path is not None:
+                for i, text in enumerate(texts):
+                    h = _fnv1a_hash(text)
+                    if h in self._cache:
+                        results[i] = self._cache[h]
+                    else:
+                        uncached_indices.append(i)
+                        uncached_texts.append(text)
+            else:
+                uncached_indices = list(range(len(texts)))
+                uncached_texts = list(texts)
+
+            # All cached — skip inference
+            if not uncached_texts:
+                return {"embeddings": results}
+
             # Update tokenizer settings
             if truncation:
                 self.tokenizer.enable_truncation(max_length=max_length)
             else:
                 self.tokenizer.no_truncation()
 
-            # Tokenize texts
-            encodings = self.tokenizer.encode_batch(texts)
+            # Tokenize uncached texts
+            encodings = self.tokenizer.encode_batch(uncached_texts)
 
             # Extract input_ids and attention_mask
             input_ids = np.array([enc.ids for enc in encodings], dtype=np.int64)
@@ -189,10 +286,15 @@ class ONNXEmbedding(BaseEmbedder):
             if self._output_dim is None:
                 self._output_dim = embeddings.shape[1]
 
-            # Convert to list of lists
+            # Fill results and update cache
             embeddings_list = embeddings.tolist()
+            for batch_i, orig_i in enumerate(uncached_indices):
+                emb = embeddings_list[batch_i]
+                results[orig_i] = emb
+                if self._cache_path is not None:
+                    self._cache[_fnv1a_hash(texts[orig_i])] = emb
 
-            return {"embeddings": embeddings_list}
+            return {"embeddings": results}
 
         except Exception as e:
             raise RuntimeError(f"Failed to generate embeddings: {str(e)}") from e
