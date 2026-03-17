@@ -2,8 +2,10 @@
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use hush_serve::hush_op;
 
 /// keyword_search: query, docs → results (top docs by term overlap)
+#[hush_op]
 pub fn keyword_search(inputs: &Value) -> Value {
     let query = inputs["query"].as_str().unwrap_or("");
     let docs = inputs["docs"].as_array().cloned().unwrap_or_default();
@@ -27,6 +29,7 @@ pub fn keyword_search(inputs: &Value) -> Value {
 }
 
 /// keyword_search_expanded: query, docs → results (search with expanded query terms)
+#[hush_op]
 pub fn keyword_search_expanded(inputs: &Value) -> Value {
     let query = inputs["query"].as_str().unwrap_or("");
     let docs = inputs["docs"].as_array().cloned().unwrap_or_default();
@@ -53,6 +56,7 @@ pub fn keyword_search_expanded(inputs: &Value) -> Value {
 }
 
 /// rrf_merge: r1, r2 → merged (reciprocal rank fusion)
+#[hush_op]
 pub fn rrf_merge(inputs: &Value) -> Value {
     let r1 = inputs["r1"].as_array().cloned().unwrap_or_default();
     let r2 = inputs["r2"].as_array().cloned().unwrap_or_default();
@@ -84,6 +88,7 @@ pub fn rrf_merge(inputs: &Value) -> Value {
 /// cosine_search: qv, docs, dvs → results (cosine similarity search)
 ///
 /// qv: query vector (first element used), docs: document strings, dvs: document vectors
+#[hush_op]
 pub fn cosine_search(inputs: &Value) -> Value {
     let qv = inputs["qv"].as_array().cloned().unwrap_or_default();
     let docs = inputs["docs"].as_array().cloned().unwrap_or_default();
@@ -135,6 +140,7 @@ pub fn cosine_search(inputs: &Value) -> Value {
 }
 
 /// keyword_retrieve: query, docs → candidates (keyword search top 8)
+#[hush_op]
 pub fn keyword_retrieve(inputs: &Value) -> Value {
     let query = inputs["query"].as_str().unwrap_or("");
     let docs = inputs["docs"].as_array().cloned().unwrap_or_default();
@@ -157,6 +163,7 @@ pub fn keyword_retrieve(inputs: &Value) -> Value {
 }
 
 /// retrieve: query_vec, doc_vectors, documents → context_docs (cosine similarity top 3)
+#[hush_op]
 pub fn retrieve(inputs: &Value) -> Value {
     let query_vec_outer = inputs["query_vec"].as_array().cloned().unwrap_or_default();
     let doc_vectors = inputs["doc_vectors"].as_array().cloned().unwrap_or_default();

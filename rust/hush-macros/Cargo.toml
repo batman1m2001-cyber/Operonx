@@ -1,0 +1,15 @@
+[package]
+name = "hush-macros"
+version = "0.1.3"
+edition = "2021"
+description = "Proc macros for Hush workflow engine — #[hush_op] auto-registration"
+license = "MIT"
+repository = "https://github.com/batman1m2001-cyber/Hush-ai"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

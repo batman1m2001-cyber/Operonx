@@ -47,7 +47,7 @@ def cosine_search(query_vector, doc_vectors, documents, top_k=3):
 # =============================================================================
 
 
-@op(rust="./rust_ops::search::retrieve")
+@op
 def retrieve(query_vec, doc_vectors, documents):
     return {"context_docs": cosine_search(query_vec[0], doc_vectors, documents, top_k=3)}
 

@@ -13,7 +13,7 @@ from hush.core.ops import if_, op
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::failing_op")
+@op(rust="failing_op")
 def failing():
     return {"result": 1 / 0}  # ZeroDivisionError!
 
@@ -23,7 +23,7 @@ def failing():
 # =============================================================================
 
 
-@op(rust="./rust_ops::math::safe_divide")
+@op
 def safe_divide(a: int, b: int):
     """Chia an toàn — trả success/error thay vì throw."""
     try:
@@ -33,13 +33,13 @@ def safe_divide(a: int, b: int):
         return {"success": False, "result": None, "error": "Cannot divide by zero"}
 
 
-@op(rust="./rust_ops::text::handle_success")
+@op
 def handle_success(result: float):
     """Xử lý kết quả thành công."""
     return {"output": f"Result: {result}"}
 
 
-@op(rust="./rust_ops::text::handle_error")
+@op
 def handle_error(error: str):
     """Xử lý lỗi."""
     return {"output": f"Error occurred: {error}"}
@@ -50,7 +50,7 @@ def handle_error(error: str):
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::retry_with_backoff")
+@op
 def retry_with_backoff(query: str):
     """Retry với exponential backoff — simulates unreliable API."""
     attempt_count = 0
@@ -76,7 +76,7 @@ def retry_with_backoff(query: str):
     }
 
 
-@op(rust="./rust_ops::pipeline::with_fallback")
+@op
 def with_fallback(primary_result: str, success: bool):
     """Dùng kết quả hoặc fallback."""
     if success:

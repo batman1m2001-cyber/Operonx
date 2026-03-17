@@ -1,21 +1,31 @@
 //! Text ops — string processing for workflow pipelines.
 
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
 /// greet: name → greeting = "Hello, {name}!"
 ///
 /// Python equivalent:
 /// ```python
-/// @op(rust="greet")
+/// @op
 /// def greet(name: str):
-///     return {"greeting": f"Hello, {name}!"}
+///     return {"greeting": f"Xin chào, {name}!"}
 /// ```
+#[hush_op]
 pub fn greet(inputs: &Value) -> Value {
+    let name = inputs["name"].as_str().unwrap_or("World");
+    json!({"greeting": format!("Xin chào, {}!", name)})
+}
+
+/// greet_en: name → greeting = "Hello, {name}!"
+#[hush_op]
+pub fn greet_en(inputs: &Value) -> Value {
     let name = inputs["name"].as_str().unwrap_or("World");
     json!({"greeting": format!("Hello, {}!", name)})
 }
 
 /// to_upper: text → result = text.upper()
+#[hush_op]
 pub fn to_upper(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     json!({"result": text.to_uppercase()})
@@ -24,6 +34,7 @@ pub fn to_upper(inputs: &Value) -> Value {
 /// string_template: template, vars → result
 ///
 /// Simple `{key}` substitution.
+#[hush_op]
 pub fn string_template(inputs: &Value) -> Value {
     let template = inputs["template"].as_str().unwrap_or("").to_string();
     let mut output = template;
@@ -42,6 +53,7 @@ pub fn string_template(inputs: &Value) -> Value {
 }
 
 /// string_concat: parts (list of str) → result (str)
+#[hush_op]
 pub fn string_concat(inputs: &Value) -> Value {
     let result = inputs["parts"]
         .as_array()
@@ -56,12 +68,14 @@ pub fn string_concat(inputs: &Value) -> Value {
 }
 
 /// greet_vi: name → greeting = "Xin chào, {name}!"
+#[hush_op]
 pub fn greet_vi(inputs: &Value) -> Value {
     let name = inputs["name"].as_str().unwrap_or("World");
     json!({"greeting": format!("Xin chào, {}!", name)})
 }
 
 /// clean_text: text → cleaned_text (strip, normalize whitespace, lowercase)
+#[hush_op]
 pub fn clean_text(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let cleaned: String = text
@@ -73,6 +87,7 @@ pub fn clean_text(inputs: &Value) -> Value {
 }
 
 /// preprocess: text → cleaned, $tags (strip + lowercase + tagging)
+#[hush_op]
 pub fn preprocess(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let cleaned = text.trim().to_lowercase();
@@ -84,6 +99,7 @@ pub fn preprocess(inputs: &Value) -> Value {
 }
 
 /// add_prefix: text, prefix → result = "{prefix}: {text}"
+#[hush_op]
 pub fn add_prefix(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let prefix = inputs["prefix"].as_str().unwrap_or("");
@@ -91,6 +107,7 @@ pub fn add_prefix(inputs: &Value) -> Value {
 }
 
 /// process_item_text: item, prefix → result = "{prefix}: {item}"
+#[hush_op]
 pub fn process_item_text(inputs: &Value) -> Value {
     let item = inputs["item"].as_str().unwrap_or("");
     let prefix = inputs["prefix"].as_str().unwrap_or("");
@@ -98,18 +115,21 @@ pub fn process_item_text(inputs: &Value) -> Value {
 }
 
 /// handle_success: result → output = "Result: {result}"
+#[hush_op]
 pub fn handle_success(inputs: &Value) -> Value {
     let result = inputs["result"].as_f64().unwrap_or(0.0);
     json!({"output": format!("Result: {}", result)})
 }
 
 /// handle_error: error → output = "Error occurred: {error}"
+#[hush_op]
 pub fn handle_error(inputs: &Value) -> Value {
     let error = inputs["error"].as_str().unwrap_or("unknown");
     json!({"output": format!("Error occurred: {}", error)})
 }
 
 /// extract_keywords: text → keywords (top 5 non-stop words > 2 chars)
+#[hush_op]
 pub fn extract_keywords(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let stop_words = [
@@ -125,6 +145,7 @@ pub fn extract_keywords(inputs: &Value) -> Value {
 }
 
 /// grade_to_message: grade → message
+#[hush_op]
 pub fn grade_to_message(inputs: &Value) -> Value {
     let grade = inputs["grade"].as_str().unwrap_or("");
     let message = match grade {
@@ -139,6 +160,7 @@ pub fn grade_to_message(inputs: &Value) -> Value {
 }
 
 /// format_labeled: value, label → formatted = "{label}: {value}"
+#[hush_op]
 pub fn format_labeled(inputs: &Value) -> Value {
     let label = inputs["label"].as_str().unwrap_or("");
     let value = &inputs["value"];
@@ -150,6 +172,7 @@ pub fn format_labeled(inputs: &Value) -> Value {
 }
 
 /// format_square: number, squared → label = "{number}^2 = {squared}"
+#[hush_op]
 pub fn format_square(inputs: &Value) -> Value {
     let number = inputs["number"].as_i64().unwrap_or(0);
     let squared = inputs["squared"].as_i64().unwrap_or(0);
@@ -163,7 +186,7 @@ mod tests {
     #[test]
     fn test_greet() {
         let result = greet(&json!({"name": "Hush"}));
-        assert_eq!(result["greeting"], "Hello, Hush!");
+        assert_eq!(result["greeting"], "Xin chào, Hush!");
     }
 
     #[test]

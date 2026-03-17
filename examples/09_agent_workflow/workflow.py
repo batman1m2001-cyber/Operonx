@@ -79,7 +79,7 @@ TOOL_DESCRIPTIONS = [
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::init_agent")
+@op
 def init_agent(query: str):
     """Khoi tao agent state."""
     return {
@@ -96,7 +96,7 @@ def init_agent(query: str):
     }
 
 
-@op(rust="./rust_ops::pipeline::process_agent_response")
+@op(rust="process_agent_response")
 def process_response(content, tool_calls, messages):
     """Xu ly response tu LLM: execute tools hoac return final answer."""
     new_messages = list(messages)

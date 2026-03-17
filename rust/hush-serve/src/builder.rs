@@ -18,6 +18,8 @@
 //! }
 //! ```
 
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -28,6 +30,7 @@ use hush_icore::registry::OpRegistry;
 use crate::config::{Cli, ServerConfig};
 use crate::fn_registry::{CompositeRegistry, FnRegistry};
 use crate::plugin::PluginRegistry;
+use crate::resources;
 
 /// Builder for configuring and running a Hush HTTP server.
 pub struct HushServerBuilder {
@@ -36,6 +39,7 @@ pub struct HushServerBuilder {
     plugin_path: Option<String>,
     host_override: Option<String>,
     port_override: Option<u16>,
+    pending_resources: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
 }
 
 impl HushServerBuilder {
@@ -46,7 +50,57 @@ impl HushServerBuilder {
             plugin_path: None,
             host_override: None,
             port_override: None,
+            pending_resources: HashMap::new(),
         }
+    }
+
+    /// Auto-register all `#[hush_op]` ops and `#[hush_resource]` factories.
+    ///
+    /// Discovers ops and resources registered via `inventory` at link time.
+    /// Resources are constructed from the `resources` section of the JSON config.
+    /// Call `.from_cli()` or `.config_file()` before this to load the config first.
+    pub fn auto_register(mut self) -> Self {
+        self.registry.collect_from_inventory();
+
+        // Collect #[hush_resource] factories and construct from config
+        let resources_config = self.config.as_ref()
+            .and_then(|c| c.resources.clone())
+            .unwrap_or_default();
+
+        for entry in inventory::iter::<crate::ResourceEntry> {
+            let config = resources_config.get(entry.name)
+                .cloned()
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+            let resource: Box<dyn Any + Send + Sync> = (entry.factory)(&config);
+            let type_id = (*resource).type_id();
+            self.pending_resources.insert(type_id, Arc::from(resource));
+
+            println!("Auto-provide resource: {}", entry.name);
+        }
+
+        self
+    }
+
+    /// Provide a typed resource accessible by `hush_serve::get::<T>()` in ops.
+    ///
+    /// Resources must be `Send + Sync + 'static`. Multiple resources of different
+    /// types can be provided. Only one resource per type is allowed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// HushServer::builder()
+    ///     .provide(OnnxEmbedder::new("./models/bge-m3").unwrap())
+    ///     .provide(SentimentModels::load())
+    ///     .auto_register()
+    ///     .from_cli()
+    ///     .serve()
+    /// ```
+    pub fn provide<T: Send + Sync + 'static>(mut self, resource: T) -> Self {
+        self.pending_resources
+            .insert(TypeId::of::<T>(), Arc::new(resource));
+        self
     }
 
     /// Register a regular op by name.
@@ -170,6 +224,11 @@ impl HushServerBuilder {
 
     /// Build and run the HTTP server (async).
     pub async fn serve_async(self) -> Result<(), Box<dyn std::error::Error>> {
+        // Initialize typed resources before serving
+        if !self.pending_resources.is_empty() {
+            resources::init_resources(self.pending_resources);
+        }
+
         let mut config = self.config.ok_or("No config provided. Use .config_file(), .config_json(), or .from_cli()")?;
 
         // Apply overrides

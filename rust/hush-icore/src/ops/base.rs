@@ -61,7 +61,7 @@ pub(crate) fn run(
     let perf_start = Instant::now();
     let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
 
-    // Try: resolve inputs → execute → store outputs
+    // Try: resolve inputs → (cache check) → execute → store outputs → (cache store)
     let mut pending = false;
     let mut input_map = serde_json::Map::new();
     let mut result_obj_for_log: Option<Value> = None;
@@ -72,12 +72,37 @@ pub(crate) fn run(
             }
         }
 
+        // Op-level cache: check before execution
+        let op_cache = if op.cache.is_some() {
+            super::cache::get_op_cache(&op.full_name)
+        } else {
+            None
+        };
+        let input_hash = if op_cache.is_some() {
+            Some(super::cache::hash_inputs(&input_map))
+        } else {
+            None
+        };
+
+        if let (Some(ref cache), Some(hash)) = (&op_cache, input_hash) {
+            if let Some(cached) = cache.get(hash) {
+                result_obj_for_log = Some(cached.clone());
+                store_result(op, Some(cached), state, context)?;
+                return Ok(());
+            }
+        }
+
         let result_obj = execute_op(op, input_map.clone(), state, context, registry)?;
 
         // Check for PENDING sentinel before storing
         if is_pending(&result_obj) {
             pending = true;
             return Ok(());
+        }
+
+        // Store in cache if enabled
+        if let (Some(ref cache), Some(hash), Some(ref result)) = (&op_cache, input_hash, &result_obj) {
+            cache.insert(hash, result.clone());
         }
 
         result_obj_for_log = result_obj.clone();
@@ -160,8 +185,12 @@ fn classify_op(op: &OpConfig) -> OpRoute<'_> {
     if hush_providers::ops::is_native_transform_op(&op.op_type) {
         return OpRoute::NativeTransform;
     }
-    if let Some(ref name) = op.rust_op {
-        return OpRoute::Builtin(name);
+    // code ops: look up by func_name (Python function's __name__)
+    if op.op_type == "code" {
+        if let Some(ref fname) = op.func_name {
+            return OpRoute::Builtin(fname);
+        }
+        return OpRoute::Builtin(&op.name);
     }
     OpRoute::Unsupported
 }
@@ -389,17 +418,16 @@ pub(crate) fn push_output_refs(
 /// Execute an op via the OpRegistry.
 /// Accepts both "path::func" format (extracts func name) and plain "func" names.
 fn execute_registry_op(
-    spec: &str,
+    func_name: &str,
     inputs: serde_json::Map<String, Value>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) -> Result<Option<Value>, RushError> {
-    let func_name = spec.rsplit("::").next().unwrap_or(spec);
     let input_value = Value::Object(inputs);
 
     let reg = registry.as_ref().ok_or_else(|| {
         RushError::RegistryError(format!(
-            "No op registry loaded. Cannot dispatch rust_op='{}'. Load a plugin via --plugin or set_registry().",
-            spec
+            "No op registry loaded. Cannot dispatch func '{}'.",
+            func_name
         ))
     })?;
 
@@ -407,8 +435,8 @@ fn execute_registry_op(
         .map(Some)
         .ok_or_else(|| {
             RushError::RegistryError(format!(
-                "Unknown op function: '{}' (from rust_op='{}')",
-                func_name, spec
+                "Unknown op function: '{}'",
+                func_name
             ))
         })
 }
@@ -478,6 +506,7 @@ fn is_native_config(config: &hush_providers::config::ProviderConfig) -> bool {
         hush_providers::config::ProviderConfig::Reranking(c) => {
             hush_providers::ops::is_native_provider_op(&c.api_type)
         }
+        hush_providers::config::ProviderConfig::Onnx(_) => true,
     }
 }
 

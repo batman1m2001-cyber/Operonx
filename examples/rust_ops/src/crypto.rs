@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use hush_serve::hush_op;
 
 /// hash_chain: data, iterations → hash
 ///
@@ -19,6 +20,7 @@ use std::hash::{Hash, Hasher};
 ///         current = hashlib.md5(current.encode()).hexdigest()
 ///     return {"hash": current}
 /// ```
+#[hush_op]
 pub fn hash_chain(inputs: &Value) -> Value {
     let data = inputs["data"].as_str().unwrap_or("");
     let iterations = inputs["iterations"].as_i64().unwrap_or(0);

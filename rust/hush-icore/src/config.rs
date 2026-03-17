@@ -59,12 +59,14 @@ pub struct GraphConfig {
     pub max_stream_concurrent: usize,
 }
 
-/// Execution bound hint — tells the scheduler how to schedule this op.
+/// Execution bound hint — tells the scheduler how to dispatch this op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpBound {
-    /// I/O-bound: HTTP calls, LLM, embeddings. Use tokio::spawn (async).
+    /// Default: run inline on scheduler thread. Zero overhead. For trivial ops.
+    Default,
+    /// I/O-bound: tokio::spawn for async network (HTTP, LLM, embeddings).
     Io,
-    /// CPU-bound: computation, transforms. Use rayon (parallel threads).
+    /// CPU-bound: rayon::spawn for heavy compute (ONNX, crypto, par_iter).
     Cpu,
 }
 
@@ -73,7 +75,7 @@ pub struct OpConfig {
     pub op_type: String,
     pub full_name: String,
     pub name: String,
-    pub rust_op: Option<String>,
+    pub func_name: Option<String>,
     pub is_async: bool,
     pub enabled: bool,
     pub verbose: bool,
@@ -93,6 +95,8 @@ pub struct OpConfig {
     pub provider_config: Option<ProviderConfig>,
     /// Whether this op contains an LLM generation (for tracing node_type="generation").
     pub contain_generation: bool,
+    /// Op-level cache config.
+    pub cache: Option<crate::ops::cache::CacheConfig>,
 }
 
 /// Branch op configuration — conditions and targets.
@@ -288,7 +292,7 @@ impl OpConfig {
         let full_name = get_string(val, "full_name")?;
         let name = get_string(val, "name")?;
 
-        let rust_op = get_opt_string(val, "rust_op");
+        let func_name = get_opt_string(val, "func_name");
         let is_async = get_bool(val, "is_async", false);
         let enabled = get_bool(val, "enabled", true);
         let verbose = get_bool(val, "verbose", false);
@@ -297,7 +301,8 @@ impl OpConfig {
         let contain_generation = get_bool(val, "contain_generation", false);
         let bound = match get_opt_string(val, "bound").as_deref() {
             Some("io") => OpBound::Io,
-            _ => OpBound::Cpu,
+            Some("cpu") => OpBound::Cpu,
+            _ => OpBound::Default,
         };
 
         let inputs = parse_params(val, "inputs")?;
@@ -320,11 +325,18 @@ impl OpConfig {
         // Parse provider config (for "llm", "embedding", "rerank" types)
         let provider_config = parse_provider_config_json(&op_type, val)?;
 
+        // Parse cache config
+        let cache = match val.get("cache") {
+            Some(Value::Bool(true)) => Some(crate::ops::cache::CacheConfig::Memory),
+            Some(Value::String(s)) => Some(crate::ops::cache::CacheConfig::File(s.clone())),
+            _ => None,
+        };
+
         let op = OpConfig {
             op_type,
             full_name,
             name,
-            rust_op,
+            func_name,
             is_async,
             enabled,
             verbose,
@@ -337,6 +349,7 @@ impl OpConfig {
             inner_graph,
             provider_config,
             contain_generation,
+            cache,
         };
 
         // Build-time validation: reject ops that cannot run in Rust mode
@@ -364,8 +377,8 @@ impl OpConfig {
             return Ok(());
         }
 
-        // Builtin ops (rust_op field present) are valid
-        if self.rust_op.is_some() {
+        // Func ops with func_name are valid
+        if self.func_name.is_some() {
             return Ok(());
         }
 
@@ -515,6 +528,7 @@ fn parse_provider_config_json(
         "llm" => parse_llm_provider_json(val),
         "embedding" => parse_embedding_provider_json(val),
         "rerank" => parse_reranking_provider_json(val),
+        "onnx" => parse_onnx_provider_json(val),
         _ => Ok(None),
     }
 }
@@ -637,6 +651,26 @@ fn parse_reranking_provider_json(val: &Value) -> Result<Option<ProviderConfig>, 
         api_version: get_opt_string(cfg_val, "api_version"),
         base_url: get_opt_string(cfg_val, "base_url"),
         model: get_opt_string(cfg_val, "model"),
+    })))
+}
+
+fn parse_onnx_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
+    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let input_type_str = cfg_val.get("input_type").and_then(|v| v.as_str()).unwrap_or("mlp");
+    let input_type = match input_type_str {
+        "attention" => hush_providers::config::onnx::OnnxInputType::Attention,
+        _ => hush_providers::config::onnx::OnnxInputType::Mlp,
+    };
+
+    Ok(Some(ProviderConfig::Onnx(hush_providers::config::onnx::OnnxInferenceConfig {
+        model_path: get_string(cfg_val, "model_path")?,
+        input_type,
+        pool_size: cfg_val.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(1) as usize,
+        intra_threads: cfg_val.get("intra_threads").and_then(|v| v.as_u64()).unwrap_or(1) as usize,
     })))
 }
 

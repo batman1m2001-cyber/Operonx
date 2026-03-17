@@ -46,7 +46,7 @@ def _execute_tool(expression: str) -> str:
         return f"Error: {e}"
 
 
-@op(rust="./rust_ops::pipeline::process_response_tool")
+@op
 def process_response(content, tool_calls):
     return {
         "has_tool_call": bool(tool_calls),
@@ -59,7 +59,7 @@ def process_response(content, tool_calls):
     }
 
 
-@op(rust="./rust_ops::pipeline::update_history")
+@op
 def update_history(history, message, response):
     return {
         "new_history": history
