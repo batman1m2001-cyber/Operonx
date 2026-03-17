@@ -67,9 +67,10 @@ pub fn build_tracers(config: &Option<TracerConfig>) -> Vec<Arc<dyn Tracer>> {
     tracers
 }
 
-/// Run a workflow on a blocking thread using a pre-parsed config.
+/// Run a workflow using the async engine — no spawn_blocking overhead.
 ///
-/// Uses Hush::from_config() to skip JSON parsing — config was parsed once at startup.
+/// Creates a fresh Hush engine per request (lightweight — config is pre-parsed Arc).
+/// Uses run_json_async which runs the scheduler directly on tokio workers.
 pub async fn run_workflow(
     config: Arc<GraphConfig>,
     inputs: Value,
@@ -77,23 +78,18 @@ pub async fn run_workflow(
     tracers: Vec<Arc<dyn Tracer>>,
     registry: Option<Arc<dyn OpRegistry>>,
 ) -> Result<Value, ServeError> {
-    let result = tokio::task::spawn_blocking(move || {
-        let mut engine = Hush::from_config(config);
+    let mut engine = Hush::from_config(config);
 
-        for tracer in tracers {
-            engine.add_tracer_arc(tracer);
-        }
+    for tracer in tracers {
+        engine.add_tracer_arc(tracer);
+    }
 
-        if let Some(reg) = registry {
-            engine.set_registry(reg);
-        }
+    if let Some(reg) = registry {
+        engine.set_registry(reg);
+    }
 
-        engine
-            .run_json(inputs, request_id, None, None)
-            .map_err(|e| ServeError::Execution(e.to_string()))
-    })
-    .await
-    .map_err(|e| ServeError::Internal(format!("Task join error: {}", e)))??;
-
-    Ok(result)
+    engine
+        .run_json_async(inputs, request_id, None, None)
+        .await
+        .map_err(|e| ServeError::Execution(e.to_string()))
 }

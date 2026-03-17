@@ -7,6 +7,7 @@
 
 pub mod embedding;
 pub mod llm;
+pub mod onnx;
 pub mod reranking;
 
 /// Provider-specific configuration, parsed from the serialized op dict.
@@ -17,6 +18,7 @@ pub enum ProviderConfig {
     LLM(LLMProviderConfig),
     Embedding(embedding::EmbeddingConfig),
     Reranking(reranking::RerankingConfig),
+    Onnx(onnx::OnnxInferenceConfig),
 }
 
 /// LLM provider config — wraps one or more LLMConfig instances (for load balancing).

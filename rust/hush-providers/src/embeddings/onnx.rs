@@ -5,12 +5,11 @@
 //! - Runs ONNX inference → last_hidden_state
 //! - Mean pooling with attention mask
 //! - L2 normalization
-//! - Optional DashMap cache with binary file persistence
+//! Caching is handled at the op level, not inside the embedder.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use dashmap::DashMap;
 use ndarray::Array2;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
@@ -28,50 +27,22 @@ struct Slot {
 
 /// Persistent ONNX embedder with a pool of sessions for concurrent inference.
 ///
-/// Optionally caches embeddings in a `DashMap` (lock-free concurrent reads)
-/// with binary file persistence via `save_cache()` / auto-load on construction.
+/// Caching is handled at the op level (via `cache=True` on EmbeddingOp),
+/// not inside the embedder.
 pub struct OnnxEmbedder {
     pool: Vec<Mutex<Slot>>,
     needs_token_type_ids: bool,
     output_name: String,
-    cache: Option<EmbeddingCache>,
-}
-
-struct EmbeddingCache {
-    map: DashMap<u64, Vec<f32>>,
-    path: PathBuf,
-}
-
-/// FNV-1a hash for fast text hashing (no crypto needed).
-fn hash_text(text: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in text.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
 }
 
 impl OnnxEmbedder {
-    /// Create a new embedder with default pool size (4), no cache.
+    /// Create a new embedder with default pool size (1).
     pub fn new(model_dir: &str) -> Result<Self, String> {
-        Self::build(model_dir, 4, None)
+        Self::with_pool_size(model_dir, 1)
     }
 
-    /// Create a new embedder with a custom pool size, no cache.
+    /// Create a new embedder with a custom pool size.
     pub fn with_pool_size(model_dir: &str, pool_size: usize) -> Result<Self, String> {
-        Self::build(model_dir, pool_size, None)
-    }
-
-    /// Create a new embedder with session pool and in-memory cache backed by a file.
-    ///
-    /// If the cache file exists, it is loaded into memory at construction time.
-    /// Call `save_cache()` to persist the in-memory cache to disk (e.g., on shutdown).
-    pub fn with_cache(model_dir: &str, pool_size: usize, cache_path: &str) -> Result<Self, String> {
-        Self::build(model_dir, pool_size, Some(cache_path))
-    }
-
-    fn build(model_dir: &str, pool_size: usize, cache_path: Option<&str>) -> Result<Self, String> {
         let dir = Path::new(model_dir);
         let model_path = dir.join("model.onnx");
         let tokenizer_path = dir.join("tokenizer.json");
@@ -113,23 +84,18 @@ impl OnnxEmbedder {
             pool.push(Mutex::new(Slot { session, tokenizer }));
         }
 
-        let cache = cache_path.map(|p| {
-            let path = PathBuf::from(p);
-            let map = Self::load_cache_file(&path);
-            EmbeddingCache { map, path }
-        });
-
         Ok(Self {
             pool,
             needs_token_type_ids,
             output_name,
-            cache,
         })
     }
 
     fn create_session(model_path: &PathBuf) -> Result<Session, String> {
         Session::builder()
             .map_err(|e| format!("Session::builder(): {}", e))?
+            .with_intra_threads(1)
+            .map_err(|e| format!("with_intra_threads: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("with_optimization_level: {}", e))?
             .commit_from_file(model_path)
@@ -159,51 +125,11 @@ impl OnnxEmbedder {
     }
 
     /// Embed texts, returning one f32 vector per input text (mean-pooled + L2-normalized).
-    ///
-    /// If a cache is configured, cached embeddings are returned directly and
-    /// only uncached texts go through ONNX inference. New results are cached automatically.
     pub fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
         if texts.is_empty() {
             return Ok(vec![]);
         }
-
-        // Fast path: check cache for all texts
-        if let Some(ref cache) = self.cache {
-            let mut results: Vec<Option<Vec<f32>>> = Vec::with_capacity(texts.len());
-            let mut uncached_indices = Vec::new();
-            let mut uncached_texts = Vec::new();
-
-            for (i, text) in texts.iter().enumerate() {
-                let h = hash_text(text);
-                if let Some(entry) = cache.map.get(&h) {
-                    results.push(Some(entry.value().clone()));
-                } else {
-                    results.push(None);
-                    uncached_indices.push(i);
-                    uncached_texts.push(*text);
-                }
-            }
-
-            if uncached_texts.is_empty() {
-                // All cached — no ONNX call needed
-                return Ok(results.into_iter().map(|r| r.unwrap()).collect());
-            }
-
-            // Compute uncached embeddings
-            let computed = self.embed_raw(&uncached_texts)?;
-
-            // Fill results and update cache
-            for (batch_i, &orig_i) in uncached_indices.iter().enumerate() {
-                let emb = &computed[batch_i];
-                cache.map.insert(hash_text(texts[orig_i]), emb.clone());
-                results[orig_i] = Some(emb.clone());
-            }
-
-            Ok(results.into_iter().map(|r| r.unwrap()).collect())
-        } else {
-            // No cache — direct inference
-            self.embed_raw(texts)
-        }
+        self.embed_raw(texts)
     }
 
     /// Raw ONNX inference without cache.
@@ -324,89 +250,6 @@ impl OnnxEmbedder {
         Ok(embeddings)
     }
 
-    /// Save the in-memory cache to disk.
-    ///
-    /// Binary format: `[count: u64]` then per entry `[hash: u64][dim: u32][floats: f32 * dim]`.
-    /// Call this on server shutdown to persist cached embeddings.
-    pub fn save_cache(&self) -> Result<usize, String> {
-        let cache = match &self.cache {
-            Some(c) => c,
-            None => return Ok(0),
-        };
-
-        if let Some(dir) = cache.path.parent() {
-            std::fs::create_dir_all(dir).ok();
-        }
-
-        let count = cache.map.len();
-        let mut buf: Vec<u8> = Vec::with_capacity(8 + count * (8 + 4 + 1024 * 4));
-        buf.extend_from_slice(&(count as u64).to_le_bytes());
-
-        for entry in cache.map.iter() {
-            let hash = *entry.key();
-            let emb = entry.value();
-            buf.extend_from_slice(&hash.to_le_bytes());
-            buf.extend_from_slice(&(emb.len() as u32).to_le_bytes());
-            for &f in emb {
-                buf.extend_from_slice(&f.to_le_bytes());
-            }
-        }
-
-        std::fs::write(&cache.path, &buf)
-            .map_err(|e| format!("Failed to write cache to {}: {}", cache.path.display(), e))?;
-
-        Ok(count)
-    }
-
-    /// Load cache from binary file. Returns empty DashMap if file doesn't exist or is corrupt.
-    fn load_cache_file(path: &Path) -> DashMap<u64, Vec<f32>> {
-        let map = DashMap::new();
-
-        let data = match std::fs::read(path) {
-            Ok(d) => d,
-            Err(_) => return map,
-        };
-
-        if data.len() < 8 {
-            return map;
-        }
-
-        let count = u64::from_le_bytes(data[0..8].try_into().unwrap_or_default()) as usize;
-        let mut offset = 8;
-
-        for _ in 0..count {
-            if offset + 12 > data.len() {
-                break;
-            }
-            let hash = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap_or_default());
-            offset += 8;
-            let dim =
-                u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or_default()) as usize;
-            offset += 4;
-
-            let float_bytes = dim * 4;
-            if offset + float_bytes > data.len() {
-                break;
-            }
-
-            let floats: Vec<f32> = (0..dim)
-                .map(|i| {
-                    let start = offset + i * 4;
-                    f32::from_le_bytes(data[start..start + 4].try_into().unwrap_or_default())
-                })
-                .collect();
-            offset += float_bytes;
-
-            map.insert(hash, floats);
-        }
-
-        map
-    }
-
-    /// Returns the number of cached embeddings, or 0 if no cache.
-    pub fn cache_size(&self) -> usize {
-        self.cache.as_ref().map(|c| c.map.len()).unwrap_or(0)
-    }
 }
 
 /// Embed texts using a local ONNX model (pure Rust inference).

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import aiohttp
 
@@ -47,16 +48,21 @@ def wait_ready(port, timeout=15):
 def spawn_server(script, port):
     check_port_free(port)
     env = {**os.environ, "PORT": str(port)}
+    log_dir = Path(script).parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_out = open(log_dir / f"serve_{port}.log", "w")
     proc = subprocess.Popen(
         [sys.executable, script],
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=log_out,
+        stderr=log_out,
     )
+    proc._log_file = log_out
     if not wait_ready(port):
         proc.terminate()
-        stderr = proc.stderr.read().decode(errors="replace")
-        raise RuntimeError(f"Server {script} failed to start:\n{stderr}")
+        log_out.close()
+        log_path = log_dir / f"serve_{port}.log"
+        raise RuntimeError(f"Server {script} failed to start. See {log_path}")
     return proc
 
 
@@ -66,6 +72,8 @@ def kill_server(proc):
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
+    if hasattr(proc, "_log_file"):
+        proc._log_file.close()
 
 
 def report(times, errors):

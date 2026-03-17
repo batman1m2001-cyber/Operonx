@@ -76,7 +76,8 @@ pub(crate) fn run_graph(
 /// Core async scheduler — 1:1 port of Python's run_scheduler().
 ///
 /// All runtime state is local — concurrent calls on the same graph are safe.
-async fn run_scheduler(
+/// Public for `Hush::run_json_async()` — called directly from async context.
+pub async fn run_scheduler(
     config: &GraphConfig,
     state: &EngineState,
     context_id: &str,
@@ -177,7 +178,7 @@ async fn run_scheduler(
             // Built-in generators run inline (no tokio::spawn overhead).
             // call_generator() returns Vec<Value> synchronously — just send
             // Yield + Exhausted events to the channel for the main loop.
-            if op.rust_op.is_some() {
+            if op.func_name.is_some() || op.op_type == "code" {
                 *active_count += 1;
                 run_builtin_generator_inline(op, state, ctx, event_tx, registry);
                 return Ok(DispatchResult::Spawned);
@@ -202,14 +203,21 @@ async fn run_scheduler(
             return Ok(DispatchResult::Completed(newly_ready));
         }
 
-        // IO-bound ops (including provider ops) → spawn_blocking for parallel fan-out
+        // IO-bound ops (including provider ops) → spawn_blocking for async HTTP
         if op.provider_config.is_some() || op.bound == OpBound::Io {
             *active_count += 1;
             spawn_blocking_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
             return Ok(DispatchResult::Spawned);
         }
 
-        // CPU-bound / simple ops → inline execution
+        // CPU-bound heavy ops → rayon thread pool (multi-core, doesn't block scheduler)
+        if op.bound == OpBound::Cpu {
+            *active_count += 1;
+            spawn_rayon_task(op, state, ctx, context_id, event_tx.clone(), registry);
+            return Ok(DispatchResult::Spawned);
+        }
+
+        // Default — inline execution (zero overhead, trivial ops)
         let result = base::run(op, state, ctx, registry)?;
 
         // PENDING sentinel — absorb input without triggering downstream
@@ -433,6 +441,60 @@ fn spawn_blocking_task(
     });
 }
 
+/// Spawn a CPU-bound op on rayon's work-stealing thread pool.
+///
+/// Uses rayon::spawn + tokio oneshot channel to notify the scheduler when done.
+/// For heavy compute (ONNX, crypto, par_iter) — doesn't block tokio or the scheduler.
+///
+/// SAFETY: same as spawn_graph_task — caller awaits all tasks.
+fn spawn_rayon_task(
+    op: &OpConfig,
+    state: &EngineState,
+    context: &str,
+    _context_id: &str,
+    event_tx: mpsc::UnboundedSender<SchedulerEvent>,
+    registry: &Option<Arc<dyn OpRegistry>>,
+) {
+    let op_addr = op as *const OpConfig as usize;
+    let state_addr = state as *const EngineState as usize;
+    let ctx = context.to_string();
+    let op_name = op.name.clone();
+    let registry = registry.clone();
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    rayon::spawn(move || {
+        // SAFETY: op and state are alive — caller awaits all tasks
+        let op = unsafe { &*(op_addr as *const OpConfig) };
+        let state = unsafe { &*(state_addr as *const EngineState) };
+
+        match base::run(op, state, &ctx, &registry) {
+            Ok(base::OpResult::Pending) => {
+                let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
+            }
+            Ok(base::OpResult::Done) => {
+                let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
+            }
+            Err(e) => {
+                state.set(&op.full_name, "error", &ctx, Value::String(format!("{}", e)));
+                let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+                log::error!("{}", logging::format_event("op_error", &[
+                    ("request_id", &req_id),
+                    ("name", &op.full_name),
+                    ("error", &format!("{}", e)),
+                ]));
+                let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
+            }
+        }
+        let _ = tx.send(());
+    });
+
+    // Bridge: wait for rayon completion without blocking the scheduler
+    tokio::spawn(async move {
+        let _ = rx.await;
+    });
+}
+
 /// Spawn a generator op as a tokio task.
 ///
 /// Built-in generators: call `builtin_ops::call_generator()` → get Vec<Value> → emit Yield per item.
@@ -482,9 +544,12 @@ fn spawn_generator_task(
         let input_value = Value::Object(inputs);
 
         // Dispatch based on generator kind
-        if let Some(ref rust_op) = op.rust_op {
+        let gen_name = op.func_name.clone().or_else(|| {
+            if op.op_type == "code" { Some(op.name.clone()) } else { None }
+        });
+        if let Some(ref name) = gen_name {
             // Registry generator: call_generator → Vec<Value>
-            run_registry_generator(op, state, &ctx, rust_op, &input_value, &op_name, &event_tx, &registry);
+            run_registry_generator(op, state, &ctx, name, &input_value, &op_name, &event_tx, &registry);
         } else if op.provider_config.is_some() && op.stream {
             // Provider streaming (LLM): use execute_streaming with channel
             run_provider_streaming(op, state, &ctx, &input_value, &op_name, &event_tx).await;
@@ -493,7 +558,7 @@ fn spawn_generator_task(
             log::error!("{}", logging::format_event("gen_error", &[
                 ("request_id", &req_id),
                 ("name", &op.full_name),
-                ("error", "Generator op has no rust_op or streaming provider"),
+                ("error", "Generator op has no func_name or streaming provider"),
             ]));
         }
 
@@ -528,8 +593,8 @@ fn run_builtin_generator_inline(
     }
 
     let input_value = Value::Object(inputs);
-    let rust_op = op.rust_op.as_ref().unwrap();
-    run_registry_generator(op, state, ctx, rust_op, &input_value, &op.name, event_tx, registry);
+    let gen_name = op.func_name.as_deref().unwrap_or(&op.name);
+    run_registry_generator(op, state, ctx, gen_name, &input_value, &op.name, event_tx, registry);
     let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
 }
 
@@ -538,13 +603,12 @@ fn run_registry_generator(
     op: &OpConfig,
     state: &EngineState,
     ctx: &str,
-    rust_op: &str,
+    func_name: &str,
     input_value: &Value,
     op_name: &str,
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
-    let func_name = rust_op.rsplit("::").next().unwrap_or(rust_op);
 
     let items = registry
         .as_ref()
@@ -576,7 +640,7 @@ fn run_registry_generator(
             log::error!("{}", logging::format_event("gen_error", &[
                 ("request_id", &req_id),
                 ("name", &op.full_name),
-                ("error", &format!("Unknown generator '{}' (from rust_op='{}') — no registry loaded or op not found", func_name, rust_op)),
+                ("error", &format!("Unknown generator '{}' — no registry loaded or op not found", func_name)),
             ]));
         }
     }
