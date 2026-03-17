@@ -11,19 +11,19 @@ from hush.core.ops.transform.func_op import op
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::fetch_data")
+@op
 def fetch_data():
     """Bước 1: Lấy data (giả lập)."""
     return {"data": [1, 2, 3, 4, 5]}
 
 
-@op(rust="./rust_ops::pipeline::transform_double")
+@op(rust="transform_double")
 def transform(data: list):
     """Bước 2: Nhân đôi mỗi phần tử."""
     return {"transformed": [x * 2 for x in data]}
 
 
-@op(rust="./rust_ops::analytics::aggregate_data")
+@op
 def aggregate(data: list):
     """Bước 3: Tính tổng và trung bình."""
     return {
@@ -38,14 +38,14 @@ def aggregate(data: list):
 # =============================================================================
 
 
-@op(rust="./rust_ops::text::clean_text")
+@op
 def clean_text(text: str):
     """Tiền xử lý: loại bỏ whitespace thừa, lowercase."""
     cleaned = " ".join(text.split()).strip().lower()
     return {"cleaned_text": cleaned}
 
 
-@op(rust="./rust_ops::analytics::count_words")
+@op
 def count_words(text: str):
     """Đếm số từ."""
     words = text.split()
@@ -56,7 +56,7 @@ def count_words(text: str):
     }
 
 
-@op(rust="./rust_ops::analytics::summarize_stats")
+@op
 def summarize_stats(word_count: int, unique_words: int, cleaned_text: str):
     """Tổng hợp thống kê."""
     return {

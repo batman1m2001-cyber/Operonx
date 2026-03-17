@@ -74,19 +74,19 @@ def reciprocal_rank_fusion(results_lists: list, k: int = 60) -> list:
 # =============================================================================
 
 
-@op(rust="./rust_ops::search::keyword_search")
+@op(rust="keyword_search")
 def search_original(query, docs):
     """Keyword search — original query."""
     return {"results": keyword_search(query, docs, top_k=5)}
 
 
-@op(rust="./rust_ops::search::keyword_search_expanded")
+@op(rust="keyword_search_expanded")
 def search_expanded(query, docs):
     """Keyword search — expanded query."""
     return {"results": keyword_search(query + " thành phố du lịch", docs, top_k=5)}
 
 
-@op(rust="./rust_ops::search::rrf_merge")
+@op
 def rrf_merge(r1, r2):
     """Merge two result lists with RRF."""
     return {"merged": reciprocal_rank_fusion([r1, r2])[:5]}

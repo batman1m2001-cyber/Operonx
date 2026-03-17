@@ -16,7 +16,7 @@ from hush.core.ops.transform.func_op import op
 from hush.providers import LLMOp, PromptOp, chain
 
 
-@op(rust="./rust_ops::text::clean_text")
+@op
 def clean_text(text: str):
     """Tiền xử lý văn bản: loại bỏ khoảng trắng thừa."""
     cleaned = " ".join(text.split()).strip()

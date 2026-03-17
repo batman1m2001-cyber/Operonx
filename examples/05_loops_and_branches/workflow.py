@@ -12,33 +12,33 @@ from hush.core.ops import if_, op
 # =============================================================================
 
 
-@op(rust="./rust_ops::iteration::each_item_with_prefix")
+@op
 def each_item(items: list, prefix: str):
     """Yield từng item — downstream ops tự động chạy per item."""
     for item in items:
         yield {"item": item, "prefix": prefix}
 
 
-@op(rust="./rust_ops::text::process_item_text")
+@op(rust="process_item_text")
 def process_item(item: str, prefix: str):
     """Xử lý 1 item."""
     return {"result": f"{prefix}: {item}"}
 
 
-@op(rust="./rust_ops::iteration::each_number")
+@op
 def each_number(numbers: list):
     """Yield từng số — scheduler tự động song song hóa."""
     for x in numbers:
         yield {"x": x}
 
 
-@op(rust="./rust_ops::math::square_named")
+@op
 def square(x: int):
     """Bình phương số."""
     return {"squared": x * x}
 
 
-@op(rust="./rust_ops::iteration::halve_until")
+@op
 def halve_until(value: int):
     """Chia đôi cho đến khi < 5 — while loop trong generator."""
     while value >= 5:
@@ -51,22 +51,22 @@ def halve_until(value: int):
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::excellent")
+@op
 def excellent():
     return {"grade": "A", "message": "Xuất sắc!"}
 
 
-@op(rust="./rust_ops::pipeline::good")
+@op
 def good():
     return {"grade": "B", "message": "Tốt!"}
 
 
-@op(rust="./rust_ops::pipeline::average_grade")
+@op(rust="average_grade")
 def average():
     return {"grade": "C", "message": "Trung bình"}
 
 
-@op(rust="./rust_ops::pipeline::fail_grade")
+@op(rust="fail_grade")
 def fail():
     return {"grade": "F", "message": "Cần cải thiện"}
 

@@ -13,13 +13,13 @@ from hush.core.ops.transform.func_op import op
 # =============================================================================
 
 
-@op(rust="./rust_ops::math::double")
+@op
 def double(x: int):
     """Nhân đôi giá trị."""
     return {"result": x * 2}
 
 
-@op(rust="./rust_ops::math::add")
+@op
 def add(a: int, b: int):
     """Cộng hai số."""
     return {"result": a + b}

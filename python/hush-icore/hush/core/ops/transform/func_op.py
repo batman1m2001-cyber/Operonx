@@ -3,6 +3,7 @@
 import ast
 import inspect
 import textwrap
+import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -23,6 +24,7 @@ def op(
     executor: Optional[str] = None,
     rust: Optional[str] = None,
     bound: Optional[str] = None,
+    cache=None,
 ):
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -51,11 +53,9 @@ def op(
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
-        rust: Optional Rust plugin op spec (e.g. ``"./my_ops::double"``).
-            Format: ``"<crate_path>::<func_name>"``. The path can be a crate
-            directory, a ``.rs`` file, or a pre-built ``.so``/``.dylib``.
-            The engine auto-builds the crate via ``cargo build --release``
-            if needed. The Python body serves as a fallback.
+        rust: Optional Rust function name override. If the Rust function has a
+            different name than the Python function, pass the Rust name here.
+            If omitted, the Python function's ``__name__`` is used for matching.
         bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
             ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
             ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
@@ -63,10 +63,11 @@ def op(
     """
 
     def decorator(fn):
-        if rust is not None:
-            fn._rust_op_name = rust
+        fn._func_name = rust if rust is not None else fn.__name__
         if bound is not None:
             fn._op_bound = bound
+        if cache is not None:
+            fn._op_cache = cache
         sig = inspect.signature(fn)
         collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
         if collisions:
@@ -347,6 +348,12 @@ class FuncOp(BaseOp):
                         f"'{key}' is not a known input or output of {code_fn.__name__}(). "
                         f"Inputs: {set(parsed_inputs)}, Outputs: {set(parsed_outputs)}"
                     )
+
+        # Resolve cache from @op(cache=...) if not set in kwargs
+        if "cache" not in kwargs:
+            fn_cache = getattr(code_fn, "_op_cache", None)
+            if fn_cache is not None:
+                kwargs["cache"] = fn_cache
 
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)

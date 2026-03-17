@@ -16,7 +16,7 @@ from hush.core import END, PARENT, START, GraphOp, graph, op
 # =============================================================================
 
 
-@op(rust="./rust_ops::streaming::customer_audio")
+@op
 async def customer_audio(sample_count: int):
     """Simulate microphone input — yields fixed-size 32ms audio chunks."""
     for i in range(sample_count):
@@ -24,7 +24,7 @@ async def customer_audio(sample_count: int):
         yield {"audio": f"chunk_{i}", "timestamp_ms": i * 32}
 
 
-@op(rust="./rust_ops::streaming::vad")
+@op
 async def vad(audio: str, timestamp_ms: int):
     """Voice Activity Detection — N-to-M generator.
 
@@ -40,13 +40,13 @@ async def vad(audio: str, timestamp_ms: int):
         }
 
 
-@op(rust="./rust_ops::streaming::stt")
+@op
 def stt(segment: str, start_ms: int, end_ms: int):
     """Speech-to-Text — transcribe a VAD segment."""
     return {"transcript": f"Hello from {segment} [{start_ms}-{end_ms}ms]"}
 
 
-@op(rust="./rust_ops::analytics::classify_intent")
+@op
 def classify_intent(transcript: str):
     """Classify user intent from transcript."""
     if "hello" in transcript.lower():
@@ -54,7 +54,7 @@ def classify_intent(transcript: str):
     return {"intent": "general", "confidence": 0.8}
 
 
-@op(rust="./rust_ops::pipeline::handle_intent")
+@op
 def handle_intent(intent: str, transcript: str):
     """Generate a response based on intent."""
     if intent == "greeting":
@@ -70,7 +70,7 @@ def llm_router(transcript):
     START >> c >> h >> END
 
 
-@op(rust="./rust_ops::streaming::tts")
+@op
 async def tts(response: str):
     """Text-to-Speech — yields audio chunks word by word."""
     words = response.split()

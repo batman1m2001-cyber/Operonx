@@ -13,7 +13,7 @@ from hush.core.ops import op
 # =============================================================================
 
 
-@op(rust="./rust_ops::analytics::analyze_sentiment")
+@op
 def analyze_sentiment(text: str):
     """Phân tích sentiment (giả lập)."""
     positive = sum(
@@ -29,7 +29,7 @@ def analyze_sentiment(text: str):
     }
 
 
-@op(rust="./rust_ops::text::extract_keywords")
+@op
 def extract_keywords(text: str):
     """Trích keywords (giả lập)."""
     stop_words = {
@@ -53,7 +53,7 @@ def extract_keywords(text: str):
     return {"keywords": keywords[:5]}
 
 
-@op(rust="./rust_ops::analytics::count_stats")
+@op
 def count_stats(text: str):
     """Đếm thống kê text."""
     words = text.split()
@@ -64,7 +64,7 @@ def count_stats(text: str):
     }
 
 
-@op(rust="./rust_ops::pipeline::merge_analysis")
+@op
 def merge_analysis(s, k, wc, cc, awl):
     """Merge fan-out results."""
     return {
@@ -83,14 +83,14 @@ def merge_analysis(s, k, wc, cc, awl):
 # =============================================================================
 
 
-@op(rust="./rust_ops::iteration::each_item")
+@op
 def each_item(items: list):
     """Yield từng item — thay thế MapOp + Each."""
     for item in items:
         yield {"item": item}
 
 
-@op(rust="./rust_ops::pipeline::process_item_squared")
+@op(rust="process_item_squared")
 def process_item(item: int):
     """Process 1 item."""
     return {"result": item * item, "status": "ok"}
@@ -101,7 +101,7 @@ def process_item(item: int):
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::safe_process")
+@op
 def safe_process(item: int):
     """Process that returns error for even numbers instead of raising."""
     if item % 2 != 0:

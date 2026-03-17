@@ -6,6 +6,7 @@
 //! Convention: input keys match the Python function's parameter names.
 
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
 /// double: x → result = x * 2
 ///
@@ -15,6 +16,7 @@ use serde_json::{json, Value};
 /// def double(x: int):
 ///     return {"result": x * 2}
 /// ```
+#[hush_op]
 pub fn double(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
         json!({"result": x * 2})
@@ -26,6 +28,7 @@ pub fn double(inputs: &Value) -> Value {
 }
 
 /// add: a, b → result = a + b
+#[hush_op]
 pub fn add(inputs: &Value) -> Value {
     match (inputs["a"].as_i64(), inputs["b"].as_i64()) {
         (Some(a), Some(b)) => json!({"result": a + b}),
@@ -38,6 +41,7 @@ pub fn add(inputs: &Value) -> Value {
 }
 
 /// multiply: a, b → result = a * b
+#[hush_op]
 pub fn multiply(inputs: &Value) -> Value {
     match (inputs["a"].as_i64(), inputs["b"].as_i64()) {
         (Some(a), Some(b)) => json!({"result": a * b}),
@@ -49,18 +53,20 @@ pub fn multiply(inputs: &Value) -> Value {
     }
 }
 
-/// square: x → result = x * x
+/// square: x → squared = x * x
+#[hush_op]
 pub fn square(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
-        json!({"result": x * x})
+        json!({"squared": x * x})
     } else if let Some(x) = inputs["x"].as_f64() {
-        json!({"result": x * x})
+        json!({"squared": x * x})
     } else {
         json!({"error": "missing or invalid input 'x'"})
     }
 }
 
 /// math_sum: values (list) → result = sum(values)
+#[hush_op]
 pub fn math_sum(inputs: &Value) -> Value {
     let total: f64 = inputs["values"]
         .as_array()
@@ -70,6 +76,7 @@ pub fn math_sum(inputs: &Value) -> Value {
 }
 
 /// math_mean: values (list) → result = mean(values)
+#[hush_op]
 pub fn math_mean(inputs: &Value) -> Value {
     let nums: Vec<f64> = inputs["values"]
         .as_array()
@@ -84,6 +91,7 @@ pub fn math_mean(inputs: &Value) -> Value {
 }
 
 /// square_named: x → squared = x * x (output key "squared" instead of "result")
+#[hush_op]
 pub fn square_named(inputs: &Value) -> Value {
     if let Some(x) = inputs["x"].as_i64() {
         json!({"squared": x * x})
@@ -95,6 +103,7 @@ pub fn square_named(inputs: &Value) -> Value {
 }
 
 /// multiply_xy: x, y → product = x * y
+#[hush_op]
 pub fn multiply_xy(inputs: &Value) -> Value {
     match (inputs["x"].as_i64(), inputs["y"].as_i64()) {
         (Some(x), Some(y)) => json!({"product": x * y}),
@@ -107,6 +116,7 @@ pub fn multiply_xy(inputs: &Value) -> Value {
 }
 
 /// multiply_xy_tagged: x, y → product, $tags (with "large-product" if > 50)
+#[hush_op]
 pub fn multiply_xy_tagged(inputs: &Value) -> Value {
     let product = match (inputs["x"].as_i64(), inputs["y"].as_i64()) {
         (Some(x), Some(y)) => x * y,
@@ -124,6 +134,7 @@ pub fn multiply_xy_tagged(inputs: &Value) -> Value {
 }
 
 /// safe_divide: a, b → success, result, error
+#[hush_op]
 pub fn safe_divide(inputs: &Value) -> Value {
     let a = inputs["a"].as_f64().unwrap_or(0.0);
     let b = inputs["b"].as_f64().unwrap_or(0.0);
@@ -135,6 +146,7 @@ pub fn safe_divide(inputs: &Value) -> Value {
 }
 
 /// score_token: token, multiplier → score = len(token) * multiplier
+#[hush_op]
 pub fn score_token(inputs: &Value) -> Value {
     let token = inputs["token"].as_str().unwrap_or("");
     let multiplier = inputs["multiplier"].as_i64().unwrap_or(1);
@@ -142,6 +154,7 @@ pub fn score_token(inputs: &Value) -> Value {
 }
 
 /// sum_list: numbers → total = sum(numbers)
+#[hush_op]
 pub fn sum_list(inputs: &Value) -> Value {
     let total: f64 = inputs["numbers"]
         .as_array()
@@ -151,6 +164,7 @@ pub fn sum_list(inputs: &Value) -> Value {
 }
 
 /// calc: x, multiplier → result = x * multiplier
+#[hush_op]
 pub fn calc(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     let multiplier = inputs["multiplier"].as_i64().unwrap_or(1);

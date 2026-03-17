@@ -7,35 +7,35 @@ from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op
 
 
-@op(rust="./rust_ops::text::greet_vi")
+@op
 def greet(name: str):
     """Tạo greeting từ tên."""
     return {"greeting": f"Xin chào, {name}!"}
 
 
-@op(rust="./rust_ops::text::greet")
+@op
 def greet_en(name: str):
     """Tạo greeting tiếng Anh."""
     return {"greeting": f"Hello, {name}!"}
 
 
-@op(rust="./rust_ops::text::to_upper")
+@op(rust="to_upper")
 def upper(text: str):
     """Chuyển thành uppercase."""
     return {"result": text.upper()}
 
 
-@op(rust="./rust_ops::pipeline::step_a")
+@op
 def step_a():
     return {"a_result": "Kết quả A"}
 
 
-@op(rust="./rust_ops::pipeline::step_b")
+@op
 def step_b():
     return {"b_result": "Kết quả B"}
 
 
-@op(rust="./rust_ops::pipeline::merge_two")
+@op(rust="merge_two")
 def merge(a: str, b: str):
     return {"combined": f"{a} + {b}"}
 

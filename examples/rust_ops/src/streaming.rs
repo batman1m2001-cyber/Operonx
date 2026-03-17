@@ -4,6 +4,7 @@
 //! so the engine can push each element downstream as a StreamCell.
 
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
 /// chunk_text: text, chunk_size → array of {chunk, index}
 ///
@@ -18,6 +19,7 @@ use serde_json::{json, Value};
 ///     for i, start in enumerate(range(0, len(words), chunk_size)):
 ///         yield {"chunk": " ".join(words[start:start+chunk_size]), "index": i}
 /// ```
+#[hush_op(generator)]
 pub fn chunk_text(inputs: &Value) -> Value {
     let text = inputs["text"].as_str().unwrap_or("");
     let chunk_size = inputs["chunk_size"].as_u64().unwrap_or(1) as usize;
@@ -47,6 +49,7 @@ pub fn chunk_text(inputs: &Value) -> Value {
 ///     for i in range(1, n + 1):
 ///         yield {"number": i, "squared": i * i}
 /// ```
+#[hush_op(generator)]
 pub fn async_counter(inputs: &Value) -> Value {
     let n = inputs["n"].as_i64().unwrap_or(0);
 
@@ -65,6 +68,7 @@ pub fn async_counter(inputs: &Value) -> Value {
 /// format_square: number, squared → {label: "{number}^2 = {squared}"}
 ///
 /// Single-item transform (not a generator), formats a squared result as a label.
+#[hush_op]
 pub fn format_square(inputs: &Value) -> Value {
     let number = &inputs["number"];
     let squared = &inputs["squared"];
@@ -84,6 +88,7 @@ pub fn format_square(inputs: &Value) -> Value {
 ///     for i in range(sample_count):
 ///         yield {"audio": f"chunk_{i}", "timestamp_ms": i * 32}
 /// ```
+#[hush_op(generator)]
 pub fn customer_audio(inputs: &Value) -> Value {
     let sample_count = inputs["sample_count"].as_i64().unwrap_or(0);
 
@@ -103,6 +108,7 @@ pub fn customer_audio(inputs: &Value) -> Value {
 ///
 /// Returns speech segments only at timestamp_ms 64 or 128 (simulated speech).
 /// Otherwise returns empty array (silence, no speech detected).
+#[hush_op(generator)]
 pub fn vad(inputs: &Value) -> Value {
     let audio = inputs["audio"].as_str().unwrap_or("");
     let timestamp_ms = inputs["timestamp_ms"].as_i64().unwrap_or(0);
@@ -121,6 +127,7 @@ pub fn vad(inputs: &Value) -> Value {
 /// stt: segment, start_ms, end_ms → {transcript}
 ///
 /// Simulated speech-to-text transcription.
+#[hush_op]
 pub fn stt(inputs: &Value) -> Value {
     let segment = inputs["segment"].as_str().unwrap_or("");
     let start_ms = &inputs["start_ms"];
@@ -143,6 +150,7 @@ pub fn stt(inputs: &Value) -> Value {
 ///     for i, word in enumerate(response.split()):
 ///         yield {"audio_out": f"tts_{i}_{word}", "index": i}
 /// ```
+#[hush_op(generator)]
 pub fn tts(inputs: &Value) -> Value {
     let response = inputs["response"].as_str().unwrap_or("");
 

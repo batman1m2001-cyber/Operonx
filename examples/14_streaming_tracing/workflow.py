@@ -13,7 +13,7 @@ from hush.core import END, PARENT, START, GraphOp, op
 # =============================================================================
 
 
-@op(rust="./rust_ops::streaming::chunk_text")
+@op
 def chunk_text(text: str, chunk_size: int):
     """Generator: splits text into chunks, yielding each one."""
     words = text.split()
@@ -22,7 +22,7 @@ def chunk_text(text: str, chunk_size: int):
         yield {"chunk": chunk, "index": i // chunk_size}
 
 
-@op(rust="./rust_ops::analytics::analyze_chunk")
+@op
 def analyze_chunk(chunk: str, index: int):
     """Analyze a single chunk — runs once per yield from chunk_text."""
     word_count = len(chunk.split())
@@ -33,7 +33,7 @@ def analyze_chunk(chunk: str, index: int):
     }
 
 
-@op(rust="./rust_ops::streaming::async_counter")
+@op
 async def async_counter(n: int):
     """Async generator: yields numbers 1..n with a simulated delay."""
     for i in range(1, n + 1):
@@ -41,7 +41,7 @@ async def async_counter(n: int):
         yield {"number": i, "squared": i * i}
 
 
-@op(rust="./rust_ops::streaming::format_square")
+@op
 def format_square(number: int, squared: int):
     """Format a single squared value."""
     return {"label": f"{number}^2 = {squared}"}

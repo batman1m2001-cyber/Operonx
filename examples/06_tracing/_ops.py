@@ -4,7 +4,7 @@ from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op
 
 
-@op(rust="./rust_ops::analytics::analyze_text")
+@op
 def analyze_text(text: str):
     """Phân tích text và thêm dynamic tags."""
     words = text.split()
@@ -23,7 +23,7 @@ def analyze_text(text: str):
     }
 
 
-@op(rust="./rust_ops::analytics::classify_by_count")
+@op(rust="classify_by_count")
 def classify(word_count: int):
     """Phân loại dựa trên word count."""
     if word_count > 20:

@@ -7,6 +7,7 @@
 //! and returns a `serde_json::Value` (a JSON array of objects).
 
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
 macro_rules! iter_array {
     ($inputs:expr, $key:expr, $map:expr) => {{
@@ -17,38 +18,49 @@ macro_rules! iter_array {
     }};
 }
 
-/// each_item: items → [{"item": x} for x in items]
+/// each_item: items, prefix → [{"item": x, "prefix": prefix} for x in items]
+#[hush_op(generator)]
 pub fn each_item(inputs: &Value) -> Value {
-    iter_array!(inputs, "items", |x| json!({"item": x}))
+    let prefix = inputs.get("prefix").cloned();
+    match prefix {
+        Some(p) => iter_array!(inputs, "items", |x| json!({"item": x, "prefix": p})),
+        None => iter_array!(inputs, "items", |x| json!({"item": x})),
+    }
 }
 
 /// each_item_with_prefix: items, prefix → [{"item": x, "prefix": prefix} for x in items]
+#[hush_op(generator)]
 pub fn each_item_with_prefix(inputs: &Value) -> Value {
     let prefix = inputs["prefix"].clone();
     iter_array!(inputs, "items", |x| json!({"item": x, "prefix": prefix}))
 }
 
 /// each_number: numbers → [{"x": n} for n in numbers]
+#[hush_op(generator)]
 pub fn each_number(inputs: &Value) -> Value {
     iter_array!(inputs, "numbers", |n| json!({"x": n}))
 }
 
 /// each_token: tokens → [{"token": t} for t in tokens]
+#[hush_op(generator)]
 pub fn each_token(inputs: &Value) -> Value {
     iter_array!(inputs, "tokens", |t| json!({"token": t}))
 }
 
 /// each_x: xs → [{"x": x} for x in xs]
+#[hush_op(generator)]
 pub fn each_x(inputs: &Value) -> Value {
     iter_array!(inputs, "xs", |x| json!({"x": x}))
 }
 
 /// each_y: ys → [{"y": y} for y in ys]
+#[hush_op(generator)]
 pub fn each_y(inputs: &Value) -> Value {
     iter_array!(inputs, "ys", |y| json!({"y": y}))
 }
 
 /// each_fruit: → [{"item": "apple"}, {"item": "banana"}, {"item": "cherry"}]
+#[hush_op(generator)]
 pub fn each_fruit(_inputs: &Value) -> Value {
     json!([
         {"item": "apple"},
@@ -58,11 +70,13 @@ pub fn each_fruit(_inputs: &Value) -> Value {
 }
 
 /// each_value: items → [{"value": item} for item in items]
+#[hush_op(generator)]
 pub fn each_value(inputs: &Value) -> Value {
     iter_array!(inputs, "items", |item| json!({"value": item}))
 }
 
 /// halve_until: value → [{"value": v}, ...] while v >= 5, halving each time
+#[hush_op(generator)]
 pub fn halve_until(inputs: &Value) -> Value {
     let mut v = inputs["value"].as_i64().unwrap_or(0);
     let mut results = Vec::new();
@@ -74,6 +88,7 @@ pub fn halve_until(inputs: &Value) -> Value {
 }
 
 /// halve_until_threshold: value, threshold → same but configurable threshold + tags
+#[hush_op(generator)]
 pub fn halve_until_threshold(inputs: &Value) -> Value {
     let mut v = inputs["value"].as_i64().unwrap_or(0);
     let threshold = inputs["threshold"].as_i64().unwrap_or(5);
@@ -89,11 +104,13 @@ pub fn halve_until_threshold(inputs: &Value) -> Value {
 }
 
 /// outer_iter: xs → [{"x": x} for x in xs]
+#[hush_op(generator)]
 pub fn outer_iter(inputs: &Value) -> Value {
     iter_array!(inputs, "xs", |x| json!({"x": x}))
 }
 
 /// inner_iter: ys, x → [{"product": x * y} for y in ys]
+#[hush_op(generator)]
 pub fn inner_iter(inputs: &Value) -> Value {
     let x = inputs["x"].as_i64().unwrap_or(0);
     iter_array!(inputs, "ys", |y| {
@@ -103,21 +120,25 @@ pub fn inner_iter(inputs: &Value) -> Value {
 }
 
 /// each_query: queries → [{"query": q} for q in queries]
+#[hush_op(generator)]
 pub fn each_query(inputs: &Value) -> Value {
     iter_array!(inputs, "queries", |q| json!({"query": q}))
 }
 
 /// each_outer: values → [{"outer": v} for v in values]
+#[hush_op(generator)]
 pub fn each_outer(inputs: &Value) -> Value {
     iter_array!(inputs, "values", |v| json!({"outer": v}))
 }
 
 /// each_inner: values → [{"inner": v} for v in values]
+#[hush_op(generator)]
 pub fn each_inner(inputs: &Value) -> Value {
     iter_array!(inputs, "values", |v| json!({"inner": v}))
 }
 
 /// emit_items: items → [{"x": item} for item in items]
+#[hush_op(generator)]
 pub fn emit_items(inputs: &Value) -> Value {
     iter_array!(inputs, "items", |item| json!({"x": item}))
 }

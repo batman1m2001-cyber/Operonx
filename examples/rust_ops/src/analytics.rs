@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
+#[hush_op]
 pub fn analyze_sentiment(input: &Value) -> Value {
     let text = input["text"].as_str().unwrap_or("");
     let positive_words = ["good", "great", "excellent", "love", "happy"];
@@ -26,14 +28,14 @@ pub fn analyze_sentiment(input: &Value) -> Value {
     json!({ "sentiment": sentiment })
 }
 
+#[hush_op]
 pub fn count_stats(input: &Value) -> Value {
     let text = input["text"].as_str().unwrap_or("");
     let words: Vec<&str> = text.split_whitespace().collect();
     let word_count = words.len();
     let char_count = text.len();
     let avg_word_len = if word_count > 0 {
-        let total_len: usize = words.iter().map(|w| w.len()).sum();
-        (total_len as f64 / word_count as f64 * 10.0).round() / 10.0
+        (char_count as f64 / word_count as f64 * 10.0).round() / 10.0
     } else {
         0.0
     };
@@ -45,6 +47,7 @@ pub fn count_stats(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn count_words(input: &Value) -> Value {
     let text = input["text"].as_str().unwrap_or("");
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -65,6 +68,7 @@ pub fn count_words(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn summarize_stats(input: &Value) -> Value {
     let word_count = input["word_count"].as_u64().unwrap_or(0);
     let unique_words = input["unique_words"].as_u64().unwrap_or(0);
@@ -84,6 +88,7 @@ pub fn summarize_stats(input: &Value) -> Value {
     json!({ "report": report })
 }
 
+#[hush_op]
 pub fn aggregate_stats(input: &Value) -> Value {
     let scores = input["scores"]
         .as_array()
@@ -114,15 +119,16 @@ pub fn aggregate_stats(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn classify_by_count(input: &Value) -> Value {
     let word_count = input["word_count"].as_u64().unwrap_or(0);
 
-    let category = if word_count > 10 {
-        "long"
+    let category = if word_count > 20 {
+        "article"
     } else if word_count > 5 {
-        "medium"
+        "sentence"
     } else {
-        "short"
+        "phrase"
     };
 
     json!({
@@ -131,6 +137,7 @@ pub fn classify_by_count(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn classify_by_score(input: &Value) -> Value {
     let score = input["score"].as_f64().unwrap_or(0.0);
 
@@ -148,6 +155,7 @@ pub fn classify_by_score(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn analyze_text(input: &Value) -> Value {
     let text = input["text"].as_str().unwrap_or("");
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -166,6 +174,7 @@ pub fn analyze_text(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn tokenize(input: &Value) -> Value {
     let text = input["text"].as_str().unwrap_or("");
     let tokens: Vec<&str> = text.split_whitespace().collect();
@@ -183,6 +192,7 @@ pub fn tokenize(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn analyze_chunk(input: &Value) -> Value {
     let chunk = input["chunk"].as_str().unwrap_or("");
     let index = input["index"].as_u64().unwrap_or(0);
@@ -190,7 +200,7 @@ pub fn analyze_chunk(input: &Value) -> Value {
     let words: Vec<&str> = chunk.split_whitespace().collect();
     let word_count = words.len();
     let has_long_word = words.iter().any(|w| w.len() > 6);
-    let score = word_count * 10 + if has_long_word { 5 } else { 0 };
+    let score = word_count * 10 + if has_long_word { 15 } else { 0 };
 
     let star = if has_long_word { "*" } else { "" };
     let result = format!("[{}] {}w score={}{}", index, word_count, score, star);
@@ -198,6 +208,7 @@ pub fn analyze_chunk(input: &Value) -> Value {
     json!({ "result": result })
 }
 
+#[hush_op]
 pub fn classify_intent(input: &Value) -> Value {
     let transcript = input["transcript"].as_str().unwrap_or("");
     let lower = transcript.to_lowercase();
@@ -215,6 +226,7 @@ pub fn classify_intent(input: &Value) -> Value {
 }
 
 /// aggregate_data: data (list of numbers) → total, average, count
+#[hush_op]
 pub fn aggregate_data(input: &Value) -> Value {
     let data = input["data"]
         .as_array()
@@ -235,6 +247,7 @@ pub fn aggregate_data(input: &Value) -> Value {
     })
 }
 
+#[hush_op]
 pub fn summarize_products(input: &Value) -> Value {
     let products = input["products"]
         .as_array()
@@ -273,7 +286,7 @@ mod tests {
         let result = count_stats(&json!({"text": "hello world foo"}));
         assert_eq!(result["word_count"], 3);
         assert_eq!(result["char_count"], 15);
-        assert_eq!(result["avg_word_len"], 4.3);
+        assert_eq!(result["avg_word_len"], 5.0);
     }
 
     #[test]
@@ -321,22 +334,22 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_by_count_long() {
-        let result = classify_by_count(&json!({"word_count": 15}));
-        assert_eq!(result["category"], "long");
-        assert_eq!(result["$tags"], json!(["category:long"]));
+    fn test_classify_by_count_article() {
+        let result = classify_by_count(&json!({"word_count": 25}));
+        assert_eq!(result["category"], "article");
+        assert_eq!(result["$tags"], json!(["category:article"]));
     }
 
     #[test]
-    fn test_classify_by_count_medium() {
+    fn test_classify_by_count_sentence() {
         let result = classify_by_count(&json!({"word_count": 7}));
-        assert_eq!(result["category"], "medium");
+        assert_eq!(result["category"], "sentence");
     }
 
     #[test]
-    fn test_classify_by_count_short() {
+    fn test_classify_by_count_phrase() {
         let result = classify_by_count(&json!({"word_count": 3}));
-        assert_eq!(result["category"], "short");
+        assert_eq!(result["category"], "phrase");
     }
 
     #[test]
@@ -392,8 +405,8 @@ mod tests {
     #[test]
     fn test_analyze_chunk() {
         let result = analyze_chunk(&json!({"chunk": "hello beautiful world", "index": 2}));
-        // 3 words, "beautiful" > 6 chars => score = 30 + 5 = 35
-        assert_eq!(result["result"], "[2] 3w score=35*");
+        // 3 words, "beautiful" > 6 chars => score = 30 + 15 = 45
+        assert_eq!(result["result"], "[2] 3w score=45*");
     }
 
     #[test]

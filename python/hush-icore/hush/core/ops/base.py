@@ -7,7 +7,7 @@ import uuid
 from abc import ABC
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event, format_log_data
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
@@ -111,7 +111,11 @@ class BaseOp(ABC):
         "enabled",
         "executor",
         "bound",
+        "cache",
     ]
+
+    # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
+    _cache_stores: Dict[str, tuple] = {}
 
     _VALID_EXECUTORS = (None, "thread")
     _VALID_BOUNDS = (None, "io", "cpu")
@@ -133,6 +137,7 @@ class BaseOp(ABC):
         enabled: bool = True,
         executor: Optional[str] = None,
         bound: Optional[str] = None,
+        cache: Union[bool, str, None] = None,
     ):
         if executor not in self._VALID_EXECUTORS:
             raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
@@ -140,6 +145,7 @@ class BaseOp(ABC):
             raise ValueError(f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}")
         self.executor = executor
         self.bound = bound
+        self.cache = cache
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -406,6 +412,92 @@ class BaseOp(ABC):
             state[self.full_name, key, context_id] = value
 
     # =========================================================================
+    # 3b. OP-LEVEL CACHE
+    # =========================================================================
+
+    def _get_cache_store(self) -> Dict[int, Dict]:
+        """Get or create the in-memory cache store for this op."""
+        key = self.full_name
+        if key not in BaseOp._cache_stores:
+            store: Dict[int, Dict] = {}
+            path = self.cache if isinstance(self.cache, str) else None
+            if path:
+                store = self._load_cache_file(path)
+            BaseOp._cache_stores[key] = (path, store)
+        return BaseOp._cache_stores[key][1]
+
+    @staticmethod
+    def _cache_hash(inputs: Dict[str, Any]) -> int:
+        """FNV-1a hash of JSON-serialized inputs."""
+        import json
+
+        data = json.dumps(inputs, sort_keys=True, default=str).encode()
+        h = 0xCBF29CE484222325
+        for b in data:
+            h ^= b
+            h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+        return h
+
+    @staticmethod
+    def _load_cache_file(path: str) -> Dict[int, Dict]:
+        """Load cache from binary file."""
+        import json
+        import struct
+        from pathlib import Path
+
+        store: Dict[int, Dict] = {}
+        p = Path(path)
+        if not p.exists():
+            return store
+
+        data = p.read_bytes()
+        if len(data) < 8:
+            return store
+
+        (count,) = struct.unpack_from("<Q", data, 0)
+        offset = 8
+        for _ in range(count):
+            if offset + 12 > len(data):
+                break
+            h, json_len = struct.unpack_from("<QI", data, offset)
+            offset += 12
+            if offset + json_len > len(data):
+                break
+            try:
+                value = json.loads(data[offset : offset + json_len])
+                store[h] = value
+            except Exception:
+                pass
+            offset += json_len
+
+        return store
+
+    @staticmethod
+    def save_all_caches() -> int:
+        """Save all file-backed caches. Returns total entries saved."""
+        import json
+        import struct
+        from pathlib import Path
+
+        total = 0
+        for op_name, (path, store) in BaseOp._cache_stores.items():
+            if not path or not store:
+                continue
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+
+            buf = struct.pack("<Q", len(store))
+            for h, value in store.items():
+                json_bytes = json.dumps(value, default=str).encode()
+                buf += struct.pack("<QI", h, len(json_bytes))
+                buf += json_bytes
+
+            p.write_bytes(buf)
+            total += len(store)
+
+        return total
+
+    # =========================================================================
     # 4. OBSERVABILITY — logging and metrics
     # =========================================================================
 
@@ -497,7 +589,22 @@ class BaseOp(ABC):
 
         try:
             _inputs = self.get_inputs(state, context_id, parent_context)
-            _outputs = await self._exec_core(_inputs)
+
+            # Op-level cache check
+            _cache_hit = False
+            if self.cache is not None:
+                _cache_key = self._cache_hash(_inputs)
+                _cache_store = self._get_cache_store()
+                if _cache_key in _cache_store:
+                    _outputs = _cache_store[_cache_key]
+                    _cache_hit = True
+
+            if not _cache_hit:
+                _outputs = await self._exec_core(_inputs)
+                # Store in cache
+                if self.cache is not None:
+                    _cache_store[_cache_key] = _outputs
+
             self.store_result(state, _outputs, context_id)
 
         except Exception:
@@ -551,13 +658,13 @@ class BaseOp(ABC):
         """Serialize this op to a config dict for the Rust backend."""
         is_async = inspect.iscoroutinefunction(self.core)
         is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
-        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→cpu)
-        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else "cpu")
-        return {
+        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→default)
+        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else None)
+        base = {
             "type": self.type,
             "full_name": self.full_name,
             "name": self.name,
-            "rust_op": getattr(self.core, "_rust_op_name", None),
+            "func_name": getattr(self.core, "_func_name", getattr(self.core, "__name__", None)),
             "python_callable": self.core,
             "is_async": is_async,
             "is_generator": is_gen,
@@ -569,6 +676,9 @@ class BaseOp(ABC):
             "inputs": self._serialize_params(self.inputs),
             "outputs": self._serialize_params(self.outputs),
         }
+        if self.cache is not None:
+            base["cache"] = self.cache
+        return base
 
     def _serialize_params(self, params: Dict[str, "Param"]) -> dict:
         """Serialize a dict of Params."""

@@ -62,6 +62,45 @@ impl FnRegistry {
         );
     }
 
+    /// Collect all `#[hush_op]`-annotated functions discovered by `inventory`.
+    ///
+    /// This populates the registry with all auto-registered ops found at link time.
+    /// Manual `.register_op()` calls can override these (called after `auto_register()`).
+    pub fn collect_from_inventory(&mut self) {
+        for entry in inventory::iter::<crate::OpEntry> {
+            match entry.kind {
+                crate::OpKind::Regular => {
+                    let f = entry.op_fn;
+                    if self.ops.contains_key(entry.name) {
+                        log::warn!(
+                            "Auto-register: duplicate op '{}', keeping first registration",
+                            entry.name
+                        );
+                    } else {
+                        self.ops.insert(entry.name.to_string(), Arc::new(move |v| f(v)));
+                    }
+                }
+                crate::OpKind::Generator => {
+                    let f = entry.gen_fn;
+                    if self.generators.contains_key(entry.name) {
+                        log::warn!(
+                            "Auto-register: duplicate generator '{}', keeping first registration",
+                            entry.name
+                        );
+                    } else {
+                        self.generators.insert(
+                            entry.name.to_string(),
+                            Arc::new(move |v| match f(v) {
+                                Value::Array(items) => items,
+                                other => vec![other],
+                            }),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns true if no ops or generators are registered.
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty() && self.generators.is_empty()

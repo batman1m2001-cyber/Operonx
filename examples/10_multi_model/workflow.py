@@ -13,13 +13,13 @@ from hush.providers import LLMOp, PromptOp
 # =============================================================================
 
 
-@op(rust="./rust_ops::pipeline::classify_simple")
+@op(rust="classify_simple")
 def is_simple(classification: str):
     """Check if classification indicates SIMPLE."""
     return {"is_simple": "SIMPLE" in classification.upper()}
 
 
-@op(rust="./rust_ops::pipeline::merge_results")
+@op
 def compare(a, b):
     """Compare outputs from two models."""
     return {
@@ -29,7 +29,7 @@ def compare(a, b):
     }
 
 
-@op(rust="./rust_ops::pipeline::select_answer")
+@op(rust="select_answer")
 def select(choice, a1, a2):
     """Select best answer based on judge's choice."""
     return {

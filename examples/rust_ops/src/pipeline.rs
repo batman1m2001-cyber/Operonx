@@ -6,12 +6,14 @@
 //! Convention: input keys match the Python function's parameter names.
 
 use serde_json::{json, Value};
+use hush_serve::hush_op;
 
 // ---------------------------------------------------------------------------
 // 1. step_a
 // ---------------------------------------------------------------------------
 
 /// step_a: () → {"a_result": "Kết quả A"}
+#[hush_op]
 pub fn step_a(_inputs: &Value) -> Value {
     json!({"a_result": "Kết quả A"})
 }
@@ -21,6 +23,7 @@ pub fn step_a(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// step_b: () → {"b_result": "Kết quả B"}
+#[hush_op]
 pub fn step_b(_inputs: &Value) -> Value {
     json!({"b_result": "Kết quả B"})
 }
@@ -30,6 +33,7 @@ pub fn step_b(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// merge_two: a, b → {"combined": "{a} + {b}"}
+#[hush_op]
 pub fn merge_two(inputs: &Value) -> Value {
     let a = inputs["a"].as_str().unwrap_or("");
     let b = inputs["b"].as_str().unwrap_or("");
@@ -41,6 +45,7 @@ pub fn merge_two(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// fetch_data: () → {"data": [1, 2, 3, 4, 5]}
+#[hush_op]
 pub fn fetch_data(_inputs: &Value) -> Value {
     json!({"data": [1, 2, 3, 4, 5]})
 }
@@ -50,6 +55,7 @@ pub fn fetch_data(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// transform_double: data (array) → {"transformed": [x*2 for x in data]}
+#[hush_op]
 pub fn transform_double(inputs: &Value) -> Value {
     let transformed: Vec<Value> = inputs["data"]
         .as_array()
@@ -75,6 +81,7 @@ pub fn transform_double(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// merge_analysis: s, k, wc, cc, awl → {"analysis": {...}}
+#[hush_op]
 pub fn merge_analysis(inputs: &Value) -> Value {
     json!({
         "analysis": {
@@ -92,6 +99,7 @@ pub fn merge_analysis(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// merge_results: a, b → {"gpt4o": a, "gpt4o_mini": b, "same_length": abs(len(a)-len(b)) < 50}
+#[hush_op]
 pub fn merge_results(inputs: &Value) -> Value {
     let a = inputs["a"].as_str().unwrap_or("");
     let b = inputs["b"].as_str().unwrap_or("");
@@ -110,6 +118,7 @@ pub fn merge_results(inputs: &Value) -> Value {
 
 /// safe_process: item → if odd: {"result": item*10, "error": null}
 ///                       else:  {"result": null, "error": "Even number: {item}"}
+#[hush_op]
 pub fn safe_process(inputs: &Value) -> Value {
     let item = inputs["item"].as_i64().unwrap_or(0);
     if item % 2 != 0 {
@@ -128,6 +137,7 @@ pub fn safe_process(inputs: &Value) -> Value {
 /// Pairs up results and errors by index.
 /// If error is null, the corresponding result goes into "successful".
 /// Otherwise, the error string goes into "failed".
+#[hush_op]
 pub fn filter_results(inputs: &Value) -> Value {
     let results = inputs["results"].as_array();
     let errors = inputs["errors"].as_array();
@@ -155,6 +165,7 @@ pub fn filter_results(inputs: &Value) -> Value {
 /// classify_simple: classification → {"is_simple": bool}
 ///
 /// Checks if the classification string contains "SIMPLE" (case-insensitive).
+#[hush_op]
 pub fn classify_simple(inputs: &Value) -> Value {
     let classification = inputs["classification"].as_str().unwrap_or("");
     let is_simple = classification.to_uppercase().contains("SIMPLE");
@@ -169,6 +180,7 @@ pub fn classify_simple(inputs: &Value) -> Value {
 ///
 /// If tool_calls is a non-empty array, has_tool_call=true and we simulate tool execution.
 /// If a tool_call has function.name == "calculator", compute result from args.
+#[hush_op]
 pub fn process_response_tool(inputs: &Value) -> Value {
     let content = inputs["content"].as_str().unwrap_or("");
     let tool_calls = inputs["tool_calls"].as_array();
@@ -224,6 +236,7 @@ pub fn process_response_tool(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// update_history: history, message, response → {"new_history": history + [user msg, assistant msg]}
+#[hush_op]
 pub fn update_history(inputs: &Value) -> Value {
     let mut new_history: Vec<Value> = inputs["history"]
         .as_array()
@@ -244,6 +257,7 @@ pub fn update_history(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// validate_input: x → {"validated_x": x, "$tags": ["validated"]}
+#[hush_op]
 pub fn validate_input(inputs: &Value) -> Value {
     json!({
         "validated_x": inputs["x"].clone(),
@@ -257,6 +271,7 @@ pub fn validate_input(inputs: &Value) -> Value {
 
 /// with_fallback: primary_result, success → if success: {"output": primary_result, "used_fallback": false}
 ///                                          else:        {"output": "Default answer (fallback)", "used_fallback": true}
+#[hush_op]
 pub fn with_fallback(inputs: &Value) -> Value {
     let success = inputs["success"].as_bool().unwrap_or(false);
     if success {
@@ -277,6 +292,7 @@ pub fn with_fallback(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// init_agent: query → {"messages": [...], "done": false, "answer": ""}
+#[hush_op]
 pub fn init_agent(inputs: &Value) -> Value {
     let query = inputs["query"].as_str().unwrap_or("");
     json!({
@@ -294,6 +310,7 @@ pub fn init_agent(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// process_agent_response: content, tool_calls, messages → process response, update messages, return done/answer
+#[hush_op]
 pub fn process_agent_response(inputs: &Value) -> Value {
     let content = inputs["content"].as_str().unwrap_or("");
     let tool_calls = inputs["tool_calls"].as_array();
@@ -453,6 +470,7 @@ fn eval_math(expr: &str) -> Result<f64, String> {
 // ---------------------------------------------------------------------------
 
 /// excellent: () → {"grade": "A", "message": "Xuất sắc!"}
+#[hush_op]
 pub fn excellent(_inputs: &Value) -> Value {
     json!({"grade": "A", "message": "Xuất sắc!"})
 }
@@ -462,6 +480,7 @@ pub fn excellent(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// good: () → {"grade": "B", "message": "Tốt!"}
+#[hush_op]
 pub fn good(_inputs: &Value) -> Value {
     json!({"grade": "B", "message": "Tốt!"})
 }
@@ -471,6 +490,7 @@ pub fn good(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// average_grade: () → {"grade": "C", "message": "Trung bình"}
+#[hush_op]
 pub fn average_grade(_inputs: &Value) -> Value {
     json!({"grade": "C", "message": "Trung bình"})
 }
@@ -480,6 +500,7 @@ pub fn average_grade(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// fail_grade: () → {"grade": "F", "message": "Cần cải thiện"}
+#[hush_op]
 pub fn fail_grade(_inputs: &Value) -> Value {
     json!({"grade": "F", "message": "Cần cải thiện"})
 }
@@ -489,6 +510,7 @@ pub fn fail_grade(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// get_config: () → {"multiplier": 10}
+#[hush_op]
 pub fn get_config(_inputs: &Value) -> Value {
     json!({"multiplier": 10})
 }
@@ -498,19 +520,18 @@ pub fn get_config(_inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// handle_intent: intent, transcript → response based on intent
+#[hush_op]
 pub fn handle_intent(inputs: &Value) -> Value {
     let intent = inputs["intent"].as_str().unwrap_or("");
     let transcript = inputs["transcript"].as_str().unwrap_or("");
 
     if intent == "greeting" {
         json!({
-            "response": format!("Xin chào! Bạn nói: '{}'", transcript),
-            "intent": "greeting",
+            "response": "Hello! How can I help you today?",
         })
     } else {
         json!({
-            "response": format!("Tôi hiểu bạn muốn nói: '{}'", transcript),
-            "intent": "general",
+            "response": format!("I understand. Let me help with: {}", transcript),
         })
     }
 }
@@ -520,6 +541,7 @@ pub fn handle_intent(inputs: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 /// process_item_squared: item → {"result": item*item, "status": "ok"}
+#[hush_op]
 pub fn process_item_squared(inputs: &Value) -> Value {
     let item = inputs["item"].as_i64().unwrap_or(0);
     json!({"result": item * item, "status": "ok"})
@@ -532,6 +554,7 @@ pub fn process_item_squared(inputs: &Value) -> Value {
 /// select_answer: choice, a1, a2 → {"answer": ..., "chosen": ...}
 ///
 /// Selects between two answers based on choice string containing "1".
+#[hush_op]
 pub fn select_answer(inputs: &Value) -> Value {
     let choice = inputs["choice"].as_str().unwrap_or("");
     let a1 = &inputs["a1"];
@@ -551,6 +574,7 @@ pub fn select_answer(inputs: &Value) -> Value {
 ///
 /// Simulates a Python ZeroDivisionError by returning an error value.
 /// In Rust plugin context, we return an error output that hush-icore treats as op failure.
+#[hush_op]
 pub fn failing_op(_inputs: &Value) -> Value {
     json!({"result": null, "$error": "ZeroDivisionError: division by zero"})
 }
@@ -563,6 +587,7 @@ pub fn failing_op(_inputs: &Value) -> Value {
 ///
 /// Mirrors Python: fails first 2 attempts, succeeds on 3rd.
 /// Self-contained (no global state).
+#[hush_op]
 pub fn retry_with_backoff(inputs: &Value) -> Value {
     let query = inputs["query"].as_str().unwrap_or("");
     // Simulate: always succeeds after internal retry (self-contained)
@@ -571,6 +596,33 @@ pub fn retry_with_backoff(inputs: &Value) -> Value {
         "answer": format!("Result for: {}", query),
         "attempts": 3,
     })
+}
+
+// ---------------------------------------------------------------------------
+// 26. aggregate
+// ---------------------------------------------------------------------------
+
+/// aggregate: data (list of numbers) → total, average, count
+#[hush_op]
+pub fn aggregate(inputs: &Value) -> Value {
+    let empty = vec![];
+    let data = inputs["data"].as_array().unwrap_or(&empty);
+    let nums: Vec<f64> = data.iter().filter_map(|v| v.as_f64()).collect();
+    let total: f64 = nums.iter().sum();
+    let count = nums.len();
+    let average = if count > 0 { total / count as f64 } else { 0.0 };
+    json!({"total": total as i64, "average": average, "count": count})
+}
+
+// ---------------------------------------------------------------------------
+// 27. compare
+// ---------------------------------------------------------------------------
+
+/// compare: results → comparison (pass-through for multi-model comparison)
+#[hush_op]
+pub fn compare(inputs: &Value) -> Value {
+    let results = inputs.get("results").cloned().unwrap_or(json!({}));
+    json!({"comparison": results})
 }
 
 // ===========================================================================
@@ -827,14 +879,12 @@ mod tests {
     #[test]
     fn test_handle_intent_greeting() {
         let result = handle_intent(&json!({"intent": "greeting", "transcript": "xin chào"}));
-        assert_eq!(result["intent"], "greeting");
-        assert!(result["response"].as_str().unwrap().contains("xin chào"));
+        assert_eq!(result["response"], "Hello! How can I help you today?");
     }
 
     #[test]
     fn test_handle_intent_general() {
         let result = handle_intent(&json!({"intent": "question", "transcript": "thời tiết"}));
-        assert_eq!(result["intent"], "general");
         assert!(result["response"].as_str().unwrap().contains("thời tiết"));
     }
 

@@ -63,15 +63,15 @@ async def main():
     embed_result = await Hush(embed_graph).run(inputs={"texts": DOCUMENTS})
     doc_vectors = embed_result["vectors"]
 
-    @op(rust="./rust_ops::search::keyword_search")
+    @op
     def kw_search_fn(query, docs):
         return {"results": keyword_search(query, docs, top_k=8)}
 
-    @op(rust="./rust_ops::search::cosine_search")
+    @op
     def vec_search_fn(qv, docs, dvs):
         return {"results": cosine_search(qv[0], dvs, docs, top_k=8)}
 
-    @op(rust="./rust_ops::search::rrf_merge")
+    @op
     def merge_results(kw, vec):
         return {"context_docs": reciprocal_rank_fusion([kw, vec])[:5]}
 

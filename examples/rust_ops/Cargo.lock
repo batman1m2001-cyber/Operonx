@@ -451,6 +451,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "hush-serve",
+ "inventory",
  "serde_json",
 ]
 
@@ -691,7 +692,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hush-icore"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ahash",
  "chrono",
@@ -708,8 +709,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hush-macros"
+version = "0.1.3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "hush-providers"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64",
  "cc",
@@ -726,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "hush-serve"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "axum",
  "clap",
@@ -734,8 +744,10 @@ dependencies = [
  "env_logger",
  "futures",
  "hush-icore",
+ "hush-macros",
  "hush-providers",
  "hush-telemetry",
+ "inventory",
  "libloading",
  "log",
  "serde",
@@ -749,7 +761,7 @@ dependencies = [
 
 [[package]]
 name = "hush-telemetry"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64",
  "chrono",
@@ -964,6 +976,15 @@ dependencies = [
  "hashbrown 0.16.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "inventory"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009ae045c87e7082cb72dab0ccd01ae075dd00141ddc108f43a0ea150a9e7227"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
