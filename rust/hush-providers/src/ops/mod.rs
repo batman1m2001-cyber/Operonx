@@ -13,6 +13,8 @@
 pub mod chain;
 pub mod embedding;
 pub mod llm;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 pub mod parser;
 pub mod prompt;
 pub mod rerank;
@@ -62,6 +64,17 @@ fn expect_reranking_config(config: &ProviderConfig) -> ProviderResult<&crate::co
     }
 }
 
+fn expect_onnx_config(config: &ProviderConfig) -> ProviderResult<&crate::config::onnx::OnnxInferenceConfig> {
+    match config {
+        ProviderConfig::Onnx(c) => Ok(c),
+        _ => Err(ProviderError {
+            message: "ONNX op requires ONNX provider config".to_string(),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
 // =============================================================================
 // Dispatch
 // =============================================================================
@@ -77,6 +90,8 @@ pub async fn execute(
         "embedding" => embedding::execute(inputs, expect_embedding_config(config)?).await,
         "rerank" => rerank::execute(inputs, expect_reranking_config(config)?).await,
         "chain" => chain::execute(inputs, expect_llm_config(config, "Chain op")?).await,
+        #[cfg(feature = "onnx")]
+        "onnx" => onnx::execute(inputs, expect_onnx_config(config)?).await,
         _ => Err(ProviderError {
             message: format!("Unknown provider op type: '{}'", op_type),
             status_code: None,

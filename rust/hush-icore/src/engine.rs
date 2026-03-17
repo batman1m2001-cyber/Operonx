@@ -36,8 +36,12 @@ impl Hush {
     /// Create a new Hush engine from a JSON config string.
     pub fn new(config_json: &str) -> Result<Self, RushError> {
         let config = GraphConfig::from_json(config_json)?;
+        let config = Arc::new(config);
+        // Initialize op-level cache store from config (idempotent — only first call takes effect)
+        let store = crate::ops::cache::build_store_from_config(&config);
+        crate::ops::cache::init_global_store(store);
         Ok(Hush {
-            config: Arc::new(config),
+            config,
             registry: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
@@ -49,6 +53,9 @@ impl Hush {
     /// Create a new Hush engine from a pre-parsed config.
     /// Avoids JSON parsing overhead — use for hot paths (e.g. per-request in hush-serve).
     pub fn from_config(config: Arc<GraphConfig>) -> Self {
+        // Initialize op-level cache store from config (idempotent — only first call takes effect)
+        let store = crate::ops::cache::build_store_from_config(&config);
+        crate::ops::cache::init_global_store(store);
         Hush {
             config,
             registry: None,
@@ -190,6 +197,116 @@ impl Hush {
         }
 
         // Apply after_run middleware (in reverse order)
+        for mw in self.middleware.iter().rev() {
+            mw.after_run(&mut result)?;
+        }
+
+        Ok(result)
+    }
+
+    /// Async version — call from tokio context (hush-serve).
+    ///
+    /// Calls `run_scheduler()` directly instead of `block_on_async(run_scheduler())`.
+    /// Eliminates spawn_blocking + block_on overhead (~1-2ms per request).
+    pub async fn run_json_async(
+        &self,
+        inputs: Value,
+        request_id: Option<String>,
+        user_id: Option<String>,
+        session_id: Option<String>,
+    ) -> Result<Value, RushError> {
+        // Apply before_run middleware (in order)
+        let mut inputs = inputs;
+        for mw in &self.middleware {
+            mw.before_run(&mut inputs)?;
+        }
+
+        let mut raw_state = EngineState::new();
+        raw_state.needs_timestamps = !self.tracers.is_empty() || self._force_timestamps;
+        let state = Arc::new(raw_state);
+        let context = "main";
+
+        if let Some(ref rid) = request_id {
+            state.set_request_id(rid.clone());
+        }
+
+        // 1. Store inputs
+        if let Value::Object(map) = inputs {
+            for (key, value) in map {
+                state.set(&self.config.full_name, &key, context, value);
+            }
+        }
+
+        // 2. Run graph — directly await the async scheduler (no block_on)
+        let graph_start = if state.needs_timestamps {
+            Some(chrono::Utc::now())
+        } else {
+            None
+        };
+        let graph_perf_start = std::time::Instant::now();
+
+        let stream_contexts = match graph_op::run_scheduler(&self.config, &state, context, &self.registry).await {
+            Ok(sc) => sc,
+            Err(e) => {
+                for mw in self.middleware.iter().rev() {
+                    mw.on_error(&e);
+                }
+                return Err(e);
+            }
+        };
+
+        // Store timing
+        if let Some(start) = graph_start {
+            let end = chrono::Utc::now();
+            let duration_ms = graph_perf_start.elapsed().as_secs_f64() * 1000.0;
+            state.set(
+                &self.config.full_name, "$start_time", context,
+                Value::String(start.to_rfc3339()),
+            );
+            state.set(
+                &self.config.full_name, "$end_time", context,
+                Value::String(end.to_rfc3339()),
+            );
+            state.set(
+                &self.config.full_name, "$duration_ms", context,
+                serde_json::json!(duration_ms),
+            );
+        }
+
+        // 3. Collect outputs
+        let mut result = graph_op::get_outputs(&self.config, &state, context, &stream_contexts)?;
+
+        // 4. Build $state metadata
+        let mut state_meta = serde_json::Map::new();
+        state_meta.insert(
+            "tags".into(),
+            Value::Array(state.tags().into_iter().map(Value::String).collect()),
+        );
+        if let Some(ref rid) = request_id {
+            state_meta.insert("request_id".into(), Value::String(rid.clone()));
+        }
+        if let Some(ref uid) = user_id {
+            state_meta.insert("user_id".into(), Value::String(uid.clone()));
+        }
+        if let Some(ref sid) = session_id {
+            state_meta.insert("session_id".into(), Value::String(sid.clone()));
+        }
+        state_meta.insert("values".into(), state.values_snapshot());
+
+        if let Value::Object(ref mut map) = result {
+            map.insert("$state".into(), Value::Object(state_meta));
+        }
+
+        // 5. Auto-flush traces
+        if !self.tracers.is_empty() {
+            self.flush_worker.submit(
+                self.tracers.clone(),
+                self.config.clone(),
+                state,
+            );
+        }
+
+        // Apply after_run middleware
         for mw in self.middleware.iter().rev() {
             mw.after_run(&mut result)?;
         }
