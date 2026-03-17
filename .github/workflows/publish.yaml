@@ -33,7 +33,7 @@ jobs:
             if [ "$OLD" != "$NEW" ]; then PYTHON_CHANGED="true"; fi
           done
 
-          for crate in rust/hush-plugin rust/hush-icore rust/hush-providers rust/hush-telemetry rust/hush-serve rust/ui-hush-eyes; do
+          for crate in rust/hush-macros rust/hush-icore rust/hush-providers rust/hush-telemetry rust/hush-serve; do
             OLD=$(git show HEAD~1:$crate/Cargo.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $crate/Cargo.toml | head -1)
             if [ "$OLD" != "$NEW" ]; then RUST_CHANGED="true"; fi
@@ -103,14 +103,14 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p hush-plugin
-          sleep 30
-          cargo publish -p hush-providers
+          # Order: macros first (standalone), then icore, then providers (depends on icore),
+          # then telemetry (depends on icore), then serve (depends on all).
+          cargo publish -p hush-macros
           sleep 30
           cargo publish -p hush-icore
+          sleep 30
+          cargo publish -p hush-providers
           sleep 30
           cargo publish -p hush-telemetry
           sleep 30
           cargo publish -p hush-serve
-          sleep 30
-          cargo publish -p hush-eyes
