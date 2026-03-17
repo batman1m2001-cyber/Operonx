@@ -1,14 +1,24 @@
 //! Provider configuration structs — parsed from JSON.
 //!
-//! Each provider type has its own config module:
-//! - llm: LLMConfig (OpenAI, Azure, vLLM, Gemini)
-//! - embedding: EmbeddingConfig (OpenAI, Azure, vLLM, ONNX)
-//! - reranking: RerankingConfig (Cohere, vLLM, Pinecone, ONNX)
+//! Config structs now live in their provider modules (matching Python):
+//! - llms/config.rs → LLMConfig, LLMBaseFields, OpenAIConfig, AzureConfig, GeminiConfig
+//! - embeddings/config.rs → EmbeddingConfig
+//! - rerankers/config.rs → RerankingConfig
+//! - onnx/config.rs → OnnxInferenceConfig
+//!
+//! This module re-exports for backward compatibility.
 
-pub mod embedding;
-pub mod llm;
-pub mod onnx;
-pub mod reranking;
+// Re-export from provider modules
+pub use crate::llms::config as llm;
+pub use crate::embeddings::config as embedding;
+pub use crate::rerankers::config as reranking;
+
+// ONNX config: lives in onnx/config.rs when feature enabled, inline stub otherwise
+#[cfg(feature = "onnx")]
+pub use crate::onnx::config as onnx;
+
+#[cfg(not(feature = "onnx"))]
+pub mod onnx;  // uses the old file (still exists as stub)
 
 /// Provider-specific configuration, parsed from the serialized op dict.
 ///

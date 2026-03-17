@@ -1,10 +1,40 @@
-//! OpenAI / vLLM / Azure embedding provider — OpenAI-compatible HTTP API.
+//! OpenAI / vLLM / Azure embedding provider — mirrors Python's `embeddings/vllm.py`.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::embedding::EmbeddingConfig;
 use crate::http::{get_client, ProviderError, ProviderResult};
+
+/// OpenAI embedding provider struct.
+pub struct OpenAIEmbedder<'a> {
+    pub config: &'a EmbeddingConfig,
+}
+
+impl<'a> OpenAIEmbedder<'a> {
+    pub fn new(config: &'a EmbeddingConfig) -> Self {
+        OpenAIEmbedder { config }
+    }
+}
+
+impl super::base::EmbedderProvider for OpenAIEmbedder<'_> {
+    fn embed(&self, texts: &[String]) -> impl std::future::Future<Output = ProviderResult<Vec<Vec<f32>>>> + Send {
+        let config = self.config;
+        async move {
+            let result = embed(config, texts).await?;
+            // Extract embeddings from the Value
+            match result.get("embeddings").and_then(|v| v.as_array()) {
+                Some(arr) => {
+                    let embeddings: Vec<Vec<f32>> = arr.iter()
+                        .filter_map(|v| v.as_array().map(|a| a.iter().filter_map(|f| f.as_f64().map(|f| f as f32)).collect()))
+                        .collect();
+                    Ok(embeddings)
+                }
+                None => Ok(vec![]),
+            }
+        }
+    }
+}
 
 // =============================================================================
 // Response types
