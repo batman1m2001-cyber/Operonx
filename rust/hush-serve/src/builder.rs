@@ -29,14 +29,12 @@ use hush_icore::registry::OpRegistry;
 
 use crate::config::{Cli, ServerConfig};
 use crate::fn_registry::{CompositeRegistry, FnRegistry};
-use crate::plugin::PluginRegistry;
 use crate::resources;
 
 /// Builder for configuring and running a Hush HTTP server.
 pub struct HushServerBuilder {
     registry: FnRegistry,
     config: Option<ServerConfig>,
-    plugin_path: Option<String>,
     host_override: Option<String>,
     port_override: Option<u16>,
     pending_resources: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
@@ -47,7 +45,6 @@ impl HushServerBuilder {
         HushServerBuilder {
             registry: FnRegistry::new(),
             config: None,
-            plugin_path: None,
             host_override: None,
             port_override: None,
             pending_resources: HashMap::new(),
@@ -170,7 +167,7 @@ impl HushServerBuilder {
         self
     }
 
-    /// Parse CLI arguments: `--config`, `--host`, `--port`, `--plugin`.
+    /// Parse CLI arguments: `--config`, `--host`, `--port`.
     ///
     /// This is the standard entry point for binaries spawned by the Python bridge.
     pub fn from_cli(mut self) -> Self {
@@ -195,9 +192,7 @@ impl HushServerBuilder {
         if let Some(port) = cli.port {
             self.port_override = Some(port);
         }
-        if let Some(plugin) = cli.plugin {
-            self.plugin_path = Some(plugin);
-        }
+        // plugin field ignored (legacy — cdylib plugins removed)
 
         self
     }
@@ -229,6 +224,12 @@ impl HushServerBuilder {
             resources::init_resources(self.pending_resources);
         }
 
+        // Register provider op factory — enables hush-icore to dispatch
+        // LLM, embedding, rerank, onnx, prompt, parser ops to hush-providers.
+        hush_icore::ops::op_trait::set_global_factory(
+            Arc::new(hush_providers::ops::factory::ProviderOpFactory),
+        );
+
         let mut config = self.config.ok_or("No config provided. Use .config_file(), .config_json(), or .from_cli()")?;
 
         // Apply overrides
@@ -239,33 +240,11 @@ impl HushServerBuilder {
             config.port = port;
         }
 
-        // Build registry: FnRegistry + optional PluginRegistry
-        let registry: Option<Arc<dyn OpRegistry>> = {
-            let has_fn_ops = !self.registry.is_empty();
-            let fn_reg: Arc<dyn OpRegistry> = Arc::new(self.registry);
-
-            // Load plugin if specified (backward compat)
-            let plugin_reg: Option<Arc<dyn OpRegistry>> = if let Some(ref plugin_path) = self.plugin_path {
-                let path = std::path::Path::new(plugin_path);
-                if !path.exists() {
-                    return Err(format!("Plugin file not found: {}", plugin_path).into());
-                }
-                let plugin = PluginRegistry::load(path)
-                    .map_err(|e| format!("{}", e))?;
-                println!("Loaded plugin: {}", plugin_path);
-                Some(Arc::new(plugin))
-            } else {
-                None
-            };
-
-            match (has_fn_ops, plugin_reg) {
-                (true, Some(plugin)) => {
-                    Some(Arc::new(CompositeRegistry::new(fn_reg, plugin)))
-                }
-                (true, None) => Some(fn_reg),
-                (false, Some(plugin)) => Some(plugin),
-                (false, None) => None,
-            }
+        // Build registry from auto-registered #[hush_op] functions
+        let registry: Option<Arc<dyn OpRegistry>> = if !self.registry.is_empty() {
+            Some(Arc::new(self.registry))
+        } else {
+            None
         };
 
         let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

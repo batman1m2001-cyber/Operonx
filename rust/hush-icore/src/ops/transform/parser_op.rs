@@ -1,11 +1,47 @@
 //! ParserOp — extract structured data from text (JSON, XML, YAML).
 //!
-//! Mirrors hush-core/hush/core/ops/transform/parser_op.py.
+//! Mirrors Python's `ops/transform/parser_op.py` (ParserOp).
 //! Supports code fence stripping, dot-path extraction, and type conversion.
+//!
+//! Lives in hush-icore (not hush-providers) — matching Python.
 
 use serde_json::{json, Map, Value};
 
-use crate::http::{ProviderError, ProviderResult};
+use crate::config::BaseOpConfig;
+use crate::error::RushError;
+use crate::ops::op_trait::{Op, OpContext};
+
+// --- Op struct (mirrors Python's ParserOp class) ---
+
+pub struct ParserOp<'a> {
+    pub config: &'a BaseOpConfig,
+}
+
+impl<'a> ParserOp<'a> {
+    pub fn new(config: &'a BaseOpConfig) -> Self {
+        ParserOp { config }
+    }
+}
+
+impl Op for ParserOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+
+    fn execute_core(
+        &self,
+        inputs: Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<Value>, RushError> {
+        let result = execute(Value::Object(inputs))
+            .map_err(|e| RushError::ProviderError(e))?;
+        Ok(Some(result))
+    }
+}
+
+// --- Internal parsing logic ---
+
+type ParserResult<T> = Result<T, String>;
 
 // =============================================================================
 // Extract field schema
@@ -57,22 +93,14 @@ fn strip_code_fences(text: &str) -> String {
 // Parsers
 // =============================================================================
 
-fn parse_json(text: &str) -> ProviderResult<Value> {
+fn parse_json(text: &str) -> ParserResult<Value> {
     let clean = strip_code_fences(text);
-    serde_json::from_str(&clean).map_err(|e| ProviderError {
-        message: format!("Failed to parse JSON: {}", e),
-        status_code: None,
-        error_code: None,
-    })
+    serde_json::from_str(&clean).map_err(|e| format!("Failed to parse JSON: {}", e))
 }
 
-fn parse_yaml(text: &str) -> ProviderResult<Value> {
+fn parse_yaml(text: &str) -> ParserResult<Value> {
     let clean = strip_code_fences(text);
-    serde_yaml::from_str::<Value>(&clean).map_err(|e| ProviderError {
-        message: format!("Failed to parse YAML: {}", e),
-        status_code: None,
-        error_code: None,
-    })
+    serde_yaml::from_str::<Value>(&clean).map_err(|e| format!("Failed to parse YAML: {}", e))
 }
 
 /// Parse XML text into a JSON Value, matching Python's xml_to_dict behavior.
@@ -83,7 +111,7 @@ fn parse_yaml(text: &str) -> ProviderResult<Value> {
 /// - Duplicate tags → aggregated into lists
 /// - Nested elements → recursive dicts
 /// - Leaf elements → text content as string
-fn parse_xml(text: &str) -> ProviderResult<Value> {
+fn parse_xml(text: &str) -> ParserResult<Value> {
     let clean = strip_code_fences(text);
 
     // Try parsing as-is first
@@ -94,11 +122,7 @@ fn parse_xml(text: &str) -> ProviderResult<Value> {
             let wrapped = format!("<root>{}</root>", clean);
             match parse_xml_inner(&wrapped) {
                 Ok(val) => Ok(val),
-                Err(e) => Err(ProviderError {
-                    message: format!("Failed to parse XML: {}", e),
-                    status_code: None,
-                    error_code: None,
-                }),
+                Err(e) => Err(format!("Failed to parse XML: {}", e)),
             }
         }
     }
@@ -288,12 +312,8 @@ fn convert_type(value: &Value, type_hint: &str) -> Value {
 ///
 /// Inputs: `{"text": str, "parser_format": str, "parser_extract": [str, ...]}`
 /// Outputs: `{field1: val1, field2: val2, ...}` — one key per extracted field.
-pub fn execute(inputs: Value) -> ProviderResult<Value> {
-    let obj = inputs.as_object().ok_or_else(|| ProviderError {
-        message: "Parser inputs must be a dict".to_string(),
-        status_code: None,
-        error_code: None,
-    })?;
+pub fn execute(inputs: Value) -> ParserResult<Value> {
+    let obj = inputs.as_object().ok_or_else(|| "Parser inputs must be a dict".to_string())?;
 
     let text = obj
         .get("text")

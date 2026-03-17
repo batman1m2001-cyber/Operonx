@@ -10,12 +10,6 @@ use serde_json::Value;
 use smallvec::SmallVec;
 
 use crate::error::RushError;
-use hush_providers::config::{
-    embedding::EmbeddingConfig,
-    llm::{AzureConfig, GeminiConfig, LLMBaseFields, LLMConfig, OpenAIConfig},
-    reranking::RerankingConfig,
-    LLMProviderConfig, ProviderConfig,
-};
 
 // =============================================================================
 // Config structs
@@ -39,7 +33,7 @@ pub struct LoopConfig {
 pub struct GraphConfig {
     pub name: String,
     pub full_name: String,
-    pub ops: AHashMap<String, OpConfig>,
+    pub ops: AHashMap<String, BaseOpConfig>,
     pub entries: Vec<String>,
     pub initial_ready_count: AHashMap<String, i32>,
     pub compiled_adj: AHashMap<String, SmallVec<[AdjEntry; 4]>>,
@@ -71,7 +65,7 @@ pub enum OpBound {
 }
 
 /// Per-op configuration.
-pub struct OpConfig {
+pub struct BaseOpConfig {
     pub op_type: String,
     pub full_name: String,
     pub name: String,
@@ -91,8 +85,9 @@ pub struct OpConfig {
     pub branch_config: Option<BranchConfig>,
     /// Nested graph config (for type == "graph").
     pub inner_graph: Option<Box<GraphConfig>>,
-    /// Provider config (for type == "llm", "embedding", "rerank").
-    pub provider_config: Option<ProviderConfig>,
+    /// Provider config as opaque JSON (for type == "llm", "embedding", "rerank", "onnx").
+    /// Parsed by provider op structs in hush-providers at execution time.
+    pub provider_config: Option<Value>,
     /// Whether this op contains an LLM generation (for tracing node_type="generation").
     pub contain_generation: bool,
     /// Op-level cache config.
@@ -162,7 +157,7 @@ impl GraphConfig {
 
         let mut ops = AHashMap::with_capacity(ops_obj.len());
         for (op_name, op_val) in ops_obj {
-            let op_config = OpConfig::from_value(op_val)?;
+            let op_config = BaseOpConfig::from_value(op_val)?;
             ops.insert(op_name.clone(), op_config);
         }
 
@@ -285,8 +280,8 @@ impl GraphConfig {
     }
 }
 
-impl OpConfig {
-    /// Parse an OpConfig from a JSON value (output of `BaseOp.serialize()`).
+impl BaseOpConfig {
+    /// Parse an BaseOpConfig from a JSON value (output of `BaseOp.serialize()`).
     fn from_value(val: &Value) -> Result<Self, RushError> {
         let op_type = get_string(val, "type")?;
         let full_name = get_string(val, "full_name")?;
@@ -322,8 +317,13 @@ impl OpConfig {
             None
         };
 
-        // Parse provider config (for "llm", "embedding", "rerank" types)
-        let provider_config = parse_provider_config_json(&op_type, val)?;
+        // Store provider config as opaque JSON — parsed by provider ops at execution time.
+        let provider_config = match op_type.as_str() {
+            "llm" | "embedding" | "rerank" | "onnx" => {
+                val.get("provider_config").cloned()
+            }
+            _ => None,
+        };
 
         // Parse cache config
         let cache = match val.get("cache") {
@@ -332,7 +332,7 @@ impl OpConfig {
             _ => None,
         };
 
-        let op = OpConfig {
+        let op = BaseOpConfig {
             op_type,
             full_name,
             name,
@@ -373,7 +373,7 @@ impl OpConfig {
         }
 
         // Native transform ops (prompt, parser) are valid
-        if hush_providers::ops::is_native_transform_op(&self.op_type) {
+        if self.op_type == "prompt" || self.op_type == "parser" {
             return Ok(());
         }
 
@@ -514,165 +514,8 @@ fn parse_ref_arg(val: &Value) -> Result<RefArg, RushError> {
     Ok(RefArg::Literal(val.clone()))
 }
 
-// =============================================================================
-// Provider config parsing (from JSON)
-// =============================================================================
+// Provider config parsing removed — now opaque Value, parsed by provider ops in hush-providers.
 
-/// Parse a ProviderConfig from an op's JSON value.
-/// Constructs hush_providers config structs directly from JSON fields.
-fn parse_provider_config_json(
-    op_type: &str,
-    val: &Value,
-) -> Result<Option<ProviderConfig>, RushError> {
-    match op_type {
-        "llm" => parse_llm_provider_json(val),
-        "embedding" => parse_embedding_provider_json(val),
-        "rerank" => parse_reranking_provider_json(val),
-        "onnx" => parse_onnx_provider_json(val),
-        _ => Ok(None),
-    }
-}
-
-fn parse_llm_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let configs_arr = match val.get("resource_configs").and_then(|v| v.as_array()) {
-        Some(a) if !a.is_empty() => a,
-        _ => return Ok(None),
-    };
-
-    let mut configs = Vec::with_capacity(configs_arr.len());
-    for cfg_val in configs_arr {
-        configs.push(parse_llm_config_json(cfg_val)?);
-    }
-
-    let resources = parse_json_string_or_list(val, "resource");
-    let ratios = parse_json_float_list(val, "ratios");
-    let fallback = parse_json_string_list(val, "fallback");
-    let batch_mode = get_bool(val, "batch_mode", false);
-
-    let mut fallback_configs = Vec::new();
-    if let Some(fb_arr) = val.get("fallback_configs").and_then(|v| v.as_array()) {
-        for cfg_val in fb_arr {
-            if let Ok(cfg) = parse_llm_config_json(cfg_val) {
-                fallback_configs.push(cfg);
-            }
-        }
-    }
-
-    Ok(Some(ProviderConfig::LLM(LLMProviderConfig {
-        configs,
-        resources,
-        ratios,
-        fallback_configs,
-        fallback,
-        batch_mode,
-    })))
-}
-
-fn parse_llm_config_json(val: &Value) -> Result<LLMConfig, RushError> {
-    let api_type = get_string(val, "api_type")?;
-
-    let base = LLMBaseFields {
-        proxy: get_opt_string(val, "proxy"),
-        cost_per_input_token: val.get("cost_per_input_token").and_then(|v| v.as_f64()),
-        cost_per_output_token: val.get("cost_per_output_token").and_then(|v| v.as_f64()),
-    };
-
-    match api_type.as_str() {
-        "openai" | "vllm" => Ok(LLMConfig::OpenAI(OpenAIConfig {
-            base,
-            api_type: api_type.clone(),
-            api_key: get_string(val, "api_key")?,
-            base_url: get_string(val, "base_url")?,
-            model: get_string(val, "model")?,
-            batch_size: val.get("batch_size").and_then(|v| v.as_u64()).unwrap_or(50000) as usize,
-            batch_flush_interval: val.get("batch_flush_interval").and_then(|v| v.as_f64()).unwrap_or(60.0),
-            batch_poll_interval: val.get("batch_poll_interval").and_then(|v| v.as_f64()).unwrap_or(30.0),
-            batch_timeout: val.get("batch_timeout").and_then(|v| v.as_f64()).unwrap_or(86400.0),
-        })),
-        "azure" => Ok(LLMConfig::Azure(AzureConfig {
-            base,
-            api_key: get_string(val, "api_key")?,
-            api_version: get_string(val, "api_version")?,
-            azure_endpoint: get_string(val, "azure_endpoint")?,
-            model: get_string(val, "model")?,
-        })),
-        "gemini" => Ok(LLMConfig::Gemini(GeminiConfig {
-            base,
-            project_id: get_string(val, "project_id")?,
-            private_key_id: get_string(val, "private_key_id")?,
-            private_key: get_string(val, "private_key")?,
-            client_email: get_string(val, "client_email")?,
-            client_id: get_string(val, "client_id")?,
-            auth_uri: get_opt_string(val, "auth_uri")
-                .unwrap_or_else(|| "https://accounts.google.com/o/oauth2/auth".to_string()),
-            token_uri: get_opt_string(val, "token_uri")
-                .unwrap_or_else(|| "https://oauth2.googleapis.com/token".to_string()),
-            auth_provider_x509_cert_url: get_opt_string(val, "auth_provider_x509_cert_url")
-                .unwrap_or_else(|| "https://www.googleapis.com/oauth2/v1/certs".to_string()),
-            client_x509_cert_url: get_string(val, "client_x509_cert_url")?,
-            universe_domain: get_opt_string(val, "universe_domain")
-                .unwrap_or_else(|| "googleapis.com".to_string()),
-            location: get_opt_string(val, "location")
-                .unwrap_or_else(|| "us-central1".to_string()),
-            model: get_opt_string(val, "model")
-                .unwrap_or_else(|| "gemini-2.0-flash-001".to_string()),
-        })),
-        _ => Err(RushError::ConfigError(format!(
-            "Unsupported LLM api_type: '{api_type}'"
-        ))),
-    }
-}
-
-fn parse_embedding_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    Ok(Some(ProviderConfig::Embedding(EmbeddingConfig {
-        api_type: get_string(cfg_val, "api_type")?,
-        api_key: get_opt_string(cfg_val, "api_key"),
-        base_url: get_opt_string(cfg_val, "base_url"),
-        model: get_opt_string(cfg_val, "model"),
-        embed_batch_size: cfg_val.get("embed_batch_size").and_then(|v| v.as_u64()).map(|n| n as usize),
-        dimensions: cfg_val.get("dimensions").and_then(|v| v.as_u64()).map(|n| n as usize),
-    })))
-}
-
-fn parse_reranking_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    Ok(Some(ProviderConfig::Reranking(RerankingConfig {
-        api_type: get_string(cfg_val, "api_type")?,
-        api_key: get_opt_string(cfg_val, "api_key"),
-        api_version: get_opt_string(cfg_val, "api_version"),
-        base_url: get_opt_string(cfg_val, "base_url"),
-        model: get_opt_string(cfg_val, "model"),
-    })))
-}
-
-fn parse_onnx_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    let input_type_str = cfg_val.get("input_type").and_then(|v| v.as_str()).unwrap_or("mlp");
-    let input_type = match input_type_str {
-        "attention" => hush_providers::config::onnx::OnnxInputType::Attention,
-        _ => hush_providers::config::onnx::OnnxInputType::Mlp,
-    };
-
-    Ok(Some(ProviderConfig::Onnx(hush_providers::config::onnx::OnnxInferenceConfig {
-        model_path: get_string(cfg_val, "model_path")?,
-        input_type,
-        pool_size: cfg_val.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(1) as usize,
-        intra_threads: cfg_val.get("intra_threads").and_then(|v| v.as_u64()).unwrap_or(1) as usize,
-    })))
-}
 
 // =============================================================================
 // JSON parsing helpers

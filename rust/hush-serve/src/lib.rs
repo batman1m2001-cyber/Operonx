@@ -52,7 +52,6 @@ pub mod fn_registry;
 pub mod resources;
 
 pub(crate) mod execute;
-pub(crate) mod plugin;
 pub(crate) mod router;
 pub(crate) mod routes;
 pub(crate) mod state;

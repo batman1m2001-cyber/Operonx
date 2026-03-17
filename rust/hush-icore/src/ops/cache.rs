@@ -227,7 +227,7 @@ pub fn build_store_from_config(config: &crate::config::GraphConfig) -> CacheStor
     store
 }
 
-fn register_ops_recursive(store: &mut CacheStore, ops: &ahash::AHashMap<String, crate::config::OpConfig>) {
+fn register_ops_recursive(store: &mut CacheStore, ops: &ahash::AHashMap<String, crate::config::BaseOpConfig>) {
     for op in ops.values() {
         if let Some(ref cache_config) = op.cache {
             store.register(&op.full_name, cache_config.clone());
