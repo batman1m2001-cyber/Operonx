@@ -7,10 +7,16 @@ Test:
   uv run python ex01_hello_world/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 
 from hush.core import Hush
-from workflow import build_hello
+
+from ex01_hello_world.workflow import build_hello
 
 engine = Hush(build_hello())
 engine.serve(port=int(os.environ.get("PORT", 8000)))

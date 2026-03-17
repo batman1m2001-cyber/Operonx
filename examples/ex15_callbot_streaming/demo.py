@@ -14,6 +14,11 @@ Example 3: Requires LANGFUSE_HUSH_* keys in .env.
 Chạy: cd examples && uv run python ex15_callbot_streaming/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import uuid
 from pathlib import Path
@@ -24,7 +29,8 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 from hush.core.tracing.collector import TraceCollector
-from workflow import build_callbot
+
+from ex15_callbot_streaming.workflow import build_callbot
 
 # =============================================================================
 # Pretty-print trace tree

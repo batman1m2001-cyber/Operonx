@@ -55,14 +55,14 @@ def op(
     """
 
     def decorator(fn):
-        # Module-qualified func_name: "ml.sentiment_filter.classify_sentiment"
+        # Module-qualified func_name: "ex05_loops_and_branches.workflow.each_item"
+        # Uses full __module__ path (no stripping) — matches Rust's module_path!()
+        # which also keeps the full path after stripping the crate name.
         module = fn.__module__ or ""
         if module in ("__main__", "") or "." not in module:
             fn._func_name = fn.__name__
         else:
-            # Strip first segment (top-level package)
-            relative = ".".join(module.split(".")[1:])
-            fn._func_name = f"{relative}.{fn.__name__}"
+            fn._func_name = f"{module}.{fn.__name__}"
         if bound is not None:
             fn._op_bound = bound
         if cache is not None:

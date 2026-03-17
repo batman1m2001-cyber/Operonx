@@ -13,10 +13,21 @@ Test:
   uv run python ex05_loops_and_branches/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 
 from hush.serve import HushApp
-from workflow import build_branch, build_for_loop, build_map_op, build_while_loop
+
+from ex05_loops_and_branches.workflow import (
+    build_branch,
+    build_for_loop,
+    build_map_op,
+    build_while_loop,
+)
 
 app = HushApp()
 app.endpoint("/for-loop", graph=build_for_loop())

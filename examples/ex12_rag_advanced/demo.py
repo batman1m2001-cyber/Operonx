@@ -8,6 +8,11 @@ Examples 2-3: require OPENAI_API_KEY (and optionally PINECONE_API_KEY).
 Chạy: cd examples && uv run python ex12_rag_advanced/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 import sys
@@ -20,7 +25,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import DOCUMENTS, build_keyword_rrf
+
+from ex12_rag_advanced.workflow import DOCUMENTS, build_keyword_rrf
 
 
 async def main():
@@ -48,7 +54,8 @@ async def main():
     from hush.core import END, PARENT, START, GraphOp
     from hush.core.ops import op
     from hush.providers import EmbeddingOp, LLMOp, PromptOp
-    from workflow import cosine_search, keyword_search, reciprocal_rank_fusion
+
+    from ex12_rag_advanced.workflow import cosine_search, keyword_search, reciprocal_rank_fusion
 
     # Pre-compute doc embeddings
     print("  Embedding documents...")

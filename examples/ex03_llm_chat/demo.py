@@ -3,11 +3,17 @@
 Chạy: cd examples && uv run python ex03_llm_chat/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import sys
 
 from hush.core import Hush
-from workflow import build_basic_chat, build_chain_chat, build_summarize
+
+from ex03_llm_chat.workflow import build_basic_chat, build_chain_chat, build_summarize
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

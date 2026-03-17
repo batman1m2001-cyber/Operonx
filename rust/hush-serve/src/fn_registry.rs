@@ -168,13 +168,28 @@ impl FnRegistry {
             .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name))
     }
 
-    /// Look up an op by name with qualified → bare fallback.
+    /// Look up an op by name: qualified → suffix → bare fallback.
     fn lookup_op(&self, name: &str) -> LookupResult<&OpFn> {
         let normalized = Self::normalize(name);
+
+        // 1. Exact qualified match
         if let Some(f) = self.ops_qualified.get(&normalized) {
             return LookupResult::Found(f);
         }
 
+        // 2. Suffix match — find registered ops ending with the query
+        //    e.g., query "workflow::each_item" matches "ex05_loops_and_branches::workflow::each_item"
+        if normalized.contains("::") {
+            let suffix = format!("::{}", normalized);
+            let matches: Vec<_> = self.ops_qualified.iter()
+                .filter(|(k, _)| k.ends_with(&suffix) || *k == &normalized)
+                .collect();
+            if matches.len() == 1 {
+                return LookupResult::Found(matches[0].1);
+            }
+        }
+
+        // 3. Bare name fallback
         let bare = Self::bare_name(name);
         if self.ops_bare_ambiguous.contains(bare) {
             let matches: Vec<_> = self.all_op_names.iter()
@@ -189,13 +204,27 @@ impl FnRegistry {
         LookupResult::NotFound
     }
 
-    /// Look up a generator by name with qualified → bare fallback.
+    /// Look up a generator by name: qualified → suffix → bare fallback.
     fn lookup_gen(&self, name: &str) -> LookupResult<&GenFn> {
         let normalized = Self::normalize(name);
+
+        // 1. Exact qualified match
         if let Some(f) = self.generators_qualified.get(&normalized) {
             return LookupResult::Found(f);
         }
 
+        // 2. Suffix match
+        if normalized.contains("::") {
+            let suffix = format!("::{}", normalized);
+            let matches: Vec<_> = self.generators_qualified.iter()
+                .filter(|(k, _)| k.ends_with(&suffix) || *k == &normalized)
+                .collect();
+            if matches.len() == 1 {
+                return LookupResult::Found(matches[0].1);
+            }
+        }
+
+        // 3. Bare name fallback
         let bare = Self::bare_name(name);
         if self.generators_bare_ambiguous.contains(bare) {
             let matches: Vec<_> = self.all_gen_names.iter()

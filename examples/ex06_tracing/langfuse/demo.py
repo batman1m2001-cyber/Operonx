@@ -5,10 +5,15 @@ Needs: LANGFUSE_HUSH_PUBLIC_KEY, LANGFUSE_HUSH_SECRET_KEY, LANGFUSE_HUSH_BASE_UR
 Chạy: cd examples && uv run python ex06_tracing/langfuse/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 
-from workflow import build_text_analyzer
+from ex06_tracing.langfuse.workflow import build_text_analyzer
 
 
 def _make_tracer():

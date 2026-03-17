@@ -3,11 +3,17 @@
 Chạy: cd examples && uv run python ex04_llm_advanced/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import json
 
 from hush.core import Hush
-from workflow import build_multi_turn, build_structured_output, build_tool_calling
+
+from ex04_llm_advanced.workflow import build_multi_turn, build_structured_output, build_tool_calling
 
 
 async def main():

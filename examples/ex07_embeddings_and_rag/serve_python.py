@@ -13,6 +13,11 @@ Test:
   uv run python ex07_embeddings_and_rag/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 from pathlib import Path
 
@@ -21,7 +26,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.serve import HushApp
-from workflow import build_basic_embedding, build_simple_rag
+
+from ex07_embeddings_and_rag.workflow import build_basic_embedding, build_simple_rag
 
 app = HushApp()
 app.endpoint("/embed", graph=build_basic_embedding())
