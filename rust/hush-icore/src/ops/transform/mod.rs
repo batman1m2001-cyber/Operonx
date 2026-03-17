@@ -1,2 +1,2 @@
-// Transform ops module — previously contained func_op.rs (built-in registry).
-// Built-in Rust ops are in src/builtin_ops/ (internal module).
+pub mod func_op;
+pub mod parser_op;

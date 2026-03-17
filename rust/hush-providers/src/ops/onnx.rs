@@ -1,4 +1,6 @@
-//! ONNX inference op — runs arbitrary ONNX models via session pool.
+//! OnnxOp — ONNX model inference (classifiers, transformers).
+//!
+//! Mirrors Python's `providers/ops/onnx.py` (OnnxOp).
 //!
 //! Inputs:
 //!   - embeddings: list of float vectors (required)
@@ -11,9 +13,46 @@
 
 use serde_json::{json, Value};
 
+use hush_icore::config::BaseOpConfig;
+use hush_icore::error::RushError;
+use hush_icore::ops::op_trait::{Op, OpContext};
+
 use crate::config::onnx::{OnnxInferenceConfig, OnnxInputType};
 use crate::http::ProviderResult;
 use crate::onnx;
+
+pub struct OnnxOp<'a> {
+    pub config: &'a BaseOpConfig,
+}
+
+impl<'a> OnnxOp<'a> {
+    pub fn new(config: &'a BaseOpConfig) -> Self {
+        OnnxOp { config }
+    }
+}
+
+impl Op for OnnxOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+
+    fn execute_core(
+        &self,
+        inputs: serde_json::Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<Value>, RushError> {
+        let config_json = self.config.provider_config.as_ref().ok_or_else(|| {
+            RushError::ProviderError(format!("OnnxOp '{}' missing provider_config", self.config.full_name))
+        })?;
+        let result = hush_icore::runtime::block_on_async(async {
+            crate::ops::execute_from_json("onnx", Value::Object(inputs), config_json).await
+        })
+        .map_err(|e| RushError::ProviderError(format!("ONNX op error: {}", e)))?;
+        Ok(Some(result))
+    }
+}
+
+// === Internal execution logic ===
 
 pub async fn execute(inputs: Value, config: &OnnxInferenceConfig) -> ProviderResult<Value> {
     let pool = onnx::get_pool(config).map_err(|e| crate::http::ProviderError {

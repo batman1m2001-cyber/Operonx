@@ -26,6 +26,7 @@ use crate::tracing::tracer::Tracer;
 pub struct Hush {
     config: Arc<GraphConfig>,
     registry: Option<Arc<dyn OpRegistry>>,
+    op_factory: Option<Arc<dyn crate::ops::op_trait::OpFactory>>,
     tracers: Vec<Arc<dyn Tracer>>,
     middleware: Vec<Box<dyn Middleware>>,
     flush_worker: FlushWorker,
@@ -43,6 +44,7 @@ impl Hush {
         Ok(Hush {
             config,
             registry: None,
+            op_factory: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
@@ -51,19 +53,24 @@ impl Hush {
     }
 
     /// Create a new Hush engine from a pre-parsed config.
-    /// Avoids JSON parsing overhead — use for hot paths (e.g. per-request in hush-serve).
     pub fn from_config(config: Arc<GraphConfig>) -> Self {
-        // Initialize op-level cache store from config (idempotent — only first call takes effect)
         let store = crate::ops::cache::build_store_from_config(&config);
         crate::ops::cache::init_global_store(store);
         Hush {
             config,
             registry: None,
+            op_factory: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
             _force_timestamps: false,
         }
+    }
+
+    /// Register a provider op factory (for LlmOp, EmbeddingOp, etc.).
+    /// hush-serve calls this to register provider ops that hush-icore doesn't know about.
+    pub fn set_op_factory(&mut self, factory: Arc<dyn crate::ops::op_trait::OpFactory>) {
+        self.op_factory = Some(factory);
     }
 
     /// Register an external op registry for custom Rust op dispatch.

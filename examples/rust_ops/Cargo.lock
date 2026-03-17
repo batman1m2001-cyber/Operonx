@@ -697,7 +697,6 @@ dependencies = [
  "ahash",
  "chrono",
  "dashmap",
- "hush-providers",
  "lasso",
  "log",
  "rayon",
@@ -723,6 +722,7 @@ version = "0.1.3"
 dependencies = [
  "base64",
  "cc",
+ "hush-icore",
  "jsonwebtoken",
  "quick-xml",
  "rand 0.8.5",
