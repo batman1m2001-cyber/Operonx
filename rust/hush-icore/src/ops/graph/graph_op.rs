@@ -364,8 +364,10 @@ fn dispatch_leaf_op(
                     return provider_op.run(ctx);
                 }
             }
-            // Fallback to old dispatch for backward compat
-            base::run(op, ctx.state, ctx.context, ctx.registry)
+            Err(RushError::UnsupportedOp(format!(
+                "Op '{}' (type='{}') has no implementation. Register an OpFactory or use #[hush_op].",
+                op.full_name, op.op_type
+            )))
         }
     }
 }
