@@ -1,5 +1,7 @@
 //! LLM providers — per-provider implementations mirroring hush-providers/llms/.
 //!
+//! `base.rs` defines the `LlmProvider` trait (mirrors Python's BaseLLM).
+//!
 //! Dispatches by LLMConfig variant to the appropriate provider:
 //! - OpenAI / vLLM → openai.rs
 //! - Azure → azure.rs
@@ -8,6 +10,8 @@
 //! Shared request/response types live in types.rs.
 //! Image encoding for multimodal support lives in image.rs.
 
+pub mod base;
+pub mod config;
 pub mod azure;
 pub mod gemini;
 pub mod image;

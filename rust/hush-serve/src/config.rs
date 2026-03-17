@@ -71,6 +71,10 @@ pub struct ServerConfig {
     pub endpoints: Vec<EndpointDef>,
     #[serde(default)]
     pub tracers: Option<TracerConfig>,
+    /// Resource configs for `#[hush_resource]` factories.
+    /// Keyed by resource name (e.g., `"embedder"`, `"sentiment"`).
+    #[serde(default)]
+    pub resources: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 /// A single endpoint definition.

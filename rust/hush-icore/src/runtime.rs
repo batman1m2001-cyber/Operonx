@@ -32,7 +32,7 @@ pub(crate) fn get_runtime() -> &'static Runtime {
 /// This avoids the "Cannot start a runtime from within a runtime" panic
 /// that would occur if you called `Runtime::block_on()` from a
 /// `spawn_blocking` task.
-pub(crate) fn block_on_async<F: Future>(future: F) -> F::Output {
+pub fn block_on_async<F: Future>(future: F) -> F::Output {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => handle.block_on(future),
         Err(_) => get_runtime().block_on(future),

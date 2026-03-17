@@ -431,6 +431,14 @@ class ResourceHub:
         """
         return self._get_with_prefix(key, "reranking")
 
+    def onnx(self, key: str) -> Any:
+        """Get ONNX inference backend by key.
+
+        Returns:
+            OnnxInferenceBackend instance with run() method
+        """
+        return self._get_with_prefix(key, "onnx")
+
     def redis(self, key: str) -> Any:
         """Get Redis client by key."""
         return self._get_with_prefix(key, "redis")

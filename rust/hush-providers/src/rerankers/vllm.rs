@@ -1,4 +1,4 @@
-//! vLLM reranker provider.
+//! vLLM reranker provider — mirrors Python's `rerankers/vllm.py`.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -6,6 +6,34 @@ use serde_json::{json, Value};
 use crate::config::reranking::RerankingConfig;
 use crate::http::{get_client, ProviderError, ProviderResult};
 use crate::rerankers::filter_and_sort;
+
+/// vLLM reranker provider struct.
+pub struct VllmReranker<'a> {
+    pub config: &'a RerankingConfig,
+}
+
+impl<'a> VllmReranker<'a> {
+    pub fn new(config: &'a RerankingConfig) -> Self {
+        VllmReranker { config }
+    }
+}
+
+impl super::base::RerankerProvider for VllmReranker<'_> {
+    fn rerank(&self, query: &str, documents: &[Value], top_k: usize) -> impl std::future::Future<Output = ProviderResult<Vec<Value>>> + Send {
+        let config = self.config;
+        let q = query.to_string();
+        let texts: Vec<String> = documents.iter()
+            .filter_map(|d| d.as_str().map(String::from).or_else(|| d.get("text").and_then(|t| t.as_str()).map(String::from)))
+            .collect();
+        async move {
+            let result = rerank(config, &q, &texts, Some(top_k), 0.0).await?;
+            match result.get("reranks").and_then(|v| v.as_array()) {
+                Some(arr) => Ok(arr.clone()),
+                None => Ok(vec![]),
+            }
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct VLLMRerankerResponse {

@@ -1,4 +1,6 @@
-//! Prompt template formatting — mirrors hush-providers/hush/providers/ops/prompt.py.
+//! PromptOp — template formatting for LLM messages.
+//!
+//! Mirrors Python's `providers/ops/prompt.py` (PromptOp).
 //!
 //! Supports three template formats:
 //! 1. String: "Hello {name}" → [{"role": "user", "content": "Hello World"}]
@@ -6,7 +8,38 @@
 //! 3. List: Full messages array (pass-through with variable substitution)
 //!
 //! Also handles conversation_history insertion and tool_results appending.
-//! This op is pure CPU — no HTTP calls, no auth needed.
+
+use hush_icore::config::BaseOpConfig;
+use hush_icore::error::RushError;
+use hush_icore::ops::op_trait::{Op, OpContext};
+
+pub struct PromptOp<'a> {
+    pub config: &'a BaseOpConfig,
+}
+
+impl<'a> PromptOp<'a> {
+    pub fn new(config: &'a BaseOpConfig) -> Self {
+        PromptOp { config }
+    }
+}
+
+impl Op for PromptOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+
+    fn execute_core(
+        &self,
+        inputs: serde_json::Map<String, serde_json::Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<serde_json::Value>, RushError> {
+        let result = execute(serde_json::Value::Object(inputs))
+            .map_err(|e| RushError::ProviderError(format!("Prompt op error: {}", e)))?;
+        Ok(Some(result))
+    }
+}
+
+// === Internal execution logic ===
 
 use regex::Regex;
 use serde_json::{json, Value};

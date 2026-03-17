@@ -3,6 +3,7 @@
 import ast
 import inspect
 import textwrap
+import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -21,8 +22,8 @@ def op(
     func: Optional[Callable] = None,
     *,
     executor: Optional[str] = None,
-    rust: Optional[str] = None,
     bound: Optional[str] = None,
+    cache=None,
 ):
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -36,10 +37,6 @@ def op(
         def fetch(url: str):
             return {"data": requests.get(url).json()}
 
-        @op(rust="./my_ops::double")
-        def double(x: int):
-            return {"result": x * 2}  # Python fallback
-
         @op(bound="io")
         async def call_api(url: str):
             return {"data": await fetch(url)}
@@ -51,11 +48,6 @@ def op(
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
-        rust: Optional Rust plugin op spec (e.g. ``"./my_ops::double"``).
-            Format: ``"<crate_path>::<func_name>"``. The path can be a crate
-            directory, a ``.rs`` file, or a pre-built ``.so``/``.dylib``.
-            The engine auto-builds the crate via ``cargo build --release``
-            if needed. The Python body serves as a fallback.
         bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
             ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
             ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
@@ -63,10 +55,18 @@ def op(
     """
 
     def decorator(fn):
-        if rust is not None:
-            fn._rust_op_name = rust
+        # Module-qualified func_name: "ex05_loops_and_branches.workflow.each_item"
+        # Uses full __module__ path (no stripping) — matches Rust's module_path!()
+        # which also keeps the full path after stripping the crate name.
+        module = fn.__module__ or ""
+        if module in ("__main__", "") or "." not in module:
+            fn._func_name = fn.__name__
+        else:
+            fn._func_name = f"{module}.{fn.__name__}"
         if bound is not None:
             fn._op_bound = bound
+        if cache is not None:
+            fn._op_cache = cache
         sig = inspect.signature(fn)
         collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
         if collisions:
@@ -347,6 +347,12 @@ class FuncOp(BaseOp):
                         f"'{key}' is not a known input or output of {code_fn.__name__}(). "
                         f"Inputs: {set(parsed_inputs)}, Outputs: {set(parsed_outputs)}"
                     )
+
+        # Resolve cache from @op(cache=...) if not set in kwargs
+        if "cache" not in kwargs:
+            fn_cache = getattr(code_fn, "_op_cache", None)
+            if fn_cache is not None:
+                kwargs["cache"] = fn_cache
 
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)

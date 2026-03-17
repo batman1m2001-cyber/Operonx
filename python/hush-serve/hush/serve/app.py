@@ -1,7 +1,7 @@
 """HushApp — serve Hush workflow graphs as HTTP APIs."""
 
 import inspect
-from typing import Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +49,7 @@ class HushApp:
         cors_origins: Optional[List[str]] = None,
         env: Union[str, bool] = True,
         resources: Optional[str] = None,
+        rust_resources: Optional[Dict[str, Any]] = None,
     ):
         self._config = AppConfig(
             title=title,
@@ -60,6 +61,7 @@ class HushApp:
         self._tracer = tracer
         self._endpoints: List[Endpoint] = []
         self._fastapi: Optional[FastAPI] = None
+        self._rust_resources = rust_resources
 
         # Load env/resources upfront so graph factories can eagerly resolve
         Hush._load_env(env)

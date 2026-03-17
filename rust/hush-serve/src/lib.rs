@@ -1,12 +1,12 @@
 //! hush-serve — build Hush workflow HTTP servers in Rust.
 //!
-//! Use as a **library** to build custom binaries with compiled-in ops:
+//! Use `#[hush_op]` + `.auto_register()` for zero-boilerplate op registration:
 //!
 //! ```rust,ignore
-//! use hush_serve::HushServer;
+//! use hush_serve::{hush_op, HushServer};
 //! use serde_json::{json, Value};
-//! use std::sync::Arc;
 //!
+//! #[hush_op]
 //! fn double(inputs: &Value) -> Value {
 //!     let x = inputs["x"].as_i64().unwrap_or(0);
 //!     json!({"result": x * 2})
@@ -14,29 +14,31 @@
 //!
 //! fn main() {
 //!     HushServer::builder()
-//!         .register_op("double", double)
+//!         .auto_register()  // discovers all #[hush_op] functions
 //!         .from_cli()
 //!         .serve()
 //!         .unwrap();
 //! }
 //! ```
 //!
-//! Or use the convenience macro for many ops:
+//! For ops that need shared resources (ONNX models, caches, pools):
 //!
 //! ```rust,ignore
-//! mod math;
-//! mod text;
+//! use hush_serve::{hush_op, HushServer};
+//!
+//! #[hush_op]
+//! fn classify(inputs: &Value) -> Value {
+//!     let embedder = hush_serve::get::<OnnxEmbedder>();
+//!     // ...
+//! }
 //!
 //! fn main() {
-//!     hush_ops!(HushServer::builder();
-//!         ops: {
-//!             "double" => math::double,
-//!             "greet" => text::greet,
-//!         },
-//!         generators: {
-//!             "each_item" => iteration::each_item,
-//!         }
-//!     ).from_cli().serve().unwrap();
+//!     HushServer::builder()
+//!         .provide(OnnxEmbedder::new("./models/bge-m3").unwrap())
+//!         .auto_register()
+//!         .from_cli()
+//!         .serve()
+//!         .unwrap();
 //! }
 //! ```
 //!
@@ -47,19 +49,123 @@ pub mod builder;
 pub mod config;
 pub mod error;
 pub mod fn_registry;
+pub mod resources;
 
 pub(crate) mod execute;
-pub(crate) mod plugin;
 pub(crate) mod router;
 pub(crate) mod routes;
 pub(crate) mod state;
 
 pub use builder::HushServerBuilder;
 pub use fn_registry::FnRegistry;
+pub use resources::get;
+
+// Re-export proc macros
+pub use hush_macros::hush_op;
+pub use hush_macros::hush_model;
+pub use hush_macros::hush_resource;
 
 // Re-export types users commonly need
 pub use hush_icore::registry::OpRegistry;
 pub use serde_json::Value;
+
+// --- Auto-registration types (used by #[hush_op] proc macro) ---
+
+/// Whether an auto-registered op is regular or a generator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpKind {
+    Regular,
+    Generator,
+}
+
+/// An auto-registered op entry, collected by `inventory` at link time.
+///
+/// Created by the `#[hush_op]` proc macro — users don't construct these directly.
+pub struct OpEntry {
+    pub name: &'static str,
+    pub module_path: &'static str,
+    pub kind: OpKind,
+    pub op_fn: fn(&serde_json::Value) -> serde_json::Value,
+    pub gen_fn: fn(&serde_json::Value) -> serde_json::Value,
+}
+
+impl OpEntry {
+    /// Create a regular op entry (used by `#[hush_op]`).
+    pub const fn new_op(
+        name: &'static str,
+        module_path: &'static str,
+        op_fn: fn(&serde_json::Value) -> serde_json::Value,
+    ) -> Self {
+        OpEntry {
+            name,
+            module_path,
+            kind: OpKind::Regular,
+            op_fn,
+            gen_fn: _noop_gen,
+        }
+    }
+
+    /// Create a generator op entry (used by `#[hush_op(generator)]`).
+    pub const fn new_gen(
+        name: &'static str,
+        module_path: &'static str,
+        gen_fn: fn(&serde_json::Value) -> serde_json::Value,
+    ) -> Self {
+        OpEntry {
+            name,
+            module_path,
+            kind: OpKind::Generator,
+            op_fn: _noop_op,
+            gen_fn,
+        }
+    }
+
+    /// Module-qualified name with crate prefix stripped.
+    /// "example_ops::math" + "double" → "math::double"
+    /// If module_path is just the crate name (root module), returns bare name.
+    pub fn qualified_name(&self) -> String {
+        let stripped = match self.module_path.find("::") {
+            Some(idx) => &self.module_path[idx + 2..],
+            None => "",
+        };
+        if stripped.is_empty() {
+            self.name.to_string()
+        } else {
+            format!("{}::{}", stripped, self.name)
+        }
+    }
+}
+
+fn _noop_op(_: &serde_json::Value) -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+fn _noop_gen(_: &serde_json::Value) -> serde_json::Value {
+    serde_json::Value::Array(vec![])
+}
+
+inventory::collect!(OpEntry);
+
+// --- Auto-registration types for resources (used by #[hush_resource] proc macro) ---
+
+/// An auto-registered resource factory, collected by `inventory` at link time.
+///
+/// Created by the `#[hush_resource]` proc macro — users don't construct these directly.
+pub struct ResourceEntry {
+    pub name: &'static str,
+    pub factory: fn(&serde_json::Value) -> Box<dyn std::any::Any + Send + Sync>,
+}
+
+impl ResourceEntry {
+    pub const fn new(
+        name: &'static str,
+        factory: fn(&serde_json::Value) -> Box<dyn std::any::Any + Send + Sync>,
+    ) -> Self {
+        ResourceEntry { name, factory }
+    }
+}
+
+inventory::collect!(ResourceEntry);
 
 /// Entry point for building a Hush HTTP server.
 pub struct HushServer;

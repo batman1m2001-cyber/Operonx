@@ -35,7 +35,7 @@ fn loop_graph_op(
         "type": "graph",
         "name": name,
         "full_name": full_name,
-        "rust_op": null,
+        "func_name": null,
         "is_async": false,
         "enabled": true,
         "verbose": false,
@@ -76,10 +76,10 @@ fn test_loop_simple_counter() {
                 .into_iter()
                 .collect();
         json!({
-            "type": "func",
+            "type": "code",
             "name": "step",
             "full_name": format!("{}.step", inner_graph_name),
-            "rust_op": "increment_counter",
+            "func_name": "increment_counter",
             "is_async": false,
             "enabled": true,
             "verbose": false,
@@ -134,10 +134,10 @@ fn test_loop_max_iterations() {
                 .into_iter()
                 .collect();
         json!({
-            "type": "func",
+            "type": "code",
             "name": "step",
             "full_name": format!("{}.step", inner_graph_name),
-            "rust_op": "increment_counter",
+            "func_name": "increment_counter",
             "is_async": false,
             "enabled": true,
             "verbose": false,
@@ -197,10 +197,10 @@ fn test_loop_fibonacci() {
         .into_iter()
         .collect();
         json!({
-            "type": "func",
+            "type": "code",
             "name": "step",
             "full_name": format!("{}.step", inner_graph_name),
-            "rust_op": "fib_step",
+            "func_name": "fib_step",
             "is_async": false,
             "enabled": true,
             "verbose": false,
@@ -264,10 +264,10 @@ fn test_loop_accumulator() {
                 .into_iter()
                 .collect();
         json!({
-            "type": "func",
+            "type": "code",
             "name": "step",
             "full_name": format!("{}.step", inner_graph_name),
-            "rust_op": "accumulate",
+            "func_name": "accumulate",
             "is_async": false,
             "enabled": true,
             "verbose": false,

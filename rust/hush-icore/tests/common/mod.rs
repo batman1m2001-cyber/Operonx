@@ -226,10 +226,10 @@ pub fn func_op(
     let inputs_obj: serde_json::Map<String, Value> = inputs.into_iter().collect();
     let outputs_obj: serde_json::Map<String, Value> = outputs.into_iter().collect();
     json!({
-        "type": "func",
+        "type": "code",
         "name": name,
         "full_name": format!("{}.{}", graph_name, name),
-        "rust_op": rust_op,
+        "func_name": rust_op,
         "is_async": false,
         "enabled": true,
         "verbose": false,
@@ -271,10 +271,10 @@ pub fn generator_op(
 ) -> Value {
     let inputs_obj: serde_json::Map<String, Value> = inputs.into_iter().collect();
     json!({
-        "type": "func",
+        "type": "code",
         "name": name,
         "full_name": format!("{}.{}", graph_name, name),
-        "rust_op": rust_op,
+        "func_name": rust_op,
         "is_async": false,
         "enabled": true,
         "verbose": false,
