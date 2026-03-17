@@ -1,10 +1,10 @@
-pub mod config;
-
 //! Generic ONNX inference — session pool for arbitrary ONNX models.
 //!
 //! Supports two input types:
 //! - MLP: (batch, dim) → (batch,) logits
 //! - Attention: (1, T, dim) + role_ids + mask → (1,) logit
+
+pub mod config;
 
 use std::sync::{Arc, Mutex, OnceLock};
 

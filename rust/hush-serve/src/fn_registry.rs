@@ -177,12 +177,16 @@ impl FnRegistry {
             return LookupResult::Found(f);
         }
 
-        // 2. Suffix match — find registered ops ending with the query
-        //    e.g., query "workflow::each_item" matches "ex05_loops_and_branches::workflow::each_item"
+        // 2. Suffix match — bidirectional:
+        //    a. query is suffix of registered: "workflow::each_item" matches "ex05::workflow::each_item"
+        //    b. registered is suffix of query: "quality_scorer::_aggregate" matches "src::quality_scorer::_aggregate"
         if normalized.contains("::") {
-            let suffix = format!("::{}", normalized);
+            let query_suffix = format!("::{}", normalized);
             let matches: Vec<_> = self.ops_qualified.iter()
-                .filter(|(k, _)| k.ends_with(&suffix) || *k == &normalized)
+                .filter(|(k, _)| {
+                    k.ends_with(&query_suffix) || *k == &normalized
+                    || normalized.ends_with(&format!("::{}", k))
+                })
                 .collect();
             if matches.len() == 1 {
                 return LookupResult::Found(matches[0].1);
@@ -213,11 +217,14 @@ impl FnRegistry {
             return LookupResult::Found(f);
         }
 
-        // 2. Suffix match
+        // 2. Suffix match (bidirectional)
         if normalized.contains("::") {
-            let suffix = format!("::{}", normalized);
+            let query_suffix = format!("::{}", normalized);
             let matches: Vec<_> = self.generators_qualified.iter()
-                .filter(|(k, _)| k.ends_with(&suffix) || *k == &normalized)
+                .filter(|(k, _)| {
+                    k.ends_with(&query_suffix) || *k == &normalized
+                    || normalized.ends_with(&format!("::{}", k))
+                })
                 .collect();
             if matches.len() == 1 {
                 return LookupResult::Found(matches[0].1);
