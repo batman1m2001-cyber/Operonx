@@ -1,11 +1,53 @@
-//! LLM op — load balancing, fallback chains, batch mode, auth.
+//! LlmOp — LLM provider calls with load balancing, fallback, batch mode, auth.
 //!
-//! Mirrors hush-providers/hush/providers/ops/llm.py:
+//! Mirrors Python's `providers/ops/llm.py` (LLMOp).
+//!
+//! Features:
 //! - Weighted random selection across multiple backends
 //! - Sequential fallback chain on failure
 //! - OpenAI Batch API integration
 //! - Keycloak / Google service account auth
 //! - Cost tracking
+
+use hush_icore::config::BaseOpConfig;
+use hush_icore::error::RushError;
+use hush_icore::ops::op_trait::{Op, OpContext};
+
+/// LlmOp — mirrors Python's LLMOp class.
+pub struct LlmOp<'a> {
+    pub config: &'a BaseOpConfig,
+}
+
+impl<'a> LlmOp<'a> {
+    pub fn new(config: &'a BaseOpConfig) -> Self {
+        LlmOp { config }
+    }
+}
+
+impl Op for LlmOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+
+    fn execute_core(
+        &self,
+        inputs: serde_json::Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<Value>, RushError> {
+        let config_json = self.config.provider_config.as_ref().ok_or_else(|| {
+            RushError::ProviderError(format!("LlmOp '{}' missing provider_config", self.config.full_name))
+        })?;
+
+        let result = hush_icore::runtime::block_on_async(async {
+            crate::ops::execute_from_json("llm", Value::Object(inputs), config_json).await
+        })
+        .map_err(|e| RushError::ProviderError(format!("LLM op error: {}", e)))?;
+
+        Ok(Some(result))
+    }
+}
+
+// === Internal execution logic (called by execute_from_json → execute → this) ===
 
 use std::sync::mpsc::Sender;
 use std::time::Instant;

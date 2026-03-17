@@ -10,12 +10,6 @@ use serde_json::Value;
 use smallvec::SmallVec;
 
 use crate::error::RushError;
-use hush_providers::config::{
-    embedding::EmbeddingConfig,
-    llm::{AzureConfig, GeminiConfig, LLMBaseFields, LLMConfig, OpenAIConfig},
-    reranking::RerankingConfig,
-    LLMProviderConfig, ProviderConfig,
-};
 
 // =============================================================================
 // Config structs
@@ -39,7 +33,7 @@ pub struct LoopConfig {
 pub struct GraphConfig {
     pub name: String,
     pub full_name: String,
-    pub ops: AHashMap<String, OpConfig>,
+    pub ops: AHashMap<String, BaseOpConfig>,
     pub entries: Vec<String>,
     pub initial_ready_count: AHashMap<String, i32>,
     pub compiled_adj: AHashMap<String, SmallVec<[AdjEntry; 4]>>,
@@ -59,21 +53,23 @@ pub struct GraphConfig {
     pub max_stream_concurrent: usize,
 }
 
-/// Execution bound hint — tells the scheduler how to schedule this op.
+/// Execution bound hint — tells the scheduler how to dispatch this op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpBound {
-    /// I/O-bound: HTTP calls, LLM, embeddings. Use tokio::spawn (async).
+    /// Default: run inline on scheduler thread. Zero overhead. For trivial ops.
+    Default,
+    /// I/O-bound: tokio::spawn for async network (HTTP, LLM, embeddings).
     Io,
-    /// CPU-bound: computation, transforms. Use rayon (parallel threads).
+    /// CPU-bound: rayon::spawn for heavy compute (ONNX, crypto, par_iter).
     Cpu,
 }
 
 /// Per-op configuration.
-pub struct OpConfig {
+pub struct BaseOpConfig {
     pub op_type: String,
     pub full_name: String,
     pub name: String,
-    pub rust_op: Option<String>,
+    pub func_name: Option<String>,
     pub is_async: bool,
     pub enabled: bool,
     pub verbose: bool,
@@ -89,10 +85,13 @@ pub struct OpConfig {
     pub branch_config: Option<BranchConfig>,
     /// Nested graph config (for type == "graph").
     pub inner_graph: Option<Box<GraphConfig>>,
-    /// Provider config (for type == "llm", "embedding", "rerank").
-    pub provider_config: Option<ProviderConfig>,
+    /// Provider config as opaque JSON (for type == "llm", "embedding", "rerank", "onnx").
+    /// Parsed by provider op structs in hush-providers at execution time.
+    pub provider_config: Option<Value>,
     /// Whether this op contains an LLM generation (for tracing node_type="generation").
     pub contain_generation: bool,
+    /// Op-level cache config.
+    pub cache: Option<crate::ops::cache::CacheConfig>,
 }
 
 /// Branch op configuration — conditions and targets.
@@ -158,7 +157,7 @@ impl GraphConfig {
 
         let mut ops = AHashMap::with_capacity(ops_obj.len());
         for (op_name, op_val) in ops_obj {
-            let op_config = OpConfig::from_value(op_val)?;
+            let op_config = BaseOpConfig::from_value(op_val)?;
             ops.insert(op_name.clone(), op_config);
         }
 
@@ -281,14 +280,14 @@ impl GraphConfig {
     }
 }
 
-impl OpConfig {
-    /// Parse an OpConfig from a JSON value (output of `BaseOp.serialize()`).
+impl BaseOpConfig {
+    /// Parse an BaseOpConfig from a JSON value (output of `BaseOp.serialize()`).
     fn from_value(val: &Value) -> Result<Self, RushError> {
         let op_type = get_string(val, "type")?;
         let full_name = get_string(val, "full_name")?;
         let name = get_string(val, "name")?;
 
-        let rust_op = get_opt_string(val, "rust_op");
+        let func_name = get_opt_string(val, "func_name");
         let is_async = get_bool(val, "is_async", false);
         let enabled = get_bool(val, "enabled", true);
         let verbose = get_bool(val, "verbose", false);
@@ -297,7 +296,8 @@ impl OpConfig {
         let contain_generation = get_bool(val, "contain_generation", false);
         let bound = match get_opt_string(val, "bound").as_deref() {
             Some("io") => OpBound::Io,
-            _ => OpBound::Cpu,
+            Some("cpu") => OpBound::Cpu,
+            _ => OpBound::Default,
         };
 
         let inputs = parse_params(val, "inputs")?;
@@ -317,14 +317,28 @@ impl OpConfig {
             None
         };
 
-        // Parse provider config (for "llm", "embedding", "rerank" types)
-        let provider_config = parse_provider_config_json(&op_type, val)?;
+        // Store provider config as opaque JSON — parsed by provider ops at execution time.
+        // Provider fields (resource_configs, resource, ratios, etc.) are serialized
+        // at top level by Python, so store the entire op JSON for the provider to parse.
+        let provider_config = match op_type.as_str() {
+            "llm" | "embedding" | "rerank" | "onnx" | "prompt" => {
+                Some(val.clone())
+            }
+            _ => None,
+        };
 
-        let op = OpConfig {
+        // Parse cache config
+        let cache = match val.get("cache") {
+            Some(Value::Bool(true)) => Some(crate::ops::cache::CacheConfig::Memory),
+            Some(Value::String(s)) => Some(crate::ops::cache::CacheConfig::File(s.clone())),
+            _ => None,
+        };
+
+        let op = BaseOpConfig {
             op_type,
             full_name,
             name,
-            rust_op,
+            func_name,
             is_async,
             enabled,
             verbose,
@@ -337,6 +351,7 @@ impl OpConfig {
             inner_graph,
             provider_config,
             contain_generation,
+            cache,
         };
 
         // Build-time validation: reject ops that cannot run in Rust mode
@@ -360,12 +375,12 @@ impl OpConfig {
         }
 
         // Native transform ops (prompt, parser) are valid
-        if hush_providers::ops::is_native_transform_op(&self.op_type) {
+        if self.op_type == "prompt" || self.op_type == "parser" {
             return Ok(());
         }
 
-        // Builtin ops (rust_op field present) are valid
-        if self.rust_op.is_some() {
+        // Func ops with func_name are valid
+        if self.func_name.is_some() {
             return Ok(());
         }
 
@@ -501,144 +516,8 @@ fn parse_ref_arg(val: &Value) -> Result<RefArg, RushError> {
     Ok(RefArg::Literal(val.clone()))
 }
 
-// =============================================================================
-// Provider config parsing (from JSON)
-// =============================================================================
+// Provider config parsing removed — now opaque Value, parsed by provider ops in hush-providers.
 
-/// Parse a ProviderConfig from an op's JSON value.
-/// Constructs hush_providers config structs directly from JSON fields.
-fn parse_provider_config_json(
-    op_type: &str,
-    val: &Value,
-) -> Result<Option<ProviderConfig>, RushError> {
-    match op_type {
-        "llm" => parse_llm_provider_json(val),
-        "embedding" => parse_embedding_provider_json(val),
-        "rerank" => parse_reranking_provider_json(val),
-        _ => Ok(None),
-    }
-}
-
-fn parse_llm_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let configs_arr = match val.get("resource_configs").and_then(|v| v.as_array()) {
-        Some(a) if !a.is_empty() => a,
-        _ => return Ok(None),
-    };
-
-    let mut configs = Vec::with_capacity(configs_arr.len());
-    for cfg_val in configs_arr {
-        configs.push(parse_llm_config_json(cfg_val)?);
-    }
-
-    let resources = parse_json_string_or_list(val, "resource");
-    let ratios = parse_json_float_list(val, "ratios");
-    let fallback = parse_json_string_list(val, "fallback");
-    let batch_mode = get_bool(val, "batch_mode", false);
-
-    let mut fallback_configs = Vec::new();
-    if let Some(fb_arr) = val.get("fallback_configs").and_then(|v| v.as_array()) {
-        for cfg_val in fb_arr {
-            if let Ok(cfg) = parse_llm_config_json(cfg_val) {
-                fallback_configs.push(cfg);
-            }
-        }
-    }
-
-    Ok(Some(ProviderConfig::LLM(LLMProviderConfig {
-        configs,
-        resources,
-        ratios,
-        fallback_configs,
-        fallback,
-        batch_mode,
-    })))
-}
-
-fn parse_llm_config_json(val: &Value) -> Result<LLMConfig, RushError> {
-    let api_type = get_string(val, "api_type")?;
-
-    let base = LLMBaseFields {
-        proxy: get_opt_string(val, "proxy"),
-        cost_per_input_token: val.get("cost_per_input_token").and_then(|v| v.as_f64()),
-        cost_per_output_token: val.get("cost_per_output_token").and_then(|v| v.as_f64()),
-    };
-
-    match api_type.as_str() {
-        "openai" | "vllm" => Ok(LLMConfig::OpenAI(OpenAIConfig {
-            base,
-            api_type: api_type.clone(),
-            api_key: get_string(val, "api_key")?,
-            base_url: get_string(val, "base_url")?,
-            model: get_string(val, "model")?,
-            batch_size: val.get("batch_size").and_then(|v| v.as_u64()).unwrap_or(50000) as usize,
-            batch_flush_interval: val.get("batch_flush_interval").and_then(|v| v.as_f64()).unwrap_or(60.0),
-            batch_poll_interval: val.get("batch_poll_interval").and_then(|v| v.as_f64()).unwrap_or(30.0),
-            batch_timeout: val.get("batch_timeout").and_then(|v| v.as_f64()).unwrap_or(86400.0),
-        })),
-        "azure" => Ok(LLMConfig::Azure(AzureConfig {
-            base,
-            api_key: get_string(val, "api_key")?,
-            api_version: get_string(val, "api_version")?,
-            azure_endpoint: get_string(val, "azure_endpoint")?,
-            model: get_string(val, "model")?,
-        })),
-        "gemini" => Ok(LLMConfig::Gemini(GeminiConfig {
-            base,
-            project_id: get_string(val, "project_id")?,
-            private_key_id: get_string(val, "private_key_id")?,
-            private_key: get_string(val, "private_key")?,
-            client_email: get_string(val, "client_email")?,
-            client_id: get_string(val, "client_id")?,
-            auth_uri: get_opt_string(val, "auth_uri")
-                .unwrap_or_else(|| "https://accounts.google.com/o/oauth2/auth".to_string()),
-            token_uri: get_opt_string(val, "token_uri")
-                .unwrap_or_else(|| "https://oauth2.googleapis.com/token".to_string()),
-            auth_provider_x509_cert_url: get_opt_string(val, "auth_provider_x509_cert_url")
-                .unwrap_or_else(|| "https://www.googleapis.com/oauth2/v1/certs".to_string()),
-            client_x509_cert_url: get_string(val, "client_x509_cert_url")?,
-            universe_domain: get_opt_string(val, "universe_domain")
-                .unwrap_or_else(|| "googleapis.com".to_string()),
-            location: get_opt_string(val, "location")
-                .unwrap_or_else(|| "us-central1".to_string()),
-            model: get_opt_string(val, "model")
-                .unwrap_or_else(|| "gemini-2.0-flash-001".to_string()),
-        })),
-        _ => Err(RushError::ConfigError(format!(
-            "Unsupported LLM api_type: '{api_type}'"
-        ))),
-    }
-}
-
-fn parse_embedding_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    Ok(Some(ProviderConfig::Embedding(EmbeddingConfig {
-        api_type: get_string(cfg_val, "api_type")?,
-        api_key: get_opt_string(cfg_val, "api_key"),
-        base_url: get_opt_string(cfg_val, "base_url"),
-        model: get_opt_string(cfg_val, "model"),
-        embed_batch_size: cfg_val.get("embed_batch_size").and_then(|v| v.as_u64()).map(|n| n as usize),
-        dimensions: cfg_val.get("dimensions").and_then(|v| v.as_u64()).map(|n| n as usize),
-    })))
-}
-
-fn parse_reranking_provider_json(val: &Value) -> Result<Option<ProviderConfig>, RushError> {
-    let cfg_val = match val.get("resource_config").filter(|v| !v.is_null()) {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    Ok(Some(ProviderConfig::Reranking(RerankingConfig {
-        api_type: get_string(cfg_val, "api_type")?,
-        api_key: get_opt_string(cfg_val, "api_key"),
-        api_version: get_opt_string(cfg_val, "api_version"),
-        base_url: get_opt_string(cfg_val, "base_url"),
-        model: get_opt_string(cfg_val, "model"),
-    })))
-}
 
 // =============================================================================
 // JSON parsing helpers

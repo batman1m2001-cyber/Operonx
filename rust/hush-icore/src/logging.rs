@@ -95,7 +95,12 @@ pub fn format_data(value: &Value, max_str: usize, max_items: usize) -> String {
                     Value::Null => "None".to_string(),
                     Value::String(s) => {
                         if s.len() > 50 {
-                            format!("'{}...'", &s[..50])
+                            let end = s.char_indices()
+                                .take_while(|&(i, _)| i < 50)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(50.min(s.len()));
+                            format!("'{}[...]'", &s[..end])
                         } else {
                             format!("'{}'", s)
                         }

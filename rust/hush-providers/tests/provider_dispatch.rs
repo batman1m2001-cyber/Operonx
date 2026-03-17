@@ -87,16 +87,16 @@ fn test_transform_prompt_with_history() {
 // execute_transform: parser ops (no HTTP, no config)
 // =============================================================================
 
+// Parser tests moved to hush-icore (ops/transform/parser_op.rs)
+// since ParserOp now lives in hush-icore, matching Python.
+
 #[test]
-fn test_transform_parser_json() {
-    let result = ops::execute_transform(
-        "parser",
-        json!({
-            "text": r#"{"name": "Alice", "age": 30}"#,
-            "parser_format": "json",
-            "parser_extract": ["name: str", "age: int"]
-        }),
-    )
+fn test_transform_parser_json_via_icore() {
+    let result = hush_icore::ops::transform::parser_op::execute(json!({
+        "text": r#"{"name": "Alice", "age": 30}"#,
+        "parser_format": "json",
+        "parser_extract": ["name: str", "age: int"]
+    }))
     .unwrap();
 
     assert_eq!(result["name"], "Alice");
@@ -104,15 +104,12 @@ fn test_transform_parser_json() {
 }
 
 #[test]
-fn test_transform_parser_xml() {
-    let result = ops::execute_transform(
-        "parser",
-        json!({
-            "text": "<answer>42</answer><confident>true</confident>",
-            "parser_format": "xml",
-            "parser_extract": ["answer: int", "confident: bool"]
-        }),
-    )
+fn test_transform_parser_xml_via_icore() {
+    let result = hush_icore::ops::transform::parser_op::execute(json!({
+        "text": "<answer>42</answer><confident>true</confident>",
+        "parser_format": "xml",
+        "parser_extract": ["answer: int", "confident: bool"]
+    }))
     .unwrap();
 
     assert_eq!(result["answer"], 42);
@@ -120,15 +117,12 @@ fn test_transform_parser_xml() {
 }
 
 #[test]
-fn test_transform_parser_yaml() {
-    let result = ops::execute_transform(
-        "parser",
-        json!({
-            "text": "name: Alice\nscore: 95.5",
-            "parser_format": "yaml",
-            "parser_extract": ["name: str", "score: float"]
-        }),
-    )
+fn test_transform_parser_yaml_via_icore() {
+    let result = hush_icore::ops::transform::parser_op::execute(json!({
+        "text": "name: Alice\nscore: 95.5",
+        "parser_format": "yaml",
+        "parser_extract": ["name: str", "score: float"]
+    }))
     .unwrap();
 
     assert_eq!(result["name"], "Alice");

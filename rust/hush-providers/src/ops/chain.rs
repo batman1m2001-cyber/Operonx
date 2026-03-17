@@ -81,7 +81,12 @@ fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
         "parser_extract": extract,
     });
 
-    let parsed = crate::ops::parser::execute(parser_inputs)?;
+    let parsed = hush_icore::ops::transform::parser_op::execute(parser_inputs)
+        .map_err(|e| crate::http::ProviderError {
+            message: format!("Parser error in chain: {}", e),
+            status_code: None,
+            error_code: None,
+        })?;
 
     // Merge parsed fields into result
     if let Some(obj) = parsed.as_object() {

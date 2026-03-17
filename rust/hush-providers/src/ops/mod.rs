@@ -13,9 +13,16 @@
 pub mod chain;
 pub mod embedding;
 pub mod llm;
-pub mod parser;
+#[cfg(feature = "onnx")]
+pub mod onnx;
+// parser moved to hush-icore/src/ops/transform/parser_op.rs (matches Python)
 pub mod prompt;
 pub mod rerank;
+
+// Op factory — creates provider ops from config at runtime.
+// Each module above (llm, embedding, rerank, onnx, prompt) now contains
+// both the Op struct (impl Op) and the internal execute logic.
+pub mod factory;
 
 use std::sync::mpsc::Sender;
 
@@ -62,6 +69,17 @@ fn expect_reranking_config(config: &ProviderConfig) -> ProviderResult<&crate::co
     }
 }
 
+fn expect_onnx_config(config: &ProviderConfig) -> ProviderResult<&crate::config::onnx::OnnxInferenceConfig> {
+    match config {
+        ProviderConfig::Onnx(c) => Ok(c),
+        _ => Err(ProviderError {
+            message: "ONNX op requires ONNX provider config".to_string(),
+            status_code: None,
+            error_code: None,
+        }),
+    }
+}
+
 // =============================================================================
 // Dispatch
 // =============================================================================
@@ -77,12 +95,31 @@ pub async fn execute(
         "embedding" => embedding::execute(inputs, expect_embedding_config(config)?).await,
         "rerank" => rerank::execute(inputs, expect_reranking_config(config)?).await,
         "chain" => chain::execute(inputs, expect_llm_config(config, "Chain op")?).await,
+        #[cfg(feature = "onnx")]
+        "onnx" => onnx::execute(inputs, expect_onnx_config(config)?).await,
         _ => Err(ProviderError {
             message: format!("Unknown provider op type: '{}'", op_type),
             status_code: None,
             error_code: None,
         }),
     }
+}
+
+/// Execute a provider op from opaque JSON config.
+/// Used by provider op structs (LlmOp, EmbeddingOp, etc.) which receive
+/// config as Value from hush-icore (where it's stored opaquely).
+pub async fn execute_from_json(
+    op_type: &str,
+    inputs: Value,
+    config_json: &Value,
+) -> ProviderResult<Value> {
+    let config = crate::config::parse_provider_config(op_type, config_json)
+        .map_err(|e| ProviderError {
+            message: format!("Failed to parse provider config: {}", e),
+            status_code: None,
+            error_code: None,
+        })?;
+    execute(op_type, inputs, &config).await
 }
 
 /// Execute a provider op in streaming mode.
@@ -118,7 +155,7 @@ pub async fn execute_streaming(
 pub fn execute_transform(op_type: &str, inputs: Value) -> ProviderResult<Value> {
     match op_type {
         "prompt" => prompt::execute(inputs),
-        "parser" => parser::execute(inputs),
+        // "parser" moved to hush-icore
         _ => Err(ProviderError {
             message: format!("Unknown transform op type: '{}'", op_type),
             status_code: None,
@@ -129,7 +166,7 @@ pub fn execute_transform(op_type: &str, inputs: Value) -> ProviderResult<Value> 
 
 /// Check if an op_type is a native transform op (pure CPU, no provider config).
 pub fn is_native_transform_op(op_type: &str) -> bool {
-    matches!(op_type, "prompt" | "parser")
+    matches!(op_type, "prompt")
 }
 
 /// Check if an api_type is a provider that we handle natively in Rust.
@@ -182,7 +219,8 @@ mod tests {
     #[test]
     fn test_is_native_transform_op() {
         assert!(is_native_transform_op("prompt"));
-        assert!(is_native_transform_op("parser"));
+        // parser is now in hush-icore, not a provider transform op
+        assert!(!is_native_transform_op("parser"));
         assert!(!is_native_transform_op("llm"));
         assert!(!is_native_transform_op("embedding"));
         assert!(!is_native_transform_op("rerank"));

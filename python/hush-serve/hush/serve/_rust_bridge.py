@@ -22,10 +22,8 @@ The Rust binary (hush-serve) is a separate crate that:
 
 from __future__ import annotations
 
-import atexit
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -47,6 +45,7 @@ class RustBackendConfig:
         self.host: str = "0.0.0.0"
         self.port: int = 8000
         self.tracers: Optional[Dict[str, Any]] = None
+        self.resources: Optional[Dict[str, Any]] = None
 
     def add_endpoint(self, path: str, graph_config: dict, **kwargs):
         self.endpoints.append({"path": path, "graph": graph_config, **kwargs})
@@ -59,6 +58,8 @@ class RustBackendConfig:
         }
         if self.tracers:
             data["tracers"] = self.tracers
+        if self.resources:
+            data["resources"] = self.resources
         return json.dumps(data, default=str)
 
 
@@ -82,6 +83,10 @@ def serialize_for_rust(app: "HushApp") -> RustBackendConfig:
 
     # Extract tracer configs from app-level tracer
     config.tracers = _extract_tracer_configs(app._tracer)
+
+    # Pass through Rust resource configs
+    if hasattr(app, "_rust_resources") and app._rust_resources:
+        config.resources = app._rust_resources
 
     return config
 
@@ -182,53 +187,6 @@ def find_hush_serve_binary(crate_dir: Optional[Path] = None) -> Path:
     return release_bin
 
 
-def _attach_to_job(proc: subprocess.Popen):
-    """Attach child process to a Windows Job Object that kills on close.
-
-    When the parent Python process exits (for any reason), Windows automatically
-    terminates all processes assigned to this job object.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.windll.kernel32
-
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        return
-
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_int64),
-            ("PerJobUserTimeLimit", ctypes.c_int64),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-            ("IoInfo", ctypes.c_byte * 48),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-
-    # 9 = JobObjectExtendedLimitInformation
-    kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
-    kernel32.AssignProcessToJobObject(job, int(proc._handle))
-
-
 def _find_cdylib(rust_ops_path: Path) -> Optional[Path]:
     """Find a built cdylib in a Rust ops crate's target directory."""
     rust_ops_path = rust_ops_path.resolve()
@@ -317,66 +275,43 @@ def serve_rust(
         f.write(config_json)
         config_path = f.name
 
-    try:
-        if binary:
-            # Custom binary mode: ops are compiled in, no plugin needed
-            bin_path = Path(binary).resolve()
-            if not bin_path.exists():
-                raise FileNotFoundError(f"Custom binary not found: {binary}")
+    if binary:
+        # Custom binary mode: ops are compiled in, no plugin needed
+        bin_path = Path(binary).resolve()
+        if not bin_path.exists():
+            raise FileNotFoundError(f"Custom binary not found: {binary}")
 
-            print(f"Starting custom Rust backend at http://{host}:{port}")
-            print(f"Binary: {bin_path}")
-            print(f"Config: {config_path}")
+        print(f"Starting custom Rust backend at http://{host}:{port}")
+        print(f"Binary: {bin_path}")
+        print(f"Config: {config_path}")
 
-            cmd = [str(bin_path), "--config", config_path]
-        else:
-            # Default binary mode: find hush-serve + optional plugin
-            plugin_path: Optional[str] = None
-            if plugin:
-                plugin_path = str(Path(plugin).resolve())
-            elif rust_ops:
-                ops_path = Path(rust_ops)
-                cdylib = _find_cdylib(ops_path)
-                if cdylib is None:
-                    cdylib = _build_cdylib(ops_path)
-                plugin_path = str(cdylib)
+        cmd = [str(bin_path), "--config", config_path]
+    else:
+        # Default binary mode: find hush-serve + optional plugin
+        plugin_path: Optional[str] = None
+        if plugin:
+            plugin_path = str(Path(plugin).resolve())
+        elif rust_ops:
+            ops_path = Path(rust_ops)
+            cdylib = _find_cdylib(ops_path)
+            if cdylib is None:
+                cdylib = _build_cdylib(ops_path)
+            plugin_path = str(cdylib)
 
-            bin_path = find_hush_serve_binary(crate_dir)
+        bin_path = find_hush_serve_binary(crate_dir)
 
-            print(f"Starting hush-serve (Rust backend) at http://{host}:{port}")
-            print(f"Binary: {bin_path}")
-            print(f"Config: {config_path}")
-            if plugin_path:
-                print(f"Plugin: {plugin_path}")
+        print(f"Starting hush-serve (Rust backend) at http://{host}:{port}")
+        print(f"Binary: {bin_path}")
+        print(f"Config: {config_path}")
+        if plugin_path:
+            print(f"Plugin: {plugin_path}")
 
-            cmd = [str(bin_path), "--config", config_path]
-            if plugin_path:
-                cmd.extend(["--plugin", plugin_path])
+        cmd = [str(bin_path), "--config", config_path]
+        if plugin_path:
+            cmd.extend(["--plugin", plugin_path])
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
-
-        # Ensure child is killed when parent exits
-        if sys.platform == "win32":
-            _attach_to_job(proc)
-        else:
-            signal.signal(signal.SIGINT, lambda s, f: proc.send_signal(s))
-            signal.signal(signal.SIGTERM, lambda s, f: proc.send_signal(s))
-
-        atexit.register(proc.terminate)
-
-        try:
-            proc.wait()
-        except KeyboardInterrupt:
-            proc.terminate()
-            proc.wait(timeout=5)
-
-    finally:
-        # Clean up temp config file
-        try:
-            os.unlink(config_path)
-        except OSError:
-            pass
+    # Replace Python process with Rust binary.
+    # execvp never returns — Python is gone, Rust owns the process.
+    # stdout/stderr are inherited from the parent (bench.py redirects to log files,
+    # interactive use goes to terminal).
+    os.execvp(cmd[0], cmd)

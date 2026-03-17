@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "hush-icore",
+    "hush-macros",
     "hush-providers",
     "hush-serve",
     "hush-telemetry",

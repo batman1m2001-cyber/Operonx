@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-use crate::config::{GraphConfig, OpConfig};
+use crate::config::{GraphConfig, BaseOpConfig};
 use crate::states::state::EngineState;
 use crate::tracing::models::{TraceNode, TraceSummary};
 
@@ -24,7 +24,7 @@ struct OpInfo {
     is_gen: bool,
     display_name: String,
     contain_generation: bool,
-    /// Input var names (non-$ prefixed) from OpConfig.
+    /// Input var names (non-$ prefixed) from BaseOpConfig.
     input_vars: Vec<String>,
 }
 
@@ -150,7 +150,7 @@ impl TraceCollector {
     }
 
     fn build_op_info_for_op(
-        op: &OpConfig,
+        op: &BaseOpConfig,
         parent_graph_name: &str,
         result: &mut HashMap<String, OpInfo>,
     ) {

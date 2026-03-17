@@ -46,7 +46,6 @@ class EmbeddingConfig(YamlModel):
     embed_batch_size: Optional[int] = None
     model: Optional[str] = None
     dimensions: Optional[int] = None
-    cache_path: Optional[str] = None
 
     @classmethod
     def default(cls) -> "EmbeddingConfig":

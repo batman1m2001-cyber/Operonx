@@ -17,7 +17,7 @@ use ahash::{AHashMap, AHashSet};
 use serde_json::Value;
 use tokio::sync::{mpsc, Semaphore};
 
-use crate::config::{GraphConfig, LoopConfig, OpBound, OpConfig};
+use crate::config::{GraphConfig, LoopConfig, OpBound, BaseOpConfig};
 use crate::error::RushError;
 use crate::logging;
 use crate::ops::base;
@@ -76,7 +76,8 @@ pub(crate) fn run_graph(
 /// Core async scheduler — 1:1 port of Python's run_scheduler().
 ///
 /// All runtime state is local — concurrent calls on the same graph are safe.
-async fn run_scheduler(
+/// Public for `Hush::run_json_async()` — called directly from async context.
+pub async fn run_scheduler(
     config: &GraphConfig,
     state: &EngineState,
     context_id: &str,
@@ -177,7 +178,7 @@ async fn run_scheduler(
             // Built-in generators run inline (no tokio::spawn overhead).
             // call_generator() returns Vec<Value> synchronously — just send
             // Yield + Exhausted events to the channel for the main loop.
-            if op.rust_op.is_some() {
+            if op.func_name.is_some() || op.op_type == "code" {
                 *active_count += 1;
                 run_builtin_generator_inline(op, state, ctx, event_tx, registry);
                 return Ok(DispatchResult::Spawned);
@@ -197,20 +198,31 @@ async fn run_scheduler(
 
         // Branch ops → always inline (just condition evaluation)
         if op.op_type == "branch" {
-            base::execute_branch(op, state, ctx)?;
+            use crate::ops::op_trait::Op;
+            let branch = crate::ops::flow::branch_op::BranchOp::new(op);
+            let op_ctx = crate::ops::op_trait::OpContext { state, context: ctx, registry };
+            branch.run(&op_ctx)?;
             let newly_ready = propagate(op_name, ctx, ready_counts, soft_satisfied)?;
             return Ok(DispatchResult::Completed(newly_ready));
         }
 
-        // IO-bound ops (including provider ops) → spawn_blocking for parallel fan-out
+        // IO-bound ops (including provider ops) → spawn_blocking for async HTTP
         if op.provider_config.is_some() || op.bound == OpBound::Io {
             *active_count += 1;
             spawn_blocking_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
             return Ok(DispatchResult::Spawned);
         }
 
-        // CPU-bound / simple ops → inline execution
-        let result = base::run(op, state, ctx, registry)?;
+        // CPU-bound heavy ops → rayon thread pool (multi-core, doesn't block scheduler)
+        if op.bound == OpBound::Cpu {
+            *active_count += 1;
+            spawn_rayon_task(op, state, ctx, context_id, event_tx.clone(), registry);
+            return Ok(DispatchResult::Spawned);
+        }
+
+        // Default — inline execution (zero overhead, trivial ops)
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: ctx, registry };
+        let result = dispatch_leaf_op(op, &op_ctx)?;
 
         // PENDING sentinel — absorb input without triggering downstream
         if result == base::OpResult::Pending {
@@ -321,6 +333,45 @@ async fn run_scheduler(
     Ok(stream_contexts)
 }
 
+/// Dispatch a leaf op through the Op trait.
+///
+/// Core ops (code, parser) are constructed directly.
+/// Provider ops (llm, embedding, etc.) are constructed via OpFactory.
+fn dispatch_leaf_op(
+    op: &BaseOpConfig,
+    ctx: &crate::ops::op_trait::OpContext,
+) -> Result<base::OpResult, RushError> {
+    use crate::ops::op_trait::Op;
+
+    match op.op_type.as_str() {
+        "code" => {
+            let func_op = crate::ops::transform::func_op::FuncOp::new(op);
+            func_op.run(ctx)
+        }
+        "parser" => {
+            let parser_op = crate::ops::transform::parser_op::ParserOp::new(op);
+            parser_op.run(ctx)
+        }
+        "branch" => {
+            let branch_op = crate::ops::flow::branch_op::BranchOp::new(op);
+            branch_op.run(ctx)
+        }
+        _ => {
+            // Provider ops — delegate to factory
+            let factory = crate::ops::op_trait::get_global_factory();
+            if let Some(factory) = factory {
+                if let Some(provider_op) = factory.create_op(op) {
+                    return provider_op.run(ctx);
+                }
+            }
+            Err(RushError::UnsupportedOp(format!(
+                "Op '{}' (type='{}') has no implementation. Register an OpFactory or use #[hush_op].",
+                op.full_name, op.op_type
+            )))
+        }
+    }
+}
+
 // =============================================================================
 // Task spawners
 // =============================================================================
@@ -330,7 +381,7 @@ async fn run_scheduler(
 /// SAFETY: config and state are alive for the duration of run_scheduler,
 /// which awaits all tasks (via active_count + event loop) before returning.
 fn spawn_graph_task(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     _parent_config: &GraphConfig,
     state: &EngineState,
     context: &str,
@@ -339,7 +390,7 @@ fn spawn_graph_task(
     semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
-    let op_addr = op as *const OpConfig as usize;
+    let op_addr = op as *const BaseOpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let ctx_id = context_id.to_string();
@@ -355,7 +406,7 @@ fn spawn_graph_task(
         };
 
         // SAFETY: op and state are alive — caller awaits all tasks before returning
-        let op = unsafe { &*(op_addr as *const OpConfig) };
+        let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
         // Must call async version directly — block_on from async context deadlocks
@@ -381,7 +432,7 @@ fn spawn_graph_task(
 ///
 /// SAFETY: same as spawn_graph_task — caller awaits all tasks.
 fn spawn_blocking_task(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
     context_id: &str,
@@ -389,7 +440,7 @@ fn spawn_blocking_task(
     semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
-    let op_addr = op as *const OpConfig as usize;
+    let op_addr = op as *const BaseOpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let ctx_id = context_id.to_string();
@@ -409,10 +460,11 @@ fn spawn_blocking_task(
         };
 
         // SAFETY: op and state are alive — caller awaits all tasks
-        let op = unsafe { &*(op_addr as *const OpConfig) };
+        let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        match base::run(op, state, &ctx, &registry) {
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: &ctx, registry: &registry };
+        match dispatch_leaf_op(op, &op_ctx) {
             Ok(base::OpResult::Pending) => {
                 let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
             }
@@ -433,6 +485,61 @@ fn spawn_blocking_task(
     });
 }
 
+/// Spawn a CPU-bound op on rayon's work-stealing thread pool.
+///
+/// Uses rayon::spawn + tokio oneshot channel to notify the scheduler when done.
+/// For heavy compute (ONNX, crypto, par_iter) — doesn't block tokio or the scheduler.
+///
+/// SAFETY: same as spawn_graph_task — caller awaits all tasks.
+fn spawn_rayon_task(
+    op: &BaseOpConfig,
+    state: &EngineState,
+    context: &str,
+    _context_id: &str,
+    event_tx: mpsc::UnboundedSender<SchedulerEvent>,
+    registry: &Option<Arc<dyn OpRegistry>>,
+) {
+    let op_addr = op as *const BaseOpConfig as usize;
+    let state_addr = state as *const EngineState as usize;
+    let ctx = context.to_string();
+    let op_name = op.name.clone();
+    let registry = registry.clone();
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    rayon::spawn(move || {
+        // SAFETY: op and state are alive — caller awaits all tasks
+        let op = unsafe { &*(op_addr as *const BaseOpConfig) };
+        let state = unsafe { &*(state_addr as *const EngineState) };
+
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: &ctx, registry: &registry };
+        match dispatch_leaf_op(op, &op_ctx) {
+            Ok(base::OpResult::Pending) => {
+                let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
+            }
+            Ok(base::OpResult::Done) => {
+                let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
+            }
+            Err(e) => {
+                state.set(&op.full_name, "error", &ctx, Value::String(format!("{}", e)));
+                let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+                log::error!("{}", logging::format_event("op_error", &[
+                    ("request_id", &req_id),
+                    ("name", &op.full_name),
+                    ("error", &format!("{}", e)),
+                ]));
+                let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
+            }
+        }
+        let _ = tx.send(());
+    });
+
+    // Bridge: wait for rayon completion without blocking the scheduler
+    tokio::spawn(async move {
+        let _ = rx.await;
+    });
+}
+
 /// Spawn a generator op as a tokio task.
 ///
 /// Built-in generators: call `builtin_ops::call_generator()` → get Vec<Value> → emit Yield per item.
@@ -440,7 +547,7 @@ fn spawn_blocking_task(
 ///
 /// SAFETY: same as spawn_graph_task — caller awaits all tasks.
 fn spawn_generator_task(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
     context_id: &str,
@@ -448,7 +555,7 @@ fn spawn_generator_task(
     _semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
-    let op_addr = op as *const OpConfig as usize;
+    let op_addr = op as *const BaseOpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
     let _ctx_id = context_id.to_string();
@@ -457,7 +564,7 @@ fn spawn_generator_task(
 
     tokio::spawn(async move {
         // SAFETY: op and state are alive — caller awaits all tasks
-        let op = unsafe { &*(op_addr as *const OpConfig) };
+        let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
         // Resolve inputs
@@ -482,9 +589,12 @@ fn spawn_generator_task(
         let input_value = Value::Object(inputs);
 
         // Dispatch based on generator kind
-        if let Some(ref rust_op) = op.rust_op {
+        let gen_name = op.func_name.clone().or_else(|| {
+            if op.op_type == "code" { Some(op.name.clone()) } else { None }
+        });
+        if let Some(ref name) = gen_name {
             // Registry generator: call_generator → Vec<Value>
-            run_registry_generator(op, state, &ctx, rust_op, &input_value, &op_name, &event_tx, &registry);
+            run_registry_generator(op, state, &ctx, name, &input_value, &op_name, &event_tx, &registry);
         } else if op.provider_config.is_some() && op.stream {
             // Provider streaming (LLM): use execute_streaming with channel
             run_provider_streaming(op, state, &ctx, &input_value, &op_name, &event_tx).await;
@@ -493,7 +603,7 @@ fn spawn_generator_task(
             log::error!("{}", logging::format_event("gen_error", &[
                 ("request_id", &req_id),
                 ("name", &op.full_name),
-                ("error", "Generator op has no rust_op or streaming provider"),
+                ("error", "Generator op has no func_name or streaming provider"),
             ]));
         }
 
@@ -507,7 +617,7 @@ fn spawn_generator_task(
 /// to the channel, then sends Exhausted. Eliminates thread scheduling overhead
 /// for CPU-bound generators (avoids Windows 15.6ms timer quantum spikes).
 fn run_builtin_generator_inline(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     ctx: &str,
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
@@ -528,23 +638,22 @@ fn run_builtin_generator_inline(
     }
 
     let input_value = Value::Object(inputs);
-    let rust_op = op.rust_op.as_ref().unwrap();
-    run_registry_generator(op, state, ctx, rust_op, &input_value, &op.name, event_tx, registry);
+    let gen_name = op.func_name.as_deref().unwrap_or(&op.name);
+    run_registry_generator(op, state, ctx, gen_name, &input_value, &op.name, event_tx, registry);
     let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
 }
 
 /// Run a generator via the registry: call_generator → iterate Vec<Value> → emit Yield per item.
 fn run_registry_generator(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     ctx: &str,
-    rust_op: &str,
+    func_name: &str,
     input_value: &Value,
     op_name: &str,
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
-    let func_name = rust_op.rsplit("::").next().unwrap_or(rust_op);
 
     let items = registry
         .as_ref()
@@ -576,7 +685,7 @@ fn run_registry_generator(
             log::error!("{}", logging::format_event("gen_error", &[
                 ("request_id", &req_id),
                 ("name", &op.full_name),
-                ("error", &format!("Unknown generator '{}' (from rust_op='{}') — no registry loaded or op not found", func_name, rust_op)),
+                ("error", &format!("Unknown generator '{}' — no registry loaded or op not found", func_name)),
             ]));
         }
     }
@@ -584,19 +693,31 @@ fn run_registry_generator(
 
 /// Run provider streaming: execute_streaming with channel → receive chunks → emit Yield.
 async fn run_provider_streaming(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     ctx: &str,
     _input_value: &Value,
     op_name: &str,
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
 ) {
-    let config = match op.provider_config.as_ref() {
+    // Streaming provider ops will be supported via OpFactory in a future version.
+    // For now, log an error and return.
+    log::error!(
+        "Streaming provider ops not yet supported via Op trait. Op: '{}' type='{}'",
+        op_name, op.op_type
+    );
+    let _ = event_tx.send(SchedulerEvent::Done(op_name.to_string(), ctx.to_string()));
+    return;
+
+    // --- Dead code below (kept for reference during migration) ---
+    #[allow(unreachable_code)]
+    {
+
+    let _config = match op.provider_config.as_ref() {
         Some(c) => c,
         None => return,
     };
 
-    // Resolve inputs fresh for the provider call
     let mut inputs = serde_json::Map::new();
     for param in &op.inputs {
         if let Ok(Some(value)) = base::resolve_param(param, state, ctx) {
@@ -604,102 +725,9 @@ async fn run_provider_streaming(
         }
     }
 
-    // Use std::sync::mpsc channel (execute_streaming expects std::sync::mpsc::Sender)
-    let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Value>();
+    let (_chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Value>();
 
-    // Spawn the provider streaming call using unsafe ptr (ProviderConfig doesn't impl Clone)
-    let op_type = op.op_type.clone();
-    let config_addr = config as *const hush_providers::config::ProviderConfig as usize;
-    let provider_handle = tokio::spawn(async move {
-        // SAFETY: config is alive — parent op outlives this task
-        let config = unsafe { &*(config_addr as *const hush_providers::config::ProviderConfig) };
-        hush_providers::ops::execute_streaming(
-            &op_type,
-            Value::Object(inputs),
-            config,
-            chunk_tx,
-        )
-        .await
-    });
-
-    // Receive chunks and emit Yield events
-    // Use try_recv in a loop with yield_now to avoid blocking the async runtime
-    let mut idx = 0;
-    loop {
-        match chunk_rx.try_recv() {
-            Ok(chunk) => {
-                let stream_ctx = format!("{}.[{}]", ctx, idx);
-
-                // Store chunk in state
-                if let Value::Object(ref map) = chunk {
-                    for (key, value) in map {
-                        if !key.starts_with('$') {
-                            state.set(&op.full_name, key, &stream_ctx, value.clone());
-                        }
-                    }
-                }
-
-                let _ = event_tx.send(SchedulerEvent::Yield(
-                    op_name.to_string(),
-                    stream_ctx,
-                    chunk,
-                ));
-                idx += 1;
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // Check if provider task is done
-                if provider_handle.is_finished() {
-                    // Drain remaining items
-                    while let Ok(chunk) = chunk_rx.try_recv() {
-                        let stream_ctx = format!("{}.[{}]", ctx, idx);
-                        if let Value::Object(ref map) = chunk {
-                            for (key, value) in map {
-                                if !key.starts_with('$') {
-                                    state.set(&op.full_name, key, &stream_ctx, value.clone());
-                                }
-                            }
-                        }
-                        let _ = event_tx.send(SchedulerEvent::Yield(
-                            op_name.to_string(),
-                            stream_ctx,
-                            chunk,
-                        ));
-                        idx += 1;
-                    }
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-        }
-    }
-
-    // Handle provider errors
-    match provider_handle.await {
-        Ok(Err(e)) => {
-            state.set(
-                &op.full_name,
-                "error",
-                ctx,
-                Value::String(format!("Streaming provider error: {}", e)),
-            );
-            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
-            log::error!("{}", logging::format_event("op_error", &[
-                ("request_id", &req_id),
-                ("name", &op.full_name),
-                ("error", &format!("Streaming provider error: {}", e)),
-            ]));
-        }
-        Err(e) => {
-            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
-            log::error!("{}", logging::format_event("op_error", &[
-                ("request_id", &req_id),
-                ("name", &op.full_name),
-                ("error", &format!("Provider task panicked: {}", e)),
-            ]));
-        }
-        Ok(Ok(_)) => {}
-    }
+    } // end unreachable_code block
 }
 
 // =============================================================================
@@ -969,7 +997,7 @@ fn find_terminal_ops(config: &GraphConfig) -> Vec<String> {
 /// Called from tokio::spawn — must NOT use block_on (would deadlock).
 /// Calls run_scheduler directly since we're already in an async context.
 async fn run_nested_graph_async(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
     registry: &Option<Arc<dyn OpRegistry>>,
@@ -1007,7 +1035,7 @@ async fn run_nested_graph_async(
 
 /// Collect outputs from a nested graph and store them under the parent op.
 fn collect_nested_outputs(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     inner: &GraphConfig,
     state: &EngineState,
     context: &str,

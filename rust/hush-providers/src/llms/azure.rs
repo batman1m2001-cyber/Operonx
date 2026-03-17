@@ -1,4 +1,4 @@
-//! Azure OpenAI LLM provider — chat completions + streaming.
+//! Azure OpenAI LLM provider — mirrors Python's `llms/azure.py`.
 
 use std::sync::mpsc::Sender;
 
@@ -6,6 +6,30 @@ use serde_json::{json, Value};
 
 use crate::config::llm::AzureConfig;
 use crate::http::{get_client, ProviderError, ProviderResult};
+
+/// Azure OpenAI provider struct.
+pub struct AzureProvider<'a> {
+    pub config: &'a AzureConfig,
+}
+
+impl<'a> AzureProvider<'a> {
+    pub fn new(config: &'a AzureConfig) -> Self {
+        AzureProvider { config }
+    }
+}
+
+impl super::base::LlmProvider for AzureProvider<'_> {
+    fn generate(&self, messages: &[Value], params: &Value) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion(config, &inputs).await }
+    }
+    fn stream(&self, messages: &[Value], params: &Value, chunk_tx: Sender<Value>) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion_stream(config, &inputs, chunk_tx).await }
+    }
+}
 use crate::llms::types::{
     build_chat_request, format_completion_response, ChatCompletionResponse,
     StreamingChatCompletionRequest,

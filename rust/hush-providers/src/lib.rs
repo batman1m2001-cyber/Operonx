@@ -18,5 +18,7 @@ pub mod config;
 pub mod embeddings;
 pub mod http;
 pub mod llms;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 pub mod ops;
 pub mod rerankers;

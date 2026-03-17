@@ -1,11 +1,38 @@
-//! Gemini LLM provider — chat completions via Vertex AI OpenAI-compatible endpoint.
+//! Gemini LLM provider — mirrors Python's `llms/gemini.py`.
 
 use std::sync::mpsc::Sender;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::config::llm::GeminiConfig;
 use crate::http::{get_client, ProviderError, ProviderResult};
+
+/// Gemini (Vertex AI) provider struct.
+pub struct GeminiProvider<'a> {
+    pub config: &'a GeminiConfig,
+    pub access_token: Option<String>,
+}
+
+impl<'a> GeminiProvider<'a> {
+    pub fn new(config: &'a GeminiConfig, access_token: Option<String>) -> Self {
+        GeminiProvider { config, access_token }
+    }
+}
+
+impl super::base::LlmProvider for GeminiProvider<'_> {
+    fn generate(&self, messages: &[Value], params: &Value) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let token = self.access_token.as_deref();
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion(config, &inputs, token).await }
+    }
+    fn stream(&self, messages: &[Value], params: &Value, chunk_tx: Sender<Value>) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let token = self.access_token.as_deref();
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion_stream(config, &inputs, token, chunk_tx).await }
+    }
+}
 use crate::llms::types::{
     build_chat_request, build_streaming_request, format_completion_response,
     ChatCompletionResponse,

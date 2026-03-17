@@ -48,6 +48,7 @@ from hush.providers.llms import (
 from hush.providers.ops import (
     EmbeddingOp,
     LLMOp,
+    OnnxOp,
     PromptOp,
     RerankOp,
     chain,
@@ -102,6 +103,7 @@ __all__ = [
     # Nodes
     "LLMOp",
     "EmbeddingOp",
+    "OnnxOp",
     "RerankOp",
     "PromptOp",
     "chain",

@@ -7,6 +7,8 @@
 //! - HuggingFace → huggingface.rs (stub — use ONNX instead)
 //! - ONNX → onnx.rs (pure Rust: ort + tokenizers)
 
+pub mod base;
+pub mod config;
 pub mod cohere;
 pub mod huggingface;
 #[cfg(feature = "onnx")]

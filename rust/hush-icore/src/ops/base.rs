@@ -11,12 +11,10 @@ use std::time::Instant;
 use chrono::Utc;
 use serde_json::Value;
 
-use crate::config::{OpConfig, ParamConfig, RefConfig};
+use crate::config::{BaseOpConfig, ParamConfig, RefConfig};
 use crate::logging;
 use crate::error::RushError;
 use crate::refs::ref_transforms::evaluate_ref_transforms;
-use crate::registry::OpRegistry;
-use crate::runtime;
 use crate::states::state::EngineState;
 
 // =============================================================================
@@ -43,25 +41,27 @@ fn is_pending(result: &Option<Value>) -> bool {
     }
 }
 
-/// Execute a leaf op: resolve inputs → call op → store outputs → push refs.
-/// Includes error resilience: catches op errors, stores in state, continues.
-/// Includes observability: enabled check, timing, logging.
-pub(crate) fn run(
-    op: &OpConfig,
-    state: &EngineState,
-    context: &str,
-    registry: &Option<Arc<dyn OpRegistry>>,
-) -> Result<OpResult, RushError> {
+/// Execute a leaf op with a custom execute function (closure).
+/// This is the ONLY entry point for op execution — called by Op::run() default impl.
+/// Used by `Op::run()` default impl — the closure calls `self.execute_core()`.
+pub(crate) fn run_with_core<F>(
+    op: &BaseOpConfig,
+    ctx: &super::op_trait::OpContext,
+    execute_fn: F,
+) -> Result<OpResult, RushError>
+where
+    F: FnOnce(serde_json::Map<String, Value>) -> Result<Option<Value>, RushError>,
+{
+    let state = ctx.state;
+    let context = ctx.context;
+
     if !op.enabled {
         return Ok(OpResult::Done);
     }
 
-    // Start timing — Instant::now() is cheap (monotonic), always used for slow-op warnings.
-    // Utc::now() is a syscall — only pay for it when tracers need timestamps.
     let perf_start = Instant::now();
     let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
 
-    // Try: resolve inputs → execute → store outputs
     let mut pending = false;
     let mut input_map = serde_json::Map::new();
     let mut result_obj_for_log: Option<Value> = None;
@@ -72,12 +72,36 @@ pub(crate) fn run(
             }
         }
 
-        let result_obj = execute_op(op, input_map.clone(), state, context, registry)?;
+        // Cache check
+        let op_cache = if op.cache.is_some() {
+            super::cache::get_op_cache(&op.full_name)
+        } else {
+            None
+        };
+        let input_hash = if op_cache.is_some() {
+            Some(super::cache::hash_inputs(&input_map))
+        } else {
+            None
+        };
 
-        // Check for PENDING sentinel before storing
+        if let (Some(ref cache), Some(hash)) = (&op_cache, input_hash) {
+            if let Some(cached) = cache.get(hash) {
+                result_obj_for_log = Some(cached.clone());
+                store_result(op, Some(cached), state, context)?;
+                return Ok(());
+            }
+        }
+
+        // Execute via closure (Op::execute_core)
+        let result_obj = execute_fn(input_map.clone())?;
+
         if is_pending(&result_obj) {
             pending = true;
             return Ok(());
+        }
+
+        if let (Some(ref cache), Some(hash), Some(ref result)) = (&op_cache, input_hash, &result_obj) {
+            cache.insert(hash, result.clone());
         }
 
         result_obj_for_log = result_obj.clone();
@@ -86,7 +110,7 @@ pub(crate) fn run(
         Ok(())
     })();
 
-    // "finally" block — always runs
+    // Timing + logging (same as run())
     let duration_ms = if let Some(st) = start_time {
         store_timing(op, state, context, st, perf_start)
     } else {
@@ -131,70 +155,7 @@ pub(crate) fn run(
     Ok(if pending { OpResult::Pending } else { OpResult::Done })
 }
 
-// =============================================================================
-// Execution dispatch
-// =============================================================================
-
-/// How an op should be executed — classified once, matched once.
-enum OpRoute<'a> {
-    /// Non-streaming provider (LLM, embedding, rerank).
-    Provider,
-    /// Native transform op (prompt, parser) — synchronous.
-    NativeTransform,
-    /// Builtin op (direct function call from builtin_ops module).
-    Builtin(&'a str),
-    /// Streaming not supported in rust mode v1.
-    StreamingProvider,
-    /// No Rust implementation available.
-    Unsupported,
-}
-
-/// Classify an op into its execution route.
-fn classify_op(op: &OpConfig) -> OpRoute<'_> {
-    if op.provider_config.is_some() {
-        if op.stream && op.op_type == "llm" {
-            return OpRoute::StreamingProvider;
-        }
-        return OpRoute::Provider;
-    }
-    if hush_providers::ops::is_native_transform_op(&op.op_type) {
-        return OpRoute::NativeTransform;
-    }
-    if let Some(ref name) = op.rust_op {
-        return OpRoute::Builtin(name);
-    }
-    OpRoute::Unsupported
-}
-
-/// Dispatch op execution to the appropriate handler.
-/// Takes ownership of inputs to avoid redundant cloning.
-fn execute_op(
-    op: &OpConfig,
-    inputs: serde_json::Map<String, Value>,
-    _state: &EngineState,
-    _context: &str,
-    registry: &Option<Arc<dyn OpRegistry>>,
-) -> Result<Option<Value>, RushError> {
-    match classify_op(op) {
-        OpRoute::StreamingProvider => Err(RushError::UnsupportedOp(
-            format!(
-                "Streaming (stream=true) is not supported in rust mode v1. Op: '{}'",
-                op.full_name
-            ),
-        )),
-        OpRoute::Provider => execute_provider_op(op, inputs),
-        OpRoute::NativeTransform => execute_native_transform_op(&op.op_type, inputs),
-        OpRoute::Builtin(spec) => execute_registry_op(spec, inputs, registry),
-        OpRoute::Unsupported => {
-            // Branch ops are handled separately by dispatch_op, not here.
-            // If we get here, the op truly has no Rust implementation.
-            Err(RushError::UnsupportedOp(format!(
-                "Op '{}' (type={}) has no Rust implementation. Use @op(rust=...) to provide one.",
-                op.full_name, op.op_type
-            )))
-        }
-    }
-}
+// Execution dispatch removed — now handled by Op trait structs via dispatch_leaf_op() in graph_op.rs.
 
 // =============================================================================
 // Observability helpers
@@ -202,7 +163,7 @@ fn execute_op(
 
 /// Store timing metrics (start_time, end_time, duration_ms) in state.
 fn store_timing(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
     start_time: chrono::DateTime<Utc>,
@@ -234,7 +195,7 @@ fn store_timing(
 }
 
 /// Log an error and store it in state.
-fn log_error(op: &OpConfig, state: &EngineState, context: &str, error_msg: &str) {
+fn log_error(op: &BaseOpConfig, state: &EngineState, context: &str, error_msg: &str) {
     state.set(
         &op.full_name,
         "error",
@@ -303,7 +264,7 @@ pub(crate) fn resolve_ref(
 /// Branch condition refs serialize `PARENT` as `"__PARENT__"` (literal string sentinel),
 /// but regular op inputs resolve to the actual graph name during Python build().
 /// This function handles that translation so branch conditions find the right state values.
-fn resolve_ref_with_parent(
+pub(crate) fn resolve_ref_with_parent(
     ref_config: &RefConfig,
     state: &EngineState,
     context: &str,
@@ -337,7 +298,7 @@ fn resolve_ref_with_parent(
 
 /// Store an op's execution result into state.
 pub(crate) fn store_result(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     result_obj: Option<Value>,
     state: &EngineState,
     context: &str,
@@ -367,7 +328,7 @@ pub(crate) fn store_result(
 
 /// Push output refs — forward op outputs to parent/destination state.
 pub(crate) fn push_output_refs(
-    op: &OpConfig,
+    op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
 ) -> Result<(), RushError> {
@@ -382,164 +343,8 @@ pub(crate) fn push_output_refs(
     Ok(())
 }
 
-// =============================================================================
-// Registry op execution
-// =============================================================================
-
-/// Execute an op via the OpRegistry.
-/// Accepts both "path::func" format (extracts func name) and plain "func" names.
-fn execute_registry_op(
-    spec: &str,
-    inputs: serde_json::Map<String, Value>,
-    registry: &Option<Arc<dyn OpRegistry>>,
-) -> Result<Option<Value>, RushError> {
-    let func_name = spec.rsplit("::").next().unwrap_or(spec);
-    let input_value = Value::Object(inputs);
-
-    let reg = registry.as_ref().ok_or_else(|| {
-        RushError::RegistryError(format!(
-            "No op registry loaded. Cannot dispatch rust_op='{}'. Load a plugin via --plugin or set_registry().",
-            spec
-        ))
-    })?;
-
-    reg.call(func_name, &input_value)
-        .map(Some)
-        .ok_or_else(|| {
-            RushError::RegistryError(format!(
-                "Unknown op function: '{}' (from rust_op='{}')",
-                func_name, spec
-            ))
-        })
-}
-
-// =============================================================================
-// Native transform op execution (synchronous)
-// =============================================================================
-
-/// Execute a native transform op (prompt, parser) via hush-providers.
-fn execute_native_transform_op(
-    op_type: &str,
-    inputs: serde_json::Map<String, Value>,
-) -> Result<Option<Value>, RushError> {
-    // Move inputs into Value::Object — zero-cost, no deep clone
-    let json_outputs = hush_providers::ops::execute_transform(op_type, Value::Object(inputs))
-        .map_err(|e| RushError::ProviderError(format!("Native transform op error: {}", e)))?;
-
-    Ok(Some(json_outputs))
-}
-
-// =============================================================================
-// Native provider op execution (async HTTP)
-// =============================================================================
-
-/// Execute a native provider op via hush-providers (sync wrapper — DEPRECATED for new code).
-fn execute_provider_op(
-    op: &OpConfig,
-    inputs: serde_json::Map<String, Value>,
-) -> Result<Option<Value>, RushError> {
-    let config = op.provider_config.as_ref().ok_or_else(|| {
-        RushError::ProviderError(format!(
-            "Op '{}' classified as Provider but missing provider_config",
-            op.full_name
-        ))
-    })?;
-
-    if !is_native_config(config) {
-        return Err(RushError::UnsupportedOp(format!(
-            "Op '{}' uses a non-native provider (api_type not supported in Rust mode)",
-            op.full_name
-        )));
-    }
-
-    // Move inputs into Value::Object — zero-cost, no deep clone
-    let json_inputs = Value::Object(inputs);
-
-    let json_outputs = runtime::block_on_async(async {
-        hush_providers::ops::execute(&op.op_type, json_inputs, config).await
-    })
-    .map_err(|e| RushError::ProviderError(format!("Native provider op error: {}", e)))?;
-
-    Ok(Some(json_outputs))
-}
-
-/// Check if a provider config's api_type(s) are natively supported.
-fn is_native_config(config: &hush_providers::config::ProviderConfig) -> bool {
-    match config {
-        hush_providers::config::ProviderConfig::LLM(c) => {
-            !c.configs.is_empty()
-                && c.configs
-                    .iter()
-                    .all(|cfg| hush_providers::ops::is_native_provider_op(cfg.api_type()))
-        }
-        hush_providers::config::ProviderConfig::Embedding(c) => {
-            hush_providers::ops::is_native_provider_op(&c.api_type)
-        }
-        hush_providers::config::ProviderConfig::Reranking(c) => {
-            hush_providers::ops::is_native_provider_op(&c.api_type)
-        }
-    }
-}
-
-// =============================================================================
-// Branch op execution
-// =============================================================================
-
-/// Execute a branch op: evaluate conditions, store selected target.
-pub(crate) fn execute_branch(
-    op: &OpConfig,
-    state: &EngineState,
-    context: &str,
-) -> Result<(), RushError> {
-    let branch = op.branch_config.as_ref().ok_or_else(|| {
-        RushError::BranchError(format!(
-            "Branch op '{}' missing branch_config",
-            op.full_name
-        ))
-    })?;
-
-    // Derive parent graph name from op full_name (e.g. "g.router" → "g")
-    let parent_graph = op
-        .full_name
-        .rsplit_once('.')
-        .map(|(parent, _)| parent)
-        .unwrap_or(&op.full_name);
-
-    // Resolve inputs first
-    for param in &op.inputs {
-        if let Some(value) = resolve_param(param, state, context)? {
-            state.set(&op.full_name, &param.var_name, context, value);
-        }
-    }
-
-    // Evaluate cases in order
-    for case in &branch.cases {
-        // Branch condition refs may use "__PARENT__" as source (from Python serialization).
-        // Resolve it to the actual parent graph name.
-        let cond_value = resolve_ref_with_parent(&case.condition, state, context, parent_graph)?;
-        if let Some(ref val) = cond_value {
-            if crate::refs::ref_transforms::is_truthy(val) {
-                state.set(
-                    &op.full_name,
-                    "target",
-                    context,
-                    Value::String(case.target.clone()),
-                );
-                return Ok(());
-            }
-        }
-    }
-
-    // Default case
-    let target = branch
-        .default
-        .clone()
-        .unwrap_or_else(|| "__END__".to_string());
-    state.set(
-        &op.full_name,
-        "target",
-        context,
-        Value::String(target),
-    );
-    Ok(())
-}
+// Old dispatch functions (execute_registry_op, execute_provider_op, execute_branch)
+// removed — now handled by Op trait structs:
+//   FuncOp (transform/func_op.rs)
+//   BranchOp (flow/branch_op.rs)
+//   LlmOp, EmbeddingOp, etc. (hush-providers/src/ops/)
