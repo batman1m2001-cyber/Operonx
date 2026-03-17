@@ -3,10 +3,21 @@
 Chạy: cd examples && uv run python ex05_loops_and_branches/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 
 from hush.core import Hush
-from workflow import build_branch, build_for_loop, build_map_op, build_while_loop
+
+from ex05_loops_and_branches.workflow import (
+    build_branch,
+    build_for_loop,
+    build_map_op,
+    build_while_loop,
+)
 
 
 async def main():

@@ -3,10 +3,16 @@
 Chạy: cd examples && uv run python ex01_hello_world/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 
 from hush.core import Hush
-from workflow import build_chain, build_hello, build_parallel
+
+from ex01_hello_world.workflow import build_chain, build_hello, build_parallel
 
 
 async def main():

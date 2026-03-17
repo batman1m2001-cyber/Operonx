@@ -17,11 +17,17 @@ Test:
   uv run python ex10_multi_model/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 from pathlib import Path
 
 from hush.serve import HushApp
-from workflow import (
+
+from ex10_multi_model.workflow import (
     build_cost_routing,
     build_ensemble,
     build_fallback,

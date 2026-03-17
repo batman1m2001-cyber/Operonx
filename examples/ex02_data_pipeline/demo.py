@@ -3,11 +3,17 @@
 Chạy: cd examples && uv run python ex02_data_pipeline/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import sys
 
 from hush.core import Hush
-from workflow import build_data_pipeline, build_text_pipeline
+
+from ex02_data_pipeline.workflow import build_data_pipeline, build_text_pipeline
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

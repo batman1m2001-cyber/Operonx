@@ -318,9 +318,11 @@ impl BaseOpConfig {
         };
 
         // Store provider config as opaque JSON — parsed by provider ops at execution time.
+        // Provider fields (resource_configs, resource, ratios, etc.) are serialized
+        // at top level by Python, so store the entire op JSON for the provider to parse.
         let provider_config = match op_type.as_str() {
-            "llm" | "embedding" | "rerank" | "onnx" => {
-                val.get("provider_config").cloned()
+            "llm" | "embedding" | "rerank" | "onnx" | "prompt" => {
+                Some(val.clone())
             }
             _ => None,
         };

@@ -12,6 +12,11 @@ Example 4: Requires LANGFUSE keys in .env.
 Chạy: cd examples && uv run python ex14_streaming_tracing/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import uuid
 from pathlib import Path
@@ -21,7 +26,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import build_async_pipeline, build_text_pipeline
+
+from ex14_streaming_tracing.workflow import build_async_pipeline, build_text_pipeline
 
 SAMPLE_TEXT = (
     "The streaming architecture enables real-time token delivery "

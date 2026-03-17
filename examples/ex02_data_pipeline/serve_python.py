@@ -11,10 +11,16 @@ Test:
   uv run python ex02_data_pipeline/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 
 from hush.serve import HushApp
-from workflow import build_data_pipeline, build_text_pipeline
+
+from ex02_data_pipeline.workflow import build_data_pipeline, build_text_pipeline
 
 app = HushApp()
 app.endpoint("/data-pipeline", graph=build_data_pipeline())

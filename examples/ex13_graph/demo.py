@@ -11,11 +11,17 @@ Learn:
 Chạy: cd examples && uv run python ex13_graph/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import sys
 
 from hush.core import END, PARENT, START, GraphOp, Hush
-from workflow import add_and_double, double_flow, double_renamed, quad_flow
+
+from ex13_graph.workflow import add_and_double, double_flow, double_renamed, quad_flow
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

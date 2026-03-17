@@ -36,7 +36,7 @@ pub fn parse_provider_config(op_type: &str, val: &serde_json::Value) -> Result<P
 pub fn parse_llm_provider_config(val: &serde_json::Value) -> Result<LLMProviderConfig, String> {
     let mut configs = Vec::new();
 
-    // Parse resource_configs array
+    // Parse resource_configs array (LLM serializes configs as array)
     if let Some(arr) = val.get("resource_configs").and_then(|v| v.as_array()) {
         for cfg_val in arr {
             if let Ok(cfg) = llm::parse_llm_config_json(cfg_val) {
@@ -79,37 +79,53 @@ pub fn parse_llm_provider_config(val: &serde_json::Value) -> Result<LLMProviderC
     Ok(LLMProviderConfig { configs, resources, ratios, fallback_configs, fallback, batch_mode })
 }
 
+/// Get the provider-specific config section from an op JSON.
+/// Python serializes provider config under "resource_config" (singular) or "resource_configs" (array).
+fn get_provider_section<'a>(val: &'a serde_json::Value) -> &'a serde_json::Value {
+    // Single resource config (embedding, rerank, onnx)
+    if let Some(rc) = val.get("resource_config") {
+        if !rc.is_null() {
+            return rc;
+        }
+    }
+    // Fallback to top-level (when fields are already at top)
+    val
+}
+
 /// Parse embedding config from JSON.
 pub fn parse_embedding_config(val: &serde_json::Value) -> Result<embedding::EmbeddingConfig, String> {
-    let api_type = val.get("api_type").and_then(|v| v.as_str()).unwrap_or("openai").to_string();
-    let model = val.get("model").and_then(|v| v.as_str()).map(String::from);
-    let api_key = val.get("api_key").and_then(|v| v.as_str()).map(String::from);
-    let base_url = val.get("base_url").and_then(|v| v.as_str()).map(String::from);
-    let dimensions = val.get("dimensions").and_then(|v| v.as_u64()).map(|v| v as usize);
-    let embed_batch_size = val.get("embed_batch_size").and_then(|v| v.as_u64()).map(|v| v as usize);
+    let cfg = get_provider_section(val);
+    let api_type = cfg.get("api_type").and_then(|v| v.as_str()).unwrap_or("openai").to_string();
+    let model = cfg.get("model").and_then(|v| v.as_str()).map(String::from);
+    let api_key = cfg.get("api_key").and_then(|v| v.as_str()).map(String::from);
+    let base_url = cfg.get("base_url").and_then(|v| v.as_str()).map(String::from);
+    let dimensions = cfg.get("dimensions").and_then(|v| v.as_u64()).map(|v| v as usize);
+    let embed_batch_size = cfg.get("embed_batch_size").and_then(|v| v.as_u64()).map(|v| v as usize);
     Ok(embedding::EmbeddingConfig { api_type, model, api_key, base_url, dimensions, embed_batch_size })
 }
 
 /// Parse reranking config from JSON.
 pub fn parse_reranking_config(val: &serde_json::Value) -> Result<reranking::RerankingConfig, String> {
-    let api_type = val.get("api_type").and_then(|v| v.as_str()).unwrap_or("vllm").to_string();
-    let model = val.get("model").and_then(|v| v.as_str()).map(String::from);
-    let api_key = val.get("api_key").and_then(|v| v.as_str()).map(String::from);
-    let api_version = val.get("api_version").and_then(|v| v.as_str()).map(String::from);
-    let base_url = val.get("base_url").and_then(|v| v.as_str()).map(String::from);
+    let cfg = get_provider_section(val);
+    let api_type = cfg.get("api_type").and_then(|v| v.as_str()).unwrap_or("vllm").to_string();
+    let model = cfg.get("model").and_then(|v| v.as_str()).map(String::from);
+    let api_key = cfg.get("api_key").and_then(|v| v.as_str()).map(String::from);
+    let api_version = cfg.get("api_version").and_then(|v| v.as_str()).map(String::from);
+    let base_url = cfg.get("base_url").and_then(|v| v.as_str()).map(String::from);
     Ok(reranking::RerankingConfig { api_type, model, api_key, api_version, base_url })
 }
 
 /// Parse ONNX inference config from JSON.
 pub fn parse_onnx_config(val: &serde_json::Value) -> Result<onnx::OnnxInferenceConfig, String> {
-    let model_path = val.get("model_path").and_then(|v| v.as_str())
+    let cfg = get_provider_section(val);
+    let model_path = cfg.get("model_path").and_then(|v| v.as_str())
         .ok_or_else(|| "Missing model_path".to_string())?.to_string();
-    let input_type = match val.get("input_type").and_then(|v| v.as_str()).unwrap_or("mlp") {
+    let input_type = match cfg.get("input_type").and_then(|v| v.as_str()).unwrap_or("mlp") {
         "attention" => onnx::OnnxInputType::Attention,
         _ => onnx::OnnxInputType::Mlp,
     };
-    let pool_size = val.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let intra_threads = val.get("intra_threads").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let pool_size = cfg.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let intra_threads = cfg.get("intra_threads").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
     Ok(onnx::OnnxInferenceConfig { model_path, input_type, pool_size, intra_threads })
 }
 

@@ -5,6 +5,11 @@ Cần: OPENAI_API_KEY trong .env + resources.yaml (embedding:openai, llm:gpt-4o-
 Chạy: cd examples && uv run python ex07_embeddings_and_rag/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 import sys
@@ -17,7 +22,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import DOCUMENTS, build_basic_embedding, build_rag_with_rerank, build_simple_rag
+
+from ex07_embeddings_and_rag.workflow import (
+    DOCUMENTS,
+    build_basic_embedding,
+    build_rag_with_rerank,
+    build_simple_rag,
+)
 
 
 async def main():

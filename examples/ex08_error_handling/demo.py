@@ -6,6 +6,11 @@ Example 4: requires OPENAI_API_KEY (LLM fallback).
 Chạy: cd examples && uv run python ex08_error_handling/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 import sys
@@ -16,7 +21,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import (
+
+from ex08_error_handling.workflow import (
     build_error_capture,
     build_error_routing,
     build_llm_fallback,

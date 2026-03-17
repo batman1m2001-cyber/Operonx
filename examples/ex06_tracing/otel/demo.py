@@ -6,10 +6,15 @@ Needs: pip install hush-telemetry[otel]
 Chạy: cd examples && uv run python ex06_tracing/otel/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 
-from workflow import build_text_analyzer
+from ex06_tracing.otel.workflow import build_text_analyzer
 
 
 def _make_tracer():

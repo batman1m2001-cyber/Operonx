@@ -7,6 +7,11 @@ Examples 1-3: no API keys required.
 Chạy: cd examples && uv run python ex11_parallel_advanced/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 from pathlib import Path
 
@@ -15,7 +20,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import build_fan_out, build_iteration, build_partial_failure
+
+from ex11_parallel_advanced.workflow import build_fan_out, build_iteration, build_partial_failure
 
 
 async def main():

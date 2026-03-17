@@ -10,10 +10,16 @@ Test:
   uv run python ex12_rag_advanced/bench.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import os
 
 from hush.serve import HushApp
-from workflow import build_keyword_rrf
+
+from ex12_rag_advanced.workflow import build_keyword_rrf
 
 app = HushApp()
 app.endpoint("/keyword-rrf", graph=build_keyword_rrf())

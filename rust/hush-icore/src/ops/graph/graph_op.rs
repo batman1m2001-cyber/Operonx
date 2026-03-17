@@ -198,7 +198,10 @@ pub async fn run_scheduler(
 
         // Branch ops → always inline (just condition evaluation)
         if op.op_type == "branch" {
-            base::execute_branch(op, state, ctx)?;
+            use crate::ops::op_trait::Op;
+            let branch = crate::ops::flow::branch_op::BranchOp::new(op);
+            let op_ctx = crate::ops::op_trait::OpContext { state, context: ctx, registry };
+            branch.run(&op_ctx)?;
             let newly_ready = propagate(op_name, ctx, ready_counts, soft_satisfied)?;
             return Ok(DispatchResult::Completed(newly_ready));
         }
@@ -218,7 +221,8 @@ pub async fn run_scheduler(
         }
 
         // Default — inline execution (zero overhead, trivial ops)
-        let result = base::run(op, state, ctx, registry)?;
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: ctx, registry };
+        let result = dispatch_leaf_op(op, &op_ctx)?;
 
         // PENDING sentinel — absorb input without triggering downstream
         if result == base::OpResult::Pending {
@@ -329,6 +333,43 @@ pub async fn run_scheduler(
     Ok(stream_contexts)
 }
 
+/// Dispatch a leaf op through the Op trait.
+///
+/// Core ops (code, parser) are constructed directly.
+/// Provider ops (llm, embedding, etc.) are constructed via OpFactory.
+fn dispatch_leaf_op(
+    op: &BaseOpConfig,
+    ctx: &crate::ops::op_trait::OpContext,
+) -> Result<base::OpResult, RushError> {
+    use crate::ops::op_trait::Op;
+
+    match op.op_type.as_str() {
+        "code" => {
+            let func_op = crate::ops::transform::func_op::FuncOp::new(op);
+            func_op.run(ctx)
+        }
+        "parser" => {
+            let parser_op = crate::ops::transform::parser_op::ParserOp::new(op);
+            parser_op.run(ctx)
+        }
+        "branch" => {
+            let branch_op = crate::ops::flow::branch_op::BranchOp::new(op);
+            branch_op.run(ctx)
+        }
+        _ => {
+            // Provider ops — delegate to factory
+            let factory = crate::ops::op_trait::get_global_factory();
+            if let Some(factory) = factory {
+                if let Some(provider_op) = factory.create_op(op) {
+                    return provider_op.run(ctx);
+                }
+            }
+            // Fallback to old dispatch for backward compat
+            base::run(op, ctx.state, ctx.context, ctx.registry)
+        }
+    }
+}
+
 // =============================================================================
 // Task spawners
 // =============================================================================
@@ -420,7 +461,8 @@ fn spawn_blocking_task(
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        match base::run(op, state, &ctx, &registry) {
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: &ctx, registry: &registry };
+        match dispatch_leaf_op(op, &op_ctx) {
             Ok(base::OpResult::Pending) => {
                 let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
             }
@@ -468,7 +510,8 @@ fn spawn_rayon_task(
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        match base::run(op, state, &ctx, &registry) {
+        let op_ctx = crate::ops::op_trait::OpContext { state, context: &ctx, registry: &registry };
+        match dispatch_leaf_op(op, &op_ctx) {
             Ok(base::OpResult::Pending) => {
                 let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
             }

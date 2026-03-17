@@ -8,6 +8,11 @@ Requires: OPENAI_API_KEY in .env
 Chạy: cd examples && uv run python ex10_multi_model/demo.py
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import os
 import sys
@@ -18,7 +23,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
-from workflow import (
+
+from ex10_multi_model.workflow import (
     build_cost_routing,
     build_ensemble,
     build_fallback,
