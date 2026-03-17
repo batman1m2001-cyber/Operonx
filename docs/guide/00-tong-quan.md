@@ -81,8 +81,8 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Quickstart](02-quickstart.md) | `01_hello_world/demo.py`, `02_data_pipeline/demo.py` | Hello world, data pipeline |
-| [Core Concepts](03-core-concepts.md) | `01_hello_world/demo.py`, `02_data_pipeline/demo.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
+| [Quickstart](02-quickstart.md) | `ex01_hello_world/demo.py`, `ex02_data_pipeline/demo.py` | Hello world, data pipeline |
+| [Core Concepts](03-core-concepts.md) | `ex01_hello_world/demo.py`, `ex02_data_pipeline/demo.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
 
 ### LLM & AI
 
@@ -117,5 +117,5 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 ```bash
 cd examples
-uv run python 01_hello_world/demo.py
+uv run python ex01_hello_world/demo.py
 ```

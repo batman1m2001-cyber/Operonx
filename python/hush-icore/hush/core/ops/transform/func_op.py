@@ -22,7 +22,6 @@ def op(
     func: Optional[Callable] = None,
     *,
     executor: Optional[str] = None,
-    rust: Optional[str] = None,
     bound: Optional[str] = None,
     cache=None,
 ):
@@ -38,10 +37,6 @@ def op(
         def fetch(url: str):
             return {"data": requests.get(url).json()}
 
-        @op(rust="./my_ops::double")
-        def double(x: int):
-            return {"result": x * 2}  # Python fallback
-
         @op(bound="io")
         async def call_api(url: str):
             return {"data": await fetch(url)}
@@ -53,9 +48,6 @@ def op(
     Args:
         executor: How to run sync functions. ``None`` (default) runs on
             the event loop, ``"thread"`` uses a thread pool.
-        rust: Optional Rust function name override. If the Rust function has a
-            different name than the Python function, pass the Rust name here.
-            If omitted, the Python function's ``__name__`` is used for matching.
         bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
             ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
             ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
@@ -63,7 +55,14 @@ def op(
     """
 
     def decorator(fn):
-        fn._func_name = rust if rust is not None else fn.__name__
+        # Module-qualified func_name: "ml.sentiment_filter.classify_sentiment"
+        module = fn.__module__ or ""
+        if module in ("__main__", "") or "." not in module:
+            fn._func_name = fn.__name__
+        else:
+            # Strip first segment (top-level package)
+            relative = ".".join(module.split(".")[1:])
+            fn._func_name = f"{relative}.{fn.__name__}"
         if bound is not None:
             fn._op_bound = bound
         if cache is not None:

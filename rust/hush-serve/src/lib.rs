@@ -63,6 +63,7 @@ pub use resources::get;
 
 // Re-export proc macros
 pub use hush_macros::hush_op;
+pub use hush_macros::hush_model;
 pub use hush_macros::hush_resource;
 
 // Re-export types users commonly need
@@ -83,6 +84,7 @@ pub enum OpKind {
 /// Created by the `#[hush_op]` proc macro — users don't construct these directly.
 pub struct OpEntry {
     pub name: &'static str,
+    pub module_path: &'static str,
     pub kind: OpKind,
     pub op_fn: fn(&serde_json::Value) -> serde_json::Value,
     pub gen_fn: fn(&serde_json::Value) -> serde_json::Value,
@@ -92,10 +94,12 @@ impl OpEntry {
     /// Create a regular op entry (used by `#[hush_op]`).
     pub const fn new_op(
         name: &'static str,
+        module_path: &'static str,
         op_fn: fn(&serde_json::Value) -> serde_json::Value,
     ) -> Self {
         OpEntry {
             name,
+            module_path,
             kind: OpKind::Regular,
             op_fn,
             gen_fn: _noop_gen,
@@ -105,13 +109,30 @@ impl OpEntry {
     /// Create a generator op entry (used by `#[hush_op(generator)]`).
     pub const fn new_gen(
         name: &'static str,
+        module_path: &'static str,
         gen_fn: fn(&serde_json::Value) -> serde_json::Value,
     ) -> Self {
         OpEntry {
             name,
+            module_path,
             kind: OpKind::Generator,
             op_fn: _noop_op,
             gen_fn,
+        }
+    }
+
+    /// Module-qualified name with crate prefix stripped.
+    /// "example_ops::math" + "double" → "math::double"
+    /// If module_path is just the crate name (root module), returns bare name.
+    pub fn qualified_name(&self) -> String {
+        let stripped = match self.module_path.find("::") {
+            Some(idx) => &self.module_path[idx + 2..],
+            None => "",
+        };
+        if stripped.is_empty() {
+            self.name.to_string()
+        } else {
+            format!("{}::{}", stripped, self.name)
         }
     }
 }
