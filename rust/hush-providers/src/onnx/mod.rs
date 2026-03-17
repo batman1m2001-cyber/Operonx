@@ -1,3 +1,5 @@
+pub mod config;
+
 //! Generic ONNX inference — session pool for arbitrary ONNX models.
 //!
 //! Supports two input types:

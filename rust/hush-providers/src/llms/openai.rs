@@ -1,7 +1,7 @@
 //! OpenAI / vLLM LLM provider — chat completions + streaming.
 //!
-//! Also contains the shared SSE stream parser used by Azure and Gemini
-//! (they all use OpenAI-compatible SSE format).
+//! Mirrors Python's `llms/openai.py`.
+//! Also contains the shared SSE stream parser used by Azure and Gemini.
 
 use std::sync::mpsc::Sender;
 
@@ -13,6 +13,43 @@ use crate::llms::types::{
     build_chat_request, build_streaming_request, format_completion_response,
     ChatCompletionResponse,
 };
+
+/// OpenAI / vLLM provider struct — mirrors Python's OpenAI(BaseLLM).
+pub struct OpenAIProvider<'a> {
+    pub config: &'a OpenAIConfig,
+    pub access_token: Option<String>,
+}
+
+impl<'a> OpenAIProvider<'a> {
+    pub fn new(config: &'a OpenAIConfig, access_token: Option<String>) -> Self {
+        OpenAIProvider { config, access_token }
+    }
+}
+
+impl super::base::LlmProvider for OpenAIProvider<'_> {
+    fn generate(
+        &self,
+        messages: &[Value],
+        params: &Value,
+    ) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let token = self.access_token.as_deref();
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion(config, &inputs, token).await }
+    }
+
+    fn stream(
+        &self,
+        messages: &[Value],
+        params: &Value,
+        chunk_tx: Sender<Value>,
+    ) -> impl std::future::Future<Output = ProviderResult<Value>> + Send {
+        let config = self.config;
+        let token = self.access_token.as_deref();
+        let inputs = json!({"messages": messages, "params": params});
+        async move { chat_completion_stream(config, &inputs, token, chunk_tx).await }
+    }
+}
 
 // =============================================================================
 // Non-streaming
