@@ -2,7 +2,7 @@
 
 Hiểu các khái niệm cốt lõi của Hush: ops, edges, data flow, và state management.
 
-> **Ví dụ chạy được**: `examples/01_hello_world/demo.py`, `examples/02_data_pipeline/demo.py`
+> **Ví dụ chạy được**: `examples/ex01_hello_world/demo.py`, `examples/ex02_data_pipeline/demo.py`
 
 ## GraphOp — Container
 

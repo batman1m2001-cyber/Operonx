@@ -16,4 +16,9 @@ pub trait OpRegistry: Send + Sync {
 
     /// Call a generator op by name. Returns `Some(Vec<Value>)` if found, `None` if unknown.
     fn call_generator(&self, name: &str, inputs: &Value) -> Option<Vec<Value>>;
+
+    /// List all registered op names (for error messages).
+    fn available_ops(&self) -> Vec<String> {
+        vec![]
+    }
 }

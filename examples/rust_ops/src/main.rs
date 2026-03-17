@@ -12,28 +12,43 @@
 //! ## Project structure convention
 //!
 //! ```text
-//! my-project/
-//! ├── pyproject.toml              # Python workflows
-//! ├── workflows/
-//! │   ├── pipeline.py
-//! │   └── agent.py
-//! ├── rust_ops/                   # ONE crate for all custom Rust ops
-//! │   ├── Cargo.toml
-//! │   └── src/
-//! │       ├── main.rs             # Server entry point (uses hush-serve lib)
-//! │       ├── math.rs             # Domain: math operations
-//! │       ├── text.rs             # Domain: text processing
-//! │       └── crypto.rs           # Domain: CPU-heavy crypto
+//! rust_ops/
+//! ├── Cargo.toml
+//! └── src/
+//!     ├── main.rs
+//!     ├── macros.rs
+//!     ├── ex01_hello_world/       (greet, upper, merge, ...)
+//!     ├── ex02_data_pipeline/     (fetch_data, transform, aggregate, ...)
+//!     ├── ex03_llm_chat/          (clean_text is in ex02)
+//!     ├── ex04_llm_advanced/      (process_response, update_history)
+//!     ├── ex05_loops_and_branches/(each_item, square, excellent, ...)
+//!     ├── ex06_tracing/           (analyze_text, classify)
+//!     ├── ex07_embeddings_and_rag/(retrieve)
+//!     ├── ex08_error_handling/    (failing, safe_divide, retry_with_backoff, ...)
+//!     ├── ex09_agent_workflow/    (init_agent, process_response)
+//!     ├── ex10_multi_model/       (is_simple, compare, select)
+//!     ├── ex11_parallel_advanced/ (analyze_sentiment, extract_keywords, ...)
+//!     ├── ex12_rag_advanced/      (search_original, search_expanded, rrf_merge)
+//!     ├── ex13_graph/             (double, add)
+//!     ├── ex14_streaming_tracing/ (chunk_text, analyze_chunk, async_counter, ...)
+//!     └── ex15_callbot_streaming/ (customer_audio, vad, stt, tts, ...)
 //! ```
 
-mod analytics;
-mod crypto;
-mod iteration;
-mod math;
-mod pipeline;
-mod search;
-mod streaming;
-mod text;
+mod ex01_hello_world;
+mod ex02_data_pipeline;
+mod ex03_llm_chat;
+mod ex04_llm_advanced;
+mod ex05_loops_and_branches;
+mod ex06_tracing;
+mod ex07_embeddings_and_rag;
+mod ex08_error_handling;
+mod ex09_agent_workflow;
+mod ex10_multi_model;
+mod ex11_parallel_advanced;
+mod ex12_rag_advanced;
+mod ex13_graph;
+mod ex14_streaming_tracing;
+mod ex15_callbot_streaming;
 
 fn main() {
     init_logging();
