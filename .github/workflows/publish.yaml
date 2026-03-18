@@ -38,7 +38,7 @@ jobs:
 
           echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
 
-          for pkg in python/hush-icore python/hush-providers python/hush-telemetry python/hush-serve; do
+          for pkg in python/hush-icore python/hush-providers python/hush-telemetry python/hush-serve python/hush-ai; do
             OLD=$(git show $BASE:$pkg/pyproject.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $pkg/pyproject.toml | head -1)
             if [ "$OLD" != "$NEW" ]; then
@@ -75,6 +75,8 @@ jobs:
             directory: python/hush-telemetry
           - package: hush-serve
             directory: python/hush-serve
+          - package: hush-ai
+            directory: python/hush-ai
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +97,7 @@ jobs:
         with:
           packages-dir: ${{ matrix.directory }}/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
   publish-crates:
     needs: [test, check-version]
