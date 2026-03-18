@@ -92,6 +92,8 @@ pub struct BaseOpConfig {
     pub contain_generation: bool,
     /// Op-level cache config.
     pub cache: Option<crate::ops::cache::CacheConfig>,
+    /// Delay in seconds before executing this op (throttling).
+    pub delay: f64,
 }
 
 /// Branch op configuration — conditions and targets.
@@ -334,6 +336,8 @@ impl BaseOpConfig {
             _ => None,
         };
 
+        let delay = val.get("delay").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
         let op = BaseOpConfig {
             op_type,
             full_name,
@@ -352,6 +356,7 @@ impl BaseOpConfig {
             provider_config,
             contain_generation,
             cache,
+            delay,
         };
 
         // Build-time validation: reject ops that cannot run in Rust mode

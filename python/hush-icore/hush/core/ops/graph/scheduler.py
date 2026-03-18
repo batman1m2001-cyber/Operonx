@@ -144,24 +144,21 @@ async def run_scheduler(
     soft_satisfied = {}
     stream_contexts = []
     output_queue = _output_queue.get()
-    semaphore = asyncio.Semaphore(graph._max_stream_concurrent)
+    semaphore = asyncio.Semaphore(graph.concurrency)
 
     # ── Async tasks (spawned by dispatch_op) ─────────────────────
 
     async def task_execute(name, op_obj, ctx, p_ctx):
         """Async task for non-inline ops (async, graph, executor="thread").
 
-        Acquires semaphore for stream contexts (backpressure control).
+        Acquires semaphore for concurrency control (stream + non-stream tasks).
         Emits "done" or "done_pending" to event_queue when finished.
         """
-        is_stream = ctx != context_id
-        if is_stream:
-            await semaphore.acquire()
+        await semaphore.acquire()
         try:
             result = await op_obj.run(state, ctx, p_ctx)
         finally:
-            if is_stream:
-                semaphore.release()
+            semaphore.release()
         if result is PENDING:
             await event_queue.put(("done_pending", name, ctx))
         else:
