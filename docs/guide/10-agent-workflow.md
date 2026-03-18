@@ -2,7 +2,7 @@
 
 Xây dựng AI agent với tool calling và `@graph.loop()`.
 
-> **Ví dụ chạy được**: `examples/09_agent_workflow/demo.py`
+> **Ví dụ chạy được**: `examples/ex09_agent_workflow/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.

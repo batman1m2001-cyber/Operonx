@@ -2,7 +2,7 @@
 
 Sử dụng embedding, reranking cho RAG (Retrieval-Augmented Generation).
 
-> **Ví dụ chạy được**: `examples/07_embeddings_and_rag/demo.py`, `examples/12_rag_advanced/demo.py`
+> **Ví dụ chạy được**: `examples/ex07_embeddings_and_rag/demo.py`, `examples/ex12_rag_advanced/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -206,7 +206,7 @@ with GraphOp(name="hybrid-rag") as graph:
     [kw, vs] >> m >> END
 ```
 
-Xem ví dụ đầy đủ tại `examples/12_rag_advanced/demo.py`.
+Xem ví dụ đầy đủ tại `examples/ex12_rag_advanced/demo.py`.
 
 ## Batch Embedding
 

@@ -2,7 +2,7 @@
 
 Sử dụng generator ops (yield) để iterate, `@graph.loop()` cho conditional loops, và `if_()` cho branches.
 
-> **Ví dụ chạy được**: `examples/05_loops_and_branches/demo.py`
+> **Ví dụ chạy được**: `examples/ex05_loops_and_branches/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
