@@ -1,0 +1,92 @@
+# Hush Resources Configuration
+# API keys are referenced from .env via ${VAR_NAME}
+# Format: category:name — used as resource="name" in your workflow
+
+# =============================================================================
+# LLM Configurations
+# =============================================================================
+
+# OpenAI GPT-4o
+llm:gpt-4o:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
+
+# OpenAI GPT-4o-mini (cheaper, faster — great for testing)
+llm:gpt-4o-mini:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+# OpenRouter — Claude Sonnet (access Anthropic via OpenAI-compatible API)
+# llm:claude-sonnet:
+#   api_type: openai
+#   api_key: ${OPENROUTER_API_KEY}
+#   base_url: https://openrouter.ai/api/v1
+#   model: anthropic/claude-sonnet-4
+
+# Google Gemini
+# llm:gemini:
+#   api_type: gemini
+#   api_key: ${GOOGLE_API_KEY}
+#   model: gemini-2.0-flash
+
+# Azure OpenAI
+# llm:azure-gpt4o:
+#   api_type: azure
+#   api_key: ${AZURE_OPENAI_API_KEY}
+#   base_url: ${AZURE_OPENAI_ENDPOINT}
+#   model: gpt-4o
+#   api_version: "2024-06-01"
+
+# =============================================================================
+# Embedding Configurations
+# =============================================================================
+
+# OpenAI Embeddings
+embedding:openai:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1/embeddings
+  model: text-embedding-3-small
+  dimensions: 1536
+
+# DeepInfra BGE-M3 (multilingual, high quality)
+# embedding:bge-m3:
+#   api_type: vllm
+#   api_key: ${DEEPINFRA_API_KEY}
+#   base_url: https://api.deepinfra.com/v1/openai/embeddings
+#   model: BAAI/bge-m3
+#   dimensions: 1024
+
+# =============================================================================
+# Reranking Configurations
+# =============================================================================
+
+# Pinecone Reranker
+# reranking:pinecone:
+#   api_type: pinecone
+#   api_key: ${PINECONE_API_KEY}
+#   api_version: "2025-04"
+#   model: bge-reranker-v2-m3
+#   base_url: https://api.pinecone.io/rerank
+
+# Cohere Reranker
+# reranking:cohere:
+#   api_type: cohere
+#   api_key: ${COHERE_API_KEY}
+#   model: rerank-v3.5
+
+# =============================================================================
+# Observability
+# =============================================================================
+
+# Langfuse (recommended for workflow tracing)
+langfuse:default:
+  public_key: ${LANGFUSE_PUBLIC_KEY}
+  secret_key: ${LANGFUSE_SECRET_KEY}
+  host: ${LANGFUSE_HOST}
+  enabled: true
+  sample_rate: 1.0

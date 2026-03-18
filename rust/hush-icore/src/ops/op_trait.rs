@@ -1,12 +1,12 @@
 //! Op trait — mirrors Python's BaseOp.
 //!
-//! Every op type (FuncOp, GraphOp, BranchOp, LlmOp, etc.) implements this trait.
+//! Every op type (BranchOp, ParserOp, LlmOp, PromptOp, etc.) implements this trait.
 //! The `run()` method has a default implementation that handles the shared flow:
 //! get_inputs → cache check → execute_core → cache store → store_result → push refs.
 //!
 //! Each op only implements `execute_core()` — like Python's `BaseOp._exec_core()`.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
@@ -16,19 +16,6 @@ use crate::registry::OpRegistry;
 use crate::states::state::EngineState;
 
 use super::base::OpResult;
-
-// Global op factory — set by hush-serve at startup, used by base.rs for provider ops.
-static GLOBAL_FACTORY: OnceLock<Arc<dyn OpFactory>> = OnceLock::new();
-
-/// Set the global op factory. Called once by hush-serve at startup.
-pub fn set_global_factory(factory: Arc<dyn OpFactory>) {
-    let _ = GLOBAL_FACTORY.set(factory);
-}
-
-/// Get the global op factory.
-pub fn get_global_factory() -> Option<Arc<dyn OpFactory>> {
-    GLOBAL_FACTORY.get().cloned()
-}
 
 /// Execution context passed to every op — borrows from the engine.
 pub struct OpContext<'a> {
@@ -70,14 +57,3 @@ pub trait Op: Send + Sync {
         })
     }
 }
-
-/// Factory for constructing provider ops from config.
-///
-/// hush-serve registers a factory that knows about LlmOp, EmbeddingOp, etc.
-/// hush-icore's scheduler calls the factory for op types it doesn't know about
-/// (anything that's not code, branch, graph, parser).
-pub trait OpFactory: Send + Sync {
-    /// Create an Op from config. Returns None if the op type is not recognized.
-    fn create_op<'a>(&self, config: &'a BaseOpConfig) -> Option<Box<dyn Op + 'a>>;
-}
-
