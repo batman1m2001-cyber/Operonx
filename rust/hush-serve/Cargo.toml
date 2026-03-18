@@ -1,6 +1,6 @@
 [package]
 name = "hush-serve"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "Standalone Rust HTTP server for Hush workflows (Axum)"
 license = "Apache-2.0"
@@ -15,9 +15,9 @@ name = "hush-serve"
 path = "src/main.rs"
 
 [dependencies]
-hush-icore = { path = "../hush-icore", version = "0.1.8" }
-hush-providers = { path = "../hush-providers", version = "0.1.8" }
-hush-telemetry = { path = "../hush-telemetry", version = "0.1.8" }
+hush-icore = { path = "../hush-icore", version = "0.1.9" }
+hush-providers = { path = "../hush-providers", version = "0.1.9" }
+hush-telemetry = { path = "../hush-telemetry", version = "0.1.9" }
 
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
@@ -34,4 +34,4 @@ futures = "0.3"
 dashmap = "6"
 libloading = "0.8"
 inventory = "0.3"
-hush-macros = { path = "../hush-macros", version = "0.1.8" }
+hush-macros = { path = "../hush-macros", version = "0.1.9" }

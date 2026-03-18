@@ -16,6 +16,7 @@ def chain(
     extract: Optional[List[str]] = None,
     parser: str = "xml",
     response_format: Optional[Dict[str, Any]] = None,
+    delay: float = 0,
 ) -> Any:
     """Build a PromptOp -> LLMOp -> (optional ParserOp) graph.
 
@@ -74,6 +75,7 @@ def chain(
             ratios=ratios,
             fallback=fallback,
             inputs=llm_inputs,
+            delay=delay,
         )
 
         _parser = ParserOp(
@@ -94,6 +96,7 @@ def chain(
             fallback=fallback,
             inputs=llm_inputs,
             outputs={"*": PARENT},
+            delay=delay,
         )
 
         START >> _prompt >> _llm >> END
