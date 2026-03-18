@@ -59,6 +59,10 @@ where
         return Ok(OpResult::Done);
     }
 
+    if op.delay > 0.0 {
+        std::thread::sleep(std::time::Duration::from_secs_f64(op.delay));
+    }
+
     let perf_start = Instant::now();
     let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
 

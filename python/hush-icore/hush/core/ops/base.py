@@ -112,6 +112,7 @@ class BaseOp(ABC):
         "executor",
         "bound",
         "cache",
+        "delay",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -138,6 +139,7 @@ class BaseOp(ABC):
         executor: Optional[str] = None,
         bound: Optional[str] = None,
         cache: Union[bool, str, None] = None,
+        delay: float = 0,
     ):
         if executor not in self._VALID_EXECUTORS:
             raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
@@ -146,6 +148,7 @@ class BaseOp(ABC):
         self.executor = executor
         self.bound = bound
         self.cache = cache
+        self.delay = delay
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -588,6 +591,9 @@ class BaseOp(ABC):
         error_msg = None
 
         try:
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+
             _inputs = self.get_inputs(state, context_id, parent_context)
 
             # Op-level cache check
@@ -678,6 +684,8 @@ class BaseOp(ABC):
         }
         if self.cache is not None:
             base["cache"] = self.cache
+        if self.delay > 0:
+            base["delay"] = self.delay
         return base
 
     def _serialize_params(self, params: Dict[str, "Param"]) -> dict:
