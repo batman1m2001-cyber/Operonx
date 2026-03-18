@@ -12,8 +12,10 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Instant;
 
 use ahash::{AHashMap, AHashSet};
+use chrono::Utc;
 use serde_json::Value;
 use tokio::sync::{mpsc, Semaphore};
 
@@ -333,43 +335,29 @@ pub async fn run_scheduler(
     Ok(stream_contexts)
 }
 
-/// Dispatch a leaf op through the Op trait.
+/// Dispatch a leaf op through the unified OpRegistry.
 ///
-/// Core ops (code, parser) are constructed directly.
-/// Provider ops (llm, embedding, etc.) are constructed via OpFactory.
+/// Mirrors Python's `op.run()` — the registry resolves config to a concrete Op,
+/// then `Op::run()` handles the full lifecycle (timing, caching, store_result, etc.).
 fn dispatch_leaf_op(
     op: &BaseOpConfig,
     ctx: &crate::ops::op_trait::OpContext,
 ) -> Result<base::OpResult, RushError> {
-    use crate::ops::op_trait::Op;
+    let registry = ctx.registry.as_ref().ok_or_else(|| {
+        RushError::RegistryError(format!(
+            "No registry loaded. Cannot dispatch op '{}' (type='{}')",
+            op.full_name, op.op_type
+        ))
+    })?;
 
-    match op.op_type.as_str() {
-        "code" => {
-            let func_op = crate::ops::transform::func_op::FuncOp::new(op);
-            func_op.run(ctx)
-        }
-        "parser" => {
-            let parser_op = crate::ops::transform::parser_op::ParserOp::new(op);
-            parser_op.run(ctx)
-        }
-        "branch" => {
-            let branch_op = crate::ops::flow::branch_op::BranchOp::new(op);
-            branch_op.run(ctx)
-        }
-        _ => {
-            // Provider ops — delegate to factory
-            let factory = crate::ops::op_trait::get_global_factory();
-            if let Some(factory) = factory {
-                if let Some(provider_op) = factory.create_op(op) {
-                    return provider_op.run(ctx);
-                }
-            }
-            Err(RushError::UnsupportedOp(format!(
-                "Op '{}' (type='{}') has no implementation. Register an OpFactory or use #[hush_op].",
-                op.full_name, op.op_type
-            )))
-        }
-    }
+    let op_impl = registry.create_op(op).ok_or_else(|| {
+        RushError::UnsupportedOp(format!(
+            "Op '{}' (type='{}') not recognized by any registry. Available: {:?}",
+            op.full_name, op.op_type, registry.available_ops()
+        ))
+    })?;
+
+    op_impl.run(ctx)
 }
 
 // =============================================================================
@@ -409,12 +397,18 @@ fn spawn_graph_task(
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        // Must call async version directly — block_on from async context deadlocks
+        // Must call async version directly — block_on from async context deadlocks.
+        // Wrap with timing — mirrors Python's GraphOp.run() finally block.
+        let perf_start = Instant::now();
+        let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
+
         match run_nested_graph_async(op, state, &ctx, &registry).await {
             Ok(()) => {
+                store_graph_timing(op, state, &ctx, start_time, perf_start);
                 let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
             }
             Err(e) => {
+                store_graph_timing(op, state, &ctx, start_time, perf_start);
                 state.set(&op.full_name, "error", &ctx, Value::String(format!("{}", e)));
                 let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
                 log::error!("{}", logging::format_event("op_error", &[
@@ -422,7 +416,9 @@ fn spawn_graph_task(
                     ("name", &op.full_name),
                     ("error", &format!("{}", e)),
                 ]));
-                let _ = event_tx.send(SchedulerEvent::Done(op_name, ctx));
+                // DonePending — failed graph must NOT propagate to successors.
+                // Python's GraphOp.run() raises → no store_result → downstream sees missing inputs.
+                let _ = event_tx.send(SchedulerEvent::DonePending(op_name, ctx));
             }
         }
     });
@@ -567,44 +563,19 @@ fn spawn_generator_task(
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
         let state = unsafe { &*(state_addr as *const EngineState) };
 
-        // Resolve inputs
-        let mut inputs = serde_json::Map::new();
-        for param in &op.inputs {
-            match base::resolve_param(param, state, &ctx) {
-                Ok(Some(value)) => { inputs.insert(param.var_name.clone(), value); }
-                Ok(None) => {}
-                Err(e) => {
-                    let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
-                    log::error!("{}", logging::format_event("gen_error", &[
-                        ("request_id", &req_id),
-                        ("name", &op.full_name),
-                        ("error", &format!("Error resolving inputs: {}", e)),
-                    ]));
-                    let _ = event_tx.send(SchedulerEvent::Exhausted(op_name));
-                    return;
+        if op.provider_config.is_some() && op.stream {
+            // Provider streaming (LLM): use execute_streaming with channel
+            let mut inputs = serde_json::Map::new();
+            for param in &op.inputs {
+                if let Ok(Some(value)) = base::resolve_param(param, state, &ctx) {
+                    inputs.insert(param.var_name.clone(), value);
                 }
             }
-        }
-
-        let input_value = Value::Object(inputs);
-
-        // Dispatch based on generator kind
-        let gen_name = op.func_name.clone().or_else(|| {
-            if op.op_type == "code" { Some(op.name.clone()) } else { None }
-        });
-        if let Some(ref name) = gen_name {
-            // Registry generator: call_generator → Vec<Value>
-            run_registry_generator(op, state, &ctx, name, &input_value, &op_name, &event_tx, &registry);
-        } else if op.provider_config.is_some() && op.stream {
-            // Provider streaming (LLM): use execute_streaming with channel
+            let input_value = Value::Object(inputs);
             run_provider_streaming(op, state, &ctx, &input_value, &op_name, &event_tx).await;
         } else {
-            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
-            log::error!("{}", logging::format_event("gen_error", &[
-                ("request_id", &req_id),
-                ("name", &op.full_name),
-                ("error", "Generator op has no func_name or streaming provider"),
-            ]));
+            // Registry generator: create_generator → generate() → Yield per item
+            run_registry_generator(op, state, &ctx, &op_name, &event_tx, &registry);
         }
 
         let _ = event_tx.send(SchedulerEvent::Exhausted(op_name));
@@ -613,7 +584,7 @@ fn spawn_generator_task(
 
 /// Run a built-in generator inline (no tokio::spawn).
 ///
-/// Resolves inputs, calls call_generator() synchronously, sends Yield events
+/// Uses `create_generator()` → `generate()` synchronously, sends Yield events
 /// to the channel, then sends Exhausted. Eliminates thread scheduling overhead
 /// for CPU-bound generators (avoids Windows 15.6ms timer quantum spikes).
 fn run_builtin_generator_inline(
@@ -623,6 +594,51 @@ fn run_builtin_generator_inline(
     event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
+    run_registry_generator(op, state, ctx, &op.name, event_tx, registry);
+    let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
+}
+
+/// Run a generator via the registry: create_generator → generate() → emit Yield per item.
+/// Captures timing metrics — mirrors Python's `task_generator()` finally block.
+fn run_registry_generator(
+    op: &BaseOpConfig,
+    state: &EngineState,
+    ctx: &str,
+    op_name: &str,
+    event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
+    registry: &Option<Arc<dyn OpRegistry>>,
+) {
+    let perf_start = Instant::now();
+    let start_time = if state.needs_timestamps { Some(Utc::now()) } else { None };
+
+    let reg = match registry.as_ref() {
+        Some(r) => r,
+        None => {
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("gen_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", "No registry loaded for generator dispatch"),
+            ]));
+            store_graph_timing(op, state, ctx, start_time, perf_start);
+            return;
+        }
+    };
+
+    let gen = match reg.create_generator(op) {
+        Some(g) => g,
+        None => {
+            let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+            log::error!("{}", logging::format_event("gen_error", &[
+                ("request_id", &req_id),
+                ("name", &op.full_name),
+                ("error", &format!("Generator '{}' not recognized by any registry", op.full_name)),
+            ]));
+            store_graph_timing(op, state, ctx, start_time, perf_start);
+            return;
+        }
+    };
+
     // Resolve inputs
     let mut inputs = serde_json::Map::new();
     for param in &op.inputs {
@@ -631,36 +647,15 @@ fn run_builtin_generator_inline(
             Ok(None) => {}
             Err(e) => {
                 log::error!("[hush] Error resolving generator inputs for {}: {}", op.full_name, e);
-                let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
+                store_graph_timing(op, state, ctx, start_time, perf_start);
                 return;
             }
         }
     }
 
-    let input_value = Value::Object(inputs);
-    let gen_name = op.func_name.as_deref().unwrap_or(&op.name);
-    run_registry_generator(op, state, ctx, gen_name, &input_value, &op.name, event_tx, registry);
-    let _ = event_tx.send(SchedulerEvent::Exhausted(op.name.clone()));
-}
-
-/// Run a generator via the registry: call_generator → iterate Vec<Value> → emit Yield per item.
-fn run_registry_generator(
-    op: &BaseOpConfig,
-    state: &EngineState,
-    ctx: &str,
-    func_name: &str,
-    input_value: &Value,
-    op_name: &str,
-    event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
-    registry: &Option<Arc<dyn OpRegistry>>,
-) {
-
-    let items = registry
-        .as_ref()
-        .and_then(|r| r.call_generator(func_name, input_value));
-
-    match items {
-        Some(items) => {
+    let op_ctx = crate::ops::op_trait::OpContext { state, context: ctx, registry };
+    match gen.generate(inputs, &op_ctx) {
+        Ok(items) => {
             for (idx, result) in items.into_iter().enumerate() {
                 let stream_ctx = format!("{}.[{}]", ctx, idx);
 
@@ -680,15 +675,18 @@ fn run_registry_generator(
                 ));
             }
         }
-        None => {
+        Err(e) => {
             let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
             log::error!("{}", logging::format_event("gen_error", &[
                 ("request_id", &req_id),
                 ("name", &op.full_name),
-                ("error", &format!("Unknown generator '{}' — no registry loaded or op not found", func_name)),
+                ("error", &format!("{}", e)),
             ]));
         }
     }
+
+    // Store timing — always, even on error (mirrors Python's finally block)
+    store_graph_timing(op, state, ctx, start_time, perf_start);
 }
 
 /// Run provider streaming: execute_streaming with channel → receive chunks → emit Yield.
@@ -1081,4 +1079,38 @@ fn collect_nested_outputs(
     }
 
     Ok(())
+}
+
+// =============================================================================
+// Timing helper for graph/generator ops
+// =============================================================================
+
+/// Store timing metrics ($start_time, $end_time, $duration_ms) for graph and generator ops.
+///
+/// Mirrors Python's `_store_metrics()` called in `GraphOp.run()` and `task_generator()` finally blocks.
+/// Reuses the same $-prefixed key convention as `base::store_timing()`.
+fn store_graph_timing(
+    op: &BaseOpConfig,
+    state: &EngineState,
+    context: &str,
+    start_time: Option<chrono::DateTime<Utc>>,
+    perf_start: Instant,
+) {
+    let duration_ms = perf_start.elapsed().as_secs_f64() * 1000.0;
+
+    if let Some(st) = start_time {
+        let end_time = Utc::now();
+        state.set(&op.full_name, "$start_time", context, Value::String(st.to_rfc3339()));
+        state.set(&op.full_name, "$end_time", context, Value::String(end_time.to_rfc3339()));
+    }
+    state.set(&op.full_name, "$duration_ms", context, serde_json::json!(duration_ms));
+
+    if duration_ms > 100.0 {
+        let req_id = state.request_id().unwrap_or_else(|| "unknown".to_string());
+        log::warn!("{}", logging::format_event("op_slow", &[
+            ("request_id", &req_id),
+            ("full_name", &op.full_name),
+            ("duration_ms", &format!("{:.1}", duration_ms)),
+        ]));
+    }
 }

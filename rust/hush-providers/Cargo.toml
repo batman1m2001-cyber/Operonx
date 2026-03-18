@@ -1,6 +1,6 @@
 [package]
 name = "hush-providers"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Provider configs and native op implementations for the Hush workflow engine"
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ dashmap = { version = "6", optional = true }
 regex = "1"
 serde_yaml = "0.9"
 quick-xml = "0.37"
-hush-icore = { path = "../hush-icore", version = "0.1.5" }
+hush-icore = { path = "../hush-icore", version = "0.1.6" }
 
 [features]
 default = []

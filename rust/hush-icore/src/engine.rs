@@ -26,7 +26,6 @@ use crate::tracing::tracer::Tracer;
 pub struct Hush {
     config: Arc<GraphConfig>,
     registry: Option<Arc<dyn OpRegistry>>,
-    op_factory: Option<Arc<dyn crate::ops::op_trait::OpFactory>>,
     tracers: Vec<Arc<dyn Tracer>>,
     middleware: Vec<Box<dyn Middleware>>,
     flush_worker: FlushWorker,
@@ -44,7 +43,6 @@ impl Hush {
         Ok(Hush {
             config,
             registry: None,
-            op_factory: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
@@ -59,7 +57,6 @@ impl Hush {
         Hush {
             config,
             registry: None,
-            op_factory: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             flush_worker: FlushWorker::new(),
@@ -67,13 +64,10 @@ impl Hush {
         }
     }
 
-    /// Register a provider op factory (for LlmOp, EmbeddingOp, etc.).
-    /// hush-serve calls this to register provider ops that hush-icore doesn't know about.
-    pub fn set_op_factory(&mut self, factory: Arc<dyn crate::ops::op_trait::OpFactory>) {
-        self.op_factory = Some(factory);
-    }
-
-    /// Register an external op registry for custom Rust op dispatch.
+    /// Register the unified op registry for all op dispatch.
+    ///
+    /// The registry handles user ops (#[hush_op]), provider ops (LLM, embedding, etc.),
+    /// and core ops (parser, branch) via `CompositeRegistry`.
     pub fn set_registry(&mut self, registry: Arc<dyn OpRegistry>) {
         self.registry = Some(registry);
     }

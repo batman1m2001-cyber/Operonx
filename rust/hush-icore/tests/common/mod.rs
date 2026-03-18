@@ -2,117 +2,173 @@
 
 use std::sync::Arc;
 
+use hush_icore::config::BaseOpConfig;
 use hush_icore::engine::Hush;
-use hush_icore::registry::OpRegistry;
-use serde_json::{json, Value};
+use hush_icore::error::RushError;
+use hush_icore::ops::op_trait::{Op, OpContext};
+use hush_icore::registry::{GeneratorOp, OpRegistry};
+use serde_json::{json, Map, Value};
 
 #[path = "../test_ops.rs"]
 mod test_ops;
 
 /// Test op registry — dispatches op names to test op functions.
-/// Replaces builtin_ops for tests.
+/// Implements the unified OpRegistry trait.
 pub struct TestRegistry;
 
+/// Wrapper that turns a `fn(&Value) -> Value` closure into an `Op`.
+struct ClosureOp<'a> {
+    config: &'a BaseOpConfig,
+    func: fn(&Value) -> Value,
+}
+
+impl Op for ClosureOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+    fn execute_core(
+        &self,
+        inputs: Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<Value>, RushError> {
+        Ok(Some((self.func)(&Value::Object(inputs))))
+    }
+}
+
+/// Wrapper that turns a `fn(&Value) -> Vec<Value>` closure into a `GeneratorOp`.
+struct ClosureGen<'a> {
+    config: &'a BaseOpConfig,
+    func: fn(&Value) -> Vec<Value>,
+}
+
+impl GeneratorOp for ClosureGen<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+    fn generate(
+        &self,
+        inputs: Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Vec<Value>, RushError> {
+        Ok((self.func)(&Value::Object(inputs)))
+    }
+}
+
+/// Resolve a test op function by name.
+fn resolve_op(name: &str) -> Option<fn(&Value) -> Value> {
+    Some(match name {
+        "double" => test_ops::double,
+        "add" => test_ops::add,
+        "hash_chain" => test_ops::hash_chain,
+        "identity" => test_ops::identity,
+        "multiply" => test_ops::multiply,
+        "square" => test_ops::square,
+        "increment" => test_ops::increment,
+        "greet" => test_ops::greet,
+        "greet_vi" => test_ops::greet_vi,
+        "make_dict" => test_ops::make_dict,
+        "to_upper" => test_ops::to_upper,
+        "join_strings" => test_ops::join_strings,
+        "dbl" => test_ops::dbl,
+        "ok_op" => test_ops::ok_op,
+        "make_list" => test_ops::make_list,
+        "increment_counter" => test_ops::increment_counter,
+        "accumulate" => test_ops::accumulate,
+        "fib_step" => test_ops::fib_step,
+        "tagged_op" => test_ops::tagged_op,
+        "safe_op" => test_ops::safe_op,
+        "multiply_values" => test_ops::multiply_values,
+        "noop" => test_ops::noop,
+        "passthrough" => test_ops::passthrough,
+        "fail_op" => test_ops::fail_op,
+        "string_concat" => test_ops::string_concat,
+        "string_split" => test_ops::string_split,
+        "string_template" => test_ops::string_template,
+        "json_parse" => test_ops::json_parse,
+        "json_extract" => test_ops::json_extract,
+        "json_merge" => test_ops::json_merge,
+        "math_sum" => test_ops::math_sum,
+        "math_mean" => test_ops::math_mean,
+        "math_max" => test_ops::math_max,
+        "math_min" => test_ops::math_min,
+        "bench_noop" => test_ops::bench_noop,
+        "classify" => test_ops::classify,
+        "process_grade" => test_ops::process_grade,
+        "aggregate" => test_ops::aggregate,
+        "bench_transform" => test_ops::bench_transform,
+        "merge_two" => test_ops::merge_two,
+        "combine_all" => test_ops::combine_all,
+        "cpu_hash_chain" => test_ops::cpu_hash_chain,
+        "cpu_prime_sieve" => test_ops::cpu_prime_sieve,
+        "cpu_matrix_mult" => test_ops::cpu_matrix_mult,
+        "cpu_fibonacci" => test_ops::cpu_fibonacci,
+        "grade_a" => test_ops::grade_a,
+        "grade_b" => test_ops::grade_b,
+        "grade_f" => test_ops::grade_f,
+        "grade_a_mult" => test_ops::grade_a_mult,
+        "grade_f_mult" => test_ops::grade_f_mult,
+        "prefix" => test_ops::prefix,
+        "sum_all" => test_ops::sum_all,
+        "classify_value" => test_ops::classify_value,
+        "multi_output" => test_ops::multi_output,
+        "multi" => test_ops::multi,
+        "compute" => test_ops::compute,
+        "process_list" => test_ops::process_list,
+        "measure" => test_ops::measure,
+        "append_char" => test_ops::append_char,
+        "collect_op" => test_ops::collect_op,
+        "make_start" => test_ops::make_start,
+        "format_grade" => test_ops::format_grade,
+        "multiply_vf" => test_ops::multiply_vf,
+        "accumulate_step" => test_ops::accumulate_step,
+        "raise_op" => test_ops::raise_op,
+        "maybe_fail" => test_ops::maybe_fail,
+        "process_item_text" => test_ops::process_item_text,
+        "square_named" => test_ops::square_named,
+        "excellent" => test_ops::excellent,
+        "good" => test_ops::good,
+        "average_grade" => test_ops::average_grade,
+        "fail_grade" => test_ops::fail_grade,
+        "analyze_text" => test_ops::analyze_text,
+        "classify_by_count" => test_ops::classify_by_count,
+        "step_a" => test_ops::step_a,
+        "step_b" => test_ops::step_b,
+        "fetch_data" => test_ops::fetch_data,
+        "transform_double" => test_ops::transform_double,
+        "aggregate_data" => test_ops::aggregate_data,
+        "clean_text" => test_ops::clean_text,
+        "count_words" => test_ops::count_words,
+        "summarize_stats" => test_ops::summarize_stats,
+        _ => return None,
+    })
+}
+
+/// Resolve a test generator function by name.
+fn resolve_gen(name: &str) -> Option<fn(&Value) -> Vec<Value>> {
+    Some(match name {
+        "chunk_text" => test_ops::chunk_text,
+        "range_gen" => test_ops::range_gen,
+        "each_item_with_prefix" => test_ops::each_item_with_prefix,
+        "each_number" => test_ops::each_number,
+        "halve_until" => test_ops::halve_until,
+        _ => return None,
+    })
+}
+
 impl OpRegistry for TestRegistry {
-    fn call(&self, name: &str, inputs: &Value) -> Option<Value> {
-        let result = match name {
-            "double" => test_ops::double(inputs),
-            "add" => test_ops::add(inputs),
-            "hash_chain" => test_ops::hash_chain(inputs),
-            "identity" => test_ops::identity(inputs),
-            "multiply" => test_ops::multiply(inputs),
-            "square" => test_ops::square(inputs),
-            "increment" => test_ops::increment(inputs),
-            "greet" => test_ops::greet(inputs),
-            "greet_vi" => test_ops::greet_vi(inputs),
-            "make_dict" => test_ops::make_dict(inputs),
-            "to_upper" => test_ops::to_upper(inputs),
-            "join_strings" => test_ops::join_strings(inputs),
-            "dbl" => test_ops::dbl(inputs),
-            "ok_op" => test_ops::ok_op(inputs),
-            "make_list" => test_ops::make_list(inputs),
-            "increment_counter" => test_ops::increment_counter(inputs),
-            "accumulate" => test_ops::accumulate(inputs),
-            "fib_step" => test_ops::fib_step(inputs),
-            "tagged_op" => test_ops::tagged_op(inputs),
-            "safe_op" => test_ops::safe_op(inputs),
-            "multiply_values" => test_ops::multiply_values(inputs),
-            "noop" => test_ops::noop(inputs),
-            "passthrough" => test_ops::passthrough(inputs),
-            "fail_op" => test_ops::fail_op(inputs),
-            "string_concat" => test_ops::string_concat(inputs),
-            "string_split" => test_ops::string_split(inputs),
-            "string_template" => test_ops::string_template(inputs),
-            "json_parse" => test_ops::json_parse(inputs),
-            "json_extract" => test_ops::json_extract(inputs),
-            "json_merge" => test_ops::json_merge(inputs),
-            "math_sum" => test_ops::math_sum(inputs),
-            "math_mean" => test_ops::math_mean(inputs),
-            "math_max" => test_ops::math_max(inputs),
-            "math_min" => test_ops::math_min(inputs),
-            "bench_noop" => test_ops::bench_noop(inputs),
-            "classify" => test_ops::classify(inputs),
-            "process_grade" => test_ops::process_grade(inputs),
-            "aggregate" => test_ops::aggregate(inputs),
-            "bench_transform" => test_ops::bench_transform(inputs),
-            "merge_two" => test_ops::merge_two(inputs),
-            "combine_all" => test_ops::combine_all(inputs),
-            "cpu_hash_chain" => test_ops::cpu_hash_chain(inputs),
-            "cpu_prime_sieve" => test_ops::cpu_prime_sieve(inputs),
-            "cpu_matrix_mult" => test_ops::cpu_matrix_mult(inputs),
-            "cpu_fibonacci" => test_ops::cpu_fibonacci(inputs),
-            "grade_a" => test_ops::grade_a(inputs),
-            "grade_b" => test_ops::grade_b(inputs),
-            "grade_f" => test_ops::grade_f(inputs),
-            "grade_a_mult" => test_ops::grade_a_mult(inputs),
-            "grade_f_mult" => test_ops::grade_f_mult(inputs),
-            "prefix" => test_ops::prefix(inputs),
-            "sum_all" => test_ops::sum_all(inputs),
-            "classify_value" => test_ops::classify_value(inputs),
-            "multi_output" => test_ops::multi_output(inputs),
-            "multi" => test_ops::multi(inputs),
-            "compute" => test_ops::compute(inputs),
-            "process_list" => test_ops::process_list(inputs),
-            "measure" => test_ops::measure(inputs),
-            "append_char" => test_ops::append_char(inputs),
-            "collect_op" => test_ops::collect_op(inputs),
-            "make_start" => test_ops::make_start(inputs),
-            "format_grade" => test_ops::format_grade(inputs),
-            "multiply_vf" => test_ops::multiply_vf(inputs),
-            "accumulate_step" => test_ops::accumulate_step(inputs),
-            "raise_op" => test_ops::raise_op(inputs),
-            "maybe_fail" => test_ops::maybe_fail(inputs),
-            "process_item_text" => test_ops::process_item_text(inputs),
-            "square_named" => test_ops::square_named(inputs),
-            "excellent" => test_ops::excellent(inputs),
-            "good" => test_ops::good(inputs),
-            "average_grade" => test_ops::average_grade(inputs),
-            "fail_grade" => test_ops::fail_grade(inputs),
-            "analyze_text" => test_ops::analyze_text(inputs),
-            "classify_by_count" => test_ops::classify_by_count(inputs),
-            "step_a" => test_ops::step_a(inputs),
-            "step_b" => test_ops::step_b(inputs),
-            "fetch_data" => test_ops::fetch_data(inputs),
-            "transform_double" => test_ops::transform_double(inputs),
-            "aggregate_data" => test_ops::aggregate_data(inputs),
-            "clean_text" => test_ops::clean_text(inputs),
-            "count_words" => test_ops::count_words(inputs),
-            "summarize_stats" => test_ops::summarize_stats(inputs),
-            _ => return None,
-        };
-        Some(result)
+    fn create_op<'a>(&self, config: &'a BaseOpConfig) -> Option<Box<dyn Op + 'a>> {
+        let name = config.func_name.as_deref().unwrap_or(&config.name);
+        let func = resolve_op(name)?;
+        Some(Box::new(ClosureOp { config, func }))
     }
 
-    fn call_generator(&self, name: &str, inputs: &Value) -> Option<Vec<Value>> {
-        let result = match name {
-            "chunk_text" => test_ops::chunk_text(inputs),
-            "range_gen" => test_ops::range_gen(inputs),
-            "each_item_with_prefix" => test_ops::each_item_with_prefix(inputs),
-            "each_number" => test_ops::each_number(inputs),
-            "halve_until" => test_ops::halve_until(inputs),
-            _ => return None,
-        };
-        Some(result)
+    fn create_generator<'a>(
+        &self,
+        config: &'a BaseOpConfig,
+    ) -> Option<Box<dyn GeneratorOp + 'a>> {
+        let name = config.func_name.as_deref().unwrap_or(&config.name);
+        let func = resolve_gen(name)?;
+        Some(Box::new(ClosureGen { config, func }))
     }
 }
 

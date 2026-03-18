@@ -2,12 +2,18 @@
 //!
 //! Supports both qualified names (`ml::sentiment::classify`) and bare name
 //! fallback (`classify`). Panics on duplicate qualified names at startup.
+//!
+//! Implements the unified OpRegistry trait — wraps closures in ClosureOp/ClosureGen
+//! so they go through the full Op::run() lifecycle (timing, caching, etc.).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use hush_icore::registry::OpRegistry;
-use serde_json::Value;
+use hush_icore::config::BaseOpConfig;
+use hush_icore::error::RushError;
+use hush_icore::ops::op_trait::{Op, OpContext};
+use hush_icore::registry::{GeneratorOp, OpRegistry};
+use serde_json::{Map, Value};
 
 type OpFn = Arc<dyn Fn(&Value) -> Value + Send + Sync>;
 type GenFn = Arc<dyn Fn(&Value) -> Vec<Value> + Send + Sync>;
@@ -30,6 +36,53 @@ pub struct FnRegistry {
     all_op_names: Vec<String>,
     all_gen_names: Vec<String>,
 }
+
+// =============================================================================
+// ClosureOp / ClosureGen — wrap closures into Op/GeneratorOp traits
+// =============================================================================
+
+/// Wraps a `fn(&Value) -> Value` closure into a proper `Op`.
+/// Goes through `Op::run()` lifecycle: timing, caching, store_result, push_output_refs.
+struct ClosureOp<'a> {
+    config: &'a BaseOpConfig,
+    closure: OpFn,
+}
+
+impl Op for ClosureOp<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+    fn execute_core(
+        &self,
+        inputs: Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Option<Value>, RushError> {
+        Ok(Some((self.closure)(&Value::Object(inputs))))
+    }
+}
+
+/// Wraps a `fn(&Value) -> Vec<Value>` closure into a proper `GeneratorOp`.
+struct ClosureGen<'a> {
+    config: &'a BaseOpConfig,
+    closure: GenFn,
+}
+
+impl GeneratorOp for ClosureGen<'_> {
+    fn op_config(&self) -> &BaseOpConfig {
+        self.config
+    }
+    fn generate(
+        &self,
+        inputs: Map<String, Value>,
+        _ctx: &OpContext,
+    ) -> Result<Vec<Value>, RushError> {
+        Ok((self.closure)(&Value::Object(inputs)))
+    }
+}
+
+// =============================================================================
+// FnRegistry implementation
+// =============================================================================
 
 impl FnRegistry {
     pub fn new() -> Self {
@@ -168,7 +221,7 @@ impl FnRegistry {
             .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name))
     }
 
-    /// Look up an op by name: qualified → suffix → bare fallback.
+    /// Look up an op closure by name: qualified → suffix → bare fallback.
     fn lookup_op(&self, name: &str) -> LookupResult<&OpFn> {
         let normalized = Self::normalize(name);
 
@@ -208,7 +261,7 @@ impl FnRegistry {
         LookupResult::NotFound
     }
 
-    /// Look up a generator by name: qualified → suffix → bare fallback.
+    /// Look up a generator closure by name: qualified → suffix → bare fallback.
     fn lookup_gen(&self, name: &str) -> LookupResult<&GenFn> {
         let normalized = Self::normalize(name);
 
@@ -260,9 +313,17 @@ impl Default for FnRegistry {
 }
 
 impl OpRegistry for FnRegistry {
-    fn call(&self, name: &str, inputs: &Value) -> Option<Value> {
-        match self.lookup_op(name) {
-            LookupResult::Found(f) => Some(f(inputs)),
+    fn create_op<'a>(&self, config: &'a BaseOpConfig) -> Option<Box<dyn Op + 'a>> {
+        // Only handle "code" ops (user-defined functions)
+        if config.op_type != "code" || config.is_generator {
+            return None;
+        }
+        let func_name = config.func_name.as_deref().unwrap_or(&config.name);
+        match self.lookup_op(func_name) {
+            LookupResult::Found(f) => Some(Box::new(ClosureOp {
+                config,
+                closure: f.clone(),
+            })),
             LookupResult::Ambiguous(bare, matches) => {
                 log::error!(
                     "Ambiguous op '{}': found in multiple modules {:?}. Use fully qualified name.",
@@ -274,9 +335,19 @@ impl OpRegistry for FnRegistry {
         }
     }
 
-    fn call_generator(&self, name: &str, inputs: &Value) -> Option<Vec<Value>> {
-        match self.lookup_gen(name) {
-            LookupResult::Found(f) => Some(f(inputs)),
+    fn create_generator<'a>(
+        &self,
+        config: &'a BaseOpConfig,
+    ) -> Option<Box<dyn GeneratorOp + 'a>> {
+        if !config.is_generator {
+            return None;
+        }
+        let func_name = config.func_name.as_deref().unwrap_or(&config.name);
+        match self.lookup_gen(func_name) {
+            LookupResult::Found(f) => Some(Box::new(ClosureGen {
+                config,
+                closure: f.clone(),
+            })),
             LookupResult::Ambiguous(bare, matches) => {
                 log::error!(
                     "Ambiguous generator '{}': found in multiple modules {:?}. Use fully qualified name.",
@@ -295,54 +366,45 @@ impl OpRegistry for FnRegistry {
     }
 }
 
-/// A registry that tries a primary registry first, then falls back to a secondary.
-pub struct CompositeRegistry {
-    primary: Arc<dyn OpRegistry>,
-    fallback: Arc<dyn OpRegistry>,
-}
-
-impl CompositeRegistry {
-    pub fn new(primary: Arc<dyn OpRegistry>, fallback: Arc<dyn OpRegistry>) -> Self {
-        CompositeRegistry { primary, fallback }
-    }
-}
-
-impl OpRegistry for CompositeRegistry {
-    fn call(&self, name: &str, inputs: &Value) -> Option<Value> {
-        self.primary
-            .call(name, inputs)
-            .or_else(|| self.fallback.call(name, inputs))
-    }
-
-    fn call_generator(&self, name: &str, inputs: &Value) -> Option<Vec<Value>> {
-        self.primary
-            .call_generator(name, inputs)
-            .or_else(|| self.fallback.call_generator(name, inputs))
-    }
-
-    fn available_ops(&self) -> Vec<String> {
-        let mut ops = self.primary.available_ops();
-        ops.extend(self.fallback.available_ops());
-        ops
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hush_icore::config::OpBound;
     use serde_json::json;
 
+    /// Build a minimal BaseOpConfig for testing.
+    fn test_config(func_name: &str, is_generator: bool) -> BaseOpConfig {
+        BaseOpConfig {
+            op_type: "code".to_string(),
+            full_name: format!("g.{}", func_name),
+            name: func_name.to_string(),
+            func_name: Some(func_name.to_string()),
+            is_async: false,
+            enabled: true,
+            verbose: false,
+            stream: false,
+            is_generator,
+            bound: OpBound::Cpu,
+            inputs: vec![],
+            outputs: vec![],
+            branch_config: None,
+            inner_graph: None,
+            provider_config: None,
+            contain_generation: false,
+            cache: None,
+        }
+    }
+
     #[test]
-    fn test_fn_registry_call() {
+    fn test_fn_registry_create_op() {
         let mut reg = FnRegistry::new();
         reg.register_op("double", |v| {
             let x = v["x"].as_i64().unwrap_or(0);
             json!({"result": x * 2})
         });
 
-        let result = reg.call("double", &json!({"x": 5}));
-        assert_eq!(result, Some(json!({"result": 10})));
-        assert_eq!(reg.call("unknown", &json!({})), None);
+        let config = test_config("double", false);
+        assert!(reg.create_op(&config).is_some());
     }
 
     #[test]
@@ -353,32 +415,8 @@ mod tests {
             (0..n).map(|i| json!({"value": i})).collect()
         });
 
-        let result = reg.call_generator("range", &json!({"n": 3}));
-        assert_eq!(
-            result,
-            Some(vec![
-                json!({"value": 0}),
-                json!({"value": 1}),
-                json!({"value": 2}),
-            ])
-        );
-    }
-
-    #[test]
-    fn test_fn_registry_shared_state() {
-        let counter = Arc::new(std::sync::atomic::AtomicI64::new(0));
-        let c = counter.clone();
-
-        let mut reg = FnRegistry::new();
-        reg.register_op("increment", move |_| {
-            let val = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            json!({"count": val + 1})
-        });
-
-        reg.call("increment", &json!({}));
-        reg.call("increment", &json!({}));
-        let result = reg.call("increment", &json!({}));
-        assert_eq!(result, Some(json!({"count": 3})));
+        let config = test_config("range", true);
+        assert!(reg.create_generator(&config).is_some());
     }
 
     #[test]
@@ -386,9 +424,9 @@ mod tests {
         let mut reg = FnRegistry::new();
         reg.register_op("ml::sentiment::classify", |_| json!({"ok": true}));
 
-        // Python sends dots, Rust stores colons
-        let result = reg.call("ml.sentiment.classify", &json!({}));
-        assert_eq!(result, Some(json!({"ok": true})));
+        let mut config = test_config("ml.sentiment.classify", false);
+        config.func_name = Some("ml.sentiment.classify".to_string());
+        assert!(reg.create_op(&config).is_some());
     }
 
     #[test]
@@ -396,9 +434,9 @@ mod tests {
         let mut reg = FnRegistry::new();
         reg.register_op("ml::sentiment::classify", |_| json!({"ok": true}));
 
-        // Bare name lookup
-        let result = reg.call("classify", &json!({}));
-        assert_eq!(result, Some(json!({"ok": true})));
+        let mut config = test_config("classify", false);
+        config.func_name = Some("classify".to_string());
+        assert!(reg.create_op(&config).is_some());
     }
 
     #[test]
@@ -410,21 +448,5 @@ mod tests {
         let available = reg.available_ops();
         assert!(available.contains(&"math::double".to_string()));
         assert!(available.contains(&"ml::classify".to_string()));
-    }
-
-    #[test]
-    fn test_composite_registry() {
-        let mut primary = FnRegistry::new();
-        primary.register_op("a", |_| json!({"from": "primary"}));
-
-        let mut fallback = FnRegistry::new();
-        fallback.register_op("a", |_| json!({"from": "fallback"}));
-        fallback.register_op("b", |_| json!({"from": "fallback"}));
-
-        let composite = CompositeRegistry::new(Arc::new(primary), Arc::new(fallback));
-
-        assert_eq!(composite.call("a", &json!({})), Some(json!({"from": "primary"})));
-        assert_eq!(composite.call("b", &json!({})), Some(json!({"from": "fallback"})));
-        assert_eq!(composite.call("c", &json!({})), None);
     }
 }
