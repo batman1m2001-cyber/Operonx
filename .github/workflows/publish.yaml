@@ -97,6 +97,7 @@ jobs:
         with:
           packages-dir: ${{ matrix.directory }}/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
   publish-crates:
     needs: [test, check-version]
