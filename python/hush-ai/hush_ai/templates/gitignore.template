@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+rust_ops/target/

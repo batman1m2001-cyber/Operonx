@@ -28,7 +28,7 @@ use serde_json::Value;
 use hush_icore::registry::OpRegistry;
 
 use crate::config::{Cli, ServerConfig};
-use crate::fn_registry::{CompositeRegistry, FnRegistry};
+use crate::fn_registry::FnRegistry;
 use crate::resources;
 
 /// Builder for configuring and running a Hush HTTP server.
@@ -224,12 +224,6 @@ impl HushServerBuilder {
             resources::init_resources(self.pending_resources);
         }
 
-        // Register provider op factory — enables hush-icore to dispatch
-        // LLM, embedding, rerank, onnx, prompt, parser ops to hush-providers.
-        hush_icore::ops::op_trait::set_global_factory(
-            Arc::new(hush_providers::ops::factory::ProviderOpFactory),
-        );
-
         let mut config = self.config.ok_or("No config provided. Use .config_file(), .config_json(), or .from_cli()")?;
 
         // Apply overrides
@@ -240,11 +234,22 @@ impl HushServerBuilder {
             config.port = port;
         }
 
-        // Build registry from auto-registered #[hush_op] functions
-        let registry: Option<Arc<dyn OpRegistry>> = if !self.registry.is_empty() {
-            Some(Arc::new(self.registry))
-        } else {
-            None
+        // Build unified registry: user ops + provider ops + core ops
+        let registry: Option<Arc<dyn OpRegistry>> = {
+            let mut registries: Vec<Arc<dyn OpRegistry>> = Vec::new();
+
+            // #[hush_op] user functions — highest priority
+            if !self.registry.is_empty() {
+                registries.push(Arc::new(self.registry));
+            }
+
+            // Provider ops (LLM, embedding, rerank, prompt, onnx)
+            registries.push(Arc::new(hush_providers::ops::factory::ProviderRegistry));
+
+            // Core ops (parser, branch)
+            registries.push(Arc::new(hush_icore::registry::CoreRegistry));
+
+            Some(Arc::new(hush_icore::registry::CompositeRegistry::new(registries)))
         };
 
         let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -268,11 +273,15 @@ impl HushServerBuilder {
     pub fn into_router(self) -> Result<axum::Router, Box<dyn std::error::Error>> {
         let config = self.config.ok_or("No config provided")?;
 
-        let has_fn_ops = !self.registry.is_empty();
-        let registry: Option<Arc<dyn OpRegistry>> = if has_fn_ops {
-            Some(Arc::new(self.registry))
-        } else {
-            None
+        // Build unified registry (same as serve_async)
+        let registry: Option<Arc<dyn OpRegistry>> = {
+            let mut registries: Vec<Arc<dyn OpRegistry>> = Vec::new();
+            if !self.registry.is_empty() {
+                registries.push(Arc::new(self.registry));
+            }
+            registries.push(Arc::new(hush_providers::ops::factory::ProviderRegistry));
+            registries.push(Arc::new(hush_icore::registry::CoreRegistry));
+            Some(Arc::new(hush_icore::registry::CompositeRegistry::new(registries)))
         };
 
         Ok(crate::router::build_router(config, registry))
