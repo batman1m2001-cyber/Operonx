@@ -20,23 +20,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - id: check
         run: |
           PYTHON_CHANGED="false"
           RUST_CHANGED="false"
 
+          # Compare against the previous commit on main (before this merge)
+          # For merge commits: use HEAD^1 (first parent = previous main tip)
+          # For regular commits: use HEAD~1
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
+            BASE="HEAD^1"
+          else
+            BASE="HEAD~1"
+          fi
+
+          echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
+
           for pkg in python/hush-icore python/hush-providers python/hush-telemetry python/hush-serve; do
-            OLD=$(git show HEAD~1:$pkg/pyproject.toml 2>/dev/null | grep '^version' | head -1 || echo "")
+            OLD=$(git show $BASE:$pkg/pyproject.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $pkg/pyproject.toml | head -1)
-            if [ "$OLD" != "$NEW" ]; then PYTHON_CHANGED="true"; fi
+            if [ "$OLD" != "$NEW" ]; then
+              echo "$pkg: $OLD -> $NEW (CHANGED)"
+              PYTHON_CHANGED="true"
+            fi
           done
 
           for crate in rust/hush-macros rust/hush-icore rust/hush-providers rust/hush-telemetry rust/hush-serve; do
-            OLD=$(git show HEAD~1:$crate/Cargo.toml 2>/dev/null | grep '^version' | head -1 || echo "")
+            OLD=$(git show $BASE:$crate/Cargo.toml 2>/dev/null | grep '^version' | head -1 || echo "")
             NEW=$(grep '^version' $crate/Cargo.toml | head -1)
-            if [ "$OLD" != "$NEW" ]; then RUST_CHANGED="true"; fi
+            if [ "$OLD" != "$NEW" ]; then
+              echo "$crate: $OLD -> $NEW (CHANGED)"
+              RUST_CHANGED="true"
+            fi
           done
 
           echo "python_changed=$PYTHON_CHANGED" >> "$GITHUB_OUTPUT"
