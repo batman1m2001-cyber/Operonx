@@ -38,9 +38,7 @@ def _prompt_api_keys() -> dict:
     langfuse_pub = click.prompt("  Langfuse public key", default="", show_default=False).strip()
     if langfuse_pub:
         keys["LANGFUSE_PUBLIC_KEY"] = langfuse_pub
-        langfuse_sec = click.prompt(
-            "  Langfuse secret key", default="", show_default=False
-        ).strip()
+        langfuse_sec = click.prompt("  Langfuse secret key", default="", show_default=False).strip()
         if langfuse_sec:
             keys["LANGFUSE_SECRET_KEY"] = langfuse_sec
 
@@ -116,7 +114,8 @@ def init(directory: str, rust: bool, no_prompt: bool):
         content = PYPROJECT_TEMPLATE.format(name=project_name)
         # Remove uv.sources for standalone projects (not in monorepo)
         content = "\n".join(
-            line for line in content.split("\n")
+            line
+            for line in content.split("\n")
             if "uv.sources" not in line and "editable" not in line
         )
         _write_file(target / "pyproject.toml", content)
