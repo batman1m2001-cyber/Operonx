@@ -381,17 +381,11 @@ fn spawn_graph_task(
     let op_addr = op as *const BaseOpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
-    let ctx_id = context_id.to_string();
     let op_name = op.name.clone();
     let registry = registry.clone();
 
     tokio::spawn(async move {
-        let is_stream = ctx != ctx_id;
-        let _permit = if is_stream {
-            Some(semaphore.acquire().await.expect("semaphore closed"))
-        } else {
-            None
-        };
+        let _permit = semaphore.acquire().await.expect("semaphore closed");
 
         // SAFETY: op and state are alive — caller awaits all tasks before returning
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
@@ -439,21 +433,15 @@ fn spawn_blocking_task(
     let op_addr = op as *const BaseOpConfig as usize;
     let state_addr = state as *const EngineState as usize;
     let ctx = context.to_string();
-    let ctx_id = context_id.to_string();
     let op_name = op.name.clone();
     let registry = registry.clone();
 
     tokio::task::spawn_blocking(move || {
-        // Acquire semaphore for stream contexts (backpressure).
+        // Acquire semaphore for concurrency control.
         // block_on inside spawn_blocking is fine — we're on a blocking thread.
-        let is_stream = ctx != ctx_id;
-        let _permit = if is_stream {
-            Some(runtime::block_on_async(async {
-                semaphore.acquire().await.expect("semaphore closed")
-            }))
-        } else {
-            None
-        };
+        let _permit = runtime::block_on_async(async {
+            semaphore.acquire().await.expect("semaphore closed")
+        });
 
         // SAFETY: op and state are alive — caller awaits all tasks
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };

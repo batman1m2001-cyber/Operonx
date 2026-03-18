@@ -80,7 +80,7 @@ class GraphOp(BaseOp):
         "_is_building",
         "_compiled_adj",
         "_stream_predecrements",
-        "_max_stream_concurrent",
+        "concurrency",
         "_loop_config",
         "stream_contexts",
     ]
@@ -91,7 +91,7 @@ class GraphOp(BaseOp):
     # 1. DEFINE — build the graph structure
     # ═══════════════════════════════════════════════════════════════════
 
-    def __init__(self, **kwargs):
+    def __init__(self, concurrency: int = 64, **kwargs):
         super().__init__(**kwargs)
         self._token = None
         self._is_building = True
@@ -103,7 +103,7 @@ class GraphOp(BaseOp):
         self.nexts = defaultdict(list)
         self.has_soft_preds = set()
         self._stream_predecrements = {}
-        self._max_stream_concurrent = 64
+        self.concurrency = concurrency
         self._compiled_adj = {}
         self._loop_config = None
         self.stream_contexts = []
@@ -520,7 +520,7 @@ class GraphOp(BaseOp):
                 }
                 if self._loop_config
                 else None,
-                "max_stream_concurrent": self._max_stream_concurrent,
+                "max_stream_concurrent": self.concurrency,
             }
         )
         return base
