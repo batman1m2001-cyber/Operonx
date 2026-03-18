@@ -2,7 +2,7 @@
 
 Xử lý lỗi trong workflows: error capture, retry, fallback, và error routing.
 
-> **Ví dụ chạy được**: `examples/08_error_handling/demo.py`
+> **Ví dụ chạy được**: `examples/ex08_error_handling/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.

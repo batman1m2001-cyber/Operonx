@@ -57,16 +57,16 @@ All bench.py files follow the same pattern:
 ## Available examples with bench.py
 
 ```
-01_hello_world/bench.py
-02_data_pipeline/bench.py
-03_llm_chat/bench.py
-04_llm_advanced/bench.py
-05_loops_and_branches/bench.py
-06_tracing/{local,langfuse,otel}/bench.py
-07_embeddings_and_rag/bench.py
-08_error_handling/bench.py
-09_agent_workflow/bench.py
-10_multi_model/bench.py
-11_parallel_advanced/bench.py
-12_rag_advanced/bench.py
+ex01_hello_world/bench.py
+ex02_data_pipeline/bench.py
+ex03_llm_chat/bench.py
+ex04_llm_advanced/bench.py
+ex05_loops_and_branches/bench.py
+ex06_tracing/{local,langfuse,otel}/bench.py
+ex07_embeddings_and_rag/bench.py
+ex08_error_handling/bench.py
+ex09_agent_workflow/bench.py
+ex10_multi_model/bench.py
+ex11_parallel_advanced/bench.py
+ex12_rag_advanced/bench.py
 ```
