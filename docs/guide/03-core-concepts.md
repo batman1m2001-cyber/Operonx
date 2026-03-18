@@ -2,7 +2,7 @@
 
 Hiểu các khái niệm cốt lõi của Hush: ops, edges, data flow, và state management.
 
-> **Ví dụ chạy được**: `examples/ex01_hello_world/demo.py`, `examples/ex02_data_pipeline/demo.py`
+> **Ví dụ chạy được**: `examples/exex01_hello_world/demo.py`, `examples/exex02_data_pipeline/demo.py`
 
 ## GraphOp — Container
 
@@ -239,7 +239,7 @@ print(state.user_id)          # User ID (nếu set)
 
 `@graph` biến một builder function thành factory tạo `GraphOp` có thể tái sử dụng. Các tham số của function tự động trở thành `PARENT` refs.
 
-> **Ví dụ chạy được**: `examples/13_graph/demo.py`
+> **Ví dụ chạy được**: `examples/ex13_graph/demo.py`
 
 ```python
 from hush.core import graph, op, START, END, PARENT, GraphOp, Hush

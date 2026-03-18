@@ -2,7 +2,7 @@
 
 Sử dụng nhiều LLM models: load balancing, fallback, ensemble, cost routing.
 
-> **Ví dụ chạy được**: `examples/10_multi_model/demo.py`
+> **Ví dụ chạy được**: `examples/ex10_multi_model/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -126,7 +126,7 @@ with GraphOp(name="ensemble") as graph:
     [llm_a, llm_b, llm_c] >> jp >> judge >> END
 ```
 
-Xem ví dụ đầy đủ tại `examples/10_multi_model/demo.py`.
+Xem ví dụ đầy đủ tại `examples/ex10_multi_model/demo.py`.
 
 ## Tiếp theo
 

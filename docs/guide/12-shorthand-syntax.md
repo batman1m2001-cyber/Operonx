@@ -2,7 +2,7 @@
 
 Hush cung cấp các `.of()` classmethod, decorator, và factory functions để viết workflow ngắn gọn hơn. Thay vì dùng class đầy đủ với `inputs={}`, bạn có thể truyền trực tiếp các tham số.
 
-> **Ví dụ chạy được**: `examples/05_loops_and_branches/demo.py`, `examples/09_agent_workflow/demo.py`
+> **Ví dụ chạy được**: `examples/ex05_loops_and_branches/demo.py`, `examples/ex09_agent_workflow/demo.py`
 
 ## Tổng quan
 
