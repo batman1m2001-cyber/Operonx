@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-ai"
-version = "0.1.8"
+version = "0.1.9"
 description = "Hush AI — high-performance workflow engine for AI applications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,10 +22,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "hush-icore>=0.1.8",
-    "hush-providers>=0.1.8",
-    "hush-serve>=0.1.8",
-    "hush-telemetry>=0.1.8",
+    "hush-icore>=0.1.9",
+    "hush-providers>=0.1.9",
+    "hush-serve>=0.1.9",
+    "hush-telemetry>=0.1.9",
     "click>=8.0",
     "python-dotenv>=1.0",
 ]
