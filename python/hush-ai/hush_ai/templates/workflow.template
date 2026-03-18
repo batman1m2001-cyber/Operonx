@@ -1,0 +1,31 @@
+"""My first Hush workflow.
+
+Run: uv run python workflow.py
+"""
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from hush.core import Hush, GraphOp, op, START, END, PARENT
+
+
+@op
+def greet(user: str):
+    return {"greeting": f"Hello, {user}!"}
+
+
+with GraphOp(name="hello") as graph:
+    g = greet(user=PARENT["user"])
+    START >> g >> END
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        engine = Hush(graph)
+        result = await engine.run({"user": "World"})
+        print(result)
+
+    asyncio.run(main())

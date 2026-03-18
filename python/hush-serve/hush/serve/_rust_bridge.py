@@ -278,6 +278,8 @@ def serve_rust(
     if binary:
         # Custom binary mode: ops are compiled in, no plugin needed
         bin_path = Path(binary).resolve()
+        if not bin_path.exists() and sys.platform == "win32" and not bin_path.suffix:
+            bin_path = bin_path.with_suffix(".exe")
         if not bin_path.exists():
             raise FileNotFoundError(f"Custom binary not found: {binary}")
 
