@@ -2,7 +2,7 @@
 
 Debug và monitor workflows với HushEyesTracer, Langfuse, và OpenTelemetry.
 
-> **Ví dụ chạy được**: `examples/06_tracing/demo.py`
+> **Ví dụ chạy được**: `examples/ex06_tracing/demo.py`
 
 ## Tại sao cần Tracing?
 
@@ -102,7 +102,7 @@ result = await engine.run(inputs={...})
 # Trace URL được log tự động
 ```
 
-Xem ví dụ đầy đủ tại `examples/06_tracing/demo.py` (Langfuse tracing is configured via env vars).
+Xem ví dụ đầy đủ tại `examples/ex06_tracing/demo.py` (Langfuse tracing is configured via env vars).
 
 ## OTelTracer (OpenTelemetry)
 
@@ -130,7 +130,7 @@ engine = Hush(graph, tracer=tracer)
 result = await engine.run(inputs={...})
 ```
 
-Xem ví dụ đầy đủ tại `examples/06_tracing/demo.py` (OTEL tracing is configured via env vars).
+Xem ví dụ đầy đủ tại `examples/ex06_tracing/demo.py` (OTEL tracing is configured via env vars).
 
 ## Multiple Tracers
 

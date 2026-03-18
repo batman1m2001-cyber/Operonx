@@ -2,7 +2,7 @@
 
 Thực thi song song trong workflows: fan-out/fan-in, generator iteration, partial failure.
 
-> **Ví dụ chạy được**: `examples/11_parallel_advanced/demo.py`
+> **Ví dụ chạy được**: `examples/ex11_parallel_advanced/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.

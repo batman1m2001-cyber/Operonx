@@ -81,25 +81,25 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Quickstart](02-quickstart.md) | `ex01_hello_world/demo.py`, `ex02_data_pipeline/demo.py` | Hello world, data pipeline |
-| [Core Concepts](03-core-concepts.md) | `ex01_hello_world/demo.py`, `ex02_data_pipeline/demo.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
+| [Quickstart](02-quickstart.md) | `exex01_hello_world/demo.py`, `exex02_data_pipeline/demo.py` | Hello world, data pipeline |
+| [Core Concepts](03-core-concepts.md) | `exex01_hello_world/demo.py`, `exex02_data_pipeline/demo.py` | GraphOp, FuncOp, inputs/outputs, PARENT, edges |
 
 ### LLM & AI
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [LLM Integration](04-llm-integration.md) | `03_llm_chat/demo.py`, `04_llm_advanced/demo.py` | PromptOp, LLMOp, providers, tools, structured output |
-| [Embeddings & RAG](06-embeddings-rag.md) | `07_embeddings_and_rag/demo.py`, `12_rag_advanced/demo.py` | Embedding, reranking, RAG pipeline, hybrid search |
-| [Multi-model](11-multi-model.md) | `10_multi_model/demo.py` | Load balancing, fallback, ensemble, cost routing |
-| [Agent Workflow](10-agent-workflow.md) | `09_agent_workflow/demo.py` | Tool-calling agent, @graph.loop |
+| [LLM Integration](04-llm-integration.md) | `ex03_llm_chat/demo.py`, `ex04_llm_advanced/demo.py` | PromptOp, LLMOp, providers, tools, structured output |
+| [Embeddings & RAG](06-embeddings-rag.md) | `ex07_embeddings_and_rag/demo.py`, `ex12_rag_advanced/demo.py` | Embedding, reranking, RAG pipeline, hybrid search |
+| [Multi-model](11-multi-model.md) | `ex10_multi_model/demo.py` | Load balancing, fallback, ensemble, cost routing |
+| [Agent Workflow](10-agent-workflow.md) | `ex09_agent_workflow/demo.py` | Tool-calling agent, @graph.loop |
 
 ### Flow Control
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Loops & Branches](05-loops-branches.md) | `05_loops_and_branches/demo.py` | Generator ops (yield), @graph.loop, BranchOp |
-| [Parallel Execution](08-parallel-execution.md) | `11_parallel_advanced/demo.py` | Fan-out/fan-in, generator iteration, partial failure |
-| [Error Handling](07-error-handling.md) | `08_error_handling/demo.py` | Error capture, retry, fallback, BranchOp routing |
+| [Loops & Branches](05-loops-branches.md) | `ex05_loops_and_branches/demo.py` | Generator ops (yield), @graph.loop, BranchOp |
+| [Parallel Execution](08-parallel-execution.md) | `ex11_parallel_advanced/demo.py` | Fan-out/fan-in, generator iteration, partial failure |
+| [Error Handling](07-error-handling.md) | `ex08_error_handling/demo.py` | Error capture, retry, fallback, BranchOp routing |
 
 ### Performance
 
@@ -111,11 +111,11 @@ Học Hush từ cơ bản đến nâng cao. Mỗi doc đều có **ví dụ ch�
 
 | Doc | Ví dụ chạy được | Nội dung |
 |-----|-----------------|----------|
-| [Tracing & Observability](09-tracing-observability.md) | `06_tracing/demo.py` | HushEyesTracer, Langfuse, OTEL, tags, cost tracking |
+| [Tracing & Observability](09-tracing-observability.md) | `ex06_tracing/demo.py` | HushEyesTracer, Langfuse, OTEL, tags, cost tracking |
 
 ## Chạy ví dụ
 
 ```bash
 cd examples
-uv run python ex01_hello_world/demo.py
+uv run python exex01_hello_world/demo.py
 ```

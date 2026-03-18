@@ -2,7 +2,7 @@
 
 Cấu hình và sử dụng LLM providers trong Hush workflows.
 
-> **Ví dụ chạy được**: `examples/03_llm_chat/demo.py`, `examples/04_llm_advanced/demo.py`
+> **Ví dụ chạy được**: `examples/ex03_llm_chat/demo.py`, `examples/ex04_llm_advanced/demo.py`
 
 > **Shorthand syntax:** Các ví dụ trong chương này sử dụng shorthand syntax cho gọn.
 > Xem [Shorthand Reference](12-shorthand-syntax.md) để biết đầy đủ.
@@ -236,7 +236,7 @@ llm = LLMOp.of(
 )
 ```
 
-Xem thêm ví dụ tại `examples/10_multi_model/demo.py`.
+Xem thêm ví dụ tại `examples/ex10_multi_model/demo.py`.
 
 ## Fallback
 
@@ -285,7 +285,7 @@ llm = LLMOp.of(
 )
 ```
 
-Xem ví dụ agent workflow đầy đủ tại `examples/09_agent_workflow/demo.py`.
+Xem ví dụ agent workflow đầy đủ tại `examples/ex09_agent_workflow/demo.py`.
 
 ## Structured Output
 
