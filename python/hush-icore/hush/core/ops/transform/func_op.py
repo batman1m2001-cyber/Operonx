@@ -24,6 +24,7 @@ def op(
     executor: Optional[str] = None,
     bound: Optional[str] = None,
     cache=None,
+    delay: float = 0,
 ):
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -86,10 +87,12 @@ def op(
             # Call-time overrides decoration-time defaults
             op_executor = init_kwargs.pop("executor", executor)
             op_bound = init_kwargs.pop("bound", bound)
+            op_delay = init_kwargs.pop("delay", delay)
             return FuncOp(
                 code_fn=fn,
                 executor=op_executor,
                 bound=op_bound,
+                delay=op_delay,
                 _mappings=mappings or None,
                 **init_kwargs,
             )

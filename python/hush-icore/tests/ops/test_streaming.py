@@ -437,7 +437,7 @@ class TestBackpressure:
             d = slow_op(x=s["x"])
             START >> s >> d >> END
 
-        g._max_stream_concurrent = 2
+        g.concurrency = 2
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
@@ -445,6 +445,72 @@ class TestBackpressure:
 
         assert len(result["result"]) == 5
         assert max_concurrent_seen <= 2
+
+    @pytest.mark.asyncio
+    async def test_concurrency_constructor_param(self):
+        """GraphOp(concurrency=1) forces sequential execution of stream items."""
+        max_concurrent_seen = 0
+        current_concurrent = 0
+        lock = asyncio.Lock()
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"x": i}
+
+        @op
+        async def slow_op(x: int):
+            nonlocal max_concurrent_seen, current_concurrent
+            async with lock:
+                current_concurrent += 1
+                max_concurrent_seen = max(max_concurrent_seen, current_concurrent)
+            await asyncio.sleep(0.01)
+            async with lock:
+                current_concurrent -= 1
+            return {"result": x}
+
+        with GraphOp(name="seq_test", concurrency=1) as g:
+            s = source(n=PARENT["n"])
+            d = slow_op(x=s["x"])
+            START >> s >> d >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"n": 5})
+        result = await g.run(state)
+
+        assert len(result["result"]) == 5
+        assert max_concurrent_seen == 1  # strictly sequential
+
+    @pytest.mark.asyncio
+    async def test_delay_param(self):
+        """@op(delay=X) waits X seconds before executing."""
+        from time import perf_counter
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"x": i}
+
+        @op(delay=0.05)
+        def delayed_op(x: int):
+            return {"result": x * 2}
+
+        with GraphOp(name="delay_test") as g:
+            s = source(n=PARENT["n"])
+            d = delayed_op(x=s["x"])
+            START >> s >> d >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"n": 3})
+        t0 = perf_counter()
+        result = await g.run(state)
+        elapsed = perf_counter() - t0
+
+        assert len(result["result"]) == 3
+        # 3 items with 50ms delay each, running in parallel = at least 50ms total
+        assert elapsed >= 0.05
 
 
 # =============================================================================

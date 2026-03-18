@@ -392,6 +392,7 @@ mod tests {
             provider_config: None,
             contain_generation: false,
             cache: None,
+            delay: 0.0,
         }
     }
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-telemetry"
-version = "0.1.7"
+version = "0.1.8"
 description = "Observability, tracing, and telemetry framework for Hush"
 readme = "README.md"
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ authors = [
     { name = "Hush Team" }
 ]
 dependencies = [
-    "hush-icore>=0.1.7",
+    "hush-icore>=0.1.8",
     "pydantic>=2.0.0",
 ]
 
