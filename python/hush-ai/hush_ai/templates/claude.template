@@ -169,13 +169,6 @@ def agent_loop(messages, done):
 from hush.core import BranchOp
 from hush.core.ops.flow import if_
 
-# Fluent API
-router = (
-    if_(PARENT["score"] >= 90, "excellent")
-    .if_(PARENT["score"] >= 70, "good")
-    .else_("fail")
-)
-
 with GraphOp(name="grade") as graph:
     s = get_score(input=PARENT["input"])
     router = if_(s["score"] >= 90, "ex").if_(s["score"] >= 70, "ok").else_("fail")
@@ -184,12 +177,44 @@ with GraphOp(name="grade") as graph:
     fail = handle_fail(score=s["score"])
 
     START >> s >> router
-    router >>~ ex >> END      # >>~ is soft edge (only runs if selected)
-    router >>~ ok >> END
-    router >>~ fail >> END
+    router >> ex >> END       # hard edge — branch logic decides which fires
+    router >> ok >> END
+    router >> fail >> END
 
 # Conditions support: >=, >, ==, !=, <, <=, & (and), | (or)
 ```
+
+### Soft Edges — Merging branches (IMPORTANT)
+
+Soft edges (`>> ~target`) are for **merge nodes** — when multiple source ops converge
+into one target, but only one source fires per execution. The target fires when ANY ONE
+soft predecessor completes (not all).
+
+**NEVER use soft edges on branch router outputs.** The router dispatches via hard edges;
+its internal branch logic decides which successor activates.
+
+**DO use soft edges when merging branch paths back into one op.**
+
+```python
+# CORRECT: merge two branch paths into one node
+router = if_(articles["skip_classify"] == True, "prepared").else_("classify")
+
+with GraphOp(name="extract") as graph:
+    # ... setup ops ...
+    START >> doc >> articles >> router
+    router >> classify >> sc         # hard: else_ path
+    [sc, router] >> ~prepared        # soft: merge node — fires from either path
+    prepared >> actions >> result >> END
+
+# WRONG — do NOT use soft edge just because it's a branch output
+# router >> ~classify >> ~prepared  ← WRONG: classify has ONE predecessor, use hard edge
+# The soft edge is only needed on prepared (the merge node with multiple predecessors)
+```
+
+**Syntax:** `>> ~target` (tilde on the target op, space after >>). NOT `>>~`.
+
+**Rule of thumb:** If an op has exactly one predecessor, use hard edge (`>>`).
+If an op has multiple predecessors but only one fires, use soft edge (`>> ~target`).
 
 ## Provider Ops (hush-providers)
 
@@ -398,5 +423,5 @@ except OpError as e:
 6. API keys in `.env`, referenced in resources.yaml as `${VAR_NAME}`
 7. Always `from dotenv import load_dotenv; load_dotenv()` at top of scripts
 8. `engine.run()` is async — use `await` or `asyncio.run()`
-9. `>>~` for soft edges (branch targets) — only selected branch runs
+9. `>> ~target` for soft edges (merge nodes only) — fires when any one predecessor completes. NEVER use on branch router outputs.
 10. Generators use `yield` in `@op` — downstream runs per yield in parallel

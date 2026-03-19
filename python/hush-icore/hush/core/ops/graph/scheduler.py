@@ -3,106 +3,26 @@
 Entry point: run_scheduler(graph, state, ...) → (outputs, stream_contexts).
 All runtime state is local — concurrent calls on the same graph are safe.
 
-Execution flow
-==============
+Concurrency model
+=================
 
-All functions are closures inside run_scheduler, sharing local state
-(event_queue, active_count, ready_counts, soft_satisfied, stream_contexts).
+    graph.concurrency controls how many stream context pipelines can execute
+    simultaneously. Uses a simple counter + pending queue:
 
-    GraphOp.run()
-        |
-        v
-    run_scheduler(graph, state, context_id, parent_context, request_id)
-        |
-        |  1. Start entry ops
-        |
-        |     drain_ready(entries, ctx)
-        |         |
-        |         └─ dispatch_op(name, ctx)
-        |              ├─ Generator    → create_task(task_generator), active_count += 1
-        |              ├─ Sync+simple  → run inline, PENDING? stop : propagate()
-        |              └─ Async/graph  → create_task(task_execute), active_count += 1
-        |
-        |  2. Event loop (while active_count > 0)
-        |     wait for event from event_queue, then:
-        |
-        |     "done"         → active_count -= 1
-        |                      propagate(op_name, ctx) → drain_ready(newly_ready)
-        |
-        |     "done_pending" → active_count -= 1
-        |
-        |     "yield"        → create stream_ctx with pre-decremented ready_counts
-        |                      propagate(gen_name, stream_ctx) → drain_ready(newly_ready)
-        |                      push to output_queue (if present)
-        |
-        |     "exhausted"    → active_count -= 1
-        |
-        |  3. Collect outputs
-        |     stream_contexts? → gather from leaf contexts (deepest [n])
-        |     generators?     → return empty lists
-        |     batch only?     → graph.get_outputs()
-        |
-        v
-    return (outputs, stream_contexts)
+    - When a generator yields, check if running_streams < concurrency
+    - If yes: dispatch the stream context immediately, running_streams += 1
+    - If no: queue the yield for later
+    - When a stream context's terminal op reaches __end__: running_streams -= 1,
+      dequeue and dispatch the next pending yield if any
 
-
-Functions
-=========
-
-    task_execute(name, op_obj, ctx, p_ctx)
-        Async task for non-inline ops (async, graph, executor="thread").
-        Acquires semaphore for stream contexts (backpressure).
-        Calls op_obj.run(), emits "done" or "done_pending".
-
-    task_generator(name, op_obj, ctx, p_ctx)
-        Async task for sync/async generator ops.
-        Iterates the generator, emitting "yield" per item with stream_ctx.
-        Each yield stores result in state. On error: partial yields kept.
-        Logs metrics. Emits "exhausted" when done.
-
-    propagate(op_name, ctx) → list[str]
-        Decrement ready_counts for each successor of op_name.
-        Branch ops: resolve target at runtime, only activate that branch.
-        Soft edges: all soft edges to same target count as 1 (first wins).
-        Returns op names whose ready_count just hit 0.
-
-    dispatch_op(name, ctx) → list[str]
-        Dispatch one op based on its type (see flow diagram above).
-        Only the inline sync path returns newly ready ops.
-        Async paths post events to event_queue instead.
-
-    drain_ready(queue, ctx)
-        Process queue of ready ops: dispatch each, append newly ready
-        successors, repeat until empty.
-
-
-Key concepts
-============
-
-    ready_count    Each op starts with count = number of predecessors.
-                   When a predecessor completes, count -= 1. At 0 → ready.
-
-    soft edges     Branch outputs: only one branch fires. All soft edges
-                   to the same target count as 1 in ready_count.
-
-    stream context Generator yields create context tuples like ("main", "[0]").
-                   Each yield gets its own ready_counts copy, so downstream
-                   ops run independently per item.
-
-    predecrements  When a generator yields, batch predecessors of downstream
-                   ops have already completed. Their contributions are
-                   pre-subtracted from the fresh ready_counts copy.
-
-    PENDING        An op can return PENDING to signal "I absorbed this input
-                   but produced no output" — downstream ops are NOT triggered.
-
-    semaphore      Limits concurrent stream tasks (default 64). Only stream
-                   contexts acquire it — batch ops run without limit.
+    This ensures each article's full pipeline (classify → actions → save)
+    runs end-to-end. No FIFO semaphore interleaving.
 """
 
 import asyncio
 import inspect
 import traceback
+from collections import deque
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
@@ -129,13 +49,7 @@ async def run_scheduler(
     parent_context,
     request_id: str,
 ) -> Tuple[Dict[str, Any], List]:
-    """Execute one scheduler pass over a graph.
-
-    All runtime state is local — safe for concurrent calls on the same graph.
-
-    Returns:
-        (outputs_dict, stream_contexts_list)
-    """
+    """Execute one scheduler pass over a graph."""
 
     # ── Local runtime state ────────────────────────────────────────
     event_queue = asyncio.Queue()
@@ -144,34 +58,32 @@ async def run_scheduler(
     soft_satisfied = {}
     stream_contexts = []
     output_queue = _output_queue.get()
-    semaphore = asyncio.Semaphore(graph.concurrency)
+
+    # Stream concurrency: counter + pending queue (replaces semaphore)
+    running_streams = 0
+    pending_yields = deque()  # queued (gen_name, stream_ctx, result_data)
+
+    # Track which stream contexts are active (for release on terminal op)
+    active_stream_ctxs = set()
 
     # ── Async tasks (spawned by dispatch_op) ─────────────────────
 
     async def task_execute(name, op_obj, ctx, p_ctx):
-        """Async task for non-inline ops (async, graph, executor="thread").
-
-        Acquires semaphore for concurrency control (stream + non-stream tasks).
-        Emits "done" or "done_pending" to event_queue when finished.
-        """
-        await semaphore.acquire()
+        """Async task for non-inline ops (async, graph, executor="thread")."""
+        if op_obj.delay > 0:
+            await asyncio.sleep(op_obj.delay)
         try:
             result = await op_obj.run(state, ctx, p_ctx)
-        finally:
-            semaphore.release()
+        except Exception:
+            await event_queue.put(("done", name, ctx))
+            return
         if result is PENDING:
             await event_queue.put(("done_pending", name, ctx))
         else:
             await event_queue.put(("done", name, ctx))
 
     async def task_generator(name, op_obj, ctx, p_ctx):
-        """Async task for generator ops (sync or async generators).
-
-        Iterates the generator, emitting ("yield", name, stream_ctx, result)
-        per item. Each yield stores the result in state and creates a new
-        stream context ctx + ("[n]",). Emits ("exhausted", name) when done.
-        Handles errors gracefully — partial yields are kept, metrics logged.
-        """
+        """Async task for generator ops (sync or async generators)."""
         gen_start = datetime.now(timezone.utc)
         gen_perf = perf_counter()
         gen_error = None
@@ -222,14 +134,7 @@ async def run_scheduler(
     # ── Scheduling logic ───────────────────────────────────────────
 
     def propagate(op_name, ctx):
-        """Propagate completion: decrement successors' ready_counts, return newly ready ops.
-
-        Branch ops: resolve target at runtime via get_target(), only
-        activate that one branch (or return [] if target is END).
-        Soft edges: first soft edge to a target sets it as satisfied,
-        subsequent soft edges to the same target are skipped.
-        Returns list of op names whose ready_count just hit 0.
-        """
+        """Propagate completion: decrement successors' ready_counts, return newly ready ops."""
         op_obj = graph._ops[op_name]
         if op_obj.type == "branch":
             target = op_obj.get_target(state, ctx)
@@ -258,16 +163,14 @@ async def run_scheduler(
                 newly_ready.append(next_op)
         return newly_ready
 
+    terminal_ops = set(graph.exits)
+
+    def is_terminal(op_name):
+        """Check if op is a terminal op (connects to END)."""
+        return op_name in terminal_ops
+
     async def dispatch_op(name, ctx):
-        """Dispatch one op to the appropriate execution mode.
-
-        Generator  → create_task(task_generator), active_count += 1, return []
-        Sync+simple (not graph, not async, no executor)
-                   → run inline, return propagate() or [] if PENDING
-        Async/graph → create_task(task_execute), active_count += 1, return []
-
-        Returns list of newly ready op names (only non-empty for inline path).
-        """
+        """Dispatch one op to the appropriate execution mode."""
         nonlocal active_count
         op_obj = graph._ops[name]
 
@@ -276,12 +179,14 @@ async def run_scheduler(
             asyncio.create_task(task_generator(name, op_obj, ctx, parent_context))
             return []
 
-        # Simple sync op (not graph, not async, no executor) → inline
+        # Simple sync op → inline
         if (
             op_obj.type != "graph"
             and not inspect.iscoroutinefunction(getattr(op_obj, "core", None))
             and getattr(op_obj, "executor", None) is None
         ):
+            if op_obj.delay > 0:
+                await asyncio.sleep(op_obj.delay)
             result = await op_obj.run(state, ctx, parent_context)
             if result is PENDING:
                 return []
@@ -292,14 +197,38 @@ async def run_scheduler(
         return []
 
     async def drain_ready(queue, ctx):
-        """Process queue of ready ops: dispatch each, append newly ready successors, repeat.
-
-        Used after initial entries and after propagate().
-        Only the inline sync path can return successors — async tasks
-        post events to event_queue instead, handled by the main loop.
-        """
+        """Process queue of ready ops: dispatch each, append newly ready successors, repeat."""
         while queue:
             queue.extend(await dispatch_op(queue.pop(0), ctx))
+
+    def dispatch_yield(gen_name, stream_ctx, result_data):
+        """Set up a stream context and dispatch its first ops. Returns True if dispatched."""
+        nonlocal running_streams
+
+        rc = graph.initial_ready_count.copy()
+        for op_name, dec in graph._stream_predecrements.get(gen_name, {}).items():
+            rc[op_name] -= dec
+        ready_counts[stream_ctx] = rc
+        stream_contexts.append(stream_ctx)
+        active_stream_ctxs.add(stream_ctx)
+        running_streams += 1
+
+        return gen_name, stream_ctx, result_data
+
+    def try_dequeue_yield():
+        """If there's capacity and pending yields, dispatch one."""
+        nonlocal running_streams
+        if pending_yields and running_streams < graph.concurrency:
+            gen_name, stream_ctx, result_data = pending_yields.popleft()
+            return dispatch_yield(gen_name, stream_ctx, result_data)
+        return None
+
+    def release_stream(ctx):
+        """Release a stream context slot, try to dequeue next."""
+        nonlocal running_streams
+        if ctx in active_stream_ctxs:
+            active_stream_ctxs.discard(ctx)
+            running_streams -= 1
 
     # ── The story ──────────────────────────────────────────────────
 
@@ -313,25 +242,48 @@ async def run_scheduler(
         if event[0] == "done":
             _, op_name, ctx = event
             active_count -= 1
+
+            # Terminal op in stream context → release slot, dequeue next
+            if ctx in active_stream_ctxs and is_terminal(op_name):
+                release_stream(ctx)
+                dispatched = try_dequeue_yield()
+                if dispatched:
+                    active_count -= 1  # balance the +1 from queueing
+                    gen_name, s_ctx, r_data = dispatched
+                    await drain_ready(propagate(gen_name, s_ctx), s_ctx)
+                    if output_queue is not None:
+                        await output_queue.put({"type": "token", "op": gen_name, "data": r_data})
+
             await drain_ready(propagate(op_name, ctx), ctx)
 
         elif event[0] == "done_pending":
+            _, op_name, ctx = event
             active_count -= 1
+            if ctx in active_stream_ctxs and is_terminal(op_name):
+                release_stream(ctx)
+                dispatched = try_dequeue_yield()
+                if dispatched:
+                    active_count -= 1  # balance the +1 from queueing
+                    gen_name, s_ctx, r_data = dispatched
+                    await drain_ready(propagate(gen_name, s_ctx), s_ctx)
+                    if output_queue is not None:
+                        await output_queue.put({"type": "token", "op": gen_name, "data": r_data})
 
         elif event[0] == "yield":
             _, gen_name, stream_ctx, result_data = event
 
-            # Create stream context with pre-decremented ready counts
-            rc = graph.initial_ready_count.copy()
-            for op_name, dec in graph._stream_predecrements.get(gen_name, {}).items():
-                rc[op_name] -= dec
-            ready_counts[stream_ctx] = rc
-            stream_contexts.append(stream_ctx)
+            if running_streams < graph.concurrency:
+                # Slot available — dispatch immediately
+                dispatch_yield(gen_name, stream_ctx, result_data)
+                await drain_ready(propagate(gen_name, stream_ctx), stream_ctx)
 
-            await drain_ready(propagate(gen_name, stream_ctx), stream_ctx)
-
-            if output_queue is not None:
-                await output_queue.put({"type": "token", "op": gen_name, "data": result_data})
+                if output_queue is not None:
+                    await output_queue.put({"type": "token", "op": gen_name, "data": result_data})
+            else:
+                # No slot — queue for later.
+                # Increment active_count so event loop doesn't exit while items are pending.
+                active_count += 1
+                pending_yields.append((gen_name, stream_ctx, result_data))
 
         elif event[0] == "exhausted":
             active_count -= 1
