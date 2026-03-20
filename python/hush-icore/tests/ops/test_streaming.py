@@ -526,9 +526,9 @@ class TestBackpressure:
         # Expected: a_start_0, a_end_0, b_start_0, b_end_0, a_start_1, ...
         for i in range(2):
             b_end_pos = execution_log.index(f"b_end_{i}")
-            a_start_next_pos = execution_log.index(f"a_start_{i+1}")
+            a_start_next_pos = execution_log.index(f"a_start_{i + 1}")
             assert b_end_pos < a_start_next_pos, (
-                f"Item {i}'s pipeline didn't complete before item {i+1} started. "
+                f"Item {i}'s pipeline didn't complete before item {i + 1} started. "
                 f"Log: {execution_log}"
             )
 
