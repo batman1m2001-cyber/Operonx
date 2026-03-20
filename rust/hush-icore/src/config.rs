@@ -35,6 +35,7 @@ pub struct GraphConfig {
     pub full_name: String,
     pub ops: AHashMap<String, BaseOpConfig>,
     pub entries: Vec<String>,
+    pub exits: Vec<String>,
     pub initial_ready_count: AHashMap<String, i32>,
     pub compiled_adj: AHashMap<String, SmallVec<[AdjEntry; 4]>>,
     pub has_soft_preds: AHashSet<String>,
@@ -170,6 +171,13 @@ impl GraphConfig {
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
 
+        // Parse exits (terminal ops that connect to END)
+        let exits = val
+            .get("exits")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
         // Parse initial_ready_count
         let mut initial_ready_count = AHashMap::new();
         if let Some(rc_obj) = val.get("initial_ready_count").and_then(|v| v.as_object()) {
@@ -269,6 +277,7 @@ impl GraphConfig {
             full_name,
             ops,
             entries,
+            exits,
             initial_ready_count,
             compiled_adj,
             has_soft_preds,

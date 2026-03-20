@@ -483,6 +483,56 @@ class TestBackpressure:
         assert max_concurrent_seen == 1  # strictly sequential
 
     @pytest.mark.asyncio
+    async def test_concurrency1_pipeline_completes_before_next(self):
+        """With concurrency=1, each stream item's full pipeline completes before the next starts.
+
+        Verifies the fix: classify→actions runs end-to-end per item, not all classifies then all actions.
+        """
+        execution_log = []
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"x": i}
+
+        @op
+        async def step_a(x: int):
+            execution_log.append(f"a_start_{x}")
+            await asyncio.sleep(0.01)
+            execution_log.append(f"a_end_{x}")
+            return {"y": x}
+
+        @op
+        async def step_b(y: int):
+            execution_log.append(f"b_start_{y}")
+            await asyncio.sleep(0.01)
+            execution_log.append(f"b_end_{y}")
+            return {"result": y * 10}
+
+        with GraphOp(name="pipeline_test", concurrency=1) as g:
+            s = source(n=PARENT["n"])
+            a = step_a(x=s["x"])
+            b = step_b(y=a["y"])
+            START >> s >> a >> b >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"n": 3})
+        result = await g.run(state)
+
+        assert len(result["result"]) == 3
+
+        # Verify pipeline order: each item's a+b completes before next item starts
+        # Expected: a_start_0, a_end_0, b_start_0, b_end_0, a_start_1, ...
+        for i in range(2):
+            b_end_pos = execution_log.index(f"b_end_{i}")
+            a_start_next_pos = execution_log.index(f"a_start_{i + 1}")
+            assert b_end_pos < a_start_next_pos, (
+                f"Item {i}'s pipeline didn't complete before item {i + 1} started. "
+                f"Log: {execution_log}"
+            )
+
+    @pytest.mark.asyncio
     async def test_delay_param(self):
         """@op(delay=X) waits X seconds before executing."""
         from time import perf_counter

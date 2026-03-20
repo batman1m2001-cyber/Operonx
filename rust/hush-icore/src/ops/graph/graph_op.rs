@@ -17,7 +17,7 @@ use std::time::Instant;
 use ahash::{AHashMap, AHashSet};
 use chrono::Utc;
 use serde_json::Value;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 
 use crate::config::{GraphConfig, LoopConfig, OpBound, BaseOpConfig};
 use crate::error::RushError;
@@ -98,7 +98,10 @@ pub async fn run_scheduler(
     // Track stream contexts for output collection
     let mut stream_contexts: Vec<String> = Vec::new();
 
-    let semaphore = Arc::new(Semaphore::new(config.max_stream_concurrent));
+    // Stream concurrency: counter + pending queue (no semaphore)
+    let mut running_streams: usize = 0;
+    let mut pending_yields: VecDeque<(String, String, Value)> = VecDeque::new();
+    let mut active_stream_ctxs: AHashSet<String> = AHashSet::new();
 
     // ── Helper: propagate completion ───────────────────────────────
     // Returns list of op names whose ready_count just hit 0.
@@ -167,8 +170,7 @@ pub async fn run_scheduler(
                        active_count: &mut usize,
                        ready_counts: &mut AHashMap<String, AHashMap<String, i32>>,
                        soft_satisfied: &mut AHashMap<String, AHashSet<String>>,
-                       event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
-                       semaphore: &Arc<Semaphore>|
+                       event_tx: &mpsc::UnboundedSender<SchedulerEvent>|
      -> Result<DispatchResult, RushError> {
         let op = config
             .ops
@@ -187,14 +189,14 @@ pub async fn run_scheduler(
             }
             // Provider streaming / other generators → spawn async task
             *active_count += 1;
-            spawn_generator_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
+            spawn_generator_task(op, state, ctx, context_id, event_tx.clone(), registry);
             return Ok(DispatchResult::Spawned);
         }
 
         // Graph ops → spawn async task (recursive scheduler)
         if op.op_type == "graph" {
             *active_count += 1;
-            spawn_graph_task(op, config, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
+            spawn_graph_task(op, config, state, ctx, event_tx.clone(), registry);
             return Ok(DispatchResult::Spawned);
         }
 
@@ -211,7 +213,7 @@ pub async fn run_scheduler(
         // IO-bound ops (including provider ops) → spawn_blocking for async HTTP
         if op.provider_config.is_some() || op.bound == OpBound::Io {
             *active_count += 1;
-            spawn_blocking_task(op, state, ctx, context_id, event_tx.clone(), Arc::clone(semaphore), registry);
+            spawn_blocking_task(op, state, ctx, event_tx.clone(), registry);
             return Ok(DispatchResult::Spawned);
         }
 
@@ -243,8 +245,7 @@ pub async fn run_scheduler(
          active_count: &mut usize,
          ready_counts: &mut AHashMap<String, AHashMap<String, i32>>,
          soft_satisfied: &mut AHashMap<String, AHashSet<String>>,
-         event_tx: &mpsc::UnboundedSender<SchedulerEvent>,
-         semaphore: &Arc<Semaphore>|
+         event_tx: &mpsc::UnboundedSender<SchedulerEvent>|
          -> Result<(), RushError> {
             while let Some(op_name) = queue.pop_front() {
                 match dispatch_op(
@@ -254,7 +255,6 @@ pub async fn run_scheduler(
                     ready_counts,
                     soft_satisfied,
                     event_tx,
-                    semaphore,
                 )? {
                     DispatchResult::Completed(newly_ready) => {
                         queue.extend(newly_ready);
@@ -265,6 +265,29 @@ pub async fn run_scheduler(
             Ok(())
         };
 
+    // ── Helper: check if op is terminal (in exits list) ───────────
+    let terminal_ops: AHashSet<String> = config.exits.iter().cloned().collect();
+    let is_terminal = |op_name: &str| -> bool {
+        terminal_ops.contains(op_name)
+    };
+
+    // ── Helper: dispatch a pending yield ─────────────────────────
+    let dispatch_yield = |gen_name: &str,
+                          stream_ctx: &str,
+                          running_streams: &mut usize,
+                          active_stream_ctxs: &mut AHashSet<String>,
+                          ready_counts: &mut AHashMap<String, AHashMap<String, i32>>,
+                          stream_contexts: &mut Vec<String>| {
+        let rc = config.stream_ready_counts
+            .get(gen_name)
+            .cloned()
+            .unwrap_or_else(|| config.initial_ready_count.clone());
+        ready_counts.insert(stream_ctx.to_string(), rc);
+        stream_contexts.push(stream_ctx.to_string());
+        active_stream_ctxs.insert(stream_ctx.to_string());
+        *running_streams += 1;
+    };
+
     // ── 1. Start entry ops ────────────────────────────────────────
     let mut queue: VecDeque<String> = config.entries.iter().cloned().collect();
     drain_ready(
@@ -274,7 +297,6 @@ pub async fn run_scheduler(
         &mut ready_counts,
         &mut soft_satisfied,
         &event_tx,
-        &semaphore,
     )?;
 
     // ── 2. Event loop ─────────────────────────────────────────────
@@ -287,42 +309,66 @@ pub async fn run_scheduler(
         match event {
             SchedulerEvent::Done(op_name, ctx) => {
                 active_count -= 1;
+
+                // Terminal op in stream context → release slot, dequeue next
+                if active_stream_ctxs.contains(&ctx) && is_terminal(&op_name) {
+                    active_stream_ctxs.remove(&ctx);
+                    running_streams -= 1;
+
+                    // Dequeue next pending yield if capacity available
+                    if let Some((g, sc, _rd)) = pending_yields.pop_front() {
+                        active_count -= 1;  // balance the +1 from queueing
+                        dispatch_yield(&g, &sc, &mut running_streams, &mut active_stream_ctxs, &mut ready_counts, &mut stream_contexts);
+                        let mut newly_ready: VecDeque<String> =
+                            propagate(&g, &sc, &mut ready_counts, &mut soft_satisfied)?.into();
+                        drain_ready(
+                            &mut newly_ready, &sc, &mut active_count,
+                            &mut ready_counts, &mut soft_satisfied, &event_tx,
+                        )?;
+                    }
+                }
+
                 let mut newly_ready: VecDeque<String> = propagate(&op_name, &ctx, &mut ready_counts, &mut soft_satisfied)?.into();
                 drain_ready(
-                    &mut newly_ready,
-                    &ctx,
-                    &mut active_count,
-                    &mut ready_counts,
-                    &mut soft_satisfied,
-                    &event_tx,
-                    &semaphore,
+                    &mut newly_ready, &ctx, &mut active_count,
+                    &mut ready_counts, &mut soft_satisfied, &event_tx,
                 )?;
             }
 
-            SchedulerEvent::DonePending(_op_name, _ctx) => {
+            SchedulerEvent::DonePending(op_name, ctx) => {
                 active_count -= 1;
+                if active_stream_ctxs.contains(&ctx) && is_terminal(&op_name) {
+                    active_stream_ctxs.remove(&ctx);
+                    running_streams -= 1;
+                    if let Some((g, sc, _rd)) = pending_yields.pop_front() {
+                        active_count -= 1;  // balance the +1 from queueing
+                        dispatch_yield(&g, &sc, &mut running_streams, &mut active_stream_ctxs, &mut ready_counts, &mut stream_contexts);
+                        let mut newly_ready: VecDeque<String> =
+                            propagate(&g, &sc, &mut ready_counts, &mut soft_satisfied)?.into();
+                        drain_ready(
+                            &mut newly_ready, &sc, &mut active_count,
+                            &mut ready_counts, &mut soft_satisfied, &event_tx,
+                        )?;
+                    }
+                }
             }
 
-            SchedulerEvent::Yield(gen_name, stream_ctx, _result_data) => {
-                // Create stream context with pre-computed ready counts (predecrements already applied).
-                let rc = config.stream_ready_counts
-                    .get(&gen_name)
-                    .cloned()
-                    .unwrap_or_else(|| config.initial_ready_count.clone());
-                ready_counts.insert(stream_ctx.clone(), rc);
-                stream_contexts.push(stream_ctx.clone());
-
-                let mut newly_ready: VecDeque<String> =
-                    propagate(&gen_name, &stream_ctx, &mut ready_counts, &mut soft_satisfied)?.into();
-                drain_ready(
-                    &mut newly_ready,
-                    &stream_ctx,
-                    &mut active_count,
-                    &mut ready_counts,
-                    &mut soft_satisfied,
-                    &event_tx,
-                    &semaphore,
-                )?;
+            SchedulerEvent::Yield(gen_name, stream_ctx, result_data) => {
+                if running_streams < config.max_stream_concurrent {
+                    // Slot available — dispatch immediately
+                    dispatch_yield(&gen_name, &stream_ctx, &mut running_streams, &mut active_stream_ctxs, &mut ready_counts, &mut stream_contexts);
+                    let mut newly_ready: VecDeque<String> =
+                        propagate(&gen_name, &stream_ctx, &mut ready_counts, &mut soft_satisfied)?.into();
+                    drain_ready(
+                        &mut newly_ready, &stream_ctx, &mut active_count,
+                        &mut ready_counts, &mut soft_satisfied, &event_tx,
+                    )?;
+                } else {
+                    // No slot — queue for later.
+                    // Increment active_count so event loop doesn't exit while items are pending.
+                    active_count += 1;
+                    pending_yields.push_back((gen_name, stream_ctx, result_data));
+                }
             }
 
             SchedulerEvent::Exhausted(_gen_name) => {
@@ -373,9 +419,7 @@ fn spawn_graph_task(
     _parent_config: &GraphConfig,
     state: &EngineState,
     context: &str,
-    context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
-    semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const BaseOpConfig as usize;
@@ -385,7 +429,6 @@ fn spawn_graph_task(
     let registry = registry.clone();
 
     tokio::spawn(async move {
-        let _permit = semaphore.acquire().await.expect("semaphore closed");
 
         // SAFETY: op and state are alive — caller awaits all tasks before returning
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
@@ -425,9 +468,7 @@ fn spawn_blocking_task(
     op: &BaseOpConfig,
     state: &EngineState,
     context: &str,
-    context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
-    semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const BaseOpConfig as usize;
@@ -437,11 +478,6 @@ fn spawn_blocking_task(
     let registry = registry.clone();
 
     tokio::task::spawn_blocking(move || {
-        // Acquire semaphore for concurrency control.
-        // block_on inside spawn_blocking is fine — we're on a blocking thread.
-        let _permit = runtime::block_on_async(async {
-            semaphore.acquire().await.expect("semaphore closed")
-        });
 
         // SAFETY: op and state are alive — caller awaits all tasks
         let op = unsafe { &*(op_addr as *const BaseOpConfig) };
@@ -536,7 +572,6 @@ fn spawn_generator_task(
     context: &str,
     context_id: &str,
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
-    _semaphore: Arc<Semaphore>,
     registry: &Option<Arc<dyn OpRegistry>>,
 ) {
     let op_addr = op as *const BaseOpConfig as usize;
