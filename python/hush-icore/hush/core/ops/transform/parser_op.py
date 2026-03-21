@@ -128,12 +128,13 @@ class ParserOp(BaseOp):
 
     type: OpType = "parser"
 
-    __slots__ = ["backend", "format", "extract", "extract_fields"]
+    __slots__ = ["backend", "format", "extract", "extract_fields", "validators"]
 
     def __init__(
         self,
         format: Optional[ParserType] = None,
         extract: Optional[List[str]] = None,
+        validators: Optional[Dict[str, list]] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs,
@@ -170,6 +171,7 @@ class ParserOp(BaseOp):
         parser_ext_param.value = self.extract
         self.inputs["parser_extract"] = parser_ext_param
 
+        self.validators = validators or {}
         self.backend = self._create_parser()
         self.core = self._process
 
@@ -247,26 +249,33 @@ class ParserOp(BaseOp):
         return value
 
     async def _process(self, text: str, parser_format=None, parser_extract=None) -> Dict[str, Any]:
-        """Parse text và trích xuất các field."""
+        """Parse text và trích xuất các field.
+
+        Returns error as output (not exception) so downstream ops can check it.
+        On success: {"field1": value, "field2": value, "error": None}
+        On failure: {"field1": None, "field2": None, "error": "error message"}
+        """
         if not text:
-            return {}
+            return {"error": "Empty input text"}
 
         try:
             parsed_data = self.backend(text)
         except Exception as e:
-            raise ParserError(
-                message="Failed to parse input text",
-                input_text=text,
-                format_type=self.format,
-                original_error=e,
-            ) from e
+            return {"error": f"Parse error ({self.format}): {e}"}
 
         result = {}
         for field in self.extract_fields:
             raw_value = self._extract_value_by_path(parsed_data, field.chain_path)
-            # Convert type based on hint (e.g., "true" string → True boolean)
             result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
+        # Validate extracted values against allowed lists
+        if self.validators:
+            for field_name, allowed_values in self.validators.items():
+                value = result.get(field_name)
+                if value is None or value not in allowed_values:
+                    return {"error": f"Validation failed: '{field_name}' value '{value}' not in {allowed_values}"}
+
+        result["error"] = None
         return result
 
     @property
