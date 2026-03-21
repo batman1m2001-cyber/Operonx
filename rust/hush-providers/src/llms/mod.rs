@@ -10,6 +10,7 @@
 //! Shared request/response types live in types.rs.
 //! Image encoding for multimodal support lives in image.rs.
 
+pub mod anthropic;
 pub mod base;
 pub mod config;
 pub mod azure;
@@ -43,6 +44,7 @@ pub async fn chat_completion(
         LLMConfig::OpenAI(c) => openai::chat_completion(c, &inputs, access_token).await,
         LLMConfig::Azure(c) => azure::chat_completion(c, &inputs).await,
         LLMConfig::Gemini(c) => gemini::chat_completion(c, &inputs, access_token).await,
+        LLMConfig::Anthropic(c) => anthropic::chat_completion(c, &inputs).await,
     }
 }
 
@@ -65,6 +67,9 @@ pub async fn chat_completion_stream(
         LLMConfig::Azure(c) => azure::chat_completion_stream(c, &inputs, chunk_tx).await,
         LLMConfig::Gemini(c) => {
             gemini::chat_completion_stream(c, &inputs, access_token, chunk_tx).await
+        }
+        LLMConfig::Anthropic(c) => {
+            anthropic::chat_completion_stream(c, &inputs, chunk_tx).await
         }
     }
 }

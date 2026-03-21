@@ -355,6 +355,22 @@ pub fn execute(inputs: Value) -> ParserResult<Value> {
         result.insert(field.output_key, converted);
     }
 
+    // Validate extracted values against allowed lists (if provided)
+    if let Some(validators) = obj.get("parser_validators").and_then(|v| v.as_object()) {
+        for (field_name, allowed) in validators {
+            if let Some(value) = result.get(field_name) {
+                if let Some(allowed_arr) = allowed.as_array() {
+                    if !allowed_arr.contains(value) {
+                        return Err(format!(
+                            "Validation failed: '{}' value '{}' not in {:?}",
+                            field_name, value, allowed_arr
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Value::Object(result))
 }
 

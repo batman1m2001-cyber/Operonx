@@ -75,11 +75,16 @@ fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
         return Ok(());
     }
 
-    let parser_inputs = json!({
+    let mut parser_inputs = json!({
         "text": content,
         "parser_format": format,
         "parser_extract": extract,
     });
+
+    // Forward validators if present
+    if let Some(validators) = inputs.get("parser_validators") {
+        parser_inputs["parser_validators"] = validators.clone();
+    }
 
     let parsed = hush_icore::ops::transform::parser_op::execute(parser_inputs)
         .map_err(|e| crate::http::ProviderError {
@@ -98,13 +103,57 @@ fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
     Ok(())
 }
 
-/// Execute a chain op: format template → call LLM → optional parse → return merged result.
-pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
+/// Internal execute with injectable LLM call — enables testing with mock LLM.
+async fn mock_execute<F, Fut>(
+    inputs: Value,
+    llm_fn: F,
+) -> ProviderResult<Value>
+where
+    F: Fn(Value) -> Fut,
+    Fut: std::future::Future<Output = ProviderResult<Value>>,
+{
+    let max_attempts = inputs.get("retry").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+    let defaults = inputs.get("default").cloned();
+
+    for attempt in 0..max_attempts {
+        let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
+        let mut result = llm_fn(llm_inputs).await?;
+        result["messages"] = messages;
+
+        match maybe_parse(&mut result, &inputs) {
+            Ok(_) => {
+                result["error"] = Value::Null;
+                return Ok(result);
+            }
+            Err(_) if attempt < max_attempts - 1 => {
+                continue;
+            }
+            Err(e) => {
+                result["error"] = Value::String(format!("{}", e));
+                if let Some(Value::Object(defs)) = &defaults {
+                    for (k, v) in defs {
+                        result[k] = v.clone();
+                    }
+                }
+                return Ok(result);
+            }
+        }
+    }
+
+    // Unreachable
     let (llm_inputs, messages) = build_llm_inputs(&inputs)?;
-    let mut result = crate::ops::llm::execute(llm_inputs, config).await?;
+    let mut result = llm_fn(llm_inputs).await?;
     result["messages"] = messages;
-    maybe_parse(&mut result, &inputs)?;
     Ok(result)
+}
+
+/// Execute a chain op: format template → call LLM → optional parse → return merged result.
+/// Supports retry on parse/validation failure via `retry` input key.
+/// On exhausted retries, applies `default` values.
+pub async fn execute(inputs: Value, config: &LLMProviderConfig) -> ProviderResult<Value> {
+    mock_execute(inputs, |llm_inputs| {
+        crate::ops::llm::execute(llm_inputs, config)
+    }).await
 }
 
 /// Execute a chain op in streaming mode.
@@ -118,4 +167,140 @@ pub async fn execute_streaming(
     result["messages"] = messages;
     maybe_parse(&mut result, &inputs)?;
     Ok(result)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    /// Helper: create mock LLM that returns responses in order.
+    fn mock_llm(responses: Vec<Value>) -> impl Fn(Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ProviderResult<Value>> + Send>> {
+        let call_count = Arc::new(AtomicU32::new(0));
+        move |_inputs: Value| {
+            let n = call_count.fetch_add(1, Ordering::SeqCst) as usize;
+            let resp = responses[n.min(responses.len() - 1)].clone();
+            Box::pin(async move { Ok(resp) })
+        }
+    }
+
+    // ── Test 1: Validator reject → exhaust retries → default ────────
+
+    #[tokio::test]
+    async fn test_validator_reject_uses_default() {
+        let inputs = json!({
+            "template": "Classify: {text}",
+            "text": "some input",
+            "parser_extract": ["result: str"],
+            "parser_format": "xml",
+            "parser_validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
+            "retry": 2,
+            "default": {"result": "FALLBACK"},
+        });
+
+        // LLM always returns UNKNOWN — validator rejects
+        let llm = mock_llm(vec![
+            json!({"content": "<result>UNKNOWN</result>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+            json!({"content": "<result>UNKNOWN</result>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+            json!({"content": "<result>UNKNOWN</result>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+        ]);
+
+        let result = mock_execute(inputs, llm).await.unwrap();
+        assert_eq!(result["result"], "FALLBACK");
+        assert!(result["error"].is_string()); // has error message
+    }
+
+    // ── Test 2: Parse fail → retry → success ───────────────────────
+
+    #[tokio::test]
+    async fn test_parse_fail_then_success() {
+        let inputs = json!({
+            "template": "Classify: {text}",
+            "text": "vâng đúng rồi",
+            "parser_extract": ["result: str"],
+            "parser_format": "xml",
+            "parser_validators": {"result": ["CONFIRM", "DENY"]},
+            "retry": 1,
+            "default": {"result": "FALLBACK"},
+        });
+
+        let llm = mock_llm(vec![
+            json!({"content": "garbage not xml", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+            json!({"content": "<result>CONFIRM</result>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+        ]);
+
+        let result = mock_execute(inputs, llm).await.unwrap();
+        assert_eq!(result["result"], "CONFIRM");
+        assert!(result["error"].is_null());
+    }
+
+    // ── Test 3: No retry → single attempt → default ────────────────
+
+    #[tokio::test]
+    async fn test_no_retry_uses_default() {
+        let inputs = json!({
+            "template": "Classify: {text}",
+            "text": "test",
+            "parser_extract": ["result: str"],
+            "parser_format": "xml",
+            "parser_validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
+            "retry": 0,
+            "default": {"result": "FALLBACK"},
+        });
+
+        let llm = mock_llm(vec![
+            json!({"content": "garbage", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+        ]);
+
+        let result = mock_execute(inputs, llm).await.unwrap();
+        assert_eq!(result["result"], "FALLBACK");
+        assert!(result["error"].is_string());
+    }
+
+    // ── Test 4: First attempt succeeds → no retry ──────────────────
+
+    #[tokio::test]
+    async fn test_success_no_retry_needed() {
+        let inputs = json!({
+            "template": "Classify: {text}",
+            "text": "vâng",
+            "parser_extract": ["intent: str"],
+            "parser_format": "xml",
+            "parser_validators": {"intent": ["CONFIRM", "DENY"]},
+            "retry": 2,
+        });
+
+        let llm = mock_llm(vec![
+            json!({"content": "<intent>CONFIRM</intent>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+        ]);
+
+        let result = mock_execute(inputs, llm).await.unwrap();
+        assert_eq!(result["intent"], "CONFIRM");
+        assert!(result["error"].is_null());
+    }
+
+    // ── Test 5: Multiple fields ────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_multiple_fields() {
+        let inputs = json!({
+            "template": "Analyze: {text}",
+            "text": "không",
+            "parser_extract": ["intent: str", "confidence: float"],
+            "parser_format": "xml",
+        });
+
+        let llm = mock_llm(vec![
+            json!({"content": "<intent>DENY</intent><confidence>0.95</confidence>", "role": "assistant", "model_used": "mock", "tokens_used": {}, "finish_reason": "stop", "tool_calls": []}),
+        ]);
+
+        let result = mock_execute(inputs, llm).await.unwrap();
+        assert_eq!(result["intent"], "DENY");
+        assert_eq!(result["confidence"], 0.95);
+    }
 }

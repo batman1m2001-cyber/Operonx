@@ -10,6 +10,7 @@ class LLMType(Enum):
     AZURE = "azure"
     VLLM = "vllm"
     GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
 
 
 class CompletionConfig(YamlModel):
@@ -97,6 +98,8 @@ class LLMConfig(YamlModel):
         elif api_type == LLMType.VLLM:
             # Assuming VLLM uses same structure as OpenAI
             return OpenAIConfig(**config_data)
+        elif api_type == LLMType.ANTHROPIC:
+            return AnthropicConfig(**config_data)
         else:
             raise ValueError(f"Unsupported api_type: {api_type}")
 
@@ -190,3 +193,20 @@ class GeminiConfig(LLMConfig):
     # Gemini model configuration
     location: str = "us-central1"
     model: str = "gemini-2.0-flash-001"
+
+
+class AnthropicConfig(LLMConfig):
+    """Configuration for Anthropic Claude endpoints
+
+    Parameters:
+        api_key: Anthropic API key
+        base_url: Base URL for API requests
+        model: Model name (e.g. claude-3-haiku-20240307)
+        anthropic_version: API version header
+    """
+
+    api_type: LLMType = LLMType.ANTHROPIC
+    api_key: str
+    base_url: str = "https://api.anthropic.com"
+    model: str = "claude-3-haiku-20240307"
+    anthropic_version: str = "2023-06-01"

@@ -123,6 +123,9 @@ where
 
     if let Err(ref err) = exec_result {
         log_error(op, state, context, &format!("{}", err));
+    } else {
+        // Success: store error = null so downstream can check op["error"]
+        state.set(&op.full_name, "error", context, Value::Null);
     }
 
     if duration_ms > 100.0 {
