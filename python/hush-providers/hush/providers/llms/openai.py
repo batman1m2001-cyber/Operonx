@@ -2,8 +2,6 @@ import asyncio
 import os
 from typing import AsyncGenerator, List, Optional, Sequence, Union
 
-import httpx
-
 # Before importing OpenAI, add this:
 import openai._base_client
 from openai import AsyncOpenAI
@@ -14,7 +12,7 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from hush.core import LOGGER
 from hush.providers.llms.config import OpenAIConfig
 
-from .base import BaseLLM
+from .base import BaseLLM, create_http_client
 
 openai._base_client.get_platform = lambda: "Windows"
 
@@ -25,12 +23,7 @@ class OpenAISDKModel(BaseLLM):
     def __init__(self, config: OpenAIConfig):
         super().__init__(config)
 
-        # Configure HTTP client with timeout and no SSL verification
-        self.http_client = httpx.AsyncClient(
-            # verify=False,
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=10),
-        )
+        self.http_client = create_http_client(proxy=config.proxy)
 
         # Initialize OpenAI client
         if hasattr(config, "base_url"):

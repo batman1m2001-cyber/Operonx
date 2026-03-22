@@ -534,14 +534,11 @@ class BaseOp(ABC):
         state: "MemoryState",
         context_id: Optional[str],
         *,
-        error: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         duration_ms: float = 0,
     ) -> None:
-        """Store execution metrics (timing, errors) to state."""
-        if error:
-            state[self.full_name, "error", context_id] = error
+        """Store execution metrics (timing) to state."""
         state[self.full_name, "start_time", context_id] = start_time
         state[self.full_name, "end_time", context_id] = end_time
         state[self.full_name, "duration_ms", context_id] = duration_ms
@@ -637,11 +634,17 @@ class BaseOp(ABC):
             self._store_metrics(
                 state,
                 context_id,
-                error=error_msg,
                 start_time=start_time,
                 end_time=end_time,
                 duration_ms=duration_ms,
             )
+            # Store error in state only if op didn't already set it via outputs.
+            # Ops like ParserOp return {"error": "..."} as normal output —
+            # don't overwrite that with None.
+            if error_msg is not None:
+                state[self.full_name, "error", context_id] = error_msg
+            elif "error" not in _outputs:
+                state[self.full_name, "error", context_id] = None
 
             # Performance monitoring: log slow ops (>100ms)
             if duration_ms > 100 and LOGGER.isEnabledFor(30):

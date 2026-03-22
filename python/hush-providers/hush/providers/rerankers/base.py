@@ -7,7 +7,7 @@ class BaseReranker(ABC):
 
     @abstractmethod
     async def run(
-        query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs
+        self, query: str, texts: List[str], top_k: int = 3, threshold: float = 0.0, **kwargs
     ) -> List[Dict]:
         """Rerank a list of texts based on their relevance to the input query.
 

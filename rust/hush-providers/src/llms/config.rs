@@ -11,6 +11,7 @@ pub enum LLMConfig {
     OpenAI(OpenAIConfig),
     Azure(AzureConfig),
     Gemini(GeminiConfig),
+    Anthropic(AnthropicConfig),
 }
 
 impl LLMConfig {
@@ -20,6 +21,7 @@ impl LLMConfig {
             LLMConfig::OpenAI(c) => &c.api_type,
             LLMConfig::Azure(_) => "azure",
             LLMConfig::Gemini(_) => "gemini",
+            LLMConfig::Anthropic(_) => "anthropic",
         }
     }
 
@@ -29,6 +31,7 @@ impl LLMConfig {
             LLMConfig::OpenAI(c) => Some(&c.model),
             LLMConfig::Azure(c) => Some(&c.model),
             LLMConfig::Gemini(c) => Some(&c.model),
+            LLMConfig::Anthropic(c) => Some(&c.model),
         }
     }
 }
@@ -99,6 +102,19 @@ pub fn parse_llm_config_json(val: &serde_json::Value) -> Result<LLMConfig, Strin
             location: get_str("location"),
             model: get_str("model"),
         })),
+        "anthropic" => Ok(LLMConfig::Anthropic(AnthropicConfig {
+            base,
+            api_key: get_str("api_key"),
+            base_url: {
+                let url = get_str("base_url");
+                if url.is_empty() { "https://api.anthropic.com".to_string() } else { url }
+            },
+            model: get_str("model"),
+            anthropic_version: {
+                let ver = get_str("anthropic_version");
+                if ver.is_empty() { "2023-06-01".to_string() } else { ver }
+            },
+        })),
         _ => Ok(LLMConfig::OpenAI(OpenAIConfig {
             base,
             api_type: api_type.to_string(),
@@ -128,4 +144,13 @@ pub struct GeminiConfig {
     pub universe_domain: String,
     pub location: String,
     pub model: String,
+}
+
+/// Anthropic Claude configuration.
+pub struct AnthropicConfig {
+    pub base: LLMBaseFields,
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    pub anthropic_version: String,
 }

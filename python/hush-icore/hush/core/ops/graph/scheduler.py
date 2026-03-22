@@ -123,11 +123,12 @@ async def run_scheduler(
             op_obj._store_metrics(
                 state,
                 ctx,
-                error=gen_error,
                 start_time=gen_start,
                 end_time=datetime.now(timezone.utc),
                 duration_ms=ms,
             )
+            if gen_error is not None:
+                state[op_obj.full_name, "error", ctx] = gen_error
 
         await event_queue.put(("exhausted", name))
 
