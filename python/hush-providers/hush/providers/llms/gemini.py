@@ -15,6 +15,7 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from hush.providers.llms.config import GeminiConfig
 
+from .base import create_http_client
 from .openai import OpenAISDKModel
 
 
@@ -66,12 +67,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             self.config.__dict__, scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
 
-        # HTTP client with basic settings
-        self.http_client = httpx.AsyncClient(
-            verify=False,
-            timeout=30.0,
-            limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
-        )
+        self.http_client = create_http_client(verify=False, read_timeout=30.0, max_connections=50)
 
         # OpenAI client
         base_url = (

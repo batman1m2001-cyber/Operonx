@@ -21,7 +21,7 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 
 from hush.core import LOGGER
-from hush.providers.llms.base import BaseLLM
+from hush.providers.llms.base import BaseLLM, create_http_client
 from hush.providers.llms.config import LLMConfig
 
 
@@ -30,10 +30,7 @@ class AnthropicModel(BaseLLM):
 
     def __init__(self, config: LLMConfig) -> None:
         super().__init__(config)
-        self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=10),
-        )
+        self.client = create_http_client()
         self.base_url = getattr(config, "base_url", "https://api.anthropic.com").rstrip("/")
         self.api_key = config.api_key
         self.model = config.model
