@@ -389,6 +389,7 @@ class TestChatIntegration:
     @pytest.mark.asyncio
     async def test_simple_generation(self, hub):
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
@@ -414,7 +415,9 @@ class TestChatIntegration:
     @pytest.mark.asyncio
     async def test_json_mode(self, hub):
         import json
+
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
@@ -446,6 +449,7 @@ class TestExtractIntegration:
     @pytest.mark.asyncio
     async def test_structured_output(self, hub):
         from hush.core.states import MemoryState, StateSchema
+
         from hush.providers.ops import extract
 
         if not hub.has("llm:gpt-4o"):
@@ -478,6 +482,7 @@ class TestExtractRefTemplate:
     def test_prompt_schema_includes_vars_when_template_is_ref(self):
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import extract
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -509,6 +514,7 @@ class TestExtractRefTemplate:
     def test_static_template_still_works(self):
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
+
         from hush.providers.ops import extract
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
