@@ -2,8 +2,6 @@ import asyncio
 import os
 from typing import AsyncGenerator, List, Optional, Sequence, Union
 
-import httpx
-
 # Before importing OpenAI, add this:
 import openai._base_client
 from openai import AsyncOpenAI

@@ -6,14 +6,10 @@ Tests the actual retry loop behavior:
 - No retry (retry=0) → single attempt
 """
 
-import asyncio
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
-
-from hush.core import Hush, GraphOp, START, END, PARENT
-from hush.core.ops import op
-
+from hush.core import END, START, GraphOp, Hush
 
 # ── Helper: mock LLM that returns different content each call ────────
 

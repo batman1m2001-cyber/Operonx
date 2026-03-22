@@ -1,6 +1,5 @@
 from typing import Any, Dict, List
 
-import httpx
 from openai import AsyncAzureOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 

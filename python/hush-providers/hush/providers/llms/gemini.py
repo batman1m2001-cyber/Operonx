@@ -4,7 +4,6 @@ import time
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, List, Optional, Sequence, Union
 
-import httpx
 import requests
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
