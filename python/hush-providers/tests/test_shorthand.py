@@ -270,7 +270,7 @@ class TestChainShorthand:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             my_chat = chat(resource="gpt-4", template="Hello")
-            assert my_chat.name == "my_chain"
+            assert my_chat.name == "my_chat"
 
     def test_chain_explicit_name(self):
         from hush.providers.ops.chain import chat
@@ -279,7 +279,7 @@ class TestChainShorthand:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(resource="gpt-4", template="Hello", name="my_named_chat")
-            assert node.name == "chat_chain"
+            assert node.name == "my_named_chat"
 
     def test_chain_with_outputs(self):
         from hush.core.ops.base import PARENT
@@ -293,15 +293,15 @@ class TestChainShorthand:
             assert "content" in node.outputs
 
     def test_chain_extract(self):
-        from hush.providers.ops.chain import chat
+        from hush.providers.ops.chain import extract
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chat(
+            node = extract(
                 resource="gpt-4",
                 template="Classify: {text}",
-                extract=["category: str", "confidence: float"],
+                fields=["category: str", "confidence: float"],
                 parser="xml",
                 text="sample",
             )
