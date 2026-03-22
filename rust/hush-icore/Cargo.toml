@@ -1,6 +1,6 @@
 [package]
 name = "hush-icore"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 description = "High-performance Rust execution backend for the Hush workflow engine"
 license = "Apache-2.0"
