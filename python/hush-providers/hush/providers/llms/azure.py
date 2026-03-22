@@ -1,11 +1,11 @@
 from typing import Any, Dict, List
 
-import httpx
 from openai import AsyncAzureOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from hush.providers.llms.config import AzureConfig
 
+from .base import create_http_client
 from .openai import OpenAISDKModel
 
 
@@ -15,13 +15,7 @@ class AzureSDKModel(OpenAISDKModel):
     def __init__(self, config: AzureConfig):
         super().__init__(config)
 
-        # Configure HTTP client with timeout and no SSL verification
-        self.http_client = httpx.AsyncClient(
-            proxy=config.proxy,
-            verify=False,
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=10),
-        )
+        self.http_client = create_http_client(verify=False, proxy=config.proxy)
         # Initialize OpenAI client
         self.client = AsyncAzureOpenAI(
             azure_endpoint=config.azure_endpoint,

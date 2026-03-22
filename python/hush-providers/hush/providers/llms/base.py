@@ -5,10 +5,26 @@ import sys
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence, Union
 
+import httpx
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from hush.providers.llms.config import LLMConfig
+
+
+def create_http_client(
+    verify: bool = True,
+    proxy: Optional[str] = None,
+    read_timeout: float = 120.0,
+    max_connections: int = 100,
+) -> httpx.AsyncClient:
+    """Shared HTTP client factory for all LLM providers."""
+    return httpx.AsyncClient(
+        proxy=proxy,
+        verify=verify,
+        timeout=httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0),
+        limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=10),
+    )
 
 
 def configure_event_loop():

@@ -1,8 +1,10 @@
 """LLM providers for hush workflows."""
 
+from hush.providers.llms.anthropic import AnthropicModel
 from hush.providers.llms.azure import AzureSDKModel
 from hush.providers.llms.base import BaseLLM
 from hush.providers.llms.config import (
+    AnthropicConfig,
     AzureConfig,
     GeminiConfig,
     LLMConfig,
@@ -36,6 +38,8 @@ __all__ = [
     "OpenAIConfig",
     "AzureConfig",
     "GeminiConfig",
+    "AnthropicConfig",
+    "AnthropicModel",
     "create_llm",
     "LLMGenerator",
     "OpenAISDKModel",

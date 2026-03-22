@@ -35,6 +35,10 @@ def create_llm(config: LLMConfig) -> BaseLLM:
                 "Gemini support requires google-cloud-aiplatform. "
                 "Install it with: pip install hush-providers[gemini]"
             ) from e
+    elif config.api_type == LLMType.ANTHROPIC:
+        from .anthropic import AnthropicModel
+
+        model_class = AnthropicModel
     else:
         raise ValueError(f"Unsupported Model: {config.api_type}")
 

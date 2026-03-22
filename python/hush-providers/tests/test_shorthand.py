@@ -192,8 +192,10 @@ class TestRerankShorthand:
     def test_rerank_shorthand_basic(self, hub):
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         node = RerankOp.of("bge-m3-onnx", query="test", documents=["a", "b"])
         assert isinstance(node, RerankOp)
@@ -204,8 +206,10 @@ class TestRerankShorthand:
     def test_rerank_shorthand_auto_name(self, hub):
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         my_rerank = RerankOp.of("bge-m3-onnx", query="q", documents=[])
         assert my_rerank.name == "my_rerank"
@@ -215,8 +219,10 @@ class TestRerankShorthand:
 
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         node = RerankOp.of("bge-m3-onnx", query="q", documents=[], outputs={"*": PARENT})
         assert "reranks" in node.outputs
@@ -240,23 +246,23 @@ class TestChainShorthand:
     def test_chain_basic(self):
         from hush.core.ops import GraphOp
 
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(resource="gpt-4", template="Hello {user}", user="world")
+            node = chat(resource="gpt-4", template="Hello {user}", user="world")
             assert isinstance(node, GraphOp)
             assert "prompt" in node._ops
             assert "llm" in node._ops
 
     def test_chain_dict_template(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(
+            node = chat(
                 resource="gpt-4",
                 template={"system": "You are {role}.", "user": "{query}"},
                 role="helpful",
@@ -264,56 +270,56 @@ class TestChainShorthand:
             assert "prompt" in node._ops
 
     def test_chain_auto_name(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            my_chain = chain(resource="gpt-4", template="Hello")
-            assert my_chain.name == "my_chain"
+            my_chat = chat(resource="gpt-4", template="Hello")
+            assert my_chat.name == "my_chat"
 
     def test_chain_explicit_name(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(resource="gpt-4", template="Hello", name="chat_chain")
-            assert node.name == "chat_chain"
+            node = chat(resource="gpt-4", template="Hello", name="my_named_chat")
+            assert node.name == "my_named_chat"
 
     def test_chain_with_outputs(self):
         from hush.core.ops.base import PARENT
 
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(resource="gpt-4", template="Hello", outputs={"*": PARENT})
+            node = chat(resource="gpt-4", template="Hello", outputs={"*": PARENT})
             assert "content" in node.outputs
 
     def test_chain_extract(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import extract
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(
+            node = extract(
                 resource="gpt-4",
                 template="Classify: {text}",
-                extract=["category: str", "confidence: float"],
+                fields=["category: str", "confidence: float"],
                 parser="xml",
                 text="sample",
             )
             assert "parser" in node._ops
 
     def test_chain_response_format(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(
+            node = chat(
                 resource="gpt-4o",
                 template={"user": "Return JSON: {text}"},
                 response_format={"type": "json_object"},
@@ -323,23 +329,23 @@ class TestChainShorthand:
             assert "response_format" in llm_op.inputs
 
     def test_chain_load_balancing(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(resource=["gpt-4o", "gpt-4o-mini"], template="Hello", ratios=[0.7, 0.3])
+            node = chat(resource=["gpt-4o", "gpt-4o-mini"], template="Hello", ratios=[0.7, 0.3])
             llm_op = node._ops["llm"]
             assert isinstance(llm_op.resource, list)
             assert llm_op.ratios == [0.7, 0.3]
 
     def test_chain_fallback(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(
+            node = chat(
                 resource="gpt-4o",
                 template="Hello",
                 fallback=["claude-sonnet", "gpt-3.5-turbo"],
@@ -348,12 +354,12 @@ class TestChainShorthand:
             assert llm_op.fallback == ["claude-sonnet", "gpt-3.5-turbo"]
 
     def test_chain_template_variables(self):
-        from hush.providers.ops.chain import chain
+        from hush.providers.ops.chain import chat
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = chain(
+            node = chat(
                 resource="gpt-4", template="Hello {user}, do {task}", user="Alice", task="coding"
             )
             # template vars should be in the chain's inputs

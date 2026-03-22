@@ -480,11 +480,12 @@ class GraphOp(BaseOp):
             self._store_metrics(
                 state,
                 context_id,
-                error=error_msg,
                 start_time=start_time,
                 end_time=end_time,
                 duration_ms=duration_ms,
             )
+            if error_msg is not None:
+                state[self.full_name, "error", context_id] = error_msg
 
             return _outputs
 

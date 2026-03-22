@@ -1,6 +1,6 @@
 [package]
 name = "hush-macros"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 description = "Proc macros for Hush workflow engine — #[hush_op] auto-registration"
 license = "MIT"

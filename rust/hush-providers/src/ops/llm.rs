@@ -286,6 +286,7 @@ fn add_metadata(
         LLMConfig::OpenAI(c) => &c.base,
         LLMConfig::Azure(c) => &c.base,
         LLMConfig::Gemini(c) => &c.base,
+        LLMConfig::Anthropic(c) => &c.base,
     };
 
     if let (Some(cost_in), Some(cost_out)) = (
