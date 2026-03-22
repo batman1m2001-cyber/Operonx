@@ -192,8 +192,10 @@ class TestRerankShorthand:
     def test_rerank_shorthand_basic(self, hub):
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         node = RerankOp.of("bge-m3-onnx", query="test", documents=["a", "b"])
         assert isinstance(node, RerankOp)
@@ -204,8 +206,10 @@ class TestRerankShorthand:
     def test_rerank_shorthand_auto_name(self, hub):
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         my_rerank = RerankOp.of("bge-m3-onnx", query="q", documents=[])
         assert my_rerank.name == "my_rerank"
@@ -215,8 +219,10 @@ class TestRerankShorthand:
 
         from hush.providers.ops.rerank import RerankOp
 
-        if not hub.has("reranking:bge-m3-onnx"):
-            pytest.skip("reranking:bge-m3-onnx not configured")
+        try:
+            hub.reranker("bge-m3-onnx")
+        except (KeyError, Exception):
+            pytest.skip("reranking:bge-m3-onnx not available (model files missing)")
 
         node = RerankOp.of("bge-m3-onnx", query="q", documents=[], outputs={"*": PARENT})
         assert "reranks" in node.outputs
