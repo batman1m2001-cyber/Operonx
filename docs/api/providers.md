@@ -28,8 +28,14 @@
       members:
         - of
 
-## chain()
+## chat()
 
-Shorthand for PromptOp + LLMOp combo.
+Shorthand for PromptOp + LLMOp text generation.
 
-::: hush.providers.ops.chain.chain
+::: hush.providers.ops.chain.chat
+
+## extract()
+
+PromptOp + LLMOp + ParserOp with retry and validation.
+
+::: hush.providers.ops.chain.extract

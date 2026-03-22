@@ -10,6 +10,7 @@ class TestChat:
 
     def test_import(self):
         from hush.providers.ops import chat
+
         assert chat is not None
 
     def test_simple_creation(self):
@@ -71,10 +72,13 @@ class TestChat:
                 resource="gpt-4o",
                 template=[
                     {"role": "system", "content": "You are a vision expert."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Analyze: {query}"},
-                        {"type": "image_url", "image_url": {"url": "{image_url}"}},
-                    ]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analyze: {query}"},
+                            {"type": "image_url", "image_url": {"url": "{image_url}"}},
+                        ],
+                    },
                 ],
                 name="vision_chat",
                 query="What is this?",
@@ -196,10 +200,12 @@ class TestExtract:
 
     def test_import(self):
         from hush.providers.ops import extract
+
         assert extract is not None
 
     def test_requires_fields(self):
         from hush.providers.ops import extract
+
         with pytest.raises(TypeError):
             extract(resource="gpt-4", template="Test")
 
@@ -363,9 +369,12 @@ class TestChatPromptFormats:
                 resource="gpt-4o",
                 template=[
                     {"role": "system", "content": "You are a vision expert."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Analyze: {query}"},
-                    ]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analyze: {query}"},
+                        ],
+                    },
                 ],
                 name="list_prompt_chat",
                 query="What is this?",
@@ -387,7 +396,10 @@ class TestChatIntegration:
 
         node = chat(
             resource="gpt-4o",
-            template={"system": "You are a helpful assistant.", "user": "Say hello to {user} in one sentence."},
+            template={
+                "system": "You are a helpful assistant.",
+                "user": "Say hello to {user} in one sentence.",
+            },
             name="simple_chat",
             user="Alice",
         )
@@ -490,7 +502,7 @@ class TestExtractRefTemplate:
             )
 
             # extract() returns GraphOp — find it by type
-            extract_op = [op for op in node._ops.values() if hasattr(op, '_loop_config')][0]
+            extract_op = [op for op in node._ops.values() if hasattr(op, "_loop_config")][0]
             prompt_op = extract_op._ops["prompt"]
             assert "transcript" in prompt_op.inputs
 
@@ -517,7 +529,7 @@ class TestExtractRefTemplate:
 
             node = detect(transcript="Hello world")
 
-            extract_op = [op for op in node._ops.values() if hasattr(op, '_loop_config')][0]
+            extract_op = [op for op in node._ops.values() if hasattr(op, "_loop_config")][0]
             prompt_op = extract_op._ops["prompt"]
             assert "transcript" in prompt_op.inputs
 

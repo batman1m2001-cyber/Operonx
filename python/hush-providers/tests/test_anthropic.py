@@ -13,6 +13,7 @@ from hush.providers.llms.factory import create_llm
 # Try loading from .env
 try:
     from dotenv import load_dotenv
+
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
 except ImportError:
     pass
@@ -49,11 +50,13 @@ def test_config_defaults():
 
 
 def test_config_from_dict():
-    config = LLMConfig.create_config({
-        "api_type": "anthropic",
-        "api_key": "sk-test",
-        "model": "claude-3-haiku-20240307",
-    })
+    config = LLMConfig.create_config(
+        {
+            "api_type": "anthropic",
+            "api_key": "sk-test",
+            "model": "claude-3-haiku-20240307",
+        }
+    )
     assert isinstance(config, AnthropicConfig)
 
 
@@ -67,21 +70,25 @@ def test_factory_creates_anthropic():
 
 
 def test_convert_messages_extracts_system():
-    system, msgs = AnthropicModel._convert_messages([
-        {"role": "system", "content": "Be helpful."},
-        {"role": "user", "content": "Hi"},
-        {"role": "assistant", "content": "Hello!"},
-        {"role": "user", "content": "Bye"},
-    ])
+    system, msgs = AnthropicModel._convert_messages(
+        [
+            {"role": "system", "content": "Be helpful."},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+            {"role": "user", "content": "Bye"},
+        ]
+    )
     assert system == "Be helpful."
     assert len(msgs) == 3
     assert msgs[0]["role"] == "user"
 
 
 def test_convert_messages_no_system():
-    system, msgs = AnthropicModel._convert_messages([
-        {"role": "user", "content": "Hi"},
-    ])
+    system, msgs = AnthropicModel._convert_messages(
+        [
+            {"role": "user", "content": "Hi"},
+        ]
+    )
     assert system is None
     assert len(msgs) == 1
 
@@ -104,7 +111,9 @@ def test_stop_reason_mapping():
 def test_build_request(model):
     body = model._build_request(
         [{"role": "system", "content": "X"}, {"role": "user", "content": "Y"}],
-        temperature=0.5, max_tokens=100, stop=["END"],
+        temperature=0.5,
+        max_tokens=100,
+        stop=["END"],
     )
     assert body["system"] == "X"
     assert body["messages"] == [{"role": "user", "content": "Y"}]
@@ -117,13 +126,15 @@ def test_build_request(model):
 
 
 def test_to_chat_completion(model):
-    result = model._to_chat_completion({
-        "id": "msg_123",
-        "model": "claude-3-haiku-20240307",
-        "content": [{"type": "text", "text": "Hello!"}],
-        "stop_reason": "end_turn",
-        "usage": {"input_tokens": 10, "output_tokens": 5},
-    })
+    result = model._to_chat_completion(
+        {
+            "id": "msg_123",
+            "model": "claude-3-haiku-20240307",
+            "content": [{"type": "text", "text": "Hello!"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
+    )
     assert result.choices[0].message.content == "Hello!"
     assert result.choices[0].finish_reason == "stop"
     assert result.usage.total_tokens == 15
@@ -136,7 +147,8 @@ def test_to_chunk_text_delta(model):
     chunk = model._to_chunk(
         "content_block_delta",
         {"delta": {"type": "text_delta", "text": "Hi"}},
-        "claude-3-haiku", "id_1",
+        "claude-3-haiku",
+        "id_1",
     )
     assert chunk.choices[0].delta.content == "Hi"
 
@@ -145,7 +157,8 @@ def test_to_chunk_message_delta(model):
     chunk = model._to_chunk(
         "message_delta",
         {"delta": {"stop_reason": "end_turn"}, "usage": {"input_tokens": 10, "output_tokens": 5}},
-        "claude-3-haiku", "id_1",
+        "claude-3-haiku",
+        "id_1",
     )
     assert chunk.choices[0].finish_reason == "stop"
 
@@ -194,11 +207,7 @@ async def test_stream_real(model):
     assert len(chunks) > 0
 
     # Collect streamed text
-    text = "".join(
-        c.choices[0].delta.content
-        for c in chunks
-        if c.choices[0].delta.content
-    )
+    text = "".join(c.choices[0].delta.content for c in chunks if c.choices[0].delta.content)
     assert text  # Should have some text
     print(f"\n  stream: {text}")
     print(f"  chunks: {len(chunks)}")
