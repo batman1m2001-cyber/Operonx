@@ -60,8 +60,12 @@ class AnthropicModel(BaseLLM):
         system = None
         messages = []
         for msg in openai_messages:
-            role = msg.get("role", "user") if isinstance(msg, dict) else getattr(msg, "role", "user")
-            content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+            role = (
+                msg.get("role", "user") if isinstance(msg, dict) else getattr(msg, "role", "user")
+            )
+            content = (
+                msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+            )
             if role == "system":
                 system = content
             else:
@@ -153,7 +157,9 @@ class AnthropicModel(BaseLLM):
                     prompt_tokens=usage.get("input_tokens", 0),
                     completion_tokens=usage.get("output_tokens", 0),
                     total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-                ) if usage else None,
+                )
+                if usage
+                else None,
             )
         return None
 
@@ -202,8 +208,12 @@ class AnthropicModel(BaseLLM):
     ) -> ChatCompletion:
         """Non-streaming Anthropic Messages API call."""
         body = self._build_request(
-            messages, stream=False,
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens, stop=stop,
+            messages,
+            stream=False,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop,
         )
         url = f"{self.base_url}/v1/messages"
         resp = await self.client.post(url, headers=self._headers(), json=body)
@@ -233,8 +243,12 @@ class AnthropicModel(BaseLLM):
         Parses Anthropic SSE events and yields OpenAI-compatible chunks.
         """
         body = self._build_request(
-            messages, stream=True,
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens, stop=stop,
+            messages,
+            stream=True,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop,
         )
         url = f"{self.base_url}/v1/messages"
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -258,6 +272,7 @@ class AnthropicModel(BaseLLM):
 
                 if line.startswith("data: ") and event_type:
                     import json
+
                     try:
                         event_data = json.loads(line[6:])
                     except json.JSONDecodeError:

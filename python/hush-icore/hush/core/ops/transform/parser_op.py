@@ -273,7 +273,9 @@ class ParserOp(BaseOp):
             for field_name, allowed_values in self.validators.items():
                 value = result.get(field_name)
                 if value is None or value not in allowed_values:
-                    return {"error": f"Validation failed: '{field_name}' value '{value}' not in {allowed_values}"}
+                    return {
+                        "error": f"Validation failed: '{field_name}' value '{value}' not in {allowed_values}"
+                    }
 
         result["error"] = None
         return result

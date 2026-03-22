@@ -41,11 +41,13 @@ def make_mock_hub(responses):
             created=1000000,
             model="mock-model",
             object="chat.completion",
-            choices=[Choice(
-                index=0,
-                message=ChatCompletionMessage(role="assistant", content=content),
-                finish_reason="stop",
-            )],
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content=content),
+                    finish_reason="stop",
+                )
+            ],
             usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
 
@@ -67,11 +69,13 @@ async def test_extract_validator_reject_uses_default():
     from hush.providers.ops.chain import extract
 
     # LLM always returns "UNKNOWN" — not in allowed list
-    mock_hub, call_count = make_mock_hub([
-        "<result>UNKNOWN</result>",
-        "<result>UNKNOWN</result>",
-        "<result>UNKNOWN</result>",
-    ])
+    mock_hub, call_count = make_mock_hub(
+        [
+            "<result>UNKNOWN</result>",
+            "<result>UNKNOWN</result>",
+            "<result>UNKNOWN</result>",
+        ]
+    )
 
     with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
@@ -107,10 +111,12 @@ async def test_extract_parse_fail_then_success():
     """First LLM call returns garbage → parse fail → retry → second call returns valid XML."""
     from hush.providers.ops.chain import extract
 
-    mock_hub, call_count = make_mock_hub([
-        "this is not xml at all!!!",       # attempt 1: parse fail
-        "<result>CONFIRM</result>",         # attempt 2: parse OK + valid
-    ])
+    mock_hub, call_count = make_mock_hub(
+        [
+            "this is not xml at all!!!",  # attempt 1: parse fail
+            "<result>CONFIRM</result>",  # attempt 2: parse OK + valid
+        ]
+    )
 
     with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
@@ -144,9 +150,11 @@ async def test_extract_no_retry_uses_default_on_fail():
     """retry=0 → only 1 attempt. Parse fail → default applied immediately."""
     from hush.providers.ops.chain import extract
 
-    mock_hub, call_count = make_mock_hub([
-        "garbage output",
-    ])
+    mock_hub, call_count = make_mock_hub(
+        [
+            "garbage output",
+        ]
+    )
 
     with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
@@ -180,9 +188,11 @@ async def test_extract_success_no_retry_needed():
     """LLM returns valid output on first try → no retry triggered."""
     from hush.providers.ops.chain import extract
 
-    mock_hub, call_count = make_mock_hub([
-        "<intent>CONFIRM</intent>",
-    ])
+    mock_hub, call_count = make_mock_hub(
+        [
+            "<intent>CONFIRM</intent>",
+        ]
+    )
 
     with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
@@ -215,9 +225,11 @@ async def test_extract_multiple_fields():
     """Extract multiple fields from XML."""
     from hush.providers.ops.chain import extract
 
-    mock_hub, call_count = make_mock_hub([
-        "<intent>DENY</intent><confidence>0.95</confidence>",
-    ])
+    mock_hub, call_count = make_mock_hub(
+        [
+            "<intent>DENY</intent><confidence>0.95</confidence>",
+        ]
+    )
 
     with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
