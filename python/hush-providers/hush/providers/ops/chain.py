@@ -134,12 +134,24 @@ def extract(
             delay=delay,
         )
 
+        parser_inputs: Dict[str, Any] = {"text": _llm["content"]}
+
+        # Dynamic validators: if validators is a Ref, pass via input for runtime resolution
+        _is_ref = hasattr(validators, "is_ref") or (
+            hasattr(validators, "__class__") and validators.__class__.__name__ == "Ref"
+        )
+        if _is_ref:
+            parser_inputs["parser_validators"] = validators
+            _static_validators = None
+        else:
+            _static_validators = validators
+
         _parser = ParserOp(
             name="parser",
             format=parser,
             extract=fields,
-            validators=validators,
-            inputs={"text": _llm["content"]},
+            validators=_static_validators,
+            inputs=parser_inputs,
         )
 
         # Feed parser outputs back to loop state.

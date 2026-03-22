@@ -171,9 +171,25 @@ class ParserOp(BaseOp):
         parser_ext_param.value = self.extract
         self.inputs["parser_extract"] = parser_ext_param
 
-        self.validators = validators or {}
+        # Validators: static dict OR dynamic via input Ref
+        # If validators is a Ref or contains Refs, register as input for runtime resolution
+        self.validators = validators if not self._is_ref(validators) else {}
+        if self._is_ref(validators):
+            self.inputs["parser_validators"] = Param(required=False, value=validators)
+        elif validators:
+            v_param = Param(type=dict, required=False)
+            v_param.value = validators
+            self.inputs["parser_validators"] = v_param
+
         self.backend = self._create_parser()
         self.core = self._process
+
+    @staticmethod
+    def _is_ref(value) -> bool:
+        """Check if value is a Ref (for dynamic input resolution)."""
+        return hasattr(value, "is_ref") or (
+            hasattr(value, "__class__") and value.__class__.__name__ == "Ref"
+        )
 
     def _create_parser(self):
         """Tạo parser function dựa trên format."""
@@ -248,7 +264,9 @@ class ParserOp(BaseOp):
         # For dict, list, any, or unknown types, return as-is
         return value
 
-    async def _process(self, text: str, parser_format=None, parser_extract=None) -> Dict[str, Any]:
+    async def _process(
+        self, text: str, parser_format=None, parser_extract=None, parser_validators=None
+    ) -> Dict[str, Any]:
         """Parse text và trích xuất các field.
 
         Returns error as output (not exception) so downstream ops can check it.
@@ -268,9 +286,10 @@ class ParserOp(BaseOp):
             raw_value = self._extract_value_by_path(parsed_data, field.chain_path)
             result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
-        # Validate extracted values against allowed lists
-        if self.validators:
-            for field_name, allowed_values in self.validators.items():
+        # Validate: use runtime validators (from input Ref) or static validators
+        active_validators = parser_validators if parser_validators else self.validators
+        if active_validators:
+            for field_name, allowed_values in active_validators.items():
                 value = result.get(field_name)
                 if value is None or value not in allowed_values:
                     return {
