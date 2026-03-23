@@ -165,13 +165,13 @@ class ParserOp(BaseOp):
         self.extract_fields = extract_fields
 
         # Serialize parser config as literal inputs so Rust can read them
-        parser_fmt_param = Param(type=str, required=False)
-        parser_fmt_param.value = self.format
-        self.inputs["parser_format"] = parser_fmt_param
+        mode_param = Param(type=str, required=False)
+        mode_param.value = self.format
+        self.inputs["mode"] = mode_param
 
-        parser_ext_param = Param(type=list, required=False)
-        parser_ext_param.value = self.extract
-        self.inputs["parser_extract"] = parser_ext_param
+        schema_param = Param(type=list, required=False)
+        schema_param.value = self.extract
+        self.inputs["schema"] = schema_param
 
         self.backend = self._create_parser()
         self.core = self._process
@@ -249,9 +249,7 @@ class ParserOp(BaseOp):
         # For dict, list, any, or unknown types, return as-is
         return value
 
-    async def _process(
-        self, text: str, parser_format=None, parser_extract=None, validators=None
-    ) -> Dict[str, Any]:
+    async def _process(self, text: str, mode=None, schema=None, validators=None) -> Dict[str, Any]:
         """Parse text và trích xuất các field.
 
         Returns error as output (not exception) so downstream ops can check it.
