@@ -130,7 +130,7 @@ def extract(
             name="parser",
             format=parser,
             extract=fields,
-            inputs={"text": _llm["content"], "parser_validators": validators},
+            inputs={"text": _llm["content"], "validators": validators},
         )
 
         # Feed parser outputs back to loop state.
