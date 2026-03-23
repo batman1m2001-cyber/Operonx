@@ -310,7 +310,7 @@ fn convert_type(value: &Value, type_hint: &str) -> Value {
 
 /// Execute parser op.
 ///
-/// Inputs: `{"text": str, "parser_format": str, "parser_extract": [str, ...]}`
+/// Inputs: `{"text": str, "mode": str, "schema": [str, ...]}`
 /// Outputs: `{field1: val1, field2: val2, ...}` — one key per extracted field.
 pub fn execute(inputs: Value) -> ParserResult<Value> {
     let obj = inputs.as_object().ok_or_else(|| "Parser inputs must be a dict".to_string())?;
@@ -325,12 +325,12 @@ pub fn execute(inputs: Value) -> ParserResult<Value> {
     }
 
     let format = obj
-        .get("parser_format")
+        .get("mode")
         .and_then(|v| v.as_str())
         .unwrap_or("xml");
 
     let extract = obj
-        .get("parser_extract")
+        .get("schema")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
@@ -356,7 +356,7 @@ pub fn execute(inputs: Value) -> ParserResult<Value> {
     }
 
     // Validate extracted values against allowed lists (if provided)
-    if let Some(validators) = obj.get("parser_validators").and_then(|v| v.as_object()) {
+    if let Some(validators) = obj.get("validators").and_then(|v| v.as_object()) {
         for (field_name, allowed) in validators {
             if let Some(value) = result.get(field_name) {
                 if let Some(allowed_arr) = allowed.as_array() {
@@ -579,8 +579,8 @@ mod tests {
     fn test_execute_json() {
         let result = execute(json!({
             "text": r#"{"name": "Alice", "age": 30}"#,
-            "parser_format": "json",
-            "parser_extract": ["name: str", "age: int"],
+            "mode": "json",
+            "schema": ["name: str", "age: int"],
         }))
         .unwrap();
         assert_eq!(result["name"], "Alice");
@@ -591,8 +591,8 @@ mod tests {
     fn test_execute_xml() {
         let result = execute(json!({
             "text": "<name>Alice</name><is_active>true</is_active>",
-            "parser_format": "xml",
-            "parser_extract": ["name: str", "is_active: bool"],
+            "mode": "xml",
+            "schema": ["name: str", "is_active: bool"],
         }))
         .unwrap();
         assert_eq!(result["name"], "Alice");
@@ -603,8 +603,8 @@ mod tests {
     fn test_execute_yaml() {
         let result = execute(json!({
             "text": "name: Alice\nscore: 95.5",
-            "parser_format": "yaml",
-            "parser_extract": ["name: str", "score: float"],
+            "mode": "yaml",
+            "schema": ["name: str", "score: float"],
         }))
         .unwrap();
         assert_eq!(result["name"], "Alice");
@@ -615,8 +615,8 @@ mod tests {
     fn test_execute_empty_text() {
         let result = execute(json!({
             "text": "",
-            "parser_format": "json",
-            "parser_extract": ["name: str"],
+            "mode": "json",
+            "schema": ["name: str"],
         }))
         .unwrap();
         assert_eq!(result, json!({}));
@@ -626,8 +626,8 @@ mod tests {
     fn test_execute_nested_extraction() {
         let result = execute(json!({
             "text": r#"{"user": {"name": "Alice", "address": {"city": "NYC"}}}"#,
-            "parser_format": "json",
-            "parser_extract": ["user.name: str", "user.address.city: str"],
+            "mode": "json",
+            "schema": ["user.name: str", "user.address.city: str"],
         }))
         .unwrap();
         assert_eq!(result["name"], "Alice");
