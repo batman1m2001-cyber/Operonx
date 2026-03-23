@@ -189,7 +189,9 @@ class HushApp:
 
             # WS /path/ws — WebSocket (if enabled)
             if ep.config.websocket:
-                app.add_websocket_route(f"{path}/ws", create_ws_handler(ep))
+                ws_handler = create_ws_handler(ep)
+                add_ws = getattr(app, "add_api_websocket_route", None) or app.add_websocket_route
+                add_ws(f"{path}/ws", ws_handler)
 
         # GET /health
         @app.get("/health", tags=["system"])
