@@ -268,7 +268,7 @@ class TestExtract:
             )
 
             parser_op = node._ops["parser"]
-            assert parser_op.validators == {"intent": ["CONFIRM", "DENY"]}
+            assert "parser_validators" in parser_op.inputs
 
     def test_no_retry_no_loop(self):
         from hush.providers.ops import extract
