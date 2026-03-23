@@ -68,7 +68,7 @@ def extract(
     delay: float = 0,
     retry: int = 0,
     validators: Optional[Dict[str, list]] = None,
-    default: Optional[Dict[str, Any]] = None,
+    default: Dict[str, Any] = {},
     **kwargs,
 ) -> GraphOp:
     """Prompt → LLM → Parser with retry via GraphOp.loop.
@@ -99,22 +99,13 @@ def extract(
     if not fields:
         raise TypeError("fields is required for extract()")
 
-    field_keys = [f.split(":")[0].strip().split(".")[-1] for f in fields]
-    _default = default or {}
-
-    # Initial loop state
-    initial_state = {"error": "init"}
-    for k in field_keys:
-        initial_state[k] = _default.get(k)
-
-    g = GraphOp.loop(
+    with GraphOp.loop(
         until="error == None",
         max_iterations=retry + 1,
-        **initial_state,
+        error="init",
+        **default,
         **kwargs,
-    )
-
-    with g:
+    ) as g:
         _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
 
         _llm = LLMOp(
@@ -131,18 +122,10 @@ def extract(
             format=parser,
             extract=fields,
             inputs={"text": _llm["content"], "validators": validators},
+            outputs={"*": PARENT},
         )
 
-        # Feed parser outputs back to loop state.
-        # ParserOp returns error as output (not exception):
-        # - success: {"field": value, "error": None}
-        # - failure: {"field": None, "error": "message"}
-        # When error, field values are None — loop keeps previous values
-        # from initial state (defaults) because push ref only fires
-        # when value is not None.
         _parser["error"] >> PARENT["error"]
-        for key in field_keys:
-            _parser[key] >> PARENT[key]
 
         START >> _prompt >> _llm >> _parser >> END
 
