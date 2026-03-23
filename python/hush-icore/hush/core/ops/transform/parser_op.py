@@ -147,7 +147,7 @@ class ParserOp(BaseOp):
         # Parse inputs/outputs từ extract
         parsed_inputs = {
             "text": Param(type=str, required=True),
-            "parser_validators": Param(type=dict, required=False),
+            "validators": Param(type=dict, required=False),
         }
         parsed_outputs = {field.output_key: Param() for field in extract_fields}
 
@@ -250,7 +250,7 @@ class ParserOp(BaseOp):
         return value
 
     async def _process(
-        self, text: str, parser_format=None, parser_extract=None, parser_validators=None
+        self, text: str, parser_format=None, parser_extract=None, validators=None
     ) -> Dict[str, Any]:
         """Parse text và trích xuất các field.
 
@@ -272,8 +272,8 @@ class ParserOp(BaseOp):
             result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
         # Validate extracted values against allowed lists (from input)
-        if parser_validators:
-            for field_name, allowed_values in parser_validators.items():
+        if validators:
+            for field_name, allowed_values in validators.items():
                 value = result.get(field_name)
                 if value is None or value not in allowed_values:
                     return {
