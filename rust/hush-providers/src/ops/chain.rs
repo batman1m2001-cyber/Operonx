@@ -51,18 +51,18 @@ fn build_llm_inputs(inputs: &Value) -> ProviderResult<(Value, Value)> {
     Ok((llm_inputs, messages))
 }
 
-/// If the LLM result has content and the inputs specify `parser_extract`,
+/// If the LLM result has content and the inputs specify `schema`,
 /// run the content through ParserOp and merge parsed fields into the result.
 ///
 /// Mirrors Python's chain() structured mode: Prompt → LLM → ParserOp.
 fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
-    let extract = match inputs.get("parser_extract").and_then(|v| v.as_array()) {
+    let schema = match inputs.get("schema").and_then(|v| v.as_array()) {
         Some(arr) if !arr.is_empty() => arr.clone(),
         _ => return Ok(()),
     };
 
-    let format = inputs
-        .get("parser_format")
+    let mode = inputs
+        .get("mode")
         .and_then(|v| v.as_str())
         .unwrap_or("xml");
 
@@ -77,13 +77,13 @@ fn maybe_parse(result: &mut Value, inputs: &Value) -> ProviderResult<()> {
 
     let mut parser_inputs = json!({
         "text": content,
-        "parser_format": format,
-        "parser_extract": extract,
+        "mode": mode,
+        "schema": schema,
     });
 
     // Forward validators if present
-    if let Some(validators) = inputs.get("parser_validators") {
-        parser_inputs["parser_validators"] = validators.clone();
+    if let Some(validators) = inputs.get("validators") {
+        parser_inputs["validators"] = validators.clone();
     }
 
     let parsed = hush_icore::ops::transform::parser_op::execute(parser_inputs)
@@ -196,9 +196,9 @@ mod tests {
         let inputs = json!({
             "template": "Classify: {text}",
             "text": "some input",
-            "parser_extract": ["result: str"],
-            "parser_format": "xml",
-            "parser_validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
+            "schema": ["result: str"],
+            "mode": "xml",
+            "validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
             "retry": 2,
             "default": {"result": "FALLBACK"},
         });
@@ -222,9 +222,9 @@ mod tests {
         let inputs = json!({
             "template": "Classify: {text}",
             "text": "vâng đúng rồi",
-            "parser_extract": ["result: str"],
-            "parser_format": "xml",
-            "parser_validators": {"result": ["CONFIRM", "DENY"]},
+            "schema": ["result: str"],
+            "mode": "xml",
+            "validators": {"result": ["CONFIRM", "DENY"]},
             "retry": 1,
             "default": {"result": "FALLBACK"},
         });
@@ -246,9 +246,9 @@ mod tests {
         let inputs = json!({
             "template": "Classify: {text}",
             "text": "test",
-            "parser_extract": ["result: str"],
-            "parser_format": "xml",
-            "parser_validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
+            "schema": ["result: str"],
+            "mode": "xml",
+            "validators": {"result": ["CONFIRM", "DENY", "FALLBACK"]},
             "retry": 0,
             "default": {"result": "FALLBACK"},
         });
@@ -269,9 +269,9 @@ mod tests {
         let inputs = json!({
             "template": "Classify: {text}",
             "text": "vâng",
-            "parser_extract": ["intent: str"],
-            "parser_format": "xml",
-            "parser_validators": {"intent": ["CONFIRM", "DENY"]},
+            "schema": ["intent: str"],
+            "mode": "xml",
+            "validators": {"intent": ["CONFIRM", "DENY"]},
             "retry": 2,
         });
 
@@ -291,8 +291,8 @@ mod tests {
         let inputs = json!({
             "template": "Analyze: {text}",
             "text": "không",
-            "parser_extract": ["intent: str", "confidence: float"],
-            "parser_format": "xml",
+            "schema": ["intent: str", "confidence: float"],
+            "mode": "xml",
         });
 
         let llm = mock_llm(vec![

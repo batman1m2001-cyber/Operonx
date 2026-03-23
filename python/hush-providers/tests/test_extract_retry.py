@@ -83,8 +83,7 @@ async def test_extract_validator_reject_uses_default():
                 fields=["result: str"],
                 parser="xml",
                 retry=2,
-                validators={"result": ["CONFIRM", "DENY", "FALLBACK"]},
-                default={"result": "FALLBACK"},
+                validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="some input",
             )
             START >> e >> END
@@ -92,10 +91,11 @@ async def test_extract_validator_reject_uses_default():
         engine = Hush(g)
         result = await engine.run(inputs={})
 
-    # Should have called LLM 3 times (1 + 2 retries)
-    assert call_count["n"] == 3
-    # Should fall back to default
+    # @FALLBACK in validators → ParserOp uses default immediately, no retry needed
+    assert call_count["n"] == 1
+    # Should fall back to @-prefixed default
     assert result["result"] == "FALLBACK"
+    assert result["error"] is None
     print(f"  validator reject test: result={result['result']}, calls={call_count['n']}")
 
 
@@ -125,7 +125,7 @@ async def test_extract_parse_fail_then_success():
                 parser="xml",
                 retry=1,
                 validators={"result": ["CONFIRM", "DENY"]},
-                default={"result": "FALLBACK"},
+                # @FALLBACK = default value when retries exhausted
                 text="vâng đúng rồi",
             )
             START >> e >> END
@@ -162,8 +162,7 @@ async def test_extract_no_retry_uses_default_on_fail():
                 fields=["result: str"],
                 parser="xml",
                 retry=0,
-                validators={"result": ["CONFIRM", "DENY", "FALLBACK"]},
-                default={"result": "FALLBACK"},
+                validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="test",
             )
             START >> e >> END
@@ -246,6 +245,46 @@ async def test_extract_multiple_fields():
     assert result["intent"] == "DENY"
     assert result["confidence"] == 0.95
     print(f"  multi fields test: intent={result['intent']}, confidence={result['confidence']}")
+
+
+# ── Test 6: Fail twice, succeed on 3rd attempt ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_extract_retry_twice_then_success():
+    """LLM fails 2 times (garbage + wrong value), succeeds on 3rd attempt."""
+    from hush.providers.ops.chain import extract
+
+    mock_hub, call_count = make_mock_hub(
+        [
+            "not xml at all",  # attempt 1: parse fail
+            "<result>UNKNOWN</result>",  # attempt 2: validator reject
+            "<result>CONFIRM</result>",  # attempt 3: success
+        ]
+    )
+
+    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        mock_cls.instance.return_value = mock_hub
+
+        with GraphOp(name="test_workflow") as g:
+            e = extract(
+                resource="mock",
+                template="Classify: {text}",
+                fields=["result: str"],
+                parser="xml",
+                retry=2,
+                validators={"result": ["CONFIRM", "DENY"]},
+                text="vâng đúng rồi",
+            )
+            START >> e >> END
+
+        engine = Hush(g)
+        result = await engine.run(inputs={})
+
+    assert call_count["n"] == 3  # 3 attempts
+    assert result["result"] == "CONFIRM"
+    assert result["error"] is None
+    print(f"  retry twice test: result={result['result']}, calls={call_count['n']}")
 
 
 if __name__ == "__main__":

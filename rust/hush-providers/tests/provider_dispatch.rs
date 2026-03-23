@@ -94,8 +94,8 @@ fn test_transform_prompt_with_history() {
 fn test_transform_parser_json_via_icore() {
     let result = hush_icore::ops::transform::parser_op::execute(json!({
         "text": r#"{"name": "Alice", "age": 30}"#,
-        "parser_format": "json",
-        "parser_extract": ["name: str", "age: int"]
+        "mode": "json",
+        "schema": ["name: str", "age: int"]
     }))
     .unwrap();
 
@@ -107,8 +107,8 @@ fn test_transform_parser_json_via_icore() {
 fn test_transform_parser_xml_via_icore() {
     let result = hush_icore::ops::transform::parser_op::execute(json!({
         "text": "<answer>42</answer><confident>true</confident>",
-        "parser_format": "xml",
-        "parser_extract": ["answer: int", "confident: bool"]
+        "mode": "xml",
+        "schema": ["answer: int", "confident: bool"]
     }))
     .unwrap();
 
@@ -120,8 +120,8 @@ fn test_transform_parser_xml_via_icore() {
 fn test_transform_parser_yaml_via_icore() {
     let result = hush_icore::ops::transform::parser_op::execute(json!({
         "text": "name: Alice\nscore: 95.5",
-        "parser_format": "yaml",
-        "parser_extract": ["name: str", "score: float"]
+        "mode": "yaml",
+        "schema": ["name: str", "score: float"]
     }))
     .unwrap();
 
