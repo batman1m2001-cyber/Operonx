@@ -83,8 +83,7 @@ async def test_extract_validator_reject_uses_default():
                 fields=["result: str"],
                 parser="xml",
                 retry=2,
-                validators={"result": ["CONFIRM", "DENY", "FALLBACK"]},
-                default={"result": "FALLBACK"},
+                validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="some input",
             )
             START >> e >> END
@@ -92,10 +91,11 @@ async def test_extract_validator_reject_uses_default():
         engine = Hush(g)
         result = await engine.run(inputs={})
 
-    # Should have called LLM 3 times (1 + 2 retries)
-    assert call_count["n"] == 3
-    # Should fall back to default
+    # @FALLBACK in validators → ParserOp uses default immediately, no retry needed
+    assert call_count["n"] == 1
+    # Should fall back to @-prefixed default
     assert result["result"] == "FALLBACK"
+    assert result["error"] is None
     print(f"  validator reject test: result={result['result']}, calls={call_count['n']}")
 
 
@@ -125,7 +125,7 @@ async def test_extract_parse_fail_then_success():
                 parser="xml",
                 retry=1,
                 validators={"result": ["CONFIRM", "DENY"]},
-                default={"result": "FALLBACK"},
+                # @FALLBACK = default value when retries exhausted
                 text="vâng đúng rồi",
             )
             START >> e >> END
@@ -162,8 +162,7 @@ async def test_extract_no_retry_uses_default_on_fail():
                 fields=["result: str"],
                 parser="xml",
                 retry=0,
-                validators={"result": ["CONFIRM", "DENY", "FALLBACK"]},
-                default={"result": "FALLBACK"},
+                validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="test",
             )
             START >> e >> END

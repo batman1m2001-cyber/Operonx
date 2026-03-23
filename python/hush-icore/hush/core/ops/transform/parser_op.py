@@ -270,13 +270,28 @@ class ParserOp(BaseOp):
             result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
         # Validate extracted values against allowed lists (from input)
+        # Values prefixed with @ are defaults (e.g. "@FALLBACK"):
+        #   - @ is stripped for membership check (FALLBACK is a valid value)
+        #   - When validation fails, the @-prefixed value is used as fallback
         if validators:
             for field_name, allowed_values in validators.items():
+                clean_values = [v.lstrip("@") if isinstance(v, str) else v for v in allowed_values]
+                default_value = next(
+                    (
+                        v.lstrip("@")
+                        for v in allowed_values
+                        if isinstance(v, str) and v.startswith("@")
+                    ),
+                    None,
+                )
                 value = result.get(field_name)
-                if value is None or value not in allowed_values:
-                    return {
-                        "error": f"Validation failed: '{field_name}' value '{value}' not in {allowed_values}"
-                    }
+                if value is None or value not in clean_values:
+                    if default_value is not None:
+                        result[field_name] = default_value
+                    else:
+                        return {
+                            "error": f"Validation failed: '{field_name}' value '{value}' not in {clean_values}"
+                        }
 
         result["error"] = None
         return result

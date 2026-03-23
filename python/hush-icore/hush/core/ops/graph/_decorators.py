@@ -90,6 +90,23 @@ def graph(fn):
 def _graph_loop(until=None, max_iterations=100):
     """Decorator factory for feedback-loop graphs.
 
+    max_iterations can be an int or a string expression evaluated against kwargs::
+
+        @graph.loop(until="error == None", max_iterations="retry + 1")
+        def extract(error, retry=0, ...):
+            ...
+
+        e = extract(error="init", retry=2)  # max_iterations = 3
+
+    Keyword-only params (after ``*``) are config — passed directly to fn,
+    NOT stored as loop state. Regular params are loop state variables::
+
+        @graph.loop(until="error == None", max_iterations="retry + 1")
+        def extract(error, retry=0, *, resource=None, fields=None):
+            # error, retry → loop state (PARENT refs, updated each iteration)
+            # resource, fields → config (direct values, fixed)
+            ...
+
     Example::
 
         @graph.loop(until="count >= 5")
@@ -104,18 +121,56 @@ def _graph_loop(until=None, max_iterations=100):
 
     def decorator(fn):
         sig = inspect.signature(fn)
-        param_names = set(sig.parameters.keys())
+        loop_params = set()
+        config_params = set()
+        for name, param in sig.parameters.items():
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                config_params.add(name)
+            elif param.kind != inspect.Parameter.VAR_KEYWORD:
+                loop_params.add(name)
 
         @wraps(fn)
         def wrapper(**kwargs):
             input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-            g = GraphOp.loop(until=until, max_iterations=max_iterations, **init_kwargs)
+
+            # Split kwargs: loop state vs config (keyword-only params)
+            # split_shorthand_kwargs puts unknown keys into input_mappings,
+            # so loop params and config params may end up there too.
+            loop_state = {}
+            config = {}
+            remaining_inputs = {}
+            for k, v in init_kwargs.items():
+                if k in config_params:
+                    config[k] = v
+                else:
+                    loop_state[k] = v
+            for k, v in (input_mappings or {}).items():
+                if k in config_params:
+                    config[k] = v
+                elif k in loop_params:
+                    loop_state[k] = v
+                else:
+                    remaining_inputs[k] = v
+            input_mappings = remaining_inputs
+
+            # Resolve max_iterations: string → eval against all kwargs + fn defaults
+            if isinstance(max_iterations, str):
+                # Include fn param defaults so expression can reference them
+                defaults = {
+                    name: p.default
+                    for name, p in sig.parameters.items()
+                    if p.default is not inspect.Parameter.empty
+                }
+                _max = eval(max_iterations, {}, {**defaults, **loop_state, **config})  # noqa: S307
+            else:
+                _max = max_iterations
+
+            g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
             g.inputs.update(input_mappings or {})
             with g:
-                # Loop params are always PARENT refs — they're loop state variables
-                # that get updated each iteration, even if initial value is static.
-                parent_refs = {k: PARENT[k] for k in input_mappings if k in param_names}
-                fn(**parent_refs)
+                # Loop state → PARENT refs, config → direct values
+                parent_refs = {k: PARENT[k] for k in loop_state if k in loop_params}
+                fn(**parent_refs, **config)
             return g
 
         register_skip(wrapper)
