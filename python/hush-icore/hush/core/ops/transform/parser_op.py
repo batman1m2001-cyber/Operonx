@@ -128,13 +128,12 @@ class ParserOp(BaseOp):
 
     type: OpType = "parser"
 
-    __slots__ = ["backend", "format", "extract", "extract_fields", "validators"]
+    __slots__ = ["backend", "format", "extract", "extract_fields"]
 
     def __init__(
         self,
         format: Optional[ParserType] = None,
         extract: Optional[List[str]] = None,
-        validators: Optional[Dict[str, list]] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs,
@@ -146,7 +145,10 @@ class ParserOp(BaseOp):
         extract_fields = [ExtractField.from_string(schema_str) for schema_str in extract]
 
         # Parse inputs/outputs từ extract
-        parsed_inputs = {"text": Param(type=str, required=True)}
+        parsed_inputs = {
+            "text": Param(type=str, required=True),
+            "parser_validators": Param(type=dict, required=False),
+        }
         parsed_outputs = {field.output_key: Param() for field in extract_fields}
 
         # Gọi super().__init__ không truyền inputs/outputs
@@ -171,25 +173,8 @@ class ParserOp(BaseOp):
         parser_ext_param.value = self.extract
         self.inputs["parser_extract"] = parser_ext_param
 
-        # Validators: static dict OR dynamic via input Ref
-        # If validators is a Ref or contains Refs, register as input for runtime resolution
-        self.validators = validators if not self._is_ref(validators) else {}
-        if self._is_ref(validators):
-            self.inputs["parser_validators"] = Param(required=False, value=validators)
-        elif validators:
-            v_param = Param(type=dict, required=False)
-            v_param.value = validators
-            self.inputs["parser_validators"] = v_param
-
         self.backend = self._create_parser()
         self.core = self._process
-
-    @staticmethod
-    def _is_ref(value) -> bool:
-        """Check if value is a Ref (for dynamic input resolution)."""
-        return hasattr(value, "is_ref") or (
-            hasattr(value, "__class__") and value.__class__.__name__ == "Ref"
-        )
 
     def _create_parser(self):
         """Tạo parser function dựa trên format."""
@@ -286,10 +271,9 @@ class ParserOp(BaseOp):
             raw_value = self._extract_value_by_path(parsed_data, field.chain_path)
             result[field.output_key] = self._convert_type(raw_value, field.type_hint)
 
-        # Validate: use runtime validators (from input Ref) or static validators
-        active_validators = parser_validators if parser_validators else self.validators
-        if active_validators:
-            for field_name, allowed_values in active_validators.items():
+        # Validate extracted values against allowed lists (from input)
+        if parser_validators:
+            for field_name, allowed_values in parser_validators.items():
                 value = result.get(field_name)
                 if value is None or value not in allowed_values:
                     return {

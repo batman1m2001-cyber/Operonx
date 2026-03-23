@@ -39,16 +39,12 @@ def chat(
     """
     _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
 
-    llm_inputs: Dict[str, Any] = {"messages": _prompt["messages"]}
-    if response_format:
-        llm_inputs["response_format"] = response_format
-
     _llm = LLMOp(
         name="llm",
         resource=resource,
         ratios=ratios,
         fallback=fallback,
-        inputs=llm_inputs,
+        inputs={"messages": _prompt["messages"], "response_format": response_format},
         outputs={"*": PARENT},
         delay=delay,
     )
@@ -121,37 +117,20 @@ def extract(
     with g:
         _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
 
-        llm_inputs: Dict[str, Any] = {"messages": _prompt["messages"]}
-        if response_format:
-            llm_inputs["response_format"] = response_format
-
         _llm = LLMOp(
             name="llm",
             resource=resource,
             ratios=ratios,
             fallback=fallback,
-            inputs=llm_inputs,
+            inputs={"messages": _prompt["messages"], "response_format": response_format},
             delay=delay,
         )
-
-        parser_inputs: Dict[str, Any] = {"text": _llm["content"]}
-
-        # Dynamic validators: if validators is a Ref, pass via input for runtime resolution
-        _is_ref = hasattr(validators, "is_ref") or (
-            hasattr(validators, "__class__") and validators.__class__.__name__ == "Ref"
-        )
-        if _is_ref:
-            parser_inputs["parser_validators"] = validators
-            _static_validators = None
-        else:
-            _static_validators = validators
 
         _parser = ParserOp(
             name="parser",
             format=parser,
             extract=fields,
-            validators=_static_validators,
-            inputs=parser_inputs,
+            inputs={"text": _llm["content"], "parser_validators": validators},
         )
 
         # Feed parser outputs back to loop state.
