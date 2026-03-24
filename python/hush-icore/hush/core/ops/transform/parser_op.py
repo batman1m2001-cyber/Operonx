@@ -243,9 +243,9 @@ class ParserOp(BaseOp):
             except (ValueError, TypeError):
                 return value
 
-        # String - return as-is or convert to string
+        # String - convert and strip whitespace (XML often has \n around values)
         if type_hint in ("str", "string"):
-            return str(value) if value is not None else ""
+            return str(value).strip() if value is not None else ""
 
         # For dict, list, any, or unknown types, return as-is
         return value
