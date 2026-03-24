@@ -603,7 +603,17 @@ class BaseOp(ABC):
                     _cache_hit = True
 
             if not _cache_hit:
+                LOGGER.debug(
+                    "BaseOp.run [%s] calling _exec_core, inputs=%s",
+                    self.full_name,
+                    list(_inputs.keys()),
+                )
                 _outputs = await self._exec_core(_inputs)
+                LOGGER.debug(
+                    "BaseOp.run [%s] _exec_core returned, outputs=%s",
+                    self.full_name,
+                    list(_outputs.keys()) if _outputs else None,
+                )
                 # Store in cache
                 if self.cache is not None:
                     _cache_store[_cache_key] = _outputs

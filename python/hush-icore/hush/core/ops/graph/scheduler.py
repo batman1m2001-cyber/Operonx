@@ -139,6 +139,13 @@ async def run_scheduler(
         op_obj = graph._ops[op_name]
         if op_obj.type == "branch":
             target = op_obj.get_target(state, ctx)
+            LOGGER.debug(
+                "[SCHED %s] branch %s -> target=%s, adj=%s",
+                graph.full_name,
+                op_name,
+                target,
+                graph._compiled_adj[op_name],
+            )
             if target == END.name:
                 return []
             successors = [(t, s) for t, s in graph._compiled_adj[op_name] if t == target]
@@ -174,6 +181,7 @@ async def run_scheduler(
         """Dispatch one op to the appropriate execution mode."""
         nonlocal active_count
         op_obj = graph._ops[name]
+        LOGGER.debug("[SCHED %s] dispatch %s (type=%s)", graph.full_name, name, op_obj.type)
 
         if _is_gen(op_obj):
             active_count += 1
@@ -194,6 +202,7 @@ async def run_scheduler(
             return propagate(name, ctx)
 
         active_count += 1
+        LOGGER.debug("[SCHED %s] async task for %s, active=%d", graph.full_name, name, active_count)
         asyncio.create_task(task_execute(name, op_obj, ctx, parent_context))
         return []
 
@@ -234,15 +243,25 @@ async def run_scheduler(
     # ── The story ──────────────────────────────────────────────────
 
     # 1. Start entry ops
+    LOGGER.debug(
+        "[SCHED %s] entries=%s, initial_ready=%s",
+        graph.full_name,
+        graph.entries,
+        dict(ready_counts[context_id]),
+    )
     await drain_ready(list(graph.entries), context_id)
 
     # 2. Event loop
     while active_count > 0:
+        LOGGER.debug("[SCHED %s] waiting event... active=%d", graph.full_name, active_count)
         event = await event_queue.get()
 
         if event[0] == "done":
             _, op_name, ctx = event
             active_count -= 1
+            LOGGER.debug(
+                "[SCHED %s] done: %s ctx=%s active=%d", graph.full_name, op_name, ctx, active_count
+            )
 
             # Terminal op in stream context → release slot, dequeue next
             if ctx in active_stream_ctxs and is_terminal(op_name):
@@ -255,7 +274,17 @@ async def run_scheduler(
                     if output_queue is not None:
                         await output_queue.put({"type": "token", "op": gen_name, "data": r_data})
 
-            await drain_ready(propagate(op_name, ctx), ctx)
+            newly = propagate(op_name, ctx)
+            LOGGER.debug(
+                "[SCHED %s] propagate %s -> newly_ready=%s, ready_counts=%s",
+                graph.full_name,
+                op_name,
+                newly,
+                {k: v for k, v in ready_counts[ctx].items() if v > 0}
+                if ctx in ready_counts
+                else "?",
+            )
+            await drain_ready(newly, ctx)
 
         elif event[0] == "done_pending":
             _, op_name, ctx = event
