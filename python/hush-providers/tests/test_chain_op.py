@@ -230,14 +230,14 @@ class TestExtract:
             assert "prompt" in node._ops
 
     def test_with_retry(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import extract_with_retry
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = extract(
+            node = extract_with_retry(
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["result: str"],
@@ -270,7 +270,7 @@ class TestExtract:
             parser_op = node._ops["parser"]
             assert "validators" in parser_op.inputs
 
-    def test_no_retry_no_loop(self):
+    def test_no_retry_is_simple_graph(self):
         from hush.providers.ops import extract
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
@@ -282,13 +282,13 @@ class TestExtract:
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["result: str"],
-                retry=0,
                 text="sample",
             )
 
-            # retry=0 → max_iterations=1 → loop runs once
-            assert node._loop_config is not None
-            assert node._loop_config.max_iterations == 1
+            # extract() is a simple @graph, no loop
+            assert node._loop_config is None
+            assert "parser" in node._ops
+            assert "llm" in node._ops
 
 
 class TestChatCombined:

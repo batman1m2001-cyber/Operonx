@@ -44,7 +44,7 @@ def chat(
         resource=resource,
         ratios=ratios,
         fallback=fallback,
-        inputs={"messages": _prompt["messages"], "response_format": response_format},
+        inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
         outputs={"*": PARENT},
         delay=delay,
     )
@@ -67,11 +67,13 @@ def extract(
     delay: float = 0,
     template: Any = None,
     response_format: Optional[Dict[str, Any]] = None,
+    # validators goes through **kwargs → PARENT, not as literal param
     validators: Optional[Dict[str, list]] = None,
 ) -> Any:
     """Prompt → LLM → Parser graph for structured extraction.
 
     Simple @graph: no retry, no loop. Just Prompt → LLM → Parser → END.
+    validators must be passed as kwarg so it flows through PARENT (not literal).
 
     Example::
 
@@ -94,7 +96,7 @@ def extract(
         resource=resource,
         ratios=ratios,
         fallback=fallback,
-        inputs={"messages": _prompt["messages"], "response_format": response_format},
+        inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
         delay=delay,
     )
 
@@ -102,7 +104,7 @@ def extract(
         name="parser",
         format=parser,
         extract=fields,
-        inputs={"text": _llm["content"], "validators": validators},
+        inputs={"text": _llm["content"], "validators": PARENT["validators"]},
         outputs={"*": PARENT},
     )
 
@@ -143,7 +145,7 @@ def extract_with_retry(
             resource=resource,
             ratios=ratios,
             fallback=fallback,
-            inputs={"messages": _prompt["messages"], "response_format": response_format},
+            inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
             delay=delay,
         )
 
