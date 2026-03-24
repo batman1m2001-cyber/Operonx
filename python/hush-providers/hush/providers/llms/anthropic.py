@@ -182,9 +182,10 @@ class AnthropicModel(BaseLLM):
             body["system"] = system
         if stream:
             body["stream"] = True
+        # Anthropic: temperature and top_p are mutually exclusive
         if kwargs.get("temperature") is not None:
             body["temperature"] = kwargs["temperature"]
-        if kwargs.get("top_p") is not None:
+        elif kwargs.get("top_p") is not None:
             body["top_p"] = kwargs["top_p"]
         if kwargs.get("stop") is not None:
             stop = kwargs["stop"]

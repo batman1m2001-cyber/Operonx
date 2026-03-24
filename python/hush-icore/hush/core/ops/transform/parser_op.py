@@ -9,6 +9,7 @@ import yaml
 
 from hush.core.configs.op_config import OpType
 from hush.core.exceptions import ParserError
+from hush.core.loggings import LOGGER
 from hush.core.ops.base import BaseOp
 from hush.core.utils.common import Param
 
@@ -256,6 +257,15 @@ class ParserOp(BaseOp):
         On success: {"field1": value, "field2": value, "error": None}
         On failure: {"field1": None, "field2": None, "error": "error message"}
         """
+        LOGGER.debug(
+            "ParserOp._process called: text=%r, validators=%r",
+            text[:100] if text else text,
+            validators,
+        )
+        if validators is not None and not isinstance(validators, dict):
+            return {
+                "error": f"validators must be a dict, got {type(validators).__name__}: {validators!r}"
+            }
         if not text:
             return {"error": "Empty input text"}
 
