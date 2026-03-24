@@ -1,6 +1,6 @@
 """Workflow nodes for AI providers."""
 
-from hush.providers.ops.chain import chat, extract, extract_with_retry
+from hush.providers.ops.chain import ask, chat
 from hush.providers.ops.embedding import EmbeddingOp
 from hush.providers.ops.llm import LLMOp
 from hush.providers.ops.onnx import OnnxOp
@@ -14,6 +14,5 @@ __all__ = [
     "RerankOp",
     "PromptOp",
     "chat",
-    "extract",
-    "extract_with_retry",
+    "ask",
 ]

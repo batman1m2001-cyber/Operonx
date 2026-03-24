@@ -298,13 +298,13 @@ class TestChainShorthand:
             node = chat(resource="gpt-4", template="Hello", outputs={"*": PARENT})
             assert "content" in node.outputs
 
-    def test_chain_extract(self):
-        from hush.providers.ops.chain import extract
+    def test_chain_ask(self):
+        from hush.providers.ops.chain import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = extract(
+            node = ask(
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["category: str", "confidence: float"],

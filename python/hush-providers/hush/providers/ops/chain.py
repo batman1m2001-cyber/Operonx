@@ -1,13 +1,12 @@
-"""chat() and extract() — LLM workflow building blocks.
+"""chat() and ask() — LLM workflow building blocks.
 
 - chat(): text generation (Prompt → LLM)
-- extract(): structured output (Prompt → LLM → Parser) with retry + validation
+- ask(): structured output (Prompt → LLM → Parser), with optional retry via until=
 """
 
 from typing import Any, Dict, List, Optional, Union
 
 from hush.core.ops import END, PARENT, START, ParserOp, graph
-from hush.core.ops.graph.graph_op import GraphOp
 from hush.providers.ops.llm import LLMOp
 from hush.providers.ops.prompt import PromptOp
 
@@ -37,14 +36,14 @@ def chat(
             query=PARENT["query"],
         )
     """
-    _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
+    _prompt = PromptOp(name="prompt", inputs={"template": template, "*": PARENT})
 
     _llm = LLMOp(
         name="llm",
         resource=resource,
         ratios=ratios,
         fallback=fallback,
-        inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
+        inputs={"messages": _prompt["messages"], "response_format": response_format},
         outputs={"*": PARENT},
         delay=delay,
     )
@@ -53,31 +52,33 @@ def chat(
 
 
 # =============================================================================
-# extract() — structured output with retry + validation
+# ask() — structured output with optional retry
 # =============================================================================
 
 
 @graph
-def extract(
+def ask(
+    # Loop state (before *) — only these become loop state variables
+    error: str = None,
+    *,
+    # Config (keyword-only) — passed directly, NOT loop state
+    template: Any = None,
     resource: Optional[Union[str, List[str]]] = None,
     ratios: Optional[List[float]] = None,
     fallback: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
     parser: str = "xml",
     delay: float = 0,
-    template: Any = None,
     response_format: Optional[Dict[str, Any]] = None,
-    # validators goes through **kwargs → PARENT, not as literal param
     validators: Optional[Dict[str, list]] = None,
+    until: str = None,
+    max_iterations: int = 2,
 ) -> Any:
     """Prompt → LLM → Parser graph for structured extraction.
 
-    Simple @graph: no retry, no loop. Just Prompt → LLM → Parser → END.
-    validators must be passed as kwarg so it flows through PARENT (not literal).
+    Simple mode (no retry)::
 
-    Example::
-
-        e = extract(
+        a = ask(
             resource="claude-haiku",
             template="Classify: {speech}",
             fields=["result: str"],
@@ -85,18 +86,32 @@ def extract(
             validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
             speech=PARENT["speech"],
         )
+
+    Retry mode (pass ``until=``)::
+
+        a = ask(
+            resource="claude-haiku",
+            template="Classify: {speech}",
+            fields=["result: str"],
+            parser="xml",
+            validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
+            until="error == None",
+            max_iterations=3,
+            error="init",
+            speech=PARENT["speech"],
+        )
     """
     if not fields:
-        raise TypeError("fields is required for extract()")
+        raise TypeError("fields is required for ask()")
 
-    _prompt = PromptOp(name="prompt", inputs={"*": PARENT})
+    _prompt = PromptOp(name="prompt", inputs={"template": template, "*": PARENT})
 
     _llm = LLMOp(
         name="llm",
         resource=resource,
         ratios=ratios,
         fallback=fallback,
-        inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
+        inputs={"messages": _prompt["messages"], "response_format": response_format},
         delay=delay,
     )
 
@@ -104,61 +119,12 @@ def extract(
         name="parser",
         format=parser,
         extract=fields,
-        inputs={"text": _llm["content"], "validators": PARENT["validators"]},
+        inputs={"text": _llm["content"], "validators": validators},
         outputs={"*": PARENT},
     )
 
-    START >> _prompt >> _llm >> _parser >> END
-
-
-def extract_with_retry(
-    resource: Optional[Union[str, List[str]]] = None,
-    ratios: Optional[List[float]] = None,
-    fallback: Optional[List[str]] = None,
-    fields: Optional[List[str]] = None,
-    parser: str = "xml",
-    delay: float = 0,
-    template: Any = None,
-    response_format: Optional[Dict[str, Any]] = None,
-    validators: Optional[Dict[str, list]] = None,
-    retry: int = 0,
-    **kwargs,
-) -> GraphOp:
-    """Prompt → LLM → Parser with retry via GraphOp.loop.
-
-    Use extract() for simple cases. Use _extract() when retry is needed.
-    """
-    if not fields:
-        raise TypeError("fields is required for extract_with_retry()")
-
-    with GraphOp.loop(
-        until="error == None",
-        max_iterations=retry + 1,
-        error="init",
-        template=template,
-        **kwargs,
-    ) as g:
-        _prompt = PromptOp(name="prompt", inputs={"template": PARENT["template"], "*": PARENT})
-
-        _llm = LLMOp(
-            name="llm",
-            resource=resource,
-            ratios=ratios,
-            fallback=fallback,
-            inputs={"messages": _prompt["messages"], "response_format": PARENT["response_format"]},
-            delay=delay,
-        )
-
-        _parser = ParserOp(
-            name="parser",
-            format=parser,
-            extract=fields,
-            inputs={"text": _llm["content"], "validators": validators},
-            outputs={"*": PARENT},
-        )
-
+    # In loop mode, feed error back to PARENT for until check
+    if error is not None:
         _parser["error"] >> PARENT["error"]
 
-        START >> _prompt >> _llm >> _parser >> END
-
-    return g
+    START >> _prompt >> _llm >> _parser >> END

@@ -1,4 +1,4 @@
-"""Tests for chat() and extract() factory functions."""
+"""Tests for chat() and ask() factory functions."""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -196,28 +196,28 @@ class TestChatResponseFormat:
 
 
 class TestExtract:
-    """Tests for extract()."""
+    """Tests for ask()."""
 
     def test_import(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
-        assert extract is not None
+        assert ask is not None
 
     def test_requires_fields(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with pytest.raises(TypeError):
-            extract(resource="gpt-4", template="Test")
+            ask(resource="gpt-4", template="Test")
 
     def test_creation(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = extract(
+            node = ask(
                 resource="gpt-4",
                 template="Classify: {text}\n<category>...</category>",
                 fields=["category: str", "confidence: float"],
@@ -230,18 +230,20 @@ class TestExtract:
             assert "prompt" in node._ops
 
     def test_with_retry(self):
-        from hush.providers.ops import extract_with_retry
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = extract_with_retry(
+            node = ask(
+                until="error == None",
+                error="init",
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["result: str"],
-                retry=2,
+                max_iterations=3,
                 validators={"result": ["CONFIRM", "DENY", "FALLBACK"]},
                 default={"result": "FALLBACK"},
                 text="sample",
@@ -252,14 +254,14 @@ class TestExtract:
             assert node._loop_config.max_iterations == 3  # retry=2 → 3 attempts
 
     def test_with_validators(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = extract(
+            node = ask(
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["intent: str"],
@@ -271,21 +273,21 @@ class TestExtract:
             assert "validators" in parser_op.inputs
 
     def test_no_retry_is_simple_graph(self):
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
 
-            node = extract(
+            node = ask(
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["result: str"],
                 text="sample",
             )
 
-            # extract() is a simple @graph, no loop
+            # ask() is a simple @graph, no loop
             assert node._loop_config is None
             assert "parser" in node._ops
             assert "llm" in node._ops
@@ -444,18 +446,18 @@ class TestChatIntegration:
 
 
 class TestExtractIntegration:
-    """Integration tests for extract() with real ResourceHub."""
+    """Integration tests for ask() with real ResourceHub."""
 
     @pytest.mark.asyncio
     async def test_structured_output(self, hub):
         from hush.core.states import MemoryState, StateSchema
 
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
 
-        node = extract(
+        node = ask(
             resource="gpt-4o",
             template="""Classify the sentiment of this text: "{text}"
 
@@ -477,13 +479,13 @@ Output your response in XML format:
 
 
 class TestExtractRefTemplate:
-    """Tests for extract() when template is a Ref (inside @graph)."""
+    """Tests for ask() when template is a Ref (inside @graph)."""
 
     def test_prompt_schema_includes_vars_when_template_is_ref(self):
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -492,7 +494,7 @@ class TestExtractRefTemplate:
 
             @graph
             def detect(template: str, transcript: str):
-                c = extract(
+                c = ask(
                     resource="gpt-4",
                     template=template,
                     fields=["result: str"],
@@ -506,7 +508,7 @@ class TestExtractRefTemplate:
                 transcript="Hello world",
             )
 
-            # extract() returns GraphOp — find it by type
+            # ask() returns GraphOp — find it by type
             extract_op = [op for op in node._ops.values() if hasattr(op, "_loop_config")][0]
             prompt_op = extract_op._ops["prompt"]
             assert "transcript" in prompt_op.inputs
@@ -515,7 +517,7 @@ class TestExtractRefTemplate:
         from hush.core import END, START
         from hush.core.ops.graph.graph_op import graph
 
-        from hush.providers.ops import extract
+        from hush.providers.ops import ask
 
         with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
             mock_instance = Mock()
@@ -524,7 +526,7 @@ class TestExtractRefTemplate:
 
             @graph
             def detect(transcript: str):
-                c = extract(
+                c = ask(
                     resource="gpt-4",
                     template="Analyze: {transcript}",
                     fields=["result: str"],

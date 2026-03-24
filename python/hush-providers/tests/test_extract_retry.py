@@ -1,7 +1,7 @@
-"""Tests for extract() and extract_with_retry().
+"""Tests for ask() and ask(until="error == None", error="init", ).
 
-- extract(): simple Prompt → LLM → Parser (no retry)
-- extract_with_retry(): with retry loop via GraphOp.loop
+- ask(): simple Prompt → LLM → Parser (no retry)
+- ask(until="error == None", error="init", ): with retry loop via GraphOp.loop
 """
 
 from unittest.mock import Mock, patch
@@ -50,14 +50,14 @@ def make_mock_hub(responses):
 
 
 # =============================================================================
-# extract() tests — simple, no retry
+# ask() tests — simple, no retry
 # =============================================================================
 
 
 @pytest.mark.asyncio
 async def test_extract_basic():
-    """extract() parses LLM output into structured fields."""
-    from hush.providers.ops.chain import extract
+    """ask() parses LLM output into structured fields."""
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
@@ -66,7 +66,7 @@ async def test_extract_basic():
 
         @graph
         def wf():
-            e = extract(
+            e = ask(
                 resource="mock",
                 template="Classify: {text}",
                 fields=["intent: str"],
@@ -85,8 +85,8 @@ async def test_extract_basic():
 
 @pytest.mark.asyncio
 async def test_extract_with_validators():
-    """extract() with validators — @-prefixed = default on validation fail."""
-    from hush.providers.ops.chain import extract
+    """ask() with validators — @-prefixed = default on validation fail."""
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"])
 
@@ -95,7 +95,7 @@ async def test_extract_with_validators():
 
         @graph
         def wf():
-            e = extract(
+            e = ask(
                 resource="mock",
                 template="Classify: {text}",
                 fields=["result: str"],
@@ -115,8 +115,8 @@ async def test_extract_with_validators():
 
 @pytest.mark.asyncio
 async def test_extract_multiple_fields():
-    """extract() extracts multiple fields from XML."""
-    from hush.providers.ops.chain import extract
+    """ask() extracts multiple fields from XML."""
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>DENY</intent><confidence>0.95</confidence>"])
 
@@ -125,7 +125,7 @@ async def test_extract_multiple_fields():
 
         @graph
         def wf():
-            e = extract(
+            e = ask(
                 resource="mock",
                 template="Analyze: {text}",
                 fields=["intent: str", "confidence: float"],
@@ -143,14 +143,14 @@ async def test_extract_multiple_fields():
 
 
 # =============================================================================
-# extract_with_retry() tests — with retry loop
+# ask(until="error == None", error="init", ) tests — with retry loop
 # =============================================================================
 
 
 @pytest.mark.asyncio
 async def test_extract_retry_validator_reject_uses_default():
     """LLM always returns wrong value → validator rejects → @-default applied."""
-    from hush.providers.ops.chain import extract_with_retry
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"] * 3)
 
@@ -158,12 +158,14 @@ async def test_extract_retry_validator_reject_uses_default():
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
-            e = extract_with_retry(
+            e = ask(
+                until="error == None",
+                error="init",
                 resource="mock",
                 template="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
-                retry=2,
+                max_iterations=3,
                 validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="some input",
             )
@@ -182,7 +184,7 @@ async def test_extract_retry_validator_reject_uses_default():
 @pytest.mark.asyncio
 async def test_extract_retry_parse_fail_then_success():
     """First call returns garbage → retry → second call returns valid XML."""
-    from hush.providers.ops.chain import extract_with_retry
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -195,12 +197,14 @@ async def test_extract_retry_parse_fail_then_success():
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
-            e = extract_with_retry(
+            e = ask(
+                until="error == None",
+                error="init",
                 resource="mock",
                 template="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
-                retry=1,
+                max_iterations=2,
                 validators={"result": ["CONFIRM", "DENY"]},
                 text="vâng đúng rồi",
             )
@@ -217,7 +221,7 @@ async def test_extract_retry_parse_fail_then_success():
 @pytest.mark.asyncio
 async def test_extract_retry_no_retry_default_on_fail():
     """retry=0 → only 1 attempt. Parse fail → @-default applied."""
-    from hush.providers.ops.chain import extract_with_retry
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["garbage output"])
 
@@ -225,12 +229,14 @@ async def test_extract_retry_no_retry_default_on_fail():
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
-            e = extract_with_retry(
+            e = ask(
+                until="error == None",
+                error="init",
                 resource="mock",
                 template="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
-                retry=0,
+                max_iterations=1,
                 validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
                 text="test",
             )
@@ -247,7 +253,7 @@ async def test_extract_retry_no_retry_default_on_fail():
 @pytest.mark.asyncio
 async def test_extract_retry_success_first_try():
     """LLM returns valid output on first try → no retry triggered."""
-    from hush.providers.ops.chain import extract_with_retry
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
@@ -255,12 +261,14 @@ async def test_extract_retry_success_first_try():
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
-            e = extract_with_retry(
+            e = ask(
+                until="error == None",
+                error="init",
                 resource="mock",
                 template="Classify: {text}",
                 fields=["intent: str"],
                 parser="xml",
-                retry=2,
+                max_iterations=3,
                 validators={"intent": ["CONFIRM", "DENY"]},
                 text="vâng",
             )
@@ -277,7 +285,7 @@ async def test_extract_retry_success_first_try():
 @pytest.mark.asyncio
 async def test_extract_retry_twice_then_success():
     """LLM fails 2 times, succeeds on 3rd attempt."""
-    from hush.providers.ops.chain import extract_with_retry
+    from hush.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -291,12 +299,14 @@ async def test_extract_retry_twice_then_success():
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
-            e = extract_with_retry(
+            e = ask(
+                until="error == None",
+                error="init",
                 resource="mock",
                 template="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
-                retry=2,
+                max_iterations=3,
                 validators={"result": ["CONFIRM", "DENY"]},
                 text="vâng đúng rồi",
             )
