@@ -1,4 +1,27 @@
-"""@graph and @graph.loop decorators for building reusable GraphOp factories."""
+"""@graph decorator for building reusable GraphOp factories.
+
+If the caller passes `until=` kwarg, the graph becomes a loop (GraphOp.loop).
+Otherwise it's a simple one-shot graph (GraphOp).
+
+Example — simple graph::
+
+    @graph
+    def classify(speech):
+        ...
+        START >> prompt >> llm >> parser >> END
+
+    g = classify(speech=PARENT["speech"])
+
+Example — loop graph (pass `until=`)::
+
+    @graph
+    def counter(count, until, max_iterations=5):
+        inc = increment(counter=count)
+        inc["counter"] >> PARENT["count"]
+        START >> inc >> END
+
+    g = counter(count=0, until="count >= 5", max_iterations=5)
+"""
 
 import inspect
 from functools import wraps
@@ -8,6 +31,9 @@ from hush.core.ops._shortcuts import _BASE_INIT_KEYS, split_shorthand_kwargs
 from hush.core.ops.base import PARENT
 from hush.core.states.ref import Ref
 from hush.core.utils.auto_name import register_skip
+
+# Keys consumed by loop logic — popped from kwargs before graph creation
+_LOOP_KEYS = {"until", "max_iterations"}
 
 
 def _build_fn_args(input_mappings, param_names):
@@ -33,30 +59,22 @@ def graph(fn):
 
     The function's parameters become graph inputs. Ref values are injected as
     PARENT refs; static values are passed through directly for use at build time.
-    Auto-naming works through the decorator (via register_skip).
 
-    Example::
+    If the caller passes ``until=`` kwarg, the graph becomes a feedback loop::
 
         @graph
-        def verify_card(conversation):
-            check = detect_card(conversation=conversation)
-            START >> check >> END
+        def ask(error="init", until="error == None", max_iterations=2, ...):
+            ...
 
-        g1 = verify_card(conversation=other_op["conv"])
-        # g1.name == "g1"
+        # Simple (no loop):
+        a = ask(fields=["result: str"], speech="hello")
 
-        # Static values pass through directly:
-        @graph
-        def my_chain(template, resource, query):
-            p = PromptOp.of(template=template, query=query)
-            llm = LLMOp.of(resource=resource, messages=p["messages"])
-            START >> p >> llm >> END
+        # With retry loop:
+        a = ask(fields=["result: str"], until="error == None", max_iterations=3, speech="hello")
 
-        c = my_chain(
-            template={"system": "You are helpful.", "user": "{query}"},
-            resource="gpt-4o",       # static — passed directly
-            query=PARENT["query"],   # Ref — becomes PARENT["query"]
-        )
+    ``max_iterations`` can be a string expression evaluated against kwargs::
+
+        a = ask(retry=2, until="error == None", max_iterations="retry + 1", ...)
     """
     from hush.core.ops.graph.graph_op import GraphOp
 
@@ -71,91 +89,53 @@ def graph(fn):
             sorted(_BASE_INIT_KEYS),
         )
 
-    param_names = set(sig.parameters.keys())
+    param_names = set(sig.parameters.keys()) - _LOOP_KEYS
 
     @wraps(fn)
     def wrapper(**kwargs):
+        # Pop loop config from kwargs
+        until = kwargs.pop("until", None)
+        max_iterations = kwargs.pop("max_iterations", 100)
+
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        g = GraphOp(inputs=input_mappings or None, **init_kwargs)
-        with g:
-            fn_args = _build_fn_args(input_mappings, param_names)
-            fn(**fn_args)
-        return g
 
-    register_skip(wrapper)
-    wrapper.__wrapped__ = fn
-    return wrapper
+        if until is not None:
+            # ── Loop mode ──
+            # Distinguish loop state (regular params) from config (keyword-only params).
+            # Only loop state params become init state for GraphOp.loop.
+            loop_params = set()
+            config_params = set()
+            for name, param in sig.parameters.items():
+                if name in _LOOP_KEYS:
+                    continue
+                if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                    config_params.add(name)
+                elif param.kind not in (
+                    inspect.Parameter.VAR_KEYWORD,
+                    inspect.Parameter.VAR_POSITIONAL,
+                ):
+                    loop_params.add(name)
 
-
-def _graph_loop(until=None, max_iterations=100):
-    """Decorator factory for feedback-loop graphs.
-
-    max_iterations can be an int or a string expression evaluated against kwargs::
-
-        @graph.loop(until="error == None", max_iterations="retry + 1")
-        def extract(error, retry=0, ...):
-            ...
-
-        e = extract(error="init", retry=2)  # max_iterations = 3
-
-    Keyword-only params (after ``*``) are config — passed directly to fn,
-    NOT stored as loop state. Regular params are loop state variables::
-
-        @graph.loop(until="error == None", max_iterations="retry + 1")
-        def extract(error, retry=0, *, resource=None, fields=None):
-            # error, retry → loop state (PARENT refs, updated each iteration)
-            # resource, fields → config (direct values, fixed)
-            ...
-
-    Example::
-
-        @graph.loop(until="count >= 5")
-        def counter(count):
-            inc = increment(counter=count)
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> END
-
-        loop = counter(count=0)
-    """
-    from hush.core.ops.graph.graph_op import GraphOp
-
-    def decorator(fn):
-        sig = inspect.signature(fn)
-        loop_params = set()
-        config_params = set()
-        for name, param in sig.parameters.items():
-            if param.kind == inspect.Parameter.KEYWORD_ONLY:
-                config_params.add(name)
-            elif param.kind != inspect.Parameter.VAR_KEYWORD:
-                loop_params.add(name)
-
-        @wraps(fn)
-        def wrapper(**kwargs):
-            input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-
-            # Split kwargs: loop state vs config (keyword-only params)
-            # split_shorthand_kwargs puts unknown keys into input_mappings,
-            # so loop params and config params may end up there too.
             loop_state = {}
             config = {}
             remaining_inputs = {}
-            for k, v in init_kwargs.items():
-                if k in config_params:
-                    config[k] = v
-                else:
-                    loop_state[k] = v
             for k, v in (input_mappings or {}).items():
-                if k in config_params:
-                    config[k] = v
+                if isinstance(v, Ref) or v is PARENT:
+                    remaining_inputs[k] = v
                 elif k in loop_params:
                     loop_state[k] = v
+                elif k in config_params:
+                    config[k] = v
                 else:
-                    remaining_inputs[k] = v
-            input_mappings = remaining_inputs
+                    remaining_inputs[k] = v  # template vars etc
+            for k, v in init_kwargs.items():
+                if k in loop_params:
+                    loop_state[k] = v
+                elif k in config_params:
+                    config[k] = v
 
-            # Resolve max_iterations: string → eval against all kwargs + fn defaults
+            # Resolve max_iterations if string expression
             if isinstance(max_iterations, str):
-                # Include fn param defaults so expression can reference them
                 defaults = {
                     name: p.default
                     for name, p in sig.parameters.items()
@@ -166,12 +146,37 @@ def _graph_loop(until=None, max_iterations=100):
                 _max = max_iterations
 
             g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
-            g.inputs.update(input_mappings or {})
+            g.inputs.update(remaining_inputs or {})
             with g:
-                # Loop state → PARENT refs, config → direct values
-                parent_refs = {k: PARENT[k] for k in loop_state if k in loop_params}
-                fn(**parent_refs, **config)
-            return g
+                # Loop state → PARENT refs, config → direct values, Ref inputs → PARENT refs
+                fn_args = {k: PARENT[k] for k in loop_state if k in loop_params}
+                fn_args.update(config)
+                fn_args.update(_build_fn_args(remaining_inputs, param_names))
+                fn(**fn_args)
+        else:
+            # ── Simple mode ──
+            g = GraphOp(inputs=input_mappings or None, **init_kwargs)
+            with g:
+                fn_args = _build_fn_args(input_mappings, param_names)
+                fn(**fn_args)
+
+        return g
+
+    register_skip(wrapper)
+    wrapper.__wrapped__ = fn
+    return wrapper
+
+
+# Backward compat: @graph.loop still works
+def _graph_loop(until=None, max_iterations=100):
+    """Deprecated: use @graph with until= kwarg instead."""
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(**kwargs):
+            kwargs["until"] = until
+            kwargs["max_iterations"] = max_iterations
+            return graph(fn)(**kwargs)
 
         register_skip(wrapper)
         wrapper.__wrapped__ = fn

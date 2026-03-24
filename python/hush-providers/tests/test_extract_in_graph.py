@@ -1,7 +1,7 @@
-"""Tests: extract() inside @graph with if_() branching.
+"""Tests: ask() inside @graph with if_() branching.
 
 Verifies:
-- No deadlock when extract() nested after if_()
+- No deadlock when ask() nested after if_()
 - Skip path works correctly
 - Validators format validation
 - @-prefix default values
@@ -15,10 +15,10 @@ from hush.core import END, START, Hush, graph
 from hush.core.ops import op
 from hush.core.ops.flow import if_
 
-from hush.providers.ops import extract
+from hush.providers.ops import ask
 from tests.test_extract_retry import make_mock_hub
 
-# ── Tests: extract() after if_() branching ──
+# ── Tests: ask() after if_() branching ──
 
 
 class TestExtractAfterBranch:
@@ -44,7 +44,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = extract(
+                e = ask(
                     resource="mock",
                     template={"user": "{text}"},
                     fields=["result: str"],
@@ -103,7 +103,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = extract(
+                e = ask(
                     resource="mock",
                     template={"user": "{text}"},
                     fields=["result: str"],
@@ -147,7 +147,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = extract(
+                e = ask(
                     resource="mock",
                     template={"user": "{text}"},
                     fields=["result: str"],
