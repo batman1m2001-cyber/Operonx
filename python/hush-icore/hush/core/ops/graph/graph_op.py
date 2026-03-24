@@ -311,6 +311,11 @@ class GraphOp(BaseOp):
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)
 
+        # Validate: Refs in child op inputs must point to ops inside this graph
+        # or to PARENT (self). Refs to ops in a parent graph won't resolve at
+        # runtime because the child runs in its own state.
+        self._validate_ref_scope()
+
     def _setup_endpoints(self):
         """Discover entry/exit ops from the graph topology."""
         LOGGER.debug("Graph [highlight]%s[/highlight]: setting up endpoints...", self.name)
@@ -333,6 +338,39 @@ class GraphOp(BaseOp):
                 self.name,
             )
             raise ValueError("Graph must have at least one exit op.")
+
+    def _validate_ref_scope(self):
+        """Validate that all Ref inputs in child ops point to ops inside this graph or PARENT.
+
+        A Ref pointing to an op in a parent/outer graph will not resolve at runtime
+        because the child graph runs in its own isolated state. This catches a common
+        mistake when nesting subgraphs (e.g., extract() inside @graph).
+
+        Raises:
+            ValueError: If a Ref points to an op outside this graph's scope.
+        """
+        valid_sources = set(self._ops.keys())
+
+        for child_name, child in self._ops.items():
+            for var, param in child.inputs.items():
+                if not isinstance(param.value, Ref):
+                    continue
+                ref: Ref = param.value
+                # PARENT refs are OK — they resolve from graph inputs
+                if ref.raw_source is self:
+                    continue
+                # Refs to ops inside this graph are OK
+                source_name = getattr(ref.raw_source, "name", None)
+                if source_name in valid_sources:
+                    continue
+                # Ref points to an op outside this graph → error
+                source_repr = source_name or repr(ref.raw_source)
+                raise ValueError(
+                    f"Graph '{self.name}': op '{child_name}' input '{var}' references "
+                    f"'{source_repr}' which is outside this graph's scope. "
+                    f"Pass the value through PARENT instead: "
+                    f"inputs={{'{var}': PARENT['{var}']}} and provide '{var}' as a graph input."
+                )
 
     def _build_ready_counts(self):
         """Compute initial_ready_count from edge topology.

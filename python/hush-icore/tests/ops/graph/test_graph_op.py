@@ -1847,8 +1847,7 @@ class TestGraphValidation:
 
     @pytest.mark.asyncio
     async def test_invalid_ref_raises_error(self):
-        """Ref to non-existent node should raise GraphValidationError."""
-        from hush.core.ops.graph.graph_op import GraphValidationError
+        """Ref to non-existent node should raise ValueError at graph build time."""
         from hush.core.states.ref import Ref
 
         # Create a fake node that doesn't exist in graph
@@ -1857,22 +1856,16 @@ class TestGraphValidation:
 
         fake = FakeNode()
 
-        with GraphOp(name="invalid_ref_graph") as graph:
-            node = FuncOp(
-                name="consumer",
-                code_fn=lambda x: {"result": x},
-                inputs={"x": Ref(fake, "output")},  # Ref to non-existent node
-                outputs={"*": PARENT},
-            )
+        with pytest.raises(ValueError, match="outside this graph's scope"):
+            with GraphOp(name="invalid_ref_graph") as graph:
+                node = FuncOp(
+                    name="consumer",
+                    code_fn=lambda x: {"result": x},
+                    inputs={"x": Ref(fake, "output")},  # Ref to non-existent node
+                    outputs={"*": PARENT},
+                )
 
-            START >> node >> END
-
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.build()
-
-        error = exc_info.value
-        assert error.result.has_errors
-        assert any("non_existent_node" in issue.message for issue in error.result.errors)
+                START >> node >> END
 
     @pytest.mark.asyncio
     async def test_parent_ref_is_valid(self):
