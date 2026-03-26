@@ -290,8 +290,24 @@ class WorkflowScheduler:
             ctx_set = set(stream_contexts)
             prefixes = {ctx[:i] for ctx in ctx_set for i in range(1, len(ctx))}
             leaf_ctxs = [ctx for ctx in stream_contexts if ctx not in prefixes]
+
+            # Filter: only include contexts where terminal op actually produced output.
+            # N-to-M generators (e.g. VAD yields 1 segment from 50 chunks) create many
+            # stream contexts but only a few reach the terminal op with real output.
+            def _has_output(ctx):
+                for var in graph.outputs:
+                    try:
+                        val = state[graph.full_name, var, ctx]
+                        if val is not None:
+                            return True
+                    except (KeyError, IndexError):
+                        pass
+                return False
+
+            terminal_ctxs = [ctx for ctx in leaf_ctxs if _has_output(ctx)]
+
             outputs = {
-                var: [state[graph.full_name, var, ctx] for ctx in leaf_ctxs]
+                var: [state[graph.full_name, var, ctx] for ctx in terminal_ctxs]
                 for var in graph.outputs
             }
         elif any(_is_gen(op) for op in graph._ops.values()):
