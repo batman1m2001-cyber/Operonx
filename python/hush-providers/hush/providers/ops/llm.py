@@ -58,6 +58,7 @@ class LLMOp(BaseOp):
         "fallback",
         "_fallback_llms",
         "_rng",
+        "_initialized",
     ]
 
     type: OpType = "llm"
@@ -163,25 +164,45 @@ class LLMOp(BaseOp):
         self.inputs = self._merge_params(input_schema, normalized_inputs)
         self.outputs = self._merge_params(output_schema, normalized_outputs)
 
-        # Set up LLM backend(s)
+        # LLM backends — lazy-initialized on first run() to allow
+        # graph construction before ResourceHub is set up
+        self._llm = None
+        self._llms = []
+        self._fallback_llms = []
+        self._initialized = False
+
+        # Set up core — may be deferred if hub not ready yet
+        self._setup_core()
+
+    def _ensure_initialized(self):
+        """Lazy-init LLM backends from ResourceHub on first use."""
+        if self._initialized:
+            return
         try:
             hub = ResourceHub.instance()
         except RuntimeError:
             hub = get_hub()
 
-        # Initialize LLM(s) based on resource type
         if isinstance(self.resource, list):
             self._llms = [hub.llm(key) for key in self.resource]
-            self._llm = self._llms[0]  # Default to first
+            self._llm = self._llms[0]
         else:
             self._llm = hub.llm(self.resource)
             self._llms = [self._llm] if self._llm else []
 
-        # Initialize fallback LLMs
         if self.fallback:
             self._fallback_llms = [hub.llm(key) for key in self.fallback]
 
-        # Set up core function based on mode
+        self._initialized = True
+        self._setup_core()
+
+    def _setup_core(self):
+        """Set up core function based on mode. Skips if LLM not initialized yet."""
+        if not self._initialized:
+            # Defer — will be called again from _ensure_initialized()
+            self.core = self._lazy_generate
+            return
+
         if self.batch_mode:
             # Batch mode: use BatchCoordinator
             from hush.providers.llms.batch_coordinator import BatchCoordinator
@@ -209,6 +230,11 @@ class LLMOp(BaseOp):
         else:
             self.core = self._llm.generate
 
+    async def _lazy_generate(self, **kwargs):
+        """Placeholder core that initializes LLM on first call, then delegates."""
+        self._ensure_initialized()
+        return await self.core(**kwargs)
+
     def _select_llm(self) -> "BaseLLM":
         """Select an LLM using weighted random selection for load balancing.
 
@@ -217,6 +243,7 @@ class LLMOp(BaseOp):
         Returns:
             BaseLLM: The selected LLM backend
         """
+        self._ensure_initialized()
         if len(self._llms) == 1:
             return self._llms[0]
 
