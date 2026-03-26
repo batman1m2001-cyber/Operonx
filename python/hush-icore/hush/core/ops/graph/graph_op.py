@@ -20,7 +20,13 @@ from hush.core.configs.op_config import OpType
 from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, PARENT, START, BaseOp
 from hush.core.ops.graph._loop import LoopConfig, run_loop
-from hush.core.ops.graph.scheduler import _is_gen, run_scheduler
+from hush.core.ops.graph.scheduler import _is_gen, run_scheduler  # kept for fallback
+from hush.core.ops.graph.task_scheduler import (
+    WorkflowScheduler,
+    _is_gen as _is_gen_new,
+    get_current_scheduler,
+    run_task_scheduler,
+)
 
 # Re-export validation types for backward compatibility
 from hush.core.ops.graph.validation import (  # noqa: E402, F401
@@ -480,7 +486,7 @@ class GraphOp(BaseOp):
             if self._is_building:
                 self.build()
 
-            _outputs, stream_ctxs = await run_scheduler(
+            _outputs, stream_ctxs = await run_task_scheduler(
                 self, state, context_id, parent_context, request_id
             )
             self.stream_contexts = stream_ctxs

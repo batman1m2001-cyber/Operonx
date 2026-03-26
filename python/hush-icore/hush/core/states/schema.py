@@ -50,6 +50,7 @@ class StateSchema:
         if op is not None:
             self.name = name or op.full_name
             self._load_from(op)
+            self._register_ref_outputs()
             self._build()
 
     # =========================================================================
@@ -98,6 +99,28 @@ class StateSchema:
         if hasattr(node, "_ops") and node._ops:
             for child in node._ops.values():
                 self._load_from(child)
+
+    def _register_ref_outputs(self) -> None:
+        """Auto-register output vars for ops referenced by downstream Refs.
+
+        When op A's input references op B's output via Ref(B, "x"),
+        but B doesn't declare "x" as output (e.g. @op with yield that
+        inspect.getsource can't parse), register (B.full_name, "x") in schema.
+
+        This is a fallback — ops SHOULD declare outputs via return schema
+        or explicit outputs dict. This catches the gap.
+        """
+        # Collect all Ref sources referenced in inputs
+        refs_needed = []
+        for (op_name, var_name), idx in list(self._var_to_idx.items()):
+            value = self._defaults[idx]
+            if isinstance(value, Ref) and not value.is_output:
+                source_key = (value.source, value.var)
+                if source_key not in self._var_to_idx:
+                    refs_needed.append(source_key)
+
+        for source_op, source_var in refs_needed:
+            self._register(source_op, source_var, None)
 
     def _register(self, op: str, var: str, value: Any) -> None:
         """Đăng ký một biến (có thể gọi nhiều lần, Ref luôn được ưu tiên)."""
