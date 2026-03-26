@@ -118,19 +118,29 @@ async def run_scheduler(
                 )
             )
         finally:
-            ms = (perf_counter() - gen_perf) * 1000
-            op_obj._log(request_id, ctx, gen_inputs, {}, ms)
-            op_obj._store_metrics(
-                state,
-                ctx,
-                start_time=gen_start,
-                end_time=datetime.now(timezone.utc),
-                duration_ms=ms,
-            )
-            if gen_error is not None:
-                state[op_obj.full_name, "error", ctx] = gen_error
-
-        await event_queue.put(("exhausted", name))
+            try:
+                ms = (perf_counter() - gen_perf) * 1000
+                op_obj._log(request_id, ctx, gen_inputs, {}, ms)
+                op_obj._store_metrics(
+                    state,
+                    ctx,
+                    start_time=gen_start,
+                    end_time=datetime.now(timezone.utc),
+                    duration_ms=ms,
+                )
+                if gen_error is not None:
+                    state[op_obj.full_name, "error", ctx] = gen_error
+            except Exception:
+                LOGGER.error(
+                    format_event(
+                        "gen_finally_error",
+                        request_id=request_id or "unknown",
+                        name=name,
+                        error=traceback.format_exc().rstrip(),
+                    )
+                )
+            finally:
+                await event_queue.put(("exhausted", name))
 
     # ── Scheduling logic ───────────────────────────────────────────
 
@@ -181,10 +191,10 @@ async def run_scheduler(
         """Dispatch one op to the appropriate execution mode."""
         nonlocal active_count
         op_obj = graph._ops[name]
-        LOGGER.debug("[SCHED %s] dispatch %s (type=%s)", graph.full_name, name, op_obj.type)
 
         if _is_gen(op_obj):
             active_count += 1
+            LOGGER.debug("[SCHED %s] +1 gen dispatch %s ctx=%s active=%d", graph.full_name, name, ctx, active_count)
             asyncio.create_task(task_generator(name, op_obj, ctx, parent_context))
             return []
 
@@ -202,7 +212,7 @@ async def run_scheduler(
             return propagate(name, ctx)
 
         active_count += 1
-        LOGGER.debug("[SCHED %s] async task for %s, active=%d", graph.full_name, name, active_count)
+        LOGGER.debug("[SCHED %s] +1 async dispatch %s ctx=%s active=%d", graph.full_name, name, ctx, active_count)
         asyncio.create_task(task_execute(name, op_obj, ctx, parent_context))
         return []
 
@@ -289,6 +299,7 @@ async def run_scheduler(
         elif event[0] == "done_pending":
             _, op_name, ctx = event
             active_count -= 1
+            LOGGER.debug("[SCHED %s] -1 done_pending %s ctx=%s active=%d", graph.full_name, op_name, ctx, active_count)
             if ctx in active_stream_ctxs and is_terminal(op_name):
                 release_stream(ctx)
                 dispatched = try_dequeue_yield()
@@ -302,8 +313,36 @@ async def run_scheduler(
         elif event[0] == "yield":
             _, gen_name, stream_ctx, result_data = event
 
-            if running_streams < graph.concurrency:
-                # Slot available — dispatch immediately
+            # Nested check: if any prefix of stream_ctx is already an active stream,
+            # this yield comes from a downstream generator — dispatch inline without
+            # consuming a concurrency slot.
+            is_nested = any(
+                stream_ctx[:i] in active_stream_ctxs
+                for i in range(1, len(stream_ctx))
+            )
+
+            if is_nested:
+                # Nested generator yield — inline dispatch, no concurrency slot
+                LOGGER.debug(
+                    "[SCHED %s] yield NESTED %s ctx=%s running_streams=%d active=%d",
+                    graph.full_name, gen_name, stream_ctx, running_streams, active_count,
+                )
+                rc = graph.initial_ready_count.copy()
+                for op_name, dec in graph._stream_predecrements.get(gen_name, {}).items():
+                    rc[op_name] -= dec
+                ready_counts[stream_ctx] = rc
+                stream_contexts.append(stream_ctx)
+                await drain_ready(propagate(gen_name, stream_ctx), stream_ctx)
+
+                if output_queue is not None:
+                    await output_queue.put({"type": "token", "op": gen_name, "data": result_data})
+
+            elif running_streams < graph.concurrency:
+                # Root generator yield — slot available, dispatch immediately
+                LOGGER.debug(
+                    "[SCHED %s] yield ROOT %s ctx=%s running_streams=%d/%d active=%d",
+                    graph.full_name, gen_name, stream_ctx, running_streams, graph.concurrency, active_count,
+                )
                 dispatch_yield(gen_name, stream_ctx, result_data)
                 await drain_ready(propagate(gen_name, stream_ctx), stream_ctx)
 
@@ -313,10 +352,19 @@ async def run_scheduler(
                 # No slot — queue for later.
                 # Increment active_count so event loop doesn't exit while items are pending.
                 active_count += 1
+                LOGGER.debug(
+                    "[SCHED %s] +1 queued yield %s ctx=%s active=%d pending=%d",
+                    graph.full_name, gen_name, stream_ctx, active_count, len(pending_yields) + 1,
+                )
                 pending_yields.append((gen_name, stream_ctx, result_data))
 
         elif event[0] == "exhausted":
+            _, exhausted_name = event[0], event[1]
             active_count -= 1
+            LOGGER.debug(
+                "[SCHED %s] -1 exhausted %s active=%d",
+                graph.full_name, exhausted_name, active_count,
+            )
 
     # 3. Collect outputs
     if stream_contexts:
