@@ -1166,7 +1166,7 @@ class TestSoftEdgeBehavior:
 
             START >> [a, b]
             a >> d  # Hard edge
-            b > d  # Soft edge
+            b >> ~d  # Soft edge
             d >> END
 
         graph.build()

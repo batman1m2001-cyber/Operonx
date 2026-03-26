@@ -75,12 +75,11 @@ class WorkflowScheduler:
     All ops (including nested GraphOp children) dispatch through this scheduler.
 
     Usage:
-        scheduler = WorkflowScheduler(concurrency=64)
+        scheduler = WorkflowScheduler()
         outputs, stream_ctxs = await scheduler.execute_graph(graph, state, ctx, parent_ctx, request_id)
     """
 
-    def __init__(self, concurrency: int = 64):
-        self.concurrency = concurrency
+    def __init__(self):
         self._cancelled = False
         self._aborted = False
 
@@ -134,7 +133,7 @@ class WorkflowScheduler:
 
         pending: deque[Task] = deque()
         active: Set[asyncio.Task] = set()
-        sem = asyncio.Semaphore(self.concurrency)
+        # No concurrency limit — dispatch all ready tasks immediately
         yield_queue: asyncio.Queue[YieldEvent] = asyncio.Queue()
         stream_contexts: List[tuple] = []
         ready_counts: Dict[tuple, Dict[str, int]] = {}
@@ -173,14 +172,11 @@ class WorkflowScheduler:
                     continue
 
                 if is_soft:
-                    # Soft edge: check if already satisfied
+                    # Soft edge: first soft predecessor decrements by 1
+                    # (all soft edges to same node count as 1 group in ready_count)
                     if rc[next_op] <= 0:
                         continue
-                    # First soft predecessor triggers
-                    if graph.has_soft_preds and next_op in graph.has_soft_preds:
-                        rc[next_op] = 0
-                    else:
-                        rc[next_op] -= 1
+                    rc[next_op] -= 1
                 else:
                     rc[next_op] -= 1
 
@@ -214,9 +210,8 @@ class WorkflowScheduler:
         # ── Main loop ──
         while (pending or active) and not self._aborted:
 
-            # 1. Promote pending → active (respect semaphore + cancel)
+            # 1. Promote pending → active
             while pending and not self._cancelled and not self._aborted:
-                await sem.acquire()
                 task = pending.popleft()
                 LOGGER.debug(
                     "[TASK_SCHED %s] dispatch %s ctx=%s active=%d",
@@ -258,7 +253,6 @@ class WorkflowScheduler:
                 elif t in active:
                     # Op task completed
                     active.discard(t)
-                    sem.release()
                     try:
                         task, result = t.result()
                         LOGGER.debug(
@@ -334,10 +328,7 @@ class WorkflowScheduler:
             if is_soft:
                 if rc[next_op] <= 0:
                     continue
-                if graph.has_soft_preds and next_op in graph.has_soft_preds:
-                    rc[next_op] = 0
-                else:
-                    rc[next_op] -= 1
+                rc[next_op] -= 1
             else:
                 rc[next_op] -= 1
             if rc[next_op] == 0:
@@ -415,6 +406,5 @@ async def run_task_scheduler(graph, state, context_id, parent_context, request_i
     """Drop-in replacement for old run_scheduler(). Same signature."""
     scheduler = _current_scheduler.get()
     if scheduler is None:
-        # Standalone call (no Hush engine) — create temporary scheduler
         scheduler = WorkflowScheduler()
     return await scheduler.execute_subgraph(graph, state, context_id, parent_context, request_id)
