@@ -184,14 +184,14 @@ class LLMOp(BaseOp):
             hub = get_hub()
 
         if isinstance(self.resource, list):
-            self._llms = [hub.llm(key) for key in self.resource]
+            self._llms = [hub.get(f"llm:{key}") for key in self.resource]
             self._llm = self._llms[0]
         else:
-            self._llm = hub.llm(self.resource)
+            self._llm = hub.get(f"llm:{self.resource}")
             self._llms = [self._llm] if self._llm else []
 
         if self.fallback:
-            self._fallback_llms = [hub.llm(key) for key in self.fallback]
+            self._fallback_llms = [hub.get(f"llm:{key}") for key in self.fallback]
 
         self._initialized = True
         self._setup_core()

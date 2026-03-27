@@ -67,7 +67,7 @@ class OnnxOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        self.backend = hub.onnx(self.resource)
+        self.backend = hub.get(f"onnx:{self.resource}")
         self.core = self._process
 
     async def _process(

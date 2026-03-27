@@ -44,7 +44,7 @@ def make_mock_hub(responses):
     mock_llm.generate = mock_generate
 
     mock_hub = Mock()
-    mock_hub.llm.return_value = mock_llm
+    mock_hub.get.return_value = mock_llm
 
     return mock_hub, call_count
 

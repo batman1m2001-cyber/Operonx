@@ -71,7 +71,7 @@ class EmbeddingOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        self.backend = hub.embedding(self.resource)
+        self.backend = hub.get(f"embedding:{self.resource}")
         self.core = self._process
 
     async def _process(self, texts: Union[str, List[str]]) -> Dict[str, Any]:

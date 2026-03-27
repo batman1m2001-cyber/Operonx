@@ -83,7 +83,7 @@ class RerankOp(BaseOp):
         except RuntimeError:
             hub = get_hub()
 
-        self.backend = hub.reranker(self.resource)
+        self.backend = hub.get(f"reranking:{self.resource}")
         self.core = self._process
 
     async def _process(
