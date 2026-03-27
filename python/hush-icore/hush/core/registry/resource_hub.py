@@ -137,14 +137,16 @@ class ResourceHub:
         # Lookup config class by category
         config_class = REGISTRY.get_class(category)
 
-        # Backward compat: fall back to 'type' or '_class' field
+        # Fall back to 'type' or '_class' field
         if not config_class:
             config_type = config_data.get("type") or config_data.get("_class")
             if config_type:
                 config_class = REGISTRY.get_class(config_type)
-            if not config_class:
-                LOGGER.warning("Unknown category: %s (key=%s)", category, key)
-                return None
+
+        # No config class found — store raw dict as config (for triton, custom categories)
+        if not config_class:
+            self._cache[key] = CacheEntry(config=config_data)
+            return config_data
 
         try:
             # Parse config (exclude type and _class fields)
