@@ -52,6 +52,28 @@ class DummyOp(BaseOp):
     def __init__(self, name: str):
         super().__init__(name=name)
 
+    def shared(self, **kwargs):
+        """Declare shared vars on current graph. Only valid on PARENT.
+
+        Shared vars persist across all stream contexts within the graph.
+        Normal PARENT vars are copied per stream context.
+
+        Usage::
+
+            @graph
+            def pipeline():
+                PARENT.shared(current_state="REMINDER", history=[])
+                # PARENT["current_state"] now shared across all stream contexts
+        """
+        if self.name != "__PARENT__":
+            raise TypeError("shared() can only be called on PARENT")
+        current_graph = get_current()
+        if current_graph is None:
+            raise RuntimeError("PARENT.shared() must be called inside a @graph function body")
+        if not hasattr(current_graph, "_shared_vars"):
+            current_graph._shared_vars = {}
+        current_graph._shared_vars.update(kwargs)
+
     def __rshift__(self, other):
         if isinstance(other, SoftEdge):
             raise TypeError(
