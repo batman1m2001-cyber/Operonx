@@ -89,6 +89,7 @@ class GraphOp(BaseOp):
         "concurrency",
         "_loop_config",
         "stream_contexts",
+        "_shared_vars",
     ]
 
     type: OpType = "graph"
@@ -113,6 +114,7 @@ class GraphOp(BaseOp):
         self._compiled_adj = {}
         self._loop_config = None
         self.stream_contexts = []
+        self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared()
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""

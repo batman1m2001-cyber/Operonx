@@ -32,7 +32,7 @@ class StateSchema:
         schema.show()  # Display all variable mappings
     """
 
-    __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs")
+    __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs", "_shared_indices")
 
     def __init__(self, op: Any = None, name: Optional[str] = None):
         """Initialize the schema.
@@ -45,12 +45,14 @@ class StateSchema:
         self._defaults: List[Any] = []
         self._pull_refs: List[Optional[Ref]] = []  # Pull data từ source khi đọc
         self._push_refs: List[Optional[Ref]] = []  # Push data đến target khi ghi
+        self._shared_indices: set = set()  # indices of shared vars (graph-level, not per-context)
 
         self.name = name
         if op is not None:
             self.name = name or op.full_name
             self._load_from(op)
             self._register_ref_outputs()
+            self._register_shared_vars(op)
             self._build()
 
     # =========================================================================
@@ -99,6 +101,21 @@ class StateSchema:
         if hasattr(node, "_ops") and node._ops:
             for child in node._ops.values():
                 self._load_from(child)
+
+    def _register_shared_vars(self, root_op) -> None:
+        """Register shared vars from PARENT.shared() calls.
+
+        Shared vars are stored at graph-level — all stream contexts read/write
+        the same cell instead of per-context copies. Marked via _shared_indices.
+        """
+        shared = getattr(root_op, "_shared_vars", None)
+        if not shared:
+            return
+        for var_name, initial_value in shared.items():
+            self._register(root_op.full_name, var_name, initial_value)
+            key = (root_op.full_name, var_name)
+            if key in self._var_to_idx:
+                self._shared_indices.add(self._var_to_idx[key])
 
     def _register_ref_outputs(self) -> None:
         """Auto-register output vars for ops referenced by downstream Refs.
