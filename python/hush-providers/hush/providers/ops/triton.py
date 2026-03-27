@@ -119,42 +119,40 @@ class TritonOp(BaseOp):
 
     def __init__(
         self,
-        resource: Optional[str] = None,
-        url: Optional[str] = None,
-        model_name: Optional[str] = None,
-        model_version: str = "",
-        timeout: float = 30.0,
+        resource=None,
         inputs_map: Optional[Dict[str, str]] = None,
         outputs_map: Optional[Dict[str, str]] = None,
         inputs: Optional[Dict[str, Any]] = None,
         outputs: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ):
+        """
+        Args:
+            resource: str (hub lookup "triton:name") or dict (inline config).
+                String: looks up "triton:{resource}" in ResourceHub.
+                Dict: {"url": "...", "model": "...", "model_version": "", "timeout": 30}
+        """
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
         self.inputs_map = inputs_map or {}
         self.outputs_map = outputs_map or {}
 
-        # Resolve config from ResourceHub or direct params
-        if resource:
+        # Store resource for lazy resolution at run time
+        if isinstance(resource, str):
             self.resource = resource
-            config = self._resolve_resource(resource)
-            self.url = config.get("url", url)
-            self.model_name = config.get("model", model_name)
-            self.model_version = config.get("model_version", model_version)
-            self.timeout = config.get("timeout", timeout)
-        else:
+            self.url = None
+            self.model_name = None
+            self.model_version = ""
+            self.timeout = 30.0
+        elif isinstance(resource, dict):
             self.resource = None
-            self.url = url
-            self.model_name = model_name
-            self.model_version = model_version
-            self.timeout = timeout
-
-        if not self.url or not self.model_name:
-            raise ValueError(
-                "TritonOp requires url and model_name (via resource config or direct params)"
-            )
+            self.url = resource.get("url")
+            self.model_name = resource.get("model")
+            self.model_version = resource.get("model_version", "")
+            self.timeout = resource.get("timeout", 30.0)
+        else:
+            raise TypeError("TritonOp requires resource (str for hub lookup or dict for inline config)")
 
         # Build I/O schema from maps
         input_schema = {op_name: Param(required=True) for op_name in self.inputs_map.values()}
@@ -174,14 +172,13 @@ class TritonOp(BaseOp):
             from hush.core.registry import ResourceHub
 
             hub = ResourceHub.instance()
-            config = hub._storage.get(f"triton:{resource}")
-            if config and hasattr(config, "model_dump"):
-                return config.model_dump()
-            elif isinstance(config, dict):
-                return config
-            # Fallback: try raw storage
-            raw = hub._storage._data.get(f"triton:{resource}", {})
-            return raw if isinstance(raw, dict) else {}
+            key = f"triton:{resource}" if ":" not in resource else resource
+            result = hub.get_config(key)
+            if hasattr(result, "model_dump"):
+                return result.model_dump()
+            elif isinstance(result, dict):
+                return result
+            return {}
         except Exception as e:
             LOGGER.warning("Failed to resolve triton resource '%s': %s", resource, e)
             return {}
@@ -197,6 +194,16 @@ class TritonOp(BaseOp):
         Accepts op input names (from inputs_map values),
         maps to Triton input names, calls inference, maps outputs back.
         """
+        # Lazy resolve resource on first run
+        if self.url is None and self.resource:
+            config = self._resolve_resource(self.resource)
+            self.url = config.get("url")
+            self.model_name = config.get("model")
+            self.model_version = config.get("model_version", "")
+            self.timeout = config.get("timeout", 30.0)
+            if not self.url or not self.model_name:
+                raise ValueError(f"TritonOp resource '{self.resource}' resolved to invalid config: {config}")
+
         grpcclient = _get_grpcclient()
         client = self._get_client()
 
