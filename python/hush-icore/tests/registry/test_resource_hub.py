@@ -689,7 +689,7 @@ class TestGracefulErrorHandling:
         hub = ResourceHub.from_yaml(config_file)
 
         with pytest.raises(KeyError, match="keycloak.*failed"):
-            hub.llm("my-model")
+            hub.get("llm:my-model")
 
         hub.close()
 
@@ -712,10 +712,10 @@ class TestGracefulErrorHandling:
 
         # Keycloak model fails
         with pytest.raises(KeyError, match="keycloak.*failed"):
-            hub.llm("keycloak-model")
+            hub.get("llm:keycloak-model")
 
         # Static model still works
-        result = hub.llm("static-model")
+        result = hub.get("llm:static-model")
         assert result.api_key == "sk-static-key"
 
         hub.close()

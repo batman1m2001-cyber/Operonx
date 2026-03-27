@@ -62,19 +62,28 @@ class YamlConfigStorage(ConfigStorage):
     Tất cả config được lưu trong một file YAML duy nhất.
     Hỗ trợ interpolation biến môi trường với syntax ${VAR} hoặc ${VAR:default}.
 
-    Cấu trúc file ví dụ:
-        llm:gpt-4:
+    Supports both nested and flat YAML formats:
+
+    Nested (preferred)::
+
+        llm:
+          gpt-4o:
             api_type: openai
-            model: gpt-4
             api_key: ${OPENAI_API_KEY}
+          claude-haiku:
+            api_type: anthropic
 
-        embedding:bge-m3:
-            api_type: vllm
-            base_url: http://localhost:8000/v1
+        triton:
+          stt:
+            url: ${TRITON_URL:localhost:8001}
+            model: fastconformer_asr
 
-        redis:default:
-            host: ${REDIS_HOST:localhost}
-            port: ${REDIS_PORT:6379}
+    Flat (legacy)::
+
+        llm:gpt-4o:
+          api_type: openai
+
+    Both resolve to key "llm:gpt-4o".
 
     Environment variable syntax:
         ${VAR}          - Required, warning if not set
@@ -82,21 +91,36 @@ class YamlConfigStorage(ConfigStorage):
     """
 
     def __init__(self, file_path: Path | str):
-        """Khởi tạo YAML storage.
-
-        Args:
-            file_path: Đường dẫn đến file config YAML
-        """
         self._file_path = Path(file_path)
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _load_file(self) -> Dict[str, Any]:
-        """Đọc và parse file YAML."""
+        """Load and flatten YAML. Nested dicts become 'category:name' keys."""
         if not self._file_path.exists():
             return {}
 
         with open(self._file_path, "r") as f:
-            return yaml.safe_load(f) or {}
+            raw = yaml.safe_load(f) or {}
+
+        # Flatten nested structure: {category: {name: config}} → {"category:name": config}
+        flat = {}
+        for key, value in raw.items():
+            if isinstance(value, dict) and ":" not in key:
+                # Check if nested: all values are dicts (category → resources)
+                # vs flat config dict (has non-dict values like strings, ints)
+                all_dicts = all(isinstance(v, dict) for v in value.values())
+                if all_dicts and value:
+                    # Nested: flatten
+                    for name, config in value.items():
+                        flat[f"{key}:{name}"] = config
+                else:
+                    # Flat config dict (legacy key without colon)
+                    flat[key] = value
+            else:
+                # Already flat key (e.g. "llm:gpt-4o")
+                flat[key] = value
+
+        return flat
 
     def _save_file(self, data: Dict[str, Any]):
         """Ghi dữ liệu vào file YAML."""
