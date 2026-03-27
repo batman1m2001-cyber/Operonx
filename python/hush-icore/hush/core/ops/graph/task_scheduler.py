@@ -294,8 +294,16 @@ class WorkflowScheduler:
             # Filter: only include contexts where terminal op actually produced output.
             # N-to-M generators (e.g. VAD yields 1 segment from 50 chunks) create many
             # stream contexts but only a few reach the terminal op with real output.
+            # Only check non-shared vars — shared vars are always set (at DEFAULT_CONTEXT)
+            # so they'd make every context appear to have output.
+            non_shared_outputs = [
+                var for var in graph.outputs
+                if state.schema.get_index(graph.full_name, var) not in state.schema._shared_indices
+            ]
+
             def _has_output(ctx):
-                for var in graph.outputs:
+                check_vars = non_shared_outputs if non_shared_outputs else graph.outputs
+                for var in check_vars:
                     try:
                         val = state[graph.full_name, var, ctx]
                         if val is not None:
