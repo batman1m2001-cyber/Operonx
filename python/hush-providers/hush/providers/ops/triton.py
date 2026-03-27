@@ -151,6 +151,11 @@ class TritonOp(BaseOp):
             self.model_name = resource.get("model")
             self.model_version = resource.get("model_version", "")
             self.timeout = resource.get("timeout", 30.0)
+            # Merge maps from config if not provided explicitly
+            if not self.inputs_map:
+                self.inputs_map = resource.get("inputs_map", {})
+            if not self.outputs_map:
+                self.outputs_map = resource.get("outputs_map", {})
         else:
             raise TypeError("TritonOp requires resource (str for hub lookup or dict for inline config)")
 
@@ -201,6 +206,10 @@ class TritonOp(BaseOp):
             self.model_name = config.get("model")
             self.model_version = config.get("model_version", "")
             self.timeout = config.get("timeout", 30.0)
+            if not self.inputs_map:
+                self.inputs_map = config.get("inputs_map", {})
+            if not self.outputs_map:
+                self.outputs_map = config.get("outputs_map", {})
             if not self.url or not self.model_name:
                 raise ValueError(f"TritonOp resource '{self.resource}' resolved to invalid config: {config}")
 
