@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-icore"
-version = "0.2.0"
+version = "0.2.2"
 description = "Hush workflow engine core - A powerful async workflow orchestration framework"
 readme = "README.md"
 license = "Apache-2.0"
