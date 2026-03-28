@@ -27,33 +27,33 @@ from hush.core.utils.common import Param
 LOGGER = logging.getLogger(__name__)
 
 # Lazy import tritonclient
-_grpcclient = None
+_aio_grpcclient = None
 
 
-def _get_grpcclient():
-    global _grpcclient
-    if _grpcclient is None:
+def _get_aio_grpcclient():
+    global _aio_grpcclient
+    if _aio_grpcclient is None:
         try:
-            import tritonclient.grpc as grpcclient
+            import tritonclient.grpc.aio as aio_grpc
 
-            _grpcclient = grpcclient
+            _aio_grpcclient = aio_grpc
         except ImportError:
             raise ImportError(
                 "tritonclient is required for TritonOp. "
                 "Install with: pip install tritonclient[grpc]"
             )
-    return _grpcclient
+    return _aio_grpcclient
 
 
-# Cache Triton clients per URL
+# Cache async Triton clients per URL
 _triton_clients: Dict[str, Any] = {}
 
 
 def _get_triton_client(url: str):
-    """Get or create a Triton gRPC client for a given URL."""
+    """Get or create an async Triton gRPC client for a given URL."""
     if url not in _triton_clients:
-        grpcclient = _get_grpcclient()
-        _triton_clients[url] = grpcclient.InferenceServerClient(url=url)
+        aio_grpc = _get_aio_grpcclient()
+        _triton_clients[url] = aio_grpc.InferenceServerClient(url=url)
     return _triton_clients[url]
 
 
@@ -213,7 +213,7 @@ class TritonOp(BaseOp):
             if not self.url or not self.model_name:
                 raise ValueError(f"TritonOp resource '{self.resource}' resolved to invalid config: {config}")
 
-        grpcclient = _get_grpcclient()
+        aio_grpc = _get_aio_grpcclient()
         client = self._get_client()
 
         # Build Triton inputs
@@ -232,18 +232,18 @@ class TritonOp(BaseOp):
                 data = data.reshape(1)
 
             triton_dtype = _numpy_to_triton_dtype(data)
-            inp = grpcclient.InferInput(triton_name, list(data.shape), triton_dtype)
+            inp = aio_grpc.InferInput(triton_name, list(data.shape), triton_dtype)
             inp.set_data_from_numpy(data)
             triton_inputs.append(inp)
 
         # Build Triton outputs
         triton_outputs = [
-            grpcclient.InferRequestedOutput(triton_name) for triton_name in self.outputs_map.keys()
+            aio_grpc.InferRequestedOutput(triton_name) for triton_name in self.outputs_map.keys()
         ]
 
-        # Inference
+        # Async inference — enables Triton dynamic batching
         try:
-            result = client.infer(
+            result = await client.infer(
                 model_name=self.model_name,
                 model_version=self.model_version,
                 inputs=triton_inputs,

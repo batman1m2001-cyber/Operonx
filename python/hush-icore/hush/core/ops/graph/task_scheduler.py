@@ -314,10 +314,18 @@ class WorkflowScheduler:
 
             terminal_ctxs = [ctx for ctx in leaf_ctxs if _has_output(ctx)]
 
-            outputs = {
-                var: [state[graph.full_name, var, ctx] for ctx in terminal_ctxs]
-                for var in graph.outputs
-            }
+            # Shared vars: read once from DEFAULT_CONTEXT (scalar)
+            # Non-shared vars: collect per terminal context (list)
+            from hush.core.states.cell import DEFAULT_CONTEXT
+            outputs = {}
+            for var in graph.outputs:
+                idx = state.schema.get_index(graph.full_name, var)
+                if idx >= 0 and idx in state.schema._shared_indices:
+                    # Shared: scalar value from DEFAULT_CONTEXT
+                    outputs[var] = state[graph.full_name, var, DEFAULT_CONTEXT]
+                else:
+                    # Non-shared: list per terminal context
+                    outputs[var] = [state[graph.full_name, var, ctx] for ctx in terminal_ctxs]
         elif any(_is_gen(op) for op in graph._ops.values()):
             outputs = {var: [] for var in graph.outputs}
         else:

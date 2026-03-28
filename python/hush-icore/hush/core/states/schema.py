@@ -103,19 +103,22 @@ class StateSchema:
                 self._load_from(child)
 
     def _register_shared_vars(self, root_op) -> None:
-        """Register shared vars from PARENT.shared() calls.
+        """Register shared vars from PARENT.shared() calls. Recurses into nested graphs."""
 
-        Shared vars are stored at graph-level — all stream contexts read/write
-        the same cell instead of per-context copies. Marked via _shared_indices.
-        """
-        shared = getattr(root_op, "_shared_vars", None)
-        if not shared:
-            return
-        for var_name, initial_value in shared.items():
-            self._register(root_op.full_name, var_name, initial_value)
-            key = (root_op.full_name, var_name)
-            if key in self._var_to_idx:
-                self._shared_indices.add(self._var_to_idx[key])
+        def _scan(node):
+            shared = getattr(node, "_shared_vars", None)
+            if shared:
+                for var_name, initial_value in shared.items():
+                    self._register(node.full_name, var_name, initial_value)
+                    key = (node.full_name, var_name)
+                    if key in self._var_to_idx:
+                        self._shared_indices.add(self._var_to_idx[key])
+            if hasattr(node, "_ops") and node._ops:
+                for child in node._ops.values():
+                    if hasattr(child, "_shared_vars"):
+                        _scan(child)
+
+        _scan(root_op)
 
     def _register_ref_outputs(self) -> None:
         """Auto-register output vars for ops referenced by downstream Refs.

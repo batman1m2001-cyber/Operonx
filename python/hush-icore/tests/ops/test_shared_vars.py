@@ -207,6 +207,77 @@ class TestSharedVarsEdgeCases:
         assert history == ["turn_0", "turn_1", "turn_2"]
 
     @pytest.mark.asyncio
+    async def test_shared_var_output_is_scalar_not_list(self):
+        """Shared var in graph output must be scalar, not wrapped in list.
+
+        Bug regression: output collection was reading shared vars once per
+        terminal stream context → wrapping in list [val, val, val].
+        Must read once from DEFAULT_CONTEXT → scalar.
+        """
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"x": i}
+
+        @op
+        def accumulate(x: int, buffer: list):
+            new_buffer = list(buffer) + [x]
+            return {"new_buffer": new_buffer}
+
+        with GraphOp(name="scalar_test") as g:
+            PARENT.shared(buffer=[])
+
+            s = source(n=PARENT["n"])
+            a = accumulate(x=s["x"], buffer=PARENT["buffer"])
+            a["new_buffer"] >> PARENT["buffer"]
+            START >> s >> a >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"n": 3})
+        result = await g.run(state)
+
+        # Shared var must be scalar [0, 1, 2], NOT [[0,1,2], [0,1,2], [0,1,2]]
+        assert result["buffer"] == [0, 1, 2]
+        assert not isinstance(result["buffer"][0], list)
+
+    @pytest.mark.asyncio
+    async def test_shared_and_nonshared_output_types(self):
+        """Shared vars = scalar in output, non-shared vars = list per context."""
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"x": i}
+
+        @op
+        def process(x: int, counter: int):
+            return {"result": x * 10, "new_counter": counter + 1}
+
+        with GraphOp(name="mixed_output") as g:
+            PARENT.shared(counter=0)
+
+            s = source(n=PARENT["n"])
+            p = process(x=s["x"], counter=PARENT["counter"])
+            p["new_counter"] >> PARENT["counter"]
+            p["result"] >> PARENT["result"]
+            START >> s >> p >> END
+
+        g.build()
+        schema = StateSchema(g)
+        state = schema.create_state(inputs={"n": 3})
+        result = await g.run(state)
+
+        # counter: shared → scalar (final value)
+        assert result["counter"] == 3
+        assert isinstance(result["counter"], int)
+
+        # result: non-shared → list per context
+        assert result["result"] == [0, 10, 20]
+        assert isinstance(result["result"], list)
+
+    @pytest.mark.asyncio
     async def test_shared_only_on_parent(self):
         """PARENT.shared() raises if called on non-PARENT."""
         from hush.core import START as s
