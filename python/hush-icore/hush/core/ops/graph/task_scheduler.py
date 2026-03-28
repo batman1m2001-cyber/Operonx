@@ -190,12 +190,12 @@ class WorkflowScheduler:
             """Execute one op, return (task, result_or_none)."""
             op_obj = graph._ops[task.op_name]
 
-            if _is_gen(op_obj):
-                # Generator op: yield into yield_queue, then return sentinel
+            if _is_gen(op_obj) or getattr(op_obj, '_has_streaming', False):
+                # Generator op or streaming GraphOp: yield into yield_queue
                 await _run_generator(task, op_obj, yield_queue, state, context_id, parent_context, request_id)
                 return task, "exhausted"
             else:
-                # Regular op (sync, async, graph)
+                # Regular op (sync, async, non-streaming graph)
                 try:
                     result = await op_obj.run(state, task.context_id, parent_context)
                 except Exception:
@@ -390,22 +390,32 @@ async def _run_generator(
     gen_inputs = {}
 
     try:
-        gen_inputs = op_obj.get_inputs(state, task.context_id, parent_context)
-        gen_fn = op_obj.core
         idx = 0
 
-        if inspect.isasyncgenfunction(gen_fn):
-            async for result in gen_fn(**gen_inputs):
+        # GraphOp with streaming inner ops → use _run_streaming
+        if getattr(op_obj, '_has_streaming', False) and hasattr(op_obj, '_run_streaming'):
+            async for result in op_obj._run_streaming(state, task.context_id, parent_context, request_id):
                 stream_ctx = task.context_id + (f"[{idx}]",)
                 op_obj.store_result(state, result, stream_ctx)
                 await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
                 idx += 1
-        elif inspect.isgeneratorfunction(gen_fn):
-            for result in gen_fn(**gen_inputs):
-                stream_ctx = task.context_id + (f"[{idx}]",)
-                op_obj.store_result(state, result, stream_ctx)
-                await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
-                idx += 1
+        else:
+            # Normal @op generator
+            gen_inputs = op_obj.get_inputs(state, task.context_id, parent_context)
+            gen_fn = op_obj.core
+
+            if inspect.isasyncgenfunction(gen_fn):
+                async for result in gen_fn(**gen_inputs):
+                    stream_ctx = task.context_id + (f"[{idx}]",)
+                    op_obj.store_result(state, result, stream_ctx)
+                    await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
+                    idx += 1
+            elif inspect.isgeneratorfunction(gen_fn):
+                for result in gen_fn(**gen_inputs):
+                    stream_ctx = task.context_id + (f"[{idx}]",)
+                    op_obj.store_result(state, result, stream_ctx)
+                    await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
+                    idx += 1
 
     except Exception:
         gen_error = traceback.format_exc()

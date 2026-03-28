@@ -90,6 +90,7 @@ class GraphOp(BaseOp):
         "_loop_config",
         "stream_contexts",
         "_shared_vars",
+        "_has_streaming",
     ]
 
     type: OpType = "graph"
@@ -115,6 +116,7 @@ class GraphOp(BaseOp):
         self._loop_config = None
         self.stream_contexts = []
         self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared()
+        self._has_streaming = False
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -286,6 +288,9 @@ class GraphOp(BaseOp):
 
         self._is_building = False
         self._cache_full_names()
+
+        # Mark if graph has streaming ops (generators inside)
+        self._has_streaming = any(_is_gen_new(child) for child in self._ops.values())
 
     def _setup_schema(self):
         """Discover inputs/outputs from child ops.
@@ -459,6 +464,41 @@ class GraphOp(BaseOp):
             child._cache_full_name()
             if hasattr(child, "_cache_full_names"):
                 child._cache_full_names()
+
+    async def _run_streaming(self, state, context_id, parent_context, request_id):
+        """Async generator: run inner graph, yield outputs per stream item.
+
+        Called by scheduler._run_generator when GraphOp._has_streaming is True.
+        """
+        self.get_inputs(state, context_id=context_id, parent_context=parent_context)
+
+        if self._is_building:
+            self.build()
+
+        _outputs, stream_ctxs = await run_task_scheduler(
+            self, state, context_id, parent_context, request_id
+        )
+        self.stream_contexts = stream_ctxs
+
+        if self._loop_config:
+            _outputs = await run_loop(
+                self, state, context_id, parent_context, request_id, _outputs
+            )
+            _outputs.pop("_loop_metrics", None)
+
+        # Yield per-item if streaming outputs (lists), else yield once
+        has_lists = any(isinstance(v, list) for v in _outputs.values())
+        if has_lists:
+            list_len = max(
+                (len(v) for v in _outputs.values() if isinstance(v, list)), default=0
+            )
+            for i in range(list_len):
+                item = {}
+                for k, v in _outputs.items():
+                    item[k] = v[i] if isinstance(v, list) and i < len(v) else v
+                yield item
+        else:
+            yield _outputs
 
     # ═══════════════════════════════════════════════════════════════════
     # 3. EXECUTE — run the workflow
