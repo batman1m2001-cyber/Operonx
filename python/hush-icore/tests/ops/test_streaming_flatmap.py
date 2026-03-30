@@ -36,7 +36,7 @@ async def test_n_to_m_streaming():
     """3 inputs → 10 yields (2+3+5), all processed concurrently."""
     with GraphOp(name="flatmap") as graph:
         gen = explode(items=PARENT["items"])
-        proc = process(value=gen["value"], source=gen["source"])
+        proc = process(value=gen["value"].parallel(), source=gen["source"].parallel())
         START >> gen >> proc >> END
 
     engine = Hush(graph)
