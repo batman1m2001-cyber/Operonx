@@ -133,10 +133,16 @@ class WorkflowScheduler:
 
         pending: deque[Task] = deque()
         active: Set[asyncio.Task] = set()
-        # No concurrency limit — dispatch all ready tasks immediately
         yield_queue: asyncio.Queue[YieldEvent] = asyncio.Queue()
         stream_contexts: List[tuple] = []
         ready_counts: Dict[tuple, Dict[str, int]] = {}
+
+        # Sequential streaming: queue per (source, downstream) pair
+        sequential_queues: Dict[tuple, deque] = {}
+        sequential_active: Dict[tuple, bool] = {}
+
+        # Collect streaming: buffer per (source, downstream) pair
+        collect_buffers: Dict[tuple, list] = {}
 
         # Init ready counts for root context
         ready_counts[context_id] = dict(graph.initial_ready_count)
@@ -223,6 +229,7 @@ class WorkflowScheduler:
                     self._handle_yield(
                         yield_queue.get_nowait(), graph, state,
                         ready_counts, stream_contexts, pending, output_queue,
+                        sequential_queues, sequential_active, collect_buffers,
                     )
 
             if not active:
@@ -247,6 +254,7 @@ class WorkflowScheduler:
                         self._handle_yield(
                             event, graph, state,
                             ready_counts, stream_contexts, pending, output_queue,
+                            sequential_queues, sequential_active, collect_buffers,
                         )
                     except (asyncio.CancelledError, Exception):
                         pass
@@ -259,11 +267,52 @@ class WorkflowScheduler:
                             "[TASK_SCHED %s] done %s ctx=%s active=%d",
                             graph.full_name, task.op_name, task.context_id, len(active),
                         )
-                        # Propagate: find ready downstream
-                        # Generator ops propagate via yield events, not on exhaustion
-                        if result is not PENDING and result != "exhausted":
+
+                        if result == "exhausted":
+                            # Generator exhausted — trigger .collect() dispatches
+                            for (src, dst), buffer in list(collect_buffers.items()):
+                                if src == task.op_name and buffer:
+                                    # Collect all buffered results into list
+                                    collected_values = {}
+                                    for _, item_result in buffer:
+                                        for k, v in item_result.items():
+                                            collected_values.setdefault(k, []).append(v)
+                                    # Dispatch downstream with collected list
+                                    collect_ctx = task.context_id + ("__collect__",)
+                                    stream_contexts.append(collect_ctx)
+                                    rc = dict(graph.initial_ready_count)
+                                    for op_n, dec in graph._stream_predecrements.get(task.op_name, {}).items():
+                                        rc[op_n] -= dec
+                                    ready_counts[collect_ctx] = rc
+                                    # Store collected values
+                                    dst_op = graph._ops.get(dst)
+                                    if dst_op:
+                                        dst_op.store_result(state, collected_values, collect_ctx)
+                                    pending.append(Task(dst, collect_ctx, graph))
+                                    del collect_buffers[(src, dst)]
+                                    LOGGER.debug(
+                                        "[TASK_SCHED %s] collect dispatch %s→%s items=%d",
+                                        graph.full_name, src, dst, len(buffer),
+                                    )
+                        elif result is not PENDING:
+                            # Normal op done — propagate downstream
                             newly_ready = propagate(task.op_name, task.context_id)
                             pending.extend(newly_ready)
+
+                        # Sequential: dispatch next queued item for this op
+                        for key in list(sequential_queues.keys()):
+                            src, dst = key
+                            if dst == task.op_name and sequential_queues[key]:
+                                next_task = sequential_queues[key].popleft()
+                                pending.append(next_task)
+                                LOGGER.debug(
+                                    "[TASK_SCHED %s] sequential next %s ctx=%s",
+                                    graph.full_name, next_task.op_name, next_task.context_id,
+                                )
+                                break
+                            elif dst == task.op_name:
+                                sequential_active[key] = False
+
                     except Exception:
                         LOGGER.error(
                             "[TASK_SCHED %s] task error: %s",
@@ -283,6 +332,7 @@ class WorkflowScheduler:
                 self._handle_yield(
                     yield_queue.get_nowait(), graph, state,
                     ready_counts, stream_contexts, pending, output_queue,
+                    sequential_queues, sequential_active, collect_buffers,
                 )
 
         # ── Collect outputs ──
@@ -333,11 +383,40 @@ class WorkflowScheduler:
 
         return outputs, stream_contexts
 
+    @staticmethod
+    def _get_stream_mode(graph, source_op_name, downstream_op_name):
+        """Get streaming mode for a connection: check Ref modifiers on downstream input.
+
+        Returns: (is_parallel, parallel_max, is_collect)
+        Default: (False, None, False) = sequential, per-item
+        """
+        from hush.core.states.ref import Ref
+        downstream_op = graph._ops.get(downstream_op_name)
+        if not downstream_op:
+            return False, None, False
+
+        for var_name, param in downstream_op.inputs.items():
+            if isinstance(param.value, Ref):
+                ref = param.value
+                # Check if this Ref points to the source op
+                src = ref.source if isinstance(ref.source, str) else getattr(ref.source, "name", None)
+                if src == source_op_name:
+                    return ref._stream_parallel, ref._stream_parallel_max, ref._stream_collect
+
+        return False, None, False
+
     def _handle_yield(
         self, event: YieldEvent, graph, state,
         ready_counts, stream_contexts, pending, output_queue,
+        sequential_queues, sequential_active, collect_buffers,
     ):
-        """Process a generator yield: create stream context, enqueue downstream."""
+        """Process a generator yield: create stream context, enqueue downstream.
+
+        Respects Ref streaming modes:
+        - Default (sequential): queue, dispatch one at a time
+        - .parallel(): dispatch immediately
+        - .collect(): buffer, dispatch all when source exhausted
+        """
         stream_ctx = event.stream_ctx
         stream_contexts.append(stream_ctx)
 
@@ -352,7 +431,7 @@ class WorkflowScheduler:
             graph.full_name, event.op_name, stream_ctx,
         )
 
-        # Propagate: decrement ready counts and enqueue newly ready ops
+        # Propagate: decrement ready counts and find newly ready ops
         adj_list = graph._compiled_adj.get(event.op_name, [])
         for next_op, is_soft in adj_list:
             if next_op not in rc:
@@ -363,8 +442,38 @@ class WorkflowScheduler:
                 rc[next_op] -= 1
             else:
                 rc[next_op] -= 1
+
             if rc[next_op] == 0:
-                pending.append(Task(next_op, stream_ctx, graph))
+                is_parallel, parallel_max, is_collect = self._get_stream_mode(
+                    graph, event.op_name, next_op
+                )
+
+                if is_collect:
+                    # Buffer for collection — dispatch when source exhausted
+                    key = (event.op_name, next_op)
+                    if key not in collect_buffers:
+                        collect_buffers[key] = []
+                    collect_buffers[key].append((stream_ctx, event.result))
+                    LOGGER.debug(
+                        "[TASK_SCHED %s] collect buffer %s→%s count=%d",
+                        graph.full_name, event.op_name, next_op, len(collect_buffers[key]),
+                    )
+
+                elif is_parallel:
+                    # Parallel: dispatch immediately
+                    pending.append(Task(next_op, stream_ctx, graph))
+
+                else:
+                    # Sequential (default): queue, dispatch one at a time
+                    key = (event.op_name, next_op)
+                    if key not in sequential_queues:
+                        sequential_queues[key] = deque()
+                    sequential_queues[key].append(Task(next_op, stream_ctx, graph))
+
+                    if key not in sequential_active or not sequential_active[key]:
+                        # No active task for this sequential chain — dispatch first
+                        sequential_active[key] = True
+                        pending.append(sequential_queues[key].popleft())
 
         # Streaming output event
         if output_queue is not None:
