@@ -113,6 +113,7 @@ class BaseOp(ABC):
         "bound",
         "cache",
         "delay",
+        "_on_yield",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -149,6 +150,7 @@ class BaseOp(ABC):
         self.bound = bound
         self.cache = cache
         self.delay = delay
+        self._on_yield = None  # set by scheduler before run() for generator ops
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -567,18 +569,15 @@ class BaseOp(ABC):
         state: "MemoryState",
         context_id: Optional[str] = None,
         parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Execute this op.
+    ):
+        """Execute this op. Results stored to state.
 
-        Args:
-            state: Workflow state.
-            context_id: Context for this op's own variables.
-            parent_context: Context used to resolve PARENT refs.
+        Handles both normal ops (single result) and generator ops (multiple yields).
+        Generator yields notify scheduler via _on_yield callback.
+        Returns _outputs for backward compat (direct call). Scheduler ignores return.
         """
-        # Skip disabled ops
         if not self.enabled:
-            LOGGER.debug("Skipped disabled op: %s", self.full_name)
-            return {}
+            return
 
         request_id = state.request_id
         start_time = datetime.now(timezone.utc)
@@ -593,36 +592,50 @@ class BaseOp(ABC):
 
             _inputs = self.get_inputs(state, context_id, parent_context)
 
-            # Op-level cache check
+            # Cache check
             _cache_hit = False
             if self.cache is not None:
                 _cache_key = self._cache_hash(_inputs)
                 _cache_store = self._get_cache_store()
                 if _cache_key in _cache_store:
                     _outputs = _cache_store[_cache_key]
+                    self.store_result(state, _outputs, context_id)
                     _cache_hit = True
 
             if not _cache_hit:
-                LOGGER.debug(
-                    "BaseOp.run [%s] calling _exec_core, inputs=%s",
-                    self.full_name,
-                    list(_inputs.keys()),
+                core_fn = self.core
+                is_gen = core_fn is not None and (
+                    inspect.isasyncgenfunction(core_fn)
+                    or inspect.isgeneratorfunction(core_fn)
                 )
-                _outputs = await self._exec_core(_inputs)
-                LOGGER.debug(
-                    "BaseOp.run [%s] _exec_core returned, outputs=%s",
-                    self.full_name,
-                    list(_outputs.keys()) if _outputs else None,
-                )
-                # Store in cache
-                if self.cache is not None:
-                    _cache_store[_cache_key] = _outputs
 
-            self.store_result(state, _outputs, context_id)
+                if is_gen:
+                    # Generator: iterate yields, store per stream context
+                    idx = 0
+                    if inspect.isasyncgenfunction(core_fn):
+                        async for result in core_fn(**_inputs):
+                            stream_ctx = context_id + (f"[{idx}]",)
+                            self.store_result(state, result, stream_ctx)
+                            if self._on_yield:
+                                await self._on_yield(self.name, stream_ctx, result)
+                            idx += 1
+                    else:
+                        for result in core_fn(**_inputs):
+                            stream_ctx = context_id + (f"[{idx}]",)
+                            self.store_result(state, result, stream_ctx)
+                            if self._on_yield:
+                                await self._on_yield(self.name, stream_ctx, result)
+                            idx += 1
+                    _outputs = {}  # generator outputs stored per-yield, not here
+                else:
+                    # Normal: single execution
+                    _outputs = await self._exec_core(_inputs)
+                    if self.cache is not None:
+                        _cache_store[_cache_key] = _outputs
+                    self.store_result(state, _outputs, context_id)
 
         except Exception:
             import sys
-
             error_msg = (
                 traceback.format_exc()
                 if LOGGER.isEnabledFor(40)
@@ -642,21 +655,14 @@ class BaseOp(ABC):
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             self._store_metrics(
-                state,
-                context_id,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=duration_ms,
+                state, context_id,
+                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
             )
-            # Store error in state only if op didn't already set it via outputs.
-            # Ops like ParserOp return {"error": "..."} as normal output —
-            # don't overwrite that with None.
             if error_msg is not None:
                 state[self.full_name, "error", context_id] = error_msg
             elif "error" not in _outputs:
                 state[self.full_name, "error", context_id] = None
 
-            # Performance monitoring: log slow ops (>100ms)
             if duration_ms > 100 and LOGGER.isEnabledFor(30):
                 LOGGER.warning(
                     format_event(

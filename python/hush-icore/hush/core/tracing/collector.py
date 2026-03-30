@@ -16,7 +16,7 @@ import logging
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hush.core.ops.graph.scheduler import _is_gen
+from hush.core.ops.graph.task_scheduler import _is_gen
 from hush.core.tracing.models import TraceNode, TraceSummary
 from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
