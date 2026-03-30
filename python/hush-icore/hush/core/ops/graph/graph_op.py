@@ -3,8 +3,7 @@
 Package layout::
 
     graph_op.py      GraphOp class (define + build + run + export)
-    scheduler.py     run_scheduler() — see its docstring for the full execution story
-    _loop.py         LoopConfig + run_loop() for feedback loops
+    task_scheduler.py WorkflowScheduler, LoopConfig, run_loop
     _decorators.py   @graph and @graph.loop decorators
     validation.py    Graph validation rules and error types
 """
@@ -19,12 +18,12 @@ from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
 from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, PARENT, START, BaseOp
-from hush.core.ops.graph._loop import LoopConfig, run_loop
-from hush.core.ops.graph.scheduler import _is_gen, run_scheduler  # kept for fallback
 from hush.core.ops.graph.task_scheduler import (
+    LoopConfig,
     WorkflowScheduler,
-    _is_gen as _is_gen_new,
+    _is_gen,
     get_current_scheduler,
+    run_loop,
     run_task_scheduler,
 )
 
@@ -290,7 +289,7 @@ class GraphOp(BaseOp):
         self._cache_full_names()
 
         # Mark if graph has streaming ops (generators inside)
-        self._has_streaming = any(_is_gen_new(child) for child in self._ops.values())
+        self._has_streaming = any(_is_gen(child) for child in self._ops.values())
 
     def _setup_schema(self):
         """Discover inputs/outputs from child ops.
@@ -464,41 +463,6 @@ class GraphOp(BaseOp):
             child._cache_full_name()
             if hasattr(child, "_cache_full_names"):
                 child._cache_full_names()
-
-    async def _run_streaming(self, state, context_id, parent_context, request_id):
-        """Async generator: run inner graph, yield outputs per stream item.
-
-        Called by scheduler._run_generator when GraphOp._has_streaming is True.
-        """
-        self.get_inputs(state, context_id=context_id, parent_context=parent_context)
-
-        if self._is_building:
-            self.build()
-
-        _outputs, stream_ctxs = await run_task_scheduler(
-            self, state, context_id, parent_context, request_id
-        )
-        self.stream_contexts = stream_ctxs
-
-        if self._loop_config:
-            _outputs = await run_loop(
-                self, state, context_id, parent_context, request_id, _outputs
-            )
-            _outputs.pop("_loop_metrics", None)
-
-        # Yield per-item if streaming outputs (lists), else yield once
-        has_lists = any(isinstance(v, list) for v in _outputs.values())
-        if has_lists:
-            list_len = max(
-                (len(v) for v in _outputs.values() if isinstance(v, list)), default=0
-            )
-            for i in range(list_len):
-                item = {}
-                for k, v in _outputs.items():
-                    item[k] = v[i] if isinstance(v, list) and i < len(v) else v
-                yield item
-        else:
-            yield _outputs
 
     # ═══════════════════════════════════════════════════════════════════
     # 3. EXECUTE — run the workflow

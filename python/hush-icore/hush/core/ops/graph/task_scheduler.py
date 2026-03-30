@@ -1,11 +1,8 @@
 """Task-based workflow scheduler.
 
-Replaces event-based scheduler.py. Single scheduler per workflow execution.
+Single scheduler per workflow execution.
 Uses asyncio.wait(FIRST_COMPLETED) for concurrent task dispatch.
-
-Phase 1: Batch ops (sync/async, graph, branch)
-Phase 2: Generator/streaming ops
-Phase 3: Loop support
+Includes loop execution (LoopConfig + run_loop).
 """
 
 import asyncio
@@ -15,8 +12,6 @@ import logging
 import traceback
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from time import perf_counter
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hush.core.utils.context import _output_queue
@@ -48,7 +43,53 @@ def _is_gen(op_obj) -> bool:
     )
 
 
-PENDING = object()
+# ── Loop support (moved from _loop.py) ──────────────────────────────────────
+
+@dataclass
+class LoopConfig:
+    """Configuration for GraphOp.loop() feedback loops."""
+    until: Any  # str expression or callable
+    max_iterations: int
+    initial_state: dict
+    _compiled_until: Any = field(default=None, repr=False)
+
+
+def _evaluate_until(cfg: LoopConfig, outputs: dict) -> bool:
+    """Evaluate the loop's until condition against current outputs."""
+    if cfg is None or cfg.until is None:
+        return False
+    if callable(cfg.until):
+        return bool(cfg.until(outputs))
+    return bool(eval(cfg._compiled_until, {"__builtins__": {}}, outputs))  # noqa: S307
+
+
+async def run_loop(graph, state, context_id, parent_context, request_id, outputs):
+    """Run feedback loop iterations until condition met or max reached.
+
+    Returns:
+        Final outputs dict with _loop_metrics added.
+    """
+    cfg = graph._loop_config
+    iteration = 0
+    while True:
+        if _evaluate_until(cfg, outputs):
+            outputs["_loop_metrics"] = {
+                "total_iterations": iteration + 1,
+                "stopped_by_condition": True,
+            }
+            return outputs
+        iteration += 1
+        if iteration >= cfg.max_iterations:
+            outputs["_loop_metrics"] = {
+                "total_iterations": iteration,
+                "stopped_by_condition": False,
+                "max_iterations_reached": True,
+            }
+            return outputs
+        next_ctx = context_id + (f"loop_{iteration}",)
+        for var_name, value in outputs.items():
+            state[graph.full_name, var_name, next_ctx] = value
+        outputs, _ = await run_task_scheduler(graph, state, next_ctx, parent_context, request_id)
 
 
 @dataclass
@@ -193,25 +234,20 @@ class WorkflowScheduler:
 
         # ── Helper: run one op as async task ──
         async def run_op(task: Task):
-            """Execute one op, return (task, result_or_none)."""
+            """Execute one op. Returns (task, is_generator)."""
             op_obj = graph._ops[task.op_name]
+            is_gen_op = _is_gen(op_obj) or getattr(op_obj, '_has_streaming', False)
 
-            if _is_gen(op_obj) or getattr(op_obj, '_has_streaming', False):
-                # Generator op or streaming GraphOp: yield into yield_queue
-                await _run_generator(task, op_obj, yield_queue, state, context_id, parent_context, request_id)
-                return task, "exhausted"
-            else:
-                # Regular op (sync, async, non-streaming graph)
-                try:
-                    result = await op_obj.run(state, task.context_id, parent_context)
-                except Exception:
-                    LOGGER.error(
-                        "[TASK_SCHED %s] error in %s ctx=%s: %s",
-                        graph.full_name, task.op_name, task.context_id,
-                        traceback.format_exc().rstrip(),
-                    )
-                    result = None
-                return task, result
+            # Set yield callback for generators
+            if is_gen_op:
+                async def on_yield(name, stream_ctx, result):
+                    await yield_queue.put(YieldEvent(name, stream_ctx, result, task.graph))
+                op_obj._on_yield = on_yield
+
+            await op_obj.run(state, task.context_id, parent_context)
+            op_obj._on_yield = None  # cleanup
+
+            return task, is_gen_op
 
         # ── Main loop ──
         while (pending or active) and not self._aborted:
@@ -245,30 +281,43 @@ class WorkflowScheduler:
 
             done, _ = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
 
-            # 3. Process completed tasks
+            # 3. Process completed tasks — yield events first, then op completions.
+            # Ordering matters: if gen_task and yield_waiter complete in the same
+            # batch, yield_waiter holds one item already removed from the queue.
+            # Processing yield events first ensures collect_buffers are fully
+            # populated before we check them on gen_task completion.
+            if yield_waiter and yield_waiter in done:
+                try:
+                    event = yield_waiter.result()
+                    self._handle_yield(
+                        event, graph, state,
+                        ready_counts, stream_contexts, pending, output_queue,
+                        sequential_queues, sequential_active, collect_buffers,
+                    )
+                except (asyncio.CancelledError, Exception):
+                    pass
+
             for t in done:
                 if t is yield_waiter:
-                    # Generator yield event
-                    try:
-                        event = t.result()
-                        self._handle_yield(
-                            event, graph, state,
-                            ready_counts, stream_contexts, pending, output_queue,
-                            sequential_queues, sequential_active, collect_buffers,
-                        )
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                    pass  # already handled above
                 elif t in active:
                     # Op task completed
                     active.discard(t)
                     try:
-                        task, result = t.result()
+                        task, is_gen_op = t.result()
                         LOGGER.debug(
-                            "[TASK_SCHED %s] done %s ctx=%s active=%d",
-                            graph.full_name, task.op_name, task.context_id, len(active),
+                            "[TASK_SCHED %s] done %s ctx=%s gen=%s active=%d",
+                            graph.full_name, task.op_name, task.context_id, is_gen_op, len(active),
                         )
 
-                        if result == "exhausted":
+                        if is_gen_op:
+                            # Drain any yields queued before this completion was processed
+                            while not yield_queue.empty():
+                                self._handle_yield(
+                                    yield_queue.get_nowait(), graph, state,
+                                    ready_counts, stream_contexts, pending, output_queue,
+                                    sequential_queues, sequential_active, collect_buffers,
+                                )
                             # Generator exhausted — trigger .collect() dispatches
                             for (src, dst), buffer in list(collect_buffers.items()):
                                 if src == task.op_name and buffer:
@@ -284,17 +333,18 @@ class WorkflowScheduler:
                                     for op_n, dec in graph._stream_predecrements.get(task.op_name, {}).items():
                                         rc[op_n] -= dec
                                     ready_counts[collect_ctx] = rc
-                                    # Store collected values
-                                    dst_op = graph._ops.get(dst)
-                                    if dst_op:
-                                        dst_op.store_result(state, collected_values, collect_ctx)
+                                    # Store collected values in source op's namespace
+                                    # (downstream reads from source["key"], not its own)
+                                    src_op = graph._ops.get(src)
+                                    if src_op:
+                                        src_op.store_result(state, collected_values, collect_ctx)
                                     pending.append(Task(dst, collect_ctx, graph))
                                     del collect_buffers[(src, dst)]
                                     LOGGER.debug(
                                         "[TASK_SCHED %s] collect dispatch %s→%s items=%d",
                                         graph.full_name, src, dst, len(buffer),
                                     )
-                        elif result is not PENDING:
+                        elif not is_gen_op:
                             # Normal op done — propagate downstream
                             newly_ready = propagate(task.op_name, task.context_id)
                             pending.extend(newly_ready)
@@ -337,45 +387,34 @@ class WorkflowScheduler:
 
         # ── Collect outputs ──
         if stream_contexts:
-            ctx_set = set(stream_contexts)
-            prefixes = {ctx[:i] for ctx in ctx_set for i in range(1, len(ctx))}
-            leaf_ctxs = [ctx for ctx in stream_contexts if ctx not in prefixes]
-
-            # Filter: only include contexts where terminal op actually produced output.
-            # N-to-M generators (e.g. VAD yields 1 segment from 50 chunks) create many
-            # stream contexts but only a few reach the terminal op with real output.
-            # Only check non-shared vars — shared vars are always set (at DEFAULT_CONTEXT)
-            # so they'd make every context appear to have output.
-            non_shared_outputs = [
-                var for var in graph.outputs
-                if state.schema.get_index(graph.full_name, var) not in state.schema._shared_indices
-            ]
-
-            def _has_output(ctx):
-                check_vars = non_shared_outputs if non_shared_outputs else graph.outputs
-                for var in check_vars:
-                    try:
-                        val = state[graph.full_name, var, ctx]
-                        if val is not None:
-                            return True
-                    except (KeyError, IndexError):
-                        pass
-                return False
-
-            terminal_ctxs = [ctx for ctx in leaf_ctxs if _has_output(ctx)]
-
-            # Shared vars: read once from DEFAULT_CONTEXT (scalar)
-            # Non-shared vars: collect per terminal context (list)
+            # Shared vars: read once from DEFAULT_CONTEXT (scalar).
+            # Non-shared vars: collect all non-None values from stream contexts (list).
             from hush.core.states.cell import DEFAULT_CONTEXT
             outputs = {}
             for var in graph.outputs:
                 idx = state.schema.get_index(graph.full_name, var)
                 if idx >= 0 and idx in state.schema._shared_indices:
-                    # Shared: scalar value from DEFAULT_CONTEXT
                     outputs[var] = state[graph.full_name, var, DEFAULT_CONTEXT]
                 else:
-                    # Non-shared: list per terminal context
-                    outputs[var] = [state[graph.full_name, var, ctx] for ctx in terminal_ctxs]
+                    # Separate __collect__ contexts (single-shot) from per-item contexts.
+                    # __collect__ → downstream ran once with full list → scalar output.
+                    # Regular stream contexts → downstream ran per-item → list output.
+                    collect_val = None
+                    per_item_vals = []
+                    for ctx in stream_contexts:
+                        try:
+                            val = state[graph.full_name, var, ctx]
+                            if val is not None:
+                                if ctx and ctx[-1] == "__collect__":
+                                    collect_val = val
+                                else:
+                                    per_item_vals.append(val)
+                        except (KeyError, IndexError):
+                            pass
+                    if collect_val is not None:
+                        outputs[var] = collect_val
+                    else:
+                        outputs[var] = per_item_vals
         elif any(_is_gen(op) for op in graph._ops.values()):
             outputs = {var: [] for var in graph.outputs}
         else:
@@ -483,74 +522,6 @@ class WorkflowScheduler:
                 output_queue.put_nowait({"type": "token", "op": event.op_name, "data": event.result})
             except Exception:
                 pass
-
-
-async def _run_generator(
-    task: Task,
-    op_obj,
-    yield_queue: asyncio.Queue,
-    state,
-    root_context_id,
-    parent_context,
-    request_id: str,
-):
-    """Execute a generator op, putting yield events into yield_queue."""
-    gen_start = datetime.now(timezone.utc)
-    gen_perf = perf_counter()
-    gen_error = None
-    gen_inputs = {}
-
-    try:
-        idx = 0
-
-        # GraphOp with streaming inner ops → use _run_streaming
-        if getattr(op_obj, '_has_streaming', False) and hasattr(op_obj, '_run_streaming'):
-            async for result in op_obj._run_streaming(state, task.context_id, parent_context, request_id):
-                stream_ctx = task.context_id + (f"[{idx}]",)
-                op_obj.store_result(state, result, stream_ctx)
-                await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
-                idx += 1
-        else:
-            # Normal @op generator
-            gen_inputs = op_obj.get_inputs(state, task.context_id, parent_context)
-            gen_fn = op_obj.core
-
-            if inspect.isasyncgenfunction(gen_fn):
-                async for result in gen_fn(**gen_inputs):
-                    stream_ctx = task.context_id + (f"[{idx}]",)
-                    op_obj.store_result(state, result, stream_ctx)
-                    await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
-                    idx += 1
-            elif inspect.isgeneratorfunction(gen_fn):
-                for result in gen_fn(**gen_inputs):
-                    stream_ctx = task.context_id + (f"[{idx}]",)
-                    op_obj.store_result(state, result, stream_ctx)
-                    await yield_queue.put(YieldEvent(task.op_name, stream_ctx, result, task.graph))
-                    idx += 1
-
-    except Exception:
-        gen_error = traceback.format_exc()
-        LOGGER.error(
-            "[TASK_SCHED] gen_error %s: %s",
-            task.op_name, gen_error.rstrip(),
-        )
-    finally:
-        try:
-            ms = (perf_counter() - gen_perf) * 1000
-            op_obj._log(request_id, task.context_id, gen_inputs, {}, ms)
-            op_obj._store_metrics(
-                state, task.context_id,
-                start_time=gen_start,
-                end_time=datetime.now(timezone.utc),
-                duration_ms=ms,
-            )
-            if gen_error is not None:
-                state[op_obj.full_name, "error", task.context_id] = gen_error
-        except Exception:
-            LOGGER.error(
-                "[TASK_SCHED] gen_finally_error %s: %s",
-                task.op_name, traceback.format_exc().rstrip(),
-            )
 
 
 # ── Backward compat wrapper ──
