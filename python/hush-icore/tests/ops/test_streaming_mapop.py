@@ -40,7 +40,7 @@ async def test_streaming_concurrent_fanout():
     """Verify streaming fan-out runs downstream ops concurrently."""
     with GraphOp(name="stream_map") as graph:
         gen = produce_items(count=PARENT["count"])
-        proc = slow_process(item=gen["item"])
+        proc = slow_process(item=gen["item"].parallel())
         START >> gen >> proc >> END
 
     engine = Hush(graph)

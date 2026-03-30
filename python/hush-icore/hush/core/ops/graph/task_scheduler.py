@@ -395,12 +395,14 @@ class WorkflowScheduler:
         if not downstream_op:
             return False, None, False
 
-        for var_name, param in downstream_op.inputs.items():
+        source_op = graph._ops.get(source_op_name)
+        source_full_name = source_op.full_name if source_op else source_op_name
+
+        for _, param in downstream_op.inputs.items():
             if isinstance(param.value, Ref):
                 ref = param.value
-                # Check if this Ref points to the source op
-                src = ref.source if isinstance(ref.source, str) else getattr(ref.source, "name", None)
-                if src == source_op_name:
+                src = ref.source if isinstance(ref.source, str) else getattr(ref.source, "full_name", getattr(ref.source, "name", None))
+                if src == source_op_name or src == source_full_name:
                     return ref._stream_parallel, ref._stream_parallel_max, ref._stream_collect
 
         return False, None, False

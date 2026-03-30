@@ -27,10 +27,15 @@ def resolve_value(key: str, value: Any, parent) -> Any:
             return parent if parent else source
         return source
 
-    # Handle Ref directly — keep transforms intact
+    # Handle Ref directly — keep transforms + streaming attrs intact
     if isinstance(value, Ref):
         resolved = resolve_parent(value.raw_source)
-        return Ref(resolved, value.var, value.transforms)
+        new_ref = Ref(resolved, value.var, value.transforms)
+        # Preserve streaming modifiers (.parallel(), .collect())
+        object.__setattr__(new_ref, "_stream_parallel", value._stream_parallel)
+        object.__setattr__(new_ref, "_stream_parallel_max", value._stream_parallel_max)
+        object.__setattr__(new_ref, "_stream_collect", value._stream_collect)
+        return new_ref
 
     # Handle op reference: some_op → Ref(some_op, key)
     if hasattr(value, "name"):
