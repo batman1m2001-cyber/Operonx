@@ -179,8 +179,8 @@ class LoopConfig:
 | Step | File | Status |
 |------|------|--------|
 | 1 | `cell.py` | ✅ done — `is_shared` on Cell |
-| 2a | `ref.py` | ⬜ `StreamPolicy` dataclass + `_with_transform()` fix |
-| 2b | `schema.py` | ✅ done (is_shared) + ⬜ add `_stream_policies` index |
+| 2a | `ref.py` | ✅ done — `StreamPolicy` dataclass + `_with_transform()` fix |
+| 2b | `schema.py` | ✅ done — `_stream_policies` index populated in `_build()` |
 | 3 | `state.py` | ✅ done — no `_shared_indices` checks |
 | 4 | `base.py` | ⬜ next — keep `contain_generation`, remove `_on_yield` |
 | 5 | `graph_op.py` | ⬜ — add `_stream_initial_ready`, update `serialize()` |

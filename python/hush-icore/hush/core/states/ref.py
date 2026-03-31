@@ -1,11 +1,19 @@
 """Ref type for zero-copy variable references with chainable transforms."""
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
     from hush.core.ops.base import BaseOp
 
 __all__ = ["Ref"]
+
+
+@dataclass
+class StreamPolicy:
+    collect: bool = False
+    parallel: bool = False
+    parallel_max: int = 0  # 0 means unlimited
 
 
 class Ref:
@@ -41,8 +49,17 @@ class Ref:
         is_output: True if this is an output ref (pushes value outward).
     """
 
-    __slots__ = ("_source", "var", "_transforms", "_fn", "idx", "is_output",
-                 "_stream_parallel", "_stream_parallel_max", "_stream_collect")
+    __slots__ = (
+        "_source",
+        "var",
+        "_transforms",
+        "_fn",
+        "idx",
+        "is_output",
+        "_stream_parallel",
+        "_stream_parallel_max",
+        "_stream_collect",
+    )
 
     _RESERVED_ATTRS = frozenset(
         {
@@ -177,7 +194,11 @@ class Ref:
         """Tạo Ref mới với thêm một transform."""
         new_transforms = self._transforms + [(op, args)]
         new_fn = self._wrap(self._fn, op, args)
-        return Ref(self._source, self.var, new_transforms, new_fn)
+        new_ref = Ref(self._source, self.var, new_transforms, new_fn)
+        object.__setattr__(new_ref, "_stream_parallel", self._stream_parallel)
+        object.__setattr__(new_ref, "_stream_parallel_max", self._stream_parallel_max)
+        object.__setattr__(new_ref, "_stream_collect", self._stream_collect)
+        return new_ref
 
     @staticmethod
     def _wrap(fn: Callable, op: str, args: Tuple) -> Callable:
