@@ -55,7 +55,7 @@ class MemoryState:
             request_id: Request ID (auto-generated if not provided)
         """
         self.schema = schema
-        self._cells: List[Cell] = [Cell(v) for v in schema._defaults]
+        self._cells: List[Cell] = [Cell(v, is_shared=(idx in schema._shared_indices)) for idx, v in enumerate(schema._defaults)]
         self._user_id = user_id or str(_uuid4())
         self._session_id = session_id or str(_uuid4())
         self._request_id = request_id or str(_uuid4())
@@ -101,17 +101,12 @@ class MemoryState:
         if idx < 0:
             raise KeyError(f"({op}, {var}) not found in schema")
 
-        # Shared vars: always use DEFAULT_CONTEXT regardless of stream context
-        if idx in self.schema._shared_indices:
-            ctx_key = DEFAULT_CONTEXT
-
         self._cells[idx][ctx_key] = value
 
         # Push ref? Push 1 hop to target
         push_ref = self.schema._push_refs[idx]
         if push_ref and push_ref.idx >= 0:
-            target_ctx = DEFAULT_CONTEXT if push_ref.idx in self.schema._shared_indices else ctx_key
-            self._cells[push_ref.idx][target_ctx] = push_ref._fn(value)
+            self._cells[push_ref.idx][ctx_key] = push_ref._fn(value)
 
     def __getitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]]) -> Any:
         """Get value. Pull from source if pull_ref exists (1 hop only).
@@ -126,10 +121,6 @@ class MemoryState:
         idx = self.schema.get_index(op, var)
         if idx < 0:
             return None
-
-        # Shared vars: always read from DEFAULT_CONTEXT
-        if idx in self.schema._shared_indices:
-            ctx_key = DEFAULT_CONTEXT
 
         cell = self._cells[idx]
 
