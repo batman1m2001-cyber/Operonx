@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
 
-from hush.core.states.ref import Ref
+from hush.core.states.ref import Ref, StreamPolicy
 
 if TYPE_CHECKING:
     from hush.core.states.state import MemoryState
@@ -32,7 +32,15 @@ class StateSchema:
         schema.show()  # Display all variable mappings
     """
 
-    __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs", "_shared_indices")
+    __slots__ = (
+        "name",
+        "_var_to_idx",
+        "_defaults",
+        "_pull_refs",
+        "_push_refs",
+        "_shared_indices",
+        "_stream_policies",
+    )
 
     def __init__(self, op: Any = None, name: Optional[str] = None):
         """Initialize the schema.
@@ -46,6 +54,9 @@ class StateSchema:
         self._pull_refs: List[Optional[Ref]] = []  # Pull data từ source khi đọc
         self._push_refs: List[Optional[Ref]] = []  # Push data đến target khi ghi
         self._shared_indices: set = set()  # indices of shared vars (graph-level, not per-context)
+        self._stream_policies: Dict[
+            Tuple[str, str], StreamPolicy
+        ] = {}  # Stream policies by (op, var)
 
         self.name = name
         if op is not None:
@@ -186,6 +197,14 @@ class StateSchema:
                 value.idx = source_idx  # Set source index trên Ref
                 self._pull_refs[idx] = value
                 self._defaults[idx] = None  # Xóa Ref, giá trị lấy từ source
+
+                # Capture stream policy for scheduler O(1) lookup
+                if value._stream_collect or value._stream_parallel:
+                    self._stream_policies[key] = StreamPolicy(
+                        collect=value._stream_collect,
+                        parallel=value._stream_parallel,
+                        parallel_max=value._stream_parallel_max or 0,
+                    )
 
             # Resolve push refs
             push_ref = self._push_refs[idx]
