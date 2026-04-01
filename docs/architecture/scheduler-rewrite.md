@@ -188,9 +188,10 @@ class LoopConfig:
 | 7 | `func_op.py` | ✅ done — async-gen `run()`, `parent_context` removed |
 | 8 | `branch_op.py` | ✅ done — `__branch_target__` injected in `_create_core_function()`, no `run()` override needed |
 | 9 | `llm.py` | ✅ done — stream branch drives `_stream_core()` directly, yields per-chunk frames |
-| 10 | `engine.py` | ✅ done — `run()` uses `async for`; `stream()` wraps generator in `_consume()` coroutine |
+| 10 | `engine.py` | ⚠️ partial — `async for` fix applied but output contract broken for generator workflows (see Step 13) |
 | 11 | `collector.py` | ⬜ line 198: `stream_contexts` ref removed from GraphOp, needs fix |
 | 12 | `_output_queue` wiring | ⬜ see below — root scheduler + `_stream_output_ops` |
+| 13 | output contract | ⚠️ CRITICAL — see below — `engine.run()` and `engine.stream()` return shape undefined for generator workflows |
 
 ---
 
@@ -203,10 +204,12 @@ class LoopConfig:
 - yields `(chunk_ctx, chunk)` per token
 - `finally` block still records timing/cost (uses last chunk as `_outputs`)
 
-### Step 10 — `engine.py` ✅ DONE
+### Step 10 — `engine.py` ⚠️ PARTIAL
 
 - `run()` line 258: uses `async for _, r in self.graph.run(state): result = r`
 - `stream()` line 348: wraps generator in `_consume()` coroutine, captures result in `_result` dict
+
+**BUT**: see Step 13 — the output contract is broken for generator workflows.
 
 ### Step 12 — `_output_queue` wiring (NEXT)
 
@@ -243,6 +246,50 @@ The root scheduler should write a frame to `_output_queue` only if the op is a
 **Note:** `is_gen` is op-level but streaming granularity should be per-var (an op can have
 both generator vars and final-only vars). This is a known limitation — deferred to a
 future refactor of `StreamPolicy`.
+
+### Step 13 — Output contract for generator workflows (CRITICAL — unresolved)
+
+**The problem:**
+
+`GraphOp.run()` is now an async generator that yields differently depending on whether the
+workflow contains generator ops:
+
+- **No generators**: yields once → `yield context_id, _outputs` — a single flat dict
+- **With generators**: yields N times → one `yield sctx, item` per stream context
+
+`engine.run()` currently does:
+```python
+result = {}
+async for _, r in self.graph.run(state):
+    result = r   # silently overwrites — only the LAST yield survives
+```
+
+This is **wrong** for generator workflows — all but the last item are lost.
+
+`engine.stream()` has the same problem in `_consume()`:
+```python
+async def _consume() -> None:
+    async for _, r in self.graph.run(state):
+        _result.update(r)   # merges dicts — collides if keys repeat across items
+```
+
+**What should the output contract be?**
+
+For `engine.run()` with generators, the natural return is accumulated results. But the
+shape is unclear:
+- `{"result": [item1, item2, ...]}` — collect all under a single key?
+- Merge all item dicts into one flat dict (broken if keys repeat)?
+- Return only the root-context outputs (ignoring stream items entirely)?
+
+For `engine.stream()`, the `{"type": "done", "data": ...}` final event needs to carry
+the same accumulated result — its shape must match `engine.run()`.
+
+**Needs design decision before implementation.**
+
+Options to consider:
+1. `engine.run()` collects all yields into a list, wrapped under a configurable key (e.g. `"$items"`)
+2. `engine.run()` returns only root-context outputs (same as non-generator workflows) — stream items are only accessible via `engine.stream()` or the `$state`
+3. `GraphOp.run()` itself changes — always yields exactly once, returning root outputs + storing stream items in state
 
 ### Step 11 — `collector.py`
 
