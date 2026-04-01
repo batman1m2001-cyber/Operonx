@@ -255,7 +255,9 @@ class Hush:
 
         # Execute the graph
         try:
-            result = await self.graph.run(state)
+            result = {}
+            async for _, r in self.graph.run(state):
+                result = r
         except Exception as e:
             # on_error middleware (in reverse order)
             for mw in reversed(self._middleware):
@@ -342,7 +344,13 @@ class Hush:
         token = _output_queue.set(queue)
 
         try:
-            task = asyncio.create_task(self.graph.run(state))
+            _result: Dict[str, Any] = {}
+
+            async def _consume() -> None:
+                async for _, r in self.graph.run(state):
+                    _result.update(r)
+
+            task = asyncio.create_task(_consume())
 
             while True:
                 if task.done() and queue.empty():
@@ -353,7 +361,8 @@ class Hush:
                 except asyncio.TimeoutError:
                     continue
 
-            result = task.result()
+            task.result()  # re-raises if graph failed
+            result = _result
         except Exception as e:
             for mw in reversed(self._middleware):
                 await mw.on_error(self.graph, inputs, e, context)
