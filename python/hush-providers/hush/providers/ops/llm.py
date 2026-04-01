@@ -7,7 +7,7 @@ fallback chains, and OpenAI Batch API mode.
 import random
 from datetime import datetime
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from hush.core import LOGGER
 from hush.core.configs import OpType
@@ -200,7 +200,7 @@ class LLMOp(BaseOp):
         """Set up core function based on mode. Skips if LLM not initialized yet."""
         if not self._initialized:
             # Defer — will be called again from _ensure_initialized()
-            self.core = self._lazy_generate
+            self._set_core(self._lazy_generate)
             return
 
         if self.batch_mode:
@@ -224,11 +224,11 @@ class LLMOp(BaseOp):
                 llm=self._llm,
                 **batch_kwargs,
             )
-            self.core = self._batch_coordinator.submit
+            self._set_core(self._batch_coordinator.submit)
         elif self.stream:
-            self.core = self._stream_core
+            self._set_core(self._stream_core)
         else:
-            self.core = self._llm.generate
+            self._set_core(self._llm.generate)
 
     async def _lazy_generate(self, **kwargs):
         """Placeholder core that initializes LLM on first call, then delegates."""
@@ -468,8 +468,7 @@ class LLMOp(BaseOp):
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
         """Run the LLM op (generate and batch modes).
 
         When stream=True, the scheduler drives _stream_core via _drive_generator()
@@ -567,7 +566,7 @@ class LLMOp(BaseOp):
                     cost_usd = input_cost + output_cost
             state[self.full_name, "cost_usd", context_id] = cost_usd
 
-        return _outputs
+        yield context_id, _outputs
 
     @shorthand
     def of(

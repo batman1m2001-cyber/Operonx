@@ -68,7 +68,7 @@ class OnnxOp(BaseOp):
             hub = get_hub()
 
         self.backend = hub.get(f"onnx:{self.resource}")
-        self.core = self._process
+        self._set_core(self._process)
 
     async def _process(
         self,

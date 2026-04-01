@@ -175,7 +175,7 @@ class ParserOp(BaseOp):
         self.inputs["schema"] = schema_param
 
         self.backend = self._create_parser()
-        self.core = self._process
+        self._set_core(self._process)
 
     def _create_parser(self):
         """Tạo parser function dựa trên format."""

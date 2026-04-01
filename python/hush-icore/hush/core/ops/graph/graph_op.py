@@ -3,7 +3,7 @@
 Package layout::
 
     graph_op.py      GraphOp class (define + build + run + export)
-    task_scheduler.py WorkflowScheduler, LoopConfig, run_loop
+    task_scheduler.py LoopConfig, _Scheduler
     _decorators.py   @graph and @graph.loop decorators
     validation.py    Graph validation rules and error types
 """
@@ -12,7 +12,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, AsyncGenerator, Callable, Dict, NamedTuple, Optional, Tuple, Union
 
 from hush.core.configs.edge_config import EdgeConfig, EdgeType
 from hush.core.configs.op_config import OpType
@@ -20,11 +20,7 @@ from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, PARENT, START, BaseOp
 from hush.core.ops.graph.task_scheduler import (
     LoopConfig,
-    WorkflowScheduler,
-    _is_gen,
-    get_current_scheduler,
-    run_loop,
-    run_task_scheduler,
+    _Scheduler,
 )
 
 # Re-export validation types for backward compatibility
@@ -41,6 +37,11 @@ from hush.core.utils.common import Param
 from hush.core.utils.context import _current_graph
 
 
+class Link(NamedTuple):
+    dst: str
+    soft: bool
+
+
 class GraphOp(BaseOp):
     """Container op that holds and executes a directed graph of child ops.
 
@@ -54,18 +55,15 @@ class GraphOp(BaseOp):
                          Inputs/outputs auto-discovered from PARENT refs.
 
         2. BUILD         g.build()  (or auto on first run)
-                         _setup_schema        scan PARENT refs → graph inputs/outputs
-                         _setup_endpoints     find entry/exit ops from topology
-                         _build_ready_counts  count predecessors per op
-                         _build_adj           compile adjacency list
-                         _build_predecrements streaming: pre-compute batch adjustments
-                         validate             branch targets, cycles, reachability, refs
+                         _setup_schema    scan PARENT refs → graph inputs/outputs
+                         _setup_endpoints find entry/exit ops from topology
+                         _build()         adj list + ready counts + stream ready counts
+                         validate         branch targets, cycles, reachability, refs
 
-        3. EXECUTE       g.run(state, context_id, parent_context)
-                         → run_scheduler()   drain_ready → dispatch_op → event loop
-                                             (propagate completion, collect outputs)
-                                             see scheduler.py for full flow
-                         → run_loop()        if loop config, iterate until condition met
+        3. EXECUTE       g.run(state, context_id)  — async generator
+                         → run_task_scheduler()  drives ops via Frame/EOF events
+                         → yields (ctx, outputs) per batch or per stream frame
+                         → loop iteration handled inside scheduler EOF handler
 
         4. EXPORT        serialize()  config dict for Rust backend
                          validate()   graph structure validation
@@ -79,17 +77,15 @@ class GraphOp(BaseOp):
         "exits",
         "prevs",
         "nexts",
-        "initial_ready_count",
-        "has_soft_preds",
         "_edges",
         "_is_building",
-        "_compiled_adj",
-        "_stream_predecrements",
         "concurrency",
         "_loop_config",
-        "stream_contexts",
         "_shared_vars",
-        "_has_streaming",
+        "_adj",
+        "_initial_ready",
+        "_stream_initial_ready",
+        "_scheduler",
     ]
 
     type: OpType = "graph"
@@ -108,14 +104,13 @@ class GraphOp(BaseOp):
         self.exits = []
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
-        self.has_soft_preds = set()
-        self._stream_predecrements = {}
         self.concurrency = concurrency
-        self._compiled_adj = {}
         self._loop_config = None
-        self.stream_contexts = []
         self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared()
-        self._has_streaming = False
+        self._adj = {}                 # {op_name: [Link(dst, soft), ...]}
+        self._initial_ready = {}       # {op_name: ready_count}
+        self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}
+        self._scheduler = None           # set by build()
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -160,7 +155,6 @@ class GraphOp(BaseOp):
         g._loop_config = LoopConfig(
             until=until,
             max_iterations=max_iterations,
-            initial_state=initial_state,
         )
         return g
 
@@ -274,22 +268,63 @@ class GraphOp(BaseOp):
 
         self._setup_schema()
         self._setup_endpoints()
-        self._build_ready_counts()
-
+        
         result = self.validate()
         result.raise_if_errors()
 
-        self._build_adj()
-        self._build_predecrements()
+        self._build()
 
-        if self._loop_config and isinstance(self._loop_config.until, str):
-            self._loop_config._compiled_until = compile(self._loop_config.until, "<until>", "eval")
-
+        self._scheduler = _Scheduler(self)
         self._is_building = False
         self._cache_full_names()
 
-        # Mark if graph has streaming ops (generators inside)
-        self._has_streaming = any(_is_gen(child) for child in self._ops.values())
+    def _build(self):
+        """Compile adjacency list, batch ready counts, and per-generator stream ready counts."""
+        # ── Phase 1: adjacency list + batch ready counts ──────────────────────────
+        # For each op, count how many predecessors it must wait for (ready count).
+        # Soft edges to the same target count as 1 (ANY one soft pred unblocks it).
+        adj = {name: [] for name in self._ops}
+        ready = {name: 0 for name in self._ops}
+        has_soft: Dict[str, bool] = {}
+
+        for (src, dst), edge in self._edges.items():
+            adj[src].append(Link(dst=dst, soft=edge.soft))
+            if edge.soft:
+                if not has_soft.get(dst, False):   # first soft pred: count once
+                    has_soft[dst] = True
+                    ready[dst] += 1
+            else:
+                ready[dst] += 1                    # every hard pred counts
+
+        self._adj = adj
+        self._initial_ready = ready
+
+        # ── Phase 2: stream-context ready counts per generator ────────────────────
+        # When generator G emits frame [0], downstream ops run in a new stream ctx.
+        # G's own hard-edge predecessors are already done (G can't start until they
+        # finish). Their ready-count contributions should not block the stream ctx.
+        # So for each generator, pre-subtract those already-done pred contributions.
+        stream_initial = {}
+        for gen_name, gen_op in self._ops.items():
+            if not gen_op.is_gen:
+                continue
+            # direct hard-edge predecessors of this generator
+            gen_preds = {
+                src for (src, dst) in self._edges
+                if dst == gen_name and not self._edges[(src, dst)].soft
+            }
+            ri = {}
+            for op_name, base_count in ready.items():
+                r = base_count
+                for pred in self.prevs.get(op_name, []):
+                    if pred == gen_name:
+                        continue  # gen itself contributes per-frame — don't subtract
+                    edge = self._edges.get((pred, op_name))
+                    if edge and not edge.soft and pred in gen_preds:
+                        r = max(0, r - 1)  # pred already done before gen started
+                ri[op_name] = r
+            stream_initial[gen_name] = ri
+        self._stream_initial_ready = stream_initial
 
     def _setup_schema(self):
         """Discover inputs/outputs from child ops.
@@ -384,77 +419,6 @@ class GraphOp(BaseOp):
                     f"inputs={{'{var}': PARENT['{var}']}} and provide '{var}' as a graph input."
                 )
 
-    def _build_ready_counts(self):
-        """Compute initial_ready_count from edge topology.
-
-        - Hard edge (>>) counts individually
-        - Soft edges (>) to the same target count as 1 (wait for ANY soft pred)
-        - Example: A >> D, B > D, C > D => initial_ready_count[D] = 2 (1 hard + 1 soft group)
-        """
-        self.initial_ready_count = {}
-        self.has_soft_preds = set()
-        for name in self._ops:
-            hard_pred_count = 0
-            has_soft = False
-            for pred in self.prevs[name]:
-                edge = self._edges.get((pred, name))
-                if edge and edge.soft:
-                    has_soft = True
-                else:
-                    hard_pred_count += 1
-            if has_soft:
-                self.has_soft_preds.add(name)
-                hard_pred_count += 1
-            self.initial_ready_count[name] = hard_pred_count
-
-    def _build_adj(self):
-        """Compile adjacency list for faster traversal at runtime."""
-        self._compiled_adj = {}
-        for name in self._ops:
-            adj = []
-            for successor in self.nexts[name]:
-                edge = self._edges.get((name, successor))
-                is_soft = bool(edge and edge.soft)
-                adj.append((successor, is_soft))
-            self._compiled_adj[name] = adj
-
-    def _build_predecrements(self):
-        """Pre-compute ready_count predecrements per generator.
-
-        When a generator yields and creates context [n], batch-level
-        predecessors of downstream ops have already completed. Their
-        ready_count contributions must be pre-decremented.
-        """
-        self._stream_predecrements = {}
-
-        gen_names = {name for name, op in self._ops.items() if _is_gen(op)}
-        if not gen_names:
-            return
-
-        for gen_name in gen_names:
-            reachable = set()
-            queue = [gen_name]
-            while queue:
-                current = queue.pop(0)
-                for succ in self.nexts.get(current, []):
-                    if succ not in reachable:
-                        reachable.add(succ)
-                        queue.append(succ)
-
-            predecrements = {}
-            for succ_name in reachable:
-                decrement = 0
-                for pred in self.prevs.get(succ_name, []):
-                    if pred == gen_name:
-                        continue
-                    if pred not in reachable:
-                        edge = self._edges.get((pred, succ_name))
-                        if edge:
-                            decrement += 1
-                if decrement > 0:
-                    predecrements[succ_name] = decrement
-            if predecrements:
-                self._stream_predecrements[gen_name] = predecrements
 
     def _cache_full_names(self) -> None:
         """Cache full_name for this op and all descendants after build."""
@@ -471,9 +435,8 @@ class GraphOp(BaseOp):
     async def run(
         self,
         state: "MemoryState",
-        context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        context_id: Optional[tuple] = None,
+    ) -> AsyncGenerator[Tuple[tuple, Dict[str, Any]], None]:
         """Execute graph: get inputs → schedule ops → loop if needed → store results."""
 
         if context_id is None:
@@ -487,30 +450,23 @@ class GraphOp(BaseOp):
         error_msg = None
 
         try:
-            _inputs = self.get_inputs(state, context_id=context_id, parent_context=parent_context)
+            _inputs = self.get_inputs(state, context_id=context_id)
 
             if self._is_building:
                 self.build()
 
-            _outputs, stream_ctxs = await run_task_scheduler(
-                self, state, context_id, parent_context, request_id
-            )
-            self.stream_contexts = stream_ctxs
+            _outputs, stream_ctxs = await self._scheduler.run(state, context_id)
 
-            if self._loop_config:
-                _outputs = await run_loop(
-                    self, state, context_id, parent_context, request_id, _outputs
-                )
-
-            # Pop _loop_metrics before store_result (not a schema variable)
-            loop_metrics = _outputs.pop("_loop_metrics", None)
-            self.store_result(state, _outputs, context_id)
-            if loop_metrics is not None:
-                _outputs["_loop_metrics"] = loop_metrics
+            if not stream_ctxs:
+                self.store_result(state, _outputs, context_id)
+                yield context_id, _outputs
+            else:
+                for sctx in stream_ctxs:
+                    item = self.get_outputs(state, context_id=sctx)
+                    yield sctx, item
 
         except Exception:
             import sys
-
             error_msg = (
                 traceback.format_exc()
                 if LOGGER.isEnabledFor(40)
@@ -528,16 +484,11 @@ class GraphOp(BaseOp):
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             self._store_metrics(
-                state,
-                context_id,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=duration_ms,
+                state, context_id,
+                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
             )
             if error_msg is not None:
                 state[self.full_name, "error", context_id] = error_msg
-
-            return _outputs
 
     # ═══════════════════════════════════════════════════════════════════
     # 4. EXPORT — serialization, validation, debug
@@ -555,19 +506,17 @@ class GraphOp(BaseOp):
                 ],
                 "entries": list(self.entries),
                 "exits": list(self.exits),
-                "initial_ready_count": dict(self.initial_ready_count),
-                "has_soft_preds": list(self.has_soft_preds),
+                "initial_ready_count": dict(self._initial_ready),
                 "compiled_adj": {
-                    op: [[succ, soft] for succ, soft in successors]
-                    for op, successors in self._compiled_adj.items()
+                    op: [[link.dst, link.soft] for link in links]
+                    for op, links in self._adj.items()
                 },
-                "stream_predecrements": self._stream_predecrements,
+                "stream_initial_ready": self._stream_initial_ready,
                 "loop_config": {
                     "until": self._loop_config.until
                     if isinstance(self._loop_config.until, str)
                     else None,
                     "max_iterations": self._loop_config.max_iterations,
-                    "loop_vars": list(self._loop_config.initial_state.keys()),
                 }
                 if self._loop_config
                 else None,
@@ -599,7 +548,7 @@ class GraphOp(BaseOp):
             LOGGER.debug(
                 "%s  %s -> %s: %s%s", prefix, edge.from_node, edge.to_node, edge.type, soft_marker
             )
-        LOGGER.debug("%sReady count: %s", prefix, dict(self.initial_ready_count))
+        LOGGER.debug("%sReady count: %s", prefix, dict(self._initial_ready))
 
         for child in self._ops.values():
             if isinstance(child, GraphOp):

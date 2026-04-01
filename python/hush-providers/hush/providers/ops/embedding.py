@@ -72,7 +72,7 @@ class EmbeddingOp(BaseOp):
             hub = get_hub()
 
         self.backend = hub.get(f"embedding:{self.resource}")
-        self.core = self._process
+        self._set_core(self._process)
 
     async def _process(self, texts: Union[str, List[str]]) -> Dict[str, Any]:
         """Process texts and return embeddings."""
