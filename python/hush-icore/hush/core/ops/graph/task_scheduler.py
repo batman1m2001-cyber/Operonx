@@ -10,21 +10,23 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from hush.core.states.ref import Ref
-from hush.core.utils.context import _output_queue
 from hush.core.loggings import LOGGER
+from hush.core.states.ref import Ref
 
 
 @dataclass
 class Frame:
     """Generator yielded one result."""
+
     op: str
     ctx: tuple
     result: dict
 
+
 @dataclass
 class EOF:
     """Marker for generator completion."""
+
     op: str
     ctx: tuple
 
@@ -32,13 +34,14 @@ class EOF:
 @dataclass
 class LoopConfig:
     """Configuration for GraphOp.loop() feedback loops."""
-    until: Any # str expression or Callable
+
+    until: Any  # str expression or Callable
     max_iterations: int = 1000
-    
+
     def __post_init__(self):
         self._compiled_until = None
         if isinstance(self.until, str):
-            self._compiled_until = compile(self.until, "<until>", "eval")            
+            self._compiled_until = compile(self.until, "<until>", "eval")
 
 
 def _evaluate_until(cfg: LoopConfig, outputs: dict) -> bool:
@@ -183,7 +186,7 @@ class _Scheduler:
                 rc[edge.dst] -= 1
                 if rc[edge.dst] == 0:
                     _route(event.op, edge.dst, event.ctx, event.result)
-        
+
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
             dst_op = g._ops[dst]
@@ -196,7 +199,7 @@ class _Scheduler:
                 if isinstance(ref, Ref) and ref.raw_source.name == src:
                     policy = state.schema._stream_policies.get((dst_op.full_name, var_name))
                     break
-            
+
             if policy and policy.collect:
                 # Buffer — flush all at once when generator EOF arrives.
                 collect_bufs.setdefault((src, dst), []).append((ctx, result))
@@ -253,19 +256,16 @@ class _Scheduler:
                 if not _evaluate_until(cfg, outputs) and n < cfg.max_iterations:
                     loop_iters[event.ctx] = n + 1
                     next_ctx = (
-                        event.ctx + ("loop_1",)
-                        if n == 0
-                        else event.ctx[:-1] + (f"loop_{n + 1}",)
+                        event.ctx + ("loop_1",) if n == 0 else event.ctx[:-1] + (f"loop_{n + 1}",)
                     )
                     for var, val in outputs.items():
                         state[op.full_name, var, next_ctx] = val
                     dispatch(event.op, next_ctx)
 
-        
         # Seed entry ops.
         for entry in g.entries:
             dispatch(entry, context_id)
-        
+
         # Main event loop - runs until all tasks and queue events are consumed.
         while inflight > 0:
             event = await queue.get()
@@ -274,7 +274,7 @@ class _Scheduler:
                 _on_frame(event)
             else:
                 _on_eof(event)
-        
+
         # Collect final outputs at root context.
         outputs = g.get_outputs(state, context_id)
         return outputs, item_ctxs

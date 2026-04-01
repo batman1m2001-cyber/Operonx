@@ -187,59 +187,62 @@ class LoopConfig:
 | 6 | `task_scheduler.py` | ✅ done — full rewrite: Frame/EOF model, `_Scheduler`, dispatch/pump/on_frame/route/on_eof |
 | 7 | `func_op.py` | ✅ done — async-gen `run()`, `parent_context` removed |
 | 8 | `branch_op.py` | ✅ done — `__branch_target__` injected in `_create_core_function()`, no `run()` override needed |
-| 9 | `llm.py` | 🔶 partial — `parent_context` removed, `yield` added; stream mode broken (see below) |
-| 10 | `engine.py` | ⬜ two call sites need `async for` update |
+| 9 | `llm.py` | ✅ done — stream branch drives `_stream_core()` directly, yields per-chunk frames |
+| 10 | `engine.py` | ✅ done — `run()` uses `async for`; `stream()` wraps generator in `_consume()` coroutine |
 | 11 | `collector.py` | ⬜ line 198: `stream_contexts` ref removed from GraphOp, needs fix |
+| 12 | `_output_queue` wiring | ⬜ see below — root scheduler + `_stream_output_ops` |
 
 ---
 
 ## Remaining Work
 
-### Step 9 — `llm.py` stream mode (CRITICAL)
+### Step 9 — `llm.py` stream mode ✅ DONE
 
-**Problem 1 — `LLMOp.run()` loses streaming chunks**
+`LLMOp.run()` now has a `stream` branch that drives `_stream_core()` directly:
+- iterates `_stream_core(**llm_params)`, stores each chunk with child context `[idx]`
+- yields `(chunk_ctx, chunk)` per token
+- `finally` block still records timing/cost (uses last chunk as `_outputs`)
 
-`LLMOp.run()` overrides `BaseOp.run()` and only yields once at the end. For stream mode,
-`_stream_core()` produces N chunks — but they're lost because the override never calls
-`super().run()` or iterates `_stream_core()` itself.
+### Step 10 — `engine.py` ✅ DONE
 
-**Problem 2 — `_output_queue` never written to**
+- `run()` line 258: uses `async for _, r in self.graph.run(state): result = r`
+- `stream()` line 348: wraps generator in `_consume()` coroutine, captures result in `_result` dict
 
-The legacy scheduler had:
-```python
-output_queue.put_nowait({"type": "token", "op": op_name, "data": result})
-```
-The new `task_scheduler.py` has no such code. `engine.stream()` sets `_output_queue`
-and waits for token events, but nothing writes to it.
+### Step 12 — `_output_queue` wiring (NEXT)
 
-**Fix plan:**
+**Design (settled after discussion):**
 
-1. Restructure `LLMOp.run()` — for stream mode, delegate to `super().run()` so
-   `BaseOp.run()` drives `_stream_core()` and yields one Frame per chunk:
+`_output_queue` is a `contextvars.ContextVar` set by `engine.stream()`. It must only be
+written by the **root graph scheduler** — nested graph schedulers run in the same async
+context and would leak internal frames if they also wrote to it.
+
+The root scheduler should write a frame to `_output_queue` only if the op is a
+**root output op** — an op whose output feeds the graph's final result. This covers:
+- ops connected to `END`
+- ops with vars mapped to `PARENT` via `outputs={"var": PARENT["var"]}` or `op[var] >> PARENT["var"]`
+
+**Implementation plan:**
+
+1. **`graph_op.py` `_build()`** — compute `_stream_output_ops: set[str]` at build time:
+   - include op names that connect directly to END
+   - include op names that have any push ref targeting PARENT (from `schema._push_refs`)
+
+2. **`task_scheduler._on_frame()`** — write to `_output_queue` when:
    ```python
-   async def run(self, state, context_id=None):
-       if self.stream:
-           async for ctx, result in super().run(state, context_id):
-               yield ctx, result
-           return
-       # batch/generate: existing logic unchanged
-       ...
-       yield context_id, _outputs
+   if g.parent is None and event.op in g._stream_output_ops:
+       oq = _output_queue.get()
+       if oq is not None:
+           oq.put_nowait({"type": "token", "op": event.op, "data": event.result})
    ```
+   - `g.parent is None` — root graph only
+   - `event.op in g._stream_output_ops` — only output-producing ops
+   - No `is_gen` check — frames from any op type are valid streaming events if they feed output
 
-2. Add `_output_queue` writes in `_on_frame` in `task_scheduler.py`:
-   ```python
-   oq = _output_queue.get()
-   if oq:
-       oq.put_nowait({"type": "token", "op": event.op, "data": event.result})
-   ```
+3. **`task_scheduler.py`** — re-add `from hush.core.utils.context import _output_queue`
 
-### Step 10 — `engine.py`
-
-Two call sites need updating from `await graph.run()` to `async for`:
-
-- **Line 258**: `result = await self.graph.run(state)` → `async for _, result in self.graph.run(state):`
-- **Line 345**: `asyncio.create_task(self.graph.run(state))` → wrap generator consumption in a coroutine
+**Note:** `is_gen` is op-level but streaming granularity should be per-var (an op can have
+both generator vars and final-only vars). This is a known limitation — deferred to a
+future refactor of `StreamPolicy`.
 
 ### Step 11 — `collector.py`
 

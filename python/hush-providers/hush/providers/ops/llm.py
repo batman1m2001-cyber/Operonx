@@ -15,6 +15,7 @@ from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
 from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
+from hush.core.utils.context import _output_queue
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -469,11 +470,7 @@ class LLMOp(BaseOp):
         state: "MemoryState",
         context_id: Optional[str] = None,
     ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
-        """Run the LLM op (generate and batch modes).
-
-        When stream=True, the scheduler drives _stream_core via _drive_generator()
-        instead of calling this method.
-        """
+        """Run the LLM op (generate, stream, and batch modes)."""
         request_id = state.request_id
         start_time = datetime.now()
         perf_start = perf_counter()
@@ -490,18 +487,33 @@ class LLMOp(BaseOp):
             _inputs = self.get_inputs(state, context_id=context_id)
             llm_params = self._build_llm_params(_inputs)
 
-            if self.batch_mode:
+            if self.stream:
+                oq = _output_queue.get()
+                base_ctx = context_id if context_id is not None else ("main",)
+                idx = 0
+                async for chunk in self._stream_core(**llm_params):
+                    chunk_ctx = base_ctx + (f"[{idx}]",)
+                    self.store_result(state, chunk, chunk_ctx)
+                    if oq is not None:
+                        oq.put_nowait({"type": "token", "op": self.full_name, "data": chunk})
+                    yield chunk_ctx, chunk
+                    idx += 1
+                    _outputs = chunk  # last chunk holds complete metadata
+
+            elif self.batch_mode:
                 LOGGER.info(f"Batch mode for {self.name}...")
                 completion = await self._batch_coordinator.submit(**llm_params)
                 _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
+                self.store_result(state, _outputs, context_id)
+                yield context_id, _outputs
 
             else:
                 LOGGER.info(f"Generate mode for {self.name}...")
                 generate_fn = selected_llm.generate if selected_llm else self.core
                 completion = await generate_fn(**llm_params)
                 _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
-
-            self.store_result(state, _outputs, context_id)
+                self.store_result(state, _outputs, context_id)
+                yield context_id, _outputs
 
         except Exception as e:
             import traceback
@@ -565,8 +577,6 @@ class LLMOp(BaseOp):
                     output_cost = output_tokens * (cost_output or 0)
                     cost_usd = input_cost + output_cost
             state[self.full_name, "cost_usd", context_id] = cost_usd
-
-        yield context_id, _outputs
 
     @shorthand
     def of(
