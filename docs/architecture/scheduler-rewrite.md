@@ -182,13 +182,78 @@ class LoopConfig:
 | 2a | `ref.py` | ✅ done — `StreamPolicy` dataclass + `_with_transform()` fix |
 | 2b | `schema.py` | ✅ done — `_stream_policies` index populated in `_build()` |
 | 3 | `state.py` | ✅ done — no `_shared_indices` checks |
-| 4 | `base.py` | ⬜ next — keep `contain_generation`, remove `_on_yield` |
-| 5 | `graph_op.py` | ⬜ — add `_stream_initial_ready`, update `serialize()` |
-| 6 | `task_scheduler.py` | ⬜ full rewrite |
-| 7 | `func_op.py` | ⬜ async-gen `run()`, remove `parent_context` |
-| 8 | `hush-providers/llm.py` | ⬜ async-gen `run()`, remove `parent_context` |
-| 9 | `branch_op.py` | ⬜ add `run()` override for `__branch_target__` |
-| 10 | `engine.py` | ⬜ two call sites for async-gen `run()` |
+| 4 | `base.py` | ✅ done — async-gen `run()`, `_on_yield` removed, `parent_context` removed |
+| 5 | `graph_op.py` | ✅ done — `Link` NamedTuple, `_build()`, async-gen `run()`, slots/serialize cleanup |
+| 6 | `task_scheduler.py` | ✅ done — full rewrite: Frame/EOF model, `_Scheduler`, dispatch/pump/on_frame/route/on_eof |
+| 7 | `func_op.py` | ✅ done — async-gen `run()`, `parent_context` removed |
+| 8 | `branch_op.py` | ✅ done — `__branch_target__` injected in `_create_core_function()`, no `run()` override needed |
+| 9 | `llm.py` | 🔶 partial — `parent_context` removed, `yield` added; stream mode broken (see below) |
+| 10 | `engine.py` | ⬜ two call sites need `async for` update |
+| 11 | `collector.py` | ⬜ line 198: `stream_contexts` ref removed from GraphOp, needs fix |
+
+---
+
+## Remaining Work
+
+### Step 9 — `llm.py` stream mode (CRITICAL)
+
+**Problem 1 — `LLMOp.run()` loses streaming chunks**
+
+`LLMOp.run()` overrides `BaseOp.run()` and only yields once at the end. For stream mode,
+`_stream_core()` produces N chunks — but they're lost because the override never calls
+`super().run()` or iterates `_stream_core()` itself.
+
+**Problem 2 — `_output_queue` never written to**
+
+The legacy scheduler had:
+```python
+output_queue.put_nowait({"type": "token", "op": op_name, "data": result})
+```
+The new `task_scheduler.py` has no such code. `engine.stream()` sets `_output_queue`
+and waits for token events, but nothing writes to it.
+
+**Fix plan:**
+
+1. Restructure `LLMOp.run()` — for stream mode, delegate to `super().run()` so
+   `BaseOp.run()` drives `_stream_core()` and yields one Frame per chunk:
+   ```python
+   async def run(self, state, context_id=None):
+       if self.stream:
+           async for ctx, result in super().run(state, context_id):
+               yield ctx, result
+           return
+       # batch/generate: existing logic unchanged
+       ...
+       yield context_id, _outputs
+   ```
+
+2. Add `_output_queue` writes in `_on_frame` in `task_scheduler.py`:
+   ```python
+   oq = _output_queue.get()
+   if oq:
+       oq.put_nowait({"type": "token", "op": event.op, "data": event.result})
+   ```
+
+### Step 10 — `engine.py`
+
+Two call sites need updating from `await graph.run()` to `async for`:
+
+- **Line 258**: `result = await self.graph.run(state)` → `async for _, result in self.graph.run(state):`
+- **Line 345**: `asyncio.create_task(self.graph.run(state))` → wrap generator consumption in a coroutine
+
+### Step 11 — `collector.py`
+
+- **Line 198**: `getattr(parent_op, "stream_contexts", [])` — `stream_contexts` slot removed from GraphOp.
+  Replace with the new `item_ctxs` returned by the scheduler, or remove if tracing no longer needs it.
+
+### Tests (after all steps)
+
+| File | Change needed |
+|------|--------------|
+| `test_graph_op.py` (lines 872–1174) | `graph.initial_ready_count` → `graph._initial_ready`; delete `has_soft_preds` asserts |
+| `test_streaming.py` (lines 76, 86, 110–111, 136–137) | `_stream_predecrements` → `_stream_initial_ready` |
+| `test_serialize.py` (lines 150, 151, 199) | update key assertions |
+| `rust/hush-icore/src/config.rs` (lines 182–251) | parse `stream_initial_ready`; handle missing `has_soft_preds` |
 
 ---
 
@@ -254,21 +319,115 @@ async def run(self, state, context_id):
 
 ## Step 5 — `graph_op.py`
 
-### __slots__ — remove, rename
-- Remove: `initial_ready_count`, `has_soft_preds`, `_compiled_adj`,
-  `_stream_predecrements`, `stream_contexts`, `_has_streaming`
-- Add: `_adj` (replaces `_compiled_adj`), `_stream_initial_ready`
+### Edge NamedTuple — add near top of file (before class)
 
-### build() — replace three methods with one
+```python
+from typing import NamedTuple
 
-Remove: `_build_ready_counts()`, `_build_adj()`, `_build_predecrements()`
-Add: `_build()`
+class Edge(NamedTuple):
+    dst: str
+    soft: bool
+```
+
+Used by `_build()` and referenced by the scheduler in Step 6 as `edge.dst`, `edge.soft`.
+
+### Imports — remove stale task_scheduler imports
+
+```python
+# OLD
+from hush.core.ops.graph.task_scheduler import (
+    LoopConfig,
+    WorkflowScheduler,
+    _is_gen,
+    get_current_scheduler,
+    run_loop,
+    run_task_scheduler,
+)
+
+# NEW — only keep what graph_op.py actually uses
+from hush.core.ops.graph.task_scheduler import (
+    LoopConfig,
+    run_task_scheduler,
+)
+```
+
+Removed: `WorkflowScheduler`, `_is_gen`, `get_current_scheduler`, `run_loop`.
+Loop execution moves into the scheduler's EOF handler (Step 6). `run_loop` has only one
+caller (graph_op.py:501) — safe to remove once loop logic is in scheduler.
+
+### __slots__ — remove 6, add 3
+
+```python
+# Remove these 6
+"initial_ready_count"
+"has_soft_preds"
+"_compiled_adj"
+"_stream_predecrements"
+"stream_contexts"
+"_has_streaming"
+
+# Add these 3
+"_adj"              # replaces _compiled_adj
+"_initial_ready"    # replaces initial_ready_count
+"_stream_initial_ready"
+```
+
+### __init__ — remove 5 old inits, add 3 new
+
+```python
+# Remove these 5 lines
+self.has_soft_preds = set()
+self._stream_predecrements = {}
+self._compiled_adj = {}
+self.stream_contexts = []
+self._has_streaming = False
+
+# Add these 3 lines (after self._loop_config = None)
+self._adj = {}
+self._initial_ready = {}
+self._stream_initial_ready = {}
+```
+
+### build() — replace three methods with one, remove _has_streaming line
+
+```python
+def build(self):
+    for child in self._ops.values():
+        if hasattr(child, "build"):
+            child.build()
+
+    self._setup_schema()
+    self._setup_endpoints()
+
+    result = self.validate()
+    result.raise_if_errors()
+
+    self._build()   # ← replaces _build_ready_counts() + _build_adj() + _build_predecrements()
+
+    if self._loop_config and isinstance(self._loop_config.until, str):
+        self._loop_config._compiled_until = compile(self._loop_config.until, "<until>", "eval")
+
+    self._is_building = False
+    self._cache_full_names()
+    # NOTE: _has_streaming line removed — scheduler uses op.is_gen directly (set in Step 4)
+```
+
+Note: `_build_ready_counts()` was called BEFORE `validate()` in the old code. In the
+new flow, `_build()` runs AFTER `validate()`. This is correct — validation only needs
+`prevs`/`nexts`/`entries`/`exits`, not ready counts.
+
+### _build() — delete 3 old methods, add new one
+
+Delete `_build_ready_counts()`, `_build_adj()`, `_build_predecrements()` entirely.
+
+Add `_build()` in their place:
 
 ```python
 def _build(self):
+    """Single pass: adjacency list + initial ready counts + stream-context ready counts."""
     adj      = {name: [] for name in self._ops}
     ready    = {name: 0  for name in self._ops}
-    has_soft = {}
+    has_soft: Dict[str, bool] = {}
 
     for (src, dst), edge in self._edges.items():
         adj[src].append(Edge(dst, edge.soft))
@@ -289,8 +448,6 @@ def _build(self):
     # downstream ops' ready counts so stream_ctx starts with correct counts.
     #
     # Conservative: only subtract DIRECT predecessors of G (via hard edge).
-    # A more precise approach would use transitive ancestors, but direct preds
-    # covers the common case: linear chains like A → G → B.
     stream_initial = {}
     for gen_name in self._ops:
         gen_preds = {
@@ -305,95 +462,184 @@ def _build(self):
                     continue  # gen contributes via per-frame decrements
                 edge = self._edges.get((pred, op_name))
                 if edge and not edge.soft and pred in gen_preds:
-                    # pred is a hard-edge predecessor of gen → guaranteed
-                    # completed before gen starts streaming
                     r = max(0, r - 1)
             ri[op_name] = r
         stream_initial[gen_name] = ri
     self._stream_initial_ready = stream_initial  # Dict[str, Dict[str, int]]
 ```
 
-No `_get_policy()` — stream policy is resolved from `state.schema._stream_policies` by the scheduler at runtime (O(1) index, prebuilt by StateSchema).
+No `_get_policy()` — stream policy resolved from `state.schema._stream_policies` at runtime (O(1), prebuilt by StateSchema).
 
-### serialize() — update field names
+### loop() classmethod — remove initial_state from LoopConfig
 
-`serialize()` references old slot names. Update after renaming:
-- `initial_ready_count` → `_initial_ready`
-- `compiled_adj` → `_adj`
-- `_loop_config.initial_state` → remove (use `_shared_indices` for loop var names)
-
-### run() — async generator
-
-`GraphOp.run()` also becomes an async generator so `pump_op` can drive it uniformly.
-`run_task_scheduler` now returns `(outputs, stream_ctxs)`.
+`LoopConfig.initial_state` field is removed in Step 6. Remove it from the constructor call:
 
 ```python
-async def run(self, state, context_id):
-    outputs, stream_ctxs = await run_task_scheduler(self, state, context_id, ...)
+# OLD
+g._loop_config = LoopConfig(
+    until=until,
+    max_iterations=max_iterations,
+    initial_state=initial_state,
+)
 
-    if not stream_ctxs:
-        # Batch mode: all ops completed at context_id, outputs are there
-        self.store_result(state, outputs, context_id)
-        yield context_id, outputs
-    else:
-        # Streaming mode: ops completed at stream_ctxs, yield one Frame per ctx
-        for sctx in stream_ctxs:
-            item = self.get_outputs(state, context_id=sctx)
-            yield sctx, item
+# NEW — initial_state already forwarded to GraphOp as inputs= (line above this)
+g._loop_config = LoopConfig(
+    until=until,
+    max_iterations=max_iterations,
+)
 ```
 
-This ensures the outer `_pump` receives the correct number of Frames regardless
-of whether the inner graph ran in batch or streaming mode.
+`initial_state` values are already passed to `cls(name=name, inputs=initial_state or None)` on
+the line above — they become graph PARENT inputs, not LoopConfig state. The LoopConfig only
+needs the stop condition.
 
-### engine.py — update call sites
-
-`run()` is now an async generator. Two call sites in `engine.py` need updating:
+### run() — async generator, no parent_context, no run_loop
 
 ```python
-# engine.run() — line 258
-result = {}
-async for _, r in self.graph.run(state):
-    result = r
+async def run(self, state: "MemoryState", context_id=None):
+    """Execute graph: get inputs → schedule → yield (ctx, outputs) per frame."""
 
-# engine.stream() — line 345, asyncio.create_task() needs a coroutine, not a gen
-async def _run_and_collect():
-    result = {}
-    async for _, r in self.graph.run(state):
-        result = r
-    return result
-task = asyncio.create_task(_run_and_collect())
-# _output_queue ContextVar is set before this, so _on_frame can still enqueue frames ✓
+    if context_id is None:
+        context_id = DEFAULT_CONTEXT
+
+    request_id = state.request_id
+    start_time = datetime.now(timezone.utc)
+    perf_start = perf_counter()
+    _inputs = {}
+    _outputs = {}
+    error_msg = None
+
+    try:
+        _inputs = self.get_inputs(state, context_id=context_id)
+
+        if self._is_building:
+            self.build()
+
+        _outputs, stream_ctxs = await run_task_scheduler(self, state, context_id, request_id)
+        # Loop iteration is handled inside run_task_scheduler via scheduler EOF handler (Step 6).
+        # No run_loop() call here.
+
+        if not stream_ctxs:
+            # Batch mode: single result at context_id
+            self.store_result(state, _outputs, context_id)
+            yield context_id, _outputs
+        else:
+            # Streaming mode: one yield per stream context
+            for sctx in stream_ctxs:
+                item = self.get_outputs(state, context_id=sctx)
+                yield sctx, item
+
+    except Exception:
+        import sys
+        error_msg = (
+            traceback.format_exc()
+            if LOGGER.isEnabledFor(40)
+            else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+        )
+        LOGGER.error(
+            "[title]\\[%s][/title] Error in op [highlight]%s[/highlight]:\n%s",
+            request_id, self.name, error_msg.rstrip(),
+        )
+
+    finally:
+        end_time = datetime.now(timezone.utc)
+        duration_ms = (perf_counter() - perf_start) * 1000
+        self._log(request_id, context_id, _inputs, _outputs, duration_ms)
+        self._store_metrics(
+            state, context_id,
+            start_time=start_time, end_time=end_time, duration_ms=duration_ms,
+        )
+        if error_msg is not None:
+            state[self.full_name, "error", context_id] = error_msg
+        # NOTE: no `return _outputs` — illegal in async generator
 ```
 
-### BaseOp.__call__ — update for async generator
+Key changes vs old `run()`:
+- `parent_context` parameter removed
+- `get_inputs()` call: remove `parent_context=parent_context`
+- `run_task_scheduler()`: 4 args `(self, state, context_id, request_id)` — `parent_context` removed
+- `self.stream_contexts = stream_ctxs` line removed (slot deleted)
+- `run_loop()` call removed — loop handled in scheduler EOF handler (Step 6)
+- `_loop_metrics` pop/re-add block removed — scheduler sets it directly on state (Step 6)
+- `return _outputs` in `finally` removed — illegal in async generator
+
+### serialize() — update Python attr refs, keep JSON keys for Rust compat
+
+**IMPORTANT:** The Rust backend (`rust/hush-icore/src/config.rs`) parses these JSON keys by
+exact name. Keep JSON output keys unchanged; only update the Python attribute references.
+`has_soft_preds` is deleted entirely (Rust config.rs needs updating when Rust is rewritten).
+`stream_predecrements` replaced by `stream_initial_ready` (different format — Rust Step TBD).
 
 ```python
-# __call__ quick-test path
-async def _collect():
-    result = {}
-    async for _, r in self.run(state):
-        result = r
-    return result
-# replace asyncio.run(self.run(state)) with:
-try:
-    asyncio.get_running_loop()
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        result = pool.submit(asyncio.run, _collect()).result()
-except RuntimeError:
-    result = asyncio.run(_collect())
+def serialize(self) -> dict:
+    base = super().serialize()
+    base.update(
+        {
+            "ops": {name: op.serialize() for name, op in self._ops.items()},
+            "edges": [
+                {"from": src, "to": dst, "soft": edge.soft}
+                for (src, dst), edge in self._edges.items()
+            ],
+            "entries": list(self.entries),
+            "exits": list(self.exits),
+            "initial_ready_count": dict(self._initial_ready),   # ← attr renamed, JSON key kept
+            # "has_soft_preds" removed — field deleted, no longer computed
+            "compiled_adj": {                                    # ← JSON key kept for Rust compat
+                op: [[e.dst, e.soft] for e in edges]            # ← Edge namedtuple fields
+                for op, edges in self._adj.items()
+            },
+            "stream_initial_ready": self._stream_initial_ready, # ← replaces stream_predecrements (new format)
+            "loop_config": {
+                "until": self._loop_config.until
+                if isinstance(self._loop_config.until, str)
+                else None,
+                "max_iterations": self._loop_config.max_iterations,
+                # "loop_vars" removed — Rust parses but never uses at runtime
+            }
+            if self._loop_config
+            else None,
+            "max_stream_concurrent": self.concurrency,
+        }
+    )
+    return base
 ```
 
-### LoopConfig — remove initial_state
+### show() — rename field ref
+
+```python
+LOGGER.debug("%sReady count: %s", prefix, dict(self._initial_ready))
+#                                                  ↑ was initial_ready_count
+```
+
+### Cascading changes to other files (NOT part of Step 5 — tracked in their own steps)
+
+These are discovered by agents and must be fixed in the steps listed:
+
+| File | Line | Change needed | Step |
+|------|------|---------------|------|
+| `task_scheduler.py` | 189, 332, 465 | `graph.initial_ready_count` → `graph._initial_ready` | 6 |
+| `task_scheduler.py` | 211, 476 | `graph._compiled_adj` → `graph._adj` | 6 |
+| `task_scheduler.py` | 333, 466 | `graph._stream_predecrements` → `graph._stream_initial_ready` (new format) | 6 |
+| `task_scheduler.py` | 239 | remove `getattr(op_obj, '_has_streaming', False)` check | 6 |
+| `task_scheduler.py` | 247 | `await op_obj.run(state, task.context_id, parent_context)` → remove parent_context | 6 |
+| `func_op.py` | 428, 433 | remove parent_context from run() and get_inputs() calls | 7 |
+| `engine.py` | 258, 345 | update for async-gen run() | 10 |
+| `collector.py` | 199 | `getattr(parent_op, "stream_contexts", [])` — stream_contexts no longer on GraphOp | 10 |
+| `test_graph_op.py` | 872–1174 | `graph.initial_ready_count` → `graph._initial_ready`; delete `has_soft_preds` asserts | tests |
+| `test_streaming.py` | 76, 86, 110–111, 136–137 | `_stream_predecrements` → `_stream_initial_ready` (verify expected values) | tests |
+| `test_serialize.py` | 150, 151, 199 | update key assertions | tests |
+| `debug_predecrements.py` | 31–32 | update attr names | tests |
+| `rust/hush-icore/src/config.rs` | 182–251 | parse `stream_initial_ready` key; handle missing `has_soft_preds` | Rust step |
+
+### LoopConfig — remove initial_state (in task_scheduler.py, Step 6)
 ```python
 @dataclass
 class LoopConfig:
-    until:          str | Callable
-    max_iterations: int = 1000
-    _compiled_until: Any = field(default=None, repr=False)
+    until:           Any   # str expression or callable
+    max_iterations:  int   = 1000
+    _compiled_until: Any   = field(default=None, repr=False)
+    # initial_state removed — initial values live as graph inputs, not here
 ```
-
-The `initial_state` kwarg in `GraphOp.loop()` is forwarded to `PARENT.shared()` instead
-of stored in LoopConfig.
 
 ---
 

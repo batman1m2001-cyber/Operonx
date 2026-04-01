@@ -5,7 +5,7 @@ import inspect
 import textwrap
 import warnings
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
 from hush.core.configs.op_config import OpType
 from hush.core.exceptions import CodeError
@@ -369,7 +369,7 @@ class FuncOp(BaseOp):
         self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
 
         self.code_fn = code_fn
-        self.core = code_fn
+        self._set_core(code_fn)
 
         # Lấy source code
         try:
@@ -418,19 +418,19 @@ class FuncOp(BaseOp):
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
         """Thực thi FuncOp với error wrapping.
 
         Override để wrap exceptions trong CodeError với context đầy đủ.
         """
         try:
-            return await super().run(state, context_id, parent_context)
+            async for ctx, result in super().run(state, context_id):
+                yield ctx, result
         except CodeError:
             raise  # Đã wrapped, không wrap lại
         except Exception as e:
             # Lấy inputs để có context cho error
-            _inputs = self.get_inputs(state, context_id, parent_context)
+            _inputs = self.get_inputs(state, context_id)
             raise CodeError(
                 message=f"Function '{self.code_fn.__name__ if self.code_fn else 'unknown'}' raised an exception",
                 function_name=self.code_fn.__name__ if self.code_fn else "unknown",

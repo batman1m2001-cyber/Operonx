@@ -169,7 +169,7 @@ class TritonOp(BaseOp):
         # Lazy client init
         self._client = None
 
-        self.core = self._process
+        self._set_core(self._process)
 
     def _resolve_resource(self, resource: str) -> dict:
         """Resolve triton resource config from ResourceHub."""

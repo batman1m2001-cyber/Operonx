@@ -84,7 +84,7 @@ class RerankOp(BaseOp):
             hub = get_hub()
 
         self.backend = hub.get(f"reranking:{self.resource}")
-        self.core = self._process
+        self._set_core(self._process)
 
     async def _process(
         self, query: str, documents: List, top_k: int, threshold: float

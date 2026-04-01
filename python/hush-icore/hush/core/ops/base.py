@@ -7,7 +7,7 @@ import uuid
 from abc import ABC
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event, format_log_data
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
@@ -15,6 +15,7 @@ from hush.core.states.ref import Ref
 from hush.core.utils.auto_name import auto_name, unique_name
 from hush.core.utils.common import Param
 from hush.core.utils.context import get_current
+from hush.core.states.cell import DEFAULT_CONTEXT
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -113,7 +114,7 @@ class BaseOp(ABC):
         "bound",
         "cache",
         "delay",
-        "_on_yield",
+        "is_gen",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -150,7 +151,6 @@ class BaseOp(ABC):
         self.bound = bound
         self.cache = cache
         self.delay = delay
-        self._on_yield = None  # set by scheduler before run() for generator ops
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -168,6 +168,7 @@ class BaseOp(ABC):
         self.targets: List[str] = targets or []
 
         self.core: Optional[Callable] = None
+        self.is_gen: bool = False
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
         self.parent = get_current()
@@ -332,21 +333,24 @@ class BaseOp(ABC):
             self.build()
 
         state = MemoryState(StateSchema(op=self), inputs=kwargs)
+
+        async def _collect():
+            result = {}
+            async for _, result in self.run(state):
+                pass
+            return result
+
         try:
             asyncio.get_running_loop()
             import concurrent.futures
-
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = pool.submit(asyncio.run, self.run(state)).result()
+                result = pool.submit(asyncio.run, _collect()).result()
         except RuntimeError:
-            result = asyncio.run(self.run(state))
+            result = asyncio.run(_collect())
         return result
 
-    def is_base_op(self) -> bool:
-        return True
-
     def get_inputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+        self, state: "MemoryState", context_id: str
     ) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
 
@@ -358,19 +362,9 @@ class BaseOp(ABC):
         result = {}
 
         for var_name, param in self.inputs.items():
-            # PARENT refs use parent_context (for loop iterations); everything else
-            # uses context_id directly — Cell hierarchy fallback handles batch resolution.
-            if (
-                parent_context is not None
-                and isinstance(param.value, Ref)
-                and param.value.raw_source is self.parent
-            ):
-                lookup_ctx = parent_context
-            else:
-                lookup_ctx = context_id
 
             # Always read from state first (may have value from MemoryState inputs or Ref)
-            value = state[self.full_name, var_name, lookup_ctx]
+            value = state[self.full_name, var_name, context_id]
 
             if value is not None:
                 result[var_name] = value
@@ -384,7 +378,7 @@ class BaseOp(ABC):
         return result
 
     def get_outputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
+        self, state: "MemoryState", context_id: str
     ) -> Dict[str, Any]:
         """Read output values from state.
 
@@ -545,36 +539,37 @@ class BaseOp(ABC):
         state[self.full_name, "end_time", context_id] = end_time
         state[self.full_name, "duration_ms", context_id] = duration_ms
 
-    async def _exec_core(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Dispatch core function based on its type (async, threaded, sync).
+    def _set_core(self, fn: Callable) -> None:
+        """Assign core function and precompute is_gen."""
+        self.core = fn
+        self.is_gen = inspect.isasyncgenfunction(fn) or inspect.isgeneratorfunction(fn)
 
-        Rejects generator functions — those must be driven by the
-        GraphOp scheduler, not called directly.
-        """
-        if inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core):
-            raise TypeError(
-                f"Generator op '{self.name}' cannot be called via run() directly. "
-                "Use it inside a GraphOp where the scheduler drives the generator."
-            )
-
-        if inspect.iscoroutinefunction(self.core):
-            return await self.core(**inputs)
+    async def _exec_core(self, inputs: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
+        """Unified dispatch — yields one result for normal ops, N for generators."""
+        core_fn = self.core
+        if inspect.isasyncgenfunction(core_fn):
+            async for result in core_fn(**inputs):
+                yield result
+        elif inspect.isgeneratorfunction(core_fn):
+            for result in core_fn(**inputs):
+                yield result
+        elif inspect.iscoroutinefunction(core_fn):
+            yield await core_fn(**inputs)
         elif self.executor == "thread":
-            return await asyncio.to_thread(self.core, **inputs)
+            yield await asyncio.to_thread(core_fn, **inputs)
         else:
-            return self.core(**inputs)
+            yield core_fn(**inputs)
 
     async def run(
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
     ):
         """Execute this op. Results stored to state.
 
         Handles both normal ops (single result) and generator ops (multiple yields).
-        Generator yields notify scheduler via _on_yield callback.
-        Returns _outputs for backward compat (direct call). Scheduler ignores return.
+        async generator — yields (context_id, result) per frame.
+        Normal op yields once. Generator op yields N times.
         """
         if not self.enabled:
             return
@@ -590,49 +585,28 @@ class BaseOp(ABC):
             if self.delay > 0:
                 await asyncio.sleep(self.delay)
 
-            _inputs = self.get_inputs(state, context_id, parent_context)
+            _inputs = self.get_inputs(state, context_id)
 
             # Cache check
-            _cache_hit = False
             if self.cache is not None:
                 _cache_key = self._cache_hash(_inputs)
                 _cache_store = self._get_cache_store()
                 if _cache_key in _cache_store:
                     _outputs = _cache_store[_cache_key]
                     self.store_result(state, _outputs, context_id)
-                    _cache_hit = True
+                    yield context_id, _outputs # <- add
+                    return # <- add (stops generators, triggers finally)
 
-            if not _cache_hit:
-                core_fn = self.core
-                is_gen = core_fn is not None and (
-                    inspect.isasyncgenfunction(core_fn)
-                    or inspect.isgeneratorfunction(core_fn)
-                )
-
-                if is_gen:
-                    # Generator: iterate yields, store per stream context
-                    idx = 0
-                    if inspect.isasyncgenfunction(core_fn):
-                        async for result in core_fn(**_inputs):
-                            stream_ctx = context_id + (f"[{idx}]",)
-                            self.store_result(state, result, stream_ctx)
-                            if self._on_yield:
-                                await self._on_yield(self.name, stream_ctx, result)
-                            idx += 1
-                    else:
-                        for result in core_fn(**_inputs):
-                            stream_ctx = context_id + (f"[{idx}]",)
-                            self.store_result(state, result, stream_ctx)
-                            if self._on_yield:
-                                await self._on_yield(self.name, stream_ctx, result)
-                            idx += 1
-                    _outputs = {}  # generator outputs stored per-yield, not here
-                else:
-                    # Normal: single execution
-                    _outputs = await self._exec_core(_inputs)
-                    if self.cache is not None:
-                        _cache_store[_cache_key] = _outputs
-                    self.store_result(state, _outputs, context_id)
+            base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
+            idx = 0
+            async for result in self._exec_core(_inputs):
+                ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
+                self.store_result(state, result, ctx)
+                if not self.is_gen and self.cache is not None:
+                    _cache_store[_cache_key] = result
+                    _outputs = result
+                yield ctx, result
+                idx += 1
 
         except Exception:
             import sys
@@ -672,8 +646,6 @@ class BaseOp(ABC):
                         duration_ms=f"{duration_ms:.1f}",
                     ),
                 )
-
-            return _outputs
 
     # =========================================================================
     # 5. SERIALIZATION — for Rust backend and tracing

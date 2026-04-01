@@ -16,7 +16,6 @@ import logging
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hush.core.ops.graph.task_scheduler import _is_gen
 from hush.core.tracing.models import TraceNode, TraceSummary
 from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
@@ -177,7 +176,7 @@ class TraceCollector:
 
         gen_ops: Set[str] = set()
         for name, op in graph._ops.items():
-            if _is_gen(op):
+            if getattr(op, "is_gen", False):
                 gen_ops.add(op.full_name)
             if isinstance(op, GraphOp):
                 self._build_graph_meta(op, result)
