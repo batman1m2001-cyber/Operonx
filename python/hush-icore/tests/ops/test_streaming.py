@@ -73,7 +73,7 @@ class TestStreamPredecrements:
         g.build()
 
         # p only has s as predecessor (the generator itself), no batch predecessors
-        assert g._stream_predecrements == {}
+        assert g._stream_initial_ready == {}
 
     def test_no_generators_no_predecrements(self):
         """Graph with no generators has empty predecrements."""
@@ -83,7 +83,7 @@ class TestStreamPredecrements:
 
         g.build()
 
-        assert g._stream_predecrements == {}
+        assert g._stream_initial_ready == {}
 
     def test_broadcast_has_predecrements(self):
         """config (batch) + source (gen) >> process → process needs predecrement for config."""
@@ -107,8 +107,8 @@ class TestStreamPredecrements:
         g.build()
 
         # p has cfg as batch predecessor (not reachable from s) → predecrement 1
-        assert "s" in g._stream_predecrements
-        assert g._stream_predecrements["s"]["p"] == 1
+        assert "s" in g._stream_initial_ready
+        assert g._stream_initial_ready["s"]["p"] == 1
 
     def test_nested_generators(self):
         """gen1 >> gen2 >> process: gen2 is downstream of gen1, process downstream of gen2."""
@@ -133,8 +133,8 @@ class TestStreamPredecrements:
 
         # No batch predecessors outside the generator chains
         # gen1's downstream: gen2, p — but gen2 only has gen1 as pred, p only has gen2
-        assert g._stream_predecrements.get("g1", {}).get("g2") is None
-        assert g._stream_predecrements.get("g2", {}).get("p") is None
+        assert g._stream_initial_ready.get("g1", {}).get("g2") is None
+        assert g._stream_initial_ready.get("g2", {}).get("p") is None
 
 
 # =============================================================================
@@ -160,7 +160,9 @@ class TestSimpleStreamChain:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [2, 4, 6]
 
@@ -181,7 +183,9 @@ class TestSimpleStreamChain:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [5]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [10]
 
@@ -202,7 +206,9 @@ class TestSimpleStreamChain:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": []})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == []
 
@@ -230,7 +236,9 @@ class TestAsyncGenerator:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [10, 20, 30]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [20, 40, 60]
 
@@ -264,7 +272,9 @@ class TestBroadcast:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3], "factor_input": 5})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # cfg doubles 5 → 10, then multiply each item by 10
         assert result["result"] == [10, 20, 30]
@@ -304,7 +314,9 @@ class TestFanOut:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # Both a and b produce "result" — last op to write wins per context
         assert len(result["result"]) == 3
@@ -348,7 +360,9 @@ class TestFanInJoin:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # item=1: a=2, b=2, merge=4
         # item=2: a=3, b=4, merge=7
@@ -398,7 +412,9 @@ class TestTwoGeneratorsZip:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"a_items": [1, 2, 3]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [101, 102, 103]
 
@@ -445,7 +461,9 @@ class _TestBackpressureDeferred:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert len(result["result"]) == 5
         # Note: concurrency limiting deferred — currently all tasks run concurrently
@@ -482,7 +500,9 @@ class _TestBackpressureDeferred:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert len(result["result"]) == 5
         # Note: concurrency limiting deferred — currently all tasks run concurrently
@@ -524,7 +544,9 @@ class _TestBackpressureDeferred:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert len(result["result"]) == 3
 
@@ -561,7 +583,9 @@ class _TestBackpressureDeferred:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
         t0 = perf_counter()
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         elapsed = perf_counter() - t0
 
         assert len(result["result"]) == 3
@@ -594,7 +618,9 @@ class TestGeneratorError:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4]})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # Only items 1, 2 are yielded before error
         assert result["result"] == [2, 4]
@@ -617,7 +643,9 @@ class TestBatchOnlyUnchanged:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"x": 5})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == 10
 
@@ -638,7 +666,9 @@ class TestBatchOnlyUnchanged:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"x": 0})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["x"] == 3
 
@@ -668,7 +698,9 @@ class TestBatchOnlyUnchanged:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"x": 5})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == 40  # (5+10) + (5+20) = 40
 
@@ -696,7 +728,8 @@ class TestGeneratorMetrics:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2]})
-        await g.run(state)
+        async for _ in g.run(state):
+            pass
 
         # Generator op should have timing metrics in the batch context
         start_time = state["metrics_test.s", "start_time"]
@@ -792,7 +825,9 @@ class TestNestedStreamDepth:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 2})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # gen1 yields: 0, 1
         # gen2(0) yields: 0, 1  → double → 0, 2

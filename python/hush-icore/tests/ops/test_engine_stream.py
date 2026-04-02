@@ -1,4 +1,4 @@
-"""Tests for engine.stream() — real-time streaming event delivery."""
+"""Tests for engine.start() — streaming output API (replaced engine.stream())."""
 
 import pytest
 
@@ -11,38 +11,37 @@ def double(x: int):
 
 
 # =============================================================================
-# Test 1: stream() on batch graph yields single done event
+# Test 1: start() on batch graph yields one frame
 # =============================================================================
 
 
-class TestStreamBatchGraph:
+class TestStartBatchGraph:
     @pytest.mark.asyncio
-    async def test_batch_graph_yields_done_only(self):
-        """Non-streaming graph via stream() yields only a 'done' event."""
+    async def test_batch_graph_yields_one_frame(self):
+        """Batch graph via start() yields one frame with output."""
         with GraphOp(name="batch") as g:
             d = double(x=PARENT["x"])
             START >> d >> END
 
         engine = Hush(g)
-        events = []
-        async for event in engine.stream(inputs={"x": 5}):
-            events.append(event)
+        frames = []
+        async for op_name, ctx, data in engine.start(inputs={"x": 5}):
+            frames.append((op_name, ctx, data))
 
-        assert len(events) == 1
-        assert events[0]["type"] == "done"
-        assert events[0]["data"]["result"] == 10
-        assert "$state" in events[0]["data"]
+        assert len(frames) == 1
+        assert frames[0][0] == "d"
+        assert frames[0][2]["result"] == 10
 
 
 # =============================================================================
-# Test 2: stream() on generator graph yields token + done events
+# Test 2: start() on generator graph yields one frame per item
 # =============================================================================
 
 
-class TestStreamGeneratorGraph:
+class TestStartGeneratorGraph:
     @pytest.mark.asyncio
-    async def test_generator_yields_token_events(self):
-        """Generator graph via stream() yields token events then done."""
+    async def test_generator_yields_one_frame_per_item(self):
+        """Generator graph via start() yields one frame per item."""
 
         @op
         def source(items: list):
@@ -55,27 +54,16 @@ class TestStreamGeneratorGraph:
             START >> s >> d >> END
 
         engine = Hush(g)
-        events = []
-        async for event in engine.stream(inputs={"items": [1, 2, 3]}):
-            events.append(event)
+        frames = []
+        async for op_name, ctx, data in engine.start(inputs={"items": [1, 2, 3]}):
+            frames.append((op_name, ctx, data))
 
-        # Should have token events from the generator + 1 done event
-        token_events = [e for e in events if e["type"] == "token"]
-        done_events = [e for e in events if e["type"] == "done"]
-
-        assert len(token_events) == 3
-        assert len(done_events) == 1
-
-        # Token events come from the source generator
-        token_values = [e["data"]["value"] for e in token_events]
-        assert sorted(token_values) == [1, 2, 3]
-
-        # Done event has accumulated results
-        assert sorted(done_events[0]["data"]["result"]) == [2, 4, 6]
+        assert len(frames) == 3
+        assert sorted(f[2]["result"] for f in frames) == [2, 4, 6]
 
     @pytest.mark.asyncio
-    async def test_generator_token_events_have_op_name(self):
-        """Token events include the op name."""
+    async def test_frame_has_op_name(self):
+        """Frames include the op name."""
 
         @op
         def source(items: list):
@@ -87,24 +75,23 @@ class TestStreamGeneratorGraph:
             START >> s >> END
 
         engine = Hush(g)
-        events = []
-        async for event in engine.stream(inputs={"items": [1]}):
-            events.append(event)
+        frame_ops = []
+        async for op_name, ctx, data in engine.start(inputs={"items": [1]}):
+            frame_ops.append(op_name)
 
-        token_events = [e for e in events if e["type"] == "token"]
-        assert len(token_events) == 1
-        assert token_events[0]["op"] == "s"
+        assert len(frame_ops) == 1
+        assert frame_ops[0] == "s"
 
 
 # =============================================================================
-# Test 3: stream() with async generator
+# Test 3: start() with async generator
 # =============================================================================
 
 
-class TestStreamAsyncGenerator:
+class TestStartAsyncGenerator:
     @pytest.mark.asyncio
     async def test_async_generator_streams(self):
-        """Async generator works with stream()."""
+        """Async generator works with start()."""
 
         @op
         async def async_source(items: list):
@@ -117,27 +104,23 @@ class TestStreamAsyncGenerator:
             START >> s >> d >> END
 
         engine = Hush(g)
-        events = []
-        async for event in engine.stream(inputs={"items": [10, 20]}):
-            events.append(event)
+        frames = []
+        async for op_name, ctx, data in engine.start(inputs={"items": [10, 20]}):
+            frames.append(data)
 
-        token_events = [e for e in events if e["type"] == "token"]
-        done_events = [e for e in events if e["type"] == "done"]
-
-        assert len(token_events) == 2
-        assert len(done_events) == 1
-        assert sorted(done_events[0]["data"]["result"]) == [20, 40]
+        assert len(frames) == 2
+        assert sorted(f["result"] for f in frames) == [20, 40]
 
 
 # =============================================================================
-# Test 4: stream() with empty generator
+# Test 4: start() with empty generator
 # =============================================================================
 
 
-class TestStreamEmptyGenerator:
+class TestStartEmptyGenerator:
     @pytest.mark.asyncio
-    async def test_empty_generator_yields_done_only(self):
-        """Empty generator yields no tokens, just done."""
+    async def test_empty_generator_yields_no_frames(self):
+        """Empty generator: handle yields no frames."""
 
         @op
         def source(items: list):
@@ -150,27 +133,41 @@ class TestStreamEmptyGenerator:
             START >> s >> d >> END
 
         engine = Hush(g)
-        events = []
-        async for event in engine.stream(inputs={"items": []}):
-            events.append(event)
+        frames = []
+        async for op_name, ctx, data in engine.start(inputs={"items": []}):
+            frames.append(data)
 
-        token_events = [e for e in events if e["type"] == "token"]
-        done_events = [e for e in events if e["type"] == "done"]
-
-        assert len(token_events) == 0
-        assert len(done_events) == 1
-        assert done_events[0]["data"]["result"] == []
+        assert len(frames) == 0
 
 
 # =============================================================================
-# Test 5: run() still works unchanged (backward compat)
+# Test 5: collect() — last-value-wins aggregation
 # =============================================================================
 
 
-class TestRunUnchanged:
+class TestCollect:
     @pytest.mark.asyncio
-    async def test_run_returns_accumulated_result(self):
-        """engine.run() still returns accumulated dict, no streaming."""
+    async def test_collect_returns_last_value(self):
+        """handle.collect() merges frames, last-value-wins for generators."""
+
+        @op
+        def source(items: list):
+            for item in items:
+                yield {"x": item}
+
+        with GraphOp(name="collect_test") as g:
+            s = source(items=PARENT["items"])
+            d = double(x=s["x"])
+            START >> s >> d >> END
+
+        engine = Hush(g)
+        result = await engine.start(inputs={"items": [1, 2, 3]}).collect()
+
+        assert result["result"] == 6  # last-value-wins
+
+    @pytest.mark.asyncio
+    async def test_run_returns_last_value(self):
+        """engine.run() returns merged dict (last-value-wins) + $state."""
 
         @op
         def source(items: list):
@@ -185,5 +182,5 @@ class TestRunUnchanged:
         engine = Hush(g)
         result = await engine.run(inputs={"items": [1, 2, 3]})
 
-        assert result["result"] == [2, 4, 6]
+        assert result["result"] == 6  # last-value-wins
         assert "$state" in result

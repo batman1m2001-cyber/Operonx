@@ -42,7 +42,9 @@ class TestSingleNodeGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == 10
 
@@ -62,7 +64,9 @@ class TestSingleNodeGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 4})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == 12
 
@@ -79,7 +83,8 @@ class TestSingleNodeGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        await graph.run(state)
+        async for _ in graph.run(state):
+            pass
 
         # Access result directly from state
         assert state["no_output_map.compute", "result"] == 105
@@ -112,7 +117,9 @@ class TestLinearGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (5 + 10) * 2 = 30
         assert result["result"] == 30
@@ -141,7 +148,9 @@ class TestLinearGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # ((5 + 10) * 2) - 5 = 25
         assert result["result"] == 25
@@ -167,7 +176,9 @@ class TestLinearGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 0})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # 0 + 1 + 2 + 3 + 4 + 5 = 15
         assert result["v"] == 15
@@ -205,7 +216,9 @@ class TestParallelGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (10 * 2) + (10 * 3) = 50
         assert result["total"] == 50
@@ -232,7 +245,9 @@ class TestParallelGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (10*2) + (10*3) + (10*4) = 90
         assert result["total"] == 90
@@ -257,7 +272,9 @@ class TestParallelGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 1})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (1 + 100) + (1 + 200) = 302
         assert result["result"] == 302
@@ -286,7 +303,9 @@ class TestParallelGraph:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 3, "y": 7})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (3 * 10) + (7 + 5) = 42
         assert result["sum"] == 42
@@ -316,7 +335,9 @@ class TestMultipleIO:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"a": 1, "b": 2, "c": 3})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["sum"] == 6
 
@@ -336,7 +357,9 @@ class TestMultipleIO:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["double"] == 10
         assert result["triple"] == 15
@@ -358,7 +381,9 @@ class TestMultipleIO:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result_a"] == 11
         assert result["result_c"] == 13
@@ -393,7 +418,9 @@ class TestComplexDataTypes:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"data": {"a": 1, "b": 2, "c": 3}})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["keys"] == ["a", "b", "c"]
         assert result["values"] == [1, 2, 3]
@@ -420,7 +447,9 @@ class TestComplexDataTypes:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # sum([2, 4, 6, 8, 10]) = 30
         assert result["total"] == 30
@@ -446,7 +475,9 @@ class TestComplexDataTypes:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"text": "hello"})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == "OLLEH"
 
@@ -483,7 +514,9 @@ class TestAsyncOperations:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 21})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == 42
 
@@ -516,7 +549,9 @@ class TestAsyncOperations:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (5 + 10) * 2 = 30
         assert result["result"] == 30
@@ -559,7 +594,9 @@ class TestAsyncOperations:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # Both should start before either ends (concurrent execution)
         assert "a_start" in call_order
@@ -592,7 +629,8 @@ class TestErrorHandling:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        await graph.run(state)
+        async for _ in graph.run(state):
+            pass
 
         # Check error is captured
         error = state["error_graph.failing", "error"]
@@ -623,7 +661,8 @@ class TestErrorHandling:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        await graph.run(state)
+        async for _ in graph.run(state):
+            pass
 
         # First node should succeed
         assert state["partial_error.first", "result"] == 15
@@ -657,7 +696,9 @@ class TestEdgeCases:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": ""})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == "default"
 
@@ -678,7 +719,9 @@ class TestEdgeCases:
         large_list = list(range(10000))
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"data": large_list})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["count"] == 10000
         assert result["sum"] == sum(range(10000))
@@ -699,7 +742,9 @@ class TestEdgeCases:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"text": "Hello 世界 🌍"})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == "Processed: Hello 世界 🌍"
 
@@ -719,7 +764,9 @@ class TestEdgeCases:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": -5, "y": 0})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["sum"] == -5
         assert result["product"] == 0
@@ -749,7 +796,9 @@ class TestFuncOpDecorator:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result"] == 11
 
@@ -769,7 +818,9 @@ class TestFuncOpDecorator:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # Uses default amount=10
         assert result["result"] == 15
@@ -801,7 +852,9 @@ class TestFuncOpDecorator:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 3})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # ((3 * 2) + 5) ** 2 = 11 ** 2 = 121
         assert result["result"] == 121
@@ -869,14 +922,18 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_count: D should have ready_count = 1 (soft edges count as 1 group)
-        assert graph.initial_ready_count["d"] == 1, (
-            f"Expected ready_count[d]=1, got {graph.initial_ready_count['d']}"
+        assert graph._initial_ready["d"] == 1, (
+            f"Expected ready_count[d]=1, got {graph._initial_ready['d']}"
         )
-        assert "d" in graph.has_soft_preds, "d should be in has_soft_preds"
+        assert "d" in {lnk.dst for lnks in graph._adj.values() for lnk in lnks if lnk.soft}, (
+            "d should be in has_soft_preds"
+        )
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # D should execute after either B or C completes
         assert "d" in execution_order
@@ -936,14 +993,18 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_count: D should have ready_count = 2 (1 hard + 1 soft group)
-        assert graph.initial_ready_count["d"] == 2, (
-            f"Expected ready_count[d]=2, got {graph.initial_ready_count['d']}"
+        assert graph._initial_ready["d"] == 2, (
+            f"Expected ready_count[d]=2, got {graph._initial_ready['d']}"
         )
-        assert "d" in graph.has_soft_preds, "d should be in has_soft_preds"
+        assert "d" in {lnk.dst for lnks in graph._adj.values() for lnk in lnks if lnk.soft}, (
+            "d should be in has_soft_preds"
+        )
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # D should execute after A and (B or C) complete
         d_index = execution_order.index("d")
@@ -980,11 +1041,13 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # D has ready_count = 2 (both hard edges counted)
-        assert graph.initial_ready_count["d"] == 2
+        assert graph._initial_ready["d"] == 2
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # D should run and have access to both B and C results
         assert result["combined"] == "b+c"
@@ -1024,14 +1087,18 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # D has ready_count = 2 (both hard edges counted)
-        assert graph.initial_ready_count["d"] == 2, (
-            f"Expected ready_count[d]=2, got {graph.initial_ready_count['d']}"
+        assert graph._initial_ready["d"] == 2, (
+            f"Expected ready_count[d]=2, got {graph._initial_ready['d']}"
         )
-        assert "d" not in graph.has_soft_preds, "d should NOT be in has_soft_preds (no soft edges)"
+        assert "d" not in {lnk.dst for lnks in graph._adj.values() for lnk in lnks if lnk.soft}, (
+            "d should NOT be in has_soft_preds (no soft edges)"
+        )
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # D must execute after BOTH A and B
         d_index = execution_order.index("d")
@@ -1107,18 +1174,23 @@ class TestSoftEdgeBehavior:
         graph.build()
 
         # Verify ready_counts
-        assert graph.initial_ready_count["e"] == 2, (
-            f"E should have ready_count=2 (1 hard + 1 soft group), got {graph.initial_ready_count['e']}"
+        assert graph._initial_ready["e"] == 2, (
+            f"E should have ready_count=2 (1 hard + 1 soft group), got {graph._initial_ready['e']}"
         )
-        assert graph.initial_ready_count["f"] == 2, (
-            f"F should have ready_count=2 (2 hard), got {graph.initial_ready_count['f']}"
+        assert graph._initial_ready["f"] == 2, (
+            f"F should have ready_count=2 (2 hard), got {graph._initial_ready['f']}"
         )
-        assert "e" in graph.has_soft_preds, "E should be in has_soft_preds"
-        assert "f" not in graph.has_soft_preds, "F should NOT be in has_soft_preds"
+        assert "e" in {lnk.dst for lnks in graph._adj.values() for lnk in lnks if lnk.soft}, (
+            "E should be in has_soft_preds"
+        )
+        assert "f" not in {lnk.dst for lnks in graph._adj.values() for lnk in lnks if lnk.soft}, (
+            "F should NOT be in has_soft_preds"
+        )
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        await graph.run(state)
+        async for _ in graph.run(state):
+            pass
 
         # E executes after A and (B or C)
         e_index = execution_order.index("e")
@@ -1171,11 +1243,13 @@ class TestSoftEdgeBehavior:
 
         graph.build()
 
-        assert graph.initial_ready_count["d"] == 2  # 1 hard + 1 soft group
+        assert graph._initial_ready["d"] == 2  # 1 hard + 1 soft group
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # B completes before A (fast vs slow)
         b_index = execution_order.index("b")
@@ -1222,7 +1296,9 @@ class TestOutputMappingSyntax:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["result_a"] == 11
         assert result["result_c"] == 13
@@ -1251,7 +1327,9 @@ class TestOutputMappingSyntax:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["value"] == 10  # Từ node1 (cú pháp cũ)
         assert result["result"] == 110  # Từ node2 (cú pháp mới)
@@ -1301,7 +1379,9 @@ class TestNodeToNodeOutputMapping:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (5 * 2) = 10 -> (10 + 100) = 110 -> (110 * 3) = 330
         assert result["output"] == 330
@@ -1333,7 +1413,9 @@ class TestNodeToNodeOutputMapping:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (10+1) + (10+2) = 11 + 12 = 23
         assert result["sum"] == 23
@@ -1363,7 +1445,9 @@ class TestNodeToNodeOutputMapping:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (5 + 10) = 15 -> (15 * 2) = 30 -> (30 - 5) = 25
         assert result["result"] == 25
@@ -1393,7 +1477,9 @@ class TestNodeToNodeOutputMapping:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         assert result["direct_b"] == 15  # 5 * 3
         assert result["processed"] == 110  # (5 * 2) + 100
@@ -1425,7 +1511,9 @@ class TestNodeToNodeOutputMapping:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 10})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (10 * 2) + (10 * 3) = 50
         assert result["total"] == 50
@@ -1465,7 +1553,9 @@ class TestComplexGraphWithAllOpTypes:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"data": [1, 2, 3, 4, 5]})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == [2, 4, 6, 8, 10]
 
     @pytest.mark.asyncio
@@ -1492,7 +1582,9 @@ class TestComplexGraphWithAllOpTypes:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"items": [10, 20, 30]})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # 10 -> 5 -> 2 (final 2)
         # 20 -> 10 -> 5 -> 2 (final 2)
@@ -1522,7 +1614,9 @@ class TestComplexGraphWithAllOpTypes:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"limit": 4})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         # 1(odd,+5=6), 2(even,+10=12), 3(odd,+5=8), 4(even,+10=14)
         assert result["result"] == [6, 12, 8, 14]
 
@@ -1556,7 +1650,9 @@ class TestComplexGraphWithAllOpTypes:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"numbers": [1, 2, 3, 4, 5]})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
 
         # (1+10)*2=22, (2+10)*2=24, (3+10)*2=26, (4+10)*2=28, (5+10)*2=30
         assert result["result"] == [22, 24, 26, 28, 30]
@@ -1592,7 +1688,9 @@ class TestComplexGraphWithAllOpTypes:
         # Test with x=5
         schema = StateSchema(outer_graph)
         state = schema.create_state(inputs={"input_value": 5})
-        result = await outer_graph.run(state)
+        result = {}
+        async for _, result in outer_graph.run(state):
+            pass
         # squares of 1..5 = [1, 4, 9, 16, 25]
         assert result["squared"] == [1, 4, 9, 16, 25]
 
@@ -1661,7 +1759,9 @@ class TestGraphValidation:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 5, "condition": True})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == 10  # process_a: 5 * 2
 
     @pytest.mark.asyncio
@@ -1697,7 +1797,9 @@ class TestGraphValidation:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"x": 1, "choice": "a"})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "path_a"
 
     # ----------------------------------------------------------
@@ -1885,7 +1987,9 @@ class TestGraphValidation:
 
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"input_value": 5})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == 10
 
     @pytest.mark.asyncio
@@ -1909,7 +2013,9 @@ class TestGraphValidation:
 
         schema = StateSchema(graph)
         state = schema.create_state()
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == 84
 
     # ----------------------------------------------------------

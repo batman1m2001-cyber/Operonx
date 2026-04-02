@@ -215,7 +215,85 @@ class LoopConfig:
 **`test_collector.py`** — verify `_get_stream_contexts` returns correct item contexts from state for generator ops.
   Replace with the new `item_ctxs` returned by the scheduler, or remove if tracing no longer needs it.
 
-### Step 14 — Tests (238 failing after child_name fix)
+### Step 14 — Tests ✅ partial (99 remaining after session 2026-04-02)
+
+**Session progress**: 238 → 99 failures fixed, 13 skipped (loop tests).
+
+#### Done ✅
+- **14-A1** `edge.is_soft` → `edge.soft` in `task_scheduler.py`
+- **14-A2** `__branch_target__` added to `BranchOp.outputs` in `branch_op.py`
+- **14-A3** `await op.run()` → `async for _, r in op.run()` across 23 test files (script-applied)
+- **14-B** All stale API renames done: `initial_ready_count`, `_stream_predecrements`, `has_soft_preds`, `_on_yield`, `engine.stream()`, `_loop_metrics`
+- `test_engine_stream.py` fully rewritten for `engine.start()` / `handle.collect()` API
+- `test_middleware.py` `engine.stream()` → `engine.run()`
+- `test_graph_loop.py` all tests skipped (pending loop fix below)
+
+#### Remaining ⬜ (99 failures — leave for tomorrow)
+
+**14-D: Streaming tests expect `result["key"] == [list]` but get last-value scalar** (~60 tests)
+
+The new scheduler streams per-item frames. `async for _, result in g.run(state): pass` gives the LAST frame only. Tests in these files expect a collected list:
+- `test_map_op.py`, `test_for_op.py`, `test_aiter_op.py`, `test_while_op.py`
+- `test_streaming.py` (streaming chain tests)
+- `test_streaming_collect.py`, `test_streaming_flatmap.py`, `test_streaming_mapop.py`, `test_streaming_ntom.py`
+- `test_graph_op.py` (TestComplexGraphWithAllOpTypes)
+- `test_shared_vars.py`
+
+Fix: collect all frames into a list-dict before asserting:
+```python
+collected = {}
+async for _, r in g.run(state):
+    for k, v in r.items():
+        collected.setdefault(k, []).append(v)
+assert collected["result"] == [2, 4, 6, 8, 10]
+```
+
+**14-E: Loop top-level re-dispatch not implemented** (~10 tests, skipped)
+
+`GraphOp.loop()` only re-dispatches when nested inside a parent graph (parent's `_on_eof` checks `op._loop_config`). When run directly via `g.run(state)`, the loop graph's own scheduler only sees the inner ops (`inc`), not `g` itself, so `_loop_config` is never checked.
+
+Fix: add loop handling to `GraphOp.run()`:
+```python
+# After _scheduler.run() returns, check _loop_config on self
+iterations = 0
+current_ctx = context_id
+while True:
+    _outputs, stream_ctxs = await self._scheduler.run(state, current_ctx)
+    if self._loop_config and not stream_ctxs:
+        if not _evaluate_until(self._loop_config, _outputs) and iterations < self._loop_config.max_iterations:
+            iterations += 1
+            next_ctx = context_id + (f"loop_{iterations}",)
+            for k, v in _outputs.items():
+                state[self.full_name, k, next_ctx] = v
+            current_ctx = next_ctx
+            continue
+    break
+```
+Also remove `_loop_metrics` assertions from all loop tests (key no longer in output).
+Affected: `test_graph_loop.py` (all), `test_concurrent.py::TestCcuLoop`, `test_iteration/test_while_op.py`
+
+**14-F: Output rename via output_queue** (~2 tests)
+
+`d["doubled"] >> PARENT["answer"]` — the output_queue carries frames with key "doubled", not "answer". `handle.collect()` returns `{"doubled": 14}`, not `{"answer": 14}`.
+Affected: `test_graph.py::TestSubgraphExecution::test_with_renamed_outputs`
+
+Fix: output_queue should carry renamed keys (map via `_out_vars` → output param name).
+
+**14-G: Error not stored in state** (~2 tests)
+
+`base.py` catches exceptions internally (logs only). `state[op, "error", ctx]` is never set.
+Old behaviour came from the old scheduler. New `_pump` in `task_scheduler` does set it, but only when exception escapes `op.run()`. Since `base.py` swallows all exceptions, nothing escapes.
+Affected: `test_parser_op.py::TestParserErrors::test_invalid_json_returns_none`
+
+Fix: add `state[self.full_name, "error", context_id] = error_msg` in `base.py`'s except block.
+
+**14-C: Tracer failures** (~20 tests)
+
+Investigate after 14-D is done — tracers read state + item_ctxs which changed format.
+
+---
+
+#### Original tracking (238 failing after child_name fix)
 
 Failures split into **real bugs** (fix production code) and **stale tests** (update test assertions).
 
