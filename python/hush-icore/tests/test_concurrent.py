@@ -225,7 +225,15 @@ class TestCcuStreaming:
 
         engine = Hush(g)
         counts = [1, 2, 3, 4, 5]
-        results = await asyncio.gather(*[engine.run(inputs={"n": n}) for n in counts])
+
+        async def collect_results(n):
+            result = {}
+            async for _, _, frame in engine.start(inputs={"n": n}):
+                for k, v in frame.items():
+                    result.setdefault(k, []).append(v)
+            return result
+
+        results = await asyncio.gather(*[collect_results(n) for n in counts])
 
         for n, r in zip(counts, results):
             expected = sorted([i * 10 for i in range(n)])

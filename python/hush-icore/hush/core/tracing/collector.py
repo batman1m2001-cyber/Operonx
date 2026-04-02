@@ -192,9 +192,22 @@ class TraceCollector:
     # =========================================================================
 
     def _get_stream_contexts(self, state: Any, gen_op_name: str, gen_ctx: Tuple) -> list:
-        """Derive item contexts from state — no GraphOp attribute needed."""
+        """Derive item contexts from generator output cells.
+
+        Generator ops store results at item contexts like ('main','[0]'),
+        but only store start_time at the root context ('main',). So we
+        look at the first output variable's cell to find item contexts.
+        """
         result = []
-        for ctx, _ in state.iter_executed(gen_op_name):
+        op = self._op_map.get(gen_op_name)
+        if not op or not op.outputs:
+            return result
+        first_out_var = next(iter(op.outputs))
+        idx = state.schema.get_index(gen_op_name, first_out_var)
+        if idx < 0:
+            return result
+        cell = state._cells[idx]
+        for ctx in cell.contexts:
             if (
                 len(ctx) == len(gen_ctx) + 1
                 and ctx[: len(gen_ctx)] == gen_ctx
@@ -307,7 +320,9 @@ class TraceCollector:
                 if kind != "batch":
                     metadata["kind"] = kind
                 if kind == "generator":
-                    yield_count = self._count_yields(ctx, self._get_stream_contexts(state, op_name, ctx))
+                    yield_count = self._count_yields(
+                        ctx, self._get_stream_contexts(state, op_name, ctx)
+                    )
                     metadata["yield_count"] = yield_count
                     if yield_count == 0:
                         metadata["status"] = "pending"

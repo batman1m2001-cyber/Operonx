@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Opt
 
 from hush.core.loggings import LOGGER, format_event, format_log_data
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
+from hush.core.states.cell import DEFAULT_CONTEXT
 from hush.core.states.ref import Ref
 from hush.core.utils.auto_name import auto_name, unique_name
 from hush.core.utils.common import Param
 from hush.core.utils.context import get_current
-from hush.core.states.cell import DEFAULT_CONTEXT
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -343,15 +343,14 @@ class BaseOp(ABC):
         try:
             asyncio.get_running_loop()
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = pool.submit(asyncio.run, _collect()).result()
         except RuntimeError:
             result = asyncio.run(_collect())
         return result
 
-    def get_inputs(
-        self, state: "MemoryState", context_id: str
-    ) -> Dict[str, Any]:
+    def get_inputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
 
         Args:
@@ -362,7 +361,6 @@ class BaseOp(ABC):
         result = {}
 
         for var_name, param in self.inputs.items():
-
             # Always read from state first (may have value from MemoryState inputs or Ref)
             value = state[self.full_name, var_name, context_id]
 
@@ -377,9 +375,7 @@ class BaseOp(ABC):
 
         return result
 
-    def get_outputs(
-        self, state: "MemoryState", context_id: str
-    ) -> Dict[str, Any]:
+    def get_outputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Read output values from state.
 
         Reads directly from this op's output variables. Output connections
@@ -594,22 +590,23 @@ class BaseOp(ABC):
                 if _cache_key in _cache_store:
                     _outputs = _cache_store[_cache_key]
                     self.store_result(state, _outputs, context_id)
-                    yield context_id, _outputs # <- add
-                    return # <- add (stops generators, triggers finally)
+                    yield context_id, _outputs  # <- add
+                    return  # <- add (stops generators, triggers finally)
 
             base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
             idx = 0
             async for result in self._exec_core(_inputs):
                 ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
                 self.store_result(state, result, ctx)
+                _outputs = result
                 if not self.is_gen and self.cache is not None:
                     _cache_store[_cache_key] = result
-                    _outputs = result
                 yield ctx, result
                 idx += 1
 
         except Exception:
             import sys
+
             error_msg = (
                 traceback.format_exc()
                 if LOGGER.isEnabledFor(40)
@@ -629,8 +626,11 @@ class BaseOp(ABC):
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             self._store_metrics(
-                state, context_id,
-                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
+                state,
+                context_id,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
             )
             if error_msg is not None:
                 state[self.full_name, "error", context_id] = error_msg

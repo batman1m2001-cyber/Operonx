@@ -14,41 +14,6 @@ import asyncio
 import pytest
 
 from hush.core import END, PARENT, START, GraphOp, Hush, op
-from hush.core.ops.base import BaseOp
-
-# ── BUG-1 ───────────────────────────────────────────────────────────────────
-# _on_yield missing from __slots__ → AttributeError on any __slots__ subclass
-
-
-@pytest.mark.skip(reason="_on_yield removed in scheduler rewrite")
-def test_bug1_on_yield_in_slots():
-    """_on_yield must be in BaseOp.__slots__ so subclasses with __slots__ work."""
-    assert "_on_yield" in BaseOp.__slots__, (
-        "_on_yield missing from BaseOp.__slots__ — scheduler will crash with "
-        "AttributeError when assigning callback to generator ops whose class "
-        "or any subclass defines __slots__"
-    )
-
-
-@pytest.mark.skip(reason="_on_yield removed in scheduler rewrite")
-@pytest.mark.asyncio
-async def test_bug1_generator_op_with_slots_subclass():
-    """Scheduler must not raise AttributeError when setting _on_yield callback."""
-
-    class SlottedOp(BaseOp):
-        __slots__ = ["_extra"]
-
-        def __init__(self):
-            super().__init__(name="slotted")
-            self._extra = None
-
-    # Simulate what the scheduler does: assign _on_yield before run()
-    instance = SlottedOp()
-    try:
-        instance._on_yield = lambda *a: None  # must not raise
-    except AttributeError as exc:
-        pytest.fail(f"BUG-1 regression: {exc}")
-
 
 # ── BUG-2 ───────────────────────────────────────────────────────────────────
 # Cache hit path skipped store_result() → downstream received None

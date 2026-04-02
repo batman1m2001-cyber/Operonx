@@ -59,14 +59,14 @@ class ExecutionHandle:
     """
 
     def __init__(self, queue: asyncio.Queue, task: asyncio.Task, state: Any = None) -> None:
-        self._queue = queue         # fed by root _Scheduler
-        self._scheduler_task = task           # task running the workflow
-        self.state = state          # MemoryState for this execution (tracing access)
+        self._queue = queue  # fed by root Scheduler
+        self._scheduler_task = task  # task running the workflow
+        self.state = state  # MemoryState for this execution (tracing access)
         self._frames: list[tuple[str, Any, dict[str, Any]]] = []
-        self._idx: int = 0          # index for __anext__, tracks how many frames have been consumed
-        self._done: bool = False         # becomes True when the execution is complete
+        self._idx: int = 0  # index for __anext__, tracks how many frames have been consumed
+        self._done: bool = False  # becomes True when the execution is complete
         self._error: BaseException | None = None  # set if the execution raises an error
-        self._cond = asyncio.Condition()  
+        self._cond = asyncio.Condition()
         self._waiters: dict[tuple[str, str], list[asyncio.Future[Any]]] = {}
         self._pump_task = asyncio.create_task(self._pump())
 
@@ -98,7 +98,7 @@ class ExecutionHandle:
                 self._done = True
                 self._resolve_all_waiters(exc)
                 self._cond.notify_all()
-    
+
     def _resolve_all_waiters(self, exc: BaseException | None) -> None:
         """Resolve or reject every pending future, then clear."""
         for futs in self._waiters.values():
@@ -110,7 +110,7 @@ class ExecutionHandle:
                 else:
                     fut.set_exception(exc)
         self._waiters.clear()
-    
+
     def _match_waiters(self, op: str, data: dict[str, Any]) -> None:
         """Check if any waiters are waiting for this op's outputs, and resolve them."""
         for var, val in data.items():
@@ -119,11 +119,11 @@ class ExecutionHandle:
                 for fut in self._waiters.pop(key, []):
                     if not fut.done():
                         fut.set_result(val)
-    
+
     # ---async iteration----------------------------------------------------------------
     def __aiter__(self) -> "ExecutionHandle":
         return self
-    
+
     async def __anext__(self) -> tuple[str, Any, dict[str, Any]]:
         """Yield the next frame (op, ctx, data) as it arrives. Waits if no frames are available yet."""
         async with self._cond:
@@ -136,13 +136,13 @@ class ExecutionHandle:
             frame = self._frames[self._idx]
             self._idx += 1
             return frame
-    
+
     # ---point query----------------------------------------------------------------------
     def __getitem__(self, key: tuple[str, str]):
         """Return awaitable for the last value of (op, var)"""
         op, var = key
-        return self._await_output(op, var) # caller does: val = await handle["op", "var"]
-    
+        return self._await_output(op, var)  # caller does: val = await handle["op", "var"]
+
     async def _await_output(self, op: str, var: str) -> Any:
         async with self._cond:
             # scan buffered frames (last value wins)
@@ -156,14 +156,14 @@ class ExecutionHandle:
                 if self._error:
                     raise self._error
                 return None
-            
+
             loop = asyncio.get_running_loop()
             fut: asyncio.Future[Any] = loop.create_future()
             self._waiters.setdefault((op, var), []).append(fut)
-        
+
         val = await fut
         return None if val is _MISSING else val
-    
+
     # ---convenience-----------------------------------------------------------------------
     async def collect(self) -> dict[str, Any]:
         """Consume all frames -> merged output dict (last value wins)."""
@@ -171,7 +171,7 @@ class ExecutionHandle:
         async for _, _, data in self:
             out.update(data)
         return out
-    
+
     def cancel(self) -> None:
         """Cancel the workflow execution."""
         self._scheduler_task.cancel()

@@ -44,8 +44,9 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # source yields 0,1,2,3,4 → filter yields 0,2,4 → double: 0,4,8
         assert result["result"] == [0, 4, 8]
@@ -79,10 +80,11 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
-        assert result["result"] == []
+        assert result.get("result", []) == []
 
     @pytest.mark.asyncio
     async def test_one_to_many(self):
@@ -111,8 +113,9 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [10, 11, 12]
 
@@ -150,8 +153,9 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 10})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # 0,1,...,9 → 0,2,4,6,8 → 0,4,8 → 0,40,80
         assert result["result"] == [0, 40, 80]
@@ -184,10 +188,11 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 50})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
-        assert result["text"] == []
+        assert result.get("text", []) == []
 
     @pytest.mark.asyncio
     async def test_speech_detected_once(self):
@@ -217,7 +222,8 @@ class TestNtoMStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 50})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["text"] == ["transcript_25"]

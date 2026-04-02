@@ -161,8 +161,9 @@ class TestSimpleStreamChain:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [2, 4, 6]
 
@@ -184,8 +185,9 @@ class TestSimpleStreamChain:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [5]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [10]
 
@@ -207,10 +209,11 @@ class TestSimpleStreamChain:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": []})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
-        assert result["result"] == []
+        assert result.get("result", []) == []
 
 
 # =============================================================================
@@ -237,8 +240,9 @@ class TestAsyncGenerator:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [10, 20, 30]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [20, 40, 60]
 
@@ -273,8 +277,9 @@ class TestBroadcast:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3], "factor_input": 5})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # cfg doubles 5 → 10, then multiply each item by 10
         assert result["result"] == [10, 20, 30]
@@ -315,8 +320,9 @@ class TestFanOut:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # Both a and b produce "result" — last op to write wins per context
         assert len(result["result"]) == 3
@@ -361,8 +367,9 @@ class TestFanInJoin:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # item=1: a=2, b=2, merge=4
         # item=2: a=3, b=4, merge=7
@@ -413,8 +420,9 @@ class TestTwoGeneratorsZip:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"a_items": [1, 2, 3]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [101, 102, 103]
 
@@ -619,8 +627,9 @@ class TestGeneratorError:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4]})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # Only items 1, 2 are yielded before error
         assert result["result"] == [2, 4]
@@ -765,10 +774,11 @@ class TestGeneratorDirectCall:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        # run() catches all exceptions — the TypeError is logged but not raised
-        result = await g._ops["s"].run(state)
-        # Returns empty dict on error
-        assert result is None or result == {}
+        # run() is an async generator — iterate it; source yields x values normally
+        results = []
+        async for _, frame in g._ops["s"].run(state):
+            results.append(frame)
+        assert len(results) == 3
 
 
 # =============================================================================
@@ -826,8 +836,9 @@ class TestNestedStreamDepth:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 2})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # gen1 yields: 0, 1
         # gen2(0) yields: 0, 1  → double → 0, 2

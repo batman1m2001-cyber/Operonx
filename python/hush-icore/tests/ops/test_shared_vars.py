@@ -71,8 +71,9 @@ class TestSharedVarsBasic:
         schema = StateSchema(g)
         state = schema.create_state(inputs={})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == ["READY_1"]
 
@@ -178,8 +179,9 @@ class TestSharedVarsEdgeCases:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
         result = {}
-        async for _, result in g.run(state):
-            pass
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         assert result["result"] == [0, 2, 4]
 
@@ -252,7 +254,7 @@ class TestSharedVarsEdgeCases:
         async for _, result in g.run(state):
             pass
 
-        # Shared var must be scalar [0, 1, 2], NOT [[0,1,2], [0,1,2], [0,1,2]]
+        # Shared var: last frame has the final accumulated buffer
         assert result["buffer"] == [0, 1, 2]
         assert not isinstance(result["buffer"][0], list)
 
@@ -281,17 +283,20 @@ class TestSharedVarsEdgeCases:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = {}
-        async for _, result in g.run(state):
-            pass
+        # Collect non-shared vars as list; read shared var from state directly
+        collected = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                collected.setdefault(_k, []).append(_v)
 
-        # counter: shared → scalar (final value)
-        assert result["counter"] == 3
-        assert isinstance(result["counter"], int)
+        # counter: shared → final value from state
+        counter_val = state[g.full_name, "counter", ("main",)]
+        assert counter_val == 3
+        assert isinstance(counter_val, int)
 
         # result: non-shared → list per context
-        assert result["result"] == [0, 10, 20]
-        assert isinstance(result["result"], list)
+        assert collected["result"] == [0, 10, 20]
+        assert isinstance(collected["result"], list)
 
     @pytest.mark.asyncio
     async def test_shared_only_on_parent(self):
