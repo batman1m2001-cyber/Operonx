@@ -108,10 +108,10 @@ class GraphOp(BaseOp):
         self.concurrency = concurrency
         self._loop_config = None
         self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared()
-        self._adj = {}                 # {op_name: [Link(dst, soft), ...]}
-        self._initial_ready = {}       # {op_name: ready_count}
+        self._adj = {}  # {op_name: [Link(dst, soft), ...]}
+        self._initial_ready = {}  # {op_name: ready_count}
         self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}
-        self._scheduler = None           # set by build()
+        self._scheduler = None  # set by build()
         self._out_vars: Dict[str, set] = {}  # {op_name: {var}} — vars mapped to PARENT output
 
     def __enter__(self):
@@ -270,7 +270,7 @@ class GraphOp(BaseOp):
 
         self._setup_schema()
         self._setup_endpoints()
-        
+
         result = self.validate()
         result.raise_if_errors()
 
@@ -292,11 +292,11 @@ class GraphOp(BaseOp):
         for (src, dst), edge in self._edges.items():
             adj[src].append(Link(dst=dst, soft=edge.soft))
             if edge.soft:
-                if not has_soft.get(dst, False):   # first soft pred: count once
+                if not has_soft.get(dst, False):  # first soft pred: count once
                     has_soft[dst] = True
                     ready[dst] += 1
             else:
-                ready[dst] += 1                    # every hard pred counts
+                ready[dst] += 1  # every hard pred counts
 
         self._adj = adj
         self._initial_ready = ready
@@ -312,7 +312,8 @@ class GraphOp(BaseOp):
                 continue
             # direct hard-edge predecessors of this generator
             gen_preds = {
-                src for (src, dst) in self._edges
+                src
+                for (src, dst) in self._edges
                 if dst == gen_name and not self._edges[(src, dst)].soft
             }
             ri = {}
@@ -338,7 +339,7 @@ class GraphOp(BaseOp):
         graph_inputs = {}
         graph_outputs = {}
 
-        for _, child in self._ops.items():
+        for child_name, child in self._ops.items():
             for var, param in child.inputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
                     graph_inputs[param.value.var] = Param(
@@ -422,7 +423,6 @@ class GraphOp(BaseOp):
                     f"inputs={{'{var}': PARENT['{var}']}} and provide '{var}' as a graph input."
                 )
 
-
     def _cache_full_names(self) -> None:
         """Cache full_name for this op and all descendants after build."""
         self._cache_full_name()
@@ -470,6 +470,7 @@ class GraphOp(BaseOp):
 
         except Exception:
             import sys
+
             error_msg = (
                 traceback.format_exc()
                 if LOGGER.isEnabledFor(40)
@@ -487,8 +488,11 @@ class GraphOp(BaseOp):
             duration_ms = (perf_counter() - perf_start) * 1000
             self._log(request_id, context_id, _inputs, _outputs, duration_ms)
             self._store_metrics(
-                state, context_id,
-                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
+                state,
+                context_id,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
             )
             if error_msg is not None:
                 state[self.full_name, "error", context_id] = error_msg
@@ -511,8 +515,7 @@ class GraphOp(BaseOp):
                 "exits": list(self.exits),
                 "initial_ready_count": dict(self._initial_ready),
                 "compiled_adj": {
-                    op: [[link.dst, link.soft] for link in links]
-                    for op, links in self._adj.items()
+                    op: [[link.dst, link.soft] for link in links] for op, links in self._adj.items()
                 },
                 "stream_initial_ready": self._stream_initial_ready,
                 "loop_config": {
