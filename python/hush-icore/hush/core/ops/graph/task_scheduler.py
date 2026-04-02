@@ -79,6 +79,7 @@ class _Scheduler:
         self,
         state,
         context_id: tuple,
+        output_queue: asyncio.Queue = None,
     ) -> Tuple[dict, List[tuple]]:
         """Drive one full execution of the graph.
 
@@ -169,6 +170,14 @@ class _Scheduler:
                 item_ctxs.append(event.ctx)
                 ri = g._stream_initial_ready.get(event.op, g._initial_ready)
                 ready[event.ctx] = dict(ri)
+
+            # Forward PARENT-bound vars to output_queue (root graph only).
+            if output_queue is not None:
+                out_vars = g._out_vars.get(event.op)
+                if out_vars:
+                    filtered = {k: v for k, v in event.result.items() if k in out_vars}
+                    if filtered:
+                        output_queue.put_nowait((event.op, event.ctx, filtered))
 
             # Check for branch target — only route to the selected branch.
             branch_target = event.result.get("__branch_target__")
@@ -274,6 +283,10 @@ class _Scheduler:
                 _on_frame(event)
             else:
                 _on_eof(event)
+
+        # Signal completion to ExecutionHandle.
+        if output_queue is not None:
+            output_queue.put_nowait(None)
 
         # Collect final outputs at root context.
         outputs = g.get_outputs(state, context_id)
