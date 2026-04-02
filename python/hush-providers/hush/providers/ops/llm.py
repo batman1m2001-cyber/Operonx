@@ -416,6 +416,7 @@ class LLMOp(BaseOp):
         The scheduler's task_generator() drives this, creating a stream
         context per yield. The final yield contains complete metadata.
         """
+        self._ensure_initialized()
         llm_params = self._build_llm_params(inputs)
         selected_llm = self._select_llm() if self._llms else self._llm
         resource = self._get_selected_resource(selected_llm) if selected_llm else self.resource
@@ -470,6 +471,7 @@ class LLMOp(BaseOp):
         context_id: Optional[str] = None,
     ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
         """Run the LLM op (generate, stream, and batch modes)."""
+        self._ensure_initialized()
         request_id = state.request_id
         start_time = datetime.now()
         perf_start = perf_counter()

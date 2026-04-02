@@ -59,8 +59,10 @@ class TestNodeIntegration:
         schema = StateSchema(op=prompt)
         state = MemoryState(schema)
 
-        result = await prompt.run(state)
+        result = {}
 
+        async for _, result in prompt.run(state):
+            pass
         assert "messages" in result
         assert len(result["messages"]) == 2
         assert result["messages"][1]["content"] == "Task: write code"
@@ -159,8 +161,10 @@ class TestEndToEndPipeline:
         schema = StateSchema(op=pipeline)
         state = MemoryState(schema, inputs={"question": "What is 2+2?"})
 
-        result = await pipeline.run(state)
+        result = {}
 
+        async for _, result in pipeline.run(state):
+            pass
         assert "content" in result
         print(f"Pipeline result: {result['content']}")
 

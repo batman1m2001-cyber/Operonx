@@ -59,8 +59,9 @@ class TestPromptShorthand:
 
         schema = StateSchema(op=node)
         state = MemoryState(schema)
-        result = await node.run(state)
-
+        result = {}
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are Claude."

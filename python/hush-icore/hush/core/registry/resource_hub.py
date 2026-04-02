@@ -375,7 +375,7 @@ class ResourceHub:
         Returns:
             KeycloakTokenProvider instance with get_token() method
         """
-        return self._get_with_prefix(key, "keycloak")
+        return self.get(f"keycloak:{key}")
 
     # ========================================================================
     # API Key Resolution (for keycloak references)
