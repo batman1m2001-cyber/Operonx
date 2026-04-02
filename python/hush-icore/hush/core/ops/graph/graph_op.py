@@ -86,6 +86,7 @@ class GraphOp(BaseOp):
         "_initial_ready",
         "_stream_initial_ready",
         "_scheduler",
+        "_out_vars",
     ]
 
     type: OpType = "graph"
@@ -111,6 +112,7 @@ class GraphOp(BaseOp):
         self._initial_ready = {}       # {op_name: ready_count}
         self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}
         self._scheduler = None           # set by build()
+        self._out_vars: Dict[str, set] = {}  # {op_name: {var}} — vars mapped to PARENT output
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -354,6 +356,7 @@ class GraphOp(BaseOp):
                         default=param.default,
                         description=param.description,
                     )
+                    self._out_vars.setdefault(child_name, set()).add(var)
 
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)

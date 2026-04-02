@@ -15,7 +15,6 @@ from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
 from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
-from hush.core.utils.context import _output_queue
 
 if TYPE_CHECKING:
     from hush.core.states import MemoryState
@@ -488,14 +487,11 @@ class LLMOp(BaseOp):
             llm_params = self._build_llm_params(_inputs)
 
             if self.stream:
-                oq = _output_queue.get()
                 base_ctx = context_id if context_id is not None else ("main",)
                 idx = 0
                 async for chunk in self._stream_core(**llm_params):
                     chunk_ctx = base_ctx + (f"[{idx}]",)
                     self.store_result(state, chunk, chunk_ctx)
-                    if oq is not None:
-                        oq.put_nowait({"type": "token", "op": self.full_name, "data": chunk})
                     yield chunk_ctx, chunk
                     idx += 1
                     _outputs = chunk  # last chunk holds complete metadata
