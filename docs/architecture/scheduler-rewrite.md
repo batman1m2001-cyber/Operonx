@@ -184,7 +184,7 @@ class LoopConfig:
 | 3 | `state.py` | ✅ done — no `_shared_indices` checks |
 | 4 | `base.py` | ✅ done — async-gen `run()`, `_on_yield` removed, `parent_context` removed |
 | 5 | `graph_op.py` | ✅ done — `Link` NamedTuple, `_build()`, async-gen `run()`, slots/serialize cleanup, `_out_vars` added |
-| 6 | `task_scheduler.py` | ✅ done — full rewrite: Frame/EOF model, `_Scheduler`, dispatch/pump/on_frame/route/on_eof, `output_queue` param |
+| 6 | `task_scheduler.py` | ✅ done — Frame/EOF model, `Scheduler` (renamed from `_Scheduler`), `run()` + `_run_once()` split, loop re-dispatch, `output_queue` param |
 | 7 | `func_op.py` | ✅ done — async-gen `run()`, `parent_context` removed |
 | 8 | `branch_op.py` | ✅ done — `__branch_target__` injected in `_create_core_function()`, no `run()` override needed |
 | 9 | `llm.py` | ✅ done — stream branch drives `_stream_core()` directly, yields per-chunk frames, `_output_queue` removed |
@@ -192,97 +192,39 @@ class LoopConfig:
 | 11 | `collector.py` | ✅ done — `_get_stream_contexts` state-driven, no stale GraphOp attribute |
 | 12 | `_output_queue` wiring | ✅ done — replaced by `output_queue` param on `_Scheduler.run()` + `_out_vars` filter |
 | 13 | output contract | ✅ done — `ExecutionHandle`: `async for` per frame, `collect()` merges, `await handle["op","var"]` for point queries |
-| 14 | Tests | ⬜ `test_engine.py`, `test_execution_handle.py` — see below |
+| 14 | Tests | ✅ done — 704 passed, 1 skipped (hush-telemetry) |
 
 ---
 
 ## Remaining Work
 
-### Step 14 — Tests ⬜
+### Step 14 — Tests ✅ (completed 2026-04-03)
 
-**`test_engine.py`** — update existing tests:
-- Replace `engine.stream()` calls with `engine.start()`
-- Replace `async for _, r in graph.run(state)` assertions with `handle.collect()`
+**Final result**: 704 passed, 1 skipped (hush-telemetry not installed).
 
-**`test_execution_handle.py`** — new file, cover:
-- `async for op, ctx, data in handle` — frames arrive in order
-- `await handle["op", "var"]` — waits correctly, last value wins for generators
-- `handle.collect()` — merges all frames, returns final dict
-- `handle.cancel()` — cancels both tasks
-- Crash propagation — scheduler error surfaces through `__anext__` and `_await_output`
-- `_out_vars` filtering — only PARENT-bound vars forwarded to queue
-
-**`test_collector.py`** — verify `_get_stream_contexts` returns correct item contexts from state for generator ops.
-  Replace with the new `item_ctxs` returned by the scheduler, or remove if tracing no longer needs it.
-
-### Step 14 — Tests ✅ partial (99 remaining after session 2026-04-02)
-
-**Session progress**: 238 → 99 failures fixed, 13 skipped (loop tests).
-
-#### Done ✅
+#### Session 1 (2026-04-02): 238 → 99 failures
 - **14-A1** `edge.is_soft` → `edge.soft` in `task_scheduler.py`
 - **14-A2** `__branch_target__` added to `BranchOp.outputs` in `branch_op.py`
 - **14-A3** `await op.run()` → `async for _, r in op.run()` across 23 test files (script-applied)
 - **14-B** All stale API renames done: `initial_ready_count`, `_stream_predecrements`, `has_soft_preds`, `_on_yield`, `engine.stream()`, `_loop_metrics`
 - `test_engine_stream.py` fully rewritten for `engine.start()` / `handle.collect()` API
 - `test_middleware.py` `engine.stream()` → `engine.run()`
-- `test_graph_loop.py` all tests skipped (pending loop fix below)
 
-#### Remaining ⬜ (99 failures — leave for tomorrow)
+#### Session 2 (2026-04-02): 99 → 23 failures
+- **14-D** Streaming tests: collected frames into list-dict pattern
+- **14-F** Output rename: `_out_vars` filter maps to PARENT var names correctly
+- **14-G** Error storage: `_pump` in `task_scheduler` handles exceptions from `op.run()`
 
-**14-D: Streaming tests expect `result["key"] == [list]` but get last-value scalar** (~60 tests)
-
-The new scheduler streams per-item frames. `async for _, result in g.run(state): pass` gives the LAST frame only. Tests in these files expect a collected list:
-- `test_map_op.py`, `test_for_op.py`, `test_aiter_op.py`, `test_while_op.py`
-- `test_streaming.py` (streaming chain tests)
-- `test_streaming_collect.py`, `test_streaming_flatmap.py`, `test_streaming_mapop.py`, `test_streaming_ntom.py`
-- `test_graph_op.py` (TestComplexGraphWithAllOpTypes)
-- `test_shared_vars.py`
-
-Fix: collect all frames into a list-dict before asserting:
-```python
-collected = {}
-async for _, r in g.run(state):
-    for k, v in r.items():
-        collected.setdefault(k, []).append(v)
-assert collected["result"] == [2, 4, 6, 8, 10]
-```
-
-**14-E: Loop top-level re-dispatch not implemented** (~10 tests, skipped)
-
-`GraphOp.loop()` only re-dispatches when nested inside a parent graph (parent's `_on_eof` checks `op._loop_config`). When run directly via `g.run(state)`, the loop graph's own scheduler only sees the inner ops (`inc`), not `g` itself, so `_loop_config` is never checked.
-
-Fix: add loop handling to `GraphOp.run()`:
-```python
-# After _scheduler.run() returns, check _loop_config on self
-iterations = 0
-current_ctx = context_id
-while True:
-    _outputs, stream_ctxs = await self._scheduler.run(state, current_ctx)
-    if self._loop_config and not stream_ctxs:
-        if not _evaluate_until(self._loop_config, _outputs) and iterations < self._loop_config.max_iterations:
-            iterations += 1
-            next_ctx = context_id + (f"loop_{iterations}",)
-            for k, v in _outputs.items():
-                state[self.full_name, k, next_ctx] = v
-            current_ctx = next_ctx
-            continue
-    break
-```
-Also remove `_loop_metrics` assertions from all loop tests (key no longer in output).
-Affected: `test_graph_loop.py` (all), `test_concurrent.py::TestCcuLoop`, `test_iteration/test_while_op.py`
-
-**14-F: Output rename via output_queue** (~2 tests)
-
-`d["doubled"] >> PARENT["answer"]` — the output_queue carries frames with key "doubled", not "answer". `handle.collect()` returns `{"doubled": 14}`, not `{"answer": 14}`.
-Affected: `test_graph.py::TestSubgraphExecution::test_with_renamed_outputs`
-
-Fix: output_queue should carry renamed keys (map via `_out_vars` → output param name).
-
-**14-G: Error not stored in state** (~2 tests)
-
-`base.py` catches exceptions internally (logs only). `state[op, "error", ctx]` is never set.
-Old behaviour came from the old scheduler. New `_pump` in `task_scheduler` does set it, but only when exception escapes `op.run()`. Since `base.py` swallows all exceptions, nothing escapes.
+#### Session 3 (2026-04-03): 23 → 0 failures, 13 → 1 skipped
+- **14-E** Loop re-dispatch: moved to `Scheduler.run()` (not GraphOp.run), `_run_once()` split eliminates recursion
+- **Tracing root node**: `_store_metrics()` called in `_run_once()` so TraceCollector finds root graph node
+- **`_get_stream_contexts()`**: reads generator output variable cells instead of `start_time` cells
+- **`test_local_tracer.py`**: `async for` → `await` for new engine API
+- **`test_collector.py`**: streaming assertion matches last-value-wins contract
+- **`test_graph_loop.py`**: unskipped 9 tests, removed `_loop_metrics` assertions
+- **`test_streaming_regression.py`**: removed 2 dead `_on_yield` tests
+- **`test_concurrent.py::TestCcuLoop`**: loop re-dispatch + output_queue final push
+- **Scheduler cleanup**: `_Scheduler` → `Scheduler`, `run()`/`_run_once()` split, fixed `seq_origins` type annotation, consistent `max_iterations - 1` in nested loops, removed unused `traceback` import
 Affected: `test_parser_op.py::TestParserErrors::test_invalid_json_returns_none`
 
 Fix: add `state[self.full_name, "error", context_id] = error_msg` in `base.py`'s except block.

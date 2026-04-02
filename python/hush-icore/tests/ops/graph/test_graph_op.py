@@ -1554,8 +1554,9 @@ class TestComplexGraphWithAllOpTypes:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"data": [1, 2, 3, 4, 5]})
         result = {}
-        async for _, result in graph.run(state):
-            pass
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [2, 4, 6, 8, 10]
 
     @pytest.mark.asyncio
@@ -1583,8 +1584,9 @@ class TestComplexGraphWithAllOpTypes:
         state = schema.create_state(inputs={"items": [10, 20, 30]})
 
         result = {}
-        async for _, result in graph.run(state):
-            pass
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # 10 -> 5 -> 2 (final 2)
         # 20 -> 10 -> 5 -> 2 (final 2)
@@ -1615,8 +1617,9 @@ class TestComplexGraphWithAllOpTypes:
         state = schema.create_state(inputs={"limit": 4})
 
         result = {}
-        async for _, result in graph.run(state):
-            pass
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 1(odd,+5=6), 2(even,+10=12), 3(odd,+5=8), 4(even,+10=14)
         assert result["result"] == [6, 12, 8, 14]
 
@@ -1651,8 +1654,9 @@ class TestComplexGraphWithAllOpTypes:
         state = schema.create_state(inputs={"numbers": [1, 2, 3, 4, 5]})
 
         result = {}
-        async for _, result in graph.run(state):
-            pass
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
 
         # (1+10)*2=22, (2+10)*2=24, (3+10)*2=26, (4+10)*2=28, (5+10)*2=30
         assert result["result"] == [22, 24, 26, 28, 30]
@@ -1689,8 +1693,9 @@ class TestComplexGraphWithAllOpTypes:
         schema = StateSchema(outer_graph)
         state = schema.create_state(inputs={"input_value": 5})
         result = {}
-        async for _, result in outer_graph.run(state):
-            pass
+        async for _, _frame in outer_graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # squares of 1..5 = [1, 4, 9, 16, 25]
         assert result["squared"] == [1, 4, 9, 16, 25]
 

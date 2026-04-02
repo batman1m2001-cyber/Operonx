@@ -55,7 +55,10 @@ class MemoryState:
             request_id: Request ID (auto-generated if not provided)
         """
         self.schema = schema
-        self._cells: List[Cell] = [Cell(v, is_shared=(idx in schema._shared_indices)) for idx, v in enumerate(schema._defaults)]
+        self._cells: List[Cell] = [
+            Cell(v, is_shared=(idx in schema._shared_indices))
+            for idx, v in enumerate(schema._defaults)
+        ]
         self._user_id = user_id or str(_uuid4())
         self._session_id = session_id or str(_uuid4())
         self._request_id = request_id or str(_uuid4())
@@ -123,6 +126,10 @@ class MemoryState:
             return None
 
         cell = self._cells[idx]
+
+        # For shared cells, always use Cell.__getitem__ which maps to DEFAULT_CONTEXT
+        if cell.is_shared:
+            return cell[ctx_key]
 
         # Has cached value? Return it
         if ctx_key in cell:

@@ -77,8 +77,8 @@ async def test_collect_graph_output_is_scalar_not_list():
     engine = Hush(graph)
     result = await engine.run(inputs={"count": 5})
 
-    assert result["count"] == 5          # scalar 5, not [5]
-    assert result["total"] == 10         # 0+1+2+3+4
+    assert result["count"] == 5  # scalar 5, not [5]
+    assert result["total"] == 10  # 0+1+2+3+4
     assert result["sorted"] == [0, 1, 2, 3, 4]
 
 
@@ -171,7 +171,10 @@ async def test_collect_runs_once_vs_parallel_runs_per_item():
         proc = count_calls_parallel(item=gen["item"].parallel())
         START >> gen >> proc >> END
 
-    result_par = await Hush(g_par).run(inputs={"count": 4})
+    result_par = {}
+    async for _, _, frame in Hush(g_par).start(inputs={"count": 4}):
+        for k, v in frame.items():
+            result_par.setdefault(k, []).append(v)
 
     # .parallel() → proc called 4 times, result is a list
     assert len(parallel_calls) == 4
@@ -244,7 +247,10 @@ async def test_collect_after_parallel_processing():
 
     engine = Hush(graph)
     wall_start = time.monotonic()
-    result = await engine.run(inputs={"count": 5})
+    result = {}
+    async for _, _, frame in engine.start(inputs={"count": 5}):
+        for k, v in frame.items():
+            result.setdefault(k, []).append(v)
     elapsed = time.monotonic() - wall_start
 
     # All 5 results collected as list
@@ -265,11 +271,11 @@ async def test_collect_with_summarize():
     engine = Hush(graph)
 
     result = await engine.run(inputs={"count": 4})
-    assert result["total"] == 6       # 0+1+2+3
+    assert result["total"] == 6  # 0+1+2+3
     assert result["count"] == 4
     assert result["sorted"] == [0, 1, 2, 3]
 
     # Different count
     result2 = await engine.run(inputs={"count": 3})
-    assert result2["total"] == 3      # 0+1+2
+    assert result2["total"] == 3  # 0+1+2
     assert result2["count"] == 3

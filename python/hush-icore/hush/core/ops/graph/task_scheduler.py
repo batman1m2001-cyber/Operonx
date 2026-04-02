@@ -5,9 +5,10 @@ Event-driven: Frame/EOF events drive op dispatch.
 """
 
 import asyncio
-import traceback
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 from hush.core.loggings import LOGGER
@@ -53,7 +54,7 @@ def _evaluate_until(cfg: LoopConfig, outputs: dict) -> bool:
     return bool(eval(cfg._compiled_until, {"__builtins__": {}}, outputs))
 
 
-class _Scheduler:
+class Scheduler:
     """Created once at graph.build(). Shared across all executions.
     All per-execution mutable state lives as locals inside run().
 
@@ -81,12 +82,14 @@ class _Scheduler:
         context_id: tuple,
         output_queue: asyncio.Queue = None,
     ) -> Tuple[dict, List[tuple]]:
-        """Drive one full execution of the graph.
+        """Drive graph execution, including loop re-dispatch if configured.
 
         Parameters
         ----------
-        state:       MemoryState — shared across all ops.
-        context_id:  Root context tuple for this execution, e.g. ``("main",)``.
+        state:        MemoryState — shared across all ops.
+        context_id:   Root context tuple for this execution, e.g. ``("main",)``.
+        output_queue: If provided, stream frames to ExecutionHandle and send
+                      ``None`` sentinel on completion.
 
         Returns
         -------
@@ -95,6 +98,53 @@ class _Scheduler:
             item_ctxs   - list of per-item context tuples produced by generators.
         """
         g = self.graph
+        outputs, item_ctxs = await self._run_once(state, context_id, output_queue)
+
+        # Top-level loop re-dispatch (GraphOp.loop() sets _loop_config on g).
+        if g._loop_config:
+            n_iters = 0
+            current_ctx = context_id
+            # The initial _run_once above counts as iteration 1,
+            # so we only re-dispatch up to max_iterations - 1 more times.
+            while (
+                not _evaluate_until(g._loop_config, outputs)
+                and n_iters < g._loop_config.max_iterations - 1
+            ):
+                next_ctx = (
+                    current_ctx + ("loop_1",)
+                    if n_iters == 0
+                    else current_ctx[:-1] + (f"loop_{n_iters + 1}",)
+                )
+                n_iters += 1
+                for var, val in outputs.items():
+                    state[g.full_name, var, next_ctx] = val
+                current_ctx = next_ctx
+                outputs, _ = await self._run_once(state, current_ctx)
+            # Push final outputs so handle.collect() gets the latest values.
+            if output_queue is not None and n_iters > 0:
+                output_queue.put_nowait((g.name, current_ctx, outputs))
+
+        # Signal completion to ExecutionHandle.
+        if output_queue is not None:
+            output_queue.put_nowait(None)
+
+        return outputs, item_ctxs
+
+    async def _run_once(
+        self,
+        state,
+        context_id: tuple,
+        output_queue: asyncio.Queue = None,
+    ) -> Tuple[dict, List[tuple]]:
+        """Execute the graph exactly once (no loop re-dispatch).
+
+        Returns
+        -------
+        (outputs, item_ctxs)
+        """
+        g = self.graph
+        _start_time = datetime.now(timezone.utc)
+        _perf_start = perf_counter()
 
         # All Frame/EOF events flow through here — the main event loop dequeues them.
         queue: asyncio.Queue = asyncio.Queue()
@@ -119,11 +169,11 @@ class _Scheduler:
         # Guards against double-dispatch: next item only starts after current EOF.
         seq_active: Dict[tuple, Dict[str, bool]] = {}
 
-        # seq_origins[(item_ctx, op_name)] = gen_ctx.
+        # seq_origins[(op_name, item_ctx)] = (src, dst) key.
         # When dst_op finishes at item_ctx (EOF arrives), we use this to find
-        # which seq_queue to advance. Keyed by (item_ctx, op_name) so two
+        # which seq_queue to advance. Keyed by (op_name, item_ctx) so two
         # downstream ops from the same generator don't overwrite each other.
-        seq_origins: Dict[Tuple[tuple, str], tuple] = {}
+        seq_origins: Dict[Tuple[str, tuple], tuple] = {}
 
         # collect_bufs[gen_ctx][dst_op] = list of (item_ctx, result) pairs.
         # When downstream op has collect=True, frames buffer here instead of
@@ -175,7 +225,7 @@ class _Scheduler:
             if output_queue is not None:
                 out_vars = g._out_vars.get(event.op)
                 if out_vars:
-                    filtered = {k: v for k, v in event.result.items() if k in out_vars}
+                    filtered = {out_vars[k]: v for k, v in event.result.items() if k in out_vars}
                     if filtered:
                         output_queue.put_nowait((event.op, event.ctx, filtered))
 
@@ -262,7 +312,7 @@ class _Scheduler:
                 outputs = op.get_outputs(state, event.ctx)
                 cfg = op._loop_config
                 n = loop_iters.get(event.ctx, 0)
-                if not _evaluate_until(cfg, outputs) and n < cfg.max_iterations:
+                if not _evaluate_until(cfg, outputs) and n < cfg.max_iterations - 1:
                     loop_iters[event.ctx] = n + 1
                     next_ctx = (
                         event.ctx + ("loop_1",) if n == 0 else event.ctx[:-1] + (f"loop_{n + 1}",)
@@ -284,10 +334,17 @@ class _Scheduler:
             else:
                 _on_eof(event)
 
-        # Signal completion to ExecutionHandle.
-        if output_queue is not None:
-            output_queue.put_nowait(None)
+        # Store graph-level metrics so TraceCollector can find this graph node.
+        _end_time = datetime.now(timezone.utc)
+        g._store_metrics(
+            state,
+            context_id,
+            start_time=_start_time,
+            end_time=_end_time,
+            duration_ms=(perf_counter() - _perf_start) * 1000,
+        )
 
         # Collect final outputs at root context.
         outputs = g.get_outputs(state, context_id)
+
         return outputs, item_ctxs

@@ -2,10 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(
-    reason="loop top-level re-dispatch pending fix in GraphOp.run(); _loop_metrics removed"
-)
-
 from hush.core import END, PARENT, START, GraphOp, graph, op
 from hush.core.states import StateSchema
 
@@ -36,8 +32,6 @@ class TestSimpleCounterLoop:
         async for _, result in g.run(state):
             pass
         assert result["count"] == 5
-        assert result["_loop_metrics"]["total_iterations"] == 5
-        assert result["_loop_metrics"]["stopped_by_condition"] is True
 
 
 # ============================================================
@@ -67,9 +61,6 @@ class TestLoopMaxIterations:
         async for _, result in g.run(state):
             pass
         assert result["count"] == 3
-        assert result["_loop_metrics"]["total_iterations"] == 3
-        assert result["_loop_metrics"]["stopped_by_condition"] is False
-        assert result["_loop_metrics"]["max_iterations_reached"] is True
 
 
 # ============================================================
@@ -103,7 +94,6 @@ class TestLoopCallableUntil:
         async for _, result in g.run(state):
             pass
         assert result["count"] == 4
-        assert result["_loop_metrics"]["total_iterations"] == 4
 
 
 # ============================================================
@@ -138,7 +128,7 @@ class TestFibonacciLoop:
 
 
 # ============================================================
-# Test 5: Loop with Streaming Inside
+# Test 5: Loop Accumulator
 # ============================================================
 
 
@@ -172,43 +162,10 @@ class TestLoopAccumulator:
             pass
         # 0->15->30->45->60->75->90->105 (7 iterations)
         assert result["total"] == 105
-        assert result["_loop_metrics"]["total_iterations"] == 7
 
 
 # ============================================================
-# Test 6: Loop Metrics
-# ============================================================
-
-
-class TestLoopMetrics:
-    """Test _loop_metrics dict in output."""
-
-    @pytest.mark.asyncio
-    async def test_metrics_on_condition_stop(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        with GraphOp.loop(name="metrics_test", until="count >= 3", count=0) as g:
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> END
-
-        g.build()
-        schema = StateSchema(g)
-        state = schema.create_state()
-
-        result = {}
-        async for _, result in g.run(state):
-            pass
-        metrics = result["_loop_metrics"]
-        assert metrics["total_iterations"] == 3
-        assert metrics["stopped_by_condition"] is True
-        assert "max_iterations_reached" not in metrics
-
-
-# ============================================================
-# Test 7: Loop Inside Graph
+# Test 6: Loop Inside Graph
 # ============================================================
 
 
@@ -247,7 +204,7 @@ class TestLoopInsideGraph:
 
 
 # ============================================================
-# Test 8: Loop with Branch
+# Test 7: Loop with Branch
 # ============================================================
 
 
@@ -276,11 +233,10 @@ class TestLoopWithBranch:
         async for _, result in g.run(state):
             pass
         assert result["value"] == 1
-        assert result["_loop_metrics"]["stopped_by_condition"] is True
 
 
 # ============================================================
-# Test 9: @graph.loop() Decorator
+# Test 8: @graph.loop() Decorator
 # ============================================================
 
 
@@ -314,7 +270,7 @@ class TestGraphLoopDecorator:
 
 
 # ============================================================
-# Test 10: Loop with Initial from Upstream
+# Test 9: Loop with Initial from Upstream
 # ============================================================
 
 

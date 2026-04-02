@@ -46,7 +46,10 @@ async def test_streaming_concurrent_fanout():
     engine = Hush(graph)
 
     wall_start = time.monotonic()
-    result = await engine.run(inputs={"count": 10})
+    result = {}
+    async for _, _, frame in engine.start(inputs={"count": 10}):
+        for k, v in frame.items():
+            result.setdefault(k, []).append(v)
     wall_elapsed = time.monotonic() - wall_start
 
     # Should have 10 results

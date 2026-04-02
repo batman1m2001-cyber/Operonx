@@ -42,7 +42,10 @@ async def test_n_to_m_streaming():
     engine = Hush(graph)
 
     wall_start = time.monotonic()
-    result = await engine.run(inputs={"items": [2, 3, 5]})
+    result = {}
+    async for _, _, frame in engine.start(inputs={"items": [2, 3, 5]}):
+        for k, v in frame.items():
+            result.setdefault(k, []).append(v)
     wall_elapsed = time.monotonic() - wall_start
 
     # 2 yields from item=2: (2:0, 2:1)

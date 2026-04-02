@@ -3,7 +3,7 @@
 Package layout::
 
     graph_op.py      GraphOp class (define + build + run + export)
-    task_scheduler.py LoopConfig, _Scheduler
+    task_scheduler.py LoopConfig, Scheduler
     _decorators.py   @graph and @graph.loop decorators
     validation.py    Graph validation rules and error types
 """
@@ -20,7 +20,7 @@ from hush.core.loggings import LOGGER
 from hush.core.ops.base import END, PARENT, START, BaseOp
 from hush.core.ops.graph.task_scheduler import (
     LoopConfig,
-    _Scheduler,
+    Scheduler,
 )
 
 # Re-export validation types for backward compatibility
@@ -112,7 +112,9 @@ class GraphOp(BaseOp):
         self._initial_ready = {}  # {op_name: ready_count}
         self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}
         self._scheduler = None  # set by build()
-        self._out_vars: Dict[str, set] = {}  # {op_name: {var}} — vars mapped to PARENT output
+        self._out_vars: Dict[
+            str, dict
+        ] = {}  # {op_name: {src_var: dest_var}} — vars mapped to PARENT output
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -276,7 +278,7 @@ class GraphOp(BaseOp):
 
         self._build()
 
-        self._scheduler = _Scheduler(self)
+        self._scheduler = Scheduler(self)
         self._is_building = False
         self._cache_full_names()
 
@@ -303,30 +305,40 @@ class GraphOp(BaseOp):
 
         # ── Phase 2: stream-context ready counts per generator ────────────────────
         # When generator G emits frame [0], downstream ops run in a new stream ctx.
-        # G's own hard-edge predecessors are already done (G can't start until they
-        # finish). Their ready-count contributions should not block the stream ctx.
-        # So for each generator, pre-subtract those already-done pred contributions.
+        # Batch ops (not reachable from G) already ran before G started — they will
+        # NOT fire EOFs at item contexts, so their ready-count contributions must be
+        # pre-subtracted when seeding item-context ready counts.
         stream_initial = {}
         for gen_name, gen_op in self._ops.items():
             if not gen_op.is_gen:
                 continue
-            # direct hard-edge predecessors of this generator
-            gen_preds = {
-                src
-                for (src, dst) in self._edges
-                if dst == gen_name and not self._edges[(src, dst)].soft
-            }
+            # Compute ops reachable (downstream) from this generator via BFS.
+            gen_reachable: set = set()
+            stack = [gen_name]
+            while stack:
+                node = stack.pop()
+                if node in gen_reachable:
+                    continue
+                gen_reachable.add(node)
+                for lnk in self._adj.get(node, []):
+                    stack.append(lnk.dst)
+
             ri = {}
+            has_predecrement = False
             for op_name, base_count in ready.items():
                 r = base_count
                 for pred in self.prevs.get(op_name, []):
                     if pred == gen_name:
                         continue  # gen itself contributes per-frame — don't subtract
                     edge = self._edges.get((pred, op_name))
-                    if edge and not edge.soft and pred in gen_preds:
-                        r = max(0, r - 1)  # pred already done before gen started
+                    if edge and not edge.soft and pred not in gen_reachable:
+                        # pred is a batch op outside gen's chain — already done at root
+                        r = max(0, r - 1)
+                        if op_name != gen_name:
+                            has_predecrement = True
                 ri[op_name] = r
-            stream_initial[gen_name] = ri
+            if has_predecrement:
+                stream_initial[gen_name] = ri
         self._stream_initial_ready = stream_initial
 
     def _setup_schema(self):
@@ -357,7 +369,7 @@ class GraphOp(BaseOp):
                         default=param.default,
                         description=param.description,
                     )
-                    self._out_vars.setdefault(child_name, set()).add(var)
+                    self._out_vars.setdefault(child_name, {})[var] = param.value.var
 
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)
@@ -460,13 +472,16 @@ class GraphOp(BaseOp):
 
             _outputs, stream_ctxs = await self._scheduler.run(state, context_id)
 
-            if not stream_ctxs:
+            _has_generators = any(op.is_gen for op in self._ops.values())
+            if not stream_ctxs and not _has_generators:
                 self.store_result(state, _outputs, context_id)
                 yield context_id, _outputs
             else:
                 for sctx in stream_ctxs:
                     item = self.get_outputs(state, context_id=sctx)
-                    yield sctx, item
+                    if any(v is not None for v in item.values()):
+                        self.store_result(state, item, sctx)
+                        yield sctx, item
 
         except Exception:
             import sys
