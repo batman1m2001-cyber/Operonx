@@ -43,7 +43,9 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # source yields 0,1,2,3,4 → filter yields 0,2,4 → double: 0,4,8
         assert result["result"] == [0, 4, 8]
@@ -76,7 +78,9 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 5})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == []
 
@@ -106,7 +110,9 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [10, 11, 12]
 
@@ -143,7 +149,9 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 10})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # 0,1,...,9 → 0,2,4,6,8 → 0,4,8 → 0,40,80
         assert result["result"] == [0, 40, 80]
@@ -175,7 +183,9 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 50})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["text"] == []
 
@@ -206,6 +216,8 @@ class TestNtoMStreaming:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 50})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["text"] == ["transcript_25"]

@@ -189,7 +189,7 @@ class _Scheduler:
                 rc = ready[event.ctx]
                 if edge.dst not in rc:
                     continue
-                if edge.is_soft and rc[edge.dst] <= 0:
+                if edge.soft and rc[edge.dst] <= 0:
                     continue
                 # All predecessors satisfied — dispatch downstream op.
                 rc[edge.dst] -= 1

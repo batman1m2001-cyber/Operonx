@@ -35,7 +35,9 @@ class TestSharedVarsBasic:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # Counter incremented 3 times: 0→1→2→3
         # Shared var at DEFAULT_CONTEXT = final value (scalar via all contexts)
@@ -68,7 +70,9 @@ class TestSharedVarsBasic:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == ["READY_1"]
 
@@ -100,7 +104,9 @@ class TestSharedVarsBasic:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # Final shared state after 3 turns
         final_state = state[g.full_name, "state_val", ("main",)]
@@ -136,7 +142,9 @@ class TestSharedVarsWithNormalVars:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # shared count incremented 3 times
         shared_count = state[g.full_name, "shared_count", ("main",)]
@@ -169,7 +177,9 @@ class TestSharedVarsEdgeCases:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         assert result["result"] == [0, 2, 4]
 
@@ -198,7 +208,9 @@ class TestSharedVarsEdgeCases:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # History accumulates: [] → ["turn_0"] → ["turn_0","turn_1"] → ["turn_0","turn_1","turn_2"]
         history = state[g.full_name, "history", ("main",)]
@@ -236,7 +248,9 @@ class TestSharedVarsEdgeCases:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # Shared var must be scalar [0, 1, 2], NOT [[0,1,2], [0,1,2], [0,1,2]]
         assert result["buffer"] == [0, 1, 2]
@@ -267,7 +281,9 @@ class TestSharedVarsEdgeCases:
         g.build()
         schema = StateSchema(g)
         state = schema.create_state(inputs={"n": 3})
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
 
         # counter: shared → scalar (final value)
         assert result["counter"] == 3
@@ -281,5 +297,6 @@ class TestSharedVarsEdgeCases:
     async def test_shared_only_on_parent(self):
         """PARENT.shared() raises if called on non-PARENT."""
         from hush.core import START as s
+
         with pytest.raises(TypeError, match="shared.*PARENT"):
             s.shared(x=1)

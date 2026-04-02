@@ -93,7 +93,11 @@ class BranchOp(BaseOp):
                     inputs[var_name] = Param(required=True, value=base_ref)
 
         # Outputs
-        outputs = {"target": Param(type=str, required=True), "matched": Param(type=str)}
+        outputs = {
+            "target": Param(type=str, required=True),
+            "matched": Param(type=str),
+            "__branch_target__": Param(type=str),
+        }
 
         return inputs, outputs
 

@@ -58,7 +58,9 @@ class TestBasicScoreRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"score": 85})
 
-        result = await branch.run(state)
+        result = {}
+        async for _, result in branch.run(state):
+            pass
         assert result["target"] == "good"
 
     @pytest.mark.asyncio
@@ -68,7 +70,9 @@ class TestBasicScoreRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"score": 95})
 
-        result = await branch.run(state)
+        result = {}
+        async for _, result in branch.run(state):
+            pass
         assert result["target"] == "excellent"
 
     @pytest.mark.asyncio
@@ -78,7 +82,9 @@ class TestBasicScoreRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"score": 30})
 
-        result = await branch.run(state)
+        result = {}
+        async for _, result in branch.run(state):
+            pass
         assert result["target"] == "fail"
 
     @pytest.mark.asyncio
@@ -88,7 +94,8 @@ class TestBasicScoreRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"score": 85})
 
-        await branch.run(state)
+        async for _ in branch.run(state):
+            pass
         assert state["score_workflow.router", "target"] == "good"
 
     @pytest.mark.asyncio
@@ -98,7 +105,8 @@ class TestBasicScoreRouting:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"score": 85})
 
-        await branch.run(state)
+        async for _ in branch.run(state):
+            pass
         assert branch.get_target(state) == "good"
 
 
@@ -160,7 +168,9 @@ class TestMultipleVariablesRouting:
 
         state["user_workflow.user_data", "age"] = 25
 
-        result = await branch.run(state)
+        result = {}
+        async for _, result in branch.run(state):
+            pass
         assert result["target"] == "adult_verified"
 
     @pytest.mark.asyncio
@@ -172,7 +182,9 @@ class TestMultipleVariablesRouting:
 
         state["user_workflow.user_data", "age"] = 15
 
-        result = await branch.run(state)
+        result = {}
+        async for _, result in branch.run(state):
+            pass
         assert result["target"] == "teen"
 
 
@@ -474,17 +486,23 @@ class TestBranchFluentBuilder:
 
         # Test score 95 → excellent
         state = schema.create_state(inputs={"score": 95})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "A grade!"
 
         # Test score 75 → good
         state = schema.create_state(inputs={"score": 75})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "B grade!"
 
         # Test score 40 → fail
         state = schema.create_state(inputs={"score": 40})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Try again!"
 
     def test_fluent_inputs_are_refs(self):
@@ -649,11 +667,15 @@ class TestIfShorthand:
         schema = StateSchema(graph)
 
         state = schema.create_state(inputs={"score": 80})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Passed!"
 
         state = schema.create_state(inputs={"score": 50})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Failed!"
 
 
@@ -968,5 +990,7 @@ class TestPlainBooleanRef:
         schema = StateSchema(graph)
 
         state = schema.create_state(inputs={})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Verified!"

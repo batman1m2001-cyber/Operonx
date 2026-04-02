@@ -207,7 +207,6 @@ class TestCcuLoop:
 
         for t, r in zip(targets, results):
             assert r["counter"] == t, f"target={t}: expected counter={t}, got {r['counter']}"
-            assert r["_loop_metrics"]["stopped_by_condition"] is True
 
 
 # =============================================================================

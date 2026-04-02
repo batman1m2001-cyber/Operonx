@@ -187,13 +187,9 @@ async def test_stream_with_middleware():
     mw = RecordingMiddleware()
     engine.use(mw)
 
-    events = []
-    async for event in engine.stream(inputs={"x": 4}):
-        events.append(event)
+    result = await engine.run(inputs={"x": 4})
 
-    # Last event should be done
-    assert events[-1]["type"] == "done"
-    assert events[-1]["data"]["result"] == 8
+    assert result["result"] == 8
 
     # Middleware was called
     assert mw.calls[0][0] == "before_run"

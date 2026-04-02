@@ -593,7 +593,9 @@ class TestTracerNonBlocking:
         e1 = Hush(g1)
         t0 = time.perf_counter()
         for i in range(NUM_REQUESTS):
-            r = await e1.run(inputs={"x": i}, request_id=f"no-{i}")
+            r = {}
+            async for _, r in e1.run(inputs={"x": i}, request_id=f"no-{i}"):
+                pass
             assert r["result"] == i * 2
         time_without = time.perf_counter() - t0
 
@@ -603,7 +605,9 @@ class TestTracerNonBlocking:
         e2 = Hush(g2, tracer=tracer)
         t0 = time.perf_counter()
         for i in range(NUM_REQUESTS):
-            r = await e2.run(inputs={"x": i}, request_id=f"yes-{i}")
+            r = {}
+            async for _, r in e2.run(inputs={"x": i}, request_id=f"yes-{i}"):
+                pass
             assert r["result"] == i * 2
         time_with = time.perf_counter() - t0
 

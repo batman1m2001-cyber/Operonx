@@ -16,11 +16,11 @@ import pytest
 from hush.core import END, PARENT, START, GraphOp, Hush, op
 from hush.core.ops.base import BaseOp
 
-
 # ── BUG-1 ───────────────────────────────────────────────────────────────────
 # _on_yield missing from __slots__ → AttributeError on any __slots__ subclass
 
 
+@pytest.mark.skip(reason="_on_yield removed in scheduler rewrite")
 def test_bug1_on_yield_in_slots():
     """_on_yield must be in BaseOp.__slots__ so subclasses with __slots__ work."""
     assert "_on_yield" in BaseOp.__slots__, (
@@ -30,6 +30,7 @@ def test_bug1_on_yield_in_slots():
     )
 
 
+@pytest.mark.skip(reason="_on_yield removed in scheduler rewrite")
 @pytest.mark.asyncio
 async def test_bug1_generator_op_with_slots_subclass():
     """Scheduler must not raise AttributeError when setting _on_yield callback."""

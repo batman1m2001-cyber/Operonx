@@ -42,7 +42,9 @@ class TestSimpleIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == [2, 4, 6, 8, 10]
 
 
@@ -82,7 +84,9 @@ class TestBroadcastIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == [10, 20, 30]
 
 
@@ -116,7 +120,9 @@ class TestMultipleListsZip:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["sum"] == [11, 22, 33]
 
     @pytest.mark.asyncio
@@ -147,7 +153,9 @@ class TestMultipleListsZip:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == [22, 44, 66]
 
 
@@ -187,7 +195,9 @@ class TestStringProcessing:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"names": ["Alice", "Bob", "Charlie"]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         expected = ["Hello, Alice!", "Hello, Bob!", "Hello, Charlie!"]
         assert result["message"] == expected
 
@@ -227,7 +237,9 @@ class TestChainOfNodes:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["z"] == [4, 6, 8]
 
 
@@ -262,7 +274,9 @@ class TestConcurrency:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == [10, 20, 30, 40, 50]
 
 
@@ -301,7 +315,9 @@ class TestRefFromPreviousNode:
         schema = StateSchema(graph)
         state = schema.create_state()
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == [50, 100, 150]
 
 
@@ -335,7 +351,9 @@ class TestEmptyIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": []})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == []
 
 
@@ -374,7 +392,9 @@ class TestRefWithNestedOperations:
         schema = StateSchema(graph)
         state = schema.create_state()
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == [20, 40, 60]
 
 
@@ -413,7 +433,9 @@ class TestParentBroadcast:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"multiplier": 10})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == [10, 20, 30, 40, 50]
 
 
@@ -450,7 +472,9 @@ class TestNestedIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [10, 20, 30]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         # 10 -> 5 -> 2 (yields 5, 2)
         # 20 -> 10 -> 5 -> 2 (yields 10, 5, 2)
         # 30 -> 15 -> 7 -> 3 (yields 15, 7, 3)
@@ -496,7 +520,9 @@ class TestDictItemsInStream:
             }
         )
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["name"] == ["Alice", "Bob", "Charlie"]
         assert result["grade"] == ["B", "A", "C"]
 
@@ -532,5 +558,7 @@ class TestAsyncGenerator:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["result"] == [2, 4, 6, 8, 10]

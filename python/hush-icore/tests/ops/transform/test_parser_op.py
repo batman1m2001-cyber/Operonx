@@ -37,7 +37,9 @@ class TestJSONParser:
         json_text = '{"user": {"name": "John", "age": 30}, "status": "active"}'
         state = MemoryState(schema, inputs={"text": json_text})
 
-        result = await json_parser.run(state)
+        result = {}
+        async for _, result in json_parser.run(state):
+            pass
         assert result["name"] == "John"
         assert result["age"] == 30
         assert result["status"] == "active"
@@ -60,7 +62,8 @@ class TestJSONParser:
         json_text = '{"user": {"name": "John"}}'
         state = MemoryState(schema, inputs={"text": json_text})
 
-        await json_parser.run(state)
+        async for _ in json_parser.run(state):
+            pass
         assert state["json_workflow.json_parser", "name"] == "John"
 
     def test_json_parser_quick_call(self):
@@ -109,7 +112,9 @@ class TestXMLParser:
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"text": xml_text})
 
-        result = await xml_parser.run(state)
+        result = {}
+        async for _, result in xml_parser.run(state):
+            pass
         assert result["name"] == "Alice"
         assert result["email"] == "alice@example.com"
         assert result["code"] == "200"
@@ -168,7 +173,8 @@ class TestParserErrors:
         graph.build()
         schema = StateSchema(graph)
         state = MemoryState(schema, inputs={"text": "not valid json"})
-        await parser.run(state)
+        async for _ in parser.run(state):
+            pass
 
         # Error should be captured in state
         error = state["invalid_json_graph.test_parser", "error"]
@@ -298,10 +304,14 @@ class TestTypeConversion:
 
         # Test with verified=true
         state = MemoryState(schema, inputs={"text": "<verified>true</verified>"})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Verified!"
 
         # Test with verified=false
         state = MemoryState(schema, inputs={"text": "<verified>false</verified>"})
-        result = await graph.run(state)
+        result = {}
+        async for _, result in graph.run(state):
+            pass
         assert result["result"] == "Not verified!"
