@@ -215,14 +215,63 @@ class LoopConfig:
 **`test_collector.py`** — verify `_get_stream_contexts` returns correct item contexts from state for generator ops.
   Replace with the new `item_ctxs` returned by the scheduler, or remove if tracing no longer needs it.
 
-### Tests (after all steps)
+### Step 14 — Tests (238 failing after child_name fix)
 
-| File | Change needed |
-|------|--------------|
-| `test_graph_op.py` (lines 872–1174) | `graph.initial_ready_count` → `graph._initial_ready`; delete `has_soft_preds` asserts |
-| `test_streaming.py` (lines 76, 86, 110–111, 136–137) | `_stream_predecrements` → `_stream_initial_ready` |
-| `test_serialize.py` (lines 150, 151, 199) | update key assertions |
-| `rust/hush-icore/src/config.rs` (lines 182–251) | parse `stream_initial_ready`; handle missing `has_soft_preds` |
+Failures split into **real bugs** (fix production code) and **stale tests** (update test assertions).
+
+---
+
+#### 14-A: Real bugs — fix production code first
+
+**14-A1 — `task_scheduler.py` `edge.is_soft` → `edge.soft` (fixes ~44 tests)**
+- `Link` NamedTuple has field `soft: bool`, but scheduler `_on_frame()` references `edge.is_soft`
+- File: `task_scheduler.py` — search and replace `edge.is_soft` → `edge.soft`
+- Affected: `test_streaming_collect.py`, `test_streaming_regression.py`, `test_collector.py`, `test_concurrent.py`, `test_workflow.py`, `test_end_output_mapping.py`
+
+**14-A2 — `BranchOp` `__branch_target__` not in state schema (fixes ~31 tests)**
+- `BranchOp._create_core_function()` injects `__branch_target__` in its result dict
+- But `__branch_target__` is not registered in `BranchOp.outputs` → `store_result()` raises `KeyError`
+- Fix: add `"__branch_target__": Param(type=str, required=False)` to BranchOp outputs schema
+- Affected: all of `test_branch_op.py` (31 tests)
+
+**14-A3 — Tests calling `graph.run()` directly with `await` (fixes ~131 tests)**
+- `GraphOp.run()` is now an async generator — cannot be `await`ed
+- Many tests do `result = await graph.run(state)` or call via engine internals expecting coroutine
+- Fix: update all direct `graph.run()` call sites in tests to `async for _, r in graph.run(state): result = r`
+  OR switch to `await engine.run(inputs)` which internally uses `start().collect()`
+- Affected: `test_graph_op.py`, `test_graph_loop.py`, `test_branch_op.py`, `test_streaming.py`,
+  `test_shared_vars.py`, `test_parser_op.py`, all iteration tests
+
+---
+
+#### 14-B: Stale test assertions — update to match new API
+
+| File | Lines | Old | New |
+|------|-------|-----|-----|
+| `test_graph_op.py` | 872–1174 | `graph.initial_ready_count` | `graph._initial_ready` |
+| `test_graph_op.py` | 875, 942, 1030, 1116–1117 | `graph.has_soft_preds` | removed — delete assertions |
+| `test_streaming.py` | 76, 86, 110–111, 136–137 | `graph._stream_predecrements` | `graph._stream_initial_ready` |
+| `test_serialize.py` | 150 | `"initial_ready_count" in s` | keep (key still exists in serialize()) |
+| `test_serialize.py` | 192–199 | `"has_soft_preds" in s` | delete test — key removed |
+| `test_streaming_regression.py` | 24–47 | `_on_yield in BaseOp.__slots__` | delete both tests — slot removed intentionally |
+| `test_engine_stream.py` | 28, 59, 91, 121, 154 | `engine.stream(inputs)` | `engine.start(inputs)` + adapt iteration |
+| `test_middleware.py` | 191 | `engine.stream(inputs)` | `engine.start(inputs)` + adapt iteration |
+| `test_graph_loop.py` | 33, 62–64, 96, 161, 188, 259 | `result["_loop_metrics"]` | removed — delete or rewrite assertions |
+| `test_concurrent.py` | 210 | `result["_loop_metrics"]` | removed — delete assertion |
+
+---
+
+#### 14-C: Tracer failures — investigate after 14-A/14-B
+
+`test_local_tracer.py` (3 failures) — likely downstream of 14-A bugs. Re-evaluate after fixing 14-A.
+
+---
+
+#### Rust (deferred)
+
+| File | Lines | Change |
+|------|-------|--------|
+| `rust/hush-icore/src/config.rs` | 182–251 | parse `stream_initial_ready`; handle missing `has_soft_preds` |
 
 ---
 
