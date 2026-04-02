@@ -82,7 +82,7 @@ class TestRerankOp:
                 return_value=[{"index": 1, "score": 0.9}, {"index": 0, "score": 0.7}]
             )
             mock_instance = Mock()
-            mock_instance.reranker.return_value = mock_reranker
+            mock_instance.get.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
             node = RerankOp(name="process_test", resource="bge-m3")
@@ -104,7 +104,7 @@ class TestRerankOp:
             mock_reranker = Mock()
             mock_reranker.run = AsyncMock(return_value=[{"index": 0, "score": 0.95}])
             mock_instance = Mock()
-            mock_instance.reranker.return_value = mock_reranker
+            mock_instance.get.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
             node = RerankOp(name="dict_test", resource="bge-m3")
@@ -151,7 +151,10 @@ class TestRerankOpIntegration:
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured in resources.yaml")
 
-        node = RerankOp(name="rerank", resource="bge-m3-onnx")
+        try:
+            node = RerankOp(name="rerank", resource="bge-m3-onnx")
+        except (KeyError, ImportError):
+            pytest.skip("reranking:bge-m3-onnx failed to initialize (missing dependencies)")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -167,8 +170,10 @@ class TestRerankOpIntegration:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "reranks" in result
         reranks = result["reranks"]
         assert len(reranks) == 2
@@ -202,8 +207,10 @@ class TestRerankOpIntegration:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "reranks" in result
         reranks = result["reranks"]
         assert len(reranks) == 2

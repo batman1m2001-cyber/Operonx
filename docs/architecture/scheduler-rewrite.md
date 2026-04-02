@@ -193,6 +193,7 @@ class LoopConfig:
 | 12 | `_output_queue` wiring | ✅ done — replaced by `output_queue` param on `_Scheduler.run()` + `_out_vars` filter |
 | 13 | output contract | ✅ done — `ExecutionHandle`: `async for` per frame, `collect()` merges, `await handle["op","var"]` for point queries |
 | 14 | Tests | ✅ done — 704 passed, 1 skipped (hush-telemetry) |
+| 15 | hush-providers | ✅ done — 195 passed, 23 skipped (ONNX/API keys) |
 
 ---
 

@@ -88,8 +88,10 @@ class TestEmbeddingOpIntegration:
         schema = StateSchema(op=node)
         state = MemoryState(schema, inputs={"texts": ["Hello world", "How are you?"]})
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "embeddings" in result
         embeddings = result["embeddings"]
         assert len(embeddings) == 2

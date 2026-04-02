@@ -409,8 +409,9 @@ class TestChatIntegration:
 
         schema = StateSchema(op=node)
         state = MemoryState(schema)
-        result = await node.run(state)
-
+        result = {}
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"chat response: {result['content']}")
 
@@ -437,8 +438,9 @@ class TestChatIntegration:
 
         schema = StateSchema(op=node)
         state = MemoryState(schema)
-        result = await node.run(state)
-
+        result = {}
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         parsed = json.loads(result["content"])
         assert isinstance(parsed, dict)
@@ -471,8 +473,9 @@ Output your response in XML format:
 
         schema = StateSchema(op=node)
         state = MemoryState(schema)
-        result = await node.run(state)
-
+        result = {}
+        async for _, result in node.run(state):
+            pass
         assert "sentiment" in result
         assert "confidence" in result
         print(f"Sentiment: {result['sentiment']}, Confidence: {result['confidence']}")

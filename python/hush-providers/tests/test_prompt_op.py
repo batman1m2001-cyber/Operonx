@@ -92,8 +92,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "messages" in result
         messages = result["messages"]
         assert len(messages) == 1
@@ -117,8 +119,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "messages" in result
         messages = result["messages"]
         assert len(messages) == 2
@@ -139,8 +143,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
@@ -166,8 +172,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are an assistant."
@@ -199,8 +207,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[1]["content"][0]["text"] == "Describe: this image"
@@ -226,7 +236,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
+
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
 
         # Should have: system, history (2 messages), user
@@ -256,7 +269,10 @@ class TestPromptOpUnified:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
+
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
 
         assert len(messages) == 2
@@ -321,8 +337,10 @@ class TestPromptOpWithVars:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 1
         assert messages[0]["content"] == "Hello Alice, teach me about Python."
@@ -346,8 +364,10 @@ class TestPromptOpWithVars:
         # Override via state inputs
         state = MemoryState(schema, inputs={"role": "a helpful assistant", "task": "explain code"})
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are a helpful assistant."
@@ -366,8 +386,10 @@ class TestPromptOpWithVars:
         schema = StateSchema(op=node)
         state = MemoryState(schema)
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are helpful."
@@ -393,8 +415,10 @@ class TestPromptOpDynamic:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are a dynamic assistant."
