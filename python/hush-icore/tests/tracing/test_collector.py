@@ -138,9 +138,9 @@ async def test_streaming_trace():
     engine = Hush(g)
     result = await engine.run(inputs={"count": 3})
     state = result["$state"]
-    # engine.run() → handle.collect() is last-value-wins for streaming;
-    # use engine.start() for list accumulation.
-    assert result["result"] == 20  # last value: (3-1)*10
+    # engine.run() → handle.collect(unwrap=True) groups by key;
+    # generator outputs become lists.
+    assert result["result"] == [0, 10, 20]
 
     collector = TraceCollector(g)
     trace = collector.collect(state)

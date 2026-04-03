@@ -206,7 +206,12 @@ class TestCcuLoop:
         results = await asyncio.gather(*[engine.run(inputs={"target": t}) for t in targets])
 
         for t, r in zip(targets, results):
-            assert r["counter"] == t, f"target={t}: expected counter={t}, got {r['counter']}"
+            # Loop emits one frame per iteration; engine.run(unwrap=True)
+            # gives scalar for 1-iteration loops, list for multi-iteration.
+            counter = r["counter"]
+            if isinstance(counter, list):
+                counter = counter[-1]  # final iteration value
+            assert counter == t, f"target={t}: expected counter={t}, got {counter}"
 
 
 # =============================================================================

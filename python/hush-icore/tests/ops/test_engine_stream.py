@@ -147,8 +147,8 @@ class TestStartEmptyGenerator:
 
 class TestCollect:
     @pytest.mark.asyncio
-    async def test_collect_returns_last_value(self):
-        """handle.collect() merges frames, last-value-wins for generators."""
+    async def test_collect_groups_by_key(self):
+        """handle.collect() merges frames by key into lists."""
 
         @op
         def source(items: list):
@@ -163,18 +163,66 @@ class TestCollect:
         engine = Hush(g)
         result = await engine.start(inputs={"items": [1, 2, 3]}).collect()
 
-        assert result["result"] == 6  # last-value-wins
+        assert result["result"] == [2, 4, 6]
 
     @pytest.mark.asyncio
-    async def test_run_returns_last_value(self):
-        """engine.run() returns merged dict (last-value-wins) + $state."""
+    async def test_collect_flat_mode(self):
+        """handle.collect('flat') returns ordered list of frame dicts."""
 
         @op
         def source(items: list):
             for item in items:
                 yield {"x": item}
 
-        with GraphOp(name="run_compat") as g:
+        with GraphOp(name="flat_test") as g:
+            s = source(items=PARENT["items"])
+            d = double(x=s["x"])
+            START >> s >> d >> END
+
+        engine = Hush(g)
+        result = await engine.start(inputs={"items": [1, 2, 3]}).collect("flat")
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert sorted(r["result"] for r in result) == [2, 4, 6]
+
+    @pytest.mark.asyncio
+    async def test_collect_unwrap(self):
+        """handle.collect(unwrap=True) unwraps single-item lists to scalars."""
+
+        with GraphOp(name="unwrap_test") as g:
+            d = double(x=PARENT["x"])
+            START >> d >> END
+
+        engine = Hush(g)
+        result = await engine.start(inputs={"x": 5}).collect(unwrap=True)
+
+        assert result["result"] == 10  # single frame → scalar
+
+    @pytest.mark.asyncio
+    async def test_run_unwraps_single_frames(self):
+        """engine.run() unwraps single-frame outputs to scalars."""
+
+        with GraphOp(name="run_scalar") as g:
+            d = double(x=PARENT["x"])
+            START >> d >> END
+
+        engine = Hush(g)
+        result = await engine.run(inputs={"x": 5})
+
+        assert result["result"] == 10
+        assert "$state" in result
+
+    @pytest.mark.asyncio
+    async def test_run_returns_lists_for_generators(self):
+        """engine.run() returns lists for generator outputs."""
+
+        @op
+        def source(items: list):
+            for item in items:
+                yield {"x": item}
+
+        with GraphOp(name="run_gen") as g:
             s = source(items=PARENT["items"])
             d = double(x=s["x"])
             START >> s >> d >> END
@@ -182,5 +230,5 @@ class TestCollect:
         engine = Hush(g)
         result = await engine.run(inputs={"items": [1, 2, 3]})
 
-        assert result["result"] == 6  # last-value-wins
+        assert result["result"] == [2, 4, 6]
         assert "$state" in result
