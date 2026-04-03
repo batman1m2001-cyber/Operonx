@@ -51,11 +51,17 @@ class ExecutionHandle:
         async for op, ctx, data in handle:
             print(op, data)
 
-        # Wait for a specific output (last value wins for generators)
+        # Wait for a specific output
         answer = await handle["llm", "content"]
 
-        # Wait for everything and return final output dict
+        # Collect all outputs grouped by key (lists)
         outputs = await handle.collect()
+
+        # Collect with single-value unwrapping
+        outputs = await handle.collect(unwrap=True)
+
+        # Collect as flat list of frame dicts
+        frames = await handle.collect("flat")
     """
 
     def __init__(self, queue: asyncio.Queue, task: asyncio.Task, state: Any = None) -> None:
@@ -165,11 +171,56 @@ class ExecutionHandle:
         return None if val is _MISSING else val
 
     # ---convenience-----------------------------------------------------------------------
-    async def collect(self) -> dict[str, Any]:
-        """Consume all frames -> merged output dict (last value wins)."""
-        out: dict[str, Any] = {}
+    @property
+    def frame_count(self) -> int:
+        """Number of frames received so far."""
+        return len(self._frames)
+
+    async def collect(
+        self, mode: str = "group", unwrap: bool = False
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        """Consume all frames and return collected output.
+
+        Args:
+            mode: ``"group"`` merges values by key into lists (default).
+                  ``"flat"`` returns an ordered list of frame dicts.
+            unwrap: When *True*, single-item lists become scalars.
+        """
+        if mode == "flat":
+            frames: list[dict[str, Any]] = []
+            async for _, _, data in self:
+                frames.append(data)
+            return frames
+
+        # mode == "group"
+        out: dict[str, list[Any]] = {}
         async for _, _, data in self:
-            out.update(data)
+            for k, v in data.items():
+                out.setdefault(k, []).append(v)
+
+        if unwrap:
+            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
+        return out
+
+    async def result(self, unwrap: bool = True) -> Dict[str, Any]:
+        """Build result from all buffered frames (does not consume).
+
+        Safe to call after ``async for`` iteration — reads from the
+        internal buffer rather than re-iterating.
+        """
+        # Wait for execution to complete if still running
+        if not self._done:
+            async with self._cond:
+                while not self._done:
+                    await self._cond.wait()
+        if self._error:
+            raise self._error
+        out: dict[str, list[Any]] = {}
+        for _, _, data in self._frames:
+            for k, v in data.items():
+                out.setdefault(k, []).append(v)
+        if unwrap:
+            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
         return out
 
     def cancel(self) -> None:
@@ -331,25 +382,34 @@ class Hush:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
         Does not block — the graph runs in the background. Use the handle to
         stream frames, await specific outputs, or collect the final result.
 
+        Tracer flush happens automatically when the scheduler completes — no
+        explicit finalize step needed.
+
         Args:
             inputs: Input data for the workflow
             user_id: Optional user identifier (auto-generated if not provided)
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
+            tracer: Optional tracer(s) — overrides engine default for this execution.
 
         Returns:
-            ExecutionHandle — async-iterable, supports await handle["op","var"]
-            and await handle.collect()
+            ExecutionHandle — async-iterable, supports ``await handle["op","var"]``
+            and ``await handle.collect()``
         """
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
+
+        # Resolve tracers: per-call overrides engine default
+        effective = tracer if tracer is not None else self._tracer
+        tracers = (effective if isinstance(effective, list) else [effective]) if effective else []
 
         state = self._schema.create_state(
             inputs=inputs,
@@ -357,6 +417,12 @@ class Hush:
             session_id=session_id,
             request_id=request_id,
         )
+
+        LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
+
+        # Capture references for the closure
+        collector = self._collector
+        graph_name = self.name
 
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -368,6 +434,16 @@ class Hush:
             except asyncio.CancelledError:
                 queue.put_nowait(None)
                 raise
+            finally:
+                # Flush tracers in background thread (fire-and-forget).
+                # State is complete at this point — safe to collect traces.
+                if tracers:
+                    from hush.core.tracing import get_flush_worker
+
+                    get_flush_worker().submit(tracers, collector, state)
+                LOGGER.info(
+                    format_event("workflow_done", request_id=request_id, graph_name=graph_name)
+                )
 
         scheduler_task = asyncio.create_task(_run())
         return ExecutionHandle(queue, scheduler_task, state)
@@ -384,7 +460,13 @@ class Hush:
         """Execute the workflow with given inputs.
 
         Each call creates a fresh state, so the same engine can be
-        used for multiple independent executions.
+        used for multiple independent executions.  Equivalent to::
+
+            handle = engine.start(inputs, tracer=tracer, ...)
+            result = await handle.collect(unwrap=True)
+
+        Tracer flush happens automatically inside ``start()`` when the
+        scheduler completes.
 
         Args:
             inputs: Input data for the workflow
@@ -398,25 +480,9 @@ class Hush:
             Dictionary containing workflow outputs plus "$state" key
             with the MemoryState for debugging/tracing access.
         """
-        # Deprecation: per-run tracer= will be removed in a future version
-        if tracer is not None:
-            import warnings
-
-            warnings.warn(
-                "Passing tracer= to run() is deprecated. "
-                "Use Hush(graph, tracer=...) or engine.use(tracer) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Generate IDs if not provided
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
-
-        # Resolve tracers: per-run overrides engine default
-        effective = tracer if tracer is not None else self._tracer
-        tracers = (effective if isinstance(effective, list) else [effective]) if effective else []
 
         context: Dict[str, Any] = {
             "user_id": user_id,
@@ -428,29 +494,22 @@ class Hush:
         for mw in self._middleware:
             inputs = await mw.before_run(self.graph, inputs, context)
 
-        LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
-
-        # Execute via start() — handles state creation + scheduler
-        handle = self.start(inputs, user_id=user_id, session_id=session_id, request_id=request_id)
+        handle = self.start(
+            inputs,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+            tracer=tracer,
+        )
 
         try:
-            result = await handle.collect()
+            result = await handle.collect(unwrap=True)
         except Exception as e:
             for mw in reversed(self._middleware):
                 await mw.on_error(self.graph, inputs, e, context)
             raise
 
-        state = handle.state
-
-        # Collect + flush in background thread (non-blocking)
-        if tracers:
-            from hush.core.tracing import get_flush_worker
-
-            get_flush_worker().submit(tracers, self._collector, state)
-
-        LOGGER.info(format_event("workflow_done", request_id=request_id, graph_name=self.name))
-
-        result["$state"] = state
+        result["$state"] = handle.state
 
         # Apply after_run middleware (in reverse order)
         for mw in reversed(self._middleware):

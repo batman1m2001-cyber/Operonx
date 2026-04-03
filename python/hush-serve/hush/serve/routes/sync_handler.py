@@ -20,7 +20,6 @@ def create_sync_handler(endpoint) -> Callable:
             request_id=request_id,
             user_id=user_id,
             session_id=session_id,
-            tracer=endpoint.tracer,
         )
 
         return {k: v for k, v in result.items() if not k.startswith("$")}
