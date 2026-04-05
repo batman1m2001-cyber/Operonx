@@ -104,10 +104,8 @@ class TestStreamCoreYields:
 
         op = LLMOp(name="test", resource="gpt-4o", stream=True)
         mock_llm = make_mock_llm(chunks)
-        op._llm = mock_llm
         op._llms = [mock_llm]
         op._initialized = True
-        op._setup_core()
 
         results = []
         async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
@@ -141,10 +139,8 @@ class TestStreamCoreYields:
 
         op = LLMOp(name="test", resource="gpt-4o", stream=True)
         mock_llm = make_mock_llm(chunks)
-        op._llm = mock_llm
         op._llms = [mock_llm]
         op._initialized = True
-        op._setup_core()
 
         results = []
         async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
@@ -189,10 +185,8 @@ class TestStreamingLLMInGraph:
 
         # Patch the LLM backend before build
         mock_llm = make_mock_llm(chunks)
-        llm._llm = mock_llm
         llm._llms = [mock_llm]
         llm._initialized = True
-        llm._setup_core()
 
         engine = Hush(g)
         handle = engine.start(inputs={"messages": [{"role": "user", "content": "hi"}]})
@@ -237,10 +231,8 @@ class TestStreamingLLMInGraph:
             START >> llm >> END
 
         mock_llm = make_mock_llm(chunks)
-        llm._llm = mock_llm
         llm._llms = [mock_llm]
         llm._initialized = True
-        llm._setup_core()
 
         engine = Hush(g)
         result = await engine.run(inputs={"messages": [{"role": "user", "content": "hi"}]})
@@ -272,10 +264,8 @@ class TestStreamingWithThinking:
 
         op = LLMOp(name="test", resource="gpt-4o", stream=True)
         mock_llm = make_mock_llm(chunks)
-        op._llm = mock_llm
         op._llms = [mock_llm]
         op._initialized = True
-        op._setup_core()
 
         results = []
         async for item in op._stream_core(messages=[{"role": "user", "content": "think"}]):
@@ -322,12 +312,10 @@ class TestStreamingFallback:
 
         # Create without fallback= to avoid hub lookup, then set manually
         llm_op = LLMOp(name="test", resource="gpt-4o", stream=True)
-        llm_op._llm = failing_llm
         llm_op._llms = [failing_llm]
         llm_op.fallback = ["fallback-model"]
         llm_op._fallback_llms = [fallback_llm]
         llm_op._initialized = True
-        llm_op._setup_core()
 
         results = []
         async for item in llm_op._stream_core(messages=[{"role": "user", "content": "hi"}]):

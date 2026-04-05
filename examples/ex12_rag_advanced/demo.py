@@ -14,19 +14,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-import os
-import sys
-from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 
 from ex12_rag_advanced.workflow import DOCUMENTS, build_keyword_rrf
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
 
 
 async def main():
@@ -34,7 +31,7 @@ async def main():
     print("=" * 55)
     print("1. Keyword Search + RRF")
     print("=" * 55)
-    engine = Hush(build_keyword_rrf())
+    engine = Hush(build_keyword_rrf(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"query": "biển đẹp", "documents": DOCUMENTS})
     print("  Query: 'biển đẹp'")
     print("  Top results (RRF merged):")
@@ -42,10 +39,6 @@ async def main():
         print(f"    {i + 1}. {doc[:60]}...")
 
     # 2. Hybrid RAG (keyword + vector) — needs OPENAI_API_KEY
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("\n  Examples 2-3 skipped — OPENAI_API_KEY chưa set")
-        return
-
     print()
     print("=" * 55)
     print("2. Hybrid RAG (keyword + vector)")
@@ -67,7 +60,7 @@ async def main():
         )
         START >> embed >> END
 
-    embed_result = await Hush(embed_graph).run(inputs={"texts": DOCUMENTS})
+    embed_result = await Hush(embed_graph, env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"texts": DOCUMENTS})
     doc_vectors = embed_result["vectors"]
 
     @op
@@ -106,7 +99,7 @@ async def main():
         [kw, vec] >> mrg >> p >> llm >> END
 
     for query in ["Thành phố nào có bãi biển Mỹ Khê?", "Đảo lớn nhất Việt Nam ở đâu?"]:
-        result = await Hush(graph).run(
+        result = await Hush(graph, env=ENV_FILE, resources=RESOURCES_FILE).run(
             inputs={"query": query, "documents": DOCUMENTS, "doc_vectors": doc_vectors}
         )
         print(f"\n  Q: {query}")

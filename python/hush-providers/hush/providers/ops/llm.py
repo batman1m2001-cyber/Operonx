@@ -5,9 +5,7 @@ fallback chains, and OpenAI Batch API mode.
 """
 
 import random
-from datetime import datetime
-from time import perf_counter
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from hush.core import LOGGER
 from hush.core.configs import OpType
@@ -17,7 +15,6 @@ from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
 
 if TYPE_CHECKING:
-    from hush.core.states import MemoryState
     from hush.providers.llms.base import BaseLLM
 
 
@@ -53,7 +50,6 @@ class LLMOp(BaseOp):
         "batch_mode",
         "ratios",
         "_llms",
-        "_llm",
         "_batch_coordinator",
         "fallback",
         "_fallback_llms",
@@ -90,28 +86,18 @@ class LLMOp(BaseOp):
             outputs: Output variable mappings
             **kwargs: Additional keyword arguments for BaseOp
         """
-        # Provider ops are I/O-bound by default (HTTP calls to LLM backends)
         kwargs.setdefault("bound", "io")
-        # Initialize base without inputs/outputs first
         super().__init__(**kwargs)
 
         self.batch_mode = batch_mode
         self.contain_generation = True
         self.fallback = fallback
-        # Dedicated RNG for load balancing - isolated from global random state
         self._rng = random.Random(seed)
 
-        # Handle load balancing setup
-        self._llms: List["BaseLLM"] = []
-        self._llm: Optional["BaseLLM"] = None
-        self._fallback_llms: List["BaseLLM"] = []
-        self._batch_coordinator = None
-
+        # Validate resource + ratios
         if isinstance(resource, list):
             self.resource = resource
             self.ratios = ratios or [1.0 / len(resource)] * len(resource)
-
-            # Validate ratios
             if len(self.ratios) != len(self.resource):
                 raise ValueError(
                     f"ratios length ({len(self.ratios)}) must match "
@@ -123,12 +109,11 @@ class LLMOp(BaseOp):
             self.resource = resource
             self.ratios = [1.0] if resource else None
 
-        # Define input/output schema
+        # I/O schema
         input_schema = {
             "messages": Param(type=list, required=True),
             "temperature": Param(type=float, default=0.0),
             "max_tokens": Param(type=int, default=None),
-            # Advanced generation parameters
             "tools": Param(type=list, default=None),
             "tool_choice": Param(type=(str, dict), default=None),
             "response_format": Param(type=dict, default=None),
@@ -158,21 +143,26 @@ class LLMOp(BaseOp):
             "error_message": Param(type=str, default=None),
         }
 
-        # Normalize and merge with user-provided
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
         self.inputs = self._merge_params(input_schema, normalized_inputs)
         self.outputs = self._merge_params(output_schema, normalized_outputs)
 
-        # LLM backends — lazy-initialized on first run() to allow
-        # graph construction before ResourceHub is set up
-        self._llm = None
-        self._llms = []
-        self._fallback_llms = []
+        # Lazy-initialized from ResourceHub on first use
+        self._llms: List["BaseLLM"] = []
+        self._fallback_llms: List["BaseLLM"] = []
+        self._batch_coordinator = None
         self._initialized = False
 
-        # Set up core — may be deferred if hub not ready yet
-        self._setup_core()
+        # Core: stream → _stream_core, else → _generate_core
+        if self.stream:
+            self._set_core(self._stream_core)
+        else:
+            self._set_core(self._generate_core)
+
+    # =========================================================================
+    # Lazy init
+    # =========================================================================
 
     def _ensure_initialized(self):
         """Lazy-init LLM backends from ResourceHub on first use."""
@@ -185,30 +175,17 @@ class LLMOp(BaseOp):
 
         if isinstance(self.resource, list):
             self._llms = [hub.get(f"llm:{key}") for key in self.resource]
-            self._llm = self._llms[0]
         else:
-            self._llm = hub.get(f"llm:{self.resource}")
-            self._llms = [self._llm] if self._llm else []
+            llm = hub.get(f"llm:{self.resource}")
+            self._llms = [llm] if llm else []
 
         if self.fallback:
             self._fallback_llms = [hub.get(f"llm:{key}") for key in self.fallback]
 
-        self._initialized = True
-        self._setup_core()
-
-    def _setup_core(self):
-        """Set up core function based on mode. Skips if LLM not initialized yet."""
-        if not self._initialized:
-            # Defer — will be called again from _ensure_initialized()
-            self._set_core(self._lazy_generate)
-            return
-
-        if self.batch_mode:
-            # Batch mode: use BatchCoordinator
+        if self.batch_mode and self._llms:
             from hush.providers.llms.batch_coordinator import BatchCoordinator
 
-            # Get batch config from LLM config if available
-            config = self._llm.config
+            config = self._llms[0].config
             batch_kwargs = {}
             if hasattr(config, "batch_size"):
                 batch_kwargs["max_batch_size"] = config.batch_size
@@ -221,139 +198,180 @@ class LLMOp(BaseOp):
 
             self._batch_coordinator = BatchCoordinator.get_coordinator(
                 resource=self.resource if isinstance(self.resource, str) else self.resource[0],
-                llm=self._llm,
+                llm=self._llms[0],
                 **batch_kwargs,
             )
-            self._set_core(self._batch_coordinator.submit)
-        elif self.stream:
-            self._set_core(self._stream_core)
-        else:
-            self._set_core(self._llm.generate)
 
-    async def _lazy_generate(self, **kwargs):
-        """Placeholder core that initializes LLM on first call, then delegates."""
-        self._ensure_initialized()
-        return await self.core(**kwargs)
+        self._initialized = True
+
+    # =========================================================================
+    # LLM selection
+    # =========================================================================
 
     def _select_llm(self) -> "BaseLLM":
-        """Select an LLM using weighted random selection for load balancing.
-
-        Uses dedicated RNG instance for isolation from global random state.
-
-        Returns:
-            BaseLLM: The selected LLM backend
-        """
+        """Select an LLM: single model returns it, multi uses weighted random."""
         self._ensure_initialized()
         if len(self._llms) == 1:
             return self._llms[0]
-
-        # Weighted random selection using dedicated RNG
         return self._rng.choices(self._llms, weights=self.ratios, k=1)[0]
 
-    def _get_selected_resource(self, llm: "BaseLLM") -> str:
-        """Get the resource key for the selected LLM.
-
-        Args:
-            llm: The selected LLM backend
-
-        Returns:
-            str: The resource key
-        """
+    def _get_resource_key(self, llm: "BaseLLM") -> str:
+        """Get the resource key string for a selected LLM."""
         if isinstance(self.resource, list):
-            idx = self._llms.index(llm)
-            return self.resource[idx]
+            return self.resource[self._llms.index(llm)]
         return self.resource
 
+    # =========================================================================
+    # Core: generate (non-streaming)
+    # =========================================================================
+
+    async def _generate_core(self, **kwargs):
+        """Select LLM → generate → fallback on error. Returns output dict."""
+        llm_params = self._build_llm_params(kwargs)
+
+        if self.batch_mode:
+            self._ensure_initialized()
+            if not self._batch_coordinator:
+                raise RuntimeError("Batch coordinator not initialized")
+            completion = await self._batch_coordinator.submit(**llm_params)
+            return self._extract_completion(completion, kwargs, self.resource)
+
+        selected = self._select_llm()
+        resource = self._get_resource_key(selected)
+
+        try:
+            completion = await selected.generate(**llm_params)
+            return self._extract_completion(completion, kwargs, resource)
+        except Exception as e:
+            if not self._fallback_llms:
+                raise
+            LOGGER.error(f"Primary {resource} failed: {e}")
+            return await self._fallback_generate(llm_params, kwargs)
+
+    async def _fallback_generate(self, llm_params, raw_inputs):
+        """Try fallback LLMs in order. Raises if all fail."""
+        for idx, fallback_llm in enumerate(self._fallback_llms):
+            fallback_key = self.fallback[idx]
+            try:
+                LOGGER.info(f"Trying fallback {fallback_key}...")
+                completion = await fallback_llm.generate(**llm_params)
+                LOGGER.info(f"Fallback to {fallback_key} succeeded")
+                return self._extract_completion(completion, raw_inputs, fallback_key)
+            except Exception as fallback_error:
+                LOGGER.error(f"Fallback {fallback_key} failed: {fallback_error}")
+        raise RuntimeError("All fallback models failed")
+
+    # =========================================================================
+    # Core: stream
+    # =========================================================================
+
+    async def _stream_core(self, **kwargs):
+        """Select LLM → stream → fallback on error. Yields per-token dicts."""
+        llm_params = self._build_llm_params(kwargs)
+        selected = self._select_llm()
+        resource = self._get_resource_key(selected)
+        acc = self._new_stream_acc()
+
+        try:
+            async for chunk in selected.stream(**llm_params):
+                yield_dict = self._process_chunk(chunk, acc)
+                if yield_dict:
+                    yield yield_dict
+        except Exception as e:
+            if not self._fallback_llms:
+                raise
+            LOGGER.error(f"Streaming from {resource} failed: {e}")
+            async for result in self._fallback_stream(llm_params, kwargs):
+                if isinstance(result, dict) and "finish_reason" in result:
+                    yield result
+                    return
+                yield result
+            return
+
+        yield self._stream_final(acc, resource, kwargs)
+
+    async def _fallback_stream(self, llm_params, raw_inputs):
+        """Try fallback LLMs for streaming. Yields chunks, final yield has metadata."""
+        for idx, fallback_llm in enumerate(self._fallback_llms):
+            fallback_key = self.fallback[idx]
+            LOGGER.info(f"Trying streaming fallback {fallback_key}...")
+            try:
+                acc = self._new_stream_acc()
+                async for chunk in fallback_llm.stream(**llm_params):
+                    yield_dict = self._process_chunk(chunk, acc)
+                    if yield_dict:
+                        yield yield_dict
+                LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
+                yield self._stream_final(acc, fallback_key, raw_inputs)
+                return
+            except Exception as fallback_error:
+                LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
+        raise RuntimeError("All streaming fallback models failed")
+
+    def _stream_final(self, acc, resource, raw_inputs):
+        """Build the final metadata yield for a stream."""
+        return {
+            "content": acc["response"],
+            "role": "assistant",
+            "finish_reason": acc["finish_reason"],
+            "model_used": resource,
+            "tokens_used": acc["tokens_used"],
+            "tool_calls": acc["tool_calls"],
+            "thinking_content": acc["thinking_content"] or None,
+            "context_used": self._estimate_context(raw_inputs),
+            "refusal": acc["refusal"],
+            "logprobs": None,
+        }
+
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Build parameters dict for LLM backend call.
-
-        Filters out None values and only includes supported LLM params.
-
-        Args:
-            _inputs: Raw inputs from state
-
-        Returns:
-            Dict with only non-None LLM parameters
-        """
+        """Extract LLM-relevant params from inputs, dropping None values."""
         llm_param_keys = [
-            "messages",
-            "temperature",
-            "max_tokens",
-            "tools",
-            "tool_choice",
-            "response_format",
-            "top_p",
-            "stop",
-            "frequency_penalty",
-            "presence_penalty",
-            "seed",
-            "logprobs",
-            "top_logprobs",
-            "n",
-            "user",
+            "messages", "temperature", "max_tokens", "tools", "tool_choice",
+            "response_format", "top_p", "stop", "frequency_penalty",
+            "presence_penalty", "seed", "logprobs", "top_logprobs", "n", "user",
         ]
-        params = {}
-        for key in llm_param_keys:
-            value = _inputs.get(key)
-            if value is not None:
-                params[key] = value
-        return params
+        return {k: v for k in llm_param_keys if (v := _inputs.get(k)) is not None}
 
-    def _extract_completion_data(
-        self, completion: Any, _inputs: Dict[str, Any], selected_resource: str
+    def _extract_completion(
+        self, completion: Any, raw_inputs: Dict[str, Any], resource: str
     ) -> Dict[str, Any]:
-        """Extract data from a completion response.
-
-        Args:
-            completion: The ChatCompletion response
-            _inputs: The input parameters
-            selected_resource: The resource key used
-
-        Returns:
-            Dict with extracted output data
-        """
+        """Extract structured output dict from a ChatCompletion response."""
         message = completion.choices[0].message
-        response = message.content or ""
-        finish_reason = completion.choices[0].finish_reason
-        thinking_content = ""
-        tokens_used = {}
-        tool_calls = []
-        refusal = None
-        logprobs_data = None
+        choice = completion.choices[0]
 
-        # Extract thinking content (for reasoning models)
+        thinking_content = ""
         if hasattr(message, "reasoning_content"):
             thinking_content = message.reasoning_content or ""
 
-        # Extract usage info
-        if completion.usage:
-            tokens_used = completion.usage.model_dump()
+        tokens_used = completion.usage.model_dump() if completion.usage else {}
 
-        # Extract tool calls
+        tool_calls = []
         if message.tool_calls:
             tool_calls = [tc.model_dump() for tc in message.tool_calls]
 
-        # Extract refusal (OpenAI safety refusals)
-        if hasattr(message, "refusal"):
-            refusal = message.refusal
+        refusal = getattr(message, "refusal", None)
 
-        # Extract logprobs
-        if hasattr(completion.choices[0], "logprobs") and completion.choices[0].logprobs:
+        logprobs_data = None
+        if hasattr(choice, "logprobs") and choice.logprobs:
             logprobs_data = (
-                completion.choices[0].logprobs.model_dump()
-                if hasattr(completion.choices[0].logprobs, "model_dump")
-                else completion.choices[0].logprobs
+                choice.logprobs.model_dump()
+                if hasattr(choice.logprobs, "model_dump")
+                else choice.logprobs
             )
 
         return {
             "role": "assistant",
-            "content": response,
-            "finish_reason": finish_reason,
-            "model_used": selected_resource or completion.model,
+            "content": message.content or "",
+            "finish_reason": choice.finish_reason,
+            "model_used": resource or completion.model,
             "tokens_used": tokens_used,
             "tool_calls": tool_calls,
-            "thinking_content": thinking_content if thinking_content else None,
-            "context_used": self._estimate_context(_inputs),
+            "thinking_content": thinking_content or None,
+            "context_used": self._estimate_context(raw_inputs),
             "refusal": refusal,
             "logprobs": logprobs_data,
         }
@@ -364,11 +382,7 @@ class LLMOp(BaseOp):
 
     @staticmethod
     def _process_chunk(chunk, acc: dict) -> Optional[dict]:
-        """Process a single stream chunk, updating accumulator state.
-
-        Returns a yield dict {"content": ..., "role": "assistant"} if the chunk
-        has content, otherwise None.
-        """
+        """Process a single stream chunk, updating accumulator state."""
         if chunk.usage:
             acc["tokens_used"] = chunk.usage.model_dump()
 
@@ -409,172 +423,9 @@ class LLMOp(BaseOp):
             "refusal": None,
         }
 
-    async def _stream_core(self, **inputs):
-        """Async generator core for streaming mode.
-
-        Yields per-token dicts as chunks arrive from the LLM backend.
-        The scheduler's task_generator() drives this, creating a stream
-        context per yield. The final yield contains complete metadata.
-        """
-        self._ensure_initialized()
-        llm_params = self._build_llm_params(inputs)
-        selected_llm = self._select_llm() if self._llms else self._llm
-        resource = self._get_selected_resource(selected_llm) if selected_llm else self.resource
-        acc = self._new_stream_acc()
-
-        try:
-            async for chunk in selected_llm.stream(**llm_params):
-                yield_dict = self._process_chunk(chunk, acc)
-                if yield_dict:
-                    yield yield_dict
-
-        except Exception as e:
-            LOGGER.error(f"Error streaming from {resource}: {e}")
-
-            if self._fallback_llms:
-                for idx, fallback_llm in enumerate(self._fallback_llms):
-                    fallback_key = self.fallback[idx]
-                    LOGGER.info(f"Trying streaming fallback {fallback_key}...")
-                    try:
-                        acc = self._new_stream_acc()
-                        async for chunk in fallback_llm.stream(**llm_params):
-                            yield_dict = self._process_chunk(chunk, acc)
-                            if yield_dict:
-                                yield yield_dict
-
-                        resource = fallback_key
-                        LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
-                        break
-                    except Exception as fallback_error:
-                        LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
-                        continue
-                else:
-                    raise
-
-        # Final yield with complete metadata
-        yield {
-            "content": acc["response"],
-            "role": "assistant",
-            "finish_reason": acc["finish_reason"],
-            "model_used": resource,
-            "tokens_used": acc["tokens_used"],
-            "tool_calls": acc["tool_calls"],
-            "thinking_content": acc["thinking_content"] or None,
-            "context_used": self._estimate_context(inputs),
-            "refusal": acc["refusal"],
-            "logprobs": None,
-        }
-
-    async def run(
-        self,
-        state: "MemoryState",
-        context_id: Optional[str] = None,
-    ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
-        """Run the LLM op (generate, stream, and batch modes)."""
-        self._ensure_initialized()
-        request_id = state.request_id
-        start_time = datetime.now()
-        perf_start = perf_counter()
-        _inputs = {}
-        _outputs = {}
-
-        # Select LLM for this request (load balancing)
-        selected_llm = self._select_llm() if self._llms else None
-        selected_resource = (
-            self._get_selected_resource(selected_llm) if selected_llm else self.resource
-        )
-
-        try:
-            _inputs = self.get_inputs(state, context_id=context_id)
-            llm_params = self._build_llm_params(_inputs)
-
-            if self.stream:
-                base_ctx = context_id if context_id is not None else ("main",)
-                idx = 0
-                async for chunk in self._stream_core(**llm_params):
-                    chunk_ctx = base_ctx + (f"[{idx}]",)
-                    self.store_result(state, chunk, chunk_ctx)
-                    yield chunk_ctx, chunk
-                    idx += 1
-                    _outputs = chunk  # last chunk holds complete metadata
-
-            elif self.batch_mode:
-                LOGGER.info(f"Batch mode for {self.name}...")
-                completion = await self._batch_coordinator.submit(**llm_params)
-                _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
-                self.store_result(state, _outputs, context_id)
-                yield context_id, _outputs
-
-            else:
-                LOGGER.info(f"Generate mode for {self.name}...")
-                generate_fn = selected_llm.generate if selected_llm else self.core
-                completion = await generate_fn(**llm_params)
-                _outputs = self._extract_completion_data(completion, _inputs, selected_resource)
-                self.store_result(state, _outputs, context_id)
-                yield context_id, _outputs
-
-        except Exception as e:
-            import traceback
-
-            primary_error = str(e)
-            LOGGER.error(f"Error in node {self.name}: {primary_error}")
-
-            # Try fallback LLMs if configured
-            if self._fallback_llms and not self.batch_mode:
-                for idx, fallback_llm in enumerate(self._fallback_llms):
-                    fallback_key = self.fallback[idx]
-                    LOGGER.info(f"Trying fallback model {fallback_key}...")
-                    try:
-                        completion = await fallback_llm.generate(**llm_params)
-                        _outputs = self._extract_completion_data(completion, _inputs, fallback_key)
-
-                        selected_llm = fallback_llm
-                        selected_resource = fallback_key
-                        self.store_result(state, _outputs, context_id)
-                        LOGGER.info(f"Fallback to {fallback_key} succeeded")
-                        break  # Success, exit fallback loop
-
-                    except Exception as fallback_error:
-                        LOGGER.error(f"Fallback {fallback_key} failed: {str(fallback_error)}")
-                        continue  # Try next fallback
-                else:
-                    # All fallbacks failed
-                    error_msg = traceback.format_exc()
-                    LOGGER.error(error_msg)
-                    state[self.full_name, "error", context_id] = (
-                        f"Primary and all fallbacks failed. Primary error: {primary_error}"
-                    )
-            else:
-                # No fallback configured or not applicable
-                error_msg = traceback.format_exc()
-                LOGGER.error(error_msg)
-                state[self.full_name, "error", context_id] = error_msg
-
-        finally:
-            end_time = datetime.now()
-            perf_end = perf_counter()
-            latency_ms = (perf_end - perf_start) * 1000
-            self._log(request_id, context_id, _inputs, _outputs, latency_ms)
-
-            # Store timing to state (critical for tracing)
-            state[self.full_name, "start_time", context_id] = start_time
-            state[self.full_name, "end_time", context_id] = end_time
-            state[self.full_name, "duration_ms", context_id] = latency_ms
-
-            # Calculate cost from LLM config if cost_per_token is configured
-            cost_usd = None
-            if selected_llm and hasattr(selected_llm, "config"):
-                config = selected_llm.config
-                cost_input = getattr(config, "cost_per_input_token", None)
-                cost_output = getattr(config, "cost_per_output_token", None)
-                if cost_input is not None or cost_output is not None:
-                    tokens = _outputs.get("tokens_used", {})
-                    input_tokens = tokens.get("prompt_tokens", 0)
-                    output_tokens = tokens.get("completion_tokens", 0)
-                    input_cost = input_tokens * (cost_input or 0)
-                    output_cost = output_tokens * (cost_output or 0)
-                    cost_usd = input_cost + output_cost
-            state[self.full_name, "cost_usd", context_id] = cost_usd
+    # =========================================================================
+    # Shorthand factory
+    # =========================================================================
 
     @shorthand
     def of(
@@ -598,17 +449,20 @@ class LLMOp(BaseOp):
             **init_kwargs,
         )
 
+    # =========================================================================
+    # Serialization
+    # =========================================================================
+
     def serialize(self) -> dict:
         """Serialize LLMOp for Rust backend, including backend configs."""
+        self._ensure_initialized()
         base = super().serialize()
 
-        # Op-level LLM config
         base["resource"] = self.resource
         base["ratios"] = self.ratios
         base["fallback"] = self.fallback
         base["batch_mode"] = self.batch_mode
 
-        # Backend configs (one per LLM for load balancing)
         configs = []
         for llm in self._llms:
             if llm and hasattr(llm, "config"):
@@ -616,7 +470,6 @@ class LLMOp(BaseOp):
         if configs:
             base["resource_configs"] = configs
 
-        # Fallback backend configs (tried in order if primary fails)
         fallback_configs = []
         for llm in self._fallback_llms:
             if llm and hasattr(llm, "config"):

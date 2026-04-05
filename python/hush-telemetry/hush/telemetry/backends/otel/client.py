@@ -17,7 +17,7 @@ class OTELClient:
         from hush.core.registry import get_hub
 
         # Get client from ResourceHub
-        client = get_hub().otel("jaeger")
+        client = get_hub().get("otel:jaeger")
 
         # Create a trace using context manager
         with client.start_trace("my-workflow") as trace:
