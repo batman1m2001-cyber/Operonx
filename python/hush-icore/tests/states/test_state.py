@@ -287,18 +287,22 @@ class TestIterExecuted:
     """Test deriving execution history from start_time cells."""
 
     def test_iter_executed_returns_contexts_with_start_time(self):
-        """iter_executed yields (ctx, start_time) for ops that have start_time set."""
+        """iter_executed yields (ctx, start_time) for ops that have duration_ms set."""
         from datetime import datetime
 
         schema = StateSchema(name="test")
         schema.set("node1", "start_time", None)
+        schema.set("node1", "duration_ms", None)
         schema.set("node2", "start_time", None)
+        schema.set("node2", "duration_ms", None)
         state = MemoryState(schema)
 
         t1 = datetime(2024, 1, 1, 12, 0, 0)
         t2 = datetime(2024, 1, 1, 12, 0, 1)
         state["node1", "start_time"] = t1
+        state["node1", "duration_ms"] = 10.0
         state["node2", "start_time"] = t2
+        state["node2", "duration_ms"] = 20.0
 
         result = list(state.iter_executed("node1"))
         assert len(result) == 1
@@ -309,9 +313,9 @@ class TestIterExecuted:
         assert result[0][1] == t2
 
     def test_iter_executed_skips_none_values(self):
-        """iter_executed skips contexts where start_time is None."""
+        """iter_executed skips contexts where duration_ms is None."""
         schema = StateSchema(name="test")
-        schema.set("node", "start_time", None)
+        schema.set("node", "duration_ms", None)
         state = MemoryState(schema)
 
         # Default is None, should not yield
@@ -333,12 +337,15 @@ class TestIterExecuted:
 
         schema = StateSchema(name="test")
         schema.set("node", "start_time", None)
+        schema.set("node", "duration_ms", None)
         state = MemoryState(schema)
 
         t1 = datetime(2024, 1, 1, 12, 0, 0)
         t2 = datetime(2024, 1, 1, 12, 0, 1)
         state["node", "start_time", "iter_0"] = t1
+        state["node", "duration_ms", "iter_0"] = 5.0
         state["node", "start_time", "iter_1"] = t2
+        state["node", "duration_ms", "iter_1"] = 8.0
 
         result = list(state.iter_executed("node"))
         assert len(result) == 2
