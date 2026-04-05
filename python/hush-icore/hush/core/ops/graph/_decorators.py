@@ -54,8 +54,18 @@ def _build_fn_args(input_mappings, param_names):
     return args
 
 
-def graph(fn):
+def graph(fn=None, *, bound=None):
     """Decorator to turn a builder function into a reusable GraphOp factory.
+
+    Can be used bare or with keyword arguments::
+
+        @graph
+        def pipeline(x):
+            ...
+
+        @graph(bound="io")
+        def io_pipeline(x):
+            ...
 
     The function's parameters become graph inputs. Ref values are injected as
     PARENT refs; static values are passed through directly for use at build time.
@@ -75,96 +85,109 @@ def graph(fn):
     ``max_iterations`` can be a string expression evaluated against kwargs::
 
         a = ask(retry=2, until="error == None", max_iterations="retry + 1", ...)
+
+    Args:
+        bound: Execution bound for the graph. ``None`` auto-detects from children.
+            ``"sync"`` forces inline dispatch, ``"io"``/``"cpu"`` forces task dispatch.
     """
-    from hush.core.ops.graph.graph_op import GraphOp
 
-    sig = inspect.signature(fn)
-    collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
-    if collisions:
-        LOGGER.warning(
-            "@graph function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
-            "Consider renaming them.",
-            fn.__name__,
-            sorted(collisions),
-            sorted(_BASE_INIT_KEYS),
-        )
+    def _make_graph_wrapper(fn, graph_bound):
+        from hush.core.ops.graph.graph_op import GraphOp
 
-    param_names = set(sig.parameters.keys()) - _LOOP_KEYS
+        sig = inspect.signature(fn)
+        collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
+        if collisions:
+            LOGGER.warning(
+                "@graph function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
+                "Consider renaming them.",
+                fn.__name__,
+                sorted(collisions),
+                sorted(_BASE_INIT_KEYS),
+            )
 
-    @wraps(fn)
-    def wrapper(**kwargs):
-        # Pop loop config from kwargs
-        until = kwargs.pop("until", None)
-        max_iterations = kwargs.pop("max_iterations", 100)
+        param_names = set(sig.parameters.keys()) - _LOOP_KEYS
 
-        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        @wraps(fn)
+        def wrapper(**kwargs):
+            # Pop loop config from kwargs
+            until = kwargs.pop("until", None)
+            max_iterations = kwargs.pop("max_iterations", 100)
 
-        if until is not None:
-            # ── Loop mode ──
-            # Distinguish loop state (regular params) from config (keyword-only params).
-            # Only loop state params become init state for GraphOp.loop.
-            loop_params = set()
-            config_params = set()
-            for name, param in sig.parameters.items():
-                if name in _LOOP_KEYS:
-                    continue
-                if param.kind == inspect.Parameter.KEYWORD_ONLY:
-                    config_params.add(name)
-                elif param.kind not in (
-                    inspect.Parameter.VAR_KEYWORD,
-                    inspect.Parameter.VAR_POSITIONAL,
-                ):
-                    loop_params.add(name)
+            input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
 
-            loop_state = {}
-            config = {}
-            remaining_inputs = {}
-            for k, v in (input_mappings or {}).items():
-                if isinstance(v, Ref) or v is PARENT:
-                    remaining_inputs[k] = v
-                elif k in loop_params:
-                    loop_state[k] = v
-                elif k in config_params:
-                    config[k] = v
+            # Inject decorator-level bound if not overridden at call time
+            if graph_bound is not None and "bound" not in init_kwargs:
+                init_kwargs["bound"] = graph_bound
+
+            if until is not None:
+                # ── Loop mode ──
+                loop_params = set()
+                config_params = set()
+                for name, param in sig.parameters.items():
+                    if name in _LOOP_KEYS:
+                        continue
+                    if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                        config_params.add(name)
+                    elif param.kind not in (
+                        inspect.Parameter.VAR_KEYWORD,
+                        inspect.Parameter.VAR_POSITIONAL,
+                    ):
+                        loop_params.add(name)
+
+                loop_state = {}
+                config = {}
+                remaining_inputs = {}
+                for k, v in (input_mappings or {}).items():
+                    if isinstance(v, Ref) or v is PARENT:
+                        remaining_inputs[k] = v
+                    elif k in loop_params:
+                        loop_state[k] = v
+                    elif k in config_params:
+                        config[k] = v
+                    else:
+                        remaining_inputs[k] = v  # template vars etc
+                for k, v in init_kwargs.items():
+                    if k in loop_params:
+                        loop_state[k] = v
+                    elif k in config_params:
+                        config[k] = v
+
+                # Resolve max_iterations if string expression
+                if isinstance(max_iterations, str):
+                    defaults = {
+                        name: p.default
+                        for name, p in sig.parameters.items()
+                        if p.default is not inspect.Parameter.empty
+                    }
+                    _max = eval(max_iterations, {}, {**defaults, **loop_state, **config})  # noqa: S307
                 else:
-                    remaining_inputs[k] = v  # template vars etc
-            for k, v in init_kwargs.items():
-                if k in loop_params:
-                    loop_state[k] = v
-                elif k in config_params:
-                    config[k] = v
+                    _max = max_iterations
 
-            # Resolve max_iterations if string expression
-            if isinstance(max_iterations, str):
-                defaults = {
-                    name: p.default
-                    for name, p in sig.parameters.items()
-                    if p.default is not inspect.Parameter.empty
-                }
-                _max = eval(max_iterations, {}, {**defaults, **loop_state, **config})  # noqa: S307
+                g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
+                g.inputs.update(remaining_inputs or {})
+                with g:
+                    fn_args = {k: PARENT[k] for k in loop_state if k in loop_params}
+                    fn_args.update(config)
+                    fn_args.update(_build_fn_args(remaining_inputs, param_names))
+                    fn(**fn_args)
             else:
-                _max = max_iterations
+                # ── Simple mode ──
+                g = GraphOp(inputs=input_mappings or None, **init_kwargs)
+                with g:
+                    fn_args = _build_fn_args(input_mappings, param_names)
+                    fn(**fn_args)
 
-            g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
-            g.inputs.update(remaining_inputs or {})
-            with g:
-                # Loop state → PARENT refs, config → direct values, Ref inputs → PARENT refs
-                fn_args = {k: PARENT[k] for k in loop_state if k in loop_params}
-                fn_args.update(config)
-                fn_args.update(_build_fn_args(remaining_inputs, param_names))
-                fn(**fn_args)
-        else:
-            # ── Simple mode ──
-            g = GraphOp(inputs=input_mappings or None, **init_kwargs)
-            with g:
-                fn_args = _build_fn_args(input_mappings, param_names)
-                fn(**fn_args)
+            return g
 
-        return g
+        register_skip(wrapper)
+        wrapper.__wrapped__ = fn
+        return wrapper
 
-    register_skip(wrapper)
-    wrapper.__wrapped__ = fn
-    return wrapper
+    if fn is not None:
+        # @graph without parentheses
+        return _make_graph_wrapper(fn, bound)
+    # @graph(bound="io") with parentheses
+    return lambda f: _make_graph_wrapper(f, bound)
 
 
 # Backward compat: @graph.loop still works

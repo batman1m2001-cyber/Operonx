@@ -282,6 +282,18 @@ class GraphOp(BaseOp):
         self._is_building = False
         self._cache_full_names()
 
+        # Auto-detect bound from children, with user override.
+        # If user explicitly set bound on the graph, respect it.
+        # Otherwise: all children sync → graph is sync (inline); any io/cpu → task.
+        if self.bound is None:
+            if all(
+                getattr(op, "bound", None) == "sync"
+                for op in self._ops.values()
+            ):
+                self.bound = "sync"
+            else:
+                self.bound = "io"
+
     def _build(self):
         """Compile adjacency list, batch ready counts, and per-generator stream ready counts."""
         # ── Phase 1: adjacency list + batch ready counts ──────────────────────────

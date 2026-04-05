@@ -200,11 +200,17 @@ class Scheduler:
         # Defaults to 0 via .get() — no pre-seeding needed.
         loop_iters: Dict[tuple, int] = {}
 
+        inline_pending: list = []
+
         def dispatch(op_name: str, ctx: tuple) -> None:
-            """Schedule op to run as soon as possible, with given context."""
+            """Schedule op based on its bound (sync=inline, io/cpu=task)."""
             nonlocal inflight
-            inflight += 1
-            asyncio.create_task(_pump(op_name, ctx))
+            op = g._ops[op_name]
+            if getattr(op, "bound", None) == "sync":
+                inline_pending.append((op_name, ctx))
+            else:
+                inflight += 1
+                asyncio.create_task(_pump(op_name, ctx))
 
         async def _pump(op_name: str, ctx: tuple) -> None:
             """Drive one op to completion and emit Frame/EOF events.
@@ -236,6 +242,25 @@ class Scheduler:
                 inflight += 1  # account for the EOF we just put on queue
             finally:
                 inflight -= 1
+
+        async def _drain_inline() -> None:
+            """Process all pending inline ops — no task creation, no queue.
+
+            Directly iterates op.run() and feeds Frame/EOF events into
+            _on_frame/_on_eof.  If those handlers dispatch more inline ops
+            (e.g. downstream sync ops becoming ready), the while-loop picks
+            them up immediately.
+            """
+            while inline_pending:
+                op_name, ctx = inline_pending.pop(0)
+                op = g._ops[op_name]
+                try:
+                    async for item_ctx, result in op.run(state, ctx):
+                        _on_frame(Frame(op_name, item_ctx, result))
+                    _on_eof(EOF(op_name, ctx))
+                except Exception as e:
+                    state[op_name, "error", ctx] = str(e)
+                    _on_eof(EOF(op_name, ctx))
 
         def _on_frame(event: Frame) -> None:
             """Handle one Frame: seed item ctx, decrement ready, route when ready."""
@@ -349,7 +374,10 @@ class Scheduler:
         for entry in g.entries:
             dispatch(entry, context_id)
 
-        # Main event loop - runs until all tasks and queue events are consumed.
+        # Drain inline ops seeded above.
+        await _drain_inline()
+
+        # Main event loop — only runs if task-based ops exist.
         while inflight > 0:
             event = await queue.get()
             inflight -= 1
@@ -357,6 +385,8 @@ class Scheduler:
                 _on_frame(event)
             else:
                 _on_eof(event)
+            # Drain any inline ops triggered by the queue event.
+            await _drain_inline()
 
         # Store graph-level metrics so TraceCollector can find this graph node.
         _end_time = datetime.now(timezone.utc)

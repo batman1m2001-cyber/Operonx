@@ -34,31 +34,27 @@ def op(
         def double(x: int):
             return {"result": x * 2}
 
-        @op(executor="thread")
-        def fetch(url: str):
-            return {"data": requests.get(url).json()}
+        @op(bound="cpu")
+        def heavy_compute(data: list):
+            return {"result": process(data)}
 
         @op(bound="io")
         async def call_api(url: str):
             return {"data": await fetch(url)}
 
-        @op(bound="cpu")
-        def heavy_compute(data: list):
-            return {"result": process(data)}
-
     Args:
-        executor: How to run sync functions. ``None`` (default) runs on
-            the event loop, ``"thread"`` uses a thread pool.
-        bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
-            ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
-            ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
-            ``None`` auto-detects: async → ``"io"``, sync → ``"cpu"``.
+        bound: Execution bound hint for the scheduler.
+            ``None`` (default) auto-detects: async → ``"io"``, sync → ``"sync"``.
+            ``"sync"``  — inline dispatch, no asyncio task (fastest).
+            ``"io"``    — asyncio task, for network/disk I/O.
+            ``"cpu"``   — asyncio.to_thread(), for heavy compute (C extensions release GIL).
+        executor: Deprecated — use ``bound="cpu"`` instead of ``executor="thread"``.
     """
+    # Backward compat: executor="thread" → bound="cpu"
+    if executor == "thread" and bound is None:
+        bound = "cpu"
 
     def decorator(fn):
-        # Module-qualified func_name: "ex05_loops_and_branches.workflow.each_item"
-        # Uses full __module__ path (no stripping) — matches Rust's module_path!()
-        # which also keeps the full path after stripping the crate name.
         module = fn.__module__ or ""
         if module in ("__main__", "") or "." not in module:
             fn._func_name = fn.__name__
@@ -84,13 +80,14 @@ def op(
         @wraps(fn)
         def wrapper(**kwargs):
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
-            # Call-time overrides decoration-time defaults
-            op_executor = init_kwargs.pop("executor", executor)
             op_bound = init_kwargs.pop("bound", bound)
+            # Backward compat: call-time executor="thread" → bound="cpu"
+            op_executor = init_kwargs.pop("executor", None)
+            if op_executor == "thread" and op_bound is None:
+                op_bound = "cpu"
             op_delay = init_kwargs.pop("delay", delay)
             return FuncOp(
                 code_fn=fn,
-                executor=op_executor,
                 bound=op_bound,
                 delay=op_delay,
                 _mappings=mappings or None,
@@ -104,7 +101,7 @@ def op(
     if func is not None:
         # @op without parentheses
         return decorator(func)
-    # @op(executor="thread") with parentheses
+    # @op(bound="cpu") with parentheses
     return decorator
 
 
