@@ -16,7 +16,7 @@ class TestChat:
     def test_simple_creation(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -34,7 +34,7 @@ class TestChat:
     def test_has_internal_nodes(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -52,7 +52,7 @@ class TestChat:
     def test_auto_naming(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -63,7 +63,7 @@ class TestChat:
     def test_with_messages_template(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -90,7 +90,7 @@ class TestChat:
     def test_contain_generation_explicit(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -111,7 +111,7 @@ class TestChatLoadBalancing:
     def test_load_balancing_creation(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -131,7 +131,7 @@ class TestChatLoadBalancing:
     def test_load_balancing_with_ratios(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -154,7 +154,7 @@ class TestChatFallback:
     def test_fallback_creation(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -178,7 +178,7 @@ class TestChatResponseFormat:
     def test_response_format_creation(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -212,7 +212,7 @@ class TestExtract:
     def test_creation(self):
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -232,7 +232,7 @@ class TestExtract:
     def test_with_retry(self):
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -256,7 +256,7 @@ class TestExtract:
     def test_with_validators(self):
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -275,7 +275,7 @@ class TestExtract:
     def test_no_retry_is_simple_graph(self):
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -299,7 +299,7 @@ class TestChatCombined:
     def test_combined_load_balancing_and_fallback(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -325,7 +325,7 @@ class TestChatPromptFormats:
     def test_string_prompt(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -343,7 +343,7 @@ class TestChatPromptFormats:
     def test_dict_prompt(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -362,7 +362,7 @@ class TestChatPromptFormats:
     def test_list_prompt(self):
         from hush.providers.ops import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -490,7 +490,7 @@ class TestExtractRefTemplate:
 
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -522,7 +522,7 @@ class TestExtractRefTemplate:
 
         from hush.providers.ops import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance

@@ -34,6 +34,14 @@ class Tracer:
         """Static tags for this tracer instance."""
         return self._tags.copy()
 
+    def to_config_dict(self) -> Optional[Dict[str, Any]]:
+        """Return a serializable config dict for the Rust backend.
+
+        Override in tracers that support the Rust backend (e.g. LangfuseTracer,
+        HushEyesTracer). Return ``None`` (default) to indicate no Rust support.
+        """
+        return None
+
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data to the backend.
 

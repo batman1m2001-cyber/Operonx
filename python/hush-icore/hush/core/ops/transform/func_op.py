@@ -360,13 +360,8 @@ class FuncOp(BaseOp):
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)
 
-        # Normalize user-provided inputs/outputs first (handles {"*": PARENT} wildcard)
-        normalized_inputs = self._normalize_params(inputs)
-        normalized_outputs = self._normalize_params(outputs)
-
-        # Merge parsed schema với normalized inputs/outputs
-        self.inputs = self._merge_params(parsed_inputs, normalized_inputs)
-        self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
+        # Merge parsed schema with user-provided (handles {"*": PARENT} wildcard)
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.code_fn = code_fn
         self._set_core(code_fn)
@@ -419,9 +414,10 @@ class FuncOp(BaseOp):
         state: "MemoryState",
         context_id: Optional[str] = None,
     ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
-        """Thực thi FuncOp với error wrapping.
+        """Execute FuncOp with CodeError wrapping.
 
-        Override để wrap exceptions trong CodeError với context đầy đủ.
+        Delegates to ``BaseOp.run()`` (async generator) and re-raises any
+        exception as a ``CodeError`` with full op context attached.
         """
         try:
             async for ctx, result in super().run(state, context_id):

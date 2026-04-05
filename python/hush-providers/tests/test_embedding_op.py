@@ -18,7 +18,7 @@ class TestEmbeddingOp:
         """Test EmbeddingOp has correct type."""
         from hush.providers.ops import EmbeddingOp
 
-        with patch("hush.providers.ops.embedding.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -32,7 +32,7 @@ class TestEmbeddingOp:
         """Test EmbeddingOp has texts input."""
         from hush.providers.ops import EmbeddingOp
 
-        with patch("hush.providers.ops.embedding.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -45,7 +45,7 @@ class TestEmbeddingOp:
         """Test EmbeddingOp has embeddings output."""
         from hush.providers.ops import EmbeddingOp
 
-        with patch("hush.providers.ops.embedding.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -58,7 +58,7 @@ class TestEmbeddingOp:
         """Test specific_metadata returns model info."""
         from hush.providers.ops import EmbeddingOp
 
-        with patch("hush.providers.ops.embedding.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance

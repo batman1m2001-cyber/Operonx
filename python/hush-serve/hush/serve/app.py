@@ -143,6 +143,14 @@ class HushApp:
             version=self._config.version,
         )
 
+        # Error handlers
+        from fastapi.exceptions import RequestValidationError
+
+        from hush.serve.errors import validation_exception_handler, workflow_exception_handler
+
+        app.add_exception_handler(Exception, workflow_exception_handler)
+        app.add_exception_handler(RequestValidationError, validation_exception_handler)
+
         # Middleware
         app.add_middleware(TimingMiddleware)
         app.add_middleware(RequestIDMiddleware)

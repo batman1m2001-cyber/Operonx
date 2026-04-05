@@ -25,7 +25,7 @@ import asyncio
 import json
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event
 from hush.core.middleware import Middleware
@@ -33,6 +33,7 @@ from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
 
 if TYPE_CHECKING:
+    from hush.core.ops.base import BaseOp
     from hush.core.registry import ResourceHub
     from hush.core.tracing import Tracer
 
@@ -312,10 +313,34 @@ class Hush:
         self._collector = TraceCollector(self.graph)
         self._middleware: List[Middleware] = []
 
+        # Eagerly init backends if a hub is already configured
+        self._warmup_ops()
+
         LOGGER.debug(
             "Hush engine initialized for workflow [highlight]%s[/highlight]",
             self.name,
         )
+
+    def _warmup_ops(self) -> None:
+        """Eagerly initialize all provider ops if a ResourceHub is available.
+
+        Skips silently when no hub is configured (ops stay lazy). Called once
+        from ``__init__`` after ``graph.build()`` so every op is fully wired.
+        """
+        from hush.core.registry.shortcuts.global_hub import _get_global_hub
+
+        if _get_global_hub() is None:
+            return
+        for op in self._iter_all_ops(self.graph):
+            op.warmup()
+
+    @staticmethod
+    def _iter_all_ops(graph: GraphOp) -> Iterator["BaseOp"]:
+        """Yield every op in *graph* recursively (depth-first)."""
+        for op in graph._ops.values():
+            yield op
+            if isinstance(op, GraphOp):
+                yield from Hush._iter_all_ops(op)
 
     @staticmethod
     def _load_env(env: Union[str, bool]) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Dict, List, Union
 
+from hush.providers._utils.huggingface import load_hf_model
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
@@ -27,8 +28,8 @@ class HFEmbedding(BaseEmbedder):
             ValueError: If model name is not provided
         """
         try:
-            import torch
-            from transformers import AutoModel, AutoTokenizer
+            import torch  # noqa: F401
+            from transformers import AutoModel  # noqa: F401
         except ImportError as e:
             raise ImportError(
                 "transformers and torch are required for HFEmbedding. "
@@ -43,35 +44,9 @@ class HFEmbedding(BaseEmbedder):
 
         # Load model and tokenizer
         try:
-            import os
+            from transformers import AutoModel
 
-            # Check if model path is a local directory
-            model_path = config.model
-            is_local_path = os.path.exists(model_path) and os.path.isdir(model_path)
-
-            if is_local_path:
-                print(f"Loading model from local path: {model_path}")
-            else:
-                print(f"Loading model from HuggingFace Hub: {model_path}")
-
-            # Load tokenizer and model from either local path or HuggingFace Hub
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path, local_files_only=is_local_path
-            )
-            self.model = AutoModel.from_pretrained(model_path, local_files_only=is_local_path)
-
-            # Move model to GPU if available
-            import torch
-
-            if torch.cuda.is_available():
-                self.model = self.model.cuda()
-                print("Model loaded on GPU")
-            else:
-                print("Model loaded on CPU")
-
-            # Set model to evaluation mode
-            self.model.eval()
-
+            self.model, self.tokenizer = load_hf_model(config.model, AutoModel)
         except Exception as e:
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 

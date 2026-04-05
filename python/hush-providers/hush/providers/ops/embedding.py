@@ -6,8 +6,8 @@ from hush.core.configs import OpType
 from hush.core.exceptions import EmbeddingError
 from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
-from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
+from hush.providers.ops._utils import resolve_hub
 
 
 class EmbeddingOp(BaseOp):
@@ -71,15 +71,15 @@ class EmbeddingOp(BaseOp):
         self._initialized = False
         self._set_core(self._process)
 
+    def warmup(self) -> None:
+        """Eagerly initialize embedding backend on engine startup."""
+        self._ensure_initialized()
+
     def _ensure_initialized(self):
         """Lazy-init embedding backend from ResourceHub on first use."""
         if self._initialized:
             return
-        try:
-            hub = ResourceHub.instance()
-        except RuntimeError:
-            hub = get_hub()
-
+        hub = resolve_hub()
         self.backend = hub.get(f"embedding:{self.resource}")
         self._initialized = True
 

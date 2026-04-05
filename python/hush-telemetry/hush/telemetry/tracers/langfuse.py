@@ -8,16 +8,16 @@ thread pool, never blocking the main async thread.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from hush.core.tracing import Tracer
+from hush.telemetry.tracers._base import ConfigurableTracer
 
 if TYPE_CHECKING:
     from hush.telemetry.backends.langfuse import LangfuseConfig
 
 
-class LangfuseTracer(Tracer):
+class LangfuseTracer(ConfigurableTracer):
     """Tracer that sends workflow traces to Langfuse via public REST API.
 
     Example:
@@ -42,28 +42,36 @@ class LangfuseTracer(Tracer):
         resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ):
-        super().__init__(tags=tags)
-        if config is None and resource is None:
-            raise ValueError("Must provide either 'config' or 'resource'")
-        if config is not None and resource is not None:
-            raise ValueError("Cannot provide both 'config' and 'resource'")
-        self._config = config
-        self._resource = resource
+        super().__init__(config=config, resource=resource, tags=tags)
 
-    @property
-    def resource(self) -> Optional[str]:
-        return self._resource
+    def _make_client(self, config):
+        from hush.telemetry.backends.langfuse import LangfuseClient
 
-    def _get_client(self):
-        """Get LangfuseClient from config or ResourceHub."""
-        if self._config is not None:
-            from hush.telemetry.backends.langfuse import LangfuseClient
+        return LangfuseClient(config)
 
-            return LangfuseClient(self._config)
+    def to_config_dict(self) -> Optional[Dict[str, Any]]:
+        """Return Langfuse config for the Rust backend. None if resource-based."""
+        if self._config is None:
+            return None
+        d: Dict[str, Any] = {
+            "public_key": self._config.public_key,
+            "secret_key": self._config.secret_key,
+            "host": self._config.host,
+        }
+        if self._stream_trace_limit is not None:
+            d["stream_trace_limit"] = self._stream_trace_limit
+        return d
 
-        from hush.core.registry import get_hub
-
-        return get_hub().get(self._resource)
+    @staticmethod
+    def _set_parent(
+        body: Dict[str, Any],
+        parent_key: Optional[str],
+        obs_ids: Dict[str, str],
+        trace_id: str,
+    ) -> None:
+        """Set parentObservationId on *body* when this node is not a direct trace child."""
+        if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
+            body["parentObservationId"] = obs_ids[parent_key]
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data to Langfuse via batch ingestion API.
@@ -104,8 +112,6 @@ class LangfuseTracer(Tracer):
         # Langfuse sorts children by startTime. The nodes list is already in
         # execution order from collect_tree(), so we just assign each sibling
         # start_time = parent_start + (child_index * 1ms) to preserve ordering.
-        from datetime import timedelta
-
         nodes = list(trace_data.get("nodes", []))
         # Collect parent start times first
         node_start: Dict[str, str] = {}
@@ -182,8 +188,7 @@ class LangfuseTracer(Tracer):
                 }
 
                 # Parent observation (if not direct child of trace)
-                if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
-                    body["parentObservationId"] = obs_ids[parent_key]
+                self._set_parent(body, parent_key, obs_ids, trace_id)
 
                 # LLM-specific fields
                 if node.get("model"):
@@ -228,8 +233,7 @@ class LangfuseTracer(Tracer):
                     "metadata": metadata or None,
                 }
 
-                if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
-                    body["parentObservationId"] = obs_ids[parent_key]
+                self._set_parent(body, parent_key, obs_ids, trace_id)
 
                 batch.append(
                     {
@@ -266,4 +270,5 @@ class LangfuseTracer(Tracer):
     def __repr__(self) -> str:
         if self._resource:
             return f"<LangfuseTracer resource={self._resource}>"
-        return f"<LangfuseTracer host={self._config.host}>"
+        host = self._config.host if self._config else "?"
+        return f"<LangfuseTracer host={host}>"

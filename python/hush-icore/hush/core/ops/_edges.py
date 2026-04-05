@@ -6,7 +6,8 @@ Provides the edge-connectivity classes and sentinel ops used by the
 
 from typing import TYPE_CHECKING
 
-from hush.core.ops.base import BaseOp, _set_wildcard_outputs
+from hush.core.ops._utils import _set_wildcard_outputs
+from hush.core.ops.base import BaseOp
 from hush.core.utils.context import get_current
 
 if TYPE_CHECKING:

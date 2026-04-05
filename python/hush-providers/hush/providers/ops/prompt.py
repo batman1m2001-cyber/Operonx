@@ -48,8 +48,6 @@ class PromptOp(BaseOp):
         )
     """
 
-    __slots__ = []
-
     type: OpType = "prompt"
 
     # Fixed input schema - only reserved keys

@@ -11,8 +11,8 @@ from hush.core import LOGGER
 from hush.core.configs import OpType
 from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
-from hush.core.registry import ResourceHub, get_hub
 from hush.core.utils.common import Param
+from hush.providers.ops._utils import resolve_hub
 
 if TYPE_CHECKING:
     from hush.providers.llms.base import BaseLLM
@@ -164,14 +164,15 @@ class LLMOp(BaseOp):
     # Lazy init
     # =========================================================================
 
+    def warmup(self) -> None:
+        """Eagerly initialize LLM backends on engine startup."""
+        self._ensure_initialized()
+
     def _ensure_initialized(self):
         """Lazy-init LLM backends from ResourceHub on first use."""
         if self._initialized:
             return
-        try:
-            hub = ResourceHub.instance()
-        except RuntimeError:
-            hub = get_hub()
+        hub = resolve_hub()
 
         if isinstance(self.resource, list):
             self._llms = [hub.get(f"llm:{key}") for key in self.resource]
@@ -330,9 +331,21 @@ class LLMOp(BaseOp):
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract LLM-relevant params from inputs, dropping None values."""
         llm_param_keys = [
-            "messages", "temperature", "max_tokens", "tools", "tool_choice",
-            "response_format", "top_p", "stop", "frequency_penalty",
-            "presence_penalty", "seed", "logprobs", "top_logprobs", "n", "user",
+            "messages",
+            "temperature",
+            "max_tokens",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "logprobs",
+            "top_logprobs",
+            "n",
+            "user",
         ]
         return {k: v for k in llm_param_keys if (v := _inputs.get(k)) is not None}
 

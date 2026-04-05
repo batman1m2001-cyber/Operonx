@@ -11,7 +11,7 @@ import pytest
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import if_
 
-CCU = 5
+CCU = 5  # Small enough to stay fast in CI, large enough to catch race conditions
 
 
 # =============================================================================
