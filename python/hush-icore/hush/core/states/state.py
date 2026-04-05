@@ -35,6 +35,7 @@ class MemoryState:
         "_session_id",
         "_request_id",
         "_tags",
+        "tracing",
     )
 
     def __init__(
@@ -65,6 +66,7 @@ class MemoryState:
 
         # Dynamic tags collected during execution
         self._tags: List[str] = []
+        self.tracing = True  # default on; engine sets False when no tracer
 
         # Apply initial inputs
         if inputs:
@@ -198,15 +200,17 @@ class MemoryState:
     def iter_executed(self, op_name: str):
         """Yield (context_id, start_time) for each execution of op_name.
 
-        Derives execution history from start_time cells — no separate
-        recording needed. Used by TraceCollector post-execution.
+        Uses duration_ms as the execution marker (always set), then looks up
+        start_time for context. start_time may be None when tracing is off.
         """
-        idx = self.schema.get_index(op_name, "start_time")
-        if idx < 0:
+        dur_idx = self.schema.get_index(op_name, "duration_ms")
+        if dur_idx < 0:
             return
-        for ctx, value in self._cells[idx].items():
-            if value is not None:
-                yield ctx, value
+        st_idx = self.schema.get_index(op_name, "start_time")
+        for ctx, dur in self._cells[dur_idx].items():
+            if dur is not None:
+                start = self._cells[st_idx][ctx] if st_idx >= 0 else None
+                yield ctx, start
 
     # =========================================================================
     # Properties

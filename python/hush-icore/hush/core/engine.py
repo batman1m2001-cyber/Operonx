@@ -442,6 +442,7 @@ class Hush:
             session_id=session_id,
             request_id=request_id,
         )
+        state.tracing = bool(tracers)  # skip per-op metrics/datetime when no tracer
 
         LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 

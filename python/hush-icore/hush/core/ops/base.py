@@ -84,6 +84,9 @@ class BaseOp(ABC):
         "cache",
         "delay",
         "is_gen",
+        "_input_cache",
+        "_metrics_idx",
+        "_error_idx",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -117,6 +120,9 @@ class BaseOp(ABC):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}")
         self.bound = bound  # resolved to concrete value by _set_core()
+        self._input_cache = None   # built on first get_inputs() call
+        self._metrics_idx = None   # (schema, st_idx, et_idx, dur_idx)
+        self._error_idx = None     # (schema, err_idx)
         self.cache = cache
         self.delay = delay
         self.id = id or uuid.uuid4().hex
@@ -346,28 +352,57 @@ class BaseOp(ABC):
     def get_inputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
 
-        PARENT refs are resolved automatically by Cell's hierarchy walk — no
-        ``parent_context`` parameter needed.
-
-        Args:
-            state: Workflow state.
-            context_id: Context of this op.
+        Uses cached cell indices to avoid per-call schema.get_index() lookups.
+        Falls back to standard path on first call to build the cache.
         """
+        # Fast path: use cached indices to skip schema.get_index() dict lookup.
+        # Cache is keyed by schema id since indices differ per schema.
+        cached = self._input_cache
+        if cached is not None and cached[0] is state.schema:
+            result = {}
+            cells = state._cells
+            pull_refs = state.schema._pull_refs
+            for var_name, idx, fallback in cached[1]:
+                # Inline the hot path of state.__getitem__ without _unpack_key + get_index
+                cell = cells[idx]
+                if cell.is_shared or context_id in cell:
+                    value = cell[context_id]
+                else:
+                    pull_ref = pull_refs[idx]
+                    if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
+                        source_val = cells[pull_ref.idx][context_id]
+                        if source_val is not None or cells[pull_ref.idx].default_value is not None:
+                            value = pull_ref._fn(source_val)
+                            cell[context_id] = value
+                        else:
+                            value = cell.default_value
+                    else:
+                        value = cell[context_id]  # hierarchy walk
+                if value is not None:
+                    result[var_name] = value
+                elif fallback is not None:
+                    result[var_name] = fallback
+            return result
+
+        # First call (or schema changed): build index cache
+        entries = []
         result = {}
-
+        full_name = self.full_name
         for var_name, param in self.inputs.items():
-            # Always read from state first (may have value from MemoryState inputs or Ref)
-            value = state[self.full_name, var_name, context_id]
+            idx = state.schema.get_index(full_name, var_name)
+            fallback = None
+            if param.value is not None and not isinstance(param.value, Ref):
+                fallback = param.value
+            elif param.default is not None:
+                fallback = param.default
+            entries.append((var_name, idx, fallback))
 
+            value = state[full_name, var_name, context_id]
             if value is not None:
                 result[var_name] = value
-            elif param.value is not None and not isinstance(param.value, Ref):
-                # Fallback: literal value in Param.value
-                result[var_name] = param.value
-            elif param.default is not None:
-                # Fallback: default value
-                result[var_name] = param.default
-
+            elif fallback is not None:
+                result[var_name] = fallback
+        self._input_cache = (state.schema, entries)
         return result
 
     def get_outputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
@@ -524,10 +559,25 @@ class BaseOp(ABC):
         end_time: Optional[datetime] = None,
         duration_ms: float = 0,
     ) -> None:
-        """Store execution metrics (timing) to state."""
-        state[self.full_name, "start_time", context_id] = start_time
-        state[self.full_name, "end_time", context_id] = end_time
-        state[self.full_name, "duration_ms", context_id] = duration_ms
+        """Store execution metrics (timing) to state via cached indices."""
+        cached = self._metrics_idx
+        if cached is not None and cached[0] is state.schema:
+            _, st_idx, et_idx, dur_idx = cached
+        else:
+            fn = self.full_name
+            st_idx = state.schema.get_index(fn, "start_time")
+            et_idx = state.schema.get_index(fn, "end_time")
+            dur_idx = state.schema.get_index(fn, "duration_ms")
+            self._metrics_idx = (state.schema, st_idx, et_idx, dur_idx)
+
+        ctx = context_id if context_id is not None else DEFAULT_CONTEXT
+        cells = state._cells
+        if st_idx >= 0:
+            cells[st_idx][ctx] = start_time
+        if et_idx >= 0:
+            cells[et_idx][ctx] = end_time
+        if dur_idx >= 0:
+            cells[dur_idx][ctx] = duration_ms
 
     def _set_core(self, fn: Callable) -> None:
         """Assign core function and resolve bound to a concrete value.
@@ -585,18 +635,14 @@ class BaseOp(ABC):
            a ``Frame`` event on the queue; when the generator exhausts naturally,
            ``_pump`` emits one ``EOF`` event.  The user never writes Frame or EOF.
 
-        Args:
-            state: Workflow state shared across all ops in the graph.
-            context_id: Root context tuple for this execution.
-
         Yields:
             ``(context_id, result)`` — one tuple per item produced by the op.
         """
         if not self.enabled:
             return
 
-        request_id = state.request_id
-        start_time = datetime.now(timezone.utc)
+        _tracing = state.tracing
+        start_time = datetime.now(timezone.utc) if _tracing else None
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
@@ -615,8 +661,8 @@ class BaseOp(ABC):
                 if _cache_key in _cache_store:
                     _outputs = _cache_store[_cache_key]
                     self.store_result(state, _outputs, context_id)
-                    yield context_id, _outputs  # <- add
-                    return  # <- add (stops generators, triggers finally)
+                    yield context_id, _outputs
+                    return
 
             base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
             idx = 0
@@ -640,33 +686,43 @@ class BaseOp(ABC):
             LOGGER.error(
                 format_event(
                     "op_error",
-                    request_id=request_id or "unknown",
+                    request_id=state.request_id or "unknown",
                     name=self.name,
                     error=error_msg.rstrip(),
                 ),
             )
 
         finally:
-            end_time = datetime.now(timezone.utc)
             duration_ms = (perf_counter() - perf_start) * 1000
-            self._log(request_id, context_id, _inputs, _outputs, duration_ms)
+            end_time = datetime.now(timezone.utc) if _tracing else None
+
             self._store_metrics(
-                state,
-                context_id,
-                start_time=start_time,
-                end_time=end_time,
-                duration_ms=duration_ms,
+                state, context_id,
+                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
             )
-            if error_msg is not None:
-                state[self.full_name, "error", context_id] = error_msg
-            elif "error" not in _outputs:
-                state[self.full_name, "error", context_id] = None
+
+            # Write error state via cached index
+            err_cached = self._error_idx
+            if err_cached is not None and err_cached[0] is state.schema:
+                err_idx = err_cached[1]
+            else:
+                err_idx = state.schema.get_index(self.full_name, "error")
+                self._error_idx = (state.schema, err_idx)
+            if err_idx >= 0:
+                ctx_key = context_id if context_id is not None else DEFAULT_CONTEXT
+                if error_msg is not None:
+                    state._cells[err_idx][ctx_key] = error_msg
+                elif "error" not in _outputs:
+                    state._cells[err_idx][ctx_key] = None
+
+            if _tracing:
+                self._log(state.request_id, context_id, _inputs, _outputs, duration_ms)
 
             if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(
                     format_event(
                         "op_slow",
-                        request_id=request_id or "unknown",
+                        request_id=state.request_id or "unknown",
                         full_name=self.full_name,
                         duration_ms=f"{duration_ms:.1f}",
                     ),
