@@ -198,89 +198,30 @@ async def run(
 
 ### `engine.py`
 
-**Status: NOT STARTED**
+**Status: DONE** — `engine.py` lines 43–178 (`ExecutionHandle`) and lines 378–481 (`start()`, `run()`).
 
-Current state:
-- `start()` method missing — not yet added
-- `stream()` still exists (lines 423–525) — uses `_output_queue` ContextVar
-- `_output_queue` removed from imports but still referenced in `stream()` lines 483, 510 — will `NameError` if called
-- `run()` still overwrites result each iteration (line 398–399) — not yet fixed
-
-What to do:
-1. Add `start()` method to `Hush`:
-
-```python
-def start(
-    self,
-    inputs: Dict[str, Any],
-    *,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    request_id: Optional[str] = None,
-    tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
-) -> ExecutionHandle:
-    """Start workflow execution; return a streaming handle immediately."""
-    user_id = user_id or str(uuid.uuid4())
-    session_id = session_id or str(uuid.uuid4())
-    request_id = request_id or str(uuid.uuid4())
-
-    state = self._schema.create_state(
-        inputs=inputs, user_id=user_id,
-        session_id=session_id, request_id=request_id,
-    )
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def _run():
-        try:
-            await self.graph._scheduler.run(state, ("main",), output_queue=queue)
-        except Exception as e:
-            queue.put_nowait(e)
-        except asyncio.CancelledError:
-            queue.put_nowait(None)
-            raise
-
-    scheduler_task = asyncio.create_task(_run())
-    return ExecutionHandle(queue, scheduler_task)
-```
-
-2. Rewrite `run()` to delegate to `start()`:
-
-```python
-async def run(self, inputs, *, user_id=None, session_id=None,
-              request_id=None, tracer=None) -> Dict[str, Any]:
-    return await self.start(
-        inputs, user_id=user_id, session_id=session_id,
-        request_id=request_id, tracer=tracer,
-    ).collect()
-```
-
-3. Delete `stream()` entirely.
-
-Note: tracing (`FlushWorker.submit`) and middleware hooks currently live inside
-`run()` and `stream()`. These need to move into `start()` or a post-collect
-wrapper. Keep the same tracing call pattern — just relocate it.
-
-### `hush/core/utils/context.py`
-
-Delete `_output_queue` ContextVar entirely.
-
-### `llm.py`
-
-Remove all reads of `_output_queue`. Stream mode already yields each token
-chunk as a frame from `run()` — the root scheduler's `_on_frame` forwards it
-to `output_queue` automatically.
+- `start()` creates an `asyncio.Queue`, spawns the scheduler task, returns `ExecutionHandle`
+- `run()` delegates to `start(...).collect(unwrap=True)`
+- `stream()` deleted; `_output_queue` ContextVar deleted
+- `output_queue` param added to `Scheduler.run()` — frames are pushed directly, no ContextVar needed
+- `llm.py` yields token chunks as frames from `run()` directly
 
 ---
 
-## Implementation order
+## Implementation Notes
 
-1. ~~**`ExecutionHandle`**~~ **DONE** — engine.py lines 43–178
-2. **`_Scheduler.run()`** — add `output_queue` param, write frames + sentinel
-3. **`engine.py`** — add `start()`, rewire `run()`, remove `stream()`
-4. **`context.py`** — delete `_output_queue` (import already removed from engine.py; `context.py` file itself still has it)
-5. **`llm.py`** — remove `_output_queue` reads
-6. **`collector.py`** — fix `_get_stream_contexts` (see below)
-7. **Tests** — update `test_engine.py`, add `test_execution_handle.py`
+All items in this document are **fully implemented** as of the scheduler rewrite
+(Steps 1–15, 704/704 tests passing).
+
+Key locations in the current codebase:
+
+| Component | File | Lines |
+|-----------|------|-------|
+| `ExecutionHandle` class | `engine.py` | 43–178 |
+| `Hush.start()` | `engine.py` | 378–449 |
+| `Hush.run()` | `engine.py` | 451–481 |
+| `Scheduler.run()` + `output_queue` param | `task_scheduler.py` | 79–350 |
+| `Scheduler._pump()` | `task_scheduler.py` | ~199–215 |
 
 ---
 

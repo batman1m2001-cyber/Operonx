@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from hush.providers._utils.huggingface import load_hf_model
 from hush.providers.rerankers.config import RerankingConfig
 
 from .base import BaseReranker
@@ -29,8 +30,8 @@ class HFReranker(BaseReranker):
             ValueError: If model name is not provided
         """
         try:
-            import torch
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            import torch  # noqa: F401
+            from transformers import AutoModelForSequenceClassification  # noqa: F401
         except ImportError as e:
             raise ImportError(
                 "transformers and torch are required for HFReranker. "
@@ -44,37 +45,11 @@ class HFReranker(BaseReranker):
 
         # Load model and tokenizer
         try:
-            import os
+            from transformers import AutoModelForSequenceClassification
 
-            # Check if model path is a local directory
-            model_path = config.model
-            is_local_path = os.path.exists(model_path) and os.path.isdir(model_path)
-
-            if is_local_path:
-                print(f"Loading reranker model from local path: {model_path}")
-            else:
-                print(f"Loading reranker model from HuggingFace Hub: {model_path}")
-
-            # Load tokenizer and model
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path, local_files_only=is_local_path
+            self.model, self.tokenizer = load_hf_model(
+                config.model, AutoModelForSequenceClassification
             )
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                model_path, local_files_only=is_local_path
-            )
-
-            # Move model to GPU if available
-            import torch
-
-            if torch.cuda.is_available():
-                self.model = self.model.cuda()
-                print("Reranker model loaded on GPU")
-            else:
-                print("Reranker model loaded on CPU")
-
-            # Set model to evaluation mode
-            self.model.eval()
-
         except Exception as e:
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 

@@ -17,7 +17,12 @@ from hush.core.states.ref import Ref
 
 @dataclass
 class Frame:
-    """Generator yielded one result."""
+    """One result yielded by an op during execution.
+
+    Created by ``Scheduler._pump()`` for every ``(ctx, result)`` tuple that
+    ``op.run()`` yields.  User code never constructs Frame directly — just
+    ``return`` or ``yield`` from an ``@op`` function.
+    """
 
     op: str
     ctx: tuple
@@ -26,7 +31,12 @@ class Frame:
 
 @dataclass
 class EOF:
-    """Marker for generator completion."""
+    """Marker that an op's async generator has exhausted.
+
+    Created by ``Scheduler._pump()`` after ``op.run()`` stops yielding
+    (i.e. the underlying function returned or its generator was exhausted).
+    User code never yields EOF — it is emitted implicitly when the op finishes.
+    """
 
     op: str
     ctx: tuple
@@ -197,7 +207,21 @@ class Scheduler:
             asyncio.create_task(_pump(op_name, ctx))
 
         async def _pump(op_name: str, ctx: tuple) -> None:
-            """Run op and put Frame/EOF events on queue."""
+            """Drive one op to completion and emit Frame/EOF events.
+
+            Consumes ``op.run()`` (an async generator) and translates its
+            yields into scheduler events:
+
+            - Each ``(item_ctx, result)`` yield → ``Frame`` on the queue.
+            - When the generator exhausts → one ``EOF`` on the queue.
+
+            The ``inflight`` counter is managed here:
+            - ``dispatch()`` adds +1 as a reservation before spawning ``_pump``.
+            - ``_pump`` adds +1 per Frame and +1 for the EOF it emits.
+            - ``finally`` subtracts the original dispatch reservation.
+            Net effect: each dispatched op contributes exactly
+            ``(N_frames + 1_EOF)`` to ``inflight``, consumed by the main loop.
+            """
             nonlocal inflight
             op = g._ops[op_name]
             try:

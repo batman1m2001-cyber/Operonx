@@ -517,7 +517,12 @@ class GraphOp(BaseOp):
     # ═══════════════════════════════════════════════════════════════════
 
     def serialize(self) -> dict:
-        """Serialize full graph to config dict for the Rust backend."""
+        """Serialize full graph to config dict for the Rust backend.
+
+        Note: the key ``"initial_ready_count"`` is kept as-is for Rust backend
+        compatibility even though the internal Python attribute was renamed to
+        ``_initial_ready`` during the scheduler rewrite.
+        """
         base = super().serialize()
         base.update(
             {

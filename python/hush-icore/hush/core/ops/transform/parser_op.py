@@ -133,7 +133,7 @@ class ParserOp(BaseOp):
 
     def __init__(
         self,
-        format: Optional[ParserType] = None,
+        format: ParserType = "xml",
         extract: Optional[List[str]] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
@@ -155,11 +155,8 @@ class ParserOp(BaseOp):
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)
 
-        # Normalize and merge with user-provided
-        normalized_inputs = self._normalize_params(inputs)
-        normalized_outputs = self._normalize_params(outputs)
-        self.inputs = self._merge_params(parsed_inputs, normalized_inputs)
-        self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
+        # Merge parsed schema with user-provided
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.format = format or "xml"
         self.extract = extract

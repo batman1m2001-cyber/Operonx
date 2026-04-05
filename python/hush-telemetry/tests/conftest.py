@@ -27,57 +27,6 @@ if _raw_config and not CONFIGS_PATH.is_absolute() and not CONFIGS_PATH.exists():
             break
         _p = _p.parent
 
-# =============================================================================
-# Configuration Validation
-# =============================================================================
-
-SETUP_TUTORIAL = """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                 HUSH OBSERVABILITY TEST CONFIGURATION REQUIRED               ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  To run hush-telemetry tests, you need to configure credentials.   ║
-║                                                                              ║
-║  STEP 1: Create .env file                                                    ║
-║  ─────────────────────────────────────────────────────────────────────────── ║
-║  Copy .env.template to .env in the project root:                             ║
-║                                                                              ║
-║    cp .env.template .env                                                     ║
-║                                                                              ║
-║  STEP 2: Set HUSH_CONFIG path                                                ║
-║  ─────────────────────────────────────────────────────────────────────────── ║
-║  Add to your .env file:                                                      ║
-║                                                                              ║
-║    HUSH_CONFIG=/path/to/your/resources.yaml                                  ║
-║                                                                              ║
-║  STEP 3: Add observability credentials to .env                               ║
-║  ─────────────────────────────────────────────────────────────────────────── ║
-║  For Langfuse tests:                                                         ║
-║    LANGFUSE_PUBLIC_KEY=pk-lf-your-key                                        ║
-║    LANGFUSE_SECRET_KEY=sk-lf-your-key                                        ║
-║    LANGFUSE_HOST=https://cloud.langfuse.com                                  ║
-║    Get keys at: https://cloud.langfuse.com                                   ║
-║                                                                              ║
-║  STEP 4: Configure resources.yaml                                            ║
-║  ─────────────────────────────────────────────────────────────────────────── ║
-║  Add observability configs to resources.yaml:                                ║
-║                                                                              ║
-║    langfuse:default:                                                         ║
-║      type: langfuse                                                          ║
-║      public_key: ${LANGFUSE_PUBLIC_KEY}                                      ║
-║      secret_key: ${LANGFUSE_SECRET_KEY}                                      ║
-║      host: ${LANGFUSE_HOST}                                                  ║
-║                                                                              ║
-║    otel:jaeger:                                                              ║
-║      type: otel                                                              ║
-║      endpoint: http://localhost:4317                                         ║
-║      protocol: grpc                                                          ║
-║      service_name: hush-workflow                                             ║
-║      insecure: true                                                          ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"""
-
 
 def pytest_configure(config):
     """Configure pytest environment."""

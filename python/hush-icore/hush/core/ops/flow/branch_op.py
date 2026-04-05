@@ -60,9 +60,8 @@ class BranchOp(BaseOp):
         # Call super().__init__ without inputs/outputs
         super().__init__(**kwargs)
 
-        # Merge parsed with user-provided
-        self.inputs = self._merge_params(parsed_inputs, inputs)
-        self.outputs = self._merge_params(parsed_outputs, outputs)
+        # Merge parsed schema with user-provided
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.default = default.name if isinstance(default, BaseOp) else default
         self.given_candidates = candidates

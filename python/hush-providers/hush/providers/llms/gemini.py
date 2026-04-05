@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, List, Optional, Sequence, Union
 
@@ -12,6 +11,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
+from hush.core import LOGGER
 from hush.providers.llms.config import GeminiConfig
 
 from .base import create_http_client
@@ -61,9 +61,22 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
         super().__init__(config)
         self.config = config
 
-        # Setup credentials
+        # Setup credentials — only pass service account fields, not Pydantic internals
+        _SA_KEYS = (
+            "project_id",
+            "private_key_id",
+            "private_key",
+            "client_email",
+            "client_id",
+            "auth_uri",
+            "token_uri",
+            "auth_provider_x509_cert_url",
+            "client_x509_cert_url",
+            "universe_domain",
+        )
+        sa_info = {"type": "service_account", **{k: getattr(self.config, k) for k in _SA_KEYS}}
         self.credentials = service_account.Credentials.from_service_account_info(
-            self.config.__dict__, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            sa_info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
 
         self.http_client = create_http_client(verify=False, read_timeout=30.0, max_connections=50)
@@ -79,7 +92,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             base_url=base_url, api_key="placeholder", http_client=self.http_client
         )
 
-    def _refresh_token(self) -> str:
+    async def _refresh_token(self) -> str:
         """
         Refresh Google Cloud access token with exponential backoff retry logic.
 
@@ -114,10 +127,12 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
                     raise Exception(f"Token refresh failed after 3 attempts: {e}")
 
                 wait_time = 2**attempt  # 1s, 2s, 4s
-                print(f"Token refresh attempt {attempt + 1} failed, retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                LOGGER.warning(
+                    "Token refresh attempt %d failed, retrying in %ss...", attempt + 1, wait_time
+                )
+                await asyncio.sleep(wait_time)
 
-    def _ensure_fresh_token(self):
+    async def _ensure_fresh_token(self):
         """
         Ensure the OpenAI client has a valid, non-expired authentication token.
 
@@ -145,7 +160,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
         )
 
         if needs_refresh:
-            self.client.api_key = self._refresh_token()
+            self.client.api_key = await self._refresh_token()
 
     async def stream(
         self,
@@ -207,7 +222,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             - Supports Gemini's advanced capabilities including multimodal inputs
         """
         # Ensure we have a fresh token
-        self._ensure_fresh_token()
+        await self._ensure_fresh_token()
         async for chunk in super().stream(
             messages=messages,
             temperature=temperature,
@@ -283,7 +298,7 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             - Supports all Gemini model capabilities including function calling
         """
         # Ensure we have a fresh token
-        self._ensure_fresh_token()
+        await self._ensure_fresh_token()
 
         return await super().generate(
             messages=messages,

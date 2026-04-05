@@ -6,6 +6,7 @@ import traceback
 import uuid
 from abc import ABC
 from datetime import datetime, timezone
+from logging import ERROR, INFO, WARNING
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
@@ -21,44 +22,13 @@ if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def _has_explicit_outputs(op) -> bool:
-    """Check whether the op has user-defined explicit output mappings.
-
-    Returns True if any output Param has a non-None value (user-set).
-    Returns False if outputs are absent, empty, or all auto-parsed.
-    """
-    if not hasattr(op, "outputs") or op.outputs is None:
-        return False
-    if len(op.outputs) == 0:
-        return False
-    for param in op.outputs.values():
-        if hasattr(param, "value") and param.value is not None:
-            return True
-    return False
-
-
-def _set_wildcard_outputs(target_op):
-    """Auto-set wildcard outputs for ops connecting to END.
-
-    For each output key with no explicit value, sets it to Ref(parent, key)
-    so the op's outputs are automatically forwarded to the parent graph.
-    """
-    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
-        if target_op.outputs is None:
-            target_op.outputs = {}
-        parent_op = getattr(target_op, "parent", None) or PARENT
-        for key in target_op.outputs:
-            param = target_op.outputs[key]
-            if hasattr(param, "value") and param.value is None:
-                param.value = Ref(parent_op, key)
-
-
 # Re-export shorthand utilities for backward compatibility
 from hush.core.ops._shortcuts import (  # noqa: F401, E402
     _BASE_INIT_KEYS,
     shorthand,
     split_shorthand_kwargs,
 )
+from hush.core.ops._utils import _has_explicit_outputs, _set_wildcard_outputs  # noqa: F401, E402
 
 
 class BaseOp(ABC):
@@ -210,6 +180,22 @@ class BaseOp(ABC):
         """Merge schema (from parsing) with user-provided inputs/outputs."""
         return merge_params(schema, user_provided, self.parent)
 
+    def _init_io(
+        self,
+        input_schema: Dict[str, Param],
+        output_schema: Dict[str, Param],
+        inputs: Any,
+        outputs: Any,
+    ) -> None:
+        """Normalise and merge parsed I/O schema with user-provided mappings.
+
+        Called by concrete op ``__init__`` implementations after
+        ``super().__init__(**kwargs)`` to set ``self.inputs`` and
+        ``self.outputs`` in one step.
+        """
+        self.inputs = self._merge_params(input_schema, self._normalize_params(inputs))
+        self.outputs = self._merge_params(output_schema, self._normalize_params(outputs))
+
     # =========================================================================
     # 1. INIT — identity, params, parent registration
     # =========================================================================
@@ -350,13 +336,24 @@ class BaseOp(ABC):
             result = asyncio.run(_collect())
         return result
 
+    def warmup(self) -> None:
+        """Called by Hush engine after graph.build() when a ResourceHub is available.
+
+        Override in provider ops (LLMOp, EmbeddingOp, etc.) to eagerly initialize
+        backends and eliminate cold-start latency on the first user request.
+
+        The default implementation is a no-op — subclasses opt in by overriding.
+        """
+
     def get_inputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
+
+        PARENT refs are resolved automatically by Cell's hierarchy walk — no
+        ``parent_context`` parameter needed.
 
         Args:
             state: Workflow state.
             context_id: Context of this op.
-            parent_context: Context used to resolve PARENT refs (for iteration ops).
         """
         result = {}
 
@@ -385,7 +382,6 @@ class BaseOp(ABC):
         Args:
             state: Workflow state.
             context_id: Context of this op.
-            parent_context: Context of PARENT (for API consistency).
         """
         return {var: state[self.full_name, var, context_id] for var in self.outputs}
 
@@ -475,7 +471,7 @@ class BaseOp(ABC):
         from pathlib import Path
 
         total = 0
-        for op_name, (path, store) in BaseOp._cache_stores.items():
+        for _, (path, store) in BaseOp._cache_stores.items():
             if not path or not store:
                 continue
             p = Path(path)
@@ -506,7 +502,7 @@ class BaseOp(ABC):
     ) -> None:
         """Log execution summary with inputs, outputs, and duration."""
         # Check both verbose flag and logger level before formatting
-        if self.verbose and LOGGER.isEnabledFor(20):  # 20 = INFO level
+        if self.verbose and LOGGER.isEnabledFor(INFO):
             msg = format_event(
                 "op_done",
                 request_id=request_id or "unknown",
@@ -561,11 +557,27 @@ class BaseOp(ABC):
         state: "MemoryState",
         context_id: Optional[str] = None,
     ):
-        """Execute this op. Results stored to state.
+        """Execute this op as a uniform async generator.
 
-        Handles both normal ops (single result) and generator ops (multiple yields).
-        async generator — yields (context_id, result) per frame.
-        Normal op yields once. Generator op yields N times.
+        Every op — whether it uses ``return`` or ``yield`` — is driven through
+        the same three-layer model:
+
+        1. **User function** (``@op``): plain ``return {"k": v}`` or ``yield {"k": v}``.
+           No awareness of Frame/EOF.
+        2. **``BaseOp.run()``** (this method): wraps the user function via
+           ``_exec_core()`` into a uniform async generator that yields
+           ``(context_id, result)`` tuples.  Normal op → one yield.
+           Generator op → N yields, each in its own stream context ``[i]``.
+        3. **``Scheduler._pump()``**: consumes this generator.  Each yield becomes
+           a ``Frame`` event on the queue; when the generator exhausts naturally,
+           ``_pump`` emits one ``EOF`` event.  The user never writes Frame or EOF.
+
+        Args:
+            state: Workflow state shared across all ops in the graph.
+            context_id: Root context tuple for this execution.
+
+        Yields:
+            ``(context_id, result)`` — one tuple per item produced by the op.
         """
         if not self.enabled:
             return
@@ -609,7 +621,7 @@ class BaseOp(ABC):
 
             error_msg = (
                 traceback.format_exc()
-                if LOGGER.isEnabledFor(40)
+                if LOGGER.isEnabledFor(ERROR)
                 else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             )
             LOGGER.error(
@@ -637,7 +649,7 @@ class BaseOp(ABC):
             elif "error" not in _outputs:
                 state[self.full_name, "error", context_id] = None
 
-            if duration_ms > 100 and LOGGER.isEnabledFor(30):
+            if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(
                     format_event(
                         "op_slow",

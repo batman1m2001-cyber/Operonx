@@ -152,7 +152,7 @@ class TestStreamCoreYields:
 
 
 # =============================================================================
-# Test 3: Streaming LLMOp in a graph via engine.stream()
+# Test 3: Streaming LLMOp in a graph via engine.start()
 # =============================================================================
 
 
@@ -206,7 +206,11 @@ class TestStreamingLLMInGraph:
 
     @pytest.mark.asyncio
     async def test_streaming_llm_run_returns_accumulated(self, hub):
-        """LLMOp(stream=True) via engine.run() returns accumulated result."""
+        """LLMOp(stream=True) via engine.run() returns accumulated result.
+
+        engine.run() delegates to engine.start().collect() internally —
+        all yielded frames are merged into a single output dict.
+        """
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):

@@ -38,9 +38,9 @@ class UsageInfo(BaseModel):
 class EmbeddingResponse(BaseModel):
     """Response from embedding API"""
 
-    id: str = str(uuid.uuid4())
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     object: str = Field(default="list")
-    created: int = time.time()
+    created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     data: List[EmbeddingData]
     usage: UsageInfo

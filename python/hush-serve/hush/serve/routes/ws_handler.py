@@ -16,6 +16,8 @@ from typing import Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from hush.serve.schema import strip_internal_keys
+
 
 def create_ws_handler(endpoint) -> Callable:
     """Create a WebSocket handler for bidirectional communication."""
@@ -23,6 +25,11 @@ def create_ws_handler(endpoint) -> Callable:
 
     async def handler(websocket: WebSocket):
         await websocket.accept()
+
+        # Extract context from WS handshake headers (same pattern as HTTP middleware)
+        request_id = websocket.headers.get("X-Request-ID", str(uuid.uuid4()))
+        user_id = websocket.headers.get("X-User-ID")
+        session_id = websocket.headers.get("X-Session-ID")
 
         try:
             while True:
@@ -33,7 +40,6 @@ def create_ws_handler(endpoint) -> Callable:
                     break
 
                 inputs = msg.get("inputs", msg)
-                request_id = str(uuid.uuid4())
 
                 try:
                     validated = request_model(**inputs)
@@ -44,6 +50,8 @@ def create_ws_handler(endpoint) -> Callable:
                 handle = endpoint.engine.start(
                     inputs=validated.model_dump(exclude_none=False),
                     request_id=request_id,
+                    user_id=user_id,
+                    session_id=session_id,
                 )
 
                 async for _op, _ctx, data in handle:
@@ -51,7 +59,7 @@ def create_ws_handler(endpoint) -> Callable:
 
                 # Build final result from buffered frames (non-consuming)
                 output = await handle.result()
-                output = {k: v for k, v in output.items() if not k.startswith("$")}
+                output = strip_internal_keys(output)
                 await websocket.send_json({"type": "result", "data": output})
 
         except WebSocketDisconnect:

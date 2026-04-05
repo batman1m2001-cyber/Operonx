@@ -11,6 +11,8 @@ from typing import Callable
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
+from hush.serve.schema import strip_internal_keys
+
 
 def create_stream_handler(endpoint) -> Callable:
     """Create a FastAPI route handler for SSE streaming."""
@@ -34,7 +36,7 @@ def create_stream_handler(endpoint) -> Callable:
 
             # Build final result from buffered frames (non-consuming)
             output = await handle.result()
-            output = {k: v for k, v in output.items() if not k.startswith("$")}
+            output = strip_internal_keys(output)
             yield f"event: done\ndata: {json.dumps(output)}\n\n"
 
         return StreamingResponse(

@@ -61,7 +61,7 @@ async def test_extract_basic():
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -90,7 +90,7 @@ async def test_extract_with_validators():
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"])
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -120,7 +120,7 @@ async def test_extract_multiple_fields():
 
     mock_hub, call_count = make_mock_hub(["<intent>DENY</intent><confidence>0.95</confidence>"])
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -154,7 +154,7 @@ async def test_extract_retry_validator_reject_uses_default():
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"] * 3)
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -193,7 +193,7 @@ async def test_extract_retry_parse_fail_then_success():
         ]
     )
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -225,7 +225,7 @@ async def test_extract_retry_no_retry_default_on_fail():
 
     mock_hub, call_count = make_mock_hub(["garbage output"])
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -257,7 +257,7 @@ async def test_extract_retry_success_first_try():
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -295,7 +295,7 @@ async def test_extract_retry_twice_then_success():
         ]
     )
 
-    with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+    with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:

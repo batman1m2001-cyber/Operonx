@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Union
 
 import numpy as np
 
+from hush.providers._utils.onnx import load_onnx_session
 from hush.providers.embeddings.base import BaseEmbedder
 from hush.providers.embeddings.config import EmbeddingConfig
 
@@ -38,8 +39,8 @@ class ONNXEmbedding(BaseEmbedder):
             ValueError: If model path is not provided
         """
         try:
-            import onnxruntime as ort
-            from tokenizers import Tokenizer
+            import onnxruntime  # noqa: F401
+            from tokenizers import Tokenizer  # noqa: F401
         except ImportError as e:
             raise ImportError(
                 "onnxruntime and tokenizers are required for ONNXEmbedding. "
@@ -54,49 +55,9 @@ class ONNXEmbedding(BaseEmbedder):
 
         # Load model and tokenizer
         try:
-            from pathlib import Path
-
-            # Check if model path is a local directory
-            model_path = Path(config.model)
-            if not model_path.exists() or not model_path.is_dir():
-                raise ValueError(f"Model path does not exist or is not a directory: {model_path}")
-
-            print(f"Loading ONNX model from local path: {model_path}")
-
-            # Check for CUDA availability
-            providers = ["CPUExecutionProvider"]
-            if "CUDAExecutionProvider" in ort.get_available_providers():
-                providers.insert(0, "CUDAExecutionProvider")
-                self._device = "cuda"
-                print("ONNX Runtime will use GPU (CUDA)")
-            else:
-                self._device = "cpu"
-                print("ONNX Runtime will use CPU")
-
-            # Load ONNX model
-            onnx_model_path = model_path / "model.onnx"
-            if not onnx_model_path.exists():
-                raise FileNotFoundError(f"ONNX model file not found: {onnx_model_path}")
-
-            session_options = ort.SessionOptions()
-            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-            self.session = ort.InferenceSession(
-                str(onnx_model_path), sess_options=session_options, providers=providers
-            )
-
-            # Load tokenizer
-            tokenizer_path = model_path / "tokenizer.json"
-            if not tokenizer_path.exists():
-                raise FileNotFoundError(f"Tokenizer file not found: {tokenizer_path}")
-
-            self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
-
-            # Enable padding and truncation
-
-            self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
-            self.tokenizer.enable_truncation(max_length=512)
-
+            self.session, self.tokenizer, self._device = load_onnx_session(config.model)
+        except (ValueError, FileNotFoundError):
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to load model '{config.model}': {str(e)}") from e
 

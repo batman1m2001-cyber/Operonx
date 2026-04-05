@@ -38,7 +38,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(responses)
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
@@ -97,7 +97,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(["<result>confirm</result>"])
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
@@ -141,7 +141,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(["<result>unknown_garbage</result>"])
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
