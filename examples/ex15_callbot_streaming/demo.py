@@ -21,16 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
 import uuid
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 from hush.core.tracing.collector import TraceCollector
 
 from ex15_callbot_streaming.workflow import build_callbot
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
 
 # =============================================================================
 # Pretty-print trace tree
@@ -92,7 +91,7 @@ async def example_1_run_and_trace():
     print()
 
     callbot = build_callbot()
-    engine = Hush(callbot)
+    engine = Hush(callbot, env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"samples": 5})
     state = result["$state"]
 
@@ -128,21 +127,22 @@ async def example_2_stream():
     print("=" * 55)
     print()
 
-    engine = Hush(build_callbot())
-    token_count = 0
+    engine = Hush(build_callbot(), env=ENV_FILE, resources=RESOURCES_FILE)
+    handle = engine.start(inputs={"samples": 5})
+    frame_count = 0
 
-    async for event in engine.stream(inputs={"samples": 5}):
-        if event["type"] == "token":
-            token_count += 1
-            if token_count <= 10:
-                print(f"  TOKEN [{event.get('op', '?')}]: {event['data']}")
-            elif token_count == 11:
-                print("  ... (more tokens)")
-        elif event["type"] == "done":
-            tts_out = event["data"].get("audio_out", [])
-            print(
-                f"\n  DONE: {token_count} tokens, {len(tts_out) if isinstance(tts_out, list) else '?'} TTS chunks"
-            )
+    async for op, ctx, data in handle:
+        frame_count += 1
+        if frame_count <= 10:
+            print(f"  FRAME [{op}]: {data}")
+        elif frame_count == 11:
+            print("  ... (more frames)")
+
+    result = await handle.result()
+    tts_out = result.get("audio_out", [])
+    print(
+        f"\n  DONE: {frame_count} frames, {len(tts_out) if isinstance(tts_out, list) else '?'} TTS chunks"
+    )
 
 
 async def example_3_langfuse():
@@ -154,16 +154,12 @@ async def example_3_langfuse():
     print("3. Callbot + Langfuse Tracing")
     print("=" * 55)
 
-    if not os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY"):
-        print("  Skipped — LANGFUSE_HUSH keys not set in .env")
-        return
-
     from hush.telemetry import LangfuseTracer
 
     request_id = str(uuid.uuid4())
-    tracer = LangfuseTracer(resource="langfuse:hush", tags=["callbot", "nested-streaming"])
+    tracer = LangfuseTracer(resource="langfuse:default", tags=["callbot", "nested-streaming"])
 
-    engine = Hush(build_callbot())
+    engine = Hush(build_callbot(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(
         inputs={"samples": 5},
         tracer=tracer,
@@ -182,7 +178,7 @@ async def example_3_langfuse():
         for err in errors:
             print(f"  FLUSH ERROR: {err}")
     else:
-        host = os.environ.get("LANGFUSE_HUSH_BASE_URL", "").rstrip("/")
+        host = os.environ.get("LANGFUSE_HOST", "").rstrip("/")
         print(f"  Trace: {host}/trace/{request_id}")
 
 

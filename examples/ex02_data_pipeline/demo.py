@@ -9,7 +9,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-import sys
 
 from hush.core import Hush
 
@@ -17,13 +16,17 @@ from ex02_data_pipeline.workflow import build_data_pipeline, build_text_pipeline
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     print("=" * 50)
     print("Pipeline 1: Data Transformation")
     print("=" * 50)
 
-    result = await Hush(build_data_pipeline()).run(inputs={})
+    result = await Hush(build_data_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={})
     print(f"  Tổng:           {result['total']}")
     print(f"  Trung bình:     {result['average']}")
     print(f"  Số phần tử:     {result['count']}")
@@ -33,7 +36,7 @@ async def main():
     print("Pipeline 2: Text Processing")
     print("=" * 50)
 
-    result = await Hush(build_text_pipeline()).run(
+    result = await Hush(build_text_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={
             "text": """
         Trí tuệ nhân tạo   đang thay đổi   cách chúng ta sống

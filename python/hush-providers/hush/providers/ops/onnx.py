@@ -30,7 +30,7 @@ class OnnxOp(BaseOp):
         pred = OnnxOp.of(resource="sentiment-agent", embeddings=emb["embeddings"])
     """
 
-    __slots__ = ["resource", "backend"]
+    __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "onnx"
 
@@ -61,14 +61,23 @@ class OnnxOp(BaseOp):
         self.inputs = self._merge_params(input_schema, inputs)
         self.outputs = self._merge_params(output_schema, outputs)
 
-        # Get ONNX backend from ResourceHub
+        # ONNX backend — lazy-initialized on first use to allow
+        # graph construction before ResourceHub is set up
+        self.backend = None
+        self._initialized = False
+        self._set_core(self._process)
+
+    def _ensure_initialized(self):
+        """Lazy-init ONNX backend from ResourceHub on first use."""
+        if self._initialized:
+            return
         try:
             hub = ResourceHub.instance()
         except RuntimeError:
             hub = get_hub()
 
         self.backend = hub.get(f"onnx:{self.resource}")
-        self._set_core(self._process)
+        self._initialized = True
 
     async def _process(
         self,
@@ -77,6 +86,7 @@ class OnnxOp(BaseOp):
         mask: Optional[List[bool]] = None,
     ) -> Dict[str, Any]:
         """Run ONNX inference on embeddings."""
+        self._ensure_initialized()
         return await self.backend.run(embeddings, role_ids=role_ids, mask=mask)
 
     @shorthand
@@ -92,6 +102,7 @@ class OnnxOp(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize OnnxOp for Rust backend."""
+        self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource
         if self.backend and hasattr(self.backend, "config"):

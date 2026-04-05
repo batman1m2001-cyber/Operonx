@@ -15,14 +15,16 @@ class TestNodeIntegration:
             LLMOp,
             PromptOp,
             RerankOp,
-            chain,
+            ask,
+            chat,
         )
 
         assert LLMOp is not None
         assert EmbeddingOp is not None
         assert RerankOp is not None
         assert PromptOp is not None
-        assert chain is not None
+        assert chat is not None
+        assert ask is not None
 
     def test_prompt_node_with_parent_outputs(self):
         """Test PromptOp with PARENT reference for outputs."""

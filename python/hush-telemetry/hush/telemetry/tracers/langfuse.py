@@ -63,7 +63,7 @@ class LangfuseTracer(Tracer):
 
         from hush.core.registry import get_hub
 
-        return get_hub().langfuse(self._resource)
+        return get_hub().get(self._resource)
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data to Langfuse via batch ingestion API.

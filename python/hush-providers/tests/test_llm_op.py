@@ -217,7 +217,7 @@ class TestLLMOpLoadBalancing:
         selections = Counter()
         for _ in range(1000):
             llm = node._select_llm()
-            key = node._get_selected_resource(llm)
+            key = node._get_resource_key(llm)
             selections[key] += 1
 
         # Check distribution is roughly correct (with tolerance)

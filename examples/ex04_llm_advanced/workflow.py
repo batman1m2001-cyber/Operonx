@@ -6,11 +6,6 @@ Cần: OPENAI_API_KEY trong .env
 """
 
 import json
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op

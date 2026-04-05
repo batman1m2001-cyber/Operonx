@@ -12,13 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-import os
-import sys
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 
@@ -31,13 +24,17 @@ from ex08_error_handling.workflow import (
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     # 1. Error capture — workflow doesn't crash
     print("=" * 50)
     print("1. Error capture trong state")
     print("=" * 50)
-    result = await Hush(build_error_capture()).run(inputs={})
+    result = await Hush(build_error_capture(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={})
     state = result["$state"]
     error = state["error-capture.fail", "error", None]
     print(f"  Error captured: {error is not None}")
@@ -48,7 +45,7 @@ async def main():
     print("=" * 50)
     print("2. Error routing với if_()")
     print("=" * 50)
-    engine = Hush(build_error_routing())
+    engine = Hush(build_error_routing(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"a": 10, "b": 3})
     print(f"  10 / 3 → {result['output']}")
     result = await engine.run(inputs={"a": 10, "b": 0})
@@ -59,7 +56,7 @@ async def main():
     print("=" * 50)
     print("3. Retry + Graceful degradation")
     print("=" * 50)
-    engine = Hush(build_retry_fallback())
+    engine = Hush(build_retry_fallback(), env=ENV_FILE, resources=RESOURCES_FILE)
     for query in ["What is AI?", "What is ML?"]:
         result = await engine.run(inputs={"query": query})
         print(f"  Query: {query}")
@@ -71,11 +68,7 @@ async def main():
     print("=" * 50)
     print("4. LLM Fallback chain")
     print("=" * 50)
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("  Skipped — OPENAI_API_KEY chưa set")
-        return
-
-    result = await Hush(build_llm_fallback()).run(inputs={"query": "What is Python?"})
+    result = await Hush(build_llm_fallback(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"query": "What is Python?"})
     print(f"  Answer: {result['answer'][:80]}...")
     print(f"  Model used: {result['model']}")
 

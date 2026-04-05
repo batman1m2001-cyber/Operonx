@@ -49,7 +49,7 @@ class LangfusePromptManager:
             return self._config
         from hush.core.registry import get_hub
 
-        return get_hub().langfuse(self._resource).config
+        return get_hub().get(self._resource).config
 
     @property
     def _langfuse(self):

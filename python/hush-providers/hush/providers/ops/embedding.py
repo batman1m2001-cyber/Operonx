@@ -27,7 +27,7 @@ class EmbeddingOp(BaseOp):
         embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
     """
 
-    __slots__ = ["resource", "backend"]
+    __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "embedding"
 
@@ -65,17 +65,27 @@ class EmbeddingOp(BaseOp):
         self.inputs = self._merge_params(input_schema, inputs)
         self.outputs = self._merge_params(output_schema, outputs)
 
-        # Get embedder from ResourceHub
+        # Embedding backend — lazy-initialized on first use to allow
+        # graph construction before ResourceHub is set up
+        self.backend = None
+        self._initialized = False
+        self._set_core(self._process)
+
+    def _ensure_initialized(self):
+        """Lazy-init embedding backend from ResourceHub on first use."""
+        if self._initialized:
+            return
         try:
             hub = ResourceHub.instance()
         except RuntimeError:
             hub = get_hub()
 
         self.backend = hub.get(f"embedding:{self.resource}")
-        self._set_core(self._process)
+        self._initialized = True
 
     async def _process(self, texts: Union[str, List[str]]) -> Dict[str, Any]:
         """Process texts and return embeddings."""
+        self._ensure_initialized()
         text_list = [texts] if isinstance(texts, str) else texts
         try:
             result = await self.backend.run(texts)
@@ -104,6 +114,7 @@ class EmbeddingOp(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize EmbeddingOp for Rust backend, including backend config."""
+        self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource
         if self.backend and hasattr(self.backend, "config"):

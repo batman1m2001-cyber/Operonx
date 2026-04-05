@@ -14,19 +14,23 @@ from hush.core import Hush
 
 from ex01_hello_world.workflow import build_chain, build_hello, build_parallel
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     print("=" * 50)
     print("1. Hello World")
     print("=" * 50)
-    result = await Hush(build_hello()).run(inputs={"name": "Hush"})
+    result = await Hush(build_hello(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"name": "Hush"})
     print(f"  {result['greeting']}")
 
     print()
     print("=" * 50)
     print("2. Chain: greet → uppercase")
     print("=" * 50)
-    result = await Hush(build_chain()).run(inputs={"name": "Hush User"})
+    result = await Hush(build_chain(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"name": "Hush User"})
     print(f"  Greeting: {result['greeting']}")
     print(f"  Uppercase: {result['result']}")
 
@@ -34,7 +38,7 @@ async def main():
     print("=" * 50)
     print("3. Parallel → merge")
     print("=" * 50)
-    result = await Hush(build_parallel()).run(inputs={})
+    result = await Hush(build_parallel(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={})
     print(f"  Combined: {result['combined']}")
 
 

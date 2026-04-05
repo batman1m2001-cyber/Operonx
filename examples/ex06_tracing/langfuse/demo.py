@@ -15,6 +15,10 @@ import os
 
 from ex06_tracing.langfuse.workflow import build_text_analyzer
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 def _make_tracer():
     """Create LangfuseTracer using LANGFUSE_HUSH_* keys."""
@@ -43,7 +47,7 @@ async def main():
     from hush.core import Hush
 
     tracer = _make_tracer()
-    engine = Hush(build_text_analyzer(), **({} if tracer is None else {"tracer": tracer}))
+    engine = Hush(build_text_analyzer(), env=ENV_FILE, resources=RESOURCES_FILE, **({} if tracer is None else {"tracer": tracer}))
 
     print("=" * 50)
     print("1. LangfuseTracer — single run")

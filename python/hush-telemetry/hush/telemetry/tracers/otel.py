@@ -61,7 +61,7 @@ class OTELTracer(Tracer):
 
         from hush.core.registry import get_hub
 
-        return get_hub().otel(self._resource)
+        return get_hub().get(self._resource)
 
     @staticmethod
     def _datetime_to_ns(dt) -> Optional[int]:

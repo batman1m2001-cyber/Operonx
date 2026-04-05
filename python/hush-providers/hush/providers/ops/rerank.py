@@ -36,7 +36,7 @@ class RerankOp(BaseOp):
         )
     """
 
-    __slots__ = ["resource", "backend"]
+    __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "rerank"
 
@@ -77,14 +77,23 @@ class RerankOp(BaseOp):
         self.inputs = self._merge_params(input_schema, inputs)
         self.outputs = self._merge_params(output_schema, outputs)
 
-        # Get reranker from ResourceHub
+        # Reranker backend — lazy-initialized on first use to allow
+        # graph construction before ResourceHub is set up
+        self.backend = None
+        self._initialized = False
+        self._set_core(self._process)
+
+    def _ensure_initialized(self):
+        """Lazy-init reranker backend from ResourceHub on first use."""
+        if self._initialized:
+            return
         try:
             hub = ResourceHub.instance()
         except RuntimeError:
             hub = get_hub()
 
         self.backend = hub.get(f"reranking:{self.resource}")
-        self._set_core(self._process)
+        self._initialized = True
 
     async def _process(
         self, query: str, documents: List, top_k: int, threshold: float
@@ -100,6 +109,7 @@ class RerankOp(BaseOp):
         Returns:
             Dictionary with reranked documents
         """
+        self._ensure_initialized()
         is_dict = False
 
         if not documents:  # Check if the list is empty
@@ -167,6 +177,7 @@ class RerankOp(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize RerankOp for Rust backend, including backend config."""
+        self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource
         if self.backend and hasattr(self.backend, "config"):

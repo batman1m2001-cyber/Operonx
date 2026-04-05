@@ -13,13 +13,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-import os
-import sys
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 
@@ -27,17 +20,17 @@ from ex09_agent_workflow.workflow import build_agent
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("Skipped — OPENAI_API_KEY chưa set")
-        return
-
     print("=" * 55)
     print("09 Agent Workflow — Tool-calling Agent (@graph.loop)")
     print("=" * 55)
 
-    engine = Hush(build_agent())
+    engine = Hush(build_agent(), env=ENV_FILE, resources=RESOURCES_FILE)
 
     queries = [
         "What is 25 * 4 + 100?",
