@@ -80,7 +80,6 @@ class BaseOp(ABC):
         "parent",
         "contain_generation",
         "enabled",
-        "executor",
         "bound",
         "cache",
         "delay",
@@ -90,8 +89,7 @@ class BaseOp(ABC):
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
     _cache_stores: Dict[str, tuple] = {}
 
-    _VALID_EXECUTORS = (None, "thread")
-    _VALID_BOUNDS = (None, "io", "cpu")
+    _VALID_BOUNDS = (None, "sync", "io", "cpu")
 
     def __init__(
         self,
@@ -113,12 +111,12 @@ class BaseOp(ABC):
         cache: Union[bool, str, None] = None,
         delay: float = 0,
     ):
-        if executor not in self._VALID_EXECUTORS:
-            raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
+        # Backward compat: executor="thread" → bound="cpu"
+        if executor == "thread" and bound is None:
+            bound = "cpu"
         if bound not in self._VALID_BOUNDS:
-            raise ValueError(f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}")
-        self.executor = executor
-        self.bound = bound
+            raise ValueError(f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}")
+        self.bound = bound  # resolved to concrete value by _set_core()
         self.cache = cache
         self.delay = delay
         self.id = id or uuid.uuid4().hex
@@ -532,25 +530,40 @@ class BaseOp(ABC):
         state[self.full_name, "duration_ms", context_id] = duration_ms
 
     def _set_core(self, fn: Callable) -> None:
-        """Assign core function and precompute is_gen."""
+        """Assign core function and resolve bound to a concrete value.
+
+        bound resolution (when None):
+          - async coroutine / async generator → "io"
+          - sync function / sync generator   → "sync"
+        """
         self.core = fn
         self.is_gen = inspect.isasyncgenfunction(fn) or inspect.isgeneratorfunction(fn)
+        if self.bound is None and fn is not None:
+            is_async = inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
+            self.bound = "io" if is_async else "sync"
 
     async def _exec_core(self, inputs: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
-        """Unified dispatch — yields one result for normal ops, N for generators."""
+        """Unified dispatch — yields one result for normal ops, N for generators.
+
+        Dispatch is based on ``self.bound`` (resolved by ``_set_core``):
+          - ``"sync"``: direct call, no await (fastest path)
+          - ``"io"``:   await coroutine / async generator
+          - ``"cpu"``:  ``asyncio.to_thread()`` for sync, await for async
+        """
         core_fn = self.core
-        if inspect.isasyncgenfunction(core_fn):
+        if self.bound == "sync":
+            if self.is_gen:
+                for result in core_fn(**inputs):
+                    yield result
+            else:
+                yield core_fn(**inputs)
+        elif self.bound == "cpu" and not self.is_gen and not inspect.iscoroutinefunction(core_fn):
+            yield await asyncio.to_thread(core_fn, **inputs)
+        elif self.is_gen:
             async for result in core_fn(**inputs):
                 yield result
-        elif inspect.isgeneratorfunction(core_fn):
-            for result in core_fn(**inputs):
-                yield result
-        elif inspect.iscoroutinefunction(core_fn):
-            yield await core_fn(**inputs)
-        elif self.executor == "thread":
-            yield await asyncio.to_thread(core_fn, **inputs)
         else:
-            yield core_fn(**inputs)
+            yield await core_fn(**inputs)
 
     async def run(
         self,
@@ -667,8 +680,6 @@ class BaseOp(ABC):
         """Serialize this op to a config dict for the Rust backend."""
         is_async = inspect.iscoroutinefunction(self.core)
         is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
-        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→default)
-        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else None)
         base = {
             "type": self.type,
             "full_name": self.full_name,
@@ -677,11 +688,10 @@ class BaseOp(ABC):
             "python_callable": self.core,
             "is_async": is_async,
             "is_generator": is_gen,
-            "executor": self.executor,
             "enabled": self.enabled,
             "verbose": self.verbose,
             "stream": self.stream,
-            "bound": bound,
+            "bound": self.bound,
             "inputs": self._serialize_params(self.inputs),
             "outputs": self._serialize_params(self.outputs),
         }
