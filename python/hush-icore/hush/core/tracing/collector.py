@@ -294,6 +294,20 @@ class TraceCollector:
                     if any(agg.values()):
                         outputs = agg
 
+                # For root graph: outputs set via >> PARENT["key"] are stored at
+                # child contexts (where subgraphs ran), not at root context ().
+                # Scan the cell directly across all stored contexts.
+                if is_root and any(v is None for v in outputs.values()):
+                    null_keys = [v for v, val in outputs.items() if val is None]
+                    for v in null_keys:
+                        try:
+                            cell = state.get_cell(op_name, v)
+                            for cell_ctx, val in cell.items():
+                                if val is not None:
+                                    outputs[v] = val  # last non-None wins
+                        except (KeyError, AttributeError):
+                            pass
+
                 # Timing
                 end_time = state[op_name, "end_time", ctx]
                 duration_ms = state[op_name, "duration_ms", ctx]
