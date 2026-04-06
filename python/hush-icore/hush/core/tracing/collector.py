@@ -316,9 +316,9 @@ class TraceCollector:
                     node_type = "span"
 
                 # metadata
-                metadata: Dict[str, Any] = {}
-                if kind != "batch":
-                    metadata["kind"] = kind
+                metadata: Dict[str, Any] = {"kind": kind}
+                if hasattr(op, "specific_metadata") and op.specific_metadata:
+                    metadata.update(op.specific_metadata)
                 if kind == "generator":
                     yield_count = self._count_yields(
                         ctx, self._get_stream_contexts(state, op_name, ctx)
