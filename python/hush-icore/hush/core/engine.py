@@ -274,7 +274,7 @@ class Hush:
         params: Optional[Dict[str, Any]] = None,
         env: Union[str, bool] = True,
         resources: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"], str]] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ):
         """Initialize Hush engine with a GraphOp or a graph factory.
 
@@ -287,9 +287,7 @@ class Hush:
             env: Path to .env file, True to auto-find, or False to skip.
             resources: Path to resources.yaml. None = no resources loaded.
             tracer: Default tracer(s) for all run() calls. Can be overridden per-run.
-                    Accepts a Tracer instance, list of Tracers, or a resource hub key
-                    (e.g. ``"langfuse:default"``). Useful for serve() where tracer
-                    applies to every request.
+                    Useful for serve() where tracer applies to every request.
         """
         # 1. Load .env
         self._load_env(env)
@@ -303,7 +301,7 @@ class Hush:
 
         self.graph = graph
         self.name = graph.name
-        self._tracer = self._resolve_tracer(tracer)
+        self._tracer = tracer
 
         # Build graph and create schema immediately
         self.graph.build()
@@ -385,27 +383,6 @@ class Hush:
         ResourceHub.set_instance(hub)
         return hub
 
-    def _resolve_tracer(
-        self,
-        tracer: Optional[Union["Tracer", List["Tracer"], str]],
-    ) -> Optional[Union["Tracer", List["Tracer"]]]:
-        """Resolve tracer(s), looking up string keys from the resource hub."""
-        if tracer is None:
-            return None
-        items = tracer if isinstance(tracer, list) else [tracer]
-        resolved = []
-        for t in items:
-            if isinstance(t, str):
-                if self.resources is None:
-                    raise RuntimeError(
-                        f"tracer='{t}' is a resource key but no resources file was loaded. "
-                        f"Pass resources='path/to/resources.yaml' to Hush()."
-                    )
-                resolved.append(self.resources.get(t))
-            else:
-                resolved.append(t)
-        return resolved[0] if len(resolved) == 1 else resolved
-
     @property
     def schema(self) -> StateSchema:
         """Access the workflow state schema."""
@@ -430,7 +407,7 @@ class Hush:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"], str]] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -456,7 +433,7 @@ class Hush:
         request_id = request_id or str(uuid.uuid4())
 
         # Resolve tracers: per-call overrides engine default
-        effective = self._resolve_tracer(tracer) if tracer is not None else self._tracer
+        effective = tracer if tracer is not None else self._tracer
         tracers = (effective if isinstance(effective, list) else [effective]) if effective else []
 
         state = self._schema.create_state(
@@ -504,7 +481,7 @@ class Hush:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"], str]] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
