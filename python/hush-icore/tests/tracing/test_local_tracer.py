@@ -141,6 +141,7 @@ class TestTraceCollector:
 
         # Use a dummy tracer so state.tracing=True and timestamps are recorded
         from unittest.mock import MagicMock
+
         dummy_tracer = MagicMock()
         dummy_tracer.on_workflow_start = MagicMock(return_value=None)
         dummy_tracer.on_workflow_end = MagicMock(return_value=None)

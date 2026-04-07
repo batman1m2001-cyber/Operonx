@@ -34,7 +34,9 @@ async def main():
     print("=" * 50)
     print("1. Error capture trong state")
     print("=" * 50)
-    result = await Hush(build_error_capture(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={})
+    result = await Hush(build_error_capture(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={}
+    )
     state = result["$state"]
     error = state["error-capture.fail", "error", None]
     print(f"  Error captured: {error is not None}")
@@ -68,7 +70,9 @@ async def main():
     print("=" * 50)
     print("4. LLM Fallback chain")
     print("=" * 50)
-    result = await Hush(build_llm_fallback(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"query": "What is Python?"})
+    result = await Hush(build_llm_fallback(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"query": "What is Python?"}
+    )
     print(f"  Answer: {result['answer'][:80]}...")
     print(f"  Model used: {result['model']}")
 

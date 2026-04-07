@@ -118,11 +118,13 @@ class BaseOp(ABC):
         if executor == "thread" and bound is None:
             bound = "cpu"
         if bound not in self._VALID_BOUNDS:
-            raise ValueError(f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}")
+            raise ValueError(
+                f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}"
+            )
         self.bound = bound  # resolved to concrete value by _set_core()
-        self._input_cache = None   # built on first get_inputs() call
-        self._metrics_idx = None   # (schema, st_idx, et_idx, dur_idx)
-        self._error_idx = None     # (schema, err_idx)
+        self._input_cache = None  # built on first get_inputs() call
+        self._metrics_idx = None  # (schema, st_idx, et_idx, dur_idx)
+        self._error_idx = None  # (schema, err_idx)
         self.cache = cache
         self.delay = delay
         self.id = id or uuid.uuid4().hex
@@ -697,8 +699,11 @@ class BaseOp(ABC):
             end_time = datetime.now(timezone.utc) if _tracing else None
 
             self._store_metrics(
-                state, context_id,
-                start_time=start_time, end_time=end_time, duration_ms=duration_ms,
+                state,
+                context_id,
+                start_time=start_time,
+                end_time=end_time,
+                duration_ms=duration_ms,
             )
 
             # Write error state via cached index

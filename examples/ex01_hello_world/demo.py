@@ -23,14 +23,18 @@ async def main():
     print("=" * 50)
     print("1. Hello World")
     print("=" * 50)
-    result = await Hush(build_hello(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"name": "Hush"})
+    result = await Hush(build_hello(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"name": "Hush"}
+    )
     print(f"  {result['greeting']}")
 
     print()
     print("=" * 50)
     print("2. Chain: greet → uppercase")
     print("=" * 50)
-    result = await Hush(build_chain(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"name": "Hush User"})
+    result = await Hush(build_chain(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"name": "Hush User"}
+    )
     print(f"  Greeting: {result['greeting']}")
     print(f"  Uppercase: {result['result']}")
 

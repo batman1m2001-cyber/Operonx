@@ -37,7 +37,9 @@ async def main():
     print("=" * 50)
     print("2. Map Op (generator yield, parallel)")
     print("=" * 50)
-    result = await Hush(build_map_op(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"numbers": [1, 2, 3, 4, 5]})
+    result = await Hush(build_map_op(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"numbers": [1, 2, 3, 4, 5]}
+    )
     print("  Input:   [1, 2, 3, 4, 5]")
     print(f"  Squared: {result['squared']}")
 
@@ -45,7 +47,9 @@ async def main():
     print("=" * 50)
     print("3. While Loop (generator while, conditional)")
     print("=" * 50)
-    result = await Hush(build_while_loop(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"start_value": 256})
+    result = await Hush(build_while_loop(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"start_value": 256}
+    )
     print("  Start: 256")
     print(f"  Values: {result['value']}")
 
@@ -54,7 +58,9 @@ async def main():
     print("4. Branch (if_ conditional routing)")
     print("=" * 50)
     for score in [95, 75, 55, 30]:
-        result = await Hush(build_branch(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"score": score})
+        result = await Hush(build_branch(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+            inputs={"score": score}
+        )
         print(f"  Score {score}: {result['grade']} — {result['message']}")
 
 

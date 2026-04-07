@@ -157,7 +157,9 @@ class TritonOp(BaseOp):
             if not self.outputs_map:
                 self.outputs_map = resource.get("outputs_map", {})
         else:
-            raise TypeError("TritonOp requires resource (str for hub lookup or dict for inline config)")
+            raise TypeError(
+                "TritonOp requires resource (str for hub lookup or dict for inline config)"
+            )
 
         # Build I/O schema from maps
         input_schema = {op_name: Param(required=True) for op_name in self.inputs_map.values()}
@@ -211,7 +213,9 @@ class TritonOp(BaseOp):
             if not self.outputs_map:
                 self.outputs_map = config.get("outputs_map", {})
             if not self.url or not self.model_name:
-                raise ValueError(f"TritonOp resource '{self.resource}' resolved to invalid config: {config}")
+                raise ValueError(
+                    f"TritonOp resource '{self.resource}' resolved to invalid config: {config}"
+                )
 
         aio_grpc = _get_aio_grpcclient()
         client = self._get_client()
