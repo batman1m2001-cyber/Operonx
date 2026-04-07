@@ -621,7 +621,7 @@ class BaseOp(ABC):
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-    ):
+    ) -> "AsyncGenerator[tuple[Optional[str], Dict[str, Any]], None]":
         """Execute this op as a uniform async generator.
 
         Every op — whether it uses ``return`` or ``yield`` — is driven through
