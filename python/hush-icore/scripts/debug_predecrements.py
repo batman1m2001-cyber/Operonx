@@ -1,7 +1,8 @@
 """Debug _stream_predecrements."""
 
-from hush.core import op, GraphOp, START, END, PARENT
 from hush.core.ops.graph.scheduler import _is_gen
+
+from hush.core import END, PARENT, START, GraphOp, op
 
 
 @op
