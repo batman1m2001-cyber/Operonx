@@ -9,6 +9,7 @@ import yaml
 
 from hush.core.configs.op_config import OpType
 from hush.core.exceptions import ParserError
+from hush.core.loggings import LOGGER
 from hush.core.ops.base import BaseOp
 from hush.core.utils.common import Param
 
@@ -132,7 +133,7 @@ class ParserOp(BaseOp):
 
     def __init__(
         self,
-        format: Optional[ParserType] = None,
+        format: ParserType = "xml",
         extract: Optional[List[str]] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
@@ -154,11 +155,8 @@ class ParserOp(BaseOp):
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)
 
-        # Normalize and merge with user-provided
-        normalized_inputs = self._normalize_params(inputs)
-        normalized_outputs = self._normalize_params(outputs)
-        self.inputs = self._merge_params(parsed_inputs, normalized_inputs)
-        self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
+        # Merge parsed schema with user-provided
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.format = format or "xml"
         self.extract = extract
@@ -174,7 +172,7 @@ class ParserOp(BaseOp):
         self.inputs["schema"] = schema_param
 
         self.backend = self._create_parser()
-        self.core = self._process
+        self._set_core(self._process)
 
     def _create_parser(self):
         """Tạo parser function dựa trên format."""
@@ -242,9 +240,9 @@ class ParserOp(BaseOp):
             except (ValueError, TypeError):
                 return value
 
-        # String - return as-is or convert to string
+        # String - convert and strip whitespace (XML often has \n around values)
         if type_hint in ("str", "string"):
-            return str(value) if value is not None else ""
+            return str(value).strip() if value is not None else ""
 
         # For dict, list, any, or unknown types, return as-is
         return value
@@ -256,6 +254,15 @@ class ParserOp(BaseOp):
         On success: {"field1": value, "field2": value, "error": None}
         On failure: {"field1": None, "field2": None, "error": "error message"}
         """
+        LOGGER.debug(
+            "ParserOp._process called: text=%r, validators=%r",
+            text[:100] if text else text,
+            validators,
+        )
+        if validators is not None and not isinstance(validators, dict):
+            return {
+                "error": f"validators must be a dict, got {type(validators).__name__}: {validators!r}"
+            }
         if not text:
             return {"error": "Empty input text"}
 

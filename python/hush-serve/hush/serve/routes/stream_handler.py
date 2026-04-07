@@ -1,6 +1,6 @@
 """SSE streaming handler: POST /path/stream -> text/event-stream.
 
-Uses engine.stream() to deliver real-time token events from generator ops,
+Uses engine.start() to deliver real-time token events from generator ops,
 followed by a final "done" event with the complete result.
 """
 
@@ -10,6 +10,8 @@ from typing import Callable
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+
+from hush.serve.schema import strip_internal_keys
 
 
 def create_stream_handler(endpoint) -> Callable:
@@ -22,18 +24,20 @@ def create_stream_handler(endpoint) -> Callable:
         session_id = request.headers.get("X-Session-ID")
 
         async def event_generator():
-            async for event in endpoint.engine.stream(
+            handle = endpoint.engine.start(
                 inputs=body.model_dump(exclude_none=False),
                 request_id=request_id,
                 user_id=user_id,
                 session_id=session_id,
-                tracer=endpoint.tracer,
-            ):
-                if event["type"] == "token":
-                    yield f"event: token\ndata: {json.dumps(event['data'])}\n\n"
-                elif event["type"] == "done":
-                    output = {k: v for k, v in event["data"].items() if not k.startswith("$")}
-                    yield f"event: done\ndata: {json.dumps(output)}\n\n"
+            )
+
+            async for _op, _ctx, data in handle:
+                yield f"event: token\ndata: {json.dumps(data)}\n\n"
+
+            # Build final result from buffered frames (non-consuming)
+            output = await handle.result()
+            output = strip_internal_keys(output)
+            yield f"event: done\ndata: {json.dumps(output)}\n\n"
 
         return StreamingResponse(
             event_generator(),

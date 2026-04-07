@@ -93,6 +93,15 @@ def linear_graph():
 # ============================================================
 
 
+@pytest.fixture(autouse=True)
+def clear_op_cache():
+    """Clear the class-level op cache between tests to prevent cross-test pollution."""
+    from hush.core.ops.base import BaseOp
+
+    yield
+    BaseOp._cache_stores.clear()
+
+
 @pytest.fixture
 def create_state():
     """Factory fixture to create state from a graph with inputs."""

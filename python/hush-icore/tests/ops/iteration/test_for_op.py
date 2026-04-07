@@ -39,7 +39,10 @@ class TestSimpleIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [2, 4, 6, 8, 10]
 
 
@@ -79,7 +82,10 @@ class TestBroadcastIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [10, 20, 30]
 
 
@@ -113,7 +119,10 @@ class TestMultipleListsZip:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20, 30]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["sum"] == [11, 22, 33]
 
 
@@ -155,7 +164,10 @@ class TestNestedIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"xs": [1, 2, 3], "ys": [10, 20]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # Outer yields 3 items, inner yields 2 per outer → 6 total (nested streaming)
         assert result["result"] == [10, 20, 20, 40, 30, 60]
 
@@ -190,8 +202,11 @@ class TestEmptyIteration:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": []})
 
-        result = await g.run(state)
-        assert result["result"] == []
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
+        assert result.get("result", []) == []
 
 
 # ============================================================
@@ -229,7 +244,10 @@ class TestRefFromPreviousNode:
         schema = StateSchema(graph)
         state = schema.create_state()
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [50, 100, 150]
 
 
@@ -265,7 +283,10 @@ class TestAccumulationPattern:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3, 4, 5]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["running_total"] == [1, 3, 6, 10, 15]
 
 
@@ -304,5 +325,8 @@ class TestChainOfDownstreamOps:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["z"] == [4, 6, 8]

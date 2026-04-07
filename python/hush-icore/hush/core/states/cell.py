@@ -16,16 +16,18 @@ class Cell:
         default_value: Fallback value when context doesn't exist
     """
 
-    __slots__ = ("contexts", "default_value")
+    __slots__ = ("contexts", "default_value", "is_shared")
 
-    def __init__(self, default_value: Any = None):
+    def __init__(self, default_value: Any = None, is_shared: bool = False):
         """Initialize Cell with a default value.
 
         Args:
             default_value: Value returned when context doesn't exist
+            is_shared: Indicates if the cell is shared across contexts
         """
         self.contexts: Dict[tuple, Any] = {}  # context_id -> value
         self.default_value = default_value
+        self.is_shared = is_shared
 
     def __setitem__(self, context_id: Optional[str], value: Any) -> None:
         """Set value for a specific context.
@@ -34,7 +36,7 @@ class Cell:
             context_id: Context ID (None = default context "main")
             value: Value to store
         """
-        if context_id is None:
+        if self.is_shared or context_id is None:
             context_id = DEFAULT_CONTEXT
         self.contexts[context_id] = value
 
@@ -50,9 +52,7 @@ class Cell:
         Returns:
             Context value, parent context value, or default_value
         """
-        if context_id is None:
-            context_id = DEFAULT_CONTEXT
-        ctx = context_id
+        ctx = DEFAULT_CONTEXT if (self.is_shared or context_id is None) else context_id
         while ctx:
             if ctx in self.contexts:
                 return self.contexts[ctx]

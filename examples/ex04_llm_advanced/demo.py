@@ -15,13 +15,17 @@ from hush.core import Hush
 
 from ex04_llm_advanced.workflow import build_multi_turn, build_structured_output, build_tool_calling
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     # 1. Structured Output
     print("=" * 50)
     print("1. Structured Output (JSON Schema)")
     print("=" * 50)
-    engine = Hush(build_structured_output())
+    engine = Hush(build_structured_output(), env=ENV_FILE, resources=RESOURCES_FILE)
     texts = [
         "Sản phẩm tuyệt vời, rất hài lòng!",
         "Dịch vụ quá tệ, không bao giờ quay lại.",
@@ -37,7 +41,7 @@ async def main():
     print("=" * 50)
     print("2. Tool Calling")
     print("=" * 50)
-    engine = Hush(build_tool_calling())
+    engine = Hush(build_tool_calling(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"query": "Tính 25 * 4 + 100"})
     print(f"  Tool called: {result['has_tool_call']}")
     if result["tool_result"]:
@@ -50,7 +54,7 @@ async def main():
     print("=" * 50)
     print("3. Multi-turn Chat")
     print("=" * 50)
-    engine = Hush(build_multi_turn())
+    engine = Hush(build_multi_turn(), env=ENV_FILE, resources=RESOURCES_FILE)
     history = []
     messages = [
         "Xin chào! Tên tôi là An.",

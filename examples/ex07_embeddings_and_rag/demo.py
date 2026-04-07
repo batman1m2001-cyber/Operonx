@@ -11,17 +11,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-import os
-import sys
-from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
-
 from hush.core import Hush
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
 
 from ex07_embeddings_and_rag.workflow import (
     DOCUMENTS,
@@ -39,7 +36,7 @@ async def main():
     print("Ví dụ 1: Basic Embedding")
     print("=" * 50)
 
-    result = await Hush(build_basic_embedding()).run(
+    result = await Hush(build_basic_embedding(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={"texts": ["Xin chào!", "Hush workflow engine"]}
     )
     vectors = result["vectors"]
@@ -57,11 +54,13 @@ async def main():
 
     # Pre-compute document embeddings
     print("  Đang embed documents...")
-    embed_result = await Hush(build_basic_embedding()).run(inputs={"texts": DOCUMENTS})
+    embed_result = await Hush(build_basic_embedding(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"texts": DOCUMENTS}
+    )
     doc_vectors = embed_result["vectors"]
     print(f"  Embedded {len(doc_vectors)} documents ({len(doc_vectors[0])} dims)")
 
-    engine = Hush(build_simple_rag())
+    engine = Hush(build_simple_rag(), env=ENV_FILE, resources=RESOURCES_FILE)
     queries = [
         "Thủ đô Việt Nam là gì?",
         "Thành phố nào nổi tiếng với bãi biển Mỹ Khê?",
@@ -87,18 +86,7 @@ async def main():
     print("Ví dụ 3: RAG + Reranking (optional)")
     print("=" * 50)
 
-    try:
-        from hush.providers import RerankOp  # noqa: F401
-    except ImportError:
-        print("  Skipped — RerankOp chưa available")
-        return
-
-    if not os.environ.get("PINECONE_API_KEY"):
-        print("  Skipped — PINECONE_API_KEY chưa set (cần cho reranking)")
-        print("  Thêm reranking:bge-m3 vào resources.yaml để dùng")
-        return
-
-    result = await Hush(build_rag_with_rerank()).run(
+    result = await Hush(build_rag_with_rerank(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={
             "query": "Thành phố biển đẹp nhất Việt Nam?",
             "documents": DOCUMENTS,

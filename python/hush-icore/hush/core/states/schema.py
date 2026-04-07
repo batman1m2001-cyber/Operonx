@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
 
-from hush.core.states.ref import Ref
+from hush.core.states.ref import Ref, StreamPolicy
 
 if TYPE_CHECKING:
     from hush.core.states.state import MemoryState
@@ -32,7 +32,15 @@ class StateSchema:
         schema.show()  # Display all variable mappings
     """
 
-    __slots__ = ("name", "_var_to_idx", "_defaults", "_pull_refs", "_push_refs")
+    __slots__ = (
+        "name",
+        "_var_to_idx",
+        "_defaults",
+        "_pull_refs",
+        "_push_refs",
+        "_shared_indices",
+        "_stream_policies",
+    )
 
     def __init__(self, op: Any = None, name: Optional[str] = None):
         """Initialize the schema.
@@ -45,11 +53,17 @@ class StateSchema:
         self._defaults: List[Any] = []
         self._pull_refs: List[Optional[Ref]] = []  # Pull data từ source khi đọc
         self._push_refs: List[Optional[Ref]] = []  # Push data đến target khi ghi
+        self._shared_indices: set = set()  # indices of shared vars (graph-level, not per-context)
+        self._stream_policies: Dict[
+            Tuple[str, str], StreamPolicy
+        ] = {}  # Stream policies by (op, var)
 
         self.name = name
         if op is not None:
             self.name = name or op.full_name
             self._load_from(op)
+            self._register_ref_outputs()
+            self._register_shared_vars(op)
             self._build()
 
     # =========================================================================
@@ -99,6 +113,46 @@ class StateSchema:
             for child in node._ops.values():
                 self._load_from(child)
 
+    def _register_shared_vars(self, root_op) -> None:
+        """Register shared vars from PARENT.shared() calls. Recurses into nested graphs."""
+
+        def _scan(node):
+            shared = getattr(node, "_shared_vars", None)
+            if shared:
+                for var_name, initial_value in shared.items():
+                    self._register(node.full_name, var_name, initial_value)
+                    key = (node.full_name, var_name)
+                    if key in self._var_to_idx:
+                        self._shared_indices.add(self._var_to_idx[key])
+            if hasattr(node, "_ops") and node._ops:
+                for child in node._ops.values():
+                    if hasattr(child, "_shared_vars"):
+                        _scan(child)
+
+        _scan(root_op)
+
+    def _register_ref_outputs(self) -> None:
+        """Auto-register output vars for ops referenced by downstream Refs.
+
+        When op A's input references op B's output via Ref(B, "x"),
+        but B doesn't declare "x" as output (e.g. @op with yield that
+        inspect.getsource can't parse), register (B.full_name, "x") in schema.
+
+        This is a fallback — ops SHOULD declare outputs via return schema
+        or explicit outputs dict. This catches the gap.
+        """
+        # Collect all Ref sources referenced in inputs
+        refs_needed = []
+        for (op_name, var_name), idx in list(self._var_to_idx.items()):
+            value = self._defaults[idx]
+            if isinstance(value, Ref) and not value.is_output:
+                source_key = (value.source, value.var)
+                if source_key not in self._var_to_idx:
+                    refs_needed.append(source_key)
+
+        for source_op, source_var in refs_needed:
+            self._register(source_op, source_var, None)
+
     def _register(self, op: str, var: str, value: Any) -> None:
         """Đăng ký một biến (có thể gọi nhiều lần, Ref luôn được ưu tiên)."""
         key = (op, var)
@@ -143,6 +197,14 @@ class StateSchema:
                 value.idx = source_idx  # Set source index trên Ref
                 self._pull_refs[idx] = value
                 self._defaults[idx] = None  # Xóa Ref, giá trị lấy từ source
+
+                # Capture stream policy for scheduler O(1) lookup
+                if value._stream_collect or value._stream_parallel:
+                    self._stream_policies[key] = StreamPolicy(
+                        collect=value._stream_collect,
+                        parallel=value._stream_parallel,
+                        parallel_max=value._stream_parallel_max or 0,
+                    )
 
             # Resolve push refs
             push_ref = self._push_refs[idx]

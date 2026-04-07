@@ -139,7 +139,14 @@ class TestTraceCollector:
             )
             START >> node >> END
 
-        engine = Hush(graph)
+        # Use a dummy tracer so state.tracing=True and timestamps are recorded
+        from unittest.mock import MagicMock
+
+        dummy_tracer = MagicMock()
+        dummy_tracer.on_workflow_start = MagicMock(return_value=None)
+        dummy_tracer.on_workflow_end = MagicMock(return_value=None)
+
+        engine = Hush(graph, tracer=dummy_tracer)
         result = await engine.run(inputs={"x": 5}, request_id="col-002")
         state = result["$state"]
 

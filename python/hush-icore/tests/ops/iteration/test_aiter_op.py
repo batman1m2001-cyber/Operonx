@@ -42,7 +42,10 @@ class TestSimpleStreaming:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"count": 10})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
 
 
@@ -83,7 +86,10 @@ class TestStreamingWithBroadcast:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"count": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [10, 20, 30, 40, 50]
 
 
@@ -128,7 +134,10 @@ class TestStreamingWithRef:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"count": 4})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # [1*5+100, 2*5+100, 3*5+100, 4*5+100] = [105, 110, 115, 120]
         assert result["result"] == [105, 110, 115, 120]
 
@@ -173,7 +182,10 @@ class TestDictItemsInStream:
             }
         )
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["name"] == ["Alice", "Bob", "Charlie"]
         assert result["grade"] == ["B", "A", "C"]
 
@@ -210,7 +222,10 @@ class TestConcurrencyLimit:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"count": 6})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["result"] == [0, 10, 20, 30, 40, 50]
 
 
@@ -250,7 +265,10 @@ class TestStreamFromUpstreamNode:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"begin": 0, "end": 5, "prefix": "MSG"})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["processed_id"] == ["MSG_0", "MSG_1", "MSG_2", "MSG_3", "MSG_4"]
         assert result["doubled_value"] == [0, 20, 40, 60, 80]
 
@@ -286,8 +304,11 @@ class TestEmptyStream:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": []})
 
-        result = await g.run(state)
-        assert result["result"] == []
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
+        assert result.get("result", []) == []
 
 
 # ============================================================
@@ -326,5 +347,8 @@ class TestChainAfterAsyncGenerator:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"items": [1, 2, 3]})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["z"] == [4, 6, 8]

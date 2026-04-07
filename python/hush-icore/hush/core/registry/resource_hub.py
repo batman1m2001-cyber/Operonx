@@ -38,14 +38,13 @@ class ResourceHub:
     - Extensible: external packages register their configs and factories
 
     Example:
-        # Basic usage
         hub = ResourceHub.from_yaml("configs/resources.yaml")
-        llm = hub.llm("gpt-4")
-        redis = hub.redis("default")
+        llm = hub.get("llm:gpt-4o")
+        stt = hub.get("triton:stt")
 
         # Or use global hub
         from hush.core.registry import get_hub
-        llm = get_hub().llm("gpt-4")
+        llm = get_hub().get("llm:gpt-4o")
     """
 
     _instance: ClassVar[Optional["ResourceHub"]] = None
@@ -138,14 +137,16 @@ class ResourceHub:
         # Lookup config class by category
         config_class = REGISTRY.get_class(category)
 
-        # Backward compat: fall back to 'type' or '_class' field
+        # Fall back to 'type' or '_class' field
         if not config_class:
             config_type = config_data.get("type") or config_data.get("_class")
             if config_type:
                 config_class = REGISTRY.get_class(config_type)
-            if not config_class:
-                LOGGER.warning("Unknown category: %s (key=%s)", category, key)
-                return None
+
+        # No config class found — store raw dict as config (for triton, custom categories)
+        if not config_class:
+            self._cache[key] = CacheEntry(config=config_data)
+            return config_data
 
         try:
             # Parse config (exclude type and _class fields)
@@ -224,22 +225,35 @@ class ResourceHub:
         """
         # Return cached instance if available
         if key in self._cache and self._cache[key].instance is not None:
-            return self._cache[key].instance
+            instance = self._cache[key].instance
+            # Refresh keycloak token if applicable (LLM resources)
+            self._refresh_keycloak(instance)
+            return instance
 
         # Load config from storage
         config = self._load_config(key)
         if not config:
             raise KeyError(f"Resource '{key}' not found in registry")
 
+        # Resolve keycloak token if configured (api_key: "keycloak:xxx")
+        resolved_config = self._resolve_keycloak(config)
+        create_config = resolved_config or config
+
         # Lazy initialize resource
         try:
-            instance = REGISTRY.create(config)
+            instance = REGISTRY.create(create_config)
         except Exception as e:
             LOGGER.warning("Failed to create resource '%s': %s", key, e)
             raise KeyError(f"Resource '{key}' failed to initialize: {e}") from e
 
         if instance is None:
             raise KeyError(f"Cannot create resource for '{key}': factory returned None")
+
+        # Attach keycloak provider for future token refresh
+        if resolved_config is not None:
+            keycloak_name = config.api_key[9:]
+            instance._keycloak_provider = self.keycloak(keycloak_name)
+            instance._original_config = config
 
         self._cache[key].instance = instance
         LOGGER.debug("Lazy loaded resource: %s", key)
@@ -322,30 +336,21 @@ class ResourceHub:
             self._storage.close()
 
     # ========================================================================
-    # Type-specific Accessors (with type hints for IDE support)
+    # Internal helpers (keycloak token resolution)
     # ========================================================================
 
-    def _get_with_prefix(self, key: str, prefix: str) -> Any:
-        """Helper to get resource with automatic prefix handling."""
-        if not key.startswith(f"{prefix}:"):
-            key = f"{prefix}:{key}"
-        return self.get(key)
-
     def _refresh_keycloak(self, instance) -> None:
-        """Refresh keycloak token on a cached LLM instance (if applicable)."""
+        """Refresh keycloak token on a cached instance (if applicable)."""
         if not hasattr(instance, "_keycloak_provider"):
             return
         fresh_token = instance._keycloak_provider.get_token()
         if hasattr(instance, "client"):
             instance.client.api_key = fresh_token
-        instance.config.api_key = fresh_token
+        if hasattr(instance, "config"):
+            instance.config.api_key = fresh_token
 
     def _resolve_keycloak(self, config: YamlModel) -> Optional[YamlModel]:
-        """If config has a keycloak:xxx api_key, resolve it and return new config.
-
-        Returns None if config doesn't use keycloak.
-        Raises KeyError if keycloak resolution fails.
-        """
+        """If config has keycloak:xxx api_key, resolve token. Returns None if not keycloak."""
         if not (hasattr(config, "api_key") and isinstance(config.api_key, str)):
             return None
         if not config.api_key.startswith("keycloak:"):
@@ -361,108 +366,6 @@ class ResourceHub:
         config_dict["api_key"] = resolved_token
         return type(config).model_validate(config_dict)
 
-    def _create_and_cache(self, full_key: str, config: YamlModel) -> Any:
-        """Create instance from config, cache it, return it.
-
-        Raises KeyError with context on failure.
-        """
-        try:
-            instance = REGISTRY.create(config)
-        except Exception as e:
-            LOGGER.warning("Failed to create resource '%s': %s", full_key, e)
-            raise KeyError(f"Resource '{full_key}' failed to initialize: {e}") from e
-
-        if instance is None:
-            raise KeyError(f"Cannot create resource for '{full_key}': factory returned None")
-
-        self._cache[full_key].instance = instance
-        return instance
-
-    def llm(self, key: str) -> "BaseLLM":
-        """Get LLM instance by key.
-
-        Automatically handles provider prefix (azure:, openai:, gemini:).
-        Supports keycloak token references in api_key (e.g., 'keycloak:myapp').
-
-        Args:
-            key: LLM identifier (e.g., 'gpt-4', 'azure:gpt-4', 'llm:gpt-4')
-
-        Returns:
-            BaseLLM instance with chat(), generate() methods
-        """
-        full_key = f"llm:{key}" if not key.startswith("llm:") else key
-
-        # Cache hit → refresh keycloak if needed → return
-        if full_key in self._cache and self._cache[full_key].instance is not None:
-            instance = self._cache[full_key].instance
-            self._refresh_keycloak(instance)
-            return instance
-
-        # Load config
-        config = self._load_config(full_key)
-        if not config:
-            raise KeyError(f"Resource '{full_key}' not found in registry")
-
-        # Resolve keycloak token if configured
-        resolved_config = self._resolve_keycloak(config)
-        instance = self._create_and_cache(full_key, resolved_config or config)
-
-        # Attach keycloak provider for future token refresh
-        if resolved_config is not None:
-            keycloak_name = config.api_key[9:]
-            instance._keycloak_provider = self.keycloak(keycloak_name)
-            instance._original_config = config
-
-        return instance
-
-    def embedding(self, key: str) -> "BaseEmbedding":
-        """Get embedding model by key.
-
-        Returns:
-            BaseEmbedding instance with embed(), embed_batch() methods
-        """
-        return self._get_with_prefix(key, "embedding")
-
-    def reranker(self, key: str) -> "BaseReranker":
-        """Get reranker instance by key.
-
-        Returns:
-            BaseReranker instance with rerank() method
-        """
-        return self._get_with_prefix(key, "reranking")
-
-    def onnx(self, key: str) -> Any:
-        """Get ONNX inference backend by key.
-
-        Returns:
-            OnnxInferenceBackend instance with run() method
-        """
-        return self._get_with_prefix(key, "onnx")
-
-    def redis(self, key: str) -> Any:
-        """Get Redis client by key."""
-        return self._get_with_prefix(key, "redis")
-
-    def mongo(self, key: str) -> Any:
-        """Get async MongoDB client by key."""
-        return self._get_with_prefix(key, "mongo")
-
-    def milvus(self, key: str) -> Any:
-        """Get Milvus client by key."""
-        return self._get_with_prefix(key, "milvus")
-
-    def s3(self, key: str) -> Any:
-        """Get S3 client by key."""
-        return self._get_with_prefix(key, "s3")
-
-    def langfuse(self, key: str) -> Any:
-        """Get Langfuse client by key."""
-        return self._get_with_prefix(key, "langfuse")
-
-    def mcp(self, key: str) -> Any:
-        """Get MCP server by key."""
-        return self._get_with_prefix(key, "mcp")
-
     def keycloak(self, key: str) -> "KeycloakTokenProvider":
         """Get KeycloakTokenProvider by key.
 
@@ -472,7 +375,7 @@ class ResourceHub:
         Returns:
             KeycloakTokenProvider instance with get_token() method
         """
-        return self._get_with_prefix(key, "keycloak")
+        return self.get(f"keycloak:{key}")
 
     # ========================================================================
     # API Key Resolution (for keycloak references)

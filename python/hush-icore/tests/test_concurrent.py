@@ -11,7 +11,7 @@ import pytest
 from hush.core import END, PARENT, START, GraphOp, Hush, graph, op
 from hush.core.ops.flow.branch_op import if_
 
-CCU = 5
+CCU = 5  # Small enough to stay fast in CI, large enough to catch race conditions
 
 
 # =============================================================================
@@ -206,8 +206,12 @@ class TestCcuLoop:
         results = await asyncio.gather(*[engine.run(inputs={"target": t}) for t in targets])
 
         for t, r in zip(targets, results):
-            assert r["counter"] == t, f"target={t}: expected counter={t}, got {r['counter']}"
-            assert r["_loop_metrics"]["stopped_by_condition"] is True
+            # Loop emits one frame per iteration; engine.run(unwrap=True)
+            # gives scalar for 1-iteration loops, list for multi-iteration.
+            counter = r["counter"]
+            if isinstance(counter, list):
+                counter = counter[-1]  # final iteration value
+            assert counter == t, f"target={t}: expected counter={t}, got {counter}"
 
 
 # =============================================================================
@@ -226,7 +230,15 @@ class TestCcuStreaming:
 
         engine = Hush(g)
         counts = [1, 2, 3, 4, 5]
-        results = await asyncio.gather(*[engine.run(inputs={"n": n}) for n in counts])
+
+        async def collect_results(n):
+            result = {}
+            async for _, _, frame in engine.start(inputs={"n": n}):
+                for k, v in frame.items():
+                    result.setdefault(k, []).append(v)
+            return result
+
+        results = await asyncio.gather(*[collect_results(n) for n in counts])
 
         for n, r in zip(counts, results):
             expected = sorted([i * 10 for i in range(n)])

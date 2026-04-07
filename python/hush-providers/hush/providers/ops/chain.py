@@ -1,13 +1,12 @@
-"""chat() and extract() — LLM workflow building blocks.
+"""chat() and ask() — LLM workflow building blocks.
 
 - chat(): text generation (Prompt → LLM)
-- extract(): structured output (Prompt → LLM → Parser) with retry + validation
+- ask(): structured output (Prompt → LLM → Parser), with optional retry via until=
 """
 
 from typing import Any, Dict, List, Optional, Union
 
 from hush.core.ops import END, PARENT, START, ParserOp, graph
-from hush.core.ops.graph.graph_op import GraphOp
 from hush.providers.ops.llm import LLMOp
 from hush.providers.ops.prompt import PromptOp
 
@@ -53,96 +52,79 @@ def chat(
 
 
 # =============================================================================
-# extract() — structured output with retry + validation
+# ask() — structured output with optional retry
 # =============================================================================
 
 
-def extract(
-    # -- Op constructor config (fixed per op instance) --
+@graph
+def ask(
+    # Loop state (before *) — only these become loop state variables
+    error: str = None,
+    *,
+    # Config (keyword-only) — passed directly, NOT loop state
+    template: Any = None,
     resource: Optional[Union[str, List[str]]] = None,
     ratios: Optional[List[float]] = None,
     fallback: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
     parser: str = "xml",
     delay: float = 0,
-    # -- Op runtime inputs (can be static or Ref) --
-    template: Any = None,
     response_format: Optional[Dict[str, Any]] = None,
     validators: Optional[Dict[str, list]] = None,
-    # -- Loop control --
-    retry: int = 0,
-    # -- Extra kwargs: template vars (speech=PARENT["speech"]), etc. --
-    **kwargs,
-) -> GraphOp:
-    """Prompt → LLM → Parser with retry via GraphOp.loop.
+    until: str = None,
+    max_iterations: int = 2,
+) -> Any:
+    """Prompt → LLM → Parser graph for structured extraction.
 
-    Four kinds of params flow through this function:
+    Simple mode (no retry)::
 
-    1. **Op constructor config** — resource, fields, parser, delay, ratios, fallback.
-       Passed to op constructors (LLMOp, ParserOp). Fixed across retries.
-
-    2. **Op runtime inputs** — template, validators, response_format.
-       Passed via op ``inputs={...}``. Can be static values or Refs (dynamic).
-
-    3. **Loop control** — retry.
-       retry → max_iterations. Defaults extracted from validators (@-prefixed values).
-
-    4. **Extra kwargs** — template vars (e.g. speech=PARENT["speech"]).
-       Forwarded into GraphOp.loop → available as PARENT vars for PromptOp.
-
-    GraphOp.loop receives: error="init" + **default + **kwargs as initial state.
-    On each iteration: PromptOp → LLMOp → ParserOp. Parser feeds error + fields
-    back to PARENT. Loop continues until error == None or max retries exhausted.
-
-    Example::
-
-        e = extract(
+        a = ask(
             resource="claude-haiku",
             template="Classify: {speech}",
             fields=["result: str"],
             parser="xml",
-            retry=2,
             validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
+            speech=PARENT["speech"],
+        )
+
+    Retry mode (pass ``until=``)::
+
+        a = ask(
+            resource="claude-haiku",
+            template="Classify: {speech}",
+            fields=["result: str"],
+            parser="xml",
+            validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
+            until="error == None",
+            max_iterations=3,
+            error="init",
             speech=PARENT["speech"],
         )
     """
     if not fields:
-        raise TypeError("fields is required for extract()")
+        raise TypeError("fields is required for ask()")
 
-    # Loop state: error="init" triggers first iteration (until="error == None"),
-    # **kwargs carries template vars and other graph inputs.
-    # Defaults handled by ParserOp via @-prefixed validators (e.g. "@FALLBACK").
-    with GraphOp.loop(
-        until="error == None",
-        max_iterations=retry + 1,
-        error="init",
-        **kwargs,
-    ) as g:
-        # 1. Build prompt from template + PARENT vars (template vars from **kwargs)
-        _prompt = PromptOp(name="prompt", inputs={"template": template, "*": PARENT})
+    _prompt = PromptOp(name="prompt", inputs={"template": template, "*": PARENT})
 
-        # 2. Call LLM
-        _llm = LLMOp(
-            name="llm",
-            resource=resource,
-            ratios=ratios,
-            fallback=fallback,
-            inputs={"messages": _prompt["messages"], "response_format": response_format},
-            delay=delay,
-        )
+    _llm = LLMOp(
+        name="llm",
+        resource=resource,
+        ratios=ratios,
+        fallback=fallback,
+        inputs={"messages": _prompt["messages"], "response_format": response_format},
+        delay=delay,
+    )
 
-        # 3. Parse + validate LLM output
-        _parser = ParserOp(
-            name="parser",
-            format=parser,
-            extract=fields,
-            inputs={"text": _llm["content"], "validators": validators},
-            outputs={"*": PARENT},  # forward parsed fields to loop state
-        )
+    _parser = ParserOp(
+        name="parser",
+        format=parser,
+        extract=fields,
+        inputs={"text": _llm["content"], "validators": validators},
+        outputs={"*": PARENT},
+    )
 
-        # Feed error back to loop state for retry decision
+    # In loop mode, feed error back to PARENT for until check
+    if error is not None:
         _parser["error"] >> PARENT["error"]
 
-        START >> _prompt >> _llm >> _parser >> END
-
-    return g
+    START >> _prompt >> _llm >> _parser >> END

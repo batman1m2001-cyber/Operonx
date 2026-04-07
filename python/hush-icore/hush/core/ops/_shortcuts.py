@@ -20,7 +20,6 @@ _BASE_INIT_KEYS = frozenset(
         "targets",
         "stream",
         "start",
-        "executor",
         "bound",
         "cache",
         "contain_generation",

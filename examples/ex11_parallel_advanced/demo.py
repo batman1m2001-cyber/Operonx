@@ -13,15 +13,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 
 from ex11_parallel_advanced.workflow import build_fan_out, build_iteration, build_partial_failure
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
 
 
 async def main():
@@ -29,7 +28,7 @@ async def main():
     print("=" * 55)
     print("1. Fan-out / Fan-in (3 parallel branches)")
     print("=" * 55)
-    engine = Hush(build_fan_out())
+    engine = Hush(build_fan_out(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(
         inputs={"text": "This is a great excellent product with good quality and love it"}
     )
@@ -44,7 +43,7 @@ async def main():
     print("=" * 55)
     print("2. Generator Iteration (replaces MapOp)")
     print("=" * 55)
-    engine = Hush(build_iteration())
+    engine = Hush(build_iteration(), env=ENV_FILE, resources=RESOURCES_FILE)
     items = list(range(1, 10))
     result = await engine.run(inputs={"items": items})
     print(f"  Items:   {items}")
@@ -55,7 +54,7 @@ async def main():
     print("=" * 55)
     print("3. Partial Failure Handling")
     print("=" * 55)
-    engine = Hush(build_partial_failure())
+    engine = Hush(build_partial_failure(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"items": [1, 2, 3, 4, 5, 6, 7]})
     results = result["results"]
     errors = result["errors"]

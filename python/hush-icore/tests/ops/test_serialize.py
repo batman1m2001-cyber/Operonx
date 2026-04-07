@@ -189,18 +189,6 @@ class TestGraphOpSerialize:
             assert "to" in edge
             assert "soft" in edge
 
-    def test_has_soft_preds(self):
-        with GraphOp(name="g") as g:
-            d = double(x=PARENT["x"])
-            START >> d >> END
-        _build_graph(g)
-
-        s = g.serialize()
-        assert "has_soft_preds" in s
-
-
-# ── BranchOp.serialize ──────────────────────────────────────────────────
-
 
 class TestBranchOpSerialize:
     def test_basic_branch(self):

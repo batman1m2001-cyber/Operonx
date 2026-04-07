@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-telemetry"
-version = "0.1.11"
+version = "0.1.12"
 description = "Observability, tracing, and telemetry framework for Hush"
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,19 +49,7 @@ include = [
 ]
 
 [tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = [
-    "E501",  # Line too long
-    "E402",  # Module level import not at top (needed for load_dotenv pattern)
-    "E721",  # Type comparison (intentional in some cases)
-    "E722",  # Bare except
-    "E731",  # Lambda assignment
-    "F841",  # Unused variable
-]
+extend = "../../ruff.toml"
 
 [tool.pytest.ini_options]
 log_cli = true
@@ -70,6 +58,7 @@ log_cli_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (may require external services)",
 ]

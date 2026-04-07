@@ -36,7 +36,10 @@ class TestSimpleCounterLoop:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"start": 0, "limit": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["counter"] == [1, 2, 3, 4, 5]
 
 
@@ -67,7 +70,10 @@ class TestAccumulatorLoop:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"step": 15, "limit": 100})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 15, 30, 45, 60, 75, 90, 105 — 7 iterations
         assert len(result["total"]) == 7
         assert result["total"][-1] == 105
@@ -100,7 +106,10 @@ class TestMaxIterationsSafety:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"max_steps": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["value"] == [1, 2, 3, 4, 5]
 
 
@@ -133,7 +142,10 @@ class TestComplexCondition:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 0->3->6->9 (done=True at 9>8), so 3 iterations
         assert len(result["x"]) == 3
         assert result["x"] == [3, 6, 9]
@@ -176,7 +188,10 @@ class TestWhileLoopWithRef:
         schema = StateSchema(graph)
         state = schema.create_state()
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 0->3->6->9->12, 4 iterations to reach counter >= 10
         assert result["counter"] == [3, 6, 9, 12]
 
@@ -208,7 +223,10 @@ class TestFibonacciSequence:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"limit": 21})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # Fibonacci: 0,1 -> 1,1 -> 1,2 -> 2,3 -> 3,5 -> 5,8 -> 8,13 -> 13,21
         assert result["a"] == [1, 1, 2, 3, 5, 8, 13]
         assert result["b"] == [1, 2, 3, 5, 8, 13, 21]
@@ -241,7 +259,10 @@ class TestDoublingLoop:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"start": 1, "limit": 16})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 1->2->4->8->16, 4 iterations
         assert result["value"] == [2, 4, 8, 16]
 
@@ -278,7 +299,10 @@ class TestWhileLoopInitialFromUpstream:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"limit": 7})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # Counter starts at 3: 4, 5, 6, 7 — 4 iterations
         assert result["counter"] == [4, 5, 6, 7]
 
@@ -310,7 +334,10 @@ class TestWhileLoopInitialFromUpstream:
         schema = StateSchema(graph)
         state = schema.create_state()
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # 0->5->10->15->20, 4 iterations
         assert result["counter"] == [5, 10, 15, 20]
 
@@ -338,7 +365,10 @@ class TestWhileLoopInitialFromUpstream:
         schema = StateSchema(graph)
         state = schema.create_state(inputs={"base": 5})
 
-        result = await graph.run(state)
+        result = {}
+        async for _, _frame in graph.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         # threshold = 15, value: 2, 4, 6, 8, 10, 12, 14, 16
         assert result["value"] == [2, 4, 6, 8, 10, 12, 14, 16]
 
@@ -375,5 +405,8 @@ class TestWhileWithDownstream:
         schema = StateSchema(g)
         state = schema.create_state(inputs={"limit": 5})
 
-        result = await g.run(state)
+        result = {}
+        async for _, _frame in g.run(state):
+            for _k, _v in _frame.items():
+                result.setdefault(_k, []).append(_v)
         assert result["squared"] == [1, 4, 9, 16, 25]

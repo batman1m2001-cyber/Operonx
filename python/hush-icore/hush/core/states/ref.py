@@ -1,11 +1,19 @@
 """Ref type for zero-copy variable references with chainable transforms."""
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
     from hush.core.ops.base import BaseOp
 
 __all__ = ["Ref"]
+
+
+@dataclass
+class StreamPolicy:
+    collect: bool = False
+    parallel: bool = False
+    parallel_max: int = 0  # 0 means unlimited
 
 
 class Ref:
@@ -41,7 +49,17 @@ class Ref:
         is_output: True if this is an output ref (pushes value outward).
     """
 
-    __slots__ = ("_source", "var", "_transforms", "_fn", "idx", "is_output")
+    __slots__ = (
+        "_source",
+        "var",
+        "_transforms",
+        "_fn",
+        "idx",
+        "is_output",
+        "_stream_parallel",
+        "_stream_parallel_max",
+        "_stream_collect",
+    )
 
     _RESERVED_ATTRS = frozenset(
         {
@@ -62,6 +80,11 @@ class Ref:
             "_clone",
             "_resolve",
             "get_all_vars",
+            "parallel",
+            "collect",
+            "_stream_parallel",
+            "_stream_parallel_max",
+            "_stream_collect",
         }
     )
 
@@ -87,6 +110,9 @@ class Ref:
         object.__setattr__(self, "_transforms", _transforms or [])
         object.__setattr__(self, "idx", -1)  # Được set bởi StateSchema._build()
         object.__setattr__(self, "is_output", is_output)  # True cho output ref
+        object.__setattr__(self, "_stream_parallel", False)
+        object.__setattr__(self, "_stream_parallel_max", None)
+        object.__setattr__(self, "_stream_collect", False)
         # Nếu có transforms nhưng không có fn, rebuild từ transforms (trường hợp deserialization)
         if _fn is None and _transforms:
             _fn = lambda x, ctx={}: x
@@ -120,13 +146,59 @@ class Ref:
 
     def _clone(self) -> "Ref":
         """Tạo bản sao của Ref."""
-        return Ref(self._source, self.var, list(self._transforms), self._fn, self.is_output)
+        new = Ref(self._source, self.var, list(self._transforms), self._fn, self.is_output)
+        object.__setattr__(new, "_stream_parallel", self._stream_parallel)
+        object.__setattr__(new, "_stream_parallel_max", self._stream_parallel_max)
+        object.__setattr__(new, "_stream_collect", self._stream_collect)
+        return new
+
+    def parallel(self, max: int = None) -> "Ref":
+        """Mark for parallel consumption. Default sequential → parallel.
+
+        Args:
+            max: Max concurrent items. None = unlimited.
+
+        Returns:
+            New Ref with parallel mode set.
+
+        Example::
+
+            op_b(x=source["x"].parallel())       # unlimited parallel
+            op_b(x=source["x"].parallel(max=4))   # max 4 concurrent
+        """
+        new = self._clone()
+        object.__setattr__(new, "_stream_parallel", True)
+        object.__setattr__(new, "_stream_parallel_max", max)
+        return new
+
+    def collect(self) -> "Ref":
+        """Collect all streamed items into a list before dispatching downstream.
+
+        Waits until source generator exhausts, then dispatches downstream
+        once with list of all items.
+
+        Returns:
+            New Ref with collect mode set.
+
+        Example::
+
+            op_b(items=source["x"].collect())                   # sequential + collect
+            op_b(items=source["x"].parallel().collect())        # parallel + collect
+            op_b(items=source["x"].parallel(max=4).collect())   # bounded parallel + collect
+        """
+        new = self._clone()
+        object.__setattr__(new, "_stream_collect", True)
+        return new
 
     def _with_transform(self, op: str, *args: Any) -> "Ref":
         """Tạo Ref mới với thêm một transform."""
         new_transforms = self._transforms + [(op, args)]
         new_fn = self._wrap(self._fn, op, args)
-        return Ref(self._source, self.var, new_transforms, new_fn)
+        new_ref = Ref(self._source, self.var, new_transforms, new_fn)
+        object.__setattr__(new_ref, "_stream_parallel", self._stream_parallel)
+        object.__setattr__(new_ref, "_stream_parallel_max", self._stream_parallel_max)
+        object.__setattr__(new_ref, "_stream_collect", self._stream_collect)
+        return new_ref
 
     @staticmethod
     def _wrap(fn: Callable, op: str, args: Tuple) -> Callable:

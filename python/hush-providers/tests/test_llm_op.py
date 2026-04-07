@@ -94,8 +94,10 @@ class TestLLMOpIntegration:
             inputs={"messages": [{"role": "user", "content": "Say 'Hello' in exactly one word."}]},
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert len(result["content"]) > 0
         print(f"LLM Response: {result['content']}")
@@ -123,8 +125,10 @@ class TestLLMOpIntegration:
             request_id=request_id,
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         # Verify accumulated content
         assert "content" in result
         assert len(result["content"]) > 0, "Should have accumulated content"
@@ -148,6 +152,7 @@ class TestLLMOpLoadBalancing:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMOp(name="lb_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.7, 0.3])
+        node._ensure_initialized()
 
         assert isinstance(node.resource, list)
         assert len(node.resource) == 2
@@ -212,7 +217,7 @@ class TestLLMOpLoadBalancing:
         selections = Counter()
         for _ in range(1000):
             llm = node._select_llm()
-            key = node._get_selected_resource(llm)
+            key = node._get_resource_key(llm)
             selections[key] += 1
 
         # Check distribution is roughly correct (with tolerance)
@@ -248,14 +253,17 @@ class TestLLMOpLoadBalancing:
         node = LLMOp(
             name="lb_exec_test", resource=["gpt-4o", "or-claude-4-sonnet"], ratios=[0.5, 0.5]
         )
+        node._ensure_initialized()
 
         schema = StateSchema(op=node)
         state = MemoryState(
             schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert result["model_used"] in ["gpt-4o", "or-claude-4-sonnet"]
         print(f"Model used: {result['model_used']}")
@@ -379,6 +387,7 @@ class TestLLMOpFallback:
             pytest.skip("Required LLM resources not configured")
 
         node = LLMOp(name="fallback_test", resource="gpt-4o", fallback=["or-claude-4-sonnet"])
+        node._ensure_initialized()
 
         assert node.fallback == ["or-claude-4-sonnet"]
         assert len(node._fallback_llms) == 1
@@ -395,6 +404,7 @@ class TestLLMOpFallback:
             resource="gpt-4o",
             fallback=["or-claude-4-sonnet", "gpt-4o"],
         )
+        node._ensure_initialized()
 
         assert len(node.fallback) == 2
         assert len(node._fallback_llms) == 2
@@ -442,8 +452,10 @@ class TestLLMOpFallback:
             schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         # Primary should work, result should use gpt-4o
         assert "content" in result
         assert result["model_used"] == "gpt-4o"
@@ -505,8 +517,10 @@ class TestLLMOpTools:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert "tool_calls" in result
         # Model should call the weather function
@@ -554,8 +568,10 @@ class TestLLMOpTools:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "tool_calls" in result
         if result["tool_calls"]:
             assert result["tool_calls"][0]["function"]["name"] == "calculate"
@@ -597,8 +613,10 @@ class TestLLMOpResponseFormat:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         # Verify the response is valid JSON
         try:
@@ -649,8 +667,10 @@ class TestLLMOpResponseFormat:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         parsed = json.loads(result["content"])
         assert "name" in parsed
@@ -698,8 +718,10 @@ class TestLLMOpVision:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert len(result["content"]) > 0
         print(f"Vision response: {result['content']}")
@@ -747,8 +769,10 @@ class TestLLMOpVision:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Base64 image response: {result['content']}")
 
@@ -778,7 +802,10 @@ class TestLLMOpGenerationParams:
             },
         )
 
-        result = await node.run(state)
+        result = {}
+
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Temperature 0.0 response: {result['content']}")
 
@@ -805,8 +832,10 @@ class TestLLMOpGenerationParams:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert "tokens_used" in result
         # Response should be truncated
@@ -838,8 +867,10 @@ class TestLLMOpGenerationParams:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         # Response should stop at or before "5"
         assert "6" not in result["content"] or "5" in result["content"]
@@ -866,8 +897,10 @@ class TestLLMOpGenerationParams:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Top-p 0.1 response: {result['content']}")
 
@@ -893,8 +926,10 @@ class TestLLMOpGenerationParams:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"With penalties response: {result['content']}")
 
@@ -925,7 +960,10 @@ class TestLLMOpGenerationParams:
                 },
             )
 
-            result = await node.run(state)
+            result = {}
+
+            async for _, result in node.run(state):
+                pass
             results.append(result["content"])
             print(f"Seed run {i + 1}: {result['content']}")
 
@@ -959,8 +997,10 @@ class TestLLMOpLogprobs:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         assert "logprobs" in result
         if result["logprobs"]:
@@ -998,8 +1038,10 @@ class TestLLMOpMultipleCompletions:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Response: {result['content']}")
 
@@ -1028,8 +1070,10 @@ class TestLLMOpUserTracking:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Response with user tracking: {result['content']}")
 
@@ -1125,8 +1169,10 @@ class TestLLMOpAudio:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         print(f"Audio input response: {result['content']}")
 
@@ -1160,7 +1206,9 @@ class TestLLMOpComplexWorkflow:
                 ]
             },
         )
-        result1 = await node.run(state1)
+        result1 = {}
+        async for _, result1 in node.run(state1):
+            pass
         print(f"Turn 1: {result1['content']}")
 
         # Second turn (continue conversation)
@@ -1175,7 +1223,9 @@ class TestLLMOpComplexWorkflow:
                 ]
             },
         )
-        result2 = await node.run(state2)
+        result2 = {}
+        async for _, result2 in node.run(state2):
+            pass
         print(f"Turn 2: {result2['content']}")
 
         assert "12" in result2["content"] or "twelve" in result2["content"].lower()
@@ -1203,8 +1253,10 @@ class TestLLMOpComplexWorkflow:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "content" in result
         # Check that response contains uppercase letters
         has_uppercase = any(c.isupper() for c in result["content"] if c.isalpha())

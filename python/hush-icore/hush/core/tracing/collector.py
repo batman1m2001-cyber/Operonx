@@ -16,7 +16,6 @@ import logging
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hush.core.ops.graph.scheduler import _is_gen
 from hush.core.tracing.models import TraceNode, TraceSummary
 from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
@@ -177,7 +176,7 @@ class TraceCollector:
 
         gen_ops: Set[str] = set()
         for name, op in graph._ops.items():
-            if _is_gen(op):
+            if getattr(op, "is_gen", False):
                 gen_ops.add(op.full_name)
             if isinstance(op, GraphOp):
                 self._build_graph_meta(op, result)
@@ -192,12 +191,30 @@ class TraceCollector:
     # Live state helpers
     # =========================================================================
 
-    def _get_stream_contexts(self, parent_name: str) -> list:
-        """Get stream_contexts from graph op (populated after run_scheduler)."""
-        parent_op = self._op_map.get(parent_name)
-        if parent_op:
-            return getattr(parent_op, "stream_contexts", [])
-        return []
+    def _get_stream_contexts(self, state: Any, gen_op_name: str, gen_ctx: Tuple) -> list:
+        """Derive item contexts from generator output cells.
+
+        Generator ops store results at item contexts like ('main','[0]'),
+        but only store start_time at the root context ('main',). So we
+        look at the first output variable's cell to find item contexts.
+        """
+        result = []
+        op = self._op_map.get(gen_op_name)
+        if not op or not op.outputs:
+            return result
+        first_out_var = next(iter(op.outputs))
+        idx = state.schema.get_index(gen_op_name, first_out_var)
+        if idx < 0:
+            return result
+        cell = state._cells[idx]
+        for ctx in cell.contexts:
+            if (
+                len(ctx) == len(gen_ctx) + 1
+                and ctx[: len(gen_ctx)] == gen_ctx
+                and _is_stream_segment(ctx[-1])
+            ):
+                result.append(ctx)
+        return result
 
     def _resolve_parent(
         self,
@@ -254,9 +271,6 @@ class TraceCollector:
             display_name = info["display_name"]
             contain_generation = info["contain_generation"]
 
-            # Get live stream_contexts from parent graph's scheduler
-            stream_contexts = self._get_stream_contexts(parent_name) if parent_name else []
-
             for ctx, start_time in state.iter_executed(op_name):
                 # Determine kind
                 kind = self._determine_kind(ctx, is_gen, is_graph_op)
@@ -272,14 +286,27 @@ class TraceCollector:
                 # Aggregate outputs for generators (collect from child contexts)
                 if is_gen and all(v is None for v in outputs.values()):
                     agg = {v: [] for v in outputs}
-                    for sc in stream_contexts:
-                        if len(sc) == len(ctx) + 1 and sc[: len(ctx)] == ctx:
-                            for v in agg:
-                                val = state[op_name, v, sc]
-                                if val is not None:
-                                    agg[v].append(val)
+                    for sc in self._get_stream_contexts(state, op_name, ctx):
+                        for v in agg:
+                            val = state[op_name, v, sc]
+                            if val is not None:
+                                agg[v].append(val)
                     if any(agg.values()):
                         outputs = agg
+
+                # For root graph: outputs set via >> PARENT["key"] are stored at
+                # child contexts (where subgraphs ran), not at root context ().
+                # Scan the cell directly across all stored contexts.
+                if is_root and any(v is None for v in outputs.values()):
+                    null_keys = [v for v, val in outputs.items() if val is None]
+                    for v in null_keys:
+                        try:
+                            cell = state.get_cell(op_name, v)
+                            for cell_ctx, val in cell.items():
+                                if val is not None:
+                                    outputs[v] = val  # last non-None wins
+                        except (KeyError, AttributeError):
+                            pass
 
                 # Timing
                 end_time = state[op_name, "end_time", ctx]
@@ -303,11 +330,13 @@ class TraceCollector:
                     node_type = "span"
 
                 # metadata
-                metadata: Dict[str, Any] = {}
-                if kind != "batch":
-                    metadata["kind"] = kind
+                metadata: Dict[str, Any] = {"kind": kind}
+                if hasattr(op, "specific_metadata") and op.specific_metadata:
+                    metadata.update(op.specific_metadata)
                 if kind == "generator":
-                    yield_count = self._count_yields(ctx, stream_contexts)
+                    yield_count = self._count_yields(
+                        ctx, self._get_stream_contexts(state, op_name, ctx)
+                    )
                     metadata["yield_count"] = yield_count
                     if yield_count == 0:
                         metadata["status"] = "pending"

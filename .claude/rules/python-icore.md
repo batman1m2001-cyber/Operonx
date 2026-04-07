@@ -62,11 +62,15 @@ Async ops always run on event loop regardless.
 
 ## Tracing
 
-Ops don't know about tracing. After `engine.run()`:
+Ops don't know about tracing. After `engine.run()` or when `engine.start()` completes:
 1. `FlushWorker.submit()` returns immediately
 2. Background thread: `TraceCollector.collect_tree()` → `TraceNode` list
 3. `_sample_stream_nodes()` caps stream items per generator
 4. `tracer.flush(trace_data)` sends to backend
+
+`engine.run()` is a thin wrapper over `engine.start().collect()`. Both trigger
+trace flush on completion. Use `engine.start()` when you need streaming access
+to frames as they arrive (`async for op, ctx, data in handle:`).
 
 ### TraceNode kinds
 - `batch` (normal), `generator`, `stream_context` (synthetic `[N]`), `stream_item`, `loop_iter`, `graph`

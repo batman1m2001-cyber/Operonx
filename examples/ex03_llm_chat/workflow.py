@@ -5,15 +5,9 @@ Defines LLM chat graphs — imported by demo.py, serve_python.py, serve_rust.py.
 Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env
 """
 
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
-
 from hush.core import END, PARENT, START, GraphOp
 from hush.core.ops.transform.func_op import op
-from hush.providers import LLMOp, PromptOp, chain
+from hush.providers import LLMOp, PromptOp, chat
 
 
 @op
@@ -45,7 +39,7 @@ def build_basic_chat():
 def build_chain_chat():
     """chain() — All-in-one, gọn hơn."""
     with GraphOp(name="chain-chat") as graph:
-        chat = chain(
+        c = chat(
             resource="gpt-4o-mini",
             template={
                 "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
@@ -54,7 +48,7 @@ def build_chain_chat():
             query=PARENT["query"],
             outputs={"content": PARENT["response"]},
         )
-        START >> chat >> END
+        START >> c >> END
     return graph
 
 

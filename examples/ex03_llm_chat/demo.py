@@ -17,12 +17,16 @@ from ex03_llm_chat.workflow import build_basic_chat, build_chain_chat, build_sum
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     print("=" * 50)
     print("1. Basic Chat (PromptOp.of + LLMOp.of)")
     print("=" * 50)
-    result = await Hush(build_basic_chat()).run(
+    result = await Hush(build_basic_chat(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={"question": "Python là gì? Trả lời trong 1 câu."}
     )
     print(f"  Trả lời: {result['answer']}")
@@ -31,14 +35,16 @@ async def main():
     print("=" * 50)
     print("2. chain() (all-in-one)")
     print("=" * 50)
-    result = await Hush(build_chain_chat()).run(inputs={"query": "Hush workflow engine là gì?"})
+    result = await Hush(build_chain_chat(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"query": "Hush workflow engine là gì?"}
+    )
     print(f"  Trả lời: {result['response']}")
 
     print()
     print("=" * 50)
     print("3. Text Summarization Pipeline")
     print("=" * 50)
-    result = await Hush(build_summarize()).run(
+    result = await Hush(build_summarize(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={
             "text": """
         Trí tuệ nhân tạo (AI) đang thay đổi cách chúng ta sống và làm việc.

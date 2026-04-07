@@ -12,6 +12,10 @@ import asyncio
 
 from hush.core import Hush
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 from ex05_loops_and_branches.workflow import (
     build_branch,
     build_for_loop,
@@ -24,7 +28,7 @@ async def main():
     print("=" * 50)
     print("1. For Loop (generator yield, sequential)")
     print("=" * 50)
-    result = await Hush(build_for_loop()).run(
+    result = await Hush(build_for_loop(), env=ENV_FILE, resources=RESOURCES_FILE).run(
         inputs={"items": ["apple", "banana", "cherry"], "prefix": "Fruit"}
     )
     print(f"  Result: {result['result']}")
@@ -33,7 +37,9 @@ async def main():
     print("=" * 50)
     print("2. Map Op (generator yield, parallel)")
     print("=" * 50)
-    result = await Hush(build_map_op()).run(inputs={"numbers": [1, 2, 3, 4, 5]})
+    result = await Hush(build_map_op(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"numbers": [1, 2, 3, 4, 5]}
+    )
     print("  Input:   [1, 2, 3, 4, 5]")
     print(f"  Squared: {result['squared']}")
 
@@ -41,7 +47,9 @@ async def main():
     print("=" * 50)
     print("3. While Loop (generator while, conditional)")
     print("=" * 50)
-    result = await Hush(build_while_loop()).run(inputs={"start_value": 256})
+    result = await Hush(build_while_loop(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"start_value": 256}
+    )
     print("  Start: 256")
     print(f"  Values: {result['value']}")
 
@@ -50,7 +58,9 @@ async def main():
     print("4. Branch (if_ conditional routing)")
     print("=" * 50)
     for score in [95, 75, 55, 30]:
-        result = await Hush(build_branch()).run(inputs={"score": score})
+        result = await Hush(build_branch(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+            inputs={"score": score}
+        )
         print(f"  Score {score}: {result['grade']} — {result['message']}")
 
 

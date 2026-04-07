@@ -28,10 +28,10 @@ class TestSimpleCounterLoop:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["count"] == 5
-        assert result["_loop_metrics"]["total_iterations"] == 5
-        assert result["_loop_metrics"]["stopped_by_condition"] is True
 
 
 # ============================================================
@@ -57,11 +57,10 @@ class TestLoopMaxIterations:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["count"] == 3
-        assert result["_loop_metrics"]["total_iterations"] == 3
-        assert result["_loop_metrics"]["stopped_by_condition"] is False
-        assert result["_loop_metrics"]["max_iterations_reached"] is True
 
 
 # ============================================================
@@ -91,9 +90,10 @@ class TestLoopCallableUntil:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["count"] == 4
-        assert result["_loop_metrics"]["total_iterations"] == 4
 
 
 # ============================================================
@@ -120,13 +120,15 @@ class TestFibonacciLoop:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["a"] == 13
         assert result["b"] == 21
 
 
 # ============================================================
-# Test 5: Loop with Streaming Inside
+# Test 5: Loop Accumulator
 # ============================================================
 
 
@@ -155,44 +157,15 @@ class TestLoopAccumulator:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         # 0->15->30->45->60->75->90->105 (7 iterations)
         assert result["total"] == 105
-        assert result["_loop_metrics"]["total_iterations"] == 7
 
 
 # ============================================================
-# Test 6: Loop Metrics
-# ============================================================
-
-
-class TestLoopMetrics:
-    """Test _loop_metrics dict in output."""
-
-    @pytest.mark.asyncio
-    async def test_metrics_on_condition_stop(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        with GraphOp.loop(name="metrics_test", until="count >= 3", count=0) as g:
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> END
-
-        g.build()
-        schema = StateSchema(g)
-        state = schema.create_state()
-
-        result = await g.run(state)
-        metrics = result["_loop_metrics"]
-        assert metrics["total_iterations"] == 3
-        assert metrics["stopped_by_condition"] is True
-        assert "max_iterations_reached" not in metrics
-
-
-# ============================================================
-# Test 7: Loop Inside Graph
+# Test 6: Loop Inside Graph
 # ============================================================
 
 
@@ -224,12 +197,14 @@ class TestLoopInsideGraph:
         schema = StateSchema(outer)
         state = schema.create_state(inputs={"start_val": 2})
 
-        result = await outer.run(state)
+        result = {}
+        async for _, result in outer.run(state):
+            pass
         assert result["count"] == 5
 
 
 # ============================================================
-# Test 8: Loop with Branch
+# Test 7: Loop with Branch
 # ============================================================
 
 
@@ -254,13 +229,14 @@ class TestLoopWithBranch:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["value"] == 1
-        assert result["_loop_metrics"]["stopped_by_condition"] is True
 
 
 # ============================================================
-# Test 9: @graph.loop() Decorator
+# Test 8: @graph.loop() Decorator
 # ============================================================
 
 
@@ -287,12 +263,14 @@ class TestGraphLoopDecorator:
         schema = StateSchema(g)
         state = schema.create_state()
 
-        result = await g.run(state)
+        result = {}
+        async for _, result in g.run(state):
+            pass
         assert result["count"] == 5
 
 
 # ============================================================
-# Test 10: Loop with Initial from Upstream
+# Test 9: Loop with Initial from Upstream
 # ============================================================
 
 
@@ -324,5 +302,7 @@ class TestLoopInitialFromUpstream:
         schema = StateSchema(outer)
         state = schema.create_state()
 
-        result = await outer.run(state)
+        result = {}
+        async for _, result in outer.run(state):
+            pass
         assert result["value"] == 1

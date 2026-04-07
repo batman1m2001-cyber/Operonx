@@ -59,8 +59,9 @@ class TestPromptShorthand:
 
         schema = StateSchema(op=node)
         state = MemoryState(schema)
-        result = await node.run(state)
-
+        result = {}
+        async for _, result in node.run(state):
+            pass
         messages = result["messages"]
         assert len(messages) == 2
         assert messages[0]["content"] == "You are Claude."
@@ -248,7 +249,7 @@ class TestChainShorthand:
 
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(resource="gpt-4", template="Hello {user}", user="world")
@@ -259,7 +260,7 @@ class TestChainShorthand:
     def test_chain_dict_template(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(
@@ -272,7 +273,7 @@ class TestChainShorthand:
     def test_chain_auto_name(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             my_chat = chat(resource="gpt-4", template="Hello")
@@ -281,7 +282,7 @@ class TestChainShorthand:
     def test_chain_explicit_name(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(resource="gpt-4", template="Hello", name="my_named_chat")
@@ -292,19 +293,19 @@ class TestChainShorthand:
 
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(resource="gpt-4", template="Hello", outputs={"*": PARENT})
             assert "content" in node.outputs
 
-    def test_chain_extract(self):
-        from hush.providers.ops.chain import extract
+    def test_chain_ask(self):
+        from hush.providers.ops.chain import ask
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
-            node = extract(
+            node = ask(
                 resource="gpt-4",
                 template="Classify: {text}",
                 fields=["category: str", "confidence: float"],
@@ -316,7 +317,7 @@ class TestChainShorthand:
     def test_chain_response_format(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(
@@ -331,7 +332,7 @@ class TestChainShorthand:
     def test_chain_load_balancing(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(resource=["gpt-4o", "gpt-4o-mini"], template="Hello", ratios=[0.7, 0.3])
@@ -342,7 +343,7 @@ class TestChainShorthand:
     def test_chain_fallback(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(
@@ -356,7 +357,7 @@ class TestChainShorthand:
     def test_chain_template_variables(self):
         from hush.providers.ops.chain import chat
 
-        with patch("hush.providers.ops.llm.ResourceHub") as mock_cls:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = _mock_resource_hub()
 
             node = chat(

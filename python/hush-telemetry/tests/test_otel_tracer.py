@@ -250,14 +250,14 @@ class TestOTELTracerFlush:
         mock_client.tracer = mock_tracer
 
         mock_hub = MagicMock()
-        mock_hub.otel.return_value = mock_client
+        mock_hub.get.return_value = mock_client
 
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
                 mock_set_ctx.return_value = MagicMock()
                 tracer.flush(sample_trace_data)
 
-        mock_hub.otel.assert_called_once_with("otel:jaeger")
+        mock_hub.get.assert_called_once_with("otel:jaeger")
         assert mock_tracer.start_span.called
         mock_client.flush.assert_called_once()
 
@@ -334,7 +334,7 @@ class TestOTELTracerFlush:
         mock_client.tracer = mock_tracer
 
         mock_hub = MagicMock()
-        mock_hub.otel.return_value = mock_client
+        mock_hub.get.return_value = mock_client
 
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
@@ -431,7 +431,7 @@ class TestOTELTracerFlush:
         mock_client.tracer = mock_tracer
 
         mock_hub = MagicMock()
-        mock_hub.otel.return_value = mock_client
+        mock_hub.get.return_value = mock_client
 
         with patch("hush.core.registry.get_hub", return_value=mock_hub):
             with patch("opentelemetry.trace.set_span_in_context") as mock_set_ctx:
