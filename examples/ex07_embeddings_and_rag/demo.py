@@ -54,7 +54,9 @@ async def main():
 
     # Pre-compute document embeddings
     print("  Đang embed documents...")
-    embed_result = await Hush(build_basic_embedding(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"texts": DOCUMENTS})
+    embed_result = await Hush(build_basic_embedding(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"texts": DOCUMENTS}
+    )
     doc_vectors = embed_result["vectors"]
     print(f"  Embedded {len(doc_vectors)} documents ({len(doc_vectors[0])} dims)")
 

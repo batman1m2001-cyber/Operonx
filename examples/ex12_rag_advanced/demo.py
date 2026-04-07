@@ -60,7 +60,9 @@ async def main():
         )
         START >> embed >> END
 
-    embed_result = await Hush(embed_graph, env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={"texts": DOCUMENTS})
+    embed_result = await Hush(embed_graph, env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={"texts": DOCUMENTS}
+    )
     doc_vectors = embed_result["vectors"]
 
     @op

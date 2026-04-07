@@ -286,10 +286,7 @@ class GraphOp(BaseOp):
         # If user explicitly set bound on the graph, respect it.
         # Otherwise: all children sync → graph is sync (inline); any io/cpu → task.
         if self.bound is None:
-            if all(
-                getattr(op, "bound", None) == "sync"
-                for op in self._ops.values()
-            ):
+            if all(getattr(op, "bound", None) == "sync" for op in self._ops.values()):
                 self.bound = "sync"
             else:
                 self.bound = "io"

@@ -46,7 +46,12 @@ async def main():
     from hush.core import Hush
 
     tracer = _make_tracer()
-    engine = Hush(build_text_analyzer(), env=ENV_FILE, resources=RESOURCES_FILE, **({} if tracer is None else {"tracer": tracer}))
+    engine = Hush(
+        build_text_analyzer(),
+        env=ENV_FILE,
+        resources=RESOURCES_FILE,
+        **({} if tracer is None else {"tracer": tracer}),
+    )
 
     print("=" * 50)
     print("1. OTELTracer — single run")

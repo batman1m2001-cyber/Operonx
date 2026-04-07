@@ -55,9 +55,7 @@ def find_rush_bench():
                 return
 
     # Not found — try building
-    print(
-        "  [info] hush-bench binary not found, building with cargo build --release..."
-    )
+    print("  [info] hush-bench binary not found, building with cargo build --release...")
     result = subprocess.run(
         ["cargo", "build", "--release", "--bin", "hush-bench"],
         cwd=bench_dir,
@@ -297,13 +295,9 @@ def build_branching(n: int):
             )
 
             exc = process_grade(grade=cls["grade"], score=cls["score"], name=f"exc{i}")
-            good = process_grade(
-                grade=cls["grade"], score=cls["score"], name=f"good{i}"
-            )
+            good = process_grade(grade=cls["grade"], score=cls["score"], name=f"good{i}")
             avg = process_grade(grade=cls["grade"], score=cls["score"], name=f"avg{i}")
-            fail = process_grade(
-                grade=cls["grade"], score=cls["score"], name=f"fail{i}"
-            )
+            fail = process_grade(grade=cls["grade"], score=cls["score"], name=f"fail{i}")
 
             if first is None:
                 START >> cls
@@ -337,9 +331,7 @@ def build_branching(n: int):
 def verify_case(x, threshold):
     """Single verification subgraph: classify -> branch -> 2 paths -> merge."""
     cls = classify(score=x, name="cls")
-    router = (
-        Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
-    )
+    router = Branch(name="router").if_(cls["score"] >= threshold, "pass_op").else_("fail_op")
     pass_op = process_grade(grade=cls["grade"], score=cls["score"], name="pass_op")
     fail_op = process_grade(grade=cls["grade"], score=cls["score"], name="fail_op")
     merge = noop(x=cls["score"], name="out")
@@ -402,9 +394,7 @@ def build_cpu_contention(n_heavy: int, n_light: int, hash_iters: int):
 
         # Heavy CPU branches (thread executor, blocks CPU)
         for i in range(n_heavy):
-            branch = cpu_heavy_branch(
-                x=PARENT["x"], iterations=hash_iters, name=f"heavy{i}"
-            )
+            branch = cpu_heavy_branch(x=PARENT["x"], iterations=hash_iters, name=f"heavy{i}")
             START >> branch
             branches.append(branch)
 
@@ -675,9 +665,7 @@ async def main():
     find_rush_bench()
 
     print("=" * 120)
-    print(
-        "  End-to-End Benchmark: Python backend (hush-icore) vs Rust backend (hush-icore)"
-    )
+    print("  End-to-End Benchmark: Python backend (hush-icore) vs Rust backend (hush-icore)")
     print(
         "  Patterns: linear, nested, parallel, branching, production, CPU-contention, CPU-production, CPU-chain"
     )

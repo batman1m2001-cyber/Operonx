@@ -24,6 +24,7 @@ from hush.core.ops.flow import if_
 
 # ── Helpers ──
 
+
 @op
 def double(x: int):
     return {"result": x * 2}
@@ -70,8 +71,8 @@ def failing_op(x: int):
 # Test 1: Inline sync op produces correct result
 # ============================================================
 
-class TestInlineSyncOp:
 
+class TestInlineSyncOp:
     @pytest.mark.asyncio
     async def test_inline_sync_op(self):
         with GraphOp(name="g") as g:
@@ -95,8 +96,8 @@ class TestInlineSyncOp:
 # Test 2: Inline sync generator
 # ============================================================
 
-class TestInlineSyncGenerator:
 
+class TestInlineSyncGenerator:
     @pytest.mark.asyncio
     async def test_generator_yields_all(self):
         with GraphOp(name="g") as g:
@@ -123,8 +124,8 @@ class TestInlineSyncGenerator:
 # Test 3: Inline fan-out (both sync)
 # ============================================================
 
-class TestInlineFanout:
 
+class TestInlineFanout:
     @pytest.mark.asyncio
     async def test_fanout_both_sync(self):
         with GraphOp(name="g") as g:
@@ -142,13 +143,13 @@ class TestInlineFanout:
 # Test 4: Mixed fan-out (sync + io)
 # ============================================================
 
-class TestMixedFanout:
 
+class TestMixedFanout:
     @pytest.mark.asyncio
     async def test_mixed_inline_and_io(self):
         with GraphOp(name="g") as g:
-            a = double(x=PARENT["x"])           # inline
-            b = async_double(x=PARENT["x"])     # task (io)
+            a = double(x=PARENT["x"])  # inline
+            b = async_double(x=PARENT["x"])  # task (io)
             m = merge(a=a["result"], b=b["result"])
             START >> [a, b] >> m >> END
 
@@ -160,8 +161,8 @@ class TestMixedFanout:
 # Test 5: IO-bound op works correctly
 # ============================================================
 
-class TestIOBound:
 
+class TestIOBound:
     @pytest.mark.asyncio
     async def test_io_bound_correct_result(self):
         with GraphOp(name="g") as g:
@@ -184,8 +185,8 @@ class TestIOBound:
 # Test 6: CPU-bound (executor="thread") runs in thread pool
 # ============================================================
 
-class TestCPUBound:
 
+class TestCPUBound:
     @pytest.mark.asyncio
     async def test_thread_executor_different_thread(self):
         main_tid = threading.current_thread().ident
@@ -211,8 +212,8 @@ class TestCPUBound:
 # Test 7: Inline error propagation
 # ============================================================
 
-class TestInlineErrorPropagation:
 
+class TestInlineErrorPropagation:
     @pytest.mark.asyncio
     async def test_error_stored_in_state(self):
         with GraphOp(name="g") as g:
@@ -233,8 +234,8 @@ class TestInlineErrorPropagation:
 # Test 8: Nested graph (inner inline, outer detects inline)
 # ============================================================
 
-class TestNestedGraph:
 
+class TestNestedGraph:
     @pytest.mark.asyncio
     async def test_nested_all_inline(self):
         @graph
@@ -282,8 +283,8 @@ class TestNestedGraph:
 # Test 9: Loop with inline ops
 # ============================================================
 
-class TestInlineLoop:
 
+class TestInlineLoop:
     @pytest.mark.asyncio
     async def test_loop_inline(self):
         from hush.core.states import StateSchema
@@ -311,8 +312,8 @@ class TestInlineLoop:
 # Test 10: Branch routing with inline ops
 # ============================================================
 
-class TestInlineBranch:
 
+class TestInlineBranch:
     @pytest.mark.asyncio
     async def test_branch_routes_correctly(self):
         @op
@@ -350,8 +351,8 @@ class TestInlineBranch:
 # Test 11: GraphOp dispatch type — user override
 # ============================================================
 
-class TestGraphOpBoundOverride:
 
+class TestGraphOpBoundOverride:
     @pytest.mark.asyncio
     async def test_graph_bound_io_forces_task(self):
         @graph(bound="io")
@@ -385,8 +386,8 @@ class TestGraphOpBoundOverride:
 # Test 12: Concurrent runs with inline ops (state isolation)
 # ============================================================
 
-class TestConcurrentInline:
 
+class TestConcurrentInline:
     @pytest.mark.asyncio
     async def test_concurrent_runs_isolated(self):
         with GraphOp(name="g") as g:
@@ -395,8 +396,6 @@ class TestConcurrentInline:
             START >> d >> a >> END
 
         engine = Hush(g)
-        results = await asyncio.gather(*[
-            engine.run(inputs={"x": i}) for i in range(5)
-        ])
+        results = await asyncio.gather(*[engine.run(inputs={"x": i}) for i in range(5)])
         for i, r in enumerate(results):
             assert r["result"] == i * 2 + 10

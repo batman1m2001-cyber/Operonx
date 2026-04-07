@@ -26,7 +26,9 @@ async def main():
     print("Pipeline 1: Data Transformation")
     print("=" * 50)
 
-    result = await Hush(build_data_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE).run(inputs={})
+    result = await Hush(build_data_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE).run(
+        inputs={}
+    )
     print(f"  Tổng:           {result['total']}")
     print(f"  Trung bình:     {result['average']}")
     print(f"  Số phần tử:     {result['count']}")
