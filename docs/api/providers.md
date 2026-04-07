@@ -34,8 +34,8 @@ Shorthand for PromptOp + LLMOp text generation.
 
 ::: hush.providers.ops.chain.chat
 
-## extract()
+## ask()
 
-PromptOp + LLMOp + ParserOp with retry and validation.
+Shorthand for PromptOp + LLMOp with structured extraction.
 
-::: hush.providers.ops.chain.extract
+::: hush.providers.ops.chain.ask
