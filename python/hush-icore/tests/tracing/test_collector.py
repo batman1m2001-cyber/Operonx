@@ -138,8 +138,9 @@ async def test_streaming_trace():
     engine = Hush(g)
     result = await engine.run(inputs={"count": 3})
     state = result["$state"]
-    assert len(result["result"]) == 3
-    assert sorted(result["result"]) == [0, 10, 20]
+    # engine.run() → handle.collect(unwrap=True) groups by key;
+    # generator outputs become lists.
+    assert result["result"] == [0, 10, 20]
 
     collector = TraceCollector(g)
     trace = collector.collect(state)

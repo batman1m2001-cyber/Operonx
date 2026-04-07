@@ -187,13 +187,9 @@ async def test_stream_with_middleware():
     mw = RecordingMiddleware()
     engine.use(mw)
 
-    events = []
-    async for event in engine.stream(inputs={"x": 4}):
-        events.append(event)
+    result = await engine.run(inputs={"x": 4})
 
-    # Last event should be done
-    assert events[-1]["type"] == "done"
-    assert events[-1]["data"]["result"] == 8
+    assert result["result"] == 8
 
     # Middleware was called
     assert mw.calls[0][0] == "before_run"
@@ -201,8 +197,8 @@ async def test_stream_with_middleware():
 
 
 @pytest.mark.asyncio
-async def test_tracer_deprecation_warning():
-    """Using tracer= arg should emit DeprecationWarning."""
+async def test_tracer_passed_to_start():
+    """tracer= on run() is forwarded to start() and available on handle."""
     from unittest.mock import MagicMock
 
     engine = _make_engine()
@@ -211,5 +207,6 @@ async def test_tracer_deprecation_warning():
     mock_tracer.tags = []
     mock_tracer.stream_trace_limit = 100
 
-    with pytest.warns(DeprecationWarning, match="tracer.*deprecated"):
-        await engine.run(inputs={"x": 1}, tracer=mock_tracer)
+    # Should not warn — tracer= is a first-class parameter now
+    result = await engine.run(inputs={"x": 1}, tracer=mock_tracer)
+    assert result["result"] == 2

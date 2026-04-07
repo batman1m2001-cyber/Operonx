@@ -5,6 +5,8 @@ from typing import Callable
 
 from fastapi import Request
 
+from hush.serve.schema import strip_internal_keys
+
 
 def create_sync_handler(endpoint) -> Callable:
     """Create a FastAPI route handler for sync execution."""
@@ -20,10 +22,9 @@ def create_sync_handler(endpoint) -> Callable:
             request_id=request_id,
             user_id=user_id,
             session_id=session_id,
-            tracer=endpoint.tracer,
         )
 
-        return {k: v for k, v in result.items() if not k.startswith("$")}
+        return strip_internal_keys(result)
 
     handler.__doc__ = f"Execute {endpoint.graph.name} workflow."
     return handler

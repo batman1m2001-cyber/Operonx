@@ -91,6 +91,12 @@ def serialize_for_rust(app: "HushApp") -> RustBackendConfig:
     return config
 
 
+_TRACER_RUST_KEYS = {
+    "LangfuseTracer": "langfuse",
+    "HushEyesTracer": "hush_eyes",
+}
+
+
 def _extract_tracer_configs(tracer) -> Optional[Dict[str, Any]]:
     """Extract Rust-compatible tracer configs from Python Tracer instances."""
     if tracer is None:
@@ -100,23 +106,12 @@ def _extract_tracer_configs(tracer) -> Optional[Dict[str, Any]]:
     result: Dict[str, Any] = {}
 
     for t in tracers:
-        cls_name = type(t).__name__
-
-        if cls_name == "LangfuseTracer" and hasattr(t, "_config") and t._config is not None:
-            cfg = t._config
-            result["langfuse"] = {
-                "public_key": cfg.public_key,
-                "secret_key": cfg.secret_key,
-                "host": cfg.host,
-            }
-            if hasattr(t, "_stream_trace_limit") and t._stream_trace_limit is not None:
-                result["langfuse"]["stream_trace_limit"] = t._stream_trace_limit
-
-        elif cls_name == "HushEyesTracer" and hasattr(t, "_host"):
-            result["hush_eyes"] = {
-                "host": getattr(t, "_host", "127.0.0.1"),
-                "port": getattr(t, "_port", 8420),
-            }
+        rust_key = _TRACER_RUST_KEYS.get(type(t).__name__)
+        if rust_key is None:
+            continue
+        cfg = t.to_config_dict()
+        if cfg is not None:
+            result[rust_key] = cfg
 
     return result if result else None
 

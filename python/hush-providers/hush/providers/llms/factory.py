@@ -43,16 +43,3 @@ def create_llm(config: LLMConfig) -> BaseLLM:
         raise ValueError(f"Unsupported Model: {config.api_type}")
 
     return model_class(config=config)
-
-
-async def main():
-    llm = create_llm(LLMConfig.default())
-
-    async for chunk in llm.stream(messages=[{"role": "user", "content": "Hello"}]):
-        print(chunk)
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())

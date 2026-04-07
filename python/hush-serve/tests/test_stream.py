@@ -95,7 +95,7 @@ class TestStreamWithGenerator:
         assert done_count == 1
 
     def test_generator_stream_token_data(self):
-        """Token events contain the yielded data."""
+        """Token events contain the output data from downstream ops."""
         graph = self._make_gen_graph()
         app = HushApp()
         app.endpoint("/gen", graph=graph, stream=True)
@@ -103,19 +103,19 @@ class TestStreamWithGenerator:
         resp = client.post("/gen/stream", json={"items": [10, 20]})
         body = resp.text
 
-        # Parse token event data
-        token_values = []
+        # Parse token event data — tokens contain downstream op outputs
+        token_results = []
         lines = body.split("\n")
         for i, line in enumerate(lines):
             if line.startswith("event: token"):
-                # Next non-empty line should be data:
                 for j in range(i + 1, len(lines)):
                     if lines[j].startswith("data:"):
                         data = json.loads(lines[j][len("data:") :].strip())
-                        token_values.append(data.get("value"))
+                        if "result" in data:
+                            token_results.append(data["result"])
                         break
 
-        assert sorted(token_values) == [10, 20]
+        assert sorted(token_results) == [20, 40]
 
     def test_generator_stream_done_has_results(self):
         """Done event contains accumulated results."""
@@ -180,7 +180,6 @@ class TestWebSocketWithGenerator:
             ws.send_json({"inputs": {"items": [1, 2]}})
 
             messages = []
-            # Read all messages until we get the result
             while True:
                 msg = ws.receive_json()
                 messages.append(msg)
@@ -190,24 +189,31 @@ class TestWebSocketWithGenerator:
             token_msgs = [m for m in messages if m["type"] == "token"]
             result_msgs = [m for m in messages if m["type"] == "result"]
 
-            assert len(token_msgs) == 2
+            assert len(token_msgs) >= 2
             assert len(result_msgs) == 1
 
-            # Token data contains yielded values
-            token_values = [m["data"]["value"] for m in token_msgs]
-            assert sorted(token_values) == [1, 2]
+            # Token data contains downstream op outputs
+            token_results = [m["data"]["result"] for m in token_msgs if "result" in m["data"]]
+            assert sorted(token_results) == [2, 4]
 
             # Result has accumulated output
             assert sorted(result_msgs[0]["data"]["result"]) == [2, 4]
 
     def test_ws_batch_graph_result_only(self, double_graph):
-        """Non-generator graph: WebSocket sends result only, no tokens."""
+        """Non-generator graph: WebSocket sends result with final data."""
         app = HushApp()
         app.endpoint("/double", graph=double_graph, websocket=True)
         client = TestClient(app.fastapi)
 
         with client.websocket_connect("/double/ws") as ws:
             ws.send_json({"inputs": {"x": 5}})
-            msg = ws.receive_json()
-            assert msg["type"] == "result"
-            assert msg["data"]["result"] == 10
+            # Read all messages until result
+            messages = []
+            while True:
+                msg = ws.receive_json()
+                messages.append(msg)
+                if msg["type"] == "result":
+                    break
+            result_msg = messages[-1]
+            assert result_msg["type"] == "result"
+            assert result_msg["data"]["result"] == 10

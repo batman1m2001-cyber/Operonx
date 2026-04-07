@@ -1,91 +1,54 @@
-"""Test that all imports work correctly."""
+"""Test that all provider imports resolve correctly and expose the expected interface."""
+
+from hush.core.utils import YamlModel
 
 
 def test_llm_imports():
-    """Test LLM provider imports."""
-    from hush.providers import (
-        BaseLLM,
-        LLMConfig,
-        LLMType,
-    )
+    from hush.providers import BaseLLM, LLMConfig, LLMType
 
-    assert BaseLLM is not None
-    assert LLMType is not None
-    assert LLMConfig is not None
-    print("✓ LLM imports successful")
+    assert hasattr(BaseLLM, "generate"), "BaseLLM must have generate()"
+    assert hasattr(BaseLLM, "stream"), "BaseLLM must have stream()"
+    assert LLMType.OPENAI.value == "openai"
+    assert issubclass(LLMConfig, YamlModel)
 
 
 def test_embedding_imports():
-    """Test embedding provider imports."""
-    from hush.providers import (
-        BaseEmbedder,
-        EmbeddingConfig,
-        EmbeddingType,
-    )
+    from hush.providers import BaseEmbedder, EmbeddingConfig, EmbeddingType
 
-    assert BaseEmbedder is not None
-    assert EmbeddingType is not None
-    assert EmbeddingConfig is not None
-    print("✓ Embedding imports successful")
+    assert hasattr(BaseEmbedder, "run"), "BaseEmbedder must have run()"
+    assert EmbeddingType.ONNX.value == "onnx"
+    assert issubclass(EmbeddingConfig, YamlModel)
 
 
 def test_reranker_imports():
-    """Test reranker provider imports."""
-    from hush.providers import (
-        BaseReranker,
-        RerankingConfig,
-        RerankingType,
-    )
+    from hush.providers import BaseReranker, RerankingConfig, RerankingType
 
-    assert BaseReranker is not None
-    assert RerankingType is not None
-    assert RerankingConfig is not None
-    print("✓ Reranker imports successful")
+    assert hasattr(BaseReranker, "run"), "BaseReranker must have run()"
+    assert RerankingType.ONNX.value == "onnx"
+    assert issubclass(RerankingConfig, YamlModel)
 
 
-def test_node_imports():
-    """Test node imports."""
-    from hush.providers import (
-        EmbeddingOp,
-        LLMOp,
-        RerankOp,
-    )
+def test_op_imports():
+    from hush.core.ops import BaseOp
 
-    assert LLMOp is not None
-    assert EmbeddingOp is not None
-    assert RerankOp is not None
-    print("✓ Node imports successful")
+    from hush.providers import EmbeddingOp, LLMOp, RerankOp
+
+    assert issubclass(LLMOp, BaseOp)
+    assert issubclass(EmbeddingOp, BaseOp)
+    assert issubclass(RerankOp, BaseOp)
 
 
 def test_config_creation():
-    """Test configuration creation."""
     from hush.providers import LLMConfig, LLMType
 
-    config_data = {
-        "api_type": "openai",
-        "api_key": "test-key",
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4",
-    }
-
-    config = LLMConfig.create_config(config_data)
+    config = LLMConfig.create_config(
+        {
+            "api_type": "openai",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4",
+        }
+    )
     assert config.api_type == LLMType.OPENAI
     assert config.api_key == "test-key"
     assert config.model == "gpt-4"
-    print("✓ Config creation successful")
-
-
-if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print(" Testing hush-providers imports ".center(60, "="))
-    print("=" * 60 + "\n")
-
-    test_llm_imports()
-    test_embedding_imports()
-    test_reranker_imports()
-    test_node_imports()
-    test_config_creation()
-
-    print("\n" + "=" * 60)
-    print(" All tests passed! ".center(60, "="))
-    print("=" * 60)

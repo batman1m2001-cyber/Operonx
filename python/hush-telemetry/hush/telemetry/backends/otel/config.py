@@ -55,7 +55,7 @@ class OTELConfig(YamlModel):
         ```python
         from hush.core.registry import get_hub
 
-        client = get_hub().otel("jaeger")
+        client = get_hub().get("otel:jaeger")
         ```
     """
 

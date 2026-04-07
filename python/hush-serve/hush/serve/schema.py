@@ -62,6 +62,15 @@ def build_response_model(graph: GraphOp) -> Type[BaseModel]:
     return create_model(model_name, **fields)
 
 
+def strip_internal_keys(d: dict) -> dict:
+    """Remove keys prefixed with '$' from a result dict.
+
+    Keys starting with '$' are internal Hush metadata (e.g. ``$tags``,
+    ``$trace_id``) and should never be exposed to API callers.
+    """
+    return {k: v for k, v in d.items() if not k.startswith("$")}
+
+
 def graph_schema_info(graph: GraphOp) -> Dict[str, Any]:
     """Return a JSON-serializable schema description for an endpoint."""
     inputs = {}

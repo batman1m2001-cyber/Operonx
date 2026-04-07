@@ -6,11 +6,13 @@ import traceback
 import uuid
 from abc import ABC
 from datetime import datetime, timezone
+from logging import ERROR, INFO, WARNING
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event, format_log_data
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
+from hush.core.states.cell import DEFAULT_CONTEXT
 from hush.core.states.ref import Ref
 from hush.core.utils.auto_name import auto_name, unique_name
 from hush.core.utils.common import Param
@@ -20,44 +22,13 @@ if TYPE_CHECKING:
     from hush.core.states import MemoryState
 
 
-def _has_explicit_outputs(op) -> bool:
-    """Check whether the op has user-defined explicit output mappings.
-
-    Returns True if any output Param has a non-None value (user-set).
-    Returns False if outputs are absent, empty, or all auto-parsed.
-    """
-    if not hasattr(op, "outputs") or op.outputs is None:
-        return False
-    if len(op.outputs) == 0:
-        return False
-    for param in op.outputs.values():
-        if hasattr(param, "value") and param.value is not None:
-            return True
-    return False
-
-
-def _set_wildcard_outputs(target_op):
-    """Auto-set wildcard outputs for ops connecting to END.
-
-    For each output key with no explicit value, sets it to Ref(parent, key)
-    so the op's outputs are automatically forwarded to the parent graph.
-    """
-    if hasattr(target_op, "outputs") and not _has_explicit_outputs(target_op):
-        if target_op.outputs is None:
-            target_op.outputs = {}
-        parent_op = getattr(target_op, "parent", None) or PARENT
-        for key in target_op.outputs:
-            param = target_op.outputs[key]
-            if hasattr(param, "value") and param.value is None:
-                param.value = Ref(parent_op, key)
-
-
 # Re-export shorthand utilities for backward compatibility
 from hush.core.ops._shortcuts import (  # noqa: F401, E402
     _BASE_INIT_KEYS,
     shorthand,
     split_shorthand_kwargs,
 )
+from hush.core.ops._utils import _has_explicit_outputs, _set_wildcard_outputs  # noqa: F401, E402
 
 
 class BaseOp(ABC):
@@ -109,17 +80,19 @@ class BaseOp(ABC):
         "parent",
         "contain_generation",
         "enabled",
-        "executor",
         "bound",
         "cache",
         "delay",
+        "is_gen",
+        "_input_cache",
+        "_metrics_idx",
+        "_error_idx",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
     _cache_stores: Dict[str, tuple] = {}
 
-    _VALID_EXECUTORS = (None, "thread")
-    _VALID_BOUNDS = (None, "io", "cpu")
+    _VALID_BOUNDS = (None, "sync", "io", "cpu")
 
     def __init__(
         self,
@@ -141,12 +114,17 @@ class BaseOp(ABC):
         cache: Union[bool, str, None] = None,
         delay: float = 0,
     ):
-        if executor not in self._VALID_EXECUTORS:
-            raise ValueError(f"executor must be 'thread', 'process', or None, got {executor!r}")
+        # Backward compat: executor="thread" → bound="cpu"
+        if executor == "thread" and bound is None:
+            bound = "cpu"
         if bound not in self._VALID_BOUNDS:
-            raise ValueError(f"bound must be 'io', 'cpu', or None (auto-detect), got {bound!r}")
-        self.executor = executor
-        self.bound = bound
+            raise ValueError(
+                f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}"
+            )
+        self.bound = bound  # resolved to concrete value by _set_core()
+        self._input_cache = None  # built on first get_inputs() call
+        self._metrics_idx = None  # (schema, st_idx, et_idx, dur_idx)
+        self._error_idx = None  # (schema, err_idx)
         self.cache = cache
         self.delay = delay
         self.id = id or uuid.uuid4().hex
@@ -166,6 +144,7 @@ class BaseOp(ABC):
         self.targets: List[str] = targets or []
 
         self.core: Optional[Callable] = None
+        self.is_gen: bool = False
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
         self.parent = get_current()
@@ -206,6 +185,22 @@ class BaseOp(ABC):
     ) -> Dict[str, Param]:
         """Merge schema (from parsing) with user-provided inputs/outputs."""
         return merge_params(schema, user_provided, self.parent)
+
+    def _init_io(
+        self,
+        input_schema: Dict[str, Param],
+        output_schema: Dict[str, Param],
+        inputs: Any,
+        outputs: Any,
+    ) -> None:
+        """Normalise and merge parsed I/O schema with user-provided mappings.
+
+        Called by concrete op ``__init__`` implementations after
+        ``super().__init__(**kwargs)`` to set ``self.inputs`` and
+        ``self.outputs`` in one step.
+        """
+        self.inputs = self._merge_params(input_schema, self._normalize_params(inputs))
+        self.outputs = self._merge_params(output_schema, self._normalize_params(outputs))
 
     # =========================================================================
     # 1. INIT — identity, params, parent registration
@@ -330,60 +325,89 @@ class BaseOp(ABC):
             self.build()
 
         state = MemoryState(StateSchema(op=self), inputs=kwargs)
+
+        async def _collect():
+            result = {}
+            async for _, result in self.run(state):
+                pass
+            return result
+
         try:
             asyncio.get_running_loop()
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = pool.submit(asyncio.run, self.run(state)).result()
+                result = pool.submit(asyncio.run, _collect()).result()
         except RuntimeError:
-            result = asyncio.run(self.run(state))
+            result = asyncio.run(_collect())
         return result
 
-    def is_base_op(self) -> bool:
-        return True
+    def warmup(self) -> None:
+        """Called by Hush engine after graph.build() when a ResourceHub is available.
 
-    def get_inputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
-    ) -> Dict[str, Any]:
+        Override in provider ops (LLMOp, EmbeddingOp, etc.) to eagerly initialize
+        backends and eliminate cold-start latency on the first user request.
+
+        The default implementation is a no-op — subclasses opt in by overriding.
+        """
+
+    def get_inputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
 
-        Args:
-            state: Workflow state.
-            context_id: Context of this op.
-            parent_context: Context used to resolve PARENT refs (for iteration ops).
+        Uses cached cell indices to avoid per-call schema.get_index() lookups.
+        Falls back to standard path on first call to build the cache.
         """
+        # Fast path: use cached indices to skip schema.get_index() dict lookup.
+        # Cache is keyed by schema id since indices differ per schema.
+        cached = self._input_cache
+        if cached is not None and cached[0] is state.schema:
+            result = {}
+            cells = state._cells
+            pull_refs = state.schema._pull_refs
+            for var_name, idx, fallback in cached[1]:
+                # Inline the hot path of state.__getitem__ without _unpack_key + get_index
+                cell = cells[idx]
+                if cell.is_shared or context_id in cell:
+                    value = cell[context_id]
+                else:
+                    pull_ref = pull_refs[idx]
+                    if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
+                        source_val = cells[pull_ref.idx][context_id]
+                        if source_val is not None or cells[pull_ref.idx].default_value is not None:
+                            value = pull_ref._fn(source_val)
+                            cell[context_id] = value
+                        else:
+                            value = cell.default_value
+                    else:
+                        value = cell[context_id]  # hierarchy walk
+                if value is not None:
+                    result[var_name] = value
+                elif fallback is not None:
+                    result[var_name] = fallback
+            return result
+
+        # First call (or schema changed): build index cache
+        entries = []
         result = {}
-
+        full_name = self.full_name
         for var_name, param in self.inputs.items():
-            # PARENT refs use parent_context (for loop iterations); everything else
-            # uses context_id directly — Cell hierarchy fallback handles batch resolution.
-            if (
-                parent_context is not None
-                and isinstance(param.value, Ref)
-                and param.value.raw_source is self.parent
-            ):
-                lookup_ctx = parent_context
-            else:
-                lookup_ctx = context_id
+            idx = state.schema.get_index(full_name, var_name)
+            fallback = None
+            if param.value is not None and not isinstance(param.value, Ref):
+                fallback = param.value
+            elif param.default is not None:
+                fallback = param.default
+            entries.append((var_name, idx, fallback))
 
-            # Always read from state first (may have value from MemoryState inputs or Ref)
-            value = state[self.full_name, var_name, lookup_ctx]
-
+            value = state[full_name, var_name, context_id]
             if value is not None:
                 result[var_name] = value
-            elif param.value is not None and not isinstance(param.value, Ref):
-                # Fallback: literal value in Param.value
-                result[var_name] = param.value
-            elif param.default is not None:
-                # Fallback: default value
-                result[var_name] = param.default
-
+            elif fallback is not None:
+                result[var_name] = fallback
+        self._input_cache = (state.schema, entries)
         return result
 
-    def get_outputs(
-        self, state: "MemoryState", context_id: str, parent_context: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def get_outputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Read output values from state.
 
         Reads directly from this op's output variables. Output connections
@@ -393,7 +417,6 @@ class BaseOp(ABC):
         Args:
             state: Workflow state.
             context_id: Context of this op.
-            parent_context: Context of PARENT (for API consistency).
         """
         return {var: state[self.full_name, var, context_id] for var in self.outputs}
 
@@ -483,7 +506,7 @@ class BaseOp(ABC):
         from pathlib import Path
 
         total = 0
-        for op_name, (path, store) in BaseOp._cache_stores.items():
+        for _, (path, store) in BaseOp._cache_stores.items():
             if not path or not store:
                 continue
             p = Path(path)
@@ -514,7 +537,7 @@ class BaseOp(ABC):
     ) -> None:
         """Log execution summary with inputs, outputs, and duration."""
         # Check both verbose flag and logger level before formatting
-        if self.verbose and LOGGER.isEnabledFor(20):  # 20 = INFO level
+        if self.verbose and LOGGER.isEnabledFor(INFO):
             msg = format_event(
                 "op_done",
                 request_id=request_id or "unknown",
@@ -538,50 +561,90 @@ class BaseOp(ABC):
         end_time: Optional[datetime] = None,
         duration_ms: float = 0,
     ) -> None:
-        """Store execution metrics (timing) to state."""
-        state[self.full_name, "start_time", context_id] = start_time
-        state[self.full_name, "end_time", context_id] = end_time
-        state[self.full_name, "duration_ms", context_id] = duration_ms
-
-    async def _exec_core(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Dispatch core function based on its type (async, threaded, sync).
-
-        Rejects generator functions — those must be driven by the
-        GraphOp scheduler, not called directly.
-        """
-        if inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core):
-            raise TypeError(
-                f"Generator op '{self.name}' cannot be called via run() directly. "
-                "Use it inside a GraphOp where the scheduler drives the generator."
-            )
-
-        if inspect.iscoroutinefunction(self.core):
-            return await self.core(**inputs)
-        elif self.executor == "thread":
-            return await asyncio.to_thread(self.core, **inputs)
+        """Store execution metrics (timing) to state via cached indices."""
+        cached = self._metrics_idx
+        if cached is not None and cached[0] is state.schema:
+            _, st_idx, et_idx, dur_idx = cached
         else:
-            return self.core(**inputs)
+            fn = self.full_name
+            st_idx = state.schema.get_index(fn, "start_time")
+            et_idx = state.schema.get_index(fn, "end_time")
+            dur_idx = state.schema.get_index(fn, "duration_ms")
+            self._metrics_idx = (state.schema, st_idx, et_idx, dur_idx)
+
+        ctx = context_id if context_id is not None else DEFAULT_CONTEXT
+        cells = state._cells
+        if st_idx >= 0:
+            cells[st_idx][ctx] = start_time
+        if et_idx >= 0:
+            cells[et_idx][ctx] = end_time
+        if dur_idx >= 0:
+            cells[dur_idx][ctx] = duration_ms
+
+    def _set_core(self, fn: Callable) -> None:
+        """Assign core function and resolve bound to a concrete value.
+
+        bound resolution (when None):
+          - async coroutine / async generator → "io"
+          - sync function / sync generator   → "sync"
+        """
+        self.core = fn
+        self.is_gen = inspect.isasyncgenfunction(fn) or inspect.isgeneratorfunction(fn)
+        if self.bound is None and fn is not None:
+            is_async = inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
+            self.bound = "io" if is_async else "sync"
+
+    async def _exec_core(self, inputs: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
+        """Unified dispatch — yields one result for normal ops, N for generators.
+
+        Dispatch is based on ``self.bound`` (resolved by ``_set_core``):
+          - ``"sync"``: direct call, no await (fastest path)
+          - ``"io"``:   await coroutine / async generator
+          - ``"cpu"``:  ``asyncio.to_thread()`` for sync, await for async
+        """
+        core_fn = self.core
+        if self.bound == "sync":
+            if self.is_gen:
+                for result in core_fn(**inputs):
+                    yield result
+            else:
+                yield core_fn(**inputs)
+        elif self.bound == "cpu" and not self.is_gen and not inspect.iscoroutinefunction(core_fn):
+            yield await asyncio.to_thread(core_fn, **inputs)
+        elif self.is_gen:
+            async for result in core_fn(**inputs):
+                yield result
+        else:
+            yield await core_fn(**inputs)
 
     async def run(
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Execute this op.
+    ):
+        """Execute this op as a uniform async generator.
 
-        Args:
-            state: Workflow state.
-            context_id: Context for this op's own variables.
-            parent_context: Context used to resolve PARENT refs.
+        Every op — whether it uses ``return`` or ``yield`` — is driven through
+        the same three-layer model:
+
+        1. **User function** (``@op``): plain ``return {"k": v}`` or ``yield {"k": v}``.
+           No awareness of Frame/EOF.
+        2. **``BaseOp.run()``** (this method): wraps the user function via
+           ``_exec_core()`` into a uniform async generator that yields
+           ``(context_id, result)`` tuples.  Normal op → one yield.
+           Generator op → N yields, each in its own stream context ``[i]``.
+        3. **``Scheduler._pump()``**: consumes this generator.  Each yield becomes
+           a ``Frame`` event on the queue; when the generator exhausts naturally,
+           ``_pump`` emits one ``EOF`` event.  The user never writes Frame or EOF.
+
+        Yields:
+            ``(context_id, result)`` — one tuple per item produced by the op.
         """
-        # Skip disabled ops
         if not self.enabled:
-            LOGGER.debug("Skipped disabled op: %s", self.full_name)
-            return {}
+            return
 
-        request_id = state.request_id
-        start_time = datetime.now(timezone.utc)
+        _tracing = state.tracing
+        start_time = datetime.now(timezone.utc) if _tracing else None
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
@@ -591,46 +654,50 @@ class BaseOp(ABC):
             if self.delay > 0:
                 await asyncio.sleep(self.delay)
 
-            _inputs = self.get_inputs(state, context_id, parent_context)
+            _inputs = self.get_inputs(state, context_id)
 
-            # Op-level cache check
-            _cache_hit = False
+            # Cache check
             if self.cache is not None:
                 _cache_key = self._cache_hash(_inputs)
                 _cache_store = self._get_cache_store()
                 if _cache_key in _cache_store:
                     _outputs = _cache_store[_cache_key]
-                    _cache_hit = True
+                    self.store_result(state, _outputs, context_id)
+                    yield context_id, _outputs
+                    return
 
-            if not _cache_hit:
-                _outputs = await self._exec_core(_inputs)
-                # Store in cache
-                if self.cache is not None:
-                    _cache_store[_cache_key] = _outputs
-
-            self.store_result(state, _outputs, context_id)
+            base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
+            idx = 0
+            async for result in self._exec_core(_inputs):
+                ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
+                self.store_result(state, result, ctx)
+                _outputs = result
+                if not self.is_gen and self.cache is not None:
+                    _cache_store[_cache_key] = result
+                yield ctx, result
+                idx += 1
 
         except Exception:
             import sys
 
             error_msg = (
                 traceback.format_exc()
-                if LOGGER.isEnabledFor(40)
+                if LOGGER.isEnabledFor(ERROR)
                 else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             )
             LOGGER.error(
                 format_event(
                     "op_error",
-                    request_id=request_id or "unknown",
+                    request_id=state.request_id or "unknown",
                     name=self.name,
                     error=error_msg.rstrip(),
                 ),
             )
 
         finally:
-            end_time = datetime.now(timezone.utc)
             duration_ms = (perf_counter() - perf_start) * 1000
-            self._log(request_id, context_id, _inputs, _outputs, duration_ms)
+            end_time = datetime.now(timezone.utc) if _tracing else None
+
             self._store_metrics(
                 state,
                 context_id,
@@ -638,26 +705,33 @@ class BaseOp(ABC):
                 end_time=end_time,
                 duration_ms=duration_ms,
             )
-            # Store error in state only if op didn't already set it via outputs.
-            # Ops like ParserOp return {"error": "..."} as normal output —
-            # don't overwrite that with None.
-            if error_msg is not None:
-                state[self.full_name, "error", context_id] = error_msg
-            elif "error" not in _outputs:
-                state[self.full_name, "error", context_id] = None
 
-            # Performance monitoring: log slow ops (>100ms)
-            if duration_ms > 100 and LOGGER.isEnabledFor(30):
+            # Write error state via cached index
+            err_cached = self._error_idx
+            if err_cached is not None and err_cached[0] is state.schema:
+                err_idx = err_cached[1]
+            else:
+                err_idx = state.schema.get_index(self.full_name, "error")
+                self._error_idx = (state.schema, err_idx)
+            if err_idx >= 0:
+                ctx_key = context_id if context_id is not None else DEFAULT_CONTEXT
+                if error_msg is not None:
+                    state._cells[err_idx][ctx_key] = error_msg
+                elif "error" not in _outputs:
+                    state._cells[err_idx][ctx_key] = None
+
+            if _tracing:
+                self._log(state.request_id, context_id, _inputs, _outputs, duration_ms)
+
+            if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(
                     format_event(
                         "op_slow",
-                        request_id=request_id or "unknown",
+                        request_id=state.request_id or "unknown",
                         full_name=self.full_name,
                         duration_ms=f"{duration_ms:.1f}",
                     ),
                 )
-
-            return _outputs
 
     # =========================================================================
     # 5. SERIALIZATION — for Rust backend and tracing
@@ -667,8 +741,6 @@ class BaseOp(ABC):
         """Serialize this op to a config dict for the Rust backend."""
         is_async = inspect.iscoroutinefunction(self.core)
         is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
-        # Resolve bound: instance attr > function attr > auto-detect (async→io, sync→default)
-        bound = self.bound or getattr(self.core, "_op_bound", None) or ("io" if is_async else None)
         base = {
             "type": self.type,
             "full_name": self.full_name,
@@ -677,11 +749,10 @@ class BaseOp(ABC):
             "python_callable": self.core,
             "is_async": is_async,
             "is_generator": is_gen,
-            "executor": self.executor,
             "enabled": self.enabled,
             "verbose": self.verbose,
             "stream": self.stream,
-            "bound": bound,
+            "bound": self.bound,
             "inputs": self._serialize_params(self.inputs),
             "outputs": self._serialize_params(self.outputs),
         }

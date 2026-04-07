@@ -60,16 +60,15 @@ class BranchOp(BaseOp):
         # Call super().__init__ without inputs/outputs
         super().__init__(**kwargs)
 
-        # Merge parsed with user-provided
-        self.inputs = self._merge_params(parsed_inputs, inputs)
-        self.outputs = self._merge_params(parsed_outputs, outputs)
+        # Merge parsed schema with user-provided
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
-        self.default = default.name if hasattr(default, "is_base_op") else default
+        self.default = default.name if isinstance(default, BaseOp) else default
         self.given_candidates = candidates
         self.cases = cases or []
         self._case_descriptions = [ref.describe() for ref, _ in self.cases]
 
-        self.core = self._create_core_function()
+        self._set_core(self._create_core_function())
 
     def _parse_cases(self, cases: List[Tuple[Ref, str]]) -> tuple:
         """Parse inputs/outputs from cases.
@@ -93,7 +92,11 @@ class BranchOp(BaseOp):
                     inputs[var_name] = Param(required=True, value=base_ref)
 
         # Outputs
-        outputs = {"target": Param(type=str, required=True), "matched": Param(type=str)}
+        outputs = {
+            "target": Param(type=str, required=True),
+            "matched": Param(type=str),
+            "__branch_target__": Param(type=str),
+        }
 
         return inputs, outputs
 
@@ -116,10 +119,10 @@ class BranchOp(BaseOp):
         def core(**inputs) -> Dict[str, str]:
             anchor = inputs.get("anchor")
             if anchor:
-                return {"target": anchor, "matched": "anchor"}
+                return {"target": anchor, "matched": "anchor", "__branch_target__": anchor}
 
             target, matched = self._evaluate_conditions(inputs)
-            return {"target": target, "matched": matched}
+            return {"target": target, "matched": matched, "__branch_target__": target}
 
         return core
 

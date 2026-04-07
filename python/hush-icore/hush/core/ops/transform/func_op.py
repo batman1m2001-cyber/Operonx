@@ -5,7 +5,7 @@ import inspect
 import textwrap
 import warnings
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
 from hush.core.configs.op_config import OpType
 from hush.core.exceptions import CodeError
@@ -34,31 +34,27 @@ def op(
         def double(x: int):
             return {"result": x * 2}
 
-        @op(executor="thread")
-        def fetch(url: str):
-            return {"data": requests.get(url).json()}
+        @op(bound="cpu")
+        def heavy_compute(data: list):
+            return {"result": process(data)}
 
         @op(bound="io")
         async def call_api(url: str):
             return {"data": await fetch(url)}
 
-        @op(bound="cpu")
-        def heavy_compute(data: list):
-            return {"result": process(data)}
-
     Args:
-        executor: How to run sync functions. ``None`` (default) runs on
-            the event loop, ``"thread"`` uses a thread pool.
-        bound: Execution bound hint for the scheduler. ``"io"`` for I/O-bound
-            ops (HTTP, LLM calls, embeddings) — uses tokio async scheduling.
-            ``"cpu"`` for CPU-bound ops (computation) — uses rayon threads.
-            ``None`` auto-detects: async → ``"io"``, sync → ``"cpu"``.
+        bound: Execution bound hint for the scheduler.
+            ``None`` (default) auto-detects: async → ``"io"``, sync → ``"sync"``.
+            ``"sync"``  — inline dispatch, no asyncio task (fastest).
+            ``"io"``    — asyncio task, for network/disk I/O.
+            ``"cpu"``   — asyncio.to_thread(), for heavy compute (C extensions release GIL).
+        executor: Deprecated — use ``bound="cpu"`` instead of ``executor="thread"``.
     """
+    # Backward compat: executor="thread" → bound="cpu"
+    if executor == "thread" and bound is None:
+        bound = "cpu"
 
     def decorator(fn):
-        # Module-qualified func_name: "ex05_loops_and_branches.workflow.each_item"
-        # Uses full __module__ path (no stripping) — matches Rust's module_path!()
-        # which also keeps the full path after stripping the crate name.
         module = fn.__module__ or ""
         if module in ("__main__", "") or "." not in module:
             fn._func_name = fn.__name__
@@ -84,13 +80,14 @@ def op(
         @wraps(fn)
         def wrapper(**kwargs):
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
-            # Call-time overrides decoration-time defaults
-            op_executor = init_kwargs.pop("executor", executor)
             op_bound = init_kwargs.pop("bound", bound)
+            # Backward compat: call-time executor="thread" → bound="cpu"
+            op_executor = init_kwargs.pop("executor", None)
+            if op_executor == "thread" and op_bound is None:
+                op_bound = "cpu"
             op_delay = init_kwargs.pop("delay", delay)
             return FuncOp(
                 code_fn=fn,
-                executor=op_executor,
                 bound=op_bound,
                 delay=op_delay,
                 _mappings=mappings or None,
@@ -104,7 +101,7 @@ def op(
     if func is not None:
         # @op without parentheses
         return decorator(func)
-    # @op(executor="thread") with parentheses
+    # @op(bound="cpu") with parentheses
     return decorator
 
 
@@ -360,16 +357,11 @@ class FuncOp(BaseOp):
         # Gọi super().__init__ không truyền inputs/outputs
         super().__init__(**kwargs)
 
-        # Normalize user-provided inputs/outputs first (handles {"*": PARENT} wildcard)
-        normalized_inputs = self._normalize_params(inputs)
-        normalized_outputs = self._normalize_params(outputs)
-
-        # Merge parsed schema với normalized inputs/outputs
-        self.inputs = self._merge_params(parsed_inputs, normalized_inputs)
-        self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
+        # Merge parsed schema with user-provided (handles {"*": PARENT} wildcard)
+        self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.code_fn = code_fn
-        self.core = code_fn
+        self._set_core(code_fn)
 
         # Lấy source code
         try:
@@ -418,19 +410,20 @@ class FuncOp(BaseOp):
         self,
         state: "MemoryState",
         context_id: Optional[str] = None,
-        parent_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Thực thi FuncOp với error wrapping.
+    ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
+        """Execute FuncOp with CodeError wrapping.
 
-        Override để wrap exceptions trong CodeError với context đầy đủ.
+        Delegates to ``BaseOp.run()`` (async generator) and re-raises any
+        exception as a ``CodeError`` with full op context attached.
         """
         try:
-            return await super().run(state, context_id, parent_context)
+            async for ctx, result in super().run(state, context_id):
+                yield ctx, result
         except CodeError:
             raise  # Đã wrapped, không wrap lại
         except Exception as e:
             # Lấy inputs để có context cho error
-            _inputs = self.get_inputs(state, context_id, parent_context)
+            _inputs = self.get_inputs(state, context_id)
             raise CodeError(
                 message=f"Function '{self.code_fn.__name__ if self.code_fn else 'unknown'}' raised an exception",
                 function_name=self.code_fn.__name__ if self.code_fn else "unknown",

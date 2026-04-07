@@ -17,6 +17,10 @@ from hush.core.tracing import LocalTracer
 
 from ex06_tracing.local.workflow import build_text_analyzer
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
+
 
 async def main():
     print("=" * 50)
@@ -24,7 +28,7 @@ async def main():
     print("=" * 50)
 
     tracer = LocalTracer(tags=["tutorial", "tracing-demo"])
-    engine = Hush(build_text_analyzer(), tracer=tracer)
+    engine = Hush(build_text_analyzer(), env=ENV_FILE, resources=RESOURCES_FILE, tracer=tracer)
 
     result = await engine.run(
         inputs={"text": "Hush la async workflow engine cho GenAI applications"},

@@ -48,8 +48,6 @@ class PromptOp(BaseOp):
         )
     """
 
-    __slots__ = []
-
     type: OpType = "prompt"
 
     # Fixed input schema - only reserved keys
@@ -105,7 +103,7 @@ class PromptOp(BaseOp):
         self.outputs = self._merge_params(parsed_outputs, normalized_outputs)
 
         # Set core function
-        self.core = self._format
+        self._set_core(self._format)
 
     def _resolve_wildcard_source(self, wildcard_source):
         """Resolve PARENT sentinel to actual parent op."""

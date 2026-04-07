@@ -18,7 +18,7 @@ Example:
     import hush.telemetry
 
     from hush.core.registry import get_hub
-    client = get_hub().langfuse("default")
+    client = get_hub().get("langfuse:default")
     ```
 """
 

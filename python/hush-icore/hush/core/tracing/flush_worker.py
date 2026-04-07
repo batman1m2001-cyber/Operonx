@@ -48,6 +48,7 @@ class FlushWorker:
             Future that resolves when flush completes. Call .result() to
             re-raise any exception from the background thread.
         """
+        self._futures = [f for f in self._futures if not f.done()]
         future = self._executor.submit(self._collect_and_flush, tracers, collector, state)
         self._futures.append(future)
         return future

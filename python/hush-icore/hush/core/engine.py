@@ -25,17 +25,209 @@ import asyncio
 import json
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event
 from hush.core.middleware import Middleware
 from hush.core.ops.graph.graph_op import GraphOp
 from hush.core.states import StateSchema
-from hush.core.utils.context import _output_queue
 
 if TYPE_CHECKING:
+    from hush.core.ops.base import BaseOp
     from hush.core.registry import ResourceHub
     from hush.core.tracing import Tracer
+
+
+_MISSING = object()
+
+
+class ExecutionHandle:
+    """Async-iterable handle for a running workflow execution.
+
+    Usage::
+
+        handle = engine.start(inputs={"text": "hello"})
+
+        # Stream every frame as it arrives (one per op yield)
+        async for op, ctx, data in handle:
+            print(op, data)
+
+        # Wait for a specific output
+        answer = await handle["llm", "content"]
+
+        # Collect all outputs grouped by key (lists)
+        outputs = await handle.collect()
+
+        # Collect with single-value unwrapping
+        outputs = await handle.collect(unwrap=True)
+
+        # Collect as flat list of frame dicts
+        frames = await handle.collect("flat")
+    """
+
+    def __init__(self, queue: asyncio.Queue, task: asyncio.Task, state: Any = None) -> None:
+        self._queue = queue  # fed by root Scheduler
+        self._scheduler_task = task  # task running the workflow
+        self.state = state  # MemoryState for this execution (tracing access)
+        self._frames: list[tuple[str, Any, dict[str, Any]]] = []
+        self._idx: int = 0  # index for __anext__, tracks how many frames have been consumed
+        self._done: bool = False  # becomes True when the execution is complete
+        self._error: BaseException | None = None  # set if the execution raises an error
+        self._cond = asyncio.Condition()
+        self._waiters: dict[tuple[str, str], list[asyncio.Future[Any]]] = {}
+        self._pump_task = asyncio.create_task(self._pump())
+
+    # ---background drain-------------------------------------------------------------
+    async def _pump(self) -> None:
+        """Drain queue -> _frames, resolve waiters."""
+        try:
+            while True:
+                item = await self._queue.get()
+                async with self._cond:
+                    if item is None:
+                        self._done = True
+                        self._resolve_all_waiters(None)
+                        self._cond.notify_all()
+                        return
+                    if isinstance(item, BaseException):
+                        self._error = item
+                        self._done = True
+                        self._resolve_all_waiters(item)
+                        self._cond.notify_all()
+                        return
+                    op, ctx, data = item
+                    self._frames.append(item)
+                    self._cond.notify_all()
+                    self._match_waiters(op, data)
+        except Exception as exc:
+            async with self._cond:
+                self._error = exc
+                self._done = True
+                self._resolve_all_waiters(exc)
+                self._cond.notify_all()
+
+    def _resolve_all_waiters(self, exc: BaseException | None) -> None:
+        """Resolve or reject every pending future, then clear."""
+        for futs in self._waiters.values():
+            for fut in futs:
+                if fut.done():
+                    continue
+                if exc is None:
+                    fut.set_result(_MISSING)
+                else:
+                    fut.set_exception(exc)
+        self._waiters.clear()
+
+    def _match_waiters(self, op: str, data: dict[str, Any]) -> None:
+        """Check if any waiters are waiting for this op's outputs, and resolve them."""
+        for var, val in data.items():
+            key = (op, var)
+            if key in self._waiters:
+                for fut in self._waiters.pop(key, []):
+                    if not fut.done():
+                        fut.set_result(val)
+
+    # ---async iteration----------------------------------------------------------------
+    def __aiter__(self) -> "ExecutionHandle":
+        return self
+
+    async def __anext__(self) -> tuple[str, Any, dict[str, Any]]:
+        """Yield the next frame (op, ctx, data) as it arrives. Waits if no frames are available yet."""
+        async with self._cond:
+            while self._idx >= len(self._frames):
+                if self._done:
+                    if self._error:
+                        raise self._error
+                    raise StopAsyncIteration
+                await self._cond.wait()
+            frame = self._frames[self._idx]
+            self._idx += 1
+            return frame
+
+    # ---point query----------------------------------------------------------------------
+    def __getitem__(self, key: tuple[str, str]):
+        """Return awaitable for the last value of (op, var)"""
+        op, var = key
+        return self._await_output(op, var)  # caller does: val = await handle["op", "var"]
+
+    async def _await_output(self, op: str, var: str) -> Any:
+        async with self._cond:
+            # scan buffered frames (last value wins)
+            last: Any = _MISSING
+            for f_op, _, data in self._frames:
+                if f_op == op and var in data:
+                    last = data[var]
+            if last is not _MISSING:
+                return last
+            if self._done:
+                if self._error:
+                    raise self._error
+                return None
+
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future[Any] = loop.create_future()
+            self._waiters.setdefault((op, var), []).append(fut)
+
+        val = await fut
+        return None if val is _MISSING else val
+
+    # ---convenience-----------------------------------------------------------------------
+    @property
+    def frame_count(self) -> int:
+        """Number of frames received so far."""
+        return len(self._frames)
+
+    async def collect(
+        self, mode: str = "group", unwrap: bool = False
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        """Consume all frames and return collected output.
+
+        Args:
+            mode: ``"group"`` merges values by key into lists (default).
+                  ``"flat"`` returns an ordered list of frame dicts.
+            unwrap: When *True*, single-item lists become scalars.
+        """
+        if mode == "flat":
+            frames: list[dict[str, Any]] = []
+            async for _, _, data in self:
+                frames.append(data)
+            return frames
+
+        # mode == "group"
+        out: dict[str, list[Any]] = {}
+        async for _, _, data in self:
+            for k, v in data.items():
+                out.setdefault(k, []).append(v)
+
+        if unwrap:
+            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
+        return out
+
+    async def result(self, unwrap: bool = True) -> Dict[str, Any]:
+        """Build result from all buffered frames (does not consume).
+
+        Safe to call after ``async for`` iteration — reads from the
+        internal buffer rather than re-iterating.
+        """
+        # Wait for execution to complete if still running
+        if not self._done:
+            async with self._cond:
+                while not self._done:
+                    await self._cond.wait()
+        if self._error:
+            raise self._error
+        out: dict[str, list[Any]] = {}
+        for _, _, data in self._frames:
+            for k, v in data.items():
+                out.setdefault(k, []).append(v)
+        if unwrap:
+            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
+        return out
+
+    def cancel(self) -> None:
+        """Cancel the workflow execution."""
+        self._scheduler_task.cancel()
+        self._pump_task.cancel()
 
 
 class Hush:
@@ -121,10 +313,34 @@ class Hush:
         self._collector = TraceCollector(self.graph)
         self._middleware: List[Middleware] = []
 
+        # Eagerly init backends if a hub is already configured
+        self._warmup_ops()
+
         LOGGER.debug(
             "Hush engine initialized for workflow [highlight]%s[/highlight]",
             self.name,
         )
+
+    def _warmup_ops(self) -> None:
+        """Eagerly initialize all provider ops if a ResourceHub is available.
+
+        Skips silently when no hub is configured (ops stay lazy). Called once
+        from ``__init__`` after ``graph.build()`` so every op is fully wired.
+        """
+        from hush.core.registry.shortcuts.global_hub import _get_global_hub
+
+        if _get_global_hub() is None:
+            return
+        for op in self._iter_all_ops(self.graph):
+            op.warmup()
+
+    @staticmethod
+    def _iter_all_ops(graph: GraphOp) -> Iterator["BaseOp"]:
+        """Yield every op in *graph* recursively (depth-first)."""
+        for op in graph._ops.values():
+            yield op
+            if isinstance(op, GraphOp):
+                yield from Hush._iter_all_ops(op)
 
     @staticmethod
     def _load_env(env: Union[str, bool]) -> None:
@@ -184,6 +400,80 @@ class Hush:
         self._middleware.append(middleware)
         return self
 
+    def start(
+        self,
+        inputs: Dict[str, Any],
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+    ) -> "ExecutionHandle":
+        """Start workflow execution and return a streaming handle immediately.
+
+        Does not block — the graph runs in the background. Use the handle to
+        stream frames, await specific outputs, or collect the final result.
+
+        Tracer flush happens automatically when the scheduler completes — no
+        explicit finalize step needed.
+
+        Args:
+            inputs: Input data for the workflow
+            user_id: Optional user identifier (auto-generated if not provided)
+            session_id: Optional session identifier (auto-generated if not provided)
+            request_id: Optional request identifier (auto-generated if not provided)
+            tracer: Optional tracer(s) — overrides engine default for this execution.
+
+        Returns:
+            ExecutionHandle — async-iterable, supports ``await handle["op","var"]``
+            and ``await handle.collect()``
+        """
+        user_id = user_id or str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
+
+        # Resolve tracers: per-call overrides engine default
+        effective = tracer if tracer is not None else self._tracer
+        tracers = (effective if isinstance(effective, list) else [effective]) if effective else []
+
+        state = self._schema.create_state(
+            inputs=inputs,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+        )
+        state.tracing = bool(tracers)  # skip per-op metrics/datetime when no tracer
+
+        LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
+
+        # Capture references for the closure
+        collector = self._collector
+        graph_name = self.name
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run() -> None:
+            try:
+                await self.graph._scheduler.run(state, ("main",), output_queue=queue)
+            except Exception as e:
+                queue.put_nowait(e)
+            except asyncio.CancelledError:
+                queue.put_nowait(None)
+                raise
+            finally:
+                # Flush tracers in background thread (fire-and-forget).
+                # State is complete at this point — safe to collect traces.
+                if tracers:
+                    from hush.core.tracing import get_flush_worker
+
+                    get_flush_worker().submit(tracers, collector, state)
+                LOGGER.info(
+                    format_event("workflow_done", request_id=request_id, graph_name=graph_name)
+                )
+
+        scheduler_task = asyncio.create_task(_run())
+        return ExecutionHandle(queue, scheduler_task, state)
+
     async def run(
         self,
         inputs: Dict[str, Any],
@@ -196,7 +486,13 @@ class Hush:
         """Execute the workflow with given inputs.
 
         Each call creates a fresh state, so the same engine can be
-        used for multiple independent executions.
+        used for multiple independent executions.  Equivalent to::
+
+            handle = engine.start(inputs, tracer=tracer, ...)
+            result = await handle.collect(unwrap=True)
+
+        Tracer flush happens automatically inside ``start()`` when the
+        scheduler completes.
 
         Args:
             inputs: Input data for the workflow
@@ -210,28 +506,9 @@ class Hush:
             Dictionary containing workflow outputs plus "$state" key
             with the MemoryState for debugging/tracing access.
         """
-        # Deprecation: per-run tracer= will be removed in a future version
-        if tracer is not None:
-            import warnings
-
-            warnings.warn(
-                "Passing tracer= to run() is deprecated. "
-                "Use Hush(graph, tracer=...) or engine.use(tracer) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Generate IDs if not provided
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
-
-        # Resolve tracers: per-run overrides engine default
-        effective = tracer if tracer is not None else self._tracer
-        if effective is not None:
-            tracers = effective if isinstance(effective, list) else [effective]
-        else:
-            tracers = []
 
         context: Dict[str, Any] = {
             "user_id": user_id,
@@ -243,141 +520,28 @@ class Hush:
         for mw in self._middleware:
             inputs = await mw.before_run(self.graph, inputs, context)
 
-        LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
-
-        # Create fresh state for this run
-        state = self._schema.create_state(
-            inputs=inputs,
+        handle = self.start(
+            inputs,
             user_id=user_id,
             session_id=session_id,
             request_id=request_id,
+            tracer=tracer,
         )
 
-        # Execute the graph
         try:
-            result = await self.graph.run(state)
+            result = await handle.collect(unwrap=True)
         except Exception as e:
-            # on_error middleware (in reverse order)
             for mw in reversed(self._middleware):
                 await mw.on_error(self.graph, inputs, e, context)
             raise
 
-        # Collect + flush in background thread (non-blocking) — legacy tracer= path
-        if tracers:
-            from hush.core.tracing import get_flush_worker
-
-            get_flush_worker().submit(tracers, self._collector, state)
-
-        LOGGER.info(format_event("workflow_done", request_id=request_id, graph_name=self.name))
-
-        # Include state in result for debugging/tracing access
-        result["$state"] = state
+        result["$state"] = handle.state
 
         # Apply after_run middleware (in reverse order)
         for mw in reversed(self._middleware):
             result = await mw.after_run(self.graph, inputs, result, context)
 
         return result
-
-    async def stream(
-        self,
-        inputs: Dict[str, Any],
-        *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Execute the workflow and yield streaming events as they arrive.
-
-        For graphs with generator ops, yields per-token events in real-time.
-        Always yields a final "done" event with the complete result.
-
-        Args:
-            inputs: Input data for the workflow
-            user_id: Optional user identifier
-            session_id: Optional session identifier
-            request_id: Optional request identifier
-            tracer: Optional tracer or list of tracers for observability.
-                    Overrides the default tracer set in ``Hush(..., tracer=...)``.
-
-        Yields:
-            Dicts with "type" key:
-            - {"type": "token", "op": name, "data": {...}} — per-yield from generator ops
-            - {"type": "done", "data": {full outputs}} — final result
-        """
-        user_id = user_id or str(uuid.uuid4())
-        session_id = session_id or str(uuid.uuid4())
-        request_id = request_id or str(uuid.uuid4())
-
-        # Resolve tracers: per-run overrides engine default
-        effective = tracer if tracer is not None else self._tracer
-        if effective is not None:
-            tracers = effective if isinstance(effective, list) else [effective]
-        else:
-            tracers = []
-
-        context: Dict[str, Any] = {
-            "user_id": user_id,
-            "session_id": session_id,
-            "request_id": request_id,
-        }
-
-        # Apply before_run middleware (in order)
-        for mw in self._middleware:
-            inputs = await mw.before_run(self.graph, inputs, context)
-
-        LOGGER.info(
-            format_event("workflow_stream_start", request_id=request_id, graph_name=self.name)
-        )
-
-        state = self._schema.create_state(
-            inputs=inputs,
-            user_id=user_id,
-            session_id=session_id,
-            request_id=request_id,
-        )
-
-        queue = asyncio.Queue()
-        token = _output_queue.set(queue)
-
-        try:
-            task = asyncio.create_task(self.graph.run(state))
-
-            while True:
-                if task.done() and queue.empty():
-                    break
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
-                    yield event
-                except asyncio.TimeoutError:
-                    continue
-
-            result = task.result()
-        except Exception as e:
-            for mw in reversed(self._middleware):
-                await mw.on_error(self.graph, inputs, e, context)
-            raise
-        finally:
-            _output_queue.reset(token)
-
-        # Legacy tracer= path
-        if tracers:
-            from hush.core.tracing import get_flush_worker
-
-            get_flush_worker().submit(tracers, self._collector, state)
-
-        LOGGER.info(
-            format_event("workflow_stream_done", request_id=request_id, graph_name=self.name)
-        )
-
-        result["$state"] = state
-
-        # Apply after_run middleware (in reverse order)
-        for mw in reversed(self._middleware):
-            result = await mw.after_run(self.graph, inputs, result, context)
-
-        yield {"type": "done", "data": result}
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.

@@ -51,7 +51,8 @@ from hush.providers.ops import (
     OnnxOp,
     PromptOp,
     RerankOp,
-    chain,
+    ask,
+    chat,
 )
 
 # Reranking exports
@@ -106,7 +107,8 @@ __all__ = [
     "OnnxOp",
     "RerankOp",
     "PromptOp",
-    "chain",
+    "chat",
+    "ask",
     # Auth
     "KeycloakTokenConfig",
     "KeycloakTokenProvider",

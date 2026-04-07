@@ -35,6 +35,8 @@ class HushEyesTracer(Tracer):
         tags: Optional[List[str]] = None,
     ):
         super().__init__(tags=tags, stream_trace_limit=None)
+        self._host = host
+        self._port = port
         self._url = f"http://{host}:{port}/api/ingest"
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
@@ -63,6 +65,9 @@ class HushEyesTracer(Tracer):
                 "Could not reach ui-hush-eyes at %s (server may not be running)",
                 self._url,
             )
+
+    def to_config_dict(self):
+        return {"host": self._host, "port": self._port}
 
     def __repr__(self) -> str:
         return f"<HushEyesTracer url={self._url}>"

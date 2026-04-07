@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hush-icore"
-version = "0.1.11"
+version = "0.4.1"
 description = "Hush workflow engine core - A powerful async workflow orchestration framework"
 readme = "README.md"
 license = "Apache-2.0"
@@ -51,25 +51,18 @@ include = [
 ]
 
 [tool.ruff]
-line-length = 100
-target-version = "py310"
+extend = "../../ruff.toml"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = [
-    "E501",  # Line too long
-    "E402",  # Module level import not at top (needed for load_dotenv pattern)
-    "E712",  # Comparison to True/False (intentional for clarity in some cases)
-    "E721",  # Type comparison (intentional in some cases)
-    "E722",  # Bare except
-    "E731",  # Lambda assignment
-    "F401",  # Unused imports (in __init__.py for re-exports)
+extend-ignore = [
+    "E712",  # Comparison to True/False — intentional for clarity in some cases
+    "F401",  # Unused imports — intentional in __init__.py re-exports
     "F541",  # f-string without placeholders
-    "F841",  # Unused variable
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (may require external services)",

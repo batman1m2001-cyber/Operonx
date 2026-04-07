@@ -1,8 +1,8 @@
-"""14 Streaming Tracing — Generator ops + engine.stream() + Langfuse tracing.
+"""14 Streaming Tracing — Generator ops + engine.start() + Langfuse tracing.
 
 Demonstrates:
 - Generator ops (yield-based) that produce streaming events
-- engine.stream() for real-time token delivery
+- engine.start() for real-time frame delivery via ExecutionHandle
 - engine.run() with generator ops (accumulated result)
 - Langfuse tracing with streaming metadata (kind, yield_count, spawned_by)
 
@@ -19,15 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncio
 import uuid
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from hush.core import Hush
 
 from ex14_streaming_tracing.workflow import build_async_pipeline, build_text_pipeline
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = str(EXAMPLES_DIR / ".env")
+RESOURCES_FILE = str(EXAMPLES_DIR.parent / "resources.yaml")
 
 SAMPLE_TEXT = (
     "The streaming architecture enables real-time token delivery "
@@ -42,7 +41,7 @@ async def example_1_run():
     print("1. engine.run() with generator ops")
     print("=" * 55)
 
-    engine = Hush(build_text_pipeline())
+    engine = Hush(build_text_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(inputs={"text": SAMPLE_TEXT, "chunk_size": 3})
     print(f"  Chunks analyzed: {len(result['result'])}")
     for line in result["result"]:
@@ -50,61 +49,57 @@ async def example_1_run():
 
 
 async def example_2_stream():
-    """engine.stream() — real-time token events."""
+    """engine.start() — real-time frame events via ExecutionHandle."""
     print()
     print("=" * 55)
-    print("2. engine.stream() — real-time events")
+    print("2. engine.start() — real-time frames")
     print("=" * 55)
 
-    engine = Hush(build_text_pipeline())
-    token_count = 0
-
-    async for event in engine.stream(
+    engine = Hush(build_text_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE)
+    handle = engine.start(
         inputs={
             "text": "Hush workflows support both batch and streaming execution modes "
             "with zero changes to op definitions",
             "chunk_size": 2,
         },
-    ):
-        if event["type"] == "token":
-            token_count += 1
-            print(f"  TOKEN [{event.get('op', '?')}]: {event['data']}")
-        elif event["type"] == "done":
-            results = event["data"].get("result", [])
-            print(f"\n  DONE: {token_count} tokens, {len(results)} chunks")
+    )
+    frame_count = 0
+
+    async for op, ctx, data in handle:
+        frame_count += 1
+        print(f"  FRAME [{op}]: {data}")
+
+    result = await handle.result()
+    results = result.get("result", [])
+    print(f"\n  DONE: {frame_count} frames, {len(results)} chunks")
 
 
 async def example_3_async_generator():
-    """Async generator with engine.stream()."""
+    """Async generator with engine.start()."""
     print()
     print("=" * 55)
     print("3. Async generator stream")
     print("=" * 55)
 
-    engine = Hush(build_async_pipeline())
-    token_count = 0
+    engine = Hush(build_async_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE)
+    handle = engine.start(inputs={"n": 5})
+    frame_count = 0
 
-    async for event in engine.stream(inputs={"n": 5}):
-        if event["type"] == "token":
-            token_count += 1
-            print(f"  TOKEN: {event['data']}")
-        elif event["type"] == "done":
-            labels = event["data"].get("label", [])
-            print(f"\n  DONE: {token_count} tokens, {len(labels)} labels")
+    async for op, ctx, data in handle:
+        frame_count += 1
+        print(f"  FRAME [{op}]: {data}")
+
+    result = await handle.result()
+    labels = result.get("label", [])
+    print(f"\n  DONE: {frame_count} frames, {len(labels)} labels")
 
 
 async def example_4_langfuse():
     """Langfuse tracing with streaming generators."""
-    import os
-
     print()
     print("=" * 55)
     print("4. Langfuse tracing")
     print("=" * 55)
-
-    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
-        print("  Skipped — LANGFUSE keys not set in .env")
-        return
 
     from hush.telemetry import LangfuseConfig, LangfuseTracer
 
@@ -112,7 +107,7 @@ async def example_4_langfuse():
     request_id = str(uuid.uuid4())
     tracer = LangfuseTracer(config=config, tags=["streaming", "generator-ops"])
 
-    engine = Hush(build_text_pipeline())
+    engine = Hush(build_text_pipeline(), env=ENV_FILE, resources=RESOURCES_FILE)
     result = await engine.run(
         inputs={"text": SAMPLE_TEXT, "chunk_size": 3},
         tracer=tracer,

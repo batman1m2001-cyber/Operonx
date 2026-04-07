@@ -130,7 +130,7 @@ def test_langfuse_tracer_flush_builds_correct_batch(sample_trace_data):
     mock_client.ingest.side_effect = capture_ingest
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         tracer.flush(sample_trace_data)
@@ -200,7 +200,7 @@ def test_langfuse_tracer_flush_parent_linking(sample_iteration_trace_data):
     mock_client.trace_url.return_value = "https://example.com/trace/test"
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         tracer.flush(sample_iteration_trace_data)
@@ -248,7 +248,7 @@ def test_langfuse_tracer_flush_all_events_have_trace_id(sample_trace_data):
     mock_client.trace_url.return_value = "https://example.com/trace/test"
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         tracer.flush(sample_trace_data)
@@ -276,7 +276,7 @@ def test_langfuse_tracer_flush_raises_on_http_error(sample_trace_data):
     )
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         with pytest.raises(urllib.error.HTTPError):
@@ -293,7 +293,7 @@ def test_langfuse_tracer_flush_raises_on_connection_error(sample_trace_data):
     mock_client.ingest.side_effect = urllib.error.URLError("Connection refused")
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         with pytest.raises(urllib.error.URLError):
@@ -312,7 +312,7 @@ def test_langfuse_tracer_flush_raises_on_timeout(sample_trace_data):
     mock_client.ingest.side_effect = socket.timeout("timed out")
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         with pytest.raises(socket.timeout):
@@ -326,7 +326,7 @@ def test_langfuse_tracer_flush_raises_on_hub_not_found(sample_trace_data):
     tracer = LangfuseTracer(resource="langfuse:default")
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.side_effect = KeyError("langfuse:default not found")
+    mock_hub.get.side_effect = KeyError("langfuse:default not found")
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         with pytest.raises(KeyError):
@@ -347,7 +347,7 @@ def test_langfuse_tracer_flush_raises_on_partial_errors(sample_trace_data):
     mock_client.trace_url.return_value = "https://example.com/trace/test"
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     with patch("hush.core.registry.get_hub", return_value=mock_hub):
         with pytest.raises(RuntimeError, match="ingestion had 1 error"):
@@ -367,7 +367,7 @@ def test_langfuse_tracer_flush_empty_nodes():
     mock_client.trace_url.return_value = "https://example.com/trace/test"
 
     mock_hub = MagicMock()
-    mock_hub.langfuse.return_value = mock_client
+    mock_hub.get.return_value = mock_client
 
     trace_data = {
         "workflow_name": "empty",

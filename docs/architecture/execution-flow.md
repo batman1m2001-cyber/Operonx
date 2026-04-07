@@ -61,10 +61,14 @@ state = self._schema.create_state(
 ### 4. Graph Execution
 
 ```python
-result = await self.graph.run(state)
+# GraphOp.run() is an async generator — consumed by engine.start()
+# engine.run() is a thin wrapper: await engine.start(inputs).collect()
+handle = engine.start(inputs=inputs, ...)
+result = await handle.collect()
 ```
 
-GraphOp.run() thực thi tất cả child ops theo dependency order.
+`GraphOp.run()` is an async generator that yields `(ctx, result)` per frame.
+The scheduler drives it via Frame/EOF events on an asyncio queue.
 
 ### 5. Cleanup
 
@@ -89,15 +93,15 @@ result["$state"] = state
 │                          |                                  │
 │  2. Create MemoryState from schema                          │
 │                          |                                  │
-│  3. graph.run(state) ─────────────────────────┐             │
+│  3. engine.start() ───────────────────────────┐             │
 │                                               │             │
 │     ┌─────────────────────────────────────────┴───────┐     │
-│     │              GraphOp.run()                    │     │
+│     │         Scheduler (Frame/EOF queue)             │     │
 │     ├─────────────────────────────────────────────────┤     │
-│     │  * Start entry ops                              │     │
-│     │  * Wait for task completion                     │     │
-│     │  * Schedule successor ops                       │     │
-│     │  * Repeat until all complete                    │     │
+│     │  * dispatch() entry ops → _pump() tasks         │     │
+│     │  * Frame event → _on_frame() route downstream   │     │
+│     │  * EOF event  → _on_eof() flush/loop/advance    │     │
+│     │  * Loop until inflight == 0                     │     │
 │     └─────────────────────────────────────────────────┘     │
 │                          |                                  │
 │  4. End streams                                             │

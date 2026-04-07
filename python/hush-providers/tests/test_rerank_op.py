@@ -18,7 +18,7 @@ class TestRerankOp:
         """Test RerankOp has correct type."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -32,7 +32,7 @@ class TestRerankOp:
         """Test RerankOp has query and documents inputs."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -48,7 +48,7 @@ class TestRerankOp:
         """Test RerankOp has reranks output."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -61,7 +61,7 @@ class TestRerankOp:
         """Test specific_metadata returns model info."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -76,13 +76,13 @@ class TestRerankOp:
         """Test processing list of string documents."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_reranker = Mock()
             mock_reranker.run = AsyncMock(
                 return_value=[{"index": 1, "score": 0.9}, {"index": 0, "score": 0.7}]
             )
             mock_instance = Mock()
-            mock_instance.reranker.return_value = mock_reranker
+            mock_instance.get.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
             node = RerankOp(name="process_test", resource="bge-m3")
@@ -100,11 +100,11 @@ class TestRerankOp:
         """Test processing list of dict documents."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_reranker = Mock()
             mock_reranker.run = AsyncMock(return_value=[{"index": 0, "score": 0.95}])
             mock_instance = Mock()
-            mock_instance.reranker.return_value = mock_reranker
+            mock_instance.get.return_value = mock_reranker
             mock_hub.instance.return_value = mock_instance
 
             node = RerankOp(name="dict_test", resource="bge-m3")
@@ -125,7 +125,7 @@ class TestRerankOp:
         """Test processing empty document list."""
         from hush.providers.ops import RerankOp
 
-        with patch("hush.providers.ops.rerank.ResourceHub") as mock_hub:
+        with patch("hush.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -151,7 +151,10 @@ class TestRerankOpIntegration:
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured in resources.yaml")
 
-        node = RerankOp(name="rerank", resource="bge-m3-onnx")
+        try:
+            node = RerankOp(name="rerank", resource="bge-m3-onnx")
+        except (KeyError, ImportError):
+            pytest.skip("reranking:bge-m3-onnx failed to initialize (missing dependencies)")
 
         schema = StateSchema(op=node)
         state = MemoryState(
@@ -167,8 +170,10 @@ class TestRerankOpIntegration:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "reranks" in result
         reranks = result["reranks"]
         assert len(reranks) == 2
@@ -202,8 +207,10 @@ class TestRerankOpIntegration:
             },
         )
 
-        result = await node.run(state)
+        result = {}
 
+        async for _, result in node.run(state):
+            pass
         assert "reranks" in result
         reranks = result["reranks"]
         assert len(reranks) == 2

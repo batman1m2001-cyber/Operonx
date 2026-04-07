@@ -9,13 +9,13 @@ Datadog, New Relic, Grafana Tempo, etc.).
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from hush.core.tracing import Tracer
+from hush.telemetry.tracers._base import ConfigurableTracer
 
 if TYPE_CHECKING:
     from hush.telemetry.backends.otel import OTELConfig
 
 
-class OTELTracer(Tracer):
+class OTELTracer(ConfigurableTracer):
     """Tracer that sends workflow traces via OpenTelemetry.
 
     Example:
@@ -40,28 +40,12 @@ class OTELTracer(Tracer):
         resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ):
-        super().__init__(tags=tags)
-        if config is None and resource is None:
-            raise ValueError("Must provide either 'config' or 'resource'")
-        if config is not None and resource is not None:
-            raise ValueError("Cannot provide both 'config' and 'resource'")
-        self._config = config
-        self._resource = resource
+        super().__init__(config=config, resource=resource, tags=tags)
 
-    @property
-    def resource(self) -> Optional[str]:
-        return self._resource
+    def _make_client(self, config):
+        from hush.telemetry.backends.otel import OTELClient
 
-    def _get_client(self):
-        """Get OTELClient from config or ResourceHub."""
-        if self._config is not None:
-            from hush.telemetry.backends.otel import OTELClient
-
-            return OTELClient(self._config)
-
-        from hush.core.registry import get_hub
-
-        return get_hub().otel(self._resource)
+        return OTELClient(config)
 
     @staticmethod
     def _datetime_to_ns(dt) -> Optional[int]:
@@ -261,4 +245,5 @@ class OTELTracer(Tracer):
     def __repr__(self) -> str:
         if self._resource:
             return f"<OTELTracer resource={self._resource}>"
-        return f"<OTELTracer endpoint={self._config.endpoint}>"
+        endpoint = self._config.endpoint if self._config else "?"
+        return f"<OTELTracer endpoint={endpoint}>"
