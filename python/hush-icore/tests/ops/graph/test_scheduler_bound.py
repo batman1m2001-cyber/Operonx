@@ -16,11 +16,10 @@ from hush.core import (
     START,
     GraphOp,
     Hush,
-    op,
     graph,
+    op,
 )
 from hush.core.ops.flow import if_
-
 
 # ── Helpers ──
 
