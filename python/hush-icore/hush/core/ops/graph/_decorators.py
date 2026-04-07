@@ -54,7 +54,7 @@ def _build_fn_args(input_mappings, param_names):
     return args
 
 
-def graph(fn=None, *, bound=None):
+def graph(fn=None, *, bound: "str | None" = None):
     """Decorator to turn a builder function into a reusable GraphOp factory.
 
     Can be used bare or with keyword arguments::
