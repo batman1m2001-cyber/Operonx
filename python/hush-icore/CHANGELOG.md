@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.3] — Tracer crash fix
+
+### Bug Fixes
+
+- **`TraceCollector` no longer crashes on non-serializable trace data.** The
+  collector previously called `dataclasses.asdict()` on every TraceNode, which
+  internally `deepcopy`s every leaf value. Any op input or output containing a
+  non-pickleable object — `asyncio.Future`, `asyncio.Queue`, file handles, gRPC
+  channels, etc. — would raise `TypeError: cannot pickle '_asyncio.Future'
+  object` and the entire trace flush would be lost. The collector now uses an
+  internal `_safe_asdict` walker that mirrors `asdict`'s recursion through
+  dataclasses/dicts/lists/tuples but, at every leaf, falls back to `repr(obj)`
+  if `deepcopy` fails. Traces flush successfully even when ops capture
+  non-serializable runtime objects.
+
 ## [Unreleased] — Streaming Refactor (Phases 2–4)
 
 ### Summary

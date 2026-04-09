@@ -12,8 +12,9 @@ Usage:
     trace_data = collector.collect(state)  # per-run: reads state, builds tree
 """
 
+import copy
 import logging
-from dataclasses import asdict
+from dataclasses import fields, is_dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hush.core.tracing.models import TraceNode, TraceSummary
@@ -21,6 +22,36 @@ from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
 
 LOGGER = logging.getLogger("hush.tracing")
+
+
+def _safe_asdict(obj: Any) -> Any:
+    """Like dataclasses.asdict, but never raises on non-serializable values.
+
+    `dataclasses.asdict` calls `copy.deepcopy` on every leaf value, which
+    explodes when the trace tree contains things like `asyncio.Future`,
+    `asyncio.Queue`, file handles, gRPC channels, etc. — perfectly normal
+    objects to find inside an op's captured input/output dict.
+
+    This walker mirrors `asdict`'s recursion through dataclasses, dicts,
+    lists, and tuples, but at every leaf it tries `deepcopy` first and
+    falls back to `repr(obj)` (and finally a placeholder string) so the
+    trace flush always succeeds.
+    """
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: _safe_asdict(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, dict):
+        return {_safe_asdict(k): _safe_asdict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        converted = [_safe_asdict(v) for v in obj]
+        return type(obj)(converted) if isinstance(obj, tuple) else converted
+    # Leaf — try deepcopy, fall back to repr
+    try:
+        return copy.deepcopy(obj)
+    except Exception:
+        try:
+            return repr(obj)
+        except Exception:
+            return f"<unrepresentable {type(obj).__name__}>"
 
 
 def _is_loop_segment(seg: str) -> bool:
@@ -151,8 +182,8 @@ class TraceCollector:
             "session_id": state.session_id,
             "workflow_name": self._graph.name,
             "tags": list(state.tags) if state.tags else [],
-            "nodes": [asdict(n) for n in result],
-            "summary": asdict(summary),
+            "nodes": [_safe_asdict(n) for n in result],
+            "summary": _safe_asdict(summary),
         }
 
     # =========================================================================
