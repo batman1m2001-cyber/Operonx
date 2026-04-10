@@ -78,8 +78,11 @@ class FlushWorker:
                 nodes = trace_data.get("nodes", [])
                 limit = getattr(tracer, "_stream_trace_limit", None)
                 sampled_nodes = _sample_stream_nodes(nodes, limit)
-                # Create a copy with merged tags and sampled nodes
-                data = {**trace_data, "tags": merged if merged else None, "nodes": sampled_nodes}
+                # Apply trace filter (exclude noisy ops, skip empty, etc.)
+                tf = getattr(tracer, "trace_filter", None)
+                filtered_nodes = tf.apply(sampled_nodes) if tf else sampled_nodes
+                # Create a copy with merged tags and filtered nodes
+                data = {**trace_data, "tags": merged if merged else None, "nodes": filtered_nodes}
                 tracer.flush(data)
             except Exception as e:
                 LOGGER.exception("Failed to flush traces to %s", type(tracer).__name__)

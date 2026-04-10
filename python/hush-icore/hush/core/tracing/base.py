@@ -4,7 +4,10 @@ Tracers receive collected trace data and flush it to external backends.
 Each tracer can have static tags that are merged with dynamic tags at flush time.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from hush.core.tracing.trace_filter import TraceFilter
 
 
 class Tracer:
@@ -25,14 +28,21 @@ class Tracer:
         self,
         tags: Optional[List[str]] = None,
         stream_trace_limit: Optional[int] = 100,
+        trace_filter: Optional["TraceFilter"] = None,
     ):
         self._tags = tags or []
         self._stream_trace_limit = stream_trace_limit
+        self._trace_filter = trace_filter
 
     @property
     def tags(self) -> List[str]:
         """Static tags for this tracer instance."""
         return self._tags.copy()
+
+    @property
+    def trace_filter(self) -> Optional["TraceFilter"]:
+        """Optional filter to exclude noisy ops from traces."""
+        return self._trace_filter
 
     def to_config_dict(self) -> Optional[Dict[str, Any]]:
         """Return a serializable config dict for the Rust backend.
