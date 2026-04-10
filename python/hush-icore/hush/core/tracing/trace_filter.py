@@ -37,6 +37,7 @@ class TraceFilter:
         exclude_kinds: Drop nodes by kind (batch, generator, stream_context, etc.).
         protected_types: node_types that are NEVER filtered out.
             Default: ["trace", "generation"] — root trace + LLM calls always kept.
+        max_io_size: Truncate input/output string values exceeding this length (0=no limit).
     """
 
     skip_empty: bool = False
@@ -44,6 +45,7 @@ class TraceFilter:
     include_ops: List[str] = field(default_factory=list)
     exclude_kinds: List[str] = field(default_factory=list)
     protected_types: List[str] = field(default_factory=lambda: ["trace", "generation"])
+    max_io_size: int = 0
 
     def __post_init__(self) -> None:
         if self.exclude_ops and self.include_ops:
@@ -77,6 +79,10 @@ class TraceFilter:
                 remove_keys.add(n["trace_key"])
 
         if not remove_keys:
+            # Still apply I/O truncation even when no nodes are removed
+            if self.max_io_size > 0:
+                for n in nodes:
+                    self._truncate_io(n, self.max_io_size)
             return nodes
 
         LOGGER.debug(
@@ -103,6 +109,11 @@ class TraceFilter:
 
         # Step 4: cleanup — remove synthetic nodes with no remaining children
         result = self._remove_empty_synthetics(result)
+
+        # Step 5: truncate large I/O values
+        if self.max_io_size > 0:
+            for n in result:
+                self._truncate_io(n, self.max_io_size)
 
         return result
 
@@ -154,6 +165,34 @@ class TraceFilter:
         if not outputs:
             return True
         return all(v is None for v in outputs.values())
+
+    @staticmethod
+    def _truncate_io(node: Dict[str, Any], max_size: int) -> None:
+        """Truncate large values in inputs and outputs.
+
+        Handles str, bytes, list, and any object whose repr exceeds max_size.
+        """
+        for key in ("inputs", "outputs"):
+            io_dict = node.get(key)
+            if not io_dict or not isinstance(io_dict, dict):
+                continue
+            for k, v in io_dict.items():
+                if v is None:
+                    continue
+                if isinstance(v, (bytes, bytearray)):
+                    if len(v) > max_size:
+                        io_dict[k] = f"<{len(v)} bytes>"
+                elif isinstance(v, str):
+                    if len(v) > max_size:
+                        io_dict[k] = v[:max_size] + f"...<truncated {len(v)} chars>"
+                elif isinstance(v, (list, tuple)):
+                    r = repr(v)
+                    if len(r) > max_size:
+                        io_dict[k] = f"<{type(v).__name__} len={len(v)}>"
+                elif isinstance(v, dict):
+                    r = repr(v)
+                    if len(r) > max_size:
+                        io_dict[k] = f"<dict len={len(v)}>"
 
     @staticmethod
     def _remove_empty_synthetics(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
