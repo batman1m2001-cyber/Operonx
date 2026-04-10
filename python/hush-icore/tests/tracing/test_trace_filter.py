@@ -438,3 +438,89 @@ class TestCombined:
         assert "denoise" not in keys
         # classify (generation) always kept
         assert "classify" in keys
+
+
+# ---------------------------------------------------------------------------
+# Test: max_io_size truncation
+# ---------------------------------------------------------------------------
+
+
+class TestMaxIoSize:
+    def test_truncates_large_string(self):
+        nodes = [
+            _node("root", node_type="trace"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="g.a",
+                outputs={"text": "x" * 5000},
+            ),
+        ]
+        tf = TraceFilter(max_io_size=100)
+        result = tf.apply(nodes)
+        a = next(n for n in result if n["trace_key"] == "a")
+        assert len(a["outputs"]["text"]) < 200
+        assert "truncated" in a["outputs"]["text"]
+
+    def test_truncates_bytes(self):
+        nodes = [
+            _node("root", node_type="trace"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="g.a",
+                outputs={"raw_wav": b"\x00" * 50000},
+            ),
+        ]
+        tf = TraceFilter(max_io_size=100)
+        result = tf.apply(nodes)
+        a = next(n for n in result if n["trace_key"] == "a")
+        assert isinstance(a["outputs"]["raw_wav"], str)
+        assert "50000 bytes" in a["outputs"]["raw_wav"]
+
+    def test_truncates_large_list(self):
+        nodes = [
+            _node("root", node_type="trace"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="g.a",
+                outputs={"audio": list(range(10000))},
+            ),
+        ]
+        tf = TraceFilter(max_io_size=100)
+        result = tf.apply(nodes)
+        a = next(n for n in result if n["trace_key"] == "a")
+        assert isinstance(a["outputs"]["audio"], str)
+        assert "len=10000" in a["outputs"]["audio"]
+
+    def test_no_truncation_when_zero(self):
+        nodes = [
+            _node("root", node_type="trace"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="g.a",
+                outputs={"text": "x" * 5000},
+            ),
+        ]
+        tf = TraceFilter(max_io_size=0)
+        result = tf.apply(nodes)
+        a = next(n for n in result if n["trace_key"] == "a")
+        assert len(a["outputs"]["text"]) == 5000
+
+    def test_small_values_untouched(self):
+        nodes = [
+            _node("root", node_type="trace"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="g.a",
+                outputs={"text": "hello", "num": 42},
+            ),
+        ]
+        tf = TraceFilter(max_io_size=100)
+        result = tf.apply(nodes)
+        a = next(n for n in result if n["trace_key"] == "a")
+        assert a["outputs"]["text"] == "hello"
+        assert a["outputs"]["num"] == 42
