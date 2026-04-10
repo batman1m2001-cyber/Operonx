@@ -39,15 +39,19 @@ _LOOP_KEYS = {"until", "max_iterations"}
 def _build_fn_args(input_mappings, param_names):
     """Build function arguments from input mappings.
 
-    Ref values and bare PARENT become PARENT[key] refs (resolved at runtime
-    from graph inputs). Static values are passed through as-is for use at
-    graph build time.
+    Ref values, bare PARENT, and None placeholders become PARENT[key] refs
+    (resolved at runtime from graph inputs). Static values are passed
+    through as-is for use at graph build time.
+
+    None is treated as a placeholder for "provide at engine.start() time",
+    enabling graph reuse: Hush(graph, params={"x": None}) compiles once,
+    engine.start(inputs={"x": real_value}) per call.
     """
     args = {}
     for key, value in input_mappings.items():
         if key not in param_names:
             continue
-        if isinstance(value, Ref) or value is PARENT:
+        if isinstance(value, Ref) or value is PARENT or value is None:
             args[key] = PARENT[key]
         else:
             args[key] = value
