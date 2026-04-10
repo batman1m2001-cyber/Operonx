@@ -136,6 +136,24 @@ class BaseLLM(ABC):
             ValueError: If parameters are outside valid ranges
         """
 
+    async def warmup(self, system_prompt: str = "") -> None:
+        """Pre-warm the LLM connection and optionally seed the prompt cache.
+
+        Sends a minimal 1-token request using the provider's own client
+        and config. If ``system_prompt`` is provided, providers that support
+        prompt caching (e.g. Anthropic) can cache it server-side so the
+        first real call benefits from the cache hit.
+
+        Override in subclasses for provider-specific caching behaviour.
+        The default implementation sends a cheap generate() call.
+        """
+        messages: List[ChatCompletionMessageParam] = [
+            {"role": "user", "content": "warmup"},
+        ]
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+        await self.generate(messages=messages, max_tokens=1)
+
     async def generate_batch(
         self,
         batch_messages: List[List[ChatCompletionMessageParam]],
