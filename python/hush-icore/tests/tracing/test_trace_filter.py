@@ -133,8 +133,15 @@ class TestExcludeOps:
     def test_exclude_by_short_name(self):
         nodes = [
             _node("root", node_type="trace"),
-            _node("a", parent_trace_key="root", op_name="callbot.recv_audio", display_name="recv_audio"),
-            _node("b", parent_trace_key="root", op_name="callbot.classify", display_name="classify"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="callbot.recv_audio",
+                display_name="recv_audio",
+            ),
+            _node(
+                "b", parent_trace_key="root", op_name="callbot.classify", display_name="classify"
+            ),
         ]
         tf = TraceFilter(exclude_ops=["recv_audio"])
         result = tf.apply(nodes)
@@ -145,7 +152,12 @@ class TestExcludeOps:
     def test_exclude_by_full_name(self):
         nodes = [
             _node("root", node_type="trace"),
-            _node("a", parent_trace_key="root", op_name="callbot.recv_audio", display_name="recv_audio"),
+            _node(
+                "a",
+                parent_trace_key="root",
+                op_name="callbot.recv_audio",
+                display_name="recv_audio",
+            ),
         ]
         tf = TraceFilter(exclude_ops=["callbot.recv_audio"])
         result = tf.apply(nodes)
@@ -321,8 +333,20 @@ class TestSyntheticCleanup:
         """Nested synthetic nodes: if inner becomes empty, outer should also be removed."""
         nodes = [
             _node("root", node_type="trace"),
-            _node("$ctx:outer", parent_trace_key="root", op_name=None, display_name="[0]", kind="stream_context"),
-            _node("$ctx:inner", parent_trace_key="$ctx:outer", op_name=None, display_name="[0]", kind="stream_context"),
+            _node(
+                "$ctx:outer",
+                parent_trace_key="root",
+                op_name=None,
+                display_name="[0]",
+                kind="stream_context",
+            ),
+            _node(
+                "$ctx:inner",
+                parent_trace_key="$ctx:outer",
+                op_name=None,
+                display_name="[0]",
+                kind="stream_context",
+            ),
             _node("a", parent_trace_key="$ctx:inner", op_name="g.a", display_name="a", outputs={}),
         ]
         tf = TraceFilter(skip_empty=True)
@@ -349,20 +373,24 @@ class TestValidation:
 
 class TestFromDict:
     def test_basic_parse(self):
-        tf = TraceFilter.from_dict({
-            "skip_empty": True,
-            "exclude_ops": ["recv_audio", "denoise"],
-        })
+        tf = TraceFilter.from_dict(
+            {
+                "skip_empty": True,
+                "exclude_ops": ["recv_audio", "denoise"],
+            }
+        )
         assert tf.skip_empty is True
         assert tf.exclude_ops == ["recv_audio", "denoise"]
         assert tf.include_ops == []
         assert tf.protected_types == ["trace", "generation"]
 
     def test_unknown_keys_ignored(self):
-        tf = TraceFilter.from_dict({
-            "skip_empty": True,
-            "future_field": "whatever",
-        })
+        tf = TraceFilter.from_dict(
+            {
+                "skip_empty": True,
+                "future_field": "whatever",
+            }
+        )
         assert tf.skip_empty is True
 
     def test_empty_dict(self):
@@ -380,9 +408,28 @@ class TestCombined:
     def test_exclude_ops_plus_skip_empty(self):
         nodes = [
             _node("root", node_type="trace"),
-            _node("recv", parent_trace_key="root", op_name="g.recv_audio", display_name="recv_audio", outputs={"audio": b"data"}),
-            _node("denoise", parent_trace_key="root", op_name="g.denoise", display_name="denoise", outputs={"x": None}),
-            _node("classify", parent_trace_key="root", op_name="g.classify", display_name="classify", node_type="generation", outputs={"intent": "greeting"}),
+            _node(
+                "recv",
+                parent_trace_key="root",
+                op_name="g.recv_audio",
+                display_name="recv_audio",
+                outputs={"audio": b"data"},
+            ),
+            _node(
+                "denoise",
+                parent_trace_key="root",
+                op_name="g.denoise",
+                display_name="denoise",
+                outputs={"x": None},
+            ),
+            _node(
+                "classify",
+                parent_trace_key="root",
+                op_name="g.classify",
+                display_name="classify",
+                node_type="generation",
+                outputs={"intent": "greeting"},
+            ),
         ]
         tf = TraceFilter(skip_empty=True, exclude_ops=["recv_audio"])
         result = tf.apply(nodes)
