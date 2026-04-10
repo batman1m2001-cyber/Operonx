@@ -42,6 +42,7 @@ class LangfuseConfig(YamlModel):
     no_proxy: Optional[str] = None
     enabled: bool = True
     sample_rate: float = 1.0
+    trace_filter: Optional[dict] = None
 
     @classmethod
     def from_env(cls) -> "LangfuseConfig":

@@ -18,10 +18,12 @@ from hush.core.tracing.models import (
     TraceNode,
     TraceSummary,
 )
+from hush.core.tracing.trace_filter import TraceFilter
 
 __all__ = [
     "Tracer",
     "TraceCollector",
+    "TraceFilter",
     "FlushWorker",
     "get_flush_worker",
     "LocalTracer",

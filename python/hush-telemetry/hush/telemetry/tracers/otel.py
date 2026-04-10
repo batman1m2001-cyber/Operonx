@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from hush.telemetry.tracers._base import ConfigurableTracer
 
 if TYPE_CHECKING:
+    from hush.core.tracing.trace_filter import TraceFilter
     from hush.telemetry.backends.otel import OTELConfig
 
 
@@ -39,8 +40,9 @@ class OTELTracer(ConfigurableTracer):
         config: Optional["OTELConfig"] = None,
         resource: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        trace_filter: Optional["TraceFilter"] = None,
     ):
-        super().__init__(config=config, resource=resource, tags=tags)
+        super().__init__(config=config, resource=resource, tags=tags, trace_filter=trace_filter)
 
     def _make_client(self, config):
         from hush.telemetry.backends.otel import OTELClient
