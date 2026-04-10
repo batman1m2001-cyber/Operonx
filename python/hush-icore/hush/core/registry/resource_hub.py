@@ -407,6 +407,41 @@ class ResourceHub:
         return api_key
 
     # ========================================================================
+    # Warmup
+    # ========================================================================
+
+    async def warmup(self, key: str, **kwargs) -> None:
+        """Pre-warm a resource's connection (e.g. LLM prompt cache).
+
+        Forces lazy-load of the resource, then calls its ``warmup()``
+        method if it exists. For LLM providers this typically sends a
+        minimal API request to establish the TCP+TLS connection and
+        optionally seed the server-side prompt cache.
+
+        Args:
+            key: Registry key (e.g. ``"llm:default"``)
+            **kwargs: Passed to the resource's ``warmup()`` method
+                      (e.g. ``system_prompt="..."`` for LLMs)
+
+        Example::
+
+            hub = ResourceHub.instance()
+            await hub.warmup("llm:default", system_prompt=sys_prompt)
+        """
+        try:
+            resource = self.get(key)
+            if hasattr(resource, "warmup"):
+                result = resource.warmup(**kwargs)
+                # Support both sync and async warmup methods
+                if hasattr(result, "__await__"):
+                    await result
+                LOGGER.debug("Warmup completed: %s", key)
+            else:
+                LOGGER.debug("Resource '%s' has no warmup method, skipping", key)
+        except Exception as exc:
+            LOGGER.warning("Warmup failed for '%s' (non-fatal): %s", key, exc)
+
+    # ========================================================================
     # Health Check
     # ========================================================================
 
