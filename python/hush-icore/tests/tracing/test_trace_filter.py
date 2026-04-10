@@ -4,7 +4,6 @@ import pytest
 
 from hush.core.tracing.trace_filter import TraceFilter
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build fake node dicts matching _safe_asdict(TraceNode) structure
 # ---------------------------------------------------------------------------
