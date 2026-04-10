@@ -192,6 +192,33 @@ class AnthropicModel(BaseLLM):
             body["stop_sequences"] = [stop] if isinstance(stop, str) else list(stop)
         return body
 
+    # ── Warmup (prompt caching) ───────────────────────────────────────
+
+    async def warmup(self, system_prompt: str = "") -> None:
+        """Pre-warm the Anthropic connection and seed the prompt cache.
+
+        Sends a minimal 1-token request with ``cache_control`` on the
+        system block so Anthropic caches it server-side. Subsequent calls
+        with the same system prompt get a cache hit → faster inference.
+        """
+        body: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "warmup"}],
+        }
+        if system_prompt:
+            body["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        url = f"{self.base_url}/v1/messages"
+        resp = await self.client.post(url, headers=self._headers(), json=body)
+        if resp.status_code != 200:
+            LOGGER.warning("Anthropic warmup failed (%d): %s", resp.status_code, resp.text[:200])
+
     # ── Core methods ────────────────────────────────────────────────────
 
     async def generate(
