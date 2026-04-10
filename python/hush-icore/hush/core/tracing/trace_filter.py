@@ -47,10 +47,7 @@ class TraceFilter:
 
     def __post_init__(self) -> None:
         if self.exclude_ops and self.include_ops:
-            raise ValueError(
-                "Cannot set both exclude_ops and include_ops — "
-                "use one or the other"
-            )
+            raise ValueError("Cannot set both exclude_ops and include_ops — use one or the other")
 
     # ------------------------------------------------------------------
     # Public API
@@ -168,9 +165,7 @@ class TraceFilter:
         changed = True
         while changed:
             changed = False
-            parent_keys: Set[Optional[str]] = {
-                n.get("parent_trace_key") for n in nodes
-            }
+            parent_keys: Set[Optional[str]] = {n.get("parent_trace_key") for n in nodes}
             before = len(nodes)
             nodes = [
                 n
