@@ -202,6 +202,10 @@ class Scheduler:
 
         inline_pending: list = []
 
+        # Concurrency gate: limits how many async _pump tasks run simultaneously.
+        # Prevents thundering herd when many stream items dispatch at once.
+        _sem = asyncio.Semaphore(g.concurrency)
+
         def dispatch(op_name: str, ctx: tuple) -> None:
             """Schedule op based on its bound (sync=inline, io/cpu=task)."""
             nonlocal inflight
@@ -215,11 +219,8 @@ class Scheduler:
         async def _pump(op_name: str, ctx: tuple) -> None:
             """Drive one op to completion and emit Frame/EOF events.
 
-            Consumes ``op.run()`` (an async generator) and translates its
-            yields into scheduler events:
-
-            - Each ``(item_ctx, result)`` yield → ``Frame`` on the queue.
-            - When the generator exhausts → one ``EOF`` on the queue.
+            Acquires the concurrency semaphore before running the op,
+            ensuring at most ``graph.concurrency`` ops run in parallel.
 
             The ``inflight`` counter is managed here:
             - ``dispatch()`` adds +1 as a reservation before spawning ``_pump``.
@@ -230,18 +231,19 @@ class Scheduler:
             """
             nonlocal inflight
             op = g._ops[op_name]
-            try:
-                async for item_ctx, result in op.run(state, ctx):
-                    queue.put_nowait(Frame(op_name, item_ctx, result))
+            async with _sem:
+                try:
+                    async for item_ctx, result in op.run(state, ctx):
+                        queue.put_nowait(Frame(op_name, item_ctx, result))
+                        inflight += 1
+                    queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1
-                queue.put_nowait(EOF(op_name, ctx))
-                inflight += 1
-            except Exception as e:
-                state[op_name, "error", ctx] = str(e)
-                queue.put_nowait(EOF(op_name, ctx))
-                inflight += 1  # account for the EOF we just put on queue
-            finally:
-                inflight -= 1
+                except Exception as e:
+                    state[op_name, "error", ctx] = str(e)
+                    queue.put_nowait(EOF(op_name, ctx))
+                    inflight += 1  # account for the EOF we just put on queue
+                finally:
+                    inflight -= 1
 
         async def _drain_inline() -> None:
             """Process all pending inline ops — no task creation, no queue.
