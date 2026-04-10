@@ -70,6 +70,7 @@ class OTELConfig(YamlModel):
     timeout: int = 30
     enabled: bool = True
     sample_rate: float = 1.0
+    trace_filter: Optional[dict] = None
 
     @classmethod
     def from_env(cls) -> "OTELConfig":
