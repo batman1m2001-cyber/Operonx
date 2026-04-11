@@ -19,7 +19,6 @@ import json
 import os
 
 import httpx
-
 from _common import big_static_context, load_env, section, show_usage
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -58,9 +57,7 @@ async def run_openai_route(client: httpx.AsyncClient, api_key: str) -> None:
     section(f"OpenRouter (automatic) — model={model}")
     print("OpenAI-routed: caching is automatic, no cache_control needed.")
 
-    for idx, question in enumerate(
-        ["Reply with: first", "Reply with: second"], start=1
-    ):
+    for idx, question in enumerate(["Reply with: first", "Reply with: second"], start=1):
         body = {
             "model": model,
             "max_tokens": 50,
@@ -74,16 +71,12 @@ async def run_openai_route(client: httpx.AsyncClient, api_key: str) -> None:
 
 
 async def run_anthropic_route(client: httpx.AsyncClient, api_key: str) -> None:
-    model = os.environ.get(
-        "OPENROUTER_ANTHROPIC_MODEL", "anthropic/claude-3.5-haiku"
-    )
+    model = os.environ.get("OPENROUTER_ANTHROPIC_MODEL", "anthropic/claude-3.5-haiku")
     context = big_static_context(target_tokens=5000)
     section(f"OpenRouter (explicit) — model={model}")
     print("Anthropic-routed: must pass cache_control on the block to cache.")
 
-    for idx, question in enumerate(
-        ["Reply with: first", "Reply with: second"], start=1
-    ):
+    for idx, question in enumerate(["Reply with: first", "Reply with: second"], start=1):
         body = {
             "model": model,
             "max_tokens": 50,

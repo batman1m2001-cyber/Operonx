@@ -56,7 +56,10 @@ class TestExtractMedia:
         img = Media(data=b"p", mime_type="image/png")
         io = {
             "messages": [
-                {"role": "user", "content": [{"type": "text"}, {"type": "image_url", "image_url": img}]}
+                {
+                    "role": "user",
+                    "content": [{"type": "text"}, {"type": "image_url", "image_url": img}],
+                }
             ]
         }
         stripped, refs = extract_media(io, "inputs")

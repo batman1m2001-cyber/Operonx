@@ -37,8 +37,10 @@ async def main() -> None:
     context = big_static_context(target_tokens=8000)
 
     section(f"Anthropic prompt caching — model={model}")
-    print("Explicit cache_control on system block; reads/writes reported "
-          "as usage.cache_read_input_tokens / cache_creation_input_tokens")
+    print(
+        "Explicit cache_control on system block; reads/writes reported "
+        "as usage.cache_read_input_tokens / cache_creation_input_tokens"
+    )
 
     async def call(question: str, label: str) -> None:
         resp = await client.messages.create(

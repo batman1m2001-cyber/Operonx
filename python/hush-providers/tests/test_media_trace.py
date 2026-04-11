@@ -8,13 +8,9 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
-from hush.core import GraphOp, Hush, Media, PARENT, op, START, END
+from hush.core import END, PARENT, START, GraphOp, Hush, Media, op
 from hush.core.tracing.collector import TraceCollector
-
 
 # --------------------------------------------------------------------------- #
 # LLMOp.normalize_trace_io unit test (no real LLM call)
@@ -34,9 +30,7 @@ class TestLLMOpNormalizeTraceIO:
                         {"type": "text", "text": "What is in this image?"},
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/png;base64,iVBORw0KGgo="
-                            },
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="},
                         },
                     ],
                 }
@@ -46,9 +40,7 @@ class TestLLMOpNormalizeTraceIO:
         normalized_in, normalized_out = node.normalize_trace_io(inputs, {})
         assert normalized_out == {}
         # Original untouched
-        assert isinstance(
-            inputs["messages"][0]["content"][1]["image_url"]["url"], str
-        )
+        assert isinstance(inputs["messages"][0]["content"][1]["image_url"]["url"], str)
 
         wrapped = normalized_in["messages"][0]["content"][1]["image_url"]["url"]
         assert isinstance(wrapped, Media)
@@ -158,8 +150,7 @@ class TestCollectorExtractsMedia:
         # Find the producer node in the collected trace — it returned a
         # top-level Media in outputs, which should appear on node.media.
         producer_nodes = [
-            n for n in trace_data["nodes"]
-            if n.get("op_name", "").endswith("producer")
+            n for n in trace_data["nodes"] if n.get("op_name", "").endswith("producer")
         ]
         assert producer_nodes, "producer node not found in trace"
         prod = producer_nodes[0]

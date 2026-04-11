@@ -47,6 +47,7 @@ def _prune_nones(value: Any) -> Any:
         return tuple(_prune_nones(v) for v in value)
     return value
 
+
 LOGGER = logging.getLogger("hush.tracing")
 
 
@@ -375,9 +376,7 @@ class TraceCollector:
                 try:
                     inputs, outputs = op.normalize_trace_io(inputs, outputs)
                 except Exception:
-                    LOGGER.exception(
-                        "normalize_trace_io failed for op %s; using raw I/O", op_name
-                    )
+                    LOGGER.exception("normalize_trace_io failed for op %s; using raw I/O", op_name)
 
                 # Extract Media instances into a parallel list with
                 # placeholders left in the I/O dicts. Used downstream by

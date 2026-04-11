@@ -27,6 +27,7 @@ def _substitute_for_field(
     if target is not None:
         substitute_placeholder(target, field_path, replacement)
 
+
 if TYPE_CHECKING:
     from hush.core.tracing.trace_filter import TraceFilter
     from hush.telemetry.backends.langfuse import LangfuseConfig

@@ -42,8 +42,9 @@ async def run_openai() -> None:
     ]
     for label in ("cold", "warm"):
         resp = await llm.generate(messages=messages, max_tokens=5)
-        print(f"  [{label}] prompt_tokens={resp.usage.prompt_tokens}  "
-              f"metrics={cache_metrics(resp)}")
+        print(
+            f"  [{label}] prompt_tokens={resp.usage.prompt_tokens}  metrics={cache_metrics(resp)}"
+        )
     await llm.close()
 
 
@@ -67,8 +68,7 @@ async def run_anthropic_long() -> None:
             await asyncio.sleep(2)
         resp = await llm.generate(messages=messages, max_tokens=5)
         print(
-            f"  [{label}] prompt_tokens={resp.usage.prompt_tokens}  "
-            f"metrics={cache_metrics(resp)}"
+            f"  [{label}] prompt_tokens={resp.usage.prompt_tokens}  metrics={cache_metrics(resp)}"
         )
 
 

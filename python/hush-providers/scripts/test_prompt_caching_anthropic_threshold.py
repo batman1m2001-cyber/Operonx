@@ -41,9 +41,7 @@ async def probe(client, model: str, target_tokens: int) -> None:
         )
         u = resp.usage
         prefix_tokens = (
-            u.input_tokens
-            + (u.cache_creation_input_tokens or 0)
-            + (u.cache_read_input_tokens or 0)
+            u.input_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
         )
         verdict = (
             "CACHED (read)"
