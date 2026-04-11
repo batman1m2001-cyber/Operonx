@@ -19,7 +19,6 @@ from hush.core.tracing import TraceFilter, label
 from hush.core.tracing.collector import TraceCollector
 from hush.core.tracing.labels import _current_gen_key
 
-
 # =========================================================================
 # Helpers
 # =========================================================================
@@ -102,7 +101,9 @@ async def test_labeled_gen_renames_stream_contexts():
 
     # No default stream_context nodes — all have been relabeled
     ctx_nodes = _nodes_by_kind(nodes, "stream_context")
-    assert ctx_nodes == [], f"unexpected stream_context nodes: {[n['display_name'] for n in ctx_nodes]}"
+    assert ctx_nodes == [], (
+        f"unexpected stream_context nodes: {[n['display_name'] for n in ctx_nodes]}"
+    )
 
     # 3 labeled_iter wrappers with the strings from label()
     labeled_nodes = _nodes_by_kind(nodes, "labeled_iter")
@@ -214,11 +215,7 @@ async def test_concurrent_runs_dont_leak_labels():
         result = await engine.run(inputs={"count": count})
         state = result["$state"]
         trace = TraceCollector(g).collect(state)
-        return [
-            n["display_name"]
-            for n in trace["nodes"]
-            if n["kind"] == "labeled_iter"
-        ]
+        return [n["display_name"] for n in trace["nodes"] if n["kind"] == "labeled_iter"]
 
     results = await asyncio.gather(
         _run_and_collect(2),
