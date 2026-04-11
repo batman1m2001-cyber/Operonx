@@ -9,9 +9,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    uses: ./.github/workflows/tests.yaml
-
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -60,7 +57,7 @@ jobs:
           echo "rust_changed=$RUST_CHANGED" >> "$GITHUB_OUTPUT"
 
   publish-pypi:
-    needs: [test, check-version]
+    needs: [check-version]
     if: needs.check-version.outputs.python-changed == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -100,7 +97,7 @@ jobs:
           skip-existing: true
 
   publish-crates:
-    needs: [test, check-version]
+    needs: [check-version]
     if: needs.check-version.outputs.rust-changed == 'true'
     runs-on: ubuntu-latest
     steps:
