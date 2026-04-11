@@ -5,10 +5,11 @@ For prompt management, see LangfusePromptManager (requires langfuse SDK).
 """
 
 import base64
+import hashlib
 import json
 import logging
 import urllib.request
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from hush.telemetry.backends.langfuse.config import LangfuseConfig
 
@@ -70,6 +71,151 @@ class LangfuseClient:
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
+
+    def upload_media(
+        self,
+        *,
+        trace_id: str,
+        field: str,
+        content_type: str,
+        content: bytes,
+        observation_id: Optional[str] = None,
+        timeout: int = 30,
+    ) -> Optional[str]:
+        """Upload a media blob and return its Langfuse media reference token.
+
+        Two-step flow per Langfuse docs:
+          1. POST /api/public/media with metadata → get mediaId + presigned URL.
+          2. PUT the raw bytes to the presigned URL with the required headers.
+
+        Args:
+            trace_id: Trace this media belongs to.
+            field: Where the media lives — ``"input"``, ``"output"``, or
+                ``"metadata"``.
+            content_type: MIME type, e.g. ``"image/png"``.
+            content: Raw bytes to upload.
+            observation_id: Optional observation (span / generation) ID.
+            timeout: HTTP timeout per request.
+
+        Returns:
+            The reference token string
+            ``@@@langfuseMedia:type=<mime>|id=<mediaId>|source=bytes@@@``,
+            or ``None`` if the upload failed.
+        """
+        content_length = len(content)
+        sha256 = base64.b64encode(hashlib.sha256(content).digest()).decode()
+
+        body_dict: Dict[str, Any] = {
+            "traceId": trace_id,
+            "field": field,
+            "contentType": content_type,
+            "contentLength": content_length,
+            "sha256Hash": sha256,
+        }
+        if observation_id:
+            body_dict["observationId"] = observation_id
+
+        url = f"{self._config.host.rstrip('/')}/api/public/media"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body_dict).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {self._auth}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                init = json.loads(resp.read())
+        except Exception as e:
+            LOGGER.warning("Langfuse media init failed: %s", e)
+            return None
+
+        upload_url = init.get("uploadUrl")
+        media_id = init.get("mediaId")
+        if not media_id:
+            LOGGER.warning("Langfuse media init returned no mediaId: %r", init)
+            return None
+
+        # If the server returned a null uploadUrl the blob is already stored
+        # (dedup by sha256). Skip the PUT and return the token.
+        if upload_url:
+            upload_method = init.get("uploadHttpMethod") or "PUT"
+            # Langfuse's own SDK ignores uploadHttpHeaders from the init
+            # response and constructs headers client-side. The presigned S3
+            # URL is signed for exactly these headers, so we must send them
+            # verbatim:
+            #   Content-Type             — matches declared contentType
+            #   x-amz-checksum-sha256    — S3 integrity check
+            #   x-ms-blob-type           — Azure Blob (ignored by S3)
+            upload_headers = {
+                "Content-Type": content_type,
+                "x-amz-checksum-sha256": sha256,
+                "x-ms-blob-type": "BlockBlob",
+            }
+
+            put_req = urllib.request.Request(
+                upload_url,
+                data=content,
+                headers=upload_headers,
+                method=upload_method,
+            )
+            try:
+                with urllib.request.urlopen(put_req, timeout=timeout) as put_resp:
+                    if put_resp.status >= 300:
+                        LOGGER.warning("Langfuse media PUT returned %d", put_resp.status)
+                        return None
+                    # Some providers require an explicit PATCH to confirm the
+                    # upload (see below).
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
+                LOGGER.warning(
+                    "Langfuse media PUT failed: %s (headers=%s body=%r)",
+                    e,
+                    list(upload_headers.keys()),
+                    body,
+                )
+                return None
+            except Exception as e:
+                LOGGER.warning("Langfuse media PUT failed: %s", e)
+                return None
+
+            # Langfuse expects a PATCH to /api/public/media/{mediaId} to mark
+            # the upload complete with the status code + timing. Without this
+            # the blob is orphaned and the reference token won't resolve.
+            self._confirm_media_upload(media_id, 200, timeout)
+
+        return f"@@@langfuseMedia:type={content_type}|id={media_id}|source=bytes@@@"
+
+    def _confirm_media_upload(self, media_id: str, upload_http_status: int, timeout: int) -> None:
+        """PATCH /api/public/media/{id} to confirm a successful upload."""
+        from datetime import datetime, timezone
+
+        url = f"{self._config.host.rstrip('/')}/api/public/media/{media_id}"
+        body = {
+            "uploadedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "uploadHttpStatus": upload_http_status,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {self._auth}",
+            },
+            method="PATCH",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status >= 300:
+                    LOGGER.warning("Langfuse media PATCH confirm returned %d", resp.status)
+        except Exception as e:
+            LOGGER.warning("Langfuse media PATCH confirm failed: %s", e)
 
     def trace_url(self, trace_id: str) -> str:
         """Build the Langfuse UI URL for a trace."""

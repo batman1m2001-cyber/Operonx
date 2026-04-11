@@ -147,6 +147,12 @@ class TestRerankOpIntegration:
 
         from hush.providers.ops import RerankOp
 
+        # Skip cleanly if the ONNX runtime deps aren't installed. BaseOp.run()
+        # swallows init errors and logs them, so the assertion below would
+        # otherwise fail with a misleading "reranks not in result" message.
+        pytest.importorskip("onnxruntime")
+        pytest.importorskip("tokenizers")
+
         # Check if bge-m3-onnx reranker is available
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured in resources.yaml")

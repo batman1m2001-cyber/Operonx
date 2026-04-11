@@ -22,7 +22,12 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 
 from hush.core import LOGGER
-from hush.providers.llms.base import BaseLLM, create_http_client
+from hush.providers.llms.base import (
+    BaseLLM,
+    anthropic_cache_min_tokens,
+    create_http_client,
+    estimate_tokens,
+)
 from hush.providers.llms.config import LLMConfig
 
 
@@ -93,6 +98,16 @@ class AnthropicModel(BaseLLM):
         )
         usage = resp.get("usage", {})
 
+        # Anthropic reports input_tokens for NON-cached tokens only. The true
+        # prompt size is input + cache_read + cache_creation. Cache hits are
+        # surfaced in prompt_tokens_details.cached_tokens (OpenAI shape);
+        # write counts are preserved in model_extra as cache_write_tokens.
+        input_tokens = usage.get("input_tokens", 0) or 0
+        output_tokens = usage.get("output_tokens", 0) or 0
+        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+        cache_write = usage.get("cache_creation_input_tokens", 0) or 0
+        prompt_tokens = input_tokens + cache_read + cache_write
+
         return ChatCompletion(
             id=resp.get("id", f"msg_{uuid.uuid4().hex[:24]}"),
             created=int(time.time()),
@@ -109,9 +124,13 @@ class AnthropicModel(BaseLLM):
                 )
             ],
             usage=CompletionUsage(
-                prompt_tokens=usage.get("input_tokens", 0),
-                completion_tokens=usage.get("output_tokens", 0),
-                total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=output_tokens,
+                total_tokens=prompt_tokens + output_tokens,
+                prompt_tokens_details={"cached_tokens": cache_read},
+                # Stash the Anthropic-only write count as a model_extra so
+                # base.cache_metrics() can retrieve it without a new schema.
+                cache_write_tokens=cache_write,
             ),
         )
 
@@ -166,10 +185,49 @@ class AnthropicModel(BaseLLM):
 
     # ── Build request body ──────────────────────────────────────────────
 
+    def _maybe_cache_system(
+        self, system: Any, messages: List[Dict[str, Any]], enabled: bool
+    ) -> Any:
+        """Wrap the system block with cache_control if caching is worth it.
+
+        Anthropic silently ignores cache_control when the prefix is below a
+        per-model minimum, so we estimate the prefix size (system + messages)
+        and only enable caching when it clears the safe threshold. Returns
+        the system field shaped as a list-of-blocks when cached, or the
+        original plain-string form otherwise.
+        """
+        if not enabled or not system:
+            return system
+        prefix_tokens = estimate_tokens(system) + estimate_tokens(messages)
+        if prefix_tokens < anthropic_cache_min_tokens(self.model):
+            LOGGER.debug(
+                "Anthropic cache skipped: prefix ~%d tokens < safe min %d for %s",
+                prefix_tokens,
+                anthropic_cache_min_tokens(self.model),
+                self.model,
+            )
+            return system
+        if isinstance(system, str):
+            return [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        if isinstance(system, list) and system:
+            blocks = [dict(b) if isinstance(b, dict) else b for b in system]
+            last = blocks[-1]
+            if isinstance(last, dict):
+                last.setdefault("cache_control", {"type": "ephemeral"})
+            return blocks
+        return system
+
     def _build_request(
         self,
         messages: List[ChatCompletionMessageParam],
         stream: bool = False,
+        cache: bool = True,
         **kwargs,
     ) -> Dict[str, Any]:
         system, anthropic_messages = self._convert_messages(messages)
@@ -179,7 +237,7 @@ class AnthropicModel(BaseLLM):
             "max_tokens": kwargs.get("max_tokens") or 4096,
         }
         if system:
-            body["system"] = system
+            body["system"] = self._maybe_cache_system(system, anthropic_messages, cache)
         if stream:
             body["stream"] = True
         # Anthropic: temperature and top_p are mutually exclusive
@@ -239,6 +297,7 @@ class AnthropicModel(BaseLLM):
         body = self._build_request(
             messages,
             stream=False,
+            cache=kwargs.get("cache", True),
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
@@ -274,6 +333,7 @@ class AnthropicModel(BaseLLM):
         body = self._build_request(
             messages,
             stream=True,
+            cache=kwargs.get("cache", True),
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,

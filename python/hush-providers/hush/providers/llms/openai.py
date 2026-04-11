@@ -102,6 +102,8 @@ class OpenAISDKModel(BaseLLM):
         )
 
         sleep = kwargs.pop("sleep", 0.0)
+        # cache flag is consumed by Anthropic backend only; drop silently here
+        kwargs.pop("cache", None)
         stream_response = await self.client.chat.completions.create(**params)
         async for chunk in stream_response:
             self.sanitize_chinese_characters(chunk)
@@ -163,6 +165,8 @@ class OpenAISDKModel(BaseLLM):
             - Local image file paths are automatically converted to base64 data URLs
             - Chinese character detection covers CJK Unified Ideographs (U+4E00-U+9FFF)
         """
+        # cache flag is consumed by Anthropic backend only; drop silently here
+        kwargs.pop("cache", None)
         # Prepare parameters
         params = self._prepare_params(
             model=self.config.model,
