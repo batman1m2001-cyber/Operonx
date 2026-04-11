@@ -196,11 +196,18 @@ class TraceFilter:
 
     @staticmethod
     def _remove_empty_synthetics(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove synthetic nodes (stream_context, loop_iter) with no children.
+        """Remove synthetic wrapper nodes with no children.
+
+        Cleans up stream_context, loop_iter, and labeled_iter wrappers that
+        have zero surviving children after filtering. For labeled_iter this
+        is the normal path for "trivial" yields — e.g. a frame_source that
+        labels every chunk but most chunks only run excluded ops. The empty
+        labeled wrapper adds no signal and should go.
 
         Cascades: if removing a synthetic leaves its parent synthetic
         childless, remove that too.
         """
+        _SYNTHETIC_KINDS = ("stream_context", "loop_iter", "labeled_iter")
         changed = True
         while changed:
             changed = False
@@ -209,10 +216,7 @@ class TraceFilter:
             nodes = [
                 n
                 for n in nodes
-                if not (
-                    n.get("kind") in ("stream_context", "loop_iter")
-                    and n["trace_key"] not in parent_keys
-                )
+                if not (n.get("kind") in _SYNTHETIC_KINDS and n["trace_key"] not in parent_keys)
             ]
             if len(nodes) < before:
                 changed = True
