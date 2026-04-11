@@ -167,6 +167,52 @@ async def test_unlabeled_gen_unchanged_from_baseline():
 
 
 # =========================================================================
+# Integration: empty labeled_iter wrappers get pruned
+# =========================================================================
+
+
+@op
+async def many_yields_labeled(count: int):
+    """Labels every yield. Used to model frame_source — label every chunk,
+    but most chunks run only excluded ops, so wrappers should be pruned."""
+    for i in range(count):
+        label(f"turn-{i}")
+        yield {"item": i}
+
+
+@pytest.mark.asyncio
+async def test_empty_labeled_iter_wrappers_are_dropped():
+    """Labeled wrappers whose surviving children are empty get pruned."""
+    with GraphOp(name="prune_wf") as g:
+        gen = many_yields_labeled(count=PARENT["count"])
+        proc = process_item(item=gen["item"])
+        START >> gen >> proc >> END
+
+    engine = Hush(g)
+    result = await engine.run(inputs={"count": 4})
+    state = result["$state"]
+
+    collector = TraceCollector(g)
+    trace = collector.collect(state)
+
+    # Sanity: before filtering, we DO see 4 labeled wrappers.
+    assert len(_nodes_by_kind(trace["nodes"], "labeled_iter")) == 4
+
+    # After excluding the only downstream op, all labeled wrappers
+    # should become childless and get dropped by _remove_empty_synthetics.
+    # exclude_ops matches display_name (the graph var name), not the func
+    # name — that's "proc" in our wiring above.
+    tf = TraceFilter(exclude_ops=["proc"])
+    filtered = tf.apply(trace["nodes"])
+
+    labeled_nodes = _nodes_by_kind(filtered, "labeled_iter")
+    assert labeled_nodes == [], (
+        f"expected all empty labeled wrappers dropped, got: "
+        f"{[n['display_name'] for n in labeled_nodes]}"
+    )
+
+
+# =========================================================================
 # Integration: TraceFilter.exclude_kinds preserves labeled wrappers
 # =========================================================================
 
