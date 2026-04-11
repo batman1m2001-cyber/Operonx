@@ -157,12 +157,32 @@ class OTELTracer(ConfigurableTracer):
                         if "total_tokens" in usage:
                             attributes["llm.usage.total_tokens"] = usage["total_tokens"]
 
+                # Media: drop-with-counter (v1). The collector already
+                # replaced blobs with <media:N> placeholders in inputs /
+                # outputs, so they serialize fine below — we just surface
+                # counts so users know media existed and how big it was.
+                media_refs = node.get("media") or []
+                if media_refs:
+                    total_bytes = sum(
+                        (r.get("size_bytes") if isinstance(r, dict) else r.size_bytes) or 0
+                        for r in media_refs
+                    )
+                    attributes["media.count"] = len(media_refs)
+                    attributes["media.total_bytes"] = int(total_bytes)
+                    mime_types = sorted(
+                        {
+                            (r.get("mime_type") if isinstance(r, dict) else r.mime_type)
+                            for r in media_refs
+                        }
+                    )
+                    attributes["media.mime_types"] = ",".join(t for t in mime_types if t)
+
                 # Serialize I/O as attributes
                 if node.get("inputs"):
                     try:
                         import json
 
-                        input_str = json.dumps(node["inputs"])
+                        input_str = json.dumps(node["inputs"], default=str)
                         if len(input_str) < 10000:
                             attributes["input"] = input_str
                     except (TypeError, ValueError):
@@ -171,7 +191,7 @@ class OTELTracer(ConfigurableTracer):
                     try:
                         import json
 
-                        output_str = json.dumps(node["outputs"])
+                        output_str = json.dumps(node["outputs"], default=str)
                         if len(output_str) < 10000:
                             attributes["output"] = output_str
                     except (TypeError, ValueError):

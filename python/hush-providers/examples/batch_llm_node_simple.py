@@ -144,11 +144,11 @@ async def test_normal_llm_node():
     for i, (question, state) in enumerate(zip(questions, states)):
         content = state[f"normal_chat_{i}.chat", "content", None]
         model = state[f"normal_chat_{i}.chat", "model_used", None]
-        tokens = state[f"normal_chat_{i}.chat", "tokens_used", None]
+        usage = state[f"normal_chat_{i}.chat", "usage", None]
         print(f"[{i}] Q: {question}")
         print(f"    A: {content}")
         print(f"    Model: {model}")
-        print(f"    Tokens: {tokens}")
+        print(f"    Usage: {usage}")
         print()
 
 
