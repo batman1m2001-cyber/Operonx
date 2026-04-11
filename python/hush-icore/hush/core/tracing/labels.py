@@ -41,9 +41,9 @@ _current_gen_key: contextvars.ContextVar[Optional[Tuple[str, tuple]]] = contextv
 # Bound by the scheduler's _run_once for the duration of the run.
 # Points to the State._iter_labels dict of the executing call, so
 # multiple concurrent engine.run() invocations get independent stores.
-_current_labels_store: contextvars.ContextVar[
-    Optional[Dict[Tuple[str, tuple], Dict[str, Any]]]
-] = contextvars.ContextVar("hush_current_labels_store", default=None)
+_current_labels_store: contextvars.ContextVar[Optional[Dict[Tuple[str, tuple], Dict[str, Any]]]] = (
+    contextvars.ContextVar("hush_current_labels_store", default=None)
+)
 
 
 def _set_gen_key(op_full_name: str, ctx: tuple) -> contextvars.Token:

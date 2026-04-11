@@ -161,8 +161,8 @@ class Scheduler:
         # stores (each pointing at its own state._iter_labels dict).
         from hush.core.tracing.labels import (
             _advance_yield,
-            _set_labels_store,
             _reset_labels_store,
+            _set_labels_store,
         )
 
         _labels_store_token = _set_labels_store(state._iter_labels)
@@ -242,7 +242,7 @@ class Scheduler:
             """
             nonlocal inflight
             op = g._ops[op_name]
-            from hush.core.tracing.labels import _set_gen_key, _reset_gen_key
+            from hush.core.tracing.labels import _reset_gen_key, _set_gen_key
 
             async with _sem:
                 # Bind label() target so the op body can name its yields.
@@ -274,7 +274,7 @@ class Scheduler:
             (e.g. downstream sync ops becoming ready), the while-loop picks
             them up immediately.
             """
-            from hush.core.tracing.labels import _set_gen_key, _reset_gen_key
+            from hush.core.tracing.labels import _reset_gen_key, _set_gen_key
 
             while inline_pending:
                 op_name, ctx = inline_pending.pop(0)
