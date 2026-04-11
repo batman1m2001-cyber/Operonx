@@ -253,7 +253,10 @@ class AnthropicModel(BaseLLM):
         }
         if system:
             body["system"] = self._maybe_cache_system(
-                system, anthropic_messages, cache, cache_ttl=cache_ttl,
+                system,
+                anthropic_messages,
+                cache,
+                cache_ttl=cache_ttl,
             )
         if stream:
             body["stream"] = True
@@ -270,7 +273,9 @@ class AnthropicModel(BaseLLM):
     # ── Warmup (prompt caching) ───────────────────────────────────────
 
     async def warmup(
-        self, system_prompt: str = "", cache_ttl: Optional[str] = None,
+        self,
+        system_prompt: str = "",
+        cache_ttl: Optional[str] = None,
     ) -> None:
         """Pre-warm the Anthropic connection and seed the prompt cache.
 
