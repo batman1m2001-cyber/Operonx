@@ -13,6 +13,7 @@ see hush-telemetry package.
 from hush.core.tracing.base import Tracer
 from hush.core.tracing.collector import TraceCollector
 from hush.core.tracing.flush_worker import FlushWorker, get_flush_worker
+from hush.core.tracing.labels import label
 from hush.core.tracing.local import LocalTracer
 from hush.core.tracing.models import (
     TraceNode,
@@ -26,6 +27,7 @@ __all__ = [
     "TraceFilter",
     "FlushWorker",
     "get_flush_worker",
+    "label",
     "LocalTracer",
     "TraceNode",
     "TraceSummary",
