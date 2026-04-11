@@ -11,6 +11,78 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from hush.providers.llms.config import LLMConfig
 
+# ── Prompt caching thresholds ────────────────────────────────────────────
+# Anthropic silently refuses to cache prefixes shorter than these limits.
+# We keep a ~25% safety margin over the documented minimums because the
+# actual cut-off is flaky right at the edge (see scripts/test_prompt_caching_
+# anthropic_threshold.py — 2052 tokens still missed on a 2048-min model).
+ANTHROPIC_CACHE_MIN_TOKENS: Dict[str, int] = {
+    # Model prefix -> safe prefix-token minimum
+    "claude-opus-4": 5000,
+    "claude-haiku-4": 5000,
+    "claude-sonnet-4-6": 2500,
+    "claude-sonnet-4-5": 1300,
+    "claude-sonnet-4": 1300,
+    "claude-3-5-haiku": 2500,
+    "claude-3-5-sonnet": 1300,
+    "claude-3-haiku": 2500,
+    "claude-3-opus": 1300,
+    "claude-3-sonnet": 1300,
+}
+# Fallback for unknown models — cover the most common 2048-token case.
+ANTHROPIC_CACHE_DEFAULT_MIN = 2500
+
+
+def anthropic_cache_min_tokens(model: str) -> int:
+    """Return the safe minimum cacheable prefix length for a Claude model."""
+    for prefix, minimum in ANTHROPIC_CACHE_MIN_TOKENS.items():
+        if model.startswith(prefix):
+            return minimum
+    return ANTHROPIC_CACHE_DEFAULT_MIN
+
+
+def estimate_tokens(text: Union[str, List, Dict, None]) -> int:
+    """Rough character-based token estimate (~4 chars/token).
+
+    Deliberately slightly pessimistic so callers under-estimate and only
+    attempt caching when well clear of the provider threshold.
+    """
+    if text is None:
+        return 0
+    if isinstance(text, str):
+        return max(1, len(text) // 4)
+    if isinstance(text, list):
+        return sum(estimate_tokens(item) for item in text)
+    if isinstance(text, dict):
+        # typical {"type": "text", "text": "..."} block
+        return estimate_tokens(text.get("text") or text.get("content"))
+    return 0
+
+
+def cache_metrics(completion: ChatCompletion) -> Dict[str, int]:
+    """Extract normalized cache metrics from a ChatCompletion.
+
+    Returns a dict with:
+      - cached_input_tokens: tokens served from cache (hit)
+      - cache_write_tokens: tokens newly written to cache (Anthropic only)
+
+    Works uniformly for OpenAI/Azure/Gemini (via prompt_tokens_details.cached_
+    tokens) and Anthropic (via the extras we stash during conversion).
+    """
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return {"cached_input_tokens": 0, "cache_write_tokens": 0}
+
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0) if details else 0
+    # Anthropic write count is stashed as a model_extra on the usage object.
+    extra = getattr(usage, "model_extra", None) or {}
+    write = extra.get("cache_write_tokens", 0)
+    return {
+        "cached_input_tokens": int(cached or 0),
+        "cache_write_tokens": int(write or 0),
+    }
+
 
 def create_http_client(
     verify: bool = True,

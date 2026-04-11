@@ -134,10 +134,10 @@ class TestLLMOpIntegration:
         assert len(result["content"]) > 0, "Should have accumulated content"
         print(f"Streamed result content: {result['content']}")
 
-        # Verify tokens_used is populated
-        assert "tokens_used" in result
-        if result["tokens_used"]:
-            print(f"Tokens used: {result['tokens_used']}")
+        # Verify usage is populated
+        assert "usage" in result
+        if result["usage"]:
+            print(f"Usage: {result['usage']}")
 
 
 class TestLLMOpLoadBalancing:
@@ -363,8 +363,8 @@ class TestLLMOpAdvancedParams:
         assert "n" in node.inputs
         assert "user" in node.inputs
 
-    def test_output_schema_has_refusal_and_logprobs(self, hub):
-        """Test LLMOp output schema includes refusal and logprobs."""
+    def test_output_schema_has_usage_and_extras(self, hub):
+        """Test LLMOp output schema includes usage and extras bag."""
         from hush.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -372,8 +372,8 @@ class TestLLMOpAdvancedParams:
 
         node = LLMOp(name="output_test", resource="gpt-4o")
 
-        assert "refusal" in node.outputs
-        assert "logprobs" in node.outputs
+        assert "usage" in node.outputs
+        assert "extras" in node.outputs
 
 
 class TestLLMOpFallback:
@@ -837,12 +837,12 @@ class TestLLMOpGenerationParams:
         async for _, result in node.run(state):
             pass
         assert "content" in result
-        assert "tokens_used" in result
+        assert "usage" in result
         # Response should be truncated
-        if result["tokens_used"]:
-            assert result["tokens_used"].get("completion_tokens", 0) <= 25  # Allow some margin
+        if result["usage"]:
+            assert result["usage"].get("completion_tokens", 0) <= 25  # Allow some margin
         print(f"Max tokens response: {result['content']}")
-        print(f"Tokens used: {result['tokens_used']}")
+        print(f"Usage: {result['usage']}")
 
     @pytest.mark.asyncio
     async def test_stop_sequences(self, hub):
@@ -1002,11 +1002,12 @@ class TestLLMOpLogprobs:
         async for _, result in node.run(state):
             pass
         assert "content" in result
-        assert "logprobs" in result
-        if result["logprobs"]:
-            print(f"Logprobs: {result['logprobs']}")
+        assert "extras" in result
+        logprobs = result["extras"].get("logprobs")
+        if logprobs:
+            print(f"Logprobs: {logprobs}")
             # Should have content with logprob info
-            assert "content" in result["logprobs"]
+            assert "content" in logprobs
         print(f"Response: {result['content']}")
 
 

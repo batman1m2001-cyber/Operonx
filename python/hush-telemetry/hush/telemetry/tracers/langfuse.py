@@ -11,7 +11,22 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from hush.core.media import substitute_placeholder
 from hush.telemetry.tracers._base import ConfigurableTracer
+
+
+def _substitute_for_field(
+    inputs: Optional[Dict[str, Any]],
+    outputs: Optional[Dict[str, Any]],
+    field_path: str,
+    replacement: Any,
+) -> None:
+    """Route a ``substitute_placeholder`` call to inputs or outputs by root segment."""
+    root, _, _ = field_path.partition(".")
+    target = inputs if root == "inputs" else outputs
+    if target is not None:
+        substitute_placeholder(target, field_path, replacement)
+
 
 if TYPE_CHECKING:
     from hush.core.tracing.trace_filter import TraceFilter
@@ -74,6 +89,72 @@ class LangfuseTracer(ConfigurableTracer):
         """Set parentObservationId on *body* when this node is not a direct trace child."""
         if parent_key and parent_key in obs_ids and obs_ids[parent_key] != trace_id:
             body["parentObservationId"] = obs_ids[parent_key]
+
+    def _upload_node_media(
+        self,
+        client,
+        node: Dict[str, Any],
+        trace_id: str,
+        observation_id: Optional[str],
+    ) -> tuple:
+        """Upload every ``MediaRef`` on a node and substitute placeholders.
+
+        Mutates ``node["inputs"]`` / ``node["outputs"]`` in place, replacing
+        each ``<media:N>`` placeholder at the ``field_path`` with the returned
+        Langfuse reference token. Failures are logged and leave a human-readable
+        fallback string so the trace is still interpretable.
+        """
+        media_list = node.get("media") or []
+        if not media_list:
+            return node.get("inputs"), node.get("outputs")
+
+        inputs = node.get("inputs") or {}
+        outputs = node.get("outputs") or {}
+
+        for ref in media_list:
+            # ref is a MediaRef dataclass at this point (pre-asdict) OR a
+            # plain dict (post-asdict). Support both for robustness.
+            field_path = ref.get("field_path") if isinstance(ref, dict) else ref.field_path
+            mime_type = ref.get("mime_type") if isinstance(ref, dict) else ref.mime_type
+            data = ref.get("data") if isinstance(ref, dict) else ref.data
+            size_bytes = ref.get("size_bytes") if isinstance(ref, dict) else ref.size_bytes
+
+            content: Optional[bytes] = None
+            if isinstance(data, bytes):
+                content = data
+            elif isinstance(data, str) and data.startswith("data:") and ";base64," in data:
+                # data:<mime>;base64,<payload> — decode and upload so Langfuse
+                # renders a native preview instead of a wall of base64.
+                import base64
+
+                try:
+                    content = base64.b64decode(data.split(",", 1)[1])
+                except Exception:
+                    content = None
+            if content is None:
+                # URL, file path, or non-base64 string — can't upload raw
+                # bytes, so leave a descriptive placeholder.
+                fallback = f"[media: {mime_type}, ref={str(data)[:80]!r}]"
+                _substitute_for_field(inputs, outputs, field_path, fallback)
+                continue
+
+            root, _, _ = field_path.partition(".")
+            lf_field = "input" if root == "inputs" else "output"
+
+            token = client.upload_media(
+                trace_id=trace_id,
+                field=lf_field,
+                content_type=mime_type,
+                content=content,
+                observation_id=observation_id,
+            )
+            if token is None:
+                fallback = f"[media upload failed: {mime_type}, {size_bytes}B]"
+                _substitute_for_field(inputs, outputs, field_path, fallback)
+            else:
+                _substitute_for_field(inputs, outputs, field_path, token)
+
+        return inputs or None, outputs or None
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Send trace data to Langfuse via batch ingestion API.
@@ -146,13 +227,29 @@ class LangfuseTracer(ConfigurableTracer):
             metadata = dict(node.get("metadata") or {})
             event_id = str(uuid.uuid4())
 
+            # Pre-assign observation ID so media upload can reference it.
+            if node_type == "trace":
+                node_obs_id = trace_id
+            else:
+                node_obs_id = str(uuid.uuid4())
+                obs_ids[key] = node_obs_id
+
+            # Upload media blobs (if any) and substitute reference tokens
+            # back into the node's inputs/outputs before building the body.
+            body_inputs, body_outputs = self._upload_node_media(
+                client,
+                node,
+                trace_id=trace_id,
+                observation_id=None if node_type == "trace" else node_obs_id,
+            )
+
             if node_type == "trace":
                 # Root trace event
                 body: Dict[str, Any] = {
                     "id": trace_id,
                     "name": node["display_name"],
-                    "input": node.get("inputs") or None,
-                    "output": node.get("outputs") or None,
+                    "input": body_inputs,
+                    "output": body_outputs,
                     "metadata": metadata or None,
                     "tags": clean_tags if clean_tags else None,
                     "environment": "default",
@@ -173,19 +270,17 @@ class LangfuseTracer(ConfigurableTracer):
                     }
                 )
                 obs_ids[key] = trace_id  # trace's "id" is used as traceId
+                # (already set via node_obs_id above; kept for clarity)
 
             elif node_type == "generation":
-                obs_id = str(uuid.uuid4())
-                obs_ids[key] = obs_id
-
                 body = {
-                    "id": obs_id,
+                    "id": node_obs_id,
                     "traceId": trace_id,
                     "name": node["display_name"],
                     "startTime": node.get("start_time"),
                     "endTime": node.get("end_time"),
-                    "input": node.get("inputs") or None,
-                    "output": node.get("outputs") or None,
+                    "input": body_inputs,
+                    "output": body_outputs,
                     "metadata": metadata or None,
                 }
 
@@ -221,17 +316,14 @@ class LangfuseTracer(ConfigurableTracer):
 
             else:
                 # Span (batch, generator, loop_iter, graph)
-                obs_id = str(uuid.uuid4())
-                obs_ids[key] = obs_id
-
                 body = {
-                    "id": obs_id,
+                    "id": node_obs_id,
                     "traceId": trace_id,
                     "name": node["display_name"],
                     "startTime": node.get("start_time"),
                     "endTime": node.get("end_time"),
-                    "input": node.get("inputs") or None,
-                    "output": node.get("outputs") or None,
+                    "input": body_inputs,
+                    "output": body_outputs,
                     "metadata": metadata or None,
                 }
 

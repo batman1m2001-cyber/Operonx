@@ -3,6 +3,7 @@
 Uses stdlib urllib.request (no external dependency).
 """
 
+import base64
 import json
 import logging
 import urllib.request
@@ -45,6 +46,9 @@ class HushEyesTracer(Tracer):
         Args:
             trace_data: Dict matching IngestRequest format
         """
+        # Base64-encode any raw bytes in node.media[] so the JSON payload is
+        # valid. The ui server can decode these and render previews inline.
+        self._encode_media(trace_data)
         body = json.dumps(trace_data, default=str).encode("utf-8")
         req = urllib.request.Request(
             self._url,
@@ -65,6 +69,16 @@ class HushEyesTracer(Tracer):
                 "Could not reach ui-hush-eyes at %s (server may not be running)",
                 self._url,
             )
+
+    @staticmethod
+    def _encode_media(trace_data: Dict[str, Any]) -> None:
+        """Rewrite media blobs in place so raw ``bytes`` become base64 strings."""
+        for node in trace_data.get("nodes") or []:
+            for ref in node.get("media") or []:
+                data = ref.get("data")
+                if isinstance(data, (bytes, bytearray)):
+                    ref["data"] = base64.b64encode(bytes(data)).decode("ascii")
+                    ref["encoding"] = "base64"
 
     def to_config_dict(self):
         return {"host": self._host, "port": self._port}

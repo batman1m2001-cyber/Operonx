@@ -17,9 +17,36 @@ import logging
 from dataclasses import fields, is_dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from hush.core.media import extract_media
 from hush.core.tracing.models import TraceNode, TraceSummary
 from hush.core.utils.algo import build_children, tree_walk
 from hush.core.utils.algo import topo_rank as compute_topo_rank
+
+
+def _prune_nones(value: Any) -> Any:
+    """Recursively drop ``None``-valued keys from trace I/O dicts.
+
+    Raw op I/O contains many undeclared / unused fields (``tools``,
+    ``tool_choice``, ``frequency_penalty``, ``extras.refusal``, …) that
+    clutter Langfuse traces. This pass removes them at every level while
+    preserving empty collections (``[]`` / ``{}``) since those can be
+    semantically meaningful (e.g. ``tool_calls=[]`` means "model didn't
+    call any tools").
+    """
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            pruned = _prune_nones(v)
+            if pruned is None:
+                continue
+            out[k] = pruned
+        return out
+    if isinstance(value, list):
+        return [_prune_nones(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_prune_nones(v) for v in value)
+    return value
+
 
 LOGGER = logging.getLogger("hush.tracing")
 
@@ -343,9 +370,30 @@ class TraceCollector:
                 end_time = state[op_name, "end_time", ctx]
                 duration_ms = state[op_name, "duration_ms", ctx]
 
+                # Per-op trace-time normalization: give the op a chance to
+                # wrap format-specific media in Media instances BEFORE the
+                # generic extraction runs. Default is identity.
+                try:
+                    inputs, outputs = op.normalize_trace_io(inputs, outputs)
+                except Exception:
+                    LOGGER.exception("normalize_trace_io failed for op %s; using raw I/O", op_name)
+
+                # Extract Media instances into a parallel list with
+                # placeholders left in the I/O dicts. Used downstream by
+                # tracers to upload / attach media out-of-band.
+                inputs, in_media = extract_media(inputs, "inputs")
+                outputs, out_media = extract_media(outputs, "outputs")
+                node_media = in_media + out_media
+
+                # Drop None-valued keys recursively — cuts LLMOp output
+                # clutter like extras.refusal=None, extras.logprobs=None,
+                # and unused input knobs (tools, tool_choice, ...).
+                inputs = _prune_nones(inputs)
+                outputs = _prune_nones(outputs)
+
                 # LLM-specific
                 model = outputs.get("model_used") if contain_generation else None
-                usage = outputs.get("tokens_used") if contain_generation else None
+                usage = outputs.get("usage") if contain_generation else None
                 cost = state[op_name, "cost_usd", ctx]
 
                 # Trace key
@@ -397,6 +445,7 @@ class TraceCollector:
                     model=model,
                     usage=usage,
                     cost=cost,
+                    media=node_media,
                 )
                 node_lookup[trace_key] = node
                 node_meta[trace_key] = {
