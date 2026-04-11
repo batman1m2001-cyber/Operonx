@@ -186,6 +186,7 @@ class TraceCollector:
 
         # 2. Scan state → TraceNodes with parents resolved
         node_lookup, node_meta = self._scan_nodes(state, executed_pairs)
+        self._current_state = state
 
         # 3. Add synthetic context groups ([0], [1], ...)
         self._add_context_groups(node_lookup, node_meta)
@@ -491,6 +492,10 @@ class TraceCollector:
                 gen_ctx_map[(meta["parent_graph_name"], meta["ctx"])] = trace_key
 
         synthetics: Dict[str, TraceNode] = {}
+        # Per-call cache of labels drained from hush.core.tracing.labels.
+        # Keyed by (spawner_op_name, gen_ctx). Drained lazily when we first
+        # need a label for a given generator.
+        label_cache: Dict[Tuple[str, tuple], List[str]] = {}
 
         for trace_key, meta in node_meta.items():
             node = node_lookup.get(trace_key)
@@ -535,13 +540,33 @@ class TraceCollector:
                     spawner_key = gen_ctx_map.get((parent_graph_name, gen_ctx))
                     parent_for_synthetic = spawner_key if spawner_key else graph_trace_key
 
+                    # Check for a user-supplied label (via hush.core.tracing.label).
+                    display_name = relative[i]
+                    kind = "stream_context"
+                    state_labels = getattr(self._current_state, "_iter_labels", None)
+                    if state_labels and spawner_key and spawner_key in node_lookup:
+                        spawner_op = node_lookup[spawner_key].op_name
+                        if spawner_op:
+                            cache_key = (spawner_op, gen_ctx)
+                            if cache_key not in label_cache:
+                                from hush.core.tracing.labels import get_labels
+
+                                label_cache[cache_key] = get_labels(
+                                    state_labels, spawner_op, gen_ctx
+                                )
+                            labels = label_cache[cache_key]
+                            iter_idx = _extract_stream_index(relative[i])
+                            if 0 <= iter_idx < len(labels) and labels[iter_idx]:
+                                display_name = labels[iter_idx]
+                                kind = "labeled_iter"
+
                     synthetics[synthetic_key] = TraceNode(
                         trace_key=synthetic_key,
                         parent_trace_key=parent_for_synthetic,
                         op_name=None,
-                        display_name=relative[i],
+                        display_name=display_name,
                         node_type="span",
-                        kind="stream_context",
+                        kind=kind,
                     )
 
                 deepest_synthetic = synthetic_key

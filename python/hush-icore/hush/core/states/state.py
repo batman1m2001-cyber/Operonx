@@ -36,6 +36,7 @@ class MemoryState:
         "_request_id",
         "_tags",
         "tracing",
+        "_iter_labels",
     )
 
     def __init__(
@@ -67,6 +68,12 @@ class MemoryState:
         # Dynamic tags collected during execution
         self._tags: List[str] = []
         self.tracing = True  # default on; engine sets False when no tracer
+
+        # Per-execution store for hush.core.tracing.label(). Keyed by
+        # (gen_op_full_name, ctx) → {"labels": [str], "next_idx": int}.
+        # Populated by label() calls inside generator ops, drained by
+        # TraceCollector when building stream_context synthetics.
+        self._iter_labels: Dict[Tuple[str, tuple], Dict[str, Any]] = {}
 
         # Apply initial inputs
         if inputs:

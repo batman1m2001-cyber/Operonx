@@ -156,6 +156,17 @@ class Scheduler:
         _start_time = datetime.now(timezone.utc)
         _perf_start = perf_counter()
 
+        # Bind the labels store for hush.core.tracing.label(). Uses a
+        # ContextVar so concurrent engine.run() calls get independent
+        # stores (each pointing at its own state._iter_labels dict).
+        from hush.core.tracing.labels import (
+            _advance_yield,
+            _set_labels_store,
+            _reset_labels_store,
+        )
+
+        _labels_store_token = _set_labels_store(state._iter_labels)
+
         # All Frame/EOF events flow through here — the main event loop dequeues them.
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -231,11 +242,20 @@ class Scheduler:
             """
             nonlocal inflight
             op = g._ops[op_name]
+            from hush.core.tracing.labels import _set_gen_key, _reset_gen_key
+
             async with _sem:
+                # Bind label() target so the op body can name its yields.
+                # Use full_name so the collector (which also uses full_name)
+                # can look up labels by the same key.
+                _label_token = _set_gen_key(op.full_name, ctx)
                 try:
                     async for item_ctx, result in op.run(state, ctx):
                         queue.put_nowait(Frame(op_name, item_ctx, result))
                         inflight += 1
+                        # Advance the "next-yield" cursor so subsequent
+                        # label() calls write to the next slot.
+                        _advance_yield(op.full_name, ctx)
                     queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1
                 except Exception as e:
@@ -243,6 +263,7 @@ class Scheduler:
                     queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1  # account for the EOF we just put on queue
                 finally:
+                    _reset_gen_key(_label_token)
                     inflight -= 1
 
         async def _drain_inline() -> None:
@@ -253,16 +274,22 @@ class Scheduler:
             (e.g. downstream sync ops becoming ready), the while-loop picks
             them up immediately.
             """
+            from hush.core.tracing.labels import _set_gen_key, _reset_gen_key
+
             while inline_pending:
                 op_name, ctx = inline_pending.pop(0)
                 op = g._ops[op_name]
+                _label_token = _set_gen_key(op.full_name, ctx)
                 try:
                     async for item_ctx, result in op.run(state, ctx):
                         _on_frame(Frame(op_name, item_ctx, result))
+                        _advance_yield(op.full_name, ctx)
                     _on_eof(EOF(op_name, ctx))
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     _on_eof(EOF(op_name, ctx))
+                finally:
+                    _reset_gen_key(_label_token)
 
         def _on_frame(event: Frame) -> None:
             """Handle one Frame: seed item ctx, decrement ready, route when ready."""
@@ -402,5 +429,8 @@ class Scheduler:
 
         # Collect final outputs at root context.
         outputs = g.get_outputs(state, context_id)
+
+        # Clear the labels store binding for this run.
+        _reset_labels_store(_labels_store_token)
 
         return outputs, item_ctxs
