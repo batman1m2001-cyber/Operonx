@@ -434,9 +434,7 @@ class BaseOp(ABC):
         """
         return {var: state[self.full_name, var, context_id] for var in self.outputs}
 
-    def normalize_trace_io(
-        self, inputs: Dict[str, Any], outputs: Dict[str, Any]
-    ) -> tuple:
+    def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
         """Produce a trace-time view of this op's I/O.
 
         Called by the tracing collector before media extraction. Subclasses

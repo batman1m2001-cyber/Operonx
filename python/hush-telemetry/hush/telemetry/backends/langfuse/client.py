@@ -164,9 +164,7 @@ class LangfuseClient:
             try:
                 with urllib.request.urlopen(put_req, timeout=timeout) as put_resp:
                     if put_resp.status >= 300:
-                        LOGGER.warning(
-                            "Langfuse media PUT returned %d", put_resp.status
-                        )
+                        LOGGER.warning("Langfuse media PUT returned %d", put_resp.status)
                         return None
                     # Some providers require an explicit PATCH to confirm the
                     # upload (see below).
@@ -194,9 +192,7 @@ class LangfuseClient:
 
         return f"@@@langfuseMedia:type={content_type}|id={media_id}|source=bytes@@@"
 
-    def _confirm_media_upload(
-        self, media_id: str, upload_http_status: int, timeout: int
-    ) -> None:
+    def _confirm_media_upload(self, media_id: str, upload_http_status: int, timeout: int) -> None:
         """PATCH /api/public/media/{id} to confirm a successful upload."""
         from datetime import datetime, timezone
 
@@ -217,9 +213,7 @@ class LangfuseClient:
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 if resp.status >= 300:
-                    LOGGER.warning(
-                        "Langfuse media PATCH confirm returned %d", resp.status
-                    )
+                    LOGGER.warning("Langfuse media PATCH confirm returned %d", resp.status)
         except Exception as e:
             LOGGER.warning("Langfuse media PATCH confirm failed: %s", e)
 

@@ -80,9 +80,7 @@ class MediaRef:
         )
 
 
-def extract_media(
-    io_dict: dict, root: str
-) -> tuple[dict, list[MediaRef]]:
+def extract_media(io_dict: dict, root: str) -> tuple[dict, list[MediaRef]]:
     """Recursively strip ``Media`` instances from an I/O dict.
 
     Args:

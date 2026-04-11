@@ -28,8 +28,10 @@ async def main() -> None:
     context = big_static_context(target_tokens=5000)
 
     section(f"OpenAI prompt caching — model={model}")
-    print("Automatic caching: minimum 1024 tokens; reads reported as "
-          "usage.prompt_tokens_details.cached_tokens")
+    print(
+        "Automatic caching: minimum 1024 tokens; reads reported as "
+        "usage.prompt_tokens_details.cached_tokens"
+    )
 
     async def call(question: str, label: str) -> None:
         resp = await client.chat.completions.create(

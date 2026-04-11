@@ -29,7 +29,6 @@ and ``OPENAI_API_KEY`` in the repo-root .env file.
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import struct
 import sys
@@ -48,9 +47,7 @@ def tiny_png_data_url() -> str:
     but the point of the test is that the tracer extracts and uploads it
     as a media attachment instead.
     """
-    b64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
-    )
+    b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
     return "data:image/png;base64," + b64
 
 
@@ -86,7 +83,7 @@ async def main() -> None:
         raise SystemExit("OPENAI_API_KEY not set in .env (needed for the vision op)")
 
     # Load resources.yaml so langfuse:default + llm:gpt-4o are available.
-    from hush.core import END, GraphOp, Hush, Media, PARENT, START, op
+    from hush.core import END, PARENT, START, GraphOp, Hush, Media, op
     from hush.core.registry import ResourceHub, set_global_hub
 
     config_path = REPO_ROOT / "resources.yaml"
@@ -96,8 +93,9 @@ async def main() -> None:
     set_global_hub(hub)
     ResourceHub.set_instance(hub)
 
-    from hush.providers.ops import LLMOp
     from hush.telemetry.tracers.langfuse import LangfuseTracer
+
+    from hush.providers.ops import LLMOp
 
     # ------------------------------------------------------------------ ops
     @op
