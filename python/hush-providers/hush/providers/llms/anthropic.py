@@ -186,7 +186,11 @@ class AnthropicModel(BaseLLM):
     # ── Build request body ──────────────────────────────────────────────
 
     def _maybe_cache_system(
-        self, system: Any, messages: List[Dict[str, Any]], enabled: bool
+        self,
+        system: Any,
+        messages: List[Dict[str, Any]],
+        enabled: bool,
+        cache_ttl: Optional[str] = None,
     ) -> Any:
         """Wrap the system block with cache_control if caching is worth it.
 
@@ -195,6 +199,11 @@ class AnthropicModel(BaseLLM):
         and only enable caching when it clears the safe threshold. Returns
         the system field shaped as a list-of-blocks when cached, or the
         original plain-string form otherwise.
+
+        Args:
+            cache_ttl: Optional TTL for the cache entry. Anthropic supports
+                ``"5m"`` (default) and ``"1h"``. When set, the
+                ``cache_control`` block includes a ``"ttl"`` field.
         """
         if not enabled or not system:
             return system
@@ -207,19 +216,24 @@ class AnthropicModel(BaseLLM):
                 self.model,
             )
             return system
+
+        cc: Dict[str, str] = {"type": "ephemeral"}
+        if cache_ttl:
+            cc["ttl"] = cache_ttl
+
         if isinstance(system, str):
             return [
                 {
                     "type": "text",
                     "text": system,
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": cc,
                 }
             ]
         if isinstance(system, list) and system:
             blocks = [dict(b) if isinstance(b, dict) else b for b in system]
             last = blocks[-1]
             if isinstance(last, dict):
-                last.setdefault("cache_control", {"type": "ephemeral"})
+                last.setdefault("cache_control", cc)
             return blocks
         return system
 
@@ -228,6 +242,7 @@ class AnthropicModel(BaseLLM):
         messages: List[ChatCompletionMessageParam],
         stream: bool = False,
         cache: bool = True,
+        cache_ttl: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         system, anthropic_messages = self._convert_messages(messages)
@@ -237,7 +252,9 @@ class AnthropicModel(BaseLLM):
             "max_tokens": kwargs.get("max_tokens") or 4096,
         }
         if system:
-            body["system"] = self._maybe_cache_system(system, anthropic_messages, cache)
+            body["system"] = self._maybe_cache_system(
+                system, anthropic_messages, cache, cache_ttl=cache_ttl,
+            )
         if stream:
             body["stream"] = True
         # Anthropic: temperature and top_p are mutually exclusive
@@ -252,12 +269,18 @@ class AnthropicModel(BaseLLM):
 
     # ── Warmup (prompt caching) ───────────────────────────────────────
 
-    async def warmup(self, system_prompt: str = "") -> None:
+    async def warmup(
+        self, system_prompt: str = "", cache_ttl: Optional[str] = None,
+    ) -> None:
         """Pre-warm the Anthropic connection and seed the prompt cache.
 
         Sends a minimal 1-token request with ``cache_control`` on the
         system block so Anthropic caches it server-side. Subsequent calls
         with the same system prompt get a cache hit → faster inference.
+
+        Args:
+            cache_ttl: Optional TTL for the cache entry (``"5m"`` or
+                ``"1h"``). Defaults to Anthropic's standard 5-minute TTL.
         """
         body: Dict[str, Any] = {
             "model": self.model,
@@ -265,11 +288,14 @@ class AnthropicModel(BaseLLM):
             "messages": [{"role": "user", "content": "warmup"}],
         }
         if system_prompt:
+            cc: Dict[str, str] = {"type": "ephemeral"}
+            if cache_ttl:
+                cc["ttl"] = cache_ttl
             body["system"] = [
                 {
                     "type": "text",
                     "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": cc,
                 }
             ]
         url = f"{self.base_url}/v1/messages"
@@ -298,6 +324,7 @@ class AnthropicModel(BaseLLM):
             messages,
             stream=False,
             cache=kwargs.get("cache", True),
+            cache_ttl=kwargs.get("cache_ttl"),
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
@@ -334,6 +361,7 @@ class AnthropicModel(BaseLLM):
             messages,
             stream=True,
             cache=kwargs.get("cache", True),
+            cache_ttl=kwargs.get("cache_ttl"),
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
