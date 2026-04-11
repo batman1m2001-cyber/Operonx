@@ -26,7 +26,7 @@ def chat(
 ) -> Any:
     """Prompt → LLM graph for text generation.
 
-    Returns raw LLM output: content, role, model_used, tokens_used, etc.
+    Returns raw LLM output: content, role, model_used, usage, extras, etc.
 
     Example::
 

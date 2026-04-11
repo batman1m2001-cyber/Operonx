@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from hush.core import LOGGER
 from hush.core.configs import OpType
+from hush.core.media import Media
 from hush.core.ops import BaseOp
 from hush.core.ops.base import shorthand, split_shorthand_kwargs
 from hush.core.utils.common import Param
@@ -16,6 +17,16 @@ from hush.providers.ops._utils import resolve_hub
 
 if TYPE_CHECKING:
     from hush.providers.llms.base import BaseLLM
+
+
+def _mime_from_data_url(url: str) -> Optional[str]:
+    """Extract the mime type from a ``data:image/png;base64,...`` header."""
+    if not url.startswith("data:"):
+        return None
+    head = url[5:].split(",", 1)[0]
+    if not head:
+        return None
+    return head.split(";", 1)[0] or None
 
 
 class LLMOp(BaseOp):
@@ -35,10 +46,15 @@ class LLMOp(BaseOp):
     Outputs:
         content (str): Generated text.
         role (str): Message role (usually ``"assistant"``).
-        model_used (str): Actual model that served the request.
-        tokens_used (dict): ``{prompt, completion, total}`` token counts.
-        tool_calls (list): Tool-call objects (if any).
         finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, etc.).
+        model_used (str): Actual model that served the request.
+        tool_calls (list): Tool-call objects (empty list when absent).
+        usage (dict): Flat token-cost metrics with keys
+            ``prompt_tokens``, ``completion_tokens``, ``total_tokens``,
+            ``cached_tokens`` (cache hit), ``cache_write_tokens``
+            (Anthropic cache write), ``reasoning_tokens``.
+        extras (dict): Bag of uncommon fields — ``thinking_content``,
+            ``refusal``, ``logprobs``. Values are ``None`` when absent.
 
     Example::
 
@@ -133,14 +149,9 @@ class LLMOp(BaseOp):
             "content": Param(type=str, required=True),
             "finish_reason": Param(type=str, default=None),
             "model_used": Param(type=str, required=True),
-            "tokens_used": Param(type=dict, default={}),
             "tool_calls": Param(type=list, default=[]),
-            "thinking_content": Param(type=str, default=None),
-            "context_used": Param(type=int, default=0),
-            "refusal": Param(type=str, default=None),
-            "logprobs": Param(type=dict, default=None),
-            "error_code": Param(type=int, default=None),
-            "error_message": Param(type=str, default=None),
+            "usage": Param(type=dict, default={}),
+            "extras": Param(type=dict, default={}),
         }
 
         normalized_inputs = self._normalize_params(inputs)
@@ -235,21 +246,21 @@ class LLMOp(BaseOp):
             if not self._batch_coordinator:
                 raise RuntimeError("Batch coordinator not initialized")
             completion = await self._batch_coordinator.submit(**llm_params)
-            return self._extract_completion(completion, kwargs, self.resource)
+            return self._extract_completion(completion, self.resource)
 
         selected = self._select_llm()
         resource = self._get_resource_key(selected)
 
         try:
             completion = await selected.generate(**llm_params)
-            return self._extract_completion(completion, kwargs, resource)
+            return self._extract_completion(completion, resource)
         except Exception as e:
             if not self._fallback_llms:
                 raise
             LOGGER.error(f"Primary {resource} failed: {e}")
-            return await self._fallback_generate(llm_params, kwargs)
+            return await self._fallback_generate(llm_params)
 
-    async def _fallback_generate(self, llm_params, raw_inputs):
+    async def _fallback_generate(self, llm_params):
         """Try fallback LLMs in order. Raises if all fail."""
         for idx, fallback_llm in enumerate(self._fallback_llms):
             fallback_key = self.fallback[idx]
@@ -257,7 +268,7 @@ class LLMOp(BaseOp):
                 LOGGER.info(f"Trying fallback {fallback_key}...")
                 completion = await fallback_llm.generate(**llm_params)
                 LOGGER.info(f"Fallback to {fallback_key} succeeded")
-                return self._extract_completion(completion, raw_inputs, fallback_key)
+                return self._extract_completion(completion, fallback_key)
             except Exception as fallback_error:
                 LOGGER.error(f"Fallback {fallback_key} failed: {fallback_error}")
         raise RuntimeError("All fallback models failed")
@@ -282,16 +293,16 @@ class LLMOp(BaseOp):
             if not self._fallback_llms:
                 raise
             LOGGER.error(f"Streaming from {resource} failed: {e}")
-            async for result in self._fallback_stream(llm_params, kwargs):
+            async for result in self._fallback_stream(llm_params):
                 if isinstance(result, dict) and "finish_reason" in result:
                     yield result
                     return
                 yield result
             return
 
-        yield self._stream_final(acc, resource, kwargs)
+        yield self._stream_final(acc, resource)
 
-    async def _fallback_stream(self, llm_params, raw_inputs):
+    async def _fallback_stream(self, llm_params):
         """Try fallback LLMs for streaming. Yields chunks, final yield has metadata."""
         for idx, fallback_llm in enumerate(self._fallback_llms):
             fallback_key = self.fallback[idx]
@@ -303,25 +314,26 @@ class LLMOp(BaseOp):
                     if yield_dict:
                         yield yield_dict
                 LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
-                yield self._stream_final(acc, fallback_key, raw_inputs)
+                yield self._stream_final(acc, fallback_key)
                 return
             except Exception as fallback_error:
                 LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
         raise RuntimeError("All streaming fallback models failed")
 
-    def _stream_final(self, acc, resource, raw_inputs):
+    def _stream_final(self, acc, resource):
         """Build the final metadata yield for a stream."""
         return {
-            "content": acc["response"],
             "role": "assistant",
+            "content": acc["response"],
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
-            "tokens_used": acc["tokens_used"],
             "tool_calls": acc["tool_calls"],
-            "thinking_content": acc["thinking_content"] or None,
-            "context_used": self._estimate_context(raw_inputs),
-            "refusal": acc["refusal"],
-            "logprobs": None,
+            "usage": self._normalize_usage(acc["usage_raw"]),
+            "extras": self._build_extras(
+                thinking_content=acc["thinking_content"] or None,
+                refusal=acc["refusal"],
+                logprobs=None,
+            ),
         }
 
     # =========================================================================
@@ -349,9 +361,7 @@ class LLMOp(BaseOp):
         ]
         return {k: v for k in llm_param_keys if (v := _inputs.get(k)) is not None}
 
-    def _extract_completion(
-        self, completion: Any, raw_inputs: Dict[str, Any], resource: str
-    ) -> Dict[str, Any]:
+    def _extract_completion(self, completion: Any, resource: str) -> Dict[str, Any]:
         """Extract structured output dict from a ChatCompletion response."""
         message = completion.choices[0].message
         choice = completion.choices[0]
@@ -360,7 +370,7 @@ class LLMOp(BaseOp):
         if hasattr(message, "reasoning_content"):
             thinking_content = message.reasoning_content or ""
 
-        tokens_used = completion.usage.model_dump() if completion.usage else {}
+        usage_raw = completion.usage.model_dump() if completion.usage else {}
 
         tool_calls = []
         if message.tool_calls:
@@ -381,23 +391,154 @@ class LLMOp(BaseOp):
             "content": message.content or "",
             "finish_reason": choice.finish_reason,
             "model_used": resource or completion.model,
-            "tokens_used": tokens_used,
             "tool_calls": tool_calls,
-            "thinking_content": thinking_content or None,
-            "context_used": self._estimate_context(raw_inputs),
-            "refusal": refusal,
-            "logprobs": logprobs_data,
+            "usage": self._normalize_usage(usage_raw),
+            "extras": self._build_extras(
+                thinking_content=thinking_content or None,
+                refusal=refusal,
+                logprobs=logprobs_data,
+            ),
         }
 
-    def _estimate_context(self, _inputs: Dict[str, Any]) -> int:
-        """Estimate context size from messages (rough token count)."""
-        return len(str(_inputs.get("messages", []))) // 4
+    # =========================================================================
+    # Trace-time media normalization (BaseOp hook)
+    # =========================================================================
+
+    def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
+        """Wrap OpenAI chat-format multimodal blocks as ``Media`` for tracing.
+
+        Runs inside the tracing collector — returns a shallow-copied inputs
+        dict with ``messages`` rewritten so ``image_url`` / ``input_audio``
+        blocks become ``Media`` instances. Real state is untouched; this is
+        only the trace-time view.
+        """
+        msgs = inputs.get("messages")
+        if msgs:
+            wrapped = self._wrap_openai_media_blocks(msgs)
+            if wrapped is not msgs:
+                inputs = {**inputs, "messages": wrapped}
+        return inputs, outputs
+
+    @staticmethod
+    def _wrap_openai_media_blocks(messages: Any) -> Any:
+        """Walk messages and convert multimodal blocks to ``Media`` wrappers.
+
+        Recognizes:
+          - ``{"type": "image_url", "image_url": {"url": "data:image/..."}}``
+            → ``Media(data_url, mime_from_header)``
+          - ``{"type": "input_audio", "input_audio": {"data": "...", "format": "wav"}}``
+            → ``Media(b64_data, "audio/<format>")``
+
+        Returns a new list when any wrapping happened, else the original
+        reference so the collector can detect "no change" cheaply.
+        """
+        if not isinstance(messages, list):
+            return messages
+
+        changed = False
+        new_msgs = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                new_msgs.append(msg)
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                new_msgs.append(msg)
+                continue
+
+            new_content = []
+            msg_changed = False
+            for block in content:
+                wrapped = LLMOp._wrap_media_block(block)
+                if wrapped is not block:
+                    msg_changed = True
+                new_content.append(wrapped)
+            if msg_changed:
+                new_msgs.append({**msg, "content": new_content})
+                changed = True
+            else:
+                new_msgs.append(msg)
+        return new_msgs if changed else messages
+
+    @staticmethod
+    def _wrap_media_block(block: Any) -> Any:
+        """Return a Media-wrapped copy of a multimodal block, or the original."""
+        if not isinstance(block, dict):
+            return block
+        btype = block.get("type")
+
+        if btype == "image_url":
+            url = (block.get("image_url") or {}).get("url")
+            if isinstance(url, str) and url.startswith("data:"):
+                mime = _mime_from_data_url(url) or "image/*"
+                return {
+                    **block,
+                    "image_url": {
+                        **block["image_url"],
+                        "url": Media(data=url, mime_type=mime),
+                    },
+                }
+
+        if btype == "input_audio":
+            audio = block.get("input_audio") or {}
+            data = audio.get("data")
+            fmt = audio.get("format") or "wav"
+            if isinstance(data, str):
+                return {
+                    **block,
+                    "input_audio": {
+                        **audio,
+                        "data": Media(data=data, mime_type=f"audio/{fmt}"),
+                    },
+                }
+        return block
+
+    @staticmethod
+    def _normalize_usage(raw: Dict[str, Any]) -> Dict[str, int]:
+        """Flatten a Pydantic CompletionUsage dump into named cost metrics.
+
+        Works for OpenAI/Azure/Gemini (cached_tokens nested under
+        prompt_tokens_details) and for Anthropic (cache_write_tokens
+        stashed as a Pydantic model_extra on usage).
+        """
+        if not raw:
+            return {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+                "reasoning_tokens": 0,
+            }
+        prompt_details = raw.get("prompt_tokens_details") or {}
+        completion_details = raw.get("completion_tokens_details") or {}
+        return {
+            "prompt_tokens": raw.get("prompt_tokens") or 0,
+            "completion_tokens": raw.get("completion_tokens") or 0,
+            "total_tokens": raw.get("total_tokens") or 0,
+            "cached_tokens": (prompt_details.get("cached_tokens") if prompt_details else 0) or 0,
+            "cache_write_tokens": raw.get("cache_write_tokens") or 0,
+            "reasoning_tokens": (
+                (completion_details.get("reasoning_tokens") if completion_details else 0) or 0
+            ),
+        }
+
+    @staticmethod
+    def _build_extras(
+        *, thinking_content: Optional[str], refusal: Optional[str], logprobs: Any
+    ) -> Dict[str, Any]:
+        """Build the extras bag — always three keys, null when absent."""
+        return {
+            "thinking_content": thinking_content,
+            "refusal": refusal,
+            "logprobs": logprobs,
+        }
 
     @staticmethod
     def _process_chunk(chunk, acc: dict) -> Optional[dict]:
         """Process a single stream chunk, updating accumulator state."""
         if chunk.usage:
-            acc["tokens_used"] = chunk.usage.model_dump()
+            acc["usage_raw"] = chunk.usage.model_dump()
 
         if not chunk.choices:
             return None
@@ -431,7 +572,7 @@ class LLMOp(BaseOp):
             "response": "",
             "thinking_content": "",
             "finish_reason": "stop",
-            "tokens_used": {},
+            "usage_raw": {},
             "tool_calls": [],
             "refusal": None,
         }

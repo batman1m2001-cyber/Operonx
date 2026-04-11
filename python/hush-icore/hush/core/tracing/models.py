@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from hush.core.media import MediaRef
+
 
 @dataclass
 class TraceSummary:
@@ -56,3 +58,9 @@ class TraceNode:
     model: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
     cost: Optional[float] = None
+
+    # Extracted media blobs (images, audio, video). Populated by the collector
+    # when normalize_trace_io surfaces Media instances. Tracers upload / drop
+    # these separately from the main trace payload, then substitute back at
+    # MediaRef.field_path.
+    media: List[MediaRef] = field(default_factory=list)

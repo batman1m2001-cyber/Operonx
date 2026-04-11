@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
 
 from hush.core.loggings import LOGGER, format_event, format_log_data
+from hush.core.media import Media
 from hush.core.ops._params import merge_params, normalize_params, resolve_value
 from hush.core.states.cell import DEFAULT_CONTEXT
 from hush.core.states.ref import Ref
@@ -29,6 +30,18 @@ from hush.core.ops._shortcuts import (  # noqa: F401, E402
     split_shorthand_kwargs,
 )
 from hush.core.ops._utils import _has_explicit_outputs, _set_wildcard_outputs  # noqa: F401, E402
+
+
+def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
+    """Strip top-level ``Media`` wrappers so consumer ops receive raw values.
+
+    The collector's raw state read preserves ``Media``; only input binding for
+    op execution drops the wrapper. Nested ``Media`` (inside dicts / lists) is
+    left alone — those are rare and usually intentional.
+    """
+    for k, v in inputs.items():
+        if isinstance(v, Media):
+            inputs[k] = v.data
 
 
 class BaseOp(ABC):
@@ -405,6 +418,7 @@ class BaseOp(ABC):
             elif fallback is not None:
                 result[var_name] = fallback
         self._input_cache = (state.schema, entries)
+        _unwrap_media_in_place(result)
         return result
 
     def get_outputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
@@ -419,6 +433,21 @@ class BaseOp(ABC):
             context_id: Context of this op.
         """
         return {var: state[self.full_name, var, context_id] for var in self.outputs}
+
+    def normalize_trace_io(
+        self, inputs: Dict[str, Any], outputs: Dict[str, Any]
+    ) -> tuple:
+        """Produce a trace-time view of this op's I/O.
+
+        Called by the tracing collector before media extraction. Subclasses
+        override when their I/O carries media in a non-``Media`` shape (e.g.
+        LLMOp wraps OpenAI chat-format ``image_url`` blocks into ``Media``
+        instances). The real state value is untouched — this returns copies
+        used only for trace capture.
+
+        Default is identity: most ops never override.
+        """
+        return inputs, outputs
 
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
         """Store result dict into state.

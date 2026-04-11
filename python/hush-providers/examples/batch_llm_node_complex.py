@@ -64,7 +64,7 @@ async def test_mixed_batch_async():
             resource="gpt-4o",
             batch_mode=False,
             inputs={"messages": PARENT["messages"]},
-            outputs={"content": PARENT["fast_response"], "tokens_used": PARENT["fast_tokens"]},
+            outputs={"content": PARENT["fast_response"], "usage": PARENT["fast_usage"]},
         )
 
         # Batch LLM (uses Batch API - slow but 50% cheaper)
@@ -74,7 +74,7 @@ async def test_mixed_batch_async():
             resource="gpt-4o",
             batch_mode=True,
             inputs={"messages": PARENT["messages"]},
-            outputs={"content": PARENT["batch_response"], "tokens_used": PARENT["batch_tokens"]},
+            outputs={"content": PARENT["batch_response"], "usage": PARENT["batch_usage"]},
         )
 
         # Connect nodes
@@ -99,7 +99,7 @@ async def test_mixed_batch_async():
 
     print(f"Completed in {elapsed:.2f} seconds")
     print(f"Fast response: {state['mixed_workflow', 'fast_response', None]}")
-    print(f"Fast tokens: {state['mixed_workflow', 'fast_tokens', None]}")
+    print(f"Fast usage: {state['mixed_workflow', 'fast_usage', None]}")
 
 
 async def test_load_balancing_with_fallback():

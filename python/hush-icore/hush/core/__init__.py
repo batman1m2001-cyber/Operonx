@@ -27,6 +27,7 @@ from hush.core.configs import (
 )
 from hush.core.engine import Hush
 from hush.core.loggings import LOGGER
+from hush.core.media import Media
 from hush.core.middleware import Middleware
 from hush.core.ops import (
     END,
@@ -93,6 +94,8 @@ __all__ = [
     "EdgeType",
     # Schema
     "Param",
+    # Media (for multimodal trace extraction)
+    "Media",
     # Logging
     "LOGGER",
     # Registry

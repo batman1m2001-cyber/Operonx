@@ -123,7 +123,7 @@ class TestStreamCoreYields:
         assert final["content"] == "Hello world"
         assert final["model_used"] == "gpt-4o"
         assert final["finish_reason"] == "stop"
-        assert final["tokens_used"]["prompt_tokens"] == 5
+        assert final["usage"]["prompt_tokens"] == 5
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_final_only(self, hub):
@@ -280,7 +280,7 @@ class TestStreamingWithThinking:
         assert results[0]["content"] == "The answer is 42"
 
         final = results[1]
-        assert final["thinking_content"] == "Let me think..."
+        assert final["extras"]["thinking_content"] == "Let me think..."
         assert final["content"] == "The answer is 42"
 
 
