@@ -21,7 +21,7 @@ Usage (Python):
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 LOGGER = logging.getLogger("hush.tracing")
 
@@ -38,6 +38,10 @@ class TraceFilter:
         protected_types: node_types that are NEVER filtered out.
             Default: ["trace", "generation"] — root trace + LLM calls always kept.
         max_io_size: Truncate input/output string values exceeding this length (0=no limit).
+        rewriters: Callables that transform the node list before filtering.
+            Each receives List[Dict] and returns List[Dict]. Runs in order.
+            Use for custom tree restructuring (e.g. grouping spans into turns).
+            YAML config: list of dotted paths like "module.path:function_name".
     """
 
     skip_empty: bool = False
@@ -46,6 +50,7 @@ class TraceFilter:
     exclude_kinds: List[str] = field(default_factory=list)
     protected_types: List[str] = field(default_factory=lambda: ["trace", "generation"])
     max_io_size: int = 0
+    rewriters: List[Callable] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.exclude_ops and self.include_ops:
@@ -59,6 +64,7 @@ class TraceFilter:
         """Filter nodes and re-parent orphaned children.
 
         Algorithm:
+        0. Run rewriters (custom tree transformations).
         1. Identify nodes to remove (respecting protected_types).
         2. Re-parent: children of removed nodes inherit their grandparent.
         3. Cleanup: remove synthetic nodes with no remaining children.
@@ -66,6 +72,13 @@ class TraceFilter:
         """
         if not nodes:
             return nodes
+
+        # Step 0: run rewriters for custom tree restructuring
+        for rewriter in self.rewriters:
+            try:
+                nodes = rewriter(nodes)
+            except Exception as exc:
+                LOGGER.warning("TraceFilter rewriter %s failed: %s", rewriter, exc)
 
         # Build parent map for re-parenting: trace_key → parent_trace_key
         parent_of: Dict[str, Optional[str]] = {
@@ -230,6 +243,9 @@ class TraceFilter:
     def from_dict(cls, d: Dict[str, Any]) -> "TraceFilter":
         """Parse from a YAML-like dict. Unknown keys are ignored.
 
+        Rewriters cannot be specified in YAML (they are callables). Pass them
+        via the constructor in code instead.
+
         Example:
             TraceFilter.from_dict({
                 "skip_empty": True,
@@ -238,4 +254,5 @@ class TraceFilter:
         """
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in d.items() if k in known_fields}
+        filtered.pop("rewriters", None)
         return cls(**filtered)
