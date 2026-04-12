@@ -704,8 +704,10 @@ class BaseOp(ABC):
                     _yield_end = perf_counter()
                     _now = datetime.now(timezone.utc)
                     self._store_metrics(
-                        state, ctx,
-                        start_time=_now, end_time=_now,
+                        state,
+                        ctx,
+                        start_time=_now,
+                        end_time=_now,
                         duration_ms=(_yield_end - _yield_start) * 1000,
                     )
                 if not self.is_gen and self.cache is not None:
