@@ -672,7 +672,9 @@ class BaseOp(ABC):
 
         _tracing = state.tracing
         start_time = None
+        end_time = None
         perf_start = perf_counter()
+        duration_ms = 0.0
         _inputs = {}
         _outputs = {}
         error_msg = None
@@ -715,6 +717,13 @@ class BaseOp(ABC):
                         end_time=_now,
                         duration_ms=(_yield_end - _yield_start) * 1000,
                     )
+                elif not self.is_gen and _tracing:
+                    # Batch ops: record timing BEFORE yield. The yield
+                    # suspends this generator until the scheduler resumes
+                    # it, inflating duration if measured in finally.
+                    _batch_end = perf_counter()
+                    end_time = datetime.now(timezone.utc)
+                    duration_ms = (_batch_end - perf_start) * 1000
                 if not self.is_gen and self.cache is not None:
                     _cache_store[_cache_key] = result
                 yield ctx, result
@@ -739,8 +748,12 @@ class BaseOp(ABC):
             )
 
         finally:
-            duration_ms = (perf_counter() - perf_start) * 1000
-            end_time = datetime.now(timezone.utc) if _tracing else None
+            if self.is_gen or not _tracing:
+                # Generators: measure total wall-clock time across all yields.
+                # Non-tracing: just compute duration for metrics.
+                duration_ms = (perf_counter() - perf_start) * 1000
+                end_time = datetime.now(timezone.utc) if _tracing else None
+            # else: batch ops already set end_time/duration_ms before yield
 
             self._store_metrics(
                 state,
