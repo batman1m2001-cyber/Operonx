@@ -695,14 +695,24 @@ class BaseOp(ABC):
 
             base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
             idx = 0
+            _yield_start = perf_counter()
             async for result in self._exec_core(_inputs):
                 ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
                 self.store_result(state, result, ctx)
                 _outputs = result
+                if self.is_gen and _tracing:
+                    _yield_end = perf_counter()
+                    _now = datetime.now(timezone.utc)
+                    self._store_metrics(
+                        state, ctx,
+                        start_time=_now, end_time=_now,
+                        duration_ms=(_yield_end - _yield_start) * 1000,
+                    )
                 if not self.is_gen and self.cache is not None:
                     _cache_store[_cache_key] = result
                 yield ctx, result
                 idx += 1
+                _yield_start = perf_counter()
 
         except Exception:
             import sys
