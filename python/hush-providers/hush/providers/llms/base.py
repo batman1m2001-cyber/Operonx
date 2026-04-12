@@ -25,7 +25,7 @@ ANTHROPIC_CACHE_MIN_TOKENS: Dict[str, int] = {
     "claude-sonnet-4": 1300,
     "claude-3-5-haiku": 2500,
     "claude-3-5-sonnet": 1300,
-    "claude-3-haiku": 2500,
+    "claude-3-haiku": 2048,
     "claude-3-opus": 1300,
     "claude-3-sonnet": 1300,
 }
