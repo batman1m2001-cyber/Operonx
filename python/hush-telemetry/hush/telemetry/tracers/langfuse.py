@@ -210,9 +210,12 @@ class LangfuseTracer(ConfigurableTracer):
                 continue
             idx = parent_child_count.get(pk, 0)
             parent_child_count[pk] = idx + 1
-            # Assign all children monotonic start_times: parent_start + idx*1ms
-            # so Langfuse preserves the execution order from collect_tree
-            base_iso = node_start.get(pk) or node.get("start_time") or now_iso
+            # Only assign monotonic start_times to nodes WITHOUT their own
+            # start_time (e.g. synthetic context nodes). Nodes with real
+            # timing from the engine keep their actual start_time.
+            if node.get("start_time"):
+                continue
+            base_iso = node_start.get(pk) or now_iso
             try:
                 base = datetime.fromisoformat(base_iso.replace("Z", "+00:00"))
                 bumped = base + timedelta(milliseconds=idx)
