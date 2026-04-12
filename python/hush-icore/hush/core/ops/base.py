@@ -671,7 +671,7 @@ class BaseOp(ABC):
             return
 
         _tracing = state.tracing
-        start_time = datetime.now(timezone.utc) if _tracing else None
+        start_time = None
         perf_start = perf_counter()
         _inputs = {}
         _outputs = {}
@@ -682,6 +682,11 @@ class BaseOp(ABC):
                 await asyncio.sleep(self.delay)
 
             _inputs = self.get_inputs(state, context_id)
+
+            # Record timing AFTER inputs resolved — measures actual processing,
+            # not time spent waiting for upstream ops in the scheduler queue.
+            start_time = datetime.now(timezone.utc) if _tracing else None
+            perf_start = perf_counter()
 
             # Cache check
             if self.cache is not None:

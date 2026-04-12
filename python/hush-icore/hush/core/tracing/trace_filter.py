@@ -38,10 +38,12 @@ class TraceFilter:
         protected_types: node_types that are NEVER filtered out.
             Default: ["trace", "generation"] — root trace + LLM calls always kept.
         max_io_size: Truncate input/output string values exceeding this length (0=no limit).
+        preserve_children_of: Don't remove children (including synthetic nodes)
+            of ops matching these names. Useful for keeping stream_context
+            children of specific generators visible (e.g. TTS sub-sentences).
         rewriters: Callables that transform the node list before filtering.
-            Each receives List[Dict] and returns List[Dict]. Runs in order.
+            Each receives List[Dict] and returns List[Dict]. Runs after filtering.
             Use for custom tree restructuring (e.g. grouping spans into turns).
-            YAML config: list of dotted paths like "module.path:function_name".
     """
 
     skip_empty: bool = False
@@ -50,6 +52,7 @@ class TraceFilter:
     exclude_kinds: List[str] = field(default_factory=list)
     protected_types: List[str] = field(default_factory=lambda: ["trace", "generation"])
     max_io_size: int = 0
+    preserve_children_of: List[str] = field(default_factory=list)
     rewriters: List[Callable] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -64,30 +67,36 @@ class TraceFilter:
         """Filter nodes and re-parent orphaned children.
 
         Algorithm:
-        0. Run rewriters (custom tree transformations).
         1. Identify nodes to remove (respecting protected_types).
         2. Re-parent: children of removed nodes inherit their grandparent.
         3. Cleanup: remove synthetic nodes with no remaining children.
-        4. Return filtered list preserving original order.
+        4. Run rewriters on the filtered tree (custom tree transformations).
+        5. Truncate large I/O values.
         """
         if not nodes:
             return nodes
-
-        # Step 0: run rewriters for custom tree restructuring
-        for rewriter in self.rewriters:
-            try:
-                nodes = rewriter(nodes)
-            except Exception as exc:
-                LOGGER.warning("TraceFilter rewriter %s failed: %s", rewriter, exc)
 
         # Build parent map for re-parenting: trace_key → parent_trace_key
         parent_of: Dict[str, Optional[str]] = {
             n["trace_key"]: n.get("parent_trace_key") for n in nodes
         }
 
+        # Build set of trace_keys whose children should be preserved
+        _preserved_parent_keys: Set[str] = set()
+        if self.preserve_children_of:
+            key_by_op: Dict[str, str] = {}
+            for n in nodes:
+                op = n.get("op_name") or n.get("display_name") or ""
+                short = op.split(".")[-1] if "." in op else op
+                if short in self.preserve_children_of or op in self.preserve_children_of:
+                    _preserved_parent_keys.add(n["trace_key"])
+
         # Step 1: identify nodes to remove
         remove_keys: Set[str] = set()
         for n in nodes:
+            # Don't remove children of preserved ops
+            if n.get("parent_trace_key") in _preserved_parent_keys:
+                continue
             if self._should_remove(n):
                 remove_keys.add(n["trace_key"])
 
@@ -123,7 +132,14 @@ class TraceFilter:
         # Step 4: cleanup — remove synthetic nodes with no remaining children
         result = self._remove_empty_synthetics(result)
 
-        # Step 5: truncate large I/O values
+        # Step 5: run rewriters on the filtered/reparented tree
+        for rewriter in self.rewriters:
+            try:
+                result = rewriter(result)
+            except Exception as exc:
+                LOGGER.warning("TraceFilter rewriter %s failed: %s", rewriter, exc)
+
+        # Step 6: truncate large I/O values
         if self.max_io_size > 0:
             for n in result:
                 self._truncate_io(n, self.max_io_size)
