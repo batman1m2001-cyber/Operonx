@@ -25,7 +25,7 @@ ANTHROPIC_CACHE_MIN_TOKENS: Dict[str, int] = {
     "claude-sonnet-4": 1300,
     "claude-3-5-haiku": 2500,
     "claude-3-5-sonnet": 1300,
-    "claude-3-haiku": 2048,
+    "claude-3-haiku": 1500,
     "claude-3-opus": 1300,
     "claude-3-sonnet": 1300,
 }
@@ -42,15 +42,17 @@ def anthropic_cache_min_tokens(model: str) -> int:
 
 
 def estimate_tokens(text: Union[str, List, Dict, None]) -> int:
-    """Rough character-based token estimate (~4 chars/token).
+    """Rough byte-based token estimate for cache eligibility.
 
-    Deliberately slightly pessimistic so callers under-estimate and only
-    attempt caching when well clear of the provider threshold.
+    Uses UTF-8 byte length / 3, which is slightly optimistic but safe:
+    Anthropic silently ignores cache_control when below the real threshold
+    (no error), so false positives are harmless while false negatives
+    (missing a valid cache opportunity) waste money on every call.
     """
     if text is None:
         return 0
     if isinstance(text, str):
-        return max(1, len(text) // 4)
+        return max(1, len(text.encode("utf-8")) // 3)
     if isinstance(text, list):
         return sum(estimate_tokens(item) for item in text)
     if isinstance(text, dict):
