@@ -1,9 +1,8 @@
-"""Package chứa các config type cho workflow graph.
+"""Config types for the workflow graph.
 
-Module này export các type và class config chính:
-    - OpType: Các loại node được hỗ trợ trong workflow
-    - EdgeConfig: Config cho edge kết nối giữa các node
-    - EdgeType: Các loại edge (normal, lookback, condition)
+- ``OpType``     — enum of op categories (func, branch, graph, llm, ...)
+- ``EdgeConfig`` — config for edges between ops
+- ``EdgeType``   — edge kinds (normal, lookback, condition)
 """
 
 from .edge_config import EdgeConfig, EdgeType

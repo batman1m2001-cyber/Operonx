@@ -1,41 +1,29 @@
-"""
-Operon Observability Package
+"""Operon telemetry — Langfuse, OpenTelemetry, and OperonEyes tracers.
 
-Backend-agnostic observability with support for multiple tracing frameworks.
+Backend-agnostic observability: every tracer extends ``operon.core.tracing.Tracer``
+and flushes in the background thread pool, never blocking the main async thread.
 
-This package provides:
-- Backend clients (LangfuseClient, OTELClient) registered to ResourceHub
-- Tracers (LangfuseTracer, OTELTracer) that extend operon.core.tracing.Tracer
+Example::
 
-Example:
-    ```python
-    from operon.telemetry import LangfuseTracer, OTELTracer
+    from operon import Operon
+    from operon.telemetry import LangfuseTracer
 
-    # Langfuse tracer
     tracer = LangfuseTracer(resource="langfuse:default")
-
-    # OpenTelemetry tracer (exports to Jaeger, Zipkin, etc.)
-    tracer = OTELTracer(resource="otel:jaeger")
-
-    # Use with workflow engine
     engine = Operon(graph, tracer=tracer)
     result = await engine.run(inputs={...})
-    ```
 
-    ```python
-    # Prompt management (requires langfuse SDK)
-    from operon.telemetry import LangfusePromptManager, LangfuseConfig
+Prompt management (requires the Langfuse SDK)::
+
+    from operon.telemetry import LangfuseConfig, LangfusePromptManager
 
     pm = LangfusePromptManager(config=LangfuseConfig.from_env())
     prompt = pm["my-prompt"]
-    ```
 """
 
 # Auto-register backends to ResourceHub on import
-import operon.telemetry.plugin  # noqa: F401 — auto-registers on import
-from operon.core.tracing import Tracer
+import operon.telemetry.plugin  # noqa: F401
 
-# Backends (configs + clients)
+from operon.core.tracing import Tracer
 from operon.telemetry.backends import (
     LangfuseClient,
     LangfuseConfig,
@@ -43,28 +31,24 @@ from operon.telemetry.backends import (
     OTELClient,
     OTELConfig,
 )
-
-# Tracers
 from operon.telemetry.tracers import (
-    OperonEyesTracer,
     LangfuseTracer,
+    OperonEyesTracer,
     OTELTracer,
 )
 
-__version__ = "0.1.0"
-
 __all__ = [
-    # Backends - Configs
+    # Base (re-exported from operon.core.tracing for convenience)
+    "Tracer",
+    # Tracers
+    "LangfuseTracer",
+    "OTELTracer",
+    "OperonEyesTracer",
+    # Configs
     "LangfuseConfig",
     "OTELConfig",
-    # Backends - Clients
+    # Clients
     "LangfuseClient",
     "LangfusePromptManager",
     "OTELClient",
-    # Tracers
-    "OperonEyesTracer",
-    "LangfuseTracer",
-    "OTELTracer",
-    # Base class (from operon.core.tracing)
-    "Tracer",
 ]
