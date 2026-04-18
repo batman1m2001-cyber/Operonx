@@ -73,7 +73,7 @@ logs/
 secrets.yaml
 
 # Local traces database
-.hush/
+.operon/
 
 # Claude Code — track shared context, ignore personal state
 .claude/*
@@ -104,7 +104,7 @@ target/
 
 # VSCode extension build artifacts
 *.vsix
-ui-hush-eyes/out/
+ui-operon-eyes/out/
 
 # Local sync scripts
 sync_to_internal.bat
