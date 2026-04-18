@@ -1,23 +1,23 @@
-"""
-Operon Providers - LLM, embedding, and reranking providers for operon workflows.
+"""Operon providers — LLM, embedding, reranker, and auth integrations.
 
-This package provides AI provider integrations for the Operon workflow engine:
-- LLM providers (OpenAI, Azure, Gemini, vLLM)
-- Embedding providers (vLLM, TEI, HuggingFace, ONNX)
-- Reranking providers (vLLM, TEI, HuggingFace, ONNX, Pinecone)
-- Workflow nodes for integrating providers into workflows
+Includes:
+- LLM providers: OpenAI, Azure, Gemini, Anthropic, vLLM (via OpenAI SDK)
+- Embedding providers: vLLM, TEI, HuggingFace, ONNX
+- Reranking providers: vLLM, TEI, HuggingFace, ONNX, Pinecone
+- Auth: Keycloak token provider with background refresh
+- Workflow ops: LLMOp, EmbeddingOp, RerankOp, OnnxOp, TritonOp, PromptOp, chat, ask
+
+Plugin registration to the core ResourceHub happens automatically on import.
 """
 
-# Auth exports
-# Auto-register plugins on import
+# Auto-register plugins to operon.core.registry on import
 import operon.providers.registry  # noqa: F401
+
 from operon.providers.auth import (
     KeycloakTokenConfig,
     KeycloakTokenProvider,
     create_auth,
 )
-
-# Embedding exports
 from operon.providers.embeddings import (
     BaseEmbedder,
     EmbeddingConfig,
@@ -28,12 +28,11 @@ from operon.providers.embeddings import (
     VLLMEmbedding,
     create_embedding,
 )
-
-# LLM exports
 from operon.providers.llms import (
+    AnthropicConfig,
+    AnthropicModel,
     AzureConfig,
     AzureSDKModel,
-    # GeminiOpenAISDKModel - lazy loaded, access via operon.providers.llms.GeminiOpenAISDKModel
     BaseLLM,
     GeminiConfig,
     LLMConfig,
@@ -43,19 +42,16 @@ from operon.providers.llms import (
     OpenAISDKModel,
     create_llm,
 )
-
-# Node exports
 from operon.providers.ops import (
     EmbeddingOp,
     LLMOp,
     OnnxOp,
     PromptOp,
     RerankOp,
+    TritonOp,
     ask,
     chat,
 )
-
-# Reranking exports
 from operon.providers.rerankers import (
     BaseReranker,
     HFReranker,
@@ -68,47 +64,51 @@ from operon.providers.rerankers import (
     create_reranking,
 )
 
-__version__ = "0.1.0"
+# Note: GeminiOpenAISDKModel is lazy-loaded via operon.providers.llms.__getattr__
+# to avoid requiring google-cloud-aiplatform when unused.
 
 __all__ = [
+    # Ops
+    "LLMOp",
+    "EmbeddingOp",
+    "RerankOp",
+    "OnnxOp",
+    "TritonOp",
+    "PromptOp",
+    "chat",
+    "ask",
     # LLM
     "BaseLLM",
     "LLMType",
     "LLMConfig",
-    "OpenAIConfig",
-    "AzureConfig",
-    "GeminiConfig",
-    "create_llm",
     "LLMGenerator",
+    "OpenAIConfig",
     "OpenAISDKModel",
+    "AzureConfig",
     "AzureSDKModel",
+    "GeminiConfig",
+    "AnthropicConfig",
+    "AnthropicModel",
+    "create_llm",
     # Embedding
     "BaseEmbedder",
     "EmbeddingType",
     "EmbeddingConfig",
-    "create_embedding",
     "VLLMEmbedding",
     "TEIEmbedding",
     "HFEmbedding",
     "ONNXEmbedding",
+    "create_embedding",
     # Reranking
     "BaseReranker",
     "RerankingType",
     "RerankingConfig",
-    "create_reranking",
     "VLLMReranker",
     "TEIReranker",
     "HFReranker",
     "ONNXReranker",
     "PineconeReranker",
-    # Nodes
-    "LLMOp",
-    "EmbeddingOp",
-    "OnnxOp",
-    "RerankOp",
-    "PromptOp",
-    "chat",
-    "ask",
+    "create_reranking",
     # Auth
     "KeycloakTokenConfig",
     "KeycloakTokenProvider",

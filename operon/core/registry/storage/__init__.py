@@ -1,4 +1,4 @@
-"""Các backend storage cho config resource."""
+"""Storage backends for the resource config registry."""
 
 from .base import ConfigStorage
 from .json import JsonConfigStorage

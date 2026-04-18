@@ -1,14 +1,13 @@
-"""Package các tiện ích dùng chung cho operon.
+"""Shared utilities for the Operon engine.
 
-Module này export các tiện ích chính:
-    - auto_name, register_skip, unique_name: Auto-naming cho nodes
-    - get_current, _current_graph: Quản lý context graph hiện tại
-    - Param: Định nghĩa parameter cho input/output của node
-    - verify_data: Xác thực dữ liệu
-    - raise_error: Raise error với message
-    - extract_condition_variables: Trích xuất biến từ condition string
-    - fake_chunk_from: Tạo fake chunk response
-    - YamlModel: Base class cho model đọc/ghi YAML
+- ``auto_name``, ``register_skip``, ``unique_name`` — auto-naming for ops
+- ``get_current``, ``_current_graph`` — current-graph context tracking
+- ``Param`` — input/output parameter descriptor for ops
+- ``verify_data`` — data validation
+- ``raise_error`` — error raising helper
+- ``extract_condition_variables`` — extract variable names from a condition string
+- ``fake_chunk_from`` — construct fake chunk responses (testing)
+- ``YamlModel`` — base class for YAML-serializable configs
 """
 
 from .auto_name import auto_name, register_skip, unique_name

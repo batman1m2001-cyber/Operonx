@@ -1,31 +1,26 @@
-"""
-Operon Core - Workflow Engine
+"""Operon core — workflow engine, ops, state, tracing, registry.
 
-A powerful async workflow orchestration framework.
+Public surface re-exported from the submodules below. For top-level
+convenience imports (``from operon import Operon``), see
+:mod:`operon.__init__`.
 
-Example:
-    ```python
+Example::
+
     from operon.core import Operon, GraphOp, START, END, PARENT
     from operon.core.ops import FuncOp
 
-    # Define graph
-    with GraphOp(name="my-workflow") as graph:
+    with GraphOp(name="workflow") as graph:
         node = FuncOp(name="processor", ...)
         START >> node >> END
 
-    # Create engine and run
     engine = Operon(graph)
     result = await engine.run(inputs={"key": "value"})
     print(result["output"])   # workflow output
-    print(result["$state"])   # access state for debugging
-    ```
+    print(result["$state"])   # MemoryState for debugging
 """
 
-from operon.core.configs import (
-    EdgeConfig,
-    EdgeType,
-)
-from operon.core.engine import Operon
+from operon.core.configs import EdgeConfig, EdgeType
+from operon.core.engine import ExecutionHandle, Operon
 from operon.core.loggings import LOGGER
 from operon.core.media import Media
 from operon.core.middleware import Middleware
@@ -55,44 +50,40 @@ from operon.core.registry import (
     ResourceHub,
     YamlConfigStorage,
 )
-from operon.core.states import (
-    Cell,
-    MemoryState,
-    Ref,
-    StateSchema,
-)
+from operon.core.states import Cell, MemoryState, Ref, StateSchema
 from operon.core.utils import Param
 
-__version__ = "0.1.0"
-
 __all__ = [
-    # Main engine
+    # Engine
     "Operon",
+    "ExecutionHandle",
     "Middleware",
-    # Nodes
+    # Op base / markers
     "BaseOp",
     "DummyOp",
-    "GraphOp",
-    "BranchOp",
-    "FuncOp",
-    "op",
-    "graph",
-    "ParserOp",
-    "ParserType",
-    # Markers
     "START",
     "END",
     "PARENT",
     "PENDING",
+    # Op types
+    "GraphOp",
+    "BranchOp",
+    "FuncOp",
+    "ParserOp",
+    "ParserType",
+    # Decorators
+    "op",
+    "graph",
     # State
     "StateSchema",
     "MemoryState",
-    # Config
+    "Ref",
+    "Cell",
+    # Configs / params
     "EdgeConfig",
     "EdgeType",
-    # Schema
     "Param",
-    # Media (for multimodal trace extraction)
+    # Multimodal
     "Media",
     # Logging
     "LOGGER",
@@ -100,8 +91,8 @@ __all__ = [
     "ResourceHub",
     "ConfigRegistry",
     "ConfigEntry",
-    "REGISTRY",
     "CacheEntry",
+    "REGISTRY",
     "HealthCheckResult",
     "ConfigStorage",
     "YamlConfigStorage",

@@ -1,10 +1,10 @@
-"""Package các logging handler.
+"""Logging handler package.
 
-Mỗi module handler định nghĩa:
-- Config class (kế thừa HandlerConfig)
-- Hàm factory (nhận config, trả về logging.Handler)
+Each handler module defines:
+- a config class (subclass of ``HandlerConfig``)
+- a factory function (takes config, returns ``logging.Handler``)
 
-Các handler được tự động đăng ký khi package này được import.
+Handlers auto-register to the parent package's registry on import.
 """
 
 from .console import ColoredRichHandler, ConsoleHandlerConfig, create_console_handler

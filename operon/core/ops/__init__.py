@@ -1,30 +1,17 @@
-"""Core nodes cho operon workflow engine.
+"""Core op types and markers for the Operon workflow engine.
 
-Bao gồm:
-- BaseOp: Base class cho tất cả workflow nodes
-- DummyOp: Node placeholder cho START/END markers
-- GraphOp: Container quản lý graph với thực thi song song
-- BranchOp: Conditional routing với precompiled conditions
-- FuncOp: Thực thi Python functions (supports generators for streaming)
-- ParserOp: Extract structured data từ text
+- ``BaseOp``        — base class for all workflow ops
+- ``DummyOp``       — placeholder for START/END markers
+- ``GraphOp``       — container managing a sub-graph with parallel execution
+- ``BranchOp``      — conditional routing with precompiled conditions
+- ``FuncOp``        — wraps a Python function (supports generators for streaming)
+- ``ParserOp``      — extracts structured data from text (XML/JSON/etc.)
+
+Markers: ``START``, ``END``, ``PARENT``, ``PENDING``.
+Decorators: ``op``, ``graph``, ``if_``.
 """
 
 from operon.core.configs.op_config import OpType
-
-
-class _PendingSentinel:
-    """Sentinel returned by ops that absorb input without producing output."""
-
-    __slots__ = ()
-
-    def __repr__(self):
-        return "PENDING"
-
-    def __bool__(self):
-        return False
-
-
-PENDING = _PendingSentinel()
 
 from .base import (
     END,
@@ -41,6 +28,21 @@ from .graph.graph_op import GraphOp, graph
 from .transform.func_op import FuncOp, op
 from .transform.parser_op import ParserOp, ParserType
 
+
+class _PendingSentinel:
+    """Sentinel returned by ops that absorb input without producing output."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "PENDING"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+PENDING = _PendingSentinel()
+
 __all__ = [
     # Base
     "BaseOp",
@@ -52,9 +54,6 @@ __all__ = [
     "END",
     "PARENT",
     "PENDING",
-    # Utilities
-    "shorthand",
-    "split_shorthand_kwargs",
     # Graph
     "GraphOp",
     "graph",
@@ -67,4 +66,7 @@ __all__ = [
     "op",
     "ParserOp",
     "ParserType",
+    # Shorthand helpers
+    "shorthand",
+    "split_shorthand_kwargs",
 ]

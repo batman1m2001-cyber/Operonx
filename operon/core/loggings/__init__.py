@@ -1,41 +1,43 @@
-"""Thiết lập logging tập trung cho Operon Core.
+"""Centralized logging for Operon.
 
-Package này cung cấp instance LOGGER đã được config sẵn và các tiện ích logging
-cho toàn bộ package operon.
+Provides a preconfigured LOGGER and utilities to build custom loggers with
+console, file, timed-file, or user-registered handlers.
 
 Modules:
-    config: LogConfig và base class HandlerConfig
-    theme: Theme và highlighter cho logging
-    handlers: Console, file, và các handler mở rộng
-    formatters: Các tiện ích format dữ liệu log
+    config      — ``LogConfig`` and base ``HandlerConfig``
+    theme       — Rich theme and highlighter for console logs
+    handlers    — console, file, timed-file handlers (extensible)
+    formatters  — log-data formatting helpers
+    events      — log template registry and event formatting
 
-Example:
+Example::
+
     from operon.core.loggings import LOGGER, LogConfig, setup_logger
 
-    # Sử dụng logger mặc định (chỉ console)
     LOGGER.info("Hello world")
 
-    # Tạo logger tùy chỉnh với nhiều handler
     config = LogConfig(
         name="my_app",
         level="DEBUG",
         handlers=[
             {"type": "console", "level": "INFO"},
             {"type": "file", "filepath": "logs/app.log", "level": "DEBUG"},
-        ]
+        ],
     )
     logger = setup_logger(config)
 
-    # Mở rộng với handler tùy chỉnh (ví dụ: Kafka)
-    # Trong package bên ngoài: operon-loggings-kafka
-    import operon.loggings.kafka  # Tự động đăng ký khi import
+Extending with a custom handler (e.g. Kafka) from a sibling package::
 
-    config = LogConfig(
-        handlers=[
-            {"type": "console"},
-            {"type": "kafka", "bootstrap_servers": "localhost:9092", "topic": "logs"},
-        ]
-    )
+    from operon.core.loggings import HandlerConfig, register_handler
+
+    class KafkaHandlerConfig(HandlerConfig):
+        type: Literal["kafka"] = "kafka"
+        bootstrap_servers: str
+        topic: str
+
+    def create_kafka_handler(config): ...
+
+    register_handler("kafka", KafkaHandlerConfig, create_kafka_handler)
 """
 
 import logging
@@ -197,17 +199,17 @@ LOGGER = setup_logger(LogConfig(name="operon.core"))
 
 
 __all__ = [
-    # Export chính
+    # Main exports
     "LOGGER",
     "LogConfig",
     "setup_logger",
-    # Base config để mở rộng
+    # Base config for extending
     "HandlerConfig",
-    # Config cho các handler có sẵn
+    # Built-in handler configs
     "ConsoleHandlerConfig",
     "FileHandlerConfig",
     "TimedFileHandlerConfig",
-    # Tiện ích
+    # Utilities
     "add_handler",
     "remove_handlers",
     "register_handler",
