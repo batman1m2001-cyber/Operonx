@@ -1,0 +1,58 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["doubler", "plus_one"],
+    "exits": ["doubler", "plus_one"],
+    "initial_ready_count": {"doubler": 0, "plus_one": 0},
+    "compiled_adj": {"doubler": [], "plus_one": []},
+    "inputs": {"x": {"required": true}},
+    "outputs": {"twice": {}, "incremented": {}},
+    "ops": {
+        "doubler": {
+            "type": "code",
+            "name": "doubler",
+            "full_name": "main.doubler",
+            "func_name": "double",
+            "bound": "sync",
+            "inputs": {
+                "x": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "x"}
+                }
+            },
+            "outputs": {
+                "result": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "twice",
+                        "is_output": true
+                    }
+                }
+            }
+        },
+        "plus_one": {
+            "type": "code",
+            "name": "plus_one",
+            "full_name": "main.plus_one",
+            "func_name": "add_one",
+            "bound": "sync",
+            "inputs": {
+                "n": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "x"}
+                }
+            },
+            "outputs": {
+                "answer": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "incremented",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

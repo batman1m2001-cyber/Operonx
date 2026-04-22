@@ -16,7 +16,7 @@ from operon.core.ops import op
 from operon.core.ops.flow import if_
 
 from operon.providers.ops import ask
-from tests.providers.test_extract_retry import make_mock_hub
+from tests.internal.providers.test_extract_retry import make_mock_hub
 
 # ── Tests: ask() after if_() branching ──
 

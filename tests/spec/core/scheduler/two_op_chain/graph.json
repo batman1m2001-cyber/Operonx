@@ -1,0 +1,55 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["double"],
+    "exits": ["add_one"],
+    "initial_ready_count": {"double": 0, "add_one": 1},
+    "compiled_adj": {
+        "double":  [["add_one", false]],
+        "add_one": []
+    },
+    "inputs": {"x": {"required": true}},
+    "outputs": {"answer": {}},
+    "ops": {
+        "double": {
+            "type": "code",
+            "name": "double",
+            "full_name": "main.double",
+            "func_name": "double",
+            "bound": "sync",
+            "inputs": {
+                "x": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "x"}
+                }
+            },
+            "outputs": {
+                "result": {}
+            }
+        },
+        "add_one": {
+            "type": "code",
+            "name": "add_one",
+            "full_name": "main.add_one",
+            "func_name": "add_one",
+            "bound": "sync",
+            "inputs": {
+                "n": {
+                    "required": true,
+                    "ref": {"source": "main.double", "var": "result"}
+                }
+            },
+            "outputs": {
+                "answer": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "answer",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

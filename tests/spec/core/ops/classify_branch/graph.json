@@ -1,0 +1,40 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["classify"],
+    "exits": ["classify"],
+    "initial_ready_count": {"classify": 0},
+    "compiled_adj": {"classify": []},
+    "inputs": {"n": {"required": true}, "threshold": {"required": true}},
+    "outputs": {"label": {}},
+    "ops": {
+        "classify": {
+            "type": "code",
+            "name": "classify",
+            "full_name": "main.classify",
+            "func_name": "classify_size",
+            "bound": "sync",
+            "inputs": {
+                "n": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "n"}
+                },
+                "threshold": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "threshold"}
+                }
+            },
+            "outputs": {
+                "label": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "label",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

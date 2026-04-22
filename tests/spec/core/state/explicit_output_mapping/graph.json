@@ -1,0 +1,36 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["step"],
+    "exits": ["step"],
+    "initial_ready_count": {"step": 0},
+    "compiled_adj": {"step": []},
+    "inputs": {"x": {"required": true}},
+    "outputs": {"renamed": {}},
+    "ops": {
+        "step": {
+            "type": "code",
+            "name": "step",
+            "full_name": "main.step",
+            "func_name": "double",
+            "bound": "sync",
+            "inputs": {
+                "x": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "x"}
+                }
+            },
+            "outputs": {
+                "result": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "renamed",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

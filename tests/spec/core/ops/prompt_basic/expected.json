@@ -1,0 +1,6 @@
+{
+    "messages": [
+        {"role": "system", "content": "You are friendly."},
+        {"role": "user", "content": "Hello Operon!"}
+    ]
+}

@@ -1,0 +1,36 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["double"],
+    "exits": ["double"],
+    "initial_ready_count": {"double": 0},
+    "compiled_adj": {"double": []},
+    "inputs": {"x": {"required": true}},
+    "outputs": {"result": {}},
+    "ops": {
+        "double": {
+            "type": "code",
+            "name": "double",
+            "full_name": "main.double",
+            "func_name": "double",
+            "bound": "sync",
+            "inputs": {
+                "x": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "x"}
+                }
+            },
+            "outputs": {
+                "result": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "result",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}
