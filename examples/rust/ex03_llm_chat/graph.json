@@ -1,0 +1,1088 @@
+{
+  "basic": {
+    "type": "graph",
+    "full_name": "basic-chat",
+    "name": "basic-chat",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "question": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "answer": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "p": {
+        "type": "prompt",
+        "full_name": "basic-chat.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
+              "user": "{question}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "question": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "basic-chat",
+              "var": "question",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "basic-chat.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "basic-chat.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "basic-chat",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "p"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "p": 0,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "chain": {
+    "type": "graph",
+    "full_name": "chain-chat",
+    "name": "chain-chat",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "response": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "c": {
+        "type": "graph",
+        "full_name": "chain-chat.c",
+        "name": "c",
+        "func_name": null,
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "chain-chat",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "resource": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": "gpt-4o-mini"
+          },
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
+              "user": "{query}"
+            }
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "chain-chat",
+              "var": "response",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "ops": {
+          "prompt": {
+            "type": "prompt",
+            "full_name": "chain-chat.c.prompt",
+            "name": "prompt",
+            "func_name": "_format",
+            "is_async": true,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "io",
+            "inputs": {
+              "template": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": {
+                  "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
+                  "user": "{query}"
+                }
+              },
+              "conversation_history": {
+                "default": [],
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "conversation_history",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "tool_results": {
+                "default": [],
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "tool_results",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "query": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "query",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              }
+            }
+          },
+          "llm": {
+            "type": "llm",
+            "full_name": "chain-chat.c.llm",
+            "name": "llm",
+            "func_name": "_generate_core",
+            "is_async": true,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "io",
+            "inputs": {
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "chain-chat.c.prompt",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "temperature": {
+                "default": 0.0,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "max_tokens": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "tools": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "tool_choice": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "response_format": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_p": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "stop": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "frequency_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "presence_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "seed": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "n": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "user": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "outputs": {
+              "role": {
+                "default": "assistant",
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "role",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "content",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "finish_reason": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "finish_reason",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "model_used": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "model_used",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "tool_calls": {
+                "default": [],
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "tool_calls",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "usage": {
+                "default": {},
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "usage",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "extras": {
+                "default": {},
+                "required": false,
+                "ref": {
+                  "source": "chain-chat.c",
+                  "var": "extras",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "resource": "gpt-4o-mini",
+            "ratios": [
+              1.0
+            ],
+            "fallback": null,
+            "batch_mode": false,
+            "resource_configs": [
+              {
+                "extra_fields": null,
+                "api_type": "openai",
+                "proxy": null,
+                "cost_per_input_token": null,
+                "cost_per_output_token": null,
+                "api_key": "<REDACTED>",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "batch_size": 50000,
+                "batch_flush_interval": 60.0,
+                "batch_poll_interval": 30.0,
+                "batch_timeout": 86400.0
+              }
+            ]
+          }
+        },
+        "edges": [
+          {
+            "from": "prompt",
+            "to": "llm",
+            "soft": false
+          }
+        ],
+        "entries": [
+          "prompt"
+        ],
+        "exits": [
+          "llm"
+        ],
+        "initial_ready_count": {
+          "prompt": 0,
+          "llm": 1
+        },
+        "compiled_adj": {
+          "prompt": [
+            [
+              "llm",
+              false
+            ]
+          ],
+          "llm": []
+        },
+        "stream_initial_ready": {},
+        "loop_config": null,
+        "max_stream_concurrent": 64
+      }
+    },
+    "edges": [],
+    "entries": [
+      "c"
+    ],
+    "exits": [
+      "c"
+    ],
+    "initial_ready_count": {
+      "c": 0
+    },
+    "compiled_adj": {
+      "c": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "summarize": {
+    "type": "graph",
+    "full_name": "summarize-pipeline",
+    "name": "summarize-pipeline",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "text": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "summary": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "preprocess": {
+        "type": "code",
+        "full_name": "summarize-pipeline.preprocess",
+        "name": "preprocess",
+        "func_name": "examples.python.ex03_llm_chat.workflow.clean_text",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "summarize-pipeline",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "cleaned_text": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "p": {
+        "type": "prompt",
+        "full_name": "summarize-pipeline.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
+              "user": "Tóm tắt:\n\n{text}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "text": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "summarize-pipeline.preprocess",
+              "var": "cleaned_text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "summarize": {
+        "type": "llm",
+        "full_name": "summarize-pipeline.summarize",
+        "name": "summarize",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "summarize-pipeline.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "summarize-pipeline",
+              "var": "summary",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "preprocess",
+        "to": "p",
+        "soft": false
+      },
+      {
+        "from": "p",
+        "to": "summarize",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "preprocess"
+    ],
+    "exits": [
+      "summarize"
+    ],
+    "initial_ready_count": {
+      "preprocess": 0,
+      "p": 1,
+      "summarize": 1
+    },
+    "compiled_adj": {
+      "preprocess": [
+        [
+          "p",
+          false
+        ]
+      ],
+      "p": [
+        [
+          "summarize",
+          false
+        ]
+      ],
+      "summarize": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

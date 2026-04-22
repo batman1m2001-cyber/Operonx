@@ -1,0 +1,386 @@
+{
+  "hello": {
+    "type": "graph",
+    "full_name": "hello-world",
+    "name": "hello-world",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "name": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "greeting": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "g": {
+        "type": "code",
+        "full_name": "hello-world.g",
+        "name": "g",
+        "func_name": "examples.python.ex01_hello_world.workflow.greet",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "name": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hello-world",
+              "var": "name",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "greeting": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "hello-world",
+              "var": "greeting",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [],
+    "entries": [
+      "g"
+    ],
+    "exits": [
+      "g"
+    ],
+    "initial_ready_count": {
+      "g": 0
+    },
+    "compiled_adj": {
+      "g": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "chain": {
+    "type": "graph",
+    "full_name": "two-steps",
+    "name": "two-steps",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "name": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "greeting": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "result": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "g": {
+        "type": "code",
+        "full_name": "two-steps.g",
+        "name": "g",
+        "func_name": "examples.python.ex01_hello_world.workflow.greet_en",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "name": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "two-steps",
+              "var": "name",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "greeting": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "two-steps",
+              "var": "greeting",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "u": {
+        "type": "code",
+        "full_name": "two-steps.u",
+        "name": "u",
+        "func_name": "examples.python.ex01_hello_world.workflow.upper",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "two-steps.g",
+              "var": "greeting",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "two-steps",
+              "var": "result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "g",
+        "to": "u",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "g"
+    ],
+    "exits": [
+      "u"
+    ],
+    "initial_ready_count": {
+      "g": 0,
+      "u": 1
+    },
+    "compiled_adj": {
+      "g": [
+        [
+          "u",
+          false
+        ]
+      ],
+      "u": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "parallel": {
+    "type": "graph",
+    "full_name": "parallel",
+    "name": "parallel",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {},
+    "outputs": {
+      "combined": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "a": {
+        "type": "code",
+        "full_name": "parallel.a",
+        "name": "a",
+        "func_name": "examples.python.ex01_hello_world.workflow.step_a",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "a_result": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "b": {
+        "type": "code",
+        "full_name": "parallel.b",
+        "name": "b",
+        "func_name": "examples.python.ex01_hello_world.workflow.step_b",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "b_result": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "m": {
+        "type": "code",
+        "full_name": "parallel.m",
+        "name": "m",
+        "func_name": "examples.python.ex01_hello_world.workflow.merge",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "a": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "parallel.a",
+              "var": "a_result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "b": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "parallel.b",
+              "var": "b_result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "combined": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "parallel",
+              "var": "combined",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "a",
+        "to": "m",
+        "soft": false
+      },
+      {
+        "from": "b",
+        "to": "m",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "a",
+      "b"
+    ],
+    "exits": [
+      "m"
+    ],
+    "initial_ready_count": {
+      "a": 0,
+      "b": 0,
+      "m": 2
+    },
+    "compiled_adj": {
+      "a": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "b": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "m": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

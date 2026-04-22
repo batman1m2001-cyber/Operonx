@@ -1,0 +1,848 @@
+{
+  "capture": {
+    "type": "graph",
+    "full_name": "error-capture",
+    "name": "error-capture",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {},
+    "outputs": {
+      "result": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "fail": {
+        "type": "code",
+        "full_name": "error-capture.fail",
+        "name": "fail",
+        "func_name": "examples.python.ex08_error_handling.workflow.failing",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "error-capture",
+              "var": "result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [],
+    "entries": [
+      "fail"
+    ],
+    "exits": [
+      "fail"
+    ],
+    "initial_ready_count": {
+      "fail": 0
+    },
+    "compiled_adj": {
+      "fail": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "routing": {
+    "type": "graph",
+    "full_name": "error-routing",
+    "name": "error-routing",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "a": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "b": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "output": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "divide": {
+        "type": "code",
+        "full_name": "error-routing.divide",
+        "name": "divide",
+        "func_name": "examples.python.ex08_error_handling.workflow.safe_divide",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "a": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "error-routing",
+              "var": "a",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "b": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "error-routing",
+              "var": "b",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "success": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "error": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "router": {
+        "type": "branch",
+        "full_name": "error-routing.router",
+        "name": "router",
+        "func_name": "core",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "anchor": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "success": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "error-routing.divide",
+              "var": "success",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "target": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "matched": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "__branch_target__": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "cases": [
+          {
+            "condition": {
+              "source": "error-routing.divide",
+              "var": "success",
+              "transforms": [],
+              "is_output": false
+            },
+            "target": "on_success"
+          }
+        ],
+        "default": "on_error",
+        "candidates": null
+      },
+      "on_success": {
+        "type": "code",
+        "full_name": "error-routing.on_success",
+        "name": "on_success",
+        "func_name": "examples.python.ex08_error_handling.workflow.handle_success",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "result": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "error-routing.divide",
+              "var": "result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "output": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "error-routing",
+              "var": "output",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "on_error": {
+        "type": "code",
+        "full_name": "error-routing.on_error",
+        "name": "on_error",
+        "func_name": "examples.python.ex08_error_handling.workflow.handle_error",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "error": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "error-routing.divide",
+              "var": "error",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "output": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "error-routing",
+              "var": "output",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "divide",
+        "to": "router",
+        "soft": false
+      },
+      {
+        "from": "router",
+        "to": "on_success",
+        "soft": false
+      },
+      {
+        "from": "router",
+        "to": "on_error",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "divide"
+    ],
+    "exits": [
+      "on_success",
+      "on_error"
+    ],
+    "initial_ready_count": {
+      "divide": 0,
+      "router": 1,
+      "on_success": 1,
+      "on_error": 1
+    },
+    "compiled_adj": {
+      "divide": [
+        [
+          "router",
+          false
+        ]
+      ],
+      "router": [
+        [
+          "on_success",
+          false
+        ],
+        [
+          "on_error",
+          false
+        ]
+      ],
+      "on_success": [],
+      "on_error": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "retry": {
+    "type": "graph",
+    "full_name": "retry-fallback",
+    "name": "retry-fallback",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "output": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "used_fallback": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "api_call": {
+        "type": "code",
+        "full_name": "retry-fallback.api_call",
+        "name": "api_call",
+        "func_name": "examples.python.ex08_error_handling.workflow.retry_with_backoff",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "retry-fallback",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "success": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "attempts": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "fallback": {
+        "type": "code",
+        "full_name": "retry-fallback.fallback",
+        "name": "fallback",
+        "func_name": "examples.python.ex08_error_handling.workflow.with_fallback",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "primary_result": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "retry-fallback.api_call",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "success": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "retry-fallback.api_call",
+              "var": "success",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "output": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "retry-fallback",
+              "var": "output",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "used_fallback": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "retry-fallback",
+              "var": "used_fallback",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "api_call",
+        "to": "fallback",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "api_call"
+    ],
+    "exits": [
+      "fallback"
+    ],
+    "initial_ready_count": {
+      "api_call": 0,
+      "fallback": 1
+    },
+    "compiled_adj": {
+      "api_call": [
+        [
+          "fallback",
+          false
+        ]
+      ],
+      "fallback": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "llm_fallback": {
+    "type": "graph",
+    "full_name": "llm-fallback",
+    "name": "llm-fallback",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "answer": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "model": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "p": {
+        "type": "prompt",
+        "full_name": "llm-fallback.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Answer briefly.",
+              "user": "{query}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "llm-fallback",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "llm-fallback.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "llm-fallback.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "llm-fallback",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "llm-fallback",
+              "var": "model",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o",
+        "ratios": [
+          1.0
+        ],
+        "fallback": [
+          "gpt-4o-mini"
+        ],
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ],
+        "fallback_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "p"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "p": 0,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

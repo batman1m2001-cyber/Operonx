@@ -1,0 +1,952 @@
+{
+  "embed": {
+    "type": "graph",
+    "full_name": "embed-texts",
+    "name": "embed-texts",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "texts": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "vectors": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "embed": {
+        "type": "embedding",
+        "full_name": "embed-texts.embed",
+        "name": "embed",
+        "func_name": "_process",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "texts": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "embed-texts",
+              "var": "texts",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "embeddings": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "embed-texts",
+              "var": "vectors",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "resource": "openai",
+        "resource_config": {
+          "extra_fields": null,
+          "api_type": "openai",
+          "api_key": "<REDACTED>",
+          "base_url": "https://api.openai.com/v1/embeddings",
+          "embed_batch_size": null,
+          "model": "text-embedding-3-small",
+          "dimensions": 1536
+        }
+      }
+    },
+    "edges": [],
+    "entries": [
+      "embed"
+    ],
+    "exits": [
+      "embed"
+    ],
+    "initial_ready_count": {
+      "embed": 0
+    },
+    "compiled_adj": {
+      "embed": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "rag": {
+    "type": "graph",
+    "full_name": "simple-rag",
+    "name": "simple-rag",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "doc_vectors": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "documents": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "context_docs": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "context_docs": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "answer": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "embed_query": {
+        "type": "embedding",
+        "full_name": "simple-rag.embed_query",
+        "name": "embed_query",
+        "func_name": "_process",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "texts": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "embeddings": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "openai",
+        "resource_config": {
+          "extra_fields": null,
+          "api_type": "openai",
+          "api_key": "<REDACTED>",
+          "base_url": "https://api.openai.com/v1/embeddings",
+          "embed_batch_size": null,
+          "model": "text-embedding-3-small",
+          "dimensions": 1536
+        }
+      },
+      "ret": {
+        "type": "code",
+        "full_name": "simple-rag.ret",
+        "name": "ret",
+        "func_name": "examples.python.ex07_embeddings_and_rag.workflow.retrieve",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query_vec": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag.embed_query",
+              "var": "embeddings",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "doc_vectors": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag",
+              "var": "doc_vectors",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "documents": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "context_docs": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "simple-rag",
+              "var": "context_docs",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "p": {
+        "type": "prompt",
+        "full_name": "simple-rag.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Trả lời câu hỏi dựa trên context được cung cấp.\nNếu không tìm thấy câu trả lời, nói 'Không tìm thấy thông tin.'\n\nContext:\n{context}",
+              "user": "{query}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "context": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "simple-rag",
+              "var": "context_docs",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "simple-rag",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "simple-rag.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "simple-rag",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "embed_query",
+        "to": "ret",
+        "soft": false
+      },
+      {
+        "from": "ret",
+        "to": "p",
+        "soft": false
+      },
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "embed_query"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "embed_query": 0,
+      "ret": 1,
+      "p": 1,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "embed_query": [
+        [
+          "ret",
+          false
+        ]
+      ],
+      "ret": [
+        [
+          "p",
+          false
+        ]
+      ],
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "rerank": {
+    "type": "graph",
+    "full_name": "rag-rerank",
+    "name": "rag-rerank",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "documents": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "sources": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "answer": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "rr": {
+        "type": "rerank",
+        "full_name": "rag-rerank.rr",
+        "name": "rr",
+        "func_name": "_process",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "rag-rerank",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "documents": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "rag-rerank",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "top_k": {
+            "default": -1,
+            "required": false,
+            "ref": null,
+            "literal": 3
+          },
+          "threshold": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "reranks": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "rag-rerank",
+              "var": "sources",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "resource": "bge-m3",
+        "resource_config": {
+          "extra_fields": null,
+          "api_type": "pinecone",
+          "api_key": "<REDACTED>",
+          "api_version": "2025-04",
+          "base_url": "https://api.pinecone.io/rerank",
+          "model": "bge-reranker-v2-m3"
+        }
+      },
+      "p": {
+        "type": "prompt",
+        "full_name": "rag-rerank.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Trả lời dựa trên context:\n\n{context}",
+              "user": "{query}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "context": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "rag-rerank.rr",
+              "var": "reranks",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "rag-rerank",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "rag-rerank.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "rag-rerank.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "rag-rerank",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "rr",
+        "to": "p",
+        "soft": false
+      },
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "rr"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "rr": 0,
+      "p": 1,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "rr": [
+        [
+          "p",
+          false
+        ]
+      ],
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

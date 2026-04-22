@@ -108,3 +108,5 @@ ui-operon-eyes/out/
 
 # Local sync scripts
 sync_to_internal.bat
+# Per-run bench reports — keep the folder tracked via .gitkeep.
+examples/bench_results/*.json

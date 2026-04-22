@@ -1,0 +1,736 @@
+{
+  "for_loop": {
+    "type": "graph",
+    "full_name": "for-loop",
+    "name": "for-loop",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "items": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "prefix": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "result": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "src": {
+        "type": "code",
+        "full_name": "for-loop.src",
+        "name": "src",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.each_item",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "items": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "for-loop",
+              "var": "items",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "prefix": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "for-loop",
+              "var": "prefix",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "item": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "prefix": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "step": {
+        "type": "code",
+        "full_name": "for-loop.step",
+        "name": "step",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.process_item",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "item": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "for-loop.src",
+              "var": "item",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "prefix": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "for-loop.src",
+              "var": "prefix",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "for-loop",
+              "var": "result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "src",
+        "to": "step",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "src"
+    ],
+    "exits": [
+      "step"
+    ],
+    "initial_ready_count": {
+      "src": 0,
+      "step": 1
+    },
+    "compiled_adj": {
+      "src": [
+        [
+          "step",
+          false
+        ]
+      ],
+      "step": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "map_op": {
+    "type": "graph",
+    "full_name": "map-op",
+    "name": "map-op",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "numbers": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "squared": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "src": {
+        "type": "code",
+        "full_name": "map-op.src",
+        "name": "src",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.each_number",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "numbers": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "map-op",
+              "var": "numbers",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "x": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "step": {
+        "type": "code",
+        "full_name": "map-op.step",
+        "name": "step",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.square",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "x": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "map-op.src",
+              "var": "x",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "squared": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "map-op",
+              "var": "squared",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "src",
+        "to": "step",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "src"
+    ],
+    "exits": [
+      "step"
+    ],
+    "initial_ready_count": {
+      "src": 0,
+      "step": 1
+    },
+    "compiled_adj": {
+      "src": [
+        [
+          "step",
+          false
+        ]
+      ],
+      "step": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "while_loop": {
+    "type": "graph",
+    "full_name": "while-loop",
+    "name": "while-loop",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "start_value": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "value": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "src": {
+        "type": "code",
+        "full_name": "while-loop.src",
+        "name": "src",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.halve_until",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "value": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "while-loop",
+              "var": "start_value",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "value": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "while-loop",
+              "var": "value",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [],
+    "entries": [
+      "src"
+    ],
+    "exits": [
+      "src"
+    ],
+    "initial_ready_count": {
+      "src": 0
+    },
+    "compiled_adj": {
+      "src": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "branch": {
+    "type": "graph",
+    "full_name": "grade-workflow",
+    "name": "grade-workflow",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "score": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "grade": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "message": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "grade_router": {
+        "type": "branch",
+        "full_name": "grade-workflow.grade_router",
+        "name": "grade_router",
+        "func_name": "core",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "anchor": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "score": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "score",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "target": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "matched": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "__branch_target__": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "cases": [
+          {
+            "condition": {
+              "source": "__PARENT__",
+              "var": "score",
+              "transforms": [
+                [
+                  "ge",
+                  [
+                    90
+                  ]
+                ]
+              ],
+              "is_output": false
+            },
+            "target": "ex"
+          },
+          {
+            "condition": {
+              "source": "__PARENT__",
+              "var": "score",
+              "transforms": [
+                [
+                  "ge",
+                  [
+                    70
+                  ]
+                ]
+              ],
+              "is_output": false
+            },
+            "target": "gd"
+          },
+          {
+            "condition": {
+              "source": "__PARENT__",
+              "var": "score",
+              "transforms": [
+                [
+                  "ge",
+                  [
+                    50
+                  ]
+                ]
+              ],
+              "is_output": false
+            },
+            "target": "av"
+          }
+        ],
+        "default": "fl",
+        "candidates": null
+      },
+      "ex": {
+        "type": "code",
+        "full_name": "grade-workflow.ex",
+        "name": "ex",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.excellent",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "grade": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "grade",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "gd": {
+        "type": "code",
+        "full_name": "grade-workflow.gd",
+        "name": "gd",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.good",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "grade": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "grade",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "av": {
+        "type": "code",
+        "full_name": "grade-workflow.av",
+        "name": "av",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.average",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "grade": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "grade",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "fl": {
+        "type": "code",
+        "full_name": "grade-workflow.fl",
+        "name": "fl",
+        "func_name": "examples.python.ex05_loops_and_branches.workflow.fail",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {},
+        "outputs": {
+          "grade": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "grade",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "grade-workflow",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "grade_router",
+        "to": "ex",
+        "soft": false
+      },
+      {
+        "from": "grade_router",
+        "to": "gd",
+        "soft": false
+      },
+      {
+        "from": "grade_router",
+        "to": "av",
+        "soft": false
+      },
+      {
+        "from": "grade_router",
+        "to": "fl",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "grade_router"
+    ],
+    "exits": [
+      "ex",
+      "gd",
+      "av",
+      "fl"
+    ],
+    "initial_ready_count": {
+      "grade_router": 0,
+      "ex": 1,
+      "gd": 1,
+      "av": 1,
+      "fl": 1
+    },
+    "compiled_adj": {
+      "grade_router": [
+        [
+          "ex",
+          false
+        ],
+        [
+          "gd",
+          false
+        ],
+        [
+          "av",
+          false
+        ],
+        [
+          "fl",
+          false
+        ]
+      ],
+      "ex": [],
+      "gd": [],
+      "av": [],
+      "fl": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

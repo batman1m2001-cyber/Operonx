@@ -1,0 +1,7 @@
+{
+  "text": {
+    "text": "The streaming architecture enables real-time token delivery from generator ops through an event queue scheduler with tuple contexts and proper EOF propagation",
+    "chunk_size": 3
+  },
+  "async_counter": {"n": 5}
+}

@@ -1,0 +1,781 @@
+{
+  "keyword_rrf": {
+    "type": "graph",
+    "full_name": "keyword-rrf",
+    "name": "keyword-rrf",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "documents": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "results": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "s_orig": {
+        "type": "code",
+        "full_name": "keyword-rrf.s_orig",
+        "name": "s_orig",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.search_original",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "docs": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "results": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "s_exp": {
+        "type": "code",
+        "full_name": "keyword-rrf.s_exp",
+        "name": "s_exp",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.search_expanded",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "docs": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "results": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "m": {
+        "type": "code",
+        "full_name": "keyword-rrf.m",
+        "name": "m",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.rrf_merge",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "r1": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf.s_orig",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "r2": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "keyword-rrf.s_exp",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "merged": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "keyword-rrf",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "s_orig",
+        "to": "m",
+        "soft": false
+      },
+      {
+        "from": "s_exp",
+        "to": "m",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "s_orig",
+      "s_exp"
+    ],
+    "exits": [
+      "m"
+    ],
+    "initial_ready_count": {
+      "s_orig": 0,
+      "s_exp": 0,
+      "m": 2
+    },
+    "compiled_adj": {
+      "s_orig": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "s_exp": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "m": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "hybrid": {
+    "type": "graph",
+    "full_name": "hybrid-rag",
+    "name": "hybrid-rag",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "documents": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "doc_vectors": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "sources": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "answer": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "kw": {
+        "type": "code",
+        "full_name": "hybrid-rag.kw",
+        "name": "kw",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.kw_search_fn",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "docs": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "results": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "embed_q": {
+        "type": "embedding",
+        "full_name": "hybrid-rag.embed_q",
+        "name": "embed_q",
+        "func_name": "_process",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "texts": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "embeddings": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "openai",
+        "resource_config": {
+          "extra_fields": null,
+          "api_type": "openai",
+          "api_key": "<REDACTED>",
+          "base_url": "https://api.openai.com/v1/embeddings",
+          "embed_batch_size": null,
+          "model": "text-embedding-3-small",
+          "dimensions": 1536
+        }
+      },
+      "vec": {
+        "type": "code",
+        "full_name": "hybrid-rag.vec",
+        "name": "vec",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.vec_search_fn",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "qv": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag.embed_q",
+              "var": "embeddings",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "docs": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "documents",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "dvs": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "doc_vectors",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "results": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "mrg": {
+        "type": "code",
+        "full_name": "hybrid-rag.mrg",
+        "name": "mrg",
+        "func_name": "examples.python.ex12_rag_advanced.workflow.merge_results",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "kw": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag.kw",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "vec": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag.vec",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "context_docs": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "sources",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      },
+      "p": {
+        "type": "prompt",
+        "full_name": "hybrid-rag.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Trả lời câu hỏi dựa trên context.\nContext:\n{context}",
+              "user": "{query}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "context": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "hybrid-rag.mrg",
+              "var": "context_docs",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "hybrid-rag.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "hybrid-rag",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "embed_q",
+        "to": "vec",
+        "soft": false
+      },
+      {
+        "from": "kw",
+        "to": "mrg",
+        "soft": false
+      },
+      {
+        "from": "vec",
+        "to": "mrg",
+        "soft": false
+      },
+      {
+        "from": "mrg",
+        "to": "p",
+        "soft": false
+      },
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "kw",
+      "embed_q"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "kw": 0,
+      "embed_q": 0,
+      "vec": 1,
+      "mrg": 2,
+      "p": 1,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "kw": [
+        [
+          "mrg",
+          false
+        ]
+      ],
+      "embed_q": [
+        [
+          "vec",
+          false
+        ]
+      ],
+      "vec": [
+        [
+          "mrg",
+          false
+        ]
+      ],
+      "mrg": [
+        [
+          "p",
+          false
+        ]
+      ],
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

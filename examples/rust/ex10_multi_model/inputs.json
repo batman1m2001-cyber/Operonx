@@ -1,0 +1,7 @@
+{
+  "parallel": {"query": "What is machine learning?"},
+  "routing": {"query": "Explain supervised vs unsupervised learning with examples."},
+  "load_balanced": {"query": "Say hello #1"},
+  "fallback": {"query": "What is Python?"},
+  "ensemble": {"query": "What causes the seasons on Earth?"}
+}

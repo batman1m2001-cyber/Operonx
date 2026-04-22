@@ -1,0 +1,5 @@
+{
+  "embed": {"texts": ["Xin chào!", "Operon workflow engine"]},
+  "rag": {"query": "Thủ đô Việt Nam là gì?"},
+  "rerank": {"query": "Thành phố biển đẹp nhất Việt Nam?"}
+}

@@ -1,0 +1,315 @@
+{
+  "text": {
+    "type": "graph",
+    "full_name": "text-chunker",
+    "name": "text-chunker",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "text": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "chunk_size": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "result": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "chunker": {
+        "type": "code",
+        "full_name": "text-chunker.chunker",
+        "name": "chunker",
+        "func_name": "examples.python.ex14_streaming_tracing.workflow.chunk_text",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "text-chunker",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "chunk_size": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "text-chunker",
+              "var": "chunk_size",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "chunk": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "index": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "analyzer": {
+        "type": "code",
+        "full_name": "text-chunker.analyzer",
+        "name": "analyzer",
+        "func_name": "examples.python.ex14_streaming_tracing.workflow.analyze_chunk",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "chunk": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "text-chunker.chunker",
+              "var": "chunk",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "index": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "text-chunker.chunker",
+              "var": "index",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "text-chunker",
+              "var": "result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "chunker",
+        "to": "analyzer",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "chunker"
+    ],
+    "exits": [
+      "analyzer"
+    ],
+    "initial_ready_count": {
+      "chunker": 0,
+      "analyzer": 1
+    },
+    "compiled_adj": {
+      "chunker": [
+        [
+          "analyzer",
+          false
+        ]
+      ],
+      "analyzer": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "async_counter": {
+    "type": "graph",
+    "full_name": "async-counter",
+    "name": "async-counter",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "n": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "label": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "counter": {
+        "type": "code",
+        "full_name": "async-counter.counter",
+        "name": "counter",
+        "func_name": "examples.python.ex14_streaming_tracing.workflow.async_counter",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "n": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "async-counter",
+              "var": "n",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "number": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "squared": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "fmt": {
+        "type": "code",
+        "full_name": "async-counter.fmt",
+        "name": "fmt",
+        "func_name": "examples.python.ex14_streaming_tracing.workflow.format_square",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "number": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "async-counter.counter",
+              "var": "number",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "squared": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "async-counter.counter",
+              "var": "squared",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "label": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "async-counter",
+              "var": "label",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "counter",
+        "to": "fmt",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "counter"
+    ],
+    "exits": [
+      "fmt"
+    ],
+    "initial_ready_count": {
+      "counter": 0,
+      "fmt": 1
+    },
+    "compiled_adj": {
+      "counter": [
+        [
+          "fmt",
+          false
+        ]
+      ],
+      "fmt": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

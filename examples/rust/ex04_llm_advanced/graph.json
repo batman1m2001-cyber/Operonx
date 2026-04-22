@@ -1,0 +1,1112 @@
+{
+  "structured": {
+    "type": "graph",
+    "full_name": "sentiment-analysis",
+    "name": "sentiment-analysis",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "text": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "analysis": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "p": {
+        "type": "prompt",
+        "full_name": "sentiment-analysis.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Phân tích sentiment của văn bản. Trả về JSON.",
+              "user": "{text}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "text": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "sentiment-analysis",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "sentiment-analysis.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "sentiment-analysis.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "type": "json_schema",
+              "json_schema": {
+                "name": "sentiment_response",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sentiment": {
+                      "type": "string",
+                      "enum": [
+                        "positive",
+                        "negative",
+                        "neutral"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sentiment",
+                    "confidence",
+                    "reason"
+                  ]
+                }
+              }
+            }
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "sentiment-analysis",
+              "var": "analysis",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "p"
+    ],
+    "exits": [
+      "llm"
+    ],
+    "initial_ready_count": {
+      "p": 0,
+      "llm": 1
+    },
+    "compiled_adj": {
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "tool": {
+    "type": "graph",
+    "full_name": "tool-calling",
+    "name": "tool-calling",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "has_tool_call": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "tool_result": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "llm_response": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "p": {
+        "type": "prompt",
+        "full_name": "tool-calling.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
+              "user": "{query}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "query": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "tool-calling",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "tool-calling.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "tool-calling.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": [
+              {
+                "type": "function",
+                "function": {
+                  "name": "calculate",
+                  "description": "Tính toán biểu thức toán học",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "expression": {
+                        "type": "string",
+                        "description": "Biểu thức toán (vd: 2+3*4)"
+                      }
+                    },
+                    "required": [
+                      "expression"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": "auto"
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      },
+      "proc": {
+        "type": "code",
+        "full_name": "tool-calling.proc",
+        "name": "proc",
+        "func_name": "examples.python.ex04_llm_advanced.workflow.process_response",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "tool-calling.llm",
+              "var": "content",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "tool_calls": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "tool-calling.llm",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "has_tool_call": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "tool-calling",
+              "var": "has_tool_call",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "tool_result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "tool-calling",
+              "var": "tool_result",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "llm_response": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "tool-calling",
+              "var": "llm_response",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      },
+      {
+        "from": "llm",
+        "to": "proc",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "p"
+    ],
+    "exits": [
+      "proc"
+    ],
+    "initial_ready_count": {
+      "p": 0,
+      "llm": 1,
+      "proc": 1
+    },
+    "compiled_adj": {
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": [
+        [
+          "proc",
+          false
+        ]
+      ],
+      "proc": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "multi_turn": {
+    "type": "graph",
+    "full_name": "multi-turn-chat",
+    "name": "multi-turn-chat",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "history": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "message": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "response": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "new_history": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "p": {
+        "type": "prompt",
+        "full_name": "multi-turn-chat.p",
+        "name": "p",
+        "func_name": "_format",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "template": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": {
+              "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
+              "user": "{message}"
+            }
+          },
+          "conversation_history": {
+            "default": [],
+            "required": false,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "history",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "tool_results": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "llm": {
+        "type": "llm",
+        "full_name": "multi-turn-chat.llm",
+        "name": "llm",
+        "func_name": "_generate_core",
+        "is_async": true,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "multi-turn-chat.p",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "temperature": {
+            "default": 0.0,
+            "required": false,
+            "ref": null,
+            "literal": 0.7
+          },
+          "max_tokens": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": 200
+          },
+          "tools": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "tool_choice": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "response_format": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_p": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "stop": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "frequency_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "presence_penalty": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "seed": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "top_logprobs": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "n": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "user": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "outputs": {
+          "role": {
+            "default": "assistant",
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "content": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "response",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "finish_reason": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "model_used": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "literal": null
+          },
+          "tool_calls": {
+            "default": [],
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "usage": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "extras": {
+            "default": {},
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "resource": "gpt-4o-mini",
+        "ratios": [
+          1.0
+        ],
+        "fallback": null,
+        "batch_mode": false,
+        "resource_configs": [
+          {
+            "extra_fields": null,
+            "api_type": "openai",
+            "proxy": null,
+            "cost_per_input_token": null,
+            "cost_per_output_token": null,
+            "api_key": "<REDACTED>",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "batch_size": 50000,
+            "batch_flush_interval": 60.0,
+            "batch_poll_interval": 30.0,
+            "batch_timeout": 86400.0
+          }
+        ]
+      },
+      "upd": {
+        "type": "code",
+        "full_name": "multi-turn-chat.upd",
+        "name": "upd",
+        "func_name": "examples.python.ex04_llm_advanced.workflow.update_history",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "history": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "history",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "message": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "message",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "response": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "multi-turn-chat.llm",
+              "var": "content",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "new_history": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "multi-turn-chat",
+              "var": "new_history",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "p",
+        "to": "llm",
+        "soft": false
+      },
+      {
+        "from": "llm",
+        "to": "upd",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "p"
+    ],
+    "exits": [
+      "upd"
+    ],
+    "initial_ready_count": {
+      "p": 0,
+      "llm": 1,
+      "upd": 1
+    },
+    "compiled_adj": {
+      "p": [
+        [
+          "llm",
+          false
+        ]
+      ],
+      "llm": [
+        [
+          "upd",
+          false
+        ]
+      ],
+      "upd": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

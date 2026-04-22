@@ -1,0 +1,1523 @@
+{
+  "calc": {
+    "type": "graph",
+    "full_name": "agent",
+    "name": "agent",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "answer": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "init": {
+        "type": "code",
+        "full_name": "agent.init",
+        "name": "init",
+        "func_name": "examples.python.ex09_agent_workflow.workflow.init_agent",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "g": {
+        "type": "graph",
+        "full_name": "agent.g",
+        "name": "g",
+        "func_name": null,
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent.init",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "done",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "ops": {
+          "llm": {
+            "type": "llm",
+            "full_name": "agent.g.llm",
+            "name": "llm",
+            "func_name": "_generate_core",
+            "is_async": true,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "io",
+            "inputs": {
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "temperature": {
+                "default": 0.0,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "max_tokens": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "tools": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": [
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "calculator",
+                      "description": "Evaluate mathematical expressions. Example: '25 * 4 + 100'",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "expression": {
+                            "type": "string",
+                            "description": "Math expression to evaluate"
+                          }
+                        },
+                        "required": [
+                          "expression"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "search",
+                      "description": "Search for factual information about a topic.",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "query": {
+                            "type": "string",
+                            "description": "Search query"
+                          }
+                        },
+                        "required": [
+                          "query"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "tool_choice": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "response_format": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_p": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "stop": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "frequency_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "presence_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "seed": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "n": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "user": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "outputs": {
+              "role": {
+                "default": "assistant",
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "finish_reason": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "model_used": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "tool_calls": {
+                "default": [],
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "usage": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "extras": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "resource": "gpt-4o-mini",
+            "ratios": [
+              1.0
+            ],
+            "fallback": null,
+            "batch_mode": false,
+            "resource_configs": [
+              {
+                "extra_fields": null,
+                "api_type": "openai",
+                "proxy": null,
+                "cost_per_input_token": null,
+                "cost_per_output_token": null,
+                "api_key": "<REDACTED>",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "batch_size": 50000,
+                "batch_flush_interval": 60.0,
+                "batch_poll_interval": 30.0,
+                "batch_timeout": 86400.0
+              }
+            ]
+          },
+          "proc": {
+            "type": "code",
+            "full_name": "agent.g.proc",
+            "name": "proc",
+            "func_name": "examples.python.ex09_agent_workflow.workflow.process_response",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "content",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "tool_calls": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "tool_calls",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "messages": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "done": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "done",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "answer": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "answer",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "llm",
+            "to": "proc",
+            "soft": false
+          }
+        ],
+        "entries": [
+          "llm"
+        ],
+        "exits": [
+          "proc"
+        ],
+        "initial_ready_count": {
+          "llm": 0,
+          "proc": 1
+        },
+        "compiled_adj": {
+          "llm": [
+            [
+              "proc",
+              false
+            ]
+          ],
+          "proc": []
+        },
+        "stream_initial_ready": {},
+        "loop_config": {
+          "until": "done == True",
+          "max_iterations": 10
+        },
+        "max_stream_concurrent": 64
+      }
+    },
+    "edges": [
+      {
+        "from": "init",
+        "to": "g",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "init"
+    ],
+    "exits": [
+      "g"
+    ],
+    "initial_ready_count": {
+      "init": 0,
+      "g": 1
+    },
+    "compiled_adj": {
+      "init": [
+        [
+          "g",
+          false
+        ]
+      ],
+      "g": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "search": {
+    "type": "graph",
+    "full_name": "agent",
+    "name": "agent",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "answer": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "init": {
+        "type": "code",
+        "full_name": "agent.init",
+        "name": "init",
+        "func_name": "examples.python.ex09_agent_workflow.workflow.init_agent",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "g": {
+        "type": "graph",
+        "full_name": "agent.g",
+        "name": "g",
+        "func_name": null,
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent.init",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "done",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "ops": {
+          "llm": {
+            "type": "llm",
+            "full_name": "agent.g.llm",
+            "name": "llm",
+            "func_name": "_generate_core",
+            "is_async": true,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "io",
+            "inputs": {
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "temperature": {
+                "default": 0.0,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "max_tokens": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "tools": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": [
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "calculator",
+                      "description": "Evaluate mathematical expressions. Example: '25 * 4 + 100'",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "expression": {
+                            "type": "string",
+                            "description": "Math expression to evaluate"
+                          }
+                        },
+                        "required": [
+                          "expression"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "search",
+                      "description": "Search for factual information about a topic.",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "query": {
+                            "type": "string",
+                            "description": "Search query"
+                          }
+                        },
+                        "required": [
+                          "query"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "tool_choice": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "response_format": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_p": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "stop": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "frequency_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "presence_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "seed": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "n": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "user": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "outputs": {
+              "role": {
+                "default": "assistant",
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "finish_reason": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "model_used": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "tool_calls": {
+                "default": [],
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "usage": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "extras": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "resource": "gpt-4o-mini",
+            "ratios": [
+              1.0
+            ],
+            "fallback": null,
+            "batch_mode": false,
+            "resource_configs": [
+              {
+                "extra_fields": null,
+                "api_type": "openai",
+                "proxy": null,
+                "cost_per_input_token": null,
+                "cost_per_output_token": null,
+                "api_key": "<REDACTED>",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "batch_size": 50000,
+                "batch_flush_interval": 60.0,
+                "batch_poll_interval": 30.0,
+                "batch_timeout": 86400.0
+              }
+            ]
+          },
+          "proc": {
+            "type": "code",
+            "full_name": "agent.g.proc",
+            "name": "proc",
+            "func_name": "examples.python.ex09_agent_workflow.workflow.process_response",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "content",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "tool_calls": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "tool_calls",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "messages": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "done": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "done",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "answer": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "answer",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "llm",
+            "to": "proc",
+            "soft": false
+          }
+        ],
+        "entries": [
+          "llm"
+        ],
+        "exits": [
+          "proc"
+        ],
+        "initial_ready_count": {
+          "llm": 0,
+          "proc": 1
+        },
+        "compiled_adj": {
+          "llm": [
+            [
+              "proc",
+              false
+            ]
+          ],
+          "proc": []
+        },
+        "stream_initial_ready": {},
+        "loop_config": {
+          "until": "done == True",
+          "max_iterations": 10
+        },
+        "max_stream_concurrent": 64
+      }
+    },
+    "edges": [
+      {
+        "from": "init",
+        "to": "g",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "init"
+    ],
+    "exits": [
+      "g"
+    ],
+    "initial_ready_count": {
+      "init": 0,
+      "g": 1
+    },
+    "compiled_adj": {
+      "init": [
+        [
+          "g",
+          false
+        ]
+      ],
+      "g": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "combined": {
+    "type": "graph",
+    "full_name": "agent",
+    "name": "agent",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "query": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "answer": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "init": {
+        "type": "code",
+        "full_name": "agent.init",
+        "name": "init",
+        "func_name": "examples.python.ex09_agent_workflow.workflow.init_agent",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "query": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent",
+              "var": "query",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "g": {
+        "type": "graph",
+        "full_name": "agent.g",
+        "name": "g",
+        "func_name": null,
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "messages": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "agent.init",
+              "var": "messages",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "done",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent.init",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "messages": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "done": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "answer": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "agent",
+              "var": "answer",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "ops": {
+          "llm": {
+            "type": "llm",
+            "full_name": "agent.g.llm",
+            "name": "llm",
+            "func_name": "_generate_core",
+            "is_async": true,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "io",
+            "inputs": {
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "temperature": {
+                "default": 0.0,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "max_tokens": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "tools": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": [
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "calculator",
+                      "description": "Evaluate mathematical expressions. Example: '25 * 4 + 100'",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "expression": {
+                            "type": "string",
+                            "description": "Math expression to evaluate"
+                          }
+                        },
+                        "required": [
+                          "expression"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "search",
+                      "description": "Search for factual information about a topic.",
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "query": {
+                            "type": "string",
+                            "description": "Search query"
+                          }
+                        },
+                        "required": [
+                          "query"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "tool_choice": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "response_format": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_p": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "stop": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "frequency_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "presence_penalty": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "seed": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "top_logprobs": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "n": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "user": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "outputs": {
+              "role": {
+                "default": "assistant",
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "finish_reason": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "model_used": {
+                "default": null,
+                "required": true,
+                "ref": null,
+                "literal": null
+              },
+              "tool_calls": {
+                "default": [],
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "usage": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "extras": {
+                "default": {},
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            },
+            "resource": "gpt-4o-mini",
+            "ratios": [
+              1.0
+            ],
+            "fallback": null,
+            "batch_mode": false,
+            "resource_configs": [
+              {
+                "extra_fields": null,
+                "api_type": "openai",
+                "proxy": null,
+                "cost_per_input_token": null,
+                "cost_per_output_token": null,
+                "api_key": "<REDACTED>",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "batch_size": 50000,
+                "batch_flush_interval": 60.0,
+                "batch_poll_interval": 30.0,
+                "batch_timeout": 86400.0
+              }
+            ]
+          },
+          "proc": {
+            "type": "code",
+            "full_name": "agent.g.proc",
+            "name": "proc",
+            "func_name": "examples.python.ex09_agent_workflow.workflow.process_response",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+              "content": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "content",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "tool_calls": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g.llm",
+                  "var": "tool_calls",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "messages": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "messages": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "messages",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "done": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "done",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "answer": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "agent.g",
+                  "var": "answer",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "llm",
+            "to": "proc",
+            "soft": false
+          }
+        ],
+        "entries": [
+          "llm"
+        ],
+        "exits": [
+          "proc"
+        ],
+        "initial_ready_count": {
+          "llm": 0,
+          "proc": 1
+        },
+        "compiled_adj": {
+          "llm": [
+            [
+              "proc",
+              false
+            ]
+          ],
+          "proc": []
+        },
+        "stream_initial_ready": {},
+        "loop_config": {
+          "until": "done == True",
+          "max_iterations": 10
+        },
+        "max_stream_concurrent": 64
+      }
+    },
+    "edges": [
+      {
+        "from": "init",
+        "to": "g",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "init"
+    ],
+    "exits": [
+      "g"
+    ],
+    "initial_ready_count": {
+      "init": 0,
+      "g": 1
+    },
+    "compiled_adj": {
+      "init": [
+        [
+          "g",
+          false
+        ]
+      ],
+      "g": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}
