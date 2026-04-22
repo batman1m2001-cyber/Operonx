@@ -1,0 +1,566 @@
+{
+  "fan_out": {
+    "type": "graph",
+    "full_name": "fan-out-fan-in",
+    "name": "fan-out-fan-in",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "text": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "analysis": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "sent": {
+        "type": "code",
+        "full_name": "fan-out-fan-in.sent",
+        "name": "sent",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.analyze_sentiment",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "sentiment": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "kw": {
+        "type": "code",
+        "full_name": "fan-out-fan-in.kw",
+        "name": "kw",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.extract_keywords",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "keywords": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "st": {
+        "type": "code",
+        "full_name": "fan-out-fan-in.st",
+        "name": "st",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.count_stats",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "text": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in",
+              "var": "text",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "word_count": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "char_count": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "avg_word_len": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "m": {
+        "type": "code",
+        "full_name": "fan-out-fan-in.m",
+        "name": "m",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.merge_analysis",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "s": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in.sent",
+              "var": "sentiment",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "k": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in.kw",
+              "var": "keywords",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "wc": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in.st",
+              "var": "word_count",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "cc": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in.st",
+              "var": "char_count",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "awl": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "fan-out-fan-in.st",
+              "var": "avg_word_len",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "analysis": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "fan-out-fan-in",
+              "var": "analysis",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "sent",
+        "to": "m",
+        "soft": false
+      },
+      {
+        "from": "kw",
+        "to": "m",
+        "soft": false
+      },
+      {
+        "from": "st",
+        "to": "m",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "sent",
+      "kw",
+      "st"
+    ],
+    "exits": [
+      "m"
+    ],
+    "initial_ready_count": {
+      "sent": 0,
+      "kw": 0,
+      "st": 0,
+      "m": 3
+    },
+    "compiled_adj": {
+      "sent": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "kw": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "st": [
+        [
+          "m",
+          false
+        ]
+      ],
+      "m": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "iteration": {
+    "type": "graph",
+    "full_name": "iteration-demo",
+    "name": "iteration-demo",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "items": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "results": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "src": {
+        "type": "code",
+        "full_name": "iteration-demo.src",
+        "name": "src",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.each_item",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "items": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "iteration-demo",
+              "var": "items",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "item": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "proc": {
+        "type": "code",
+        "full_name": "iteration-demo.proc",
+        "name": "proc",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.process_item",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "item": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "iteration-demo.src",
+              "var": "item",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "iteration-demo",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "status": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "src",
+        "to": "proc",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "src"
+    ],
+    "exits": [
+      "proc"
+    ],
+    "initial_ready_count": {
+      "src": 0,
+      "proc": 1
+    },
+    "compiled_adj": {
+      "src": [
+        [
+          "proc",
+          false
+        ]
+      ],
+      "proc": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  },
+  "partial_failure": {
+    "type": "graph",
+    "full_name": "partial-failure",
+    "name": "partial-failure",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+      "items": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "results": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "errors": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "src": {
+        "type": "code",
+        "full_name": "partial-failure.src",
+        "name": "src",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.each_item",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "items": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "partial-failure",
+              "var": "items",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "item": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "proc": {
+        "type": "code",
+        "full_name": "partial-failure.proc",
+        "name": "proc",
+        "func_name": "examples.python.ex11_parallel_advanced.workflow.safe_process",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "item": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "partial-failure.src",
+              "var": "item",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "result": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "partial-failure",
+              "var": "results",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "error": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "partial-failure",
+              "var": "errors",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "src",
+        "to": "proc",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "src"
+    ],
+    "exits": [
+      "proc"
+    ],
+    "initial_ready_count": {
+      "src": 0,
+      "proc": 1
+    },
+    "compiled_adj": {
+      "src": [
+        [
+          "proc",
+          false
+        ]
+      ],
+      "proc": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

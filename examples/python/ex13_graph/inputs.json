@@ -1,0 +1,7 @@
+{
+  "basic": {"input": 5},
+  "chained": {"input": 3},
+  "renamed": {"input": 7},
+  "multi_params": {"x": 3, "y": 7},
+  "nested": {"input": 5}
+}

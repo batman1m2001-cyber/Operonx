@@ -1,0 +1,463 @@
+{
+  "callbot": {
+    "type": "graph",
+    "full_name": "callbot",
+    "name": "callbot",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "io",
+    "inputs": {
+      "samples": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "outputs": {
+      "audio_out": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "index": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      }
+    },
+    "ops": {
+      "audio": {
+        "type": "code",
+        "full_name": "callbot.audio",
+        "name": "audio",
+        "func_name": "examples.python.ex15_callbot_streaming.workflow.customer_audio",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "sample_count": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot",
+              "var": "samples",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "audio": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "timestamp_ms": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "v": {
+        "type": "code",
+        "full_name": "callbot.v",
+        "name": "v",
+        "func_name": "examples.python.ex15_callbot_streaming.workflow.vad",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "audio": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.audio",
+              "var": "audio",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "timestamp_ms": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.audio",
+              "var": "timestamp_ms",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "segment": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "start_ms": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          },
+          "end_ms": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "transcribe": {
+        "type": "code",
+        "full_name": "callbot.transcribe",
+        "name": "transcribe",
+        "func_name": "examples.python.ex15_callbot_streaming.workflow.stt",
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "segment": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.v",
+              "var": "segment",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "start_ms": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.v",
+              "var": "start_ms",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "end_ms": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.v",
+              "var": "end_ms",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "transcript": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        }
+      },
+      "router": {
+        "type": "graph",
+        "full_name": "callbot.router",
+        "name": "router",
+        "func_name": null,
+        "is_async": false,
+        "is_generator": false,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "sync",
+        "inputs": {
+          "transcript": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.transcribe",
+              "var": "transcript",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "response": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "literal": null
+          }
+        },
+        "ops": {
+          "c": {
+            "type": "code",
+            "full_name": "callbot.router.c",
+            "name": "c",
+            "func_name": "examples.python.ex15_callbot_streaming.workflow.classify_intent",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+              "transcript": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "callbot.router",
+                  "var": "transcript",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "intent": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              },
+              "confidence": {
+                "default": null,
+                "required": false,
+                "ref": null,
+                "literal": null
+              }
+            }
+          },
+          "h": {
+            "type": "code",
+            "full_name": "callbot.router.h",
+            "name": "h",
+            "func_name": "examples.python.ex15_callbot_streaming.workflow.handle_intent",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+              "intent": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "callbot.router.c",
+                  "var": "intent",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              },
+              "transcript": {
+                "default": null,
+                "required": true,
+                "ref": {
+                  "source": "callbot.router",
+                  "var": "transcript",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            },
+            "outputs": {
+              "response": {
+                "default": null,
+                "required": false,
+                "ref": {
+                  "source": "callbot.router",
+                  "var": "response",
+                  "transforms": [],
+                  "is_output": false
+                },
+                "literal": null
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "c",
+            "to": "h",
+            "soft": false
+          }
+        ],
+        "entries": [
+          "c"
+        ],
+        "exits": [
+          "h"
+        ],
+        "initial_ready_count": {
+          "c": 0,
+          "h": 1
+        },
+        "compiled_adj": {
+          "c": [
+            [
+              "h",
+              false
+            ]
+          ],
+          "h": []
+        },
+        "stream_initial_ready": {},
+        "loop_config": null,
+        "max_stream_concurrent": 64
+      },
+      "speak": {
+        "type": "code",
+        "full_name": "callbot.speak",
+        "name": "speak",
+        "func_name": "examples.python.ex15_callbot_streaming.workflow.tts",
+        "is_async": false,
+        "is_generator": true,
+        "enabled": true,
+        "verbose": true,
+        "stream": false,
+        "bound": "io",
+        "inputs": {
+          "response": {
+            "default": null,
+            "required": true,
+            "ref": {
+              "source": "callbot.router",
+              "var": "response",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        },
+        "outputs": {
+          "audio_out": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "callbot",
+              "var": "audio_out",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          },
+          "index": {
+            "default": null,
+            "required": false,
+            "ref": {
+              "source": "callbot",
+              "var": "index",
+              "transforms": [],
+              "is_output": false
+            },
+            "literal": null
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "audio",
+        "to": "v",
+        "soft": false
+      },
+      {
+        "from": "v",
+        "to": "transcribe",
+        "soft": false
+      },
+      {
+        "from": "transcribe",
+        "to": "router",
+        "soft": false
+      },
+      {
+        "from": "router",
+        "to": "speak",
+        "soft": false
+      }
+    ],
+    "entries": [
+      "audio"
+    ],
+    "exits": [
+      "speak"
+    ],
+    "initial_ready_count": {
+      "audio": 0,
+      "v": 1,
+      "transcribe": 1,
+      "router": 1,
+      "speak": 1
+    },
+    "compiled_adj": {
+      "audio": [
+        [
+          "v",
+          false
+        ]
+      ],
+      "v": [
+        [
+          "transcribe",
+          false
+        ]
+      ],
+      "transcribe": [
+        [
+          "router",
+          false
+        ]
+      ],
+      "router": [
+        [
+          "speak",
+          false
+        ]
+      ],
+      "speak": []
+    },
+    "stream_initial_ready": {
+      "speak": {
+        "audio": 0,
+        "v": 0,
+        "transcribe": 0,
+        "router": 0,
+        "speak": 0
+      }
+    },
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+  }
+}

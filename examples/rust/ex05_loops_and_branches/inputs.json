@@ -1,0 +1,6 @@
+{
+  "for_loop": {"items": ["apple", "banana", "cherry"], "prefix": "Fruit"},
+  "map_op": {"numbers": [1, 2, 3, 4, 5]},
+  "while_loop": {"start_value": 256},
+  "branch": {"score": 95}
+}

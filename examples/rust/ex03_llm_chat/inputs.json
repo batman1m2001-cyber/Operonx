@@ -1,0 +1,7 @@
+{
+  "basic": {"question": "Python là gì? Trả lời trong 1 câu."},
+  "chain": {"query": "Operon workflow engine là gì?"},
+  "summarize": {
+    "text": "\n        Trí tuệ nhân tạo (AI) đang thay đổi cách chúng ta sống và làm việc.\n        Từ xe tự lái đến trợ lý ảo, AI đã trở thành một phần không thể thiếu\n        trong cuộc sống hàng ngày. Các công ty công nghệ lớn đang đầu tư\n        hàng tỷ đô la vào nghiên cứu AI, với hy vọng tạo ra những đột phá\n        mới trong lĩnh vực này.\n        "
+  }
+}
