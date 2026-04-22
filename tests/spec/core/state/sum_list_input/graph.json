@@ -1,0 +1,36 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["summer"],
+    "exits": ["summer"],
+    "initial_ready_count": {"summer": 0},
+    "compiled_adj": {"summer": []},
+    "inputs": {"xs": {"required": true}},
+    "outputs": {"total": {}},
+    "ops": {
+        "summer": {
+            "type": "code",
+            "name": "summer",
+            "full_name": "main.summer",
+            "func_name": "sum_list",
+            "bound": "sync",
+            "inputs": {
+                "xs": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "xs"}
+                }
+            },
+            "outputs": {
+                "total": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "total",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

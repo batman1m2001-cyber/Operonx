@@ -1,0 +1,37 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["fixed"],
+    "exits": ["fixed"],
+    "initial_ready_count": {"fixed": 0},
+    "compiled_adj": {"fixed": []},
+    "inputs": {},
+    "outputs": {"messages": {}},
+    "ops": {
+        "fixed": {
+            "type": "prompt",
+            "name": "fixed",
+            "full_name": "main.fixed",
+            "bound": "sync",
+            "inputs": {
+                "template": {
+                    "literal": [
+                        {"role": "system", "content": "You are terse."},
+                        {"role": "user", "content": "Summarize."}
+                    ]
+                }
+            },
+            "outputs": {
+                "messages": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "messages",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}

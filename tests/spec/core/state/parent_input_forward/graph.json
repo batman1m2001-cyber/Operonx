@@ -1,0 +1,36 @@
+{
+    "schema_version": "1.0",
+    "type": "graph",
+    "name": "main",
+    "full_name": "main",
+    "entries": ["lower"],
+    "exits": ["lower"],
+    "initial_ready_count": {"lower": 0},
+    "compiled_adj": {"lower": []},
+    "inputs": {"text": {"required": true}},
+    "outputs": {"result": {}},
+    "ops": {
+        "lower": {
+            "type": "code",
+            "name": "lower",
+            "full_name": "main.lower",
+            "func_name": "lowercase",
+            "bound": "sync",
+            "inputs": {
+                "text": {
+                    "required": true,
+                    "ref": {"source": "__PARENT__", "var": "text"}
+                }
+            },
+            "outputs": {
+                "result": {
+                    "ref": {
+                        "source": "__PARENT__",
+                        "var": "result",
+                        "is_output": true
+                    }
+                }
+            }
+        }
+    }
+}
