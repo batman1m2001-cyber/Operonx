@@ -1,0 +1,62 @@
+[workspace]
+members  = ["operonx", "operonx-macros"]
+resolver = "2"
+
+[workspace.package]
+edition      = "2021"
+rust-version = "1.75"
+version      = "0.6.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/operon-ai/operon"
+
+[workspace.dependencies]
+# Runtime
+tokio              = { version = "1.40", features = ["full"] }
+tokio-util         = { version = "0.7", features = ["rt"] }
+futures            = "0.3"
+async-stream       = "0.3"
+async-trait        = "0.1"
+
+# Concurrency & interning
+dashmap            = "6.1"
+lasso              = { version = "0.7", features = ["multi-threaded"] }
+parking_lot        = "0.12"
+rayon              = "1.10"
+smallvec           = { version = "1.13", features = ["serde"] }
+
+# Serialization
+serde              = { version = "1.0", features = ["derive"] }
+serde_json         = "1.0"
+serde_yaml         = "0.9"
+thiserror          = "1.0"
+
+# HTTP / env
+reqwest            = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+dotenvy            = "0.15"
+
+# Tracing & logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Plugin registration
+inventory          = "0.3"
+
+# Random
+rand               = { version = "0.8", features = ["std_rng"] }
+
+# Time / crypto helpers
+chrono             = { version = "0.4", features = ["serde"] }
+base64             = "0.22"
+uuid               = { version = "1.10", features = ["v4", "serde"] }
+
+# Optional deps — `optional = true` applies at the sub-crate level, not the workspace.
+# ONNX
+# TODO(phase-0): ort 2.0 hasn't shipped stable yet — check crates.io for the latest
+# 2.0.0-rc.N at scaffold time and pin exact (=X.Y.Z-rc.N). Current as of writing: rc.9.
+# Consider ort 1.16.x if RC churn becomes painful; requires inference code rewrite.
+ort                = "=2.0.0-rc.9"
+tokenizers         = "0.20"
+
+# Triton
+tonic              = "0.12"
+prost              = "0.13"

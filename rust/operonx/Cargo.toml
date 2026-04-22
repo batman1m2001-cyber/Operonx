@@ -1,0 +1,131 @@
+[package]
+name                   = "operonx"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+description            = "High-performance Rust execution backend for Operon workflows"
+# Bundle the shared `Operon/tests/spec/` fixture tree into the published
+# crate so `cargo test -p operonx` works post-install. The JSON fixtures
+# live at the repo root (`Operon/tests/spec/`) per plan §8.5 — Python and
+# Rust both read the same files. Cargo's `include` walks paths relative to
+# the crate manifest directory; the `../../tests/spec/**` entry pulls in
+# the repo-root tree.
+include = [
+    "src/**",
+    "tests/common/**",
+    "tests/spec/**",
+    "tests/internal/**",
+    "tests/*.rs",
+    "../../tests/spec/**",
+    "README.md",
+    "LICENSE",
+]
+
+[dependencies]
+operonx-macros               = { version = "0.6.0", path = "../operonx-macros" }
+tokio.workspace              = true
+tokio-util.workspace         = true
+futures.workspace            = true
+async-stream.workspace       = true
+async-trait.workspace        = true
+dashmap.workspace            = true
+lasso.workspace              = true
+parking_lot.workspace        = true
+rayon.workspace              = true
+smallvec.workspace           = true
+serde.workspace              = true
+serde_json.workspace         = true
+serde_yaml.workspace         = true
+thiserror.workspace          = true
+reqwest.workspace            = true
+dotenvy.workspace            = true
+tracing.workspace            = true
+tracing-subscriber.workspace = true
+inventory.workspace          = true
+rand.workspace               = true
+chrono.workspace             = true
+base64.workspace             = true
+uuid.workspace               = true
+ort                          = { workspace = true, optional = true }
+tokenizers                   = { workspace = true, optional = true }
+tonic                        = { workspace = true, optional = true }
+prost                        = { workspace = true, optional = true }
+
+[dev-dependencies]
+wiremock = "0.6"
+
+# ── Runnable Rust examples — standalone demos under
+#    `examples/rust/<name>/demo.rs`. Each `demo.rs` is self-contained:
+#    declares its `#[op]` functions, reads its sibling `graph.json` +
+#    `inputs.json`, runs the engine with `engine.run_json()` **after**
+#    construction has finished, and saves a latency report to
+#    `examples/bench_results/<name>_rust.json`. Shared reporter lives in
+#    `examples/rust/_common.rs` (pulled in via `#[path]`).
+[[example]]
+name = "ex01_hello_world"
+path = "../../examples/rust/ex01_hello_world/demo.rs"
+
+[[example]]
+name = "ex02_data_pipeline"
+path = "../../examples/rust/ex02_data_pipeline/demo.rs"
+
+[[example]]
+name = "ex03_llm_chat"
+path = "../../examples/rust/ex03_llm_chat/demo.rs"
+
+[[example]]
+name = "ex04_llm_advanced"
+path = "../../examples/rust/ex04_llm_advanced/demo.rs"
+
+[[example]]
+name = "ex05_loops_and_branches"
+path = "../../examples/rust/ex05_loops_and_branches/demo.rs"
+
+[[example]]
+name = "ex07_embeddings_and_rag"
+path = "../../examples/rust/ex07_embeddings_and_rag/demo.rs"
+
+[[example]]
+name = "ex08_error_handling"
+path = "../../examples/rust/ex08_error_handling/demo.rs"
+
+[[example]]
+name = "ex09_agent_workflow"
+path = "../../examples/rust/ex09_agent_workflow/demo.rs"
+
+[[example]]
+name = "ex10_multi_model"
+path = "../../examples/rust/ex10_multi_model/demo.rs"
+
+[[example]]
+name = "ex11_parallel_advanced"
+path = "../../examples/rust/ex11_parallel_advanced/demo.rs"
+
+[[example]]
+name = "ex12_rag_advanced"
+path = "../../examples/rust/ex12_rag_advanced/demo.rs"
+
+[[example]]
+name = "ex13_graph"
+path = "../../examples/rust/ex13_graph/demo.rs"
+
+[[example]]
+name = "ex14_streaming_tracing"
+path = "../../examples/rust/ex14_streaming_tracing/demo.rs"
+
+[[example]]
+name = "ex15_callbot_streaming"
+path = "../../examples/rust/ex15_callbot_streaming/demo.rs"
+
+[features]
+default       = ["langfuse", "operon-eyes"]
+langfuse      = []
+operon-eyes   = []
+onnx          = ["dep:ort", "dep:tokenizers"]
+triton        = ["dep:tonic", "dep:prost"]
+# otel: intentionally not listed — deferred to v0.7 per MIGRATION_rust.md §6a
+
+[package.metadata.docs.rs]
+all-features = true
