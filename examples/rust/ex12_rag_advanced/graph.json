@@ -337,16 +337,7 @@
             "literal": null
           }
         },
-        "resource": "openai",
-        "resource_config": {
-          "extra_fields": null,
-          "api_type": "openai",
-          "api_key": "<REDACTED>",
-          "base_url": "https://api.openai.com/v1/embeddings",
-          "embed_batch_size": null,
-          "model": "text-embedding-3-small",
-          "dimensions": 1536
-        }
+        "resource": "openai"
       },
       "vec": {
         "type": "code",
@@ -679,23 +670,7 @@
           1.0
         ],
         "fallback": null,
-        "batch_mode": false,
-        "resource_configs": [
-          {
-            "extra_fields": null,
-            "api_type": "openai",
-            "proxy": null,
-            "cost_per_input_token": null,
-            "cost_per_output_token": null,
-            "api_key": "<REDACTED>",
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
-            "batch_size": 50000,
-            "batch_flush_interval": 60.0,
-            "batch_poll_interval": 30.0,
-            "batch_timeout": 86400.0
-          }
-        ]
+        "batch_mode": false
       }
     },
     "edges": [
