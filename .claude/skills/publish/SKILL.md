@@ -1,88 +1,92 @@
 ---
 name: publish
-description: Bump versions across all Python + Rust packages, commit, PR, and publish to PyPI + crates.io
+description: Bump version across the Python package + Rust crates, commit, PR, and publish to PyPI + crates.io
 ---
 
 # /publish — Version Bump & Release
 
-Bump all package versions, run tests, commit, create PR, and publish.
+Bump the single Python package + the two Rust crates, run tests, commit, tag,
+and publish.
 
 ## Steps
 
 ### 1. Determine new version
 
-Ask the user for the new version (e.g., `0.1.3`). If they just say "bump", increment the patch version.
+Ask the user for the new version (e.g., `0.6.2`). If they just say "bump",
+increment the patch version.
 
-### 2. Bump Python packages (4 packages)
-
-Update `version = "X.Y.Z"` in:
-- `python/hush-icore/pyproject.toml`
-- `python/hush-providers/pyproject.toml`
-- `python/hush-telemetry/pyproject.toml`
-- `python/hush-serve/pyproject.toml`
-
-Also update cross-package dependency versions:
-- `hush-icore >= X.Y.Z` in hush-providers, hush-telemetry, hush-serve
-- `hush-providers >= X.Y.Z` in hush-serve (optional)
-- `hush-telemetry >= X.Y.Z` in hush-serve (optional)
-
-### 3. Bump Rust crates (6 crates)
+### 2. Bump Python package
 
 Update `version = "X.Y.Z"` in:
-- `rust/hush-plugin/Cargo.toml`
-- `rust/hush-icore/Cargo.toml`
-- `rust/hush-providers/Cargo.toml`
-- `rust/hush-telemetry/Cargo.toml`
-- `rust/hush-serve/Cargo.toml`
-- `rust/ui-hush-eyes/Cargo.toml` (hush-eyes)
+- [pyproject.toml](pyproject.toml) (top-level `[project]` table)
+- [operonx/__init__.py](operonx/__init__.py) (`__version__`)
 
-Also update inter-crate dependency versions in each Cargo.toml.
+### 3. Bump Rust crates
+
+The Rust workspace shares one version. Update `version = "X.Y.Z"` in:
+- [rust/Cargo.toml](rust/Cargo.toml) (`[workspace.package]` — both `operonx`
+  and `operonx-macros` inherit from here via `version.workspace = true`)
+
+If `operonx` declares an explicit dependency version on `operonx-macros`,
+also bump that pin.
 
 ### 4. Run tests
 
 ```bash
-# Python
-cd python/hush-icore && uv run -m pytest
-cd python/hush-providers && uv run -m pytest
-cd python/hush-serve && uv run -m pytest
+# Python — single command
+uv sync --all-extras
+uv run pytest tests/ -m "not integration"
 
-# Rust
+# Rust — single workspace
 cd rust && cargo test --workspace
 ```
 
-### 5. Commit and PR
+### 5. Update CHANGELOG
+
+Move the `## [Unreleased]` content under a new `## [X.Y.Z] - YYYY-MM-DD`
+heading. Update the comparison links at the bottom.
+
+### 6. Commit, tag, and PR
 
 ```bash
-git add -A
-git commit -m "chore: bump all packages to vX.Y.Z"
-git push origin dev
-gh pr create --base main --head dev --title "chore: bump to vX.Y.Z" --body "..."
+git add pyproject.toml operonx/__init__.py rust/Cargo.toml CHANGELOG.md
+git commit -m "chore: bump to vX.Y.Z"
+git tag vX.Y.Z
+git push origin main
+git push origin vX.Y.Z
 ```
 
-### 6. After merge
-
-The Publish workflow (`.github/workflows/publish.yaml`) auto-triggers on merge to main:
-- Publishes Python packages to PyPI (via `PYPI_API_TOKEN`)
-- Publishes Rust crates to crates.io (via `CARGO_REGISTRY_TOKEN`)
-
-Crates.io publish order (dependencies):
-```
-hush-plugin (standalone)
-hush-providers (standalone)
-hush-icore (depends on hush-providers)
-hush-telemetry (depends on hush-icore)
-hush-serve (depends on hush-icore + hush-providers + hush-telemetry)
-hush-eyes (standalone)
-```
-
-### 7. Verify
+If working off a feature branch, open a PR first:
 
 ```bash
-pip index versions hush-icore
-pip index versions hush-serve
-# Check crates.io manually or via cargo search
+gh pr create --base main --title "chore: bump to vX.Y.Z" --body "..."
+```
+
+### 7. After merge / push
+
+The Publish workflow ([.github/workflows/publish.yaml](.github/workflows/publish.yaml))
+auto-triggers on version-string change in `main`:
+- Publishes the Python package to PyPI (via `PYPI_API_TOKEN`)
+- Publishes the Rust crates to crates.io (via `CARGO_REGISTRY_TOKEN`)
+
+crates.io publish order (dependencies):
+
+```
+operonx-macros  (no operonx deps)
+operonx         (depends on operonx-macros)
+```
+
+`cargo publish -p operonx-macros && sleep 30 && cargo publish -p operonx`.
+The sleep gives crates.io time to index the macros crate before `operonx` resolves.
+
+### 8. Verify
+
+```bash
+pip index versions operonx
+cargo search operonx
 ```
 
 ## Git identity
 
-Always commit as `Bruce Win <batman1m2001@gmail.com>`. Never add Co-Authored-By lines.
+Always commit as `Bruce Win <batman1m2001@gmail.com>`. Never add
+Co-Authored-By lines.

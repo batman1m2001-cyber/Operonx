@@ -940,7 +940,7 @@ impl OperonBuilder {
     /// and the module-qualified name (e.g. `"math::double"`) are registered
     /// so graph JSON can reference either.
     ///
-    /// Equivalent to Hush's `HushServer::builder().auto_register()`.
+    /// Equivalent to the Python `OperonBuilder.auto_register()` toggle.
     pub fn auto_register(mut self) -> Self {
         self.auto_register = true;
         self
@@ -1114,7 +1114,7 @@ impl OperonBuilder {
 ///
 /// Each entry is registered under **both** its bare name (e.g. `"double"`)
 /// and its module-qualified name (e.g. `"math::double"`). This lets graph
-/// JSON reference whichever form it prefers and mirrors Hush's behaviour.
+/// JSON reference whichever form it prefers and mirrors the Python registry behaviour.
 /// When two entries share a bare name, the first one wins and subsequent
 /// collisions are logged — the qualified names remain unique regardless.
 fn install_inventory_ops(reg: &InMemoryOpRegistry) {
@@ -1129,7 +1129,7 @@ fn install_inventory_ops(reg: &InMemoryOpRegistry) {
         // Qualified names must be globally unique. A collision means two
         // `#[op]`-annotated fns share both their module path and their name
         // attribute — almost always an accidental copy-paste, never valid.
-        // Panic loudly (mirrors Hush's behaviour) instead of silently
+        // Panic loudly (mirrors the Python registry behaviour) instead of silently
         // overwriting — silent overwrite hides real bugs in link order.
         if !seen_qualified.insert(qualified.clone()) {
             panic!(

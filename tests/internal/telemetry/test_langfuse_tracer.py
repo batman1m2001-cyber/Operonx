@@ -15,15 +15,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Langfuse cloud credentials (for integration tests) - loaded from environment
-# Prefer LANGFUSE_HUSH_* keys (Langfuse Cloud) over LANGFUSE_* (VPBank internal)
+# Langfuse credentials for integration tests. Uses the standard Langfuse SDK
+# env var names (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST).
+# Tests skip when these are unset.
 LANGFUSE_CONFIG = {
-    "public_key": os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY")
-    or os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
-    "secret_key": os.environ.get("LANGFUSE_HUSH_SECRET_KEY")
-    or os.environ.get("LANGFUSE_SECRET_KEY", ""),
-    "host": os.environ.get("LANGFUSE_HUSH_BASE_URL")
-    or os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+    "public_key": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+    "secret_key": os.environ.get("LANGFUSE_SECRET_KEY", ""),
+    "host": os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 }
 
 
@@ -415,7 +413,7 @@ def test_langfuse_tracer_flush_integration():
     """Test LangfuseTracer.flush() end-to-end with real Langfuse cloud."""
     from operonx.telemetry import LangfuseConfig, LangfuseTracer
 
-    if not (os.environ.get("LANGFUSE_HUSH_PUBLIC_KEY") or os.environ.get("LANGFUSE_PUBLIC_KEY")):
+    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
         pytest.skip("LANGFUSE keys not set")
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)

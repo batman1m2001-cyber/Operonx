@@ -8,7 +8,7 @@ from operonx.core import END, PARENT, START, FuncOp, GraphOp, Operon
 class TestOperonBasic:
     """Basic Operon engine tests."""
 
-    def test_hush_creation(self):
+    def test_operon_creation(self):
         """Test Operon can be created with a GraphOp."""
         with GraphOp(name="test-workflow") as graph:
             node = FuncOp(name="dummy", code_fn=lambda: {"x": 1})
@@ -18,7 +18,7 @@ class TestOperonBasic:
         assert engine.name == "test-workflow"
         assert engine.schema is not None
 
-    def test_hush_repr(self):
+    def test_operon_repr(self):
         """Test Operon string representation."""
         with GraphOp(name="test") as graph:
             node = FuncOp(name="dummy", code_fn=lambda: {"x": 1})

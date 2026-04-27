@@ -1,8 +1,8 @@
 """14 Streaming & Tracing — Python-side demo.
 
 Generator pipelines exercised via ``engine.run(...)``. No API keys required.
-Streaming via ``engine.start(...)`` is exercised in the original Hush tutorial
-but not timed here; the reporter captures the accumulated ``engine.run(...)``
+Streaming via ``engine.start(...)`` is covered in the streaming guide but
+not timed here; the reporter captures the accumulated ``engine.run(...)``
 result.
 """
 

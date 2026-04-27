@@ -8,9 +8,9 @@ Generator pipelines — sync and async. No API keys.
 | `async_counter` | `async_counter` (async gen) → `format_square`|
 
 `engine.run(...)` accumulates yielded frames into lists. The streaming
-`engine.start(...)` real-time delivery path is exercised in the Hush
-tutorial but not timed here — add it yourself once you're ready to see
-the frame-by-frame view.
+`engine.start(...)` real-time delivery path is covered in the
+[streaming guide](../../../docs/guide/06-streaming.md) but not timed here
+— add it yourself once you're ready to see the frame-by-frame view.
 
 ## Run
 

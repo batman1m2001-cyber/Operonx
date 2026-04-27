@@ -175,7 +175,7 @@ class GraphOp(BaseOp):
         if not self._is_building:
             raise RuntimeError("Cannot add op after graph has been built")
 
-        if getattr(op, "_is_hush_builder", False):
+        if getattr(op, "_is_operonx_builder", False):
             name = getattr(op, "_name", None) or type(op).__name__
             LOGGER.error(
                 "%s '%s' is not built. Call .build() or .else_() before adding to graph.",
