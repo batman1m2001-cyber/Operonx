@@ -1,9 +1,10 @@
 # Operonx
 
 <p align="center">
-  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/tests.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/tests.yaml/badge.svg" alt="Tests"></a>
-  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/format.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/format.yaml/badge.svg" alt="Format"></a>
-  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/rust-runtime.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/rust-runtime.yaml/badge.svg" alt="Rust"></a>
+  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/tests.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/tests.yaml/badge.svg?branch=main" alt="Tests"></a>
+  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/format.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/format.yaml/badge.svg?branch=main" alt="Format"></a>
+  <a href="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/rust-runtime.yaml"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/rust-runtime.yaml/badge.svg?branch=main" alt="Rust"></a>
+  <a href="https://batman1m2001-cyber.github.io/Operonx/"><img src="https://github.com/batman1m2001-cyber/Operonx/actions/workflows/docs.yaml/badge.svg?branch=main" alt="Docs"></a>
   <a href="https://codecov.io/gh/batman1m2001-cyber/Operonx"><img src="https://codecov.io/gh/batman1m2001-cyber/Operonx/branch/main/graph/badge.svg" alt="Coverage"></a>
   <a href="https://pypi.org/project/operonx/"><img src="https://img.shields.io/pypi/v/operonx?label=PyPI" alt="PyPI"></a>
   <a href="https://crates.io/crates/operonx"><img src="https://img.shields.io/crates/v/operonx?label=crates.io" alt="crates.io"></a>
