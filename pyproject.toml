@@ -145,14 +145,21 @@ dev = [
     "ruff>=0.1",
     "pre-commit",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
 
 [project.scripts]
 operonx = "operonx.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/batman1m2001-cyber/Operon"
-Documentation = "https://github.com/batman1m2001-cyber/Operon#readme"
-Repository = "https://github.com/batman1m2001-cyber/Operon"
+Homepage = "https://github.com/batman1m2001-cyber/Operonx"
+Documentation = "https://batman1m2001-cyber.github.io/Operonx/"
+Repository = "https://github.com/batman1m2001-cyber/Operonx"
+Changelog = "https://github.com/batman1m2001-cyber/Operonx/blob/main/CHANGELOG.md"
+Issues = "https://github.com/batman1m2001-cyber/Operonx/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx"]

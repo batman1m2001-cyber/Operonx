@@ -489,7 +489,7 @@ class ResourceHub:
     # Warmup
     # ========================================================================
 
-    async def warmup(self, key: str, **kwargs) -> None:
+    async def warmup(self, key: str, **kwargs: Any) -> None:
         """Pre-warm a resource's connection (e.g. LLM prompt cache).
 
         Forces lazy-load of the resource, then calls its ``warmup()``

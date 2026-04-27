@@ -1,0 +1,94 @@
+site_name: Operonx
+site_description: A high-performance workflow engine — Python + Rust
+site_url: https://batman1m2001-cyber.github.io/Operonx/
+repo_url: https://github.com/batman1m2001-cyber/Operonx
+repo_name: batman1m2001-cyber/Operonx
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            merge_init_into_class: true
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            filters: ["!^_"]
+            heading_level: 2
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Installation: guide/00-installation.md
+      - First workflow: guide/01-first-workflow.md
+      - LLM chat: guide/02-llm-chat.md
+      - Loops and branches: guide/03-loops-and-branches.md
+      - RAG: guide/04-rag.md
+      - Agents: guide/05-agents.md
+      - Streaming: guide/06-streaming.md
+      - Tracing: guide/07-tracing.md
+      - Deployment: guide/08-deployment.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Execution flow: architecture/execution-flow.md
+      - State model: architecture/state-model.md
+      - Streaming: architecture/streaming.md
+      - Rust and Python: architecture/rust-python.md
+      - Resource hub: architecture/resource-hub.md
+  - API reference:
+      - operonx.core: api/core.md
+      - operonx.core.ops: api/ops.md
+      - operonx.providers: api/providers.md
+      - operonx.telemetry: api/telemetry.md
+      - operonx.core.registry: api/registry.md
