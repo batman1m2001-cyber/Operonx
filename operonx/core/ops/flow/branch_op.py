@@ -206,7 +206,7 @@ class Branch:
     """
 
     __slots__ = ("_name", "_cases", "_default", "_inputs", "_kwargs")
-    _is_hush_builder = True
+    _is_operonx_builder = True
 
     def __init__(self, name: Optional[str] = None, **kwargs):
         """Initialise the builder.

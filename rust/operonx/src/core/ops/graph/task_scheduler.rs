@@ -868,7 +868,7 @@ async fn execute_op(
             // Python emits fully-qualified names (e.g. `tests.spec._ops.double`)
             // while `#[op]` / `OperonBuilder::op` typically register bare names
             // (`double`). Try the exact name first, then fall back to the last
-            // dotted component — mirrors Hush's bare-name resolution.
+            // dotted component — mirrors the Python bare-name resolution.
             let func = registry
                 .lookup(func_name)
                 .or_else(|| {

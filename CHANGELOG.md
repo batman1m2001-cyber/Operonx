@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.1] - 2026-04-28
 
 ### Added
-- Repository readiness: pre-commit hooks (ruff + cargo fmt), codecov configuration,
-  CHANGELOG, CODE_OF_CONDUCT, public-facing docs scaffolding (mkdocs).
+- Repository readiness: pre-commit hooks (ruff + cargo fmt + advisory clippy;
+  `-D warnings` flips on once the ~25 outstanding port-era lint debts clear),
+  codecov configuration, CHANGELOG, CODE_OF_CONDUCT, public-facing docs site (mkdocs
+  Material with mkdocstrings, full guide + architecture + API reference).
 - `[standard]` extra — recommended production install (OpenAI + Langfuse + OTEL + serve).
 - `[all]` extra now includes Anthropic, Gemini, Bedrock, ONNX, Langfuse, OTEL, serve
   (was previously missing the LLM provider extras).
+- `[docs]` extra (mkdocs + mkdocs-material + mkdocstrings) for local doc development.
 - `extras-smoke` CI matrix verifies each `pip install operonx[X]` works in a fresh venv.
 
 ### Changed
@@ -22,11 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Installing only `operonx[anthropic]` no longer requires numpy / onnxruntime / torch.
 - Tests under `tests/internal/providers/` are auto-marked `integration` and skipped
   unless API credentials are configured.
-- README, CONTRIBUTING, and SECURITY rewritten for the single-package layout.
+- README, CONTRIBUTING, SECURITY, and CLAUDE.md rewritten for the single-package layout.
+- `[project.urls]` in pyproject.toml fixed to point at the renamed Operonx repo.
+- `env.example` corrected: stale `OPERON_TRACES_DB` replaced with `OPERON_TRACES_DIR`
+  (the env var the local tracer actually reads), and the `.env` loading note updated to
+  reflect the explicit `operonx.bootstrap()` model.
 
 ### Fixed
 - Provider extras no longer fail at import time when their non-shared dependencies
   are missing — error surfaces only on actual backend instantiation.
+- Removed leftover `_is_hush_builder` flags, `hush_current_*` ContextVar names, and
+  `test_hush_*` test names from the Hush-ai migration (now `_is_operonx_builder`,
+  `operonx_current_*`, `test_operon_*`).
+- Stale `chain` references in CLAUDE.md, README, and docs replaced with the actual
+  helper name `chat` (renamed during the original migration but missed in user-facing
+  docs).
 
 ## [0.6.0] - 2026-04-26
 

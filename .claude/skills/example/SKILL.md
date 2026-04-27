@@ -5,7 +5,7 @@ description: Scaffold a new example with workflow, demo, bench, and serve files
 
 # /example — Create a New Example
 
-Scaffold a new example folder with the standard file layout.
+Scaffold a new example folder under `examples/python/` with the standard file layout.
 
 ## Usage
 
@@ -19,7 +19,7 @@ Scaffold a new example folder with the standard file layout.
 ### 1. Create the folder
 
 ```bash
-mkdir -p examples/{NN}_{name}
+mkdir -p examples/python/ex{NN}_{name}
 ```
 
 ### 2. Generate files
@@ -29,16 +29,15 @@ Every example has this structure:
 #### `workflow.py` — Shared graph definition
 
 ```python
-"""Shared workflow definition for {NN}_{name}.
+"""Shared workflow definition for ex{NN}_{name}.
 
 Defines the graph and ops — imported by demo.py, serve_python.py, serve_rust.py.
 """
 
-from hush.core import END, PARENT, START, GraphOp
-from hush.core.ops.transform.func_op import op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 
-@op(rust="./rust_ops::module::func")
+@op(rust="my_op")
 def my_op(x: int):
     return {"result": x * 2}
 
@@ -55,90 +54,84 @@ def build_workflow():
 ```python
 """Run workflow locally (no HTTP server).
 
-Chạy: cd examples && uv run python {NN}_{name}/demo.py
+Run: cd examples/python && uv run python ex{NN}_{name}/demo.py
 """
 
 import asyncio
-from hush.core import Hush
+from operonx.core import Operon
 from workflow import build_workflow
 
+
 async def main():
-    engine = Hush(build_workflow())
+    engine = Operon(build_workflow())
     result = await engine.run(inputs={"x": 5})
     print(result)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-#### `serve_python.py` — Python backend
+#### `serve_python.py` — Python backend (`operonx[serve]`)
 
 ```python
 """Serve with Python backend (FastAPI + uvicorn).
 
-Chạy: cd examples && uv run python {NN}_{name}/serve_python.py
+Run: cd examples/python && uv run python ex{NN}_{name}/serve_python.py
 """
 
 import os
-from hush.core import Hush
+from operonx.serve import build_app
+from operonx.core import Operon
 from workflow import build_workflow
 
-engine = Hush(build_workflow())
-engine.serve(port=int(os.environ.get("PORT", 8000)))
+app = build_app(engine_factory=lambda: Operon(build_workflow()))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, port=int(os.environ.get("PORT", 8000)))
 ```
 
-#### `serve_rust.py` — Rust backend
+#### `serve_rust.py` / Rust binary — Rust backend (Axum)
 
-```python
-"""Serve with Rust backend (Axum).
+The Rust serve binary is invoked from the command line — there is no Python wrapper:
 
-Requires: cd rust && cargo build --release -p hush-serve
-          cd examples/rust_ops && cargo build --release
-
-Chạy: cd examples && uv run python {NN}_{name}/serve_rust.py
-"""
-
-import os
-from hush.core import Hush
-from workflow import build_workflow
-
-engine = Hush(build_workflow())
-engine.serve(
-    port=int(os.environ.get("PORT", 8000)),
-    backend="rust",
-    rust_ops="rust_ops",
-)
+```bash
+cd rust && cargo build --release -p operonx-serve
+./rust/target/release/operonx-serve --graph ./graph.json --port 8000
 ```
+
+If the example needs Rust ops, register them with `#[op]` in a Rust crate that
+links into `operonx-serve` (no cdylib runtime loading is implemented).
 
 #### `bench.py` — Benchmark both backends
 
-Copy from the nearest similar example (01 for pure-compute, 03 for LLM) and update:
+Copy from the nearest similar example (ex01 for pure-compute, ex03 for LLM) and update:
 - `ENDPOINTS` list with the new workflow's paths and payloads
 - Docstring with the example name
 
 ### 3. Add Rust ops (if needed)
 
-If the workflow uses `@op(rust="./rust_ops::module::func")`:
-1. Create the module in `examples/rust_ops/src/{module}.rs`
-2. Add functions and export via `hush_plugin!(..., new_func)`
-3. Update `examples/rust_ops/src/lib.rs` to declare the module
+If the workflow uses `@op(rust="my_op")`:
+
+1. Add the function to `examples/rust_ops/src/{module}.rs` (or wherever your
+   Rust crate lives).
+2. Annotate with `#[op(name = "my_op")]` from `operonx-macros`.
+3. Make sure the crate is linked into the binary that runs the workflow
+   (e.g., `operonx-serve`).
 
 ### 4. Test
 
 ```bash
 # Demo
-cd examples && uv run python {NN}_{name}/demo.py
+cd examples/python && uv run python ex{NN}_{name}/demo.py
 
 # Bench (both backends)
-cd examples && uv run python {NN}_{name}/bench.py
+cd examples/python && uv run python ex{NN}_{name}/bench.py
 ```
-
-### 5. Copy to hush-examples (if project exists)
-
-If `/home/thanglq150188/Work/hush-examples/` exists, copy the new example there too.
 
 ## Naming convention
 
-- Folders: `{NN}_{snake_case_name}` (e.g., `16_custom_parser`)
+- Folders: `ex{NN}_{snake_case_name}` (e.g., `ex16_custom_parser`)
 - Numbers are sequential — check the last example number first
 - Workflows: descriptive function name (e.g., `build_parser_workflow`)

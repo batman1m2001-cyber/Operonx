@@ -30,31 +30,45 @@ Specifically guaranteed:
 - `Operon::new(graph_json)` does **not** auto-load `.env` or
   `resources.yaml`, mirroring Python's `Operon(graph)` decoupling.
 
-## Plugin ops (cdylib)
+## Plugin ops
 
-Custom Rust ops are dispatched via the `OpRegistry` trait in
-`rust/operonx/src/registry.rs`. To add a Rust op consumed from Python:
+Custom Rust ops are registered via the `#[op]` attribute macro from the
+`operonx-macros` crate. The macro emits an `inventory::submit!` so the op
+is auto-discovered when the crate is compiled into the Rust runtime.
 
-1. Write a `fn(&serde_json::Value) -> serde_json::Value` function in your
-   cdylib crate.
-2. Export via `hush_plugin!(func_name)` macro from the `operonx-plugin`
-   crate.
-3. Reference from Python via `@op(rust="./my_crate::module::func")` —
-   Python falls back to the function body if the cdylib isn't loaded.
+```rust
+use operonx::op;
+use serde_json::Value;
+
+#[op(name = "double")]
+fn double(input: &Value) -> Value {
+    let x = input["x"].as_i64().unwrap_or(0);
+    serde_json::json!({ "result": x * 2 })
+}
+```
+
+From Python, reference the registered op by name:
 
 ```python
-@op(rust="./rust_ops::pipeline::double")
+@op(rust="double")
 def double(x: int):
-    return {"result": x * 2}  # Python fallback
+    return {"result": x * 2}  # Python fallback when the Rust runtime is not used
 ```
+
+`OperonBuilder::auto_register()` (Rust) collects every `#[op]`-annotated
+function and adds it to the registry — no manual registration calls needed.
+
+Runtime cdylib plugin loading (loading external `.so`/`.dll` files at
+runtime) is **not currently implemented**. Plugin ops must be compiled
+into the consuming binary or library.
 
 ## Build targets
 
 | Crate | Type | How |
 |---|---|---|
 | `operonx` | rlib | `cd rust && cargo build --release` |
-| `operonx-macros` | proc-macro | Built transitively as a `operonx` dep |
-| User cdylib ops | cdylib | `cargo build --release` in the user's crate |
+| `operonx-macros` | proc-macro | Built transitively as an `operonx` dep |
+| User binaries / libraries with `#[op]`-annotated fns | bin / rlib | `cargo build --release` in the user's crate |
 
 ## Out of scope (deferred)
 

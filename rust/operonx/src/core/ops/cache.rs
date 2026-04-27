@@ -1,8 +1,8 @@
 //! Op-level cache.
 //!
 //! Any op can cache its inputs→outputs via the `cache` field on its config.
-//! Mirrors Hush-ai `ops/cache.rs`. Port reuses FNV-1a hashing over JSON-serialized
-//! inputs.
+//! Mirrors the Python `operonx/core/ops/cache.py`. Port reuses FNV-1a hashing
+//! over JSON-serialized inputs.
 //!
 //! # Phase 1 scope
 //! `CacheConfig` enum + `OpCache` struct skeleton. Full file-based persistence
