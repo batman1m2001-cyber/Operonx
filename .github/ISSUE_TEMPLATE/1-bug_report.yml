@@ -11,9 +11,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: Hush Version
-      description: Which version of hush-icore/hush-providers are you using?
-      placeholder: "0.1.0"
+      label: Operonx Version
+      description: Which version of operonx are you using? (`pip show operonx`)
+      placeholder: "0.6.1"
     validations:
       required: true
 

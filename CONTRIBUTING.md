@@ -1,6 +1,6 @@
-# Contributing to Hush
+# Contributing to Operonx
 
-Thank you for your interest in contributing to Hush! This guide will help you get started.
+Thank you for your interest in contributing to Operonx! This guide gets you set up and shipping.
 
 ## Development Setup
 
@@ -8,142 +8,138 @@ Thank you for your interest in contributing to Hush! This guide will help you ge
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package manager
+- Rust toolchain (only if you touch the `rust/` tree) — install via [rustup](https://rustup.rs/)
 
 ### Clone and Install
 
 ```bash
-git clone https://github.com/batman1m2001-cyber/Hush-ai.git
-cd Hush-ai
-
-# Install hush-icore (foundation)
-cd hush-icore && uv sync --all-extras && cd ..
-
-# Install hush-providers (depends on hush-icore)
-cd hush-providers && uv sync --all-extras && cd ..
-
-# Install hush-telemetry (depends on hush-icore)
-cd hush-telemetry && uv sync --all-extras && cd ..
+git clone https://github.com/batman1m2001-cyber/Operonx.git
+cd Operonx
+uv sync --all-extras
 ```
+
+This installs `operonx` and every optional extra (`anthropic`, `langfuse`, `otel`, `serve`, ...) plus the dev toolchain.
 
 ### Pre-commit Hooks
 
-We use pre-commit to ensure code quality:
+Pre-commit runs ruff (Python) + cargo fmt/clippy (Rust) on every commit:
 
 ```bash
-# Install pre-commit
 uv tool install pre-commit
-
-# Set up hooks
 pre-commit install
+pre-commit run --all-files   # one-off check across the tree
+```
 
-# Run on all files (optional)
-pre-commit run --all-files
+### Environment
+
+Most provider tests are auto-skipped without `resources.yaml` + `.env`. To run them:
+
+```bash
+cp env.example .env
+# Edit .env with your API keys
 ```
 
 ## Code Style
 
-- **Formatter**: Black-compatible via Ruff
+- **Formatter**: Ruff (Black-compatible)
 - **Line length**: 100 characters
-- **Linter**: Ruff with rules `E, F, I, W`
-- **Type hints**: Use typing module, Pydantic for validation
-- **Docstrings**: Google style (optional, only where helpful)
-
-### Running Checks
+- **Linter**: Ruff with rules `E, F, I, W` (see `pyproject.toml` for the full ignore list)
+- **Type hints**: Required on public APIs; Pydantic for config
+- **Docstrings**: Google style on public surface (`__all__` entries)
 
 ```bash
-# Format code
-ruff format .
+uv run ruff format operonx/ tests/ examples/python/
+uv run ruff check --fix operonx/ tests/ examples/python/
+```
 
-# Lint and auto-fix
-ruff check --fix .
+Rust:
+
+```bash
+cd rust && cargo fmt --all && cargo clippy --workspace
 ```
 
 ## Testing
 
-We use pytest with pytest-asyncio:
-
 ```bash
-# Run tests for a package
-cd hush-icore && uv run pytest
+# Unit + non-integration tests (default — what CI runs)
+uv run pytest tests/ -m "not integration"
 
-# Run with coverage
-cd hush-icore && uv run pytest --cov=hush
+# Full suite including integration tests (needs API keys)
+uv run pytest tests/
+
+# With coverage
+uv run pytest tests/ --cov=operonx --cov-report=term-missing -m "not integration"
+
+# Rust
+cd rust && cargo test --workspace
 ```
+
+Tests under `tests/internal/providers/` are auto-marked `integration` (they hit real APIs or need a configured `ResourceHub`); they're excluded by default and only run when API credentials are present.
 
 ## Pull Request Workflow
 
-1. **Fork** the repository
-2. **Create a branch** from `main`:
+1. **Fork** and clone
+2. **Branch** from `dev`:
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b feature/your-feature-name dev
    ```
-3. **Make changes** following our code style
-4. **Write tests** for new functionality
-5. **Run tests** locally to ensure they pass
-6. **Commit** with a clear message
-7. **Push** and open a Pull Request
+3. **Code + test** — keep PRs focused; one logical change per PR
+4. **Verify locally**:
+   - `pre-commit run --all-files`
+   - `uv run pytest tests/ -m "not integration"`
+   - `cd rust && cargo test --workspace` (if Rust touched)
+5. **Open PR** against `dev`. CI runs the full matrix; review starts when it's green.
 
 ### PR Checklist
 
 - [ ] Tests pass locally
-- [ ] Code is formatted (`ruff format`)
-- [ ] Linter passes (`ruff check`)
-- [ ] Documentation updated if needed
+- [ ] `pre-commit` clean
+- [ ] Public API changes have docstrings
+- [ ] CHANGELOG entry added under `## [Unreleased]` (for user-visible changes)
+- [ ] Documentation updated if touching architecture or public APIs
 
-## Documentation Updates
+## Branch Policy
 
-When making changes, update the appropriate documentation:
-
-| Change Type | Update |
-|-------------|--------|
-| New op type | `hush-icore/CLAUDE.md`, `docs/guide/03-core-concepts.md` |
-| New provider | `hush-providers/CLAUDE.md`, `docs/guide/04-llm-integration.md` |
-| New tracer | `hush-telemetry/CLAUDE.md`, `docs/guide/09-tracing-observability.md` |
-| API change | Relevant `CLAUDE.md` + guide docs |
-| Internal refactor | `docs/architecture/` if algorithm changes |
-
-See [CLAUDE.md](CLAUDE.md) for the complete sync mapping.
+- `main` — release branch. Only updated via PR from `dev`. CI/CD publishes on version bumps here.
+- `dev` — integration branch. PRs land here. Default branch for new work.
 
 ## Project Structure
 
 ```
-Hush-ai/
-├── python/
-│   ├── hush-icore/         # Core workflow engine
-│   ├── hush-providers/     # LLM, embedding, reranking (Python)
-│   ├── hush-telemetry/     # Tracing backends (Langfuse, OTEL)
-│   └── hush-serve/         # HTTP API server (FastAPI + uvicorn)
+Operonx/
+├── operonx/              # Python package (single package, optional extras)
+│   ├── core/             # Engine, ops, state, registry, telemetry hooks
+│   ├── providers/        # LLM, embedding, reranking, auth integrations
+│   └── telemetry/        # Tracer backends (Langfuse, OTEL)
 ├── rust/
-│   ├── hush-icore/         # Rust execution backend (DashMap + rayon)
-│   ├── hush-providers/     # Rust provider implementations (native HTTP, ONNX)
-│   ├── hush-serve/         # Rust HTTP server (Axum)
-│   ├── hush-plugin/        # Plugin SDK (cdylib)
-│   └── hush-eyes/          # Trace visualization server
-├── examples/               # Runnable Python examples
+│   ├── operonx/          # Pure Rust engine + native providers
+│   └── operonx-macros/   # Proc macros (#[op], #[model], #[resource])
+├── examples/python/      # Runnable examples
+├── tests/
+│   ├── internal/         # Engine + provider tests
+│   └── spec/             # Python ↔ Rust parity fixtures
 ├── docs/
-│   ├── guide/              # User guide (Vietnamese)
-│   └── architecture/       # Deep technical docs
-└── CLAUDE.md               # Quick reference
+│   ├── architecture/     # Internals + design docs
+│   ├── guide/            # User guide (Vietnamese)
+│   └── api/              # Auto-generated API reference (mkdocstrings)
+└── .github/workflows/    # CI/CD
 ```
 
-## Package Dependencies
+## Documentation
 
-```
-hush-icore (foundation - no hush dependencies)
-    ↓
-hush-providers (depends on hush-icore)
-    ↓
-hush-telemetry (depends on hush-icore)
+| Change Type | Update |
+|-------------|--------|
+| New op type | `operonx/core/ops/` + relevant guide chapter |
+| New provider | `operonx/providers/` + `docs/architecture/` if non-trivial |
+| New tracer | `operonx/telemetry/tracers/` |
+| Public API change | Update docstring + CHANGELOG; mkdocstrings re-renders the API page |
+| Architectural change | Add/update a page in `docs/architecture/` |
 
-hush-icore (Rust backend - depends on hush-icore at runtime)
-hush-providers (Rust crate - used by hush-icore)
-```
+## Questions
 
-## Questions?
-
-- Open a [Question issue](https://github.com/batman1m2001-cyber/Hush-ai/issues/new?template=3-question.yml)
-- Check existing documentation in `docs/guide/`
+- [Open a question issue](https://github.com/batman1m2001-cyber/Operonx/issues/new?template=3-question.yml)
+- Browse [docs/guide/](docs/guide/) for the user guide
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+By contributing, you agree your contributions will be licensed under the Apache 2.0 License.

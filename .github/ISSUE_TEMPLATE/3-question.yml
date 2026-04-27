@@ -1,12 +1,12 @@
 name: Question
-description: Ask a question about Hush
+description: Ask a question about Operonx
 labels: ["question"]
 
 body:
   - type: markdown
     attributes:
       value: |
-        Have a question about using Hush? We're happy to help!
+        Have a question about using Operonx? We're happy to help!
 
   - type: textarea
     id: question
@@ -27,4 +27,4 @@ body:
     attributes:
       label: Documentation Check
       options:
-        - label: I have checked the existing documentation in tutorial/docs/
+        - label: I have checked the existing documentation in docs/

@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.6.x   | :white_check_mark: |
+| < 0.6   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -40,7 +41,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ## Security Best Practices for Users
 
-When using Hush in production:
+When using Operonx in production:
 
 1. **API Keys**: Never commit API keys to version control
    - Use environment variables or secrets management
@@ -58,9 +59,7 @@ When using Hush in production:
 
 This security policy applies to:
 
-- `hush-core`
-- `hush-providers`
-- `hush-telemetry`
-- `ui-hush-eyes`
+- The `operonx` Python package on PyPI (and all its extras: `[standard]`, `[anthropic]`, `[onnx]`, etc.)
+- The `operonx` and `operonx-macros` Rust crates on crates.io
 
-Third-party provider SDKs (OpenAI, Anthropic, etc.) have their own security policies.
+Third-party provider SDKs (OpenAI, Anthropic, etc.) have their own security policies — vulnerabilities specific to those SDKs should be reported upstream.
