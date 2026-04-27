@@ -1,6 +1,6 @@
 //! [`BaseEmbedder`] trait.
 //!
-//! Mirrors Python [`operon/providers/embeddings/base.py`](../../../../../operon/providers/embeddings/base.py).
+//! Mirrors Python [`operonx/providers/embeddings/base.py`](../../../../../operonx/providers/embeddings/base.py).
 //! Per plan §5b.1 the canonical method is `run()` (not `embed()`).
 
 use std::collections::HashMap;

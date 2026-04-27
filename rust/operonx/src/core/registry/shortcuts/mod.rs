@@ -1,6 +1,6 @@
 //! Registry convenience shortcuts.
 //!
-//! Mirrors Python `operon/core/registry/shortcuts/`.
+//! Mirrors Python `operonx/core/registry/shortcuts/`.
 
 pub mod health;
 

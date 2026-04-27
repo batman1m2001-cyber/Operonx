@@ -43,8 +43,8 @@ async def async_main(runs: int, langfuse: bool) -> None:
     )
 
     # 2. Hybrid — needs pre-computed doc embeddings (untimed precomp).
-    from operon.core import END, PARENT, START, GraphOp
-    from operon.providers import EmbeddingOp
+    from operonx.core import END, PARENT, START, GraphOp
+    from operonx.providers import EmbeddingOp
 
     with GraphOp(name="embed-docs") as embed_graph:
         embed = EmbeddingOp.of(

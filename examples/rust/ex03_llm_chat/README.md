@@ -26,7 +26,7 @@ Writes `examples/bench_results/ex03_llm_chat_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex03_llm_chat.workflow import build_basic_chat, build_chain_chat, build_summarize
 
 def dump(g):

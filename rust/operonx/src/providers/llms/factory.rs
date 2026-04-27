@@ -1,6 +1,6 @@
 //! `create_llm` — dispatch an [`LLMConfig`] to the matching backend.
 //!
-//! Mirrors Python [`operon/providers/llms/factory.py`](../../../../../operon/providers/llms/factory.py).
+//! Mirrors Python [`operonx/providers/llms/factory.py`](../../../../../operonx/providers/llms/factory.py).
 
 use std::sync::Arc;
 

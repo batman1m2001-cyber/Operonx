@@ -79,7 +79,7 @@ def build_tracer(enable: bool, name_suffix: str = "_python"):
     if not enable:
         return None
     try:
-        from operon.telemetry.tracers.langfuse import LangfuseTracer
+        from operonx.telemetry.tracers.langfuse import LangfuseTracer
 
         return LangfuseTracer()
     except Exception as e:  # pragma: no cover - environment-dependent
@@ -236,8 +236,8 @@ def build_engine(graph, *, langfuse: bool, name_suffix: str = "_python"):
     :func:`_ensure_resources_loaded` so a single bootstrap is shared
     across every scenario.
     """
-    import operon
-    from operon.core import Operon
+    import operonx
+    from operonx.core import Operon
 
     _ensure_resources_loaded()
 
@@ -247,7 +247,7 @@ def build_engine(graph, *, langfuse: bool, name_suffix: str = "_python"):
     tracer = build_tracer(langfuse, name_suffix)
     if tracer is not None:
         kwargs["tracer"] = tracer
-    _ = operon  # keep import; bootstrap is reached above
+    _ = operonx  # keep import; bootstrap is reached above
     return Operon(graph, **kwargs)
 
 
@@ -266,12 +266,12 @@ def _ensure_resources_loaded() -> None:
     global _RESOURCES_BOOTSTRAPPED
     if _RESOURCES_BOOTSTRAPPED:
         return
-    import operon
+    import operonx
 
     if RESOURCES_FILE.exists():
-        operon.bootstrap(resources=str(RESOURCES_FILE))
+        operonx.bootstrap(resources=str(RESOURCES_FILE))
     else:
-        operon.bootstrap()
+        operonx.bootstrap()
     _RESOURCES_BOOTSTRAPPED = True
 
 

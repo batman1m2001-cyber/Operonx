@@ -1,6 +1,6 @@
 //! Shared helpers for provider ops.
 //!
-//! Mirrors Python [`operon/providers/ops/_utils.py`](../../../../../operon/providers/ops/_utils.py).
+//! Mirrors Python [`operonx/providers/ops/_utils.py`](../../../../../operonx/providers/ops/_utils.py).
 //! Per plan §5b.8 the Python file exposes only `resolve_hub()` — nothing
 //! else. The Rust port mirrors that plus a few downcast helpers needed to
 //! recover typed trait objects from the [`ResourceHub`] cache.

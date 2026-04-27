@@ -1,6 +1,6 @@
 //! Telemetry backend clients.
 //!
-//! Mirrors Python `operon/telemetry/backends/`.
+//! Mirrors Python `operonx/telemetry/backends/`.
 
 pub mod langfuse;
 

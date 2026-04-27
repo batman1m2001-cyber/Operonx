@@ -13,12 +13,12 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from operon.providers.auth import (
+from operonx.providers.auth import (
     KeycloakTokenConfig,
     KeycloakTokenProvider,
     create_auth,
 )
-from operon.providers.registry import auth_plugin
+from operonx.providers.registry import auth_plugin
 
 # =============================================================================
 # KeycloakTokenConfig Tests
@@ -117,7 +117,7 @@ class TestKeycloakTokenProvider:
         assert provider._started is False
         print("✓ Provider creation")
 
-    @patch("operon.providers.auth.keycloak.httpx.Client")
+    @patch("operonx.providers.auth.keycloak.httpx.Client")
     def test_get_token_fetches_on_first_call(self, mock_client_class, config, mock_response):
         """Test that get_token fetches token on first call."""
         # Setup mock
@@ -135,7 +135,7 @@ class TestKeycloakTokenProvider:
         mock_client.post.assert_called_once()
         print("✓ Token fetched on first call")
 
-    @patch("operon.providers.auth.keycloak.httpx.Client")
+    @patch("operonx.providers.auth.keycloak.httpx.Client")
     def test_get_token_returns_cached(self, mock_client_class, config, mock_response):
         """Test that get_token returns cached token."""
         # Setup mock
@@ -157,7 +157,7 @@ class TestKeycloakTokenProvider:
         assert mock_client.post.call_count == 1
         print("✓ Token returned from cache")
 
-    @patch("operon.providers.auth.keycloak.httpx.Client")
+    @patch("operonx.providers.auth.keycloak.httpx.Client")
     def test_invalidate_clears_cache(self, mock_client_class, config, mock_response):
         """Test that invalidate clears the cached token."""
         # Setup mock
@@ -330,7 +330,7 @@ llm:static-llm:
 
     def test_keycloak_config_loads(self, temp_config_file):
         """Test that keycloak config loads from YAML."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
         config = hub.get_config("keycloak:test")
@@ -343,12 +343,12 @@ llm:static-llm:
 
     def test_keycloak_accessor(self, temp_config_file):
         """Test hub.keycloak() accessor."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
 
         # Mock the token fetch
-        with patch("operon.providers.auth.keycloak.httpx.Client") as mock_client_class:
+        with patch("operonx.providers.auth.keycloak.httpx.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_client.__enter__ = Mock(return_value=mock_client)
             mock_client.__exit__ = Mock(return_value=False)
@@ -367,7 +367,7 @@ llm:static-llm:
 
     def test_llm_with_keycloak_reference(self, temp_config_file):
         """Test that LLM with keycloak:xxx api_key resolves token."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
 
@@ -378,7 +378,7 @@ llm:static-llm:
 
     def test_llm_with_static_key(self, temp_config_file):
         """Test that LLM with static api_key works normally."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
 
@@ -388,7 +388,7 @@ llm:static-llm:
 
     def test_resolve_api_key_static(self, temp_config_file):
         """Test _resolve_api_key with static key."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
         result = hub._resolve_api_key("sk-static-key")
@@ -397,11 +397,11 @@ llm:static-llm:
 
     def test_resolve_api_key_keycloak(self, temp_config_file):
         """Test _resolve_api_key with keycloak reference."""
-        from operon.core.registry import ResourceHub
+        from operonx.core.registry import ResourceHub
 
         hub = ResourceHub.from_yaml(temp_config_file)
 
-        with patch("operon.providers.auth.keycloak.httpx.Client") as mock_client_class:
+        with patch("operonx.providers.auth.keycloak.httpx.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_client.__enter__ = Mock(return_value=mock_client)
             mock_client.__exit__ = Mock(return_value=False)
@@ -449,7 +449,7 @@ class TestRealKeycloakIntegration:
     @pytest.fixture
     def real_hub(self, hub):
         """Reuse the session-scoped hub loaded from resources.yaml."""
-        import operon.providers  # noqa: F401 - Register plugins
+        import operonx.providers  # noqa: F401 - Register plugins
 
         return hub
 
@@ -550,7 +550,7 @@ class TestRealKeycloakIntegration:
         2. Verifies keycloak token is resolved
         3. Makes an actual LLM generate request
         """
-        from operon.providers.llms.base import BaseLLM
+        from operonx.providers.llms.base import BaseLLM
 
         # Get LLM - should resolve keycloak token automatically
         llm = real_hub.llm("claude-4-sonnet")
@@ -697,7 +697,7 @@ class TestBackgroundRefresh:
 class TestThreadSafety:
     """Tests for thread safety of KeycloakTokenProvider."""
 
-    @patch("operon.providers.auth.keycloak.httpx.Client")
+    @patch("operonx.providers.auth.keycloak.httpx.Client")
     def test_concurrent_get_token_calls(self, mock_client_class):
         """Test that concurrent get_token calls are thread-safe."""
 
@@ -758,7 +758,7 @@ class TestThreadSafety:
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print(" Testing operon-providers auth module ".center(60, "="))
+    print(" Testing operonx-providers auth module ".center(60, "="))
     print("=" * 60 + "\n")
 
     # Run config tests

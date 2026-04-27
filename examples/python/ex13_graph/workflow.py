@@ -3,8 +3,8 @@
 ``@graph``-decorated reusable graph components. No API keys required.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.graph.graph_op import graph
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.graph.graph_op import graph
 
 # =============================================================================
 # Ops

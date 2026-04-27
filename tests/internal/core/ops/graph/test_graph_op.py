@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from operon.core import (
+from operonx.core import (
     END,
     PARENT,
     START,
@@ -1715,8 +1715,8 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_invalid_branch_target_raises_error(self):
         """Branch node with non-existent target should raise GraphValidationError."""
-        from operon.core.ops.flow.branch_op import Branch
-        from operon.core.ops.graph.graph_op import GraphValidationError
+        from operonx.core.ops.flow.branch_op import Branch
+        from operonx.core.ops.graph.graph_op import GraphValidationError
 
         with GraphOp(name="invalid_branch_graph") as graph:
             router = (
@@ -1739,7 +1739,7 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_valid_branch_targets_pass(self):
         """Branch node with valid targets should pass validation."""
-        from operon.core.ops.flow.branch_op import Branch
+        from operonx.core.ops.flow.branch_op import Branch
 
         @op
         def process_a(x: int):
@@ -1772,7 +1772,7 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_branch_with_node_reference_instead_of_string(self):
         """Branch can use node reference directly instead of string name."""
-        from operon.core.ops.flow.branch_op import Branch
+        from operonx.core.ops.flow.branch_op import Branch
 
         @op
         def handler_a(x: int):
@@ -1955,7 +1955,7 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_invalid_ref_raises_error(self):
         """Ref to non-existent node should raise ValueError at graph build time."""
-        from operon.core.states.ref import Ref
+        from operonx.core.states.ref import Ref
 
         # Create a fake node that doesn't exist in graph
         class FakeNode:
@@ -2051,8 +2051,8 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_auto_build_catches_validation_errors(self):
         """Auto-build should catch validation errors."""
-        from operon.core.ops.flow.branch_op import Branch
-        from operon.core.ops.graph.graph_op import GraphValidationError
+        from operonx.core.ops.flow.branch_op import Branch
+        from operonx.core.ops.graph.graph_op import GraphValidationError
 
         with GraphOp(name="invalid_auto_build") as graph:
             router = Branch("bad_router").if_(PARENT["x"] > 0, "missing_node").else_("also_missing")
@@ -2069,7 +2069,7 @@ class TestGraphValidation:
 
     def test_validation_result_properties(self):
         """Test ValidationResult properties work correctly."""
-        from operon.core.ops.graph.graph_op import (
+        from operonx.core.ops.graph.graph_op import (
             ValidationIssue,
             ValidationLevel,
             ValidationResult,
@@ -2102,7 +2102,7 @@ class TestGraphValidation:
 
     def test_validation_issue_str_format(self):
         """Test ValidationIssue string formatting."""
-        from operon.core.ops.graph.graph_op import ValidationIssue, ValidationLevel
+        from operonx.core.ops.graph.graph_op import ValidationIssue, ValidationLevel
 
         issue = ValidationIssue(
             level=ValidationLevel.ERROR,
@@ -2125,7 +2125,7 @@ class TestGraphValidation:
 
     def test_raise_if_errors(self):
         """Test raise_if_errors method."""
-        from operon.core.ops.graph.graph_op import (
+        from operonx.core.ops.graph.graph_op import (
             GraphValidationError,
             ValidationIssue,
             ValidationLevel,
@@ -2158,8 +2158,8 @@ class TestGraphValidation:
     @pytest.mark.asyncio
     async def test_multiple_validation_issues(self):
         """Graph with multiple issues should report all of them."""
-        from operon.core.ops.flow.branch_op import Branch
-        from operon.core.ops.graph.graph_op import GraphValidationError
+        from operonx.core.ops.flow.branch_op import Branch
+        from operonx.core.ops.graph.graph_op import GraphValidationError
 
         with GraphOp(name="multi_issue_graph") as graph:
             # Issue 1: Branch with invalid target

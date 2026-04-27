@@ -1,6 +1,6 @@
 //! `OnnxOp` — run arbitrary ONNX models via ResourceHub.
 //!
-//! Mirrors Python [`operon/providers/ops/onnx.py`](../../../../../operon/providers/ops/onnx.py).
+//! Mirrors Python [`operonx/providers/ops/onnx.py`](../../../../../operonx/providers/ops/onnx.py).
 //! Supports two input-type flavors (MLP / Attention) — dispatch to either
 //! happens inside the [`OnnxInferenceBackend`] itself; this op just forwards
 //! the inputs map and returns whatever the backend emits.

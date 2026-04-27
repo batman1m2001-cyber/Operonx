@@ -1,6 +1,6 @@
 //! Google Vertex AI / Gemini chat completion backend.
 //!
-//! Mirrors Python [`operon/providers/llms/gemini.py`](../../../../../operon/providers/llms/gemini.py).
+//! Mirrors Python [`operonx/providers/llms/gemini.py`](../../../../../operonx/providers/llms/gemini.py).
 //! Uses a service-account JWT to mint a short-lived access token, then hits
 //! the OpenAI-compatible endpoint at
 //! `https://{region}-aiplatform.googleapis.com/v1/projects/…/chat/completions`.

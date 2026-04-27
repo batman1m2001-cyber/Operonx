@@ -1,6 +1,6 @@
 //! Embedding plugin registration.
 //!
-//! Mirrors Python [`operon/providers/registry/embedding_plugin.py`](../../../../../operon/providers/registry/embedding_plugin.py).
+//! Mirrors Python [`operonx/providers/registry/embedding_plugin.py`](../../../../../operonx/providers/registry/embedding_plugin.py).
 
 use std::sync::Arc;
 

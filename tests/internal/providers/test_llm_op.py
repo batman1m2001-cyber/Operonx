@@ -8,13 +8,13 @@ class TestLLMOp:
 
     def test_import(self):
         """Test LLMOp can be imported."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         assert LLMOp is not None
 
     def test_node_type(self, hub):
         """Test LLMOp has correct type."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -26,7 +26,7 @@ class TestLLMOp:
 
     def test_input_schema(self, hub):
         """Test LLMOp has required input schema."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -37,7 +37,7 @@ class TestLLMOp:
 
     def test_output_schema(self, hub):
         """Test LLMOp has expected output schema."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -50,7 +50,7 @@ class TestLLMOp:
 
     def test_streaming_mode(self, hub):
         """Test LLMOp can be created in streaming mode."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -61,7 +61,7 @@ class TestLLMOp:
 
     def test_metadata(self, hub):
         """Test specific_metadata returns model info."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -78,9 +78,9 @@ class TestLLMOpIntegration:
     @pytest.mark.asyncio
     async def test_llm_node_with_hub(self, hub):
         """Test LLMOp works with ResourceHub."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         # Check if gpt-4o-mini is available
         if not hub.has("llm:gpt-4o-mini"):
@@ -105,9 +105,9 @@ class TestLLMOpIntegration:
     @pytest.mark.asyncio
     async def test_llm_node_streaming_with_tokens(self, hub):
         """Test LLMOp streaming mode accumulates content and tokens."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         # Check if gpt-4o-mini is available
         if not hub.has("llm:gpt-4o-mini"):
@@ -145,7 +145,7 @@ class TestLLMOpLoadBalancing:
 
     def test_load_balancing_init_with_list(self, hub):
         """Test LLMOp initialization with multiple resources."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         # Check if required resources are available
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
@@ -161,7 +161,7 @@ class TestLLMOpLoadBalancing:
 
     def test_load_balancing_default_ratios(self, hub):
         """Test LLMOp uses equal ratios when not specified."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -172,7 +172,7 @@ class TestLLMOpLoadBalancing:
 
     def test_load_balancing_ratio_validation_length(self, hub):
         """Test LLMOp raises error when ratios length doesn't match."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -188,7 +188,7 @@ class TestLLMOpLoadBalancing:
 
     def test_load_balancing_ratio_validation_sum(self, hub):
         """Test LLMOp raises error when ratios don't sum to 1.0."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -206,7 +206,7 @@ class TestLLMOpLoadBalancing:
         """Test _select_llm follows weighted distribution."""
         from collections import Counter
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -229,7 +229,7 @@ class TestLLMOpLoadBalancing:
 
     def test_load_balancing_metadata(self, hub):
         """Test load balancing info in metadata."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -243,9 +243,9 @@ class TestLLMOpLoadBalancing:
     @pytest.mark.asyncio
     async def test_load_balancing_execution(self, hub):
         """Test LLMOp execution with load balancing."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -276,7 +276,7 @@ class TestLLMOpBatchMode:
 
     def test_batch_mode_init(self, hub):
         """Test LLMOp initialization with batch_mode."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -288,7 +288,7 @@ class TestLLMOpBatchMode:
 
     def test_batch_mode_metadata(self, hub):
         """Test batch_mode in metadata."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -300,7 +300,7 @@ class TestLLMOpBatchMode:
 
     def test_batch_mode_coordinator_singleton(self, hub):
         """Test BatchCoordinator is shared for same resource."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -319,13 +319,13 @@ class TestBatchCoordinator:
 
     def test_coordinator_import(self):
         """Test BatchCoordinator can be imported."""
-        from operon.providers.llms.batch_coordinator import BatchCoordinator
+        from operonx.providers.llms.batch_coordinator import BatchCoordinator
 
         assert BatchCoordinator is not None
 
     def test_coordinator_pending_count(self, hub):
         """Test pending request counting."""
-        from operon.providers.llms.batch_coordinator import BatchCoordinator
+        from operonx.providers.llms.batch_coordinator import BatchCoordinator
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -342,7 +342,7 @@ class TestLLMOpAdvancedParams:
 
     def test_input_schema_has_advanced_params(self, hub):
         """Test LLMOp input schema includes advanced parameters."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -365,7 +365,7 @@ class TestLLMOpAdvancedParams:
 
     def test_output_schema_has_usage_and_extras(self, hub):
         """Test LLMOp output schema includes usage and extras bag."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -381,7 +381,7 @@ class TestLLMOpFallback:
 
     def test_fallback_init(self, hub):
         """Test LLMOp initialization with fallback."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -394,7 +394,7 @@ class TestLLMOpFallback:
 
     def test_fallback_multiple_models(self, hub):
         """Test LLMOp with multiple fallback models."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -411,7 +411,7 @@ class TestLLMOpFallback:
 
     def test_fallback_in_metadata(self, hub):
         """Test fallback info in metadata."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -424,7 +424,7 @@ class TestLLMOpFallback:
 
     def test_no_fallback_not_in_metadata(self, hub):
         """Test no fallback key in metadata when not configured."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -437,9 +437,9 @@ class TestLLMOpFallback:
     @pytest.mark.asyncio
     async def test_fallback_with_valid_primary(self, hub):
         """Test normal execution with fallback configured (no fallback triggered)."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
@@ -468,9 +468,9 @@ class TestLLMOpTools:
     @pytest.mark.asyncio
     async def test_tools_function_calling(self, hub):
         """Test LLMOp with tools for function calling."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -532,9 +532,9 @@ class TestLLMOpTools:
     @pytest.mark.asyncio
     async def test_tools_force_function_call(self, hub):
         """Test LLMOp forcing a specific function call."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -586,9 +586,9 @@ class TestLLMOpResponseFormat:
         """Test LLMOp with JSON response format."""
         import json
 
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -631,9 +631,9 @@ class TestLLMOpResponseFormat:
         """Test LLMOp with JSON schema for structured output."""
         import json
 
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -685,9 +685,9 @@ class TestLLMOpVision:
     @pytest.mark.asyncio
     async def test_image_url_input(self, hub):
         """Test LLMOp with image URL input."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -731,9 +731,9 @@ class TestLLMOpVision:
         """Test LLMOp with base64 encoded image input."""
         import base64
 
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -783,9 +783,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_temperature(self, hub):
         """Test LLMOp with different temperature settings."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -812,9 +812,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_max_tokens(self, hub):
         """Test LLMOp with max_tokens limit."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -847,9 +847,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_stop_sequences(self, hub):
         """Test LLMOp with stop sequences."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -879,9 +879,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_top_p(self, hub):
         """Test LLMOp with top_p (nucleus sampling)."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -907,9 +907,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_frequency_and_presence_penalty(self, hub):
         """Test LLMOp with frequency and presence penalties."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -936,9 +936,9 @@ class TestLLMOpGenerationParams:
     @pytest.mark.asyncio
     async def test_seed_reproducibility(self, hub):
         """Test LLMOp with seed for reproducible outputs."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -978,9 +978,9 @@ class TestLLMOpLogprobs:
     @pytest.mark.asyncio
     async def test_logprobs_enabled(self, hub):
         """Test LLMOp with logprobs enabled."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -1017,9 +1017,9 @@ class TestLLMOpMultipleCompletions:
     @pytest.mark.asyncio
     async def test_multiple_completions(self, hub):
         """Test LLMOp generating multiple completions."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -1053,9 +1053,9 @@ class TestLLMOpUserTracking:
     @pytest.mark.asyncio
     async def test_user_parameter(self, hub):
         """Test LLMOp with user parameter for tracking."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -1087,9 +1087,9 @@ class TestLLMOpAudio:
         """Test LLMOp with audio input using gpt-4o-audio model."""
         import base64
 
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o-audio"):
             pytest.skip("llm:gpt-4o-audio not configured")
@@ -1187,9 +1187,9 @@ class TestLLMOpComplexWorkflow:
     @pytest.mark.asyncio
     async def test_multi_turn_conversation(self, hub):
         """Test LLMOp with multi-turn conversation."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -1234,9 +1234,9 @@ class TestLLMOpComplexWorkflow:
     @pytest.mark.asyncio
     async def test_system_prompt_behavior(self, hub):
         """Test LLMOp follows system prompt instructions."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")

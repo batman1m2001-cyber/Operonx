@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.transform.func_op import extract_return_schema
-from operon.core.states.schema import StateSchema
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.transform.func_op import extract_return_schema
+from operonx.core.states.schema import StateSchema
 
 # =============================================================================
 # Test Helpers
@@ -789,7 +789,7 @@ class TestGeneratorDirectCall:
 class TestTupleContextCompat:
     def test_string_context_auto_converts(self):
         """String context passed to state auto-converts to tuple."""
-        from operon.core.states import MemoryState
+        from operonx.core.states import MemoryState
 
         with GraphOp(name="compat_test") as g:
             d = double(x=PARENT["x"])

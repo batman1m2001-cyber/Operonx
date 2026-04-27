@@ -6,8 +6,8 @@ with a clear error message suggesting PARENT.
 
 import pytest
 
-from operon.core import END, PARENT, START, graph
-from operon.core.ops import op
+from operonx.core import END, PARENT, START, graph
+from operonx.core.ops import op
 
 
 @op

@@ -8,8 +8,8 @@ Only applies when node doesn't have explicit outputs defined.
 
 import pytest
 
-from operon.core import END, PARENT, START, FuncOp, GraphOp, Operon
-from operon.core.states.ref import Ref
+from operonx.core import END, PARENT, START, FuncOp, GraphOp, Operon
+from operonx.core.states.ref import Ref
 
 
 class TestAutoOutputMapping:

@@ -1,6 +1,6 @@
 //! LLM providers.
 //!
-//! Mirrors Python `operon/providers/llms/`.
+//! Mirrors Python `operonx/providers/llms/`.
 
 pub mod anthropic;
 pub mod azure;

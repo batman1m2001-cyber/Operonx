@@ -1,1 +1,1 @@
-"""Tests for operon.core.ops package."""
+"""Tests for operonx.core.ops package."""

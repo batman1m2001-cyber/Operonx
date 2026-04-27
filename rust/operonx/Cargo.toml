@@ -121,9 +121,9 @@ name = "ex15_callbot_streaming"
 path = "../../examples/rust/ex15_callbot_streaming/demo.rs"
 
 [features]
-default       = ["langfuse", "operon-eyes"]
+default       = ["langfuse", "operonx-eyes"]
 langfuse      = []
-operon-eyes   = []
+operonx-eyes   = []
 onnx          = ["dep:ort", "dep:tokenizers"]
 triton        = ["dep:tonic", "dep:prost"]
 # otel: intentionally not listed — deferred to v0.7 per MIGRATION_rust.md §6a

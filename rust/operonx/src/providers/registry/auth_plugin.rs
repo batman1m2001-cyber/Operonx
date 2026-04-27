@@ -1,6 +1,6 @@
 //! Auth plugin registration.
 //!
-//! Mirrors Python [`operon/providers/registry/auth_plugin.py`](../../../../../operon/providers/registry/auth_plugin.py).
+//! Mirrors Python [`operonx/providers/registry/auth_plugin.py`](../../../../../operonx/providers/registry/auth_plugin.py).
 
 use std::sync::Arc;
 

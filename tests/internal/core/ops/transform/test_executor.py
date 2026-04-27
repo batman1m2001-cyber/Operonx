@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon, op
+from operonx.core import END, PARENT, START, GraphOp, Operon, op
 
 # ============================================================
 # Sync ops with different bounds

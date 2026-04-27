@@ -1,6 +1,6 @@
 //! `create_reranker` — dispatch a [`RerankingConfig`] to the matching backend.
 //!
-//! Mirrors Python [`operon/providers/rerankers/factory.py`](../../../../../operon/providers/rerankers/factory.py).
+//! Mirrors Python [`operonx/providers/rerankers/factory.py`](../../../../../operonx/providers/rerankers/factory.py).
 
 use std::sync::Arc;
 

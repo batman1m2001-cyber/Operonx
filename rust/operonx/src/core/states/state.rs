@@ -1,6 +1,6 @@
 //! `MemoryState` — workflow state backed by [`Cell`]s, indexed via [`StateSchema`].
 //!
-//! Mirrors Python [`operon/core/states/state.py`](../../../../operon/core/states/state.py).
+//! Mirrors Python [`operonx/core/states/state.py`](../../../../operonx/core/states/state.py).
 //! Each `(op_name, var_name)` resolves to a slot index in constant time; each slot
 //! is a [`Cell`] that stores multi-context values with parent-walk on read.
 //!

@@ -1,6 +1,6 @@
 //! Azure OpenAI chat completion backend.
 //!
-//! Mirrors Python [`operon/providers/llms/azure.py`](../../../../../operon/providers/llms/azure.py).
+//! Mirrors Python [`operonx/providers/llms/azure.py`](../../../../../operonx/providers/llms/azure.py).
 //! Same wire shape as OpenAI but auth goes through `api-key` header +
 //! the URL embeds `deployment` + `api-version` query string.
 //!

@@ -1,6 +1,6 @@
 //! `create_auth` — build a [`KeycloakTokenProvider`] from its config.
 //!
-//! Mirrors Python [`operon/providers/auth/factory.py`](../../../../../operon/providers/auth/factory.py).
+//! Mirrors Python [`operonx/providers/auth/factory.py`](../../../../../operonx/providers/auth/factory.py).
 //! Per plan §5b.6 the factory is **Keycloak-only** — no multi-type
 //! dispatcher. Expand only when a second auth provider is added.
 

@@ -1,6 +1,6 @@
 //! Langfuse backend — config, client, prompt manager.
 //!
-//! Mirrors Python `operon/telemetry/backends/langfuse/`.
+//! Mirrors Python `operonx/telemetry/backends/langfuse/`.
 
 pub mod client;
 pub mod config;

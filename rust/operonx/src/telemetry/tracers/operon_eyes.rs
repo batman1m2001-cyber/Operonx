@@ -1,7 +1,7 @@
-//! [`OperonEyesTracer`] — sends traces to the local `ui-operon-eyes`
+//! [`OperonEyesTracer`] — sends traces to the local `ui-operonx-eyes`
 //! SQLite-backed server.
 //!
-//! Mirrors Python [`operon/telemetry/tracers/operon_eyes.py`](../../../../../operon/telemetry/tracers/operon_eyes.py).
+//! Mirrors Python [`operonx/telemetry/tracers/operon_eyes.py`](../../../../../operonx/telemetry/tracers/operon_eyes.py).
 //! Per plan §6a endpoint default: `127.0.0.1:8420/api/ingest`. Per §6b.13
 //! `stream_trace_limit` is hardcoded to `None` (the UI handles large traces
 //! locally).
@@ -16,7 +16,7 @@ use crate::core::tracing::base::Tracer;
 use crate::core::tracing::models::TraceData;
 use crate::core::tracing::trace_filter::TraceFilter;
 
-/// Default host:port for the local `ui-operon-eyes` server.
+/// Default host:port for the local `ui-operonx-eyes` server.
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 8420;
 
@@ -109,7 +109,7 @@ impl Tracer for OperonEyesTracer {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     warn!(
-                        "OperonEyesTracer: ui-operon-eyes returned status {} at {}",
+                        "OperonEyesTracer: ui-operonx-eyes returned status {} at {}",
                         resp.status(),
                         url
                     );

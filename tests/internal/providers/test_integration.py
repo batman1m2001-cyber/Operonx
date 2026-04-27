@@ -1,16 +1,16 @@
-"""Integration tests for operon-providers nodes working together."""
+"""Integration tests for operonx-providers nodes working together."""
 
 import pytest
-from operon.core.ops import END, PARENT, START, GraphOp
-from operon.core.states import MemoryState, StateSchema
+from operonx.core.ops import END, PARENT, START, GraphOp
+from operonx.core.states import MemoryState, StateSchema
 
 
 class TestNodeIntegration:
     """Integration tests for nodes working together."""
 
     def test_all_nodes_importable(self):
-        """Test all nodes can be imported from operon.providers."""
-        from operon.providers import (
+        """Test all nodes can be imported from operonx.providers."""
+        from operonx.providers import (
             EmbeddingOp,
             LLMOp,
             PromptOp,
@@ -28,7 +28,7 @@ class TestNodeIntegration:
 
     def test_prompt_node_with_parent_outputs(self):
         """Test PromptOp with PARENT reference for outputs."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         with GraphOp(name="test_graph") as graph:
             prompt = PromptOp(
@@ -48,7 +48,7 @@ class TestNodeIntegration:
     @pytest.mark.asyncio
     async def test_prompt_node_execution(self):
         """Test PromptOp standalone execution."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         prompt = PromptOp(
             name="prompt",
@@ -75,7 +75,7 @@ class TestPluginAutoRegistration:
 
     def test_plugins_are_registered(self):
         """Test that plugins auto-register on import."""
-        from operon.providers.registry import embedding_plugin, llm_plugin, rerank_plugin
+        from operonx.providers.registry import embedding_plugin, llm_plugin, rerank_plugin
 
         assert llm_plugin.is_registered()
         assert embedding_plugin.is_registered()
@@ -83,7 +83,7 @@ class TestPluginAutoRegistration:
 
     def test_config_classes_registered(self):
         """Test that config classes are registered in REGISTRY."""
-        from operon.core.registry import REGISTRY
+        from operonx.core.registry import REGISTRY
 
         # Import plugins to trigger registration
 
@@ -130,7 +130,7 @@ class TestEndToEndPipeline:
     @pytest.mark.asyncio
     async def test_prompt_to_llm_pipeline(self, hub):
         """Test a pipeline from PromptOp to LLMOp."""
-        from operon.providers.ops import LLMOp, PromptOp
+        from operonx.providers.ops import LLMOp, PromptOp
 
         if not hub.has("llm:gpt-4o-mini"):
             pytest.skip("llm:gpt-4o-mini not configured")

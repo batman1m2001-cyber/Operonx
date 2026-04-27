@@ -1,6 +1,6 @@
 //! Runtime graph validation.
 //!
-//! Mirrors Python [`operon/core/ops/graph/validation.py`](../../../../../operon/core/ops/graph/validation.py).
+//! Mirrors Python [`operonx/core/ops/graph/validation.py`](../../../../../operonx/core/ops/graph/validation.py).
 //! Checks: unresolvable refs, cycles in compiled adjacency, unreachable
 //! entries/exits, unknown edge endpoints, branch targets.
 //!

@@ -1,6 +1,6 @@
 //! [`Tracer`] trait — what telemetry backends implement.
 //!
-//! Mirrors Python [`operon/core/tracing/base.py`](../../../../operon/core/tracing/base.py).
+//! Mirrors Python [`operonx/core/tracing/base.py`](../../../../operonx/core/tracing/base.py).
 //!
 //! Per plan §4b.3 `flush()` is **sync**, not async — Python runs it in a
 //! thread pool. Rust mirrors this via `tokio::task::spawn_blocking`.

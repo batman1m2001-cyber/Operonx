@@ -14,10 +14,10 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon, op
-from operon.core.tracing import TraceFilter, label
-from operon.core.tracing.collector import TraceCollector
-from operon.core.tracing.labels import _current_gen_key
+from operonx.core import END, PARENT, START, GraphOp, Operon, op
+from operonx.core.tracing import TraceFilter, label
+from operonx.core.tracing.collector import TraceCollector
+from operonx.core.tracing.labels import _current_gen_key
 
 # =========================================================================
 # Helpers

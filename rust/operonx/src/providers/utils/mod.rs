@@ -1,6 +1,6 @@
 //! Shared provider utilities.
 //!
-//! Mirrors Python `operon/providers/_utils/` (the leading underscore is dropped
+//! Mirrors Python `operonx/providers/_utils/` (the leading underscore is dropped
 //! since Rust has no import-visibility convention tied to it).
 
 pub mod huggingface;

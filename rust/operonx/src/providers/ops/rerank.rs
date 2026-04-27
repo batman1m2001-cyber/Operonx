@@ -1,6 +1,6 @@
 //! `RerankOp` — rank documents by relevance to a query.
 //!
-//! Mirrors Python [`operon/providers/ops/rerank.py`](../../../../../operon/providers/ops/rerank.py).
+//! Mirrors Python [`operonx/providers/ops/rerank.py`](../../../../../operonx/providers/ops/rerank.py).
 
 use serde_json::{json, Map, Value};
 

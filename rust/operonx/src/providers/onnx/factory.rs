@@ -1,6 +1,6 @@
 //! `create_onnx_backend` — build an [`OnnxBackend`] from its config.
 //!
-//! Mirrors Python [`operon/providers/onnx/factory.py`](../../../../../operon/providers/onnx/factory.py).
+//! Mirrors Python [`operonx/providers/onnx/factory.py`](../../../../../operonx/providers/onnx/factory.py).
 
 use std::sync::Arc;
 

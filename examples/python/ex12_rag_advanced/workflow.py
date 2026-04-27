@@ -4,7 +4,7 @@ Keyword RRF (no API key) + hybrid (vector + keyword) RAG.
 """
 
 import numpy as np
-from operon.core import END, PARENT, START, GraphOp, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 # =============================================================================
 # Sample data
@@ -128,7 +128,7 @@ def build_hybrid_rag() -> GraphOp:
     Requires ``OPENAI_API_KEY`` (embedding + LLM) and pre-computed
     ``doc_vectors`` in the inputs.
     """
-    from operon.providers import EmbeddingOp, LLMOp, PromptOp
+    from operonx.providers import EmbeddingOp, LLMOp, PromptOp
 
     with GraphOp(name="hybrid-rag") as graph:
         kw = kw_search_fn(query=PARENT["query"], docs=PARENT["documents"])

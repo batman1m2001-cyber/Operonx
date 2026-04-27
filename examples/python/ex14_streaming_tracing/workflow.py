@@ -5,7 +5,7 @@ Generator pipelines for streaming demos.
 
 import asyncio
 
-from operon.core import END, PARENT, START, GraphOp, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 # =============================================================================
 # Generator ops

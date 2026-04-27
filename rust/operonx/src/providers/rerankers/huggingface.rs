@@ -1,6 +1,6 @@
 //! HuggingFace Transformers reranker backend.
 //!
-//! Mirrors Python [`operon/providers/rerankers/huggingface.py`](../../../../../operon/providers/rerankers/huggingface.py).
+//! Mirrors Python [`operonx/providers/rerankers/huggingface.py`](../../../../../operonx/providers/rerankers/huggingface.py).
 //! Per plan §5a recommendation, stays a **stub** in v0.6 — Rust prod paths
 //! use ONNX exports ([`super::onnx::OnnxReranker`]).
 

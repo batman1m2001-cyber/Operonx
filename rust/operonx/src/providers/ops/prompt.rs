@@ -1,6 +1,6 @@
 //! `PromptOp` — builds chat messages from templates.
 //!
-//! Mirrors Python [`operon/providers/ops/prompt.py`](../../../../../operon/providers/ops/prompt.py).
+//! Mirrors Python [`operonx/providers/ops/prompt.py`](../../../../../operonx/providers/ops/prompt.py).
 //!
 //! Accepts three template forms:
 //!

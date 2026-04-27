@@ -1,6 +1,6 @@
 //! Embedding provider configuration.
 //!
-//! Mirrors Python [`operon/providers/embeddings/config.py`](../../../../../operon/providers/embeddings/config.py).
+//! Mirrors Python [`operonx/providers/embeddings/config.py`](../../../../../operonx/providers/embeddings/config.py).
 //! Python uses a flat `EmbeddingConfig` class with an `api_type` enum — we
 //! match that shape exactly here.
 

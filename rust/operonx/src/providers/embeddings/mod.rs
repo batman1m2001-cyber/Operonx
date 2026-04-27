@@ -1,6 +1,6 @@
 //! Embedding providers.
 //!
-//! Mirrors Python `operon/providers/embeddings/`.
+//! Mirrors Python `operonx/providers/embeddings/`.
 
 pub mod base;
 pub mod config;

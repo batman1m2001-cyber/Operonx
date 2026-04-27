@@ -1,6 +1,6 @@
 //! Reranker plugin registration.
 //!
-//! Mirrors Python [`operon/providers/registry/rerank_plugin.py`](../../../../../operon/providers/registry/rerank_plugin.py).
+//! Mirrors Python [`operonx/providers/registry/rerank_plugin.py`](../../../../../operonx/providers/registry/rerank_plugin.py).
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! `JsonConfigStorage` — all configs in a single JSON file.
 //!
-//! Mirrors Python [`operon/core/registry/storage/json.py`](../../../../../../operon/core/registry/storage/json.py).
+//! Mirrors Python [`operonx/core/registry/storage/json.py`](../../../../../../operonx/core/registry/storage/json.py).
 //! Unlike the YAML backend, this one does **not** do env-var interpolation —
 //! JSON configs are treated as already-resolved material (typically exported
 //! by a tool that has already substituted secrets).

@@ -4,8 +4,8 @@ Error handling patterns: capture, route, retry+fallback, LLM fallback chain.
 Scenarios 1-3 are pure compute; scenario 4 needs ``OPENAI_API_KEY``.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.flow.branch_op import if_
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.flow.branch_op import if_
 
 # =============================================================================
 # Ops — Error capture
@@ -121,7 +121,7 @@ def build_retry_fallback() -> GraphOp:
 
 def build_llm_fallback() -> GraphOp:
     """Graph: LLM with fallback chain (gpt-4o → gpt-4o-mini)."""
-    from operon.providers import LLMOp, PromptOp
+    from operonx.providers import LLMOp, PromptOp
 
     with GraphOp(name="llm-fallback") as graph:
         p = PromptOp.of(

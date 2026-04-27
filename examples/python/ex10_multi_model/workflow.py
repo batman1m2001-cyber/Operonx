@@ -5,9 +5,9 @@ fallback chains, ensemble with judge.
 Requires ``OPENAI_API_KEY``.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.flow.branch_op import if_
-from operon.providers import LLMOp, PromptOp
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.flow.branch_op import if_
+from operonx.providers import LLMOp, PromptOp
 
 # =============================================================================
 # Ops

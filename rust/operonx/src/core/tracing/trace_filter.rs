@@ -1,6 +1,6 @@
 //! [`TraceFilter`] — drop / preserve / truncate nodes before flushing.
 //!
-//! Mirrors Python [`operon/core/tracing/trace_filter.py`](../../../../operon/core/tracing/trace_filter.py).
+//! Mirrors Python [`operonx/core/tracing/trace_filter.py`](../../../../operonx/core/tracing/trace_filter.py).
 //! Per plan §6b.4 the struct carries exactly these fields; `rewriters` is
 //! **not** ported (Python-specific callable list).
 

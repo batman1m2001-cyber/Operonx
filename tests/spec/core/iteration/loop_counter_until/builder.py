@@ -5,7 +5,7 @@ expression evaluates true. Each iteration pipes `increment(counter)` and
 assigns the result back to `PARENT["count"]`.
 """
 
-from operon.core import END, PARENT, START, GraphOp
+from operonx.core import END, PARENT, START, GraphOp
 
 from tests.spec._ops import increment
 

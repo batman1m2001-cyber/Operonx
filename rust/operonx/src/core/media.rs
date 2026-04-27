@@ -1,6 +1,6 @@
 //! `Media` / `MediaRef` — trace-extractable media wrappers.
 //!
-//! Mirrors Python [`operon/core/media.py`](../../../../operon/core/media.py).
+//! Mirrors Python [`operonx/core/media.py`](../../../../operonx/core/media.py).
 //!
 //! Producer ops wrap media values at the source:
 //!

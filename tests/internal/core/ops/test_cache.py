@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon
-from operon.core.ops import op
+from operonx.core import END, PARENT, START, GraphOp, Operon
+from operonx.core.ops import op
 
 pytestmark = pytest.mark.asyncio
 
@@ -103,7 +103,7 @@ class TestOpCacheFile:
 
     async def test_cache_saves_to_file(self, tmp_path):
         """Cache should save entries to binary file."""
-        from operon.core.ops.base import BaseOp
+        from operonx.core.ops.base import BaseOp
 
         cache_path = str(tmp_path / "test_cache.bin")
 
@@ -135,7 +135,7 @@ class TestOpCacheFile:
 
     async def test_cache_loads_from_file(self, tmp_path):
         """Cache should load entries from existing binary file."""
-        from operon.core.ops.base import BaseOp
+        from operonx.core.ops.base import BaseOp
 
         cache_path = str(tmp_path / "preloaded.bin")
 

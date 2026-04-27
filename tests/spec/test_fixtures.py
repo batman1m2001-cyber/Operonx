@@ -24,7 +24,7 @@ from typing import Any, Dict
 
 import pytest
 
-from operon.core import Operon
+from operonx.core import Operon
 
 SPEC_ROOT = Path(__file__).parent
 

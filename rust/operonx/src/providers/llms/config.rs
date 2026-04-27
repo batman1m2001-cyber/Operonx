@@ -1,4 +1,4 @@
-//! LLM provider configuration — mirrors Python [`operon/providers/llms/config.py`](../../../../../operon/providers/llms/config.py).
+//! LLM provider configuration — mirrors Python [`operonx/providers/llms/config.py`](../../../../../operonx/providers/llms/config.py).
 //!
 //! Hierarchy mirrors Python's class tree:
 //! - [`LLMConfig`] — discriminated union by `api_type`.

@@ -1,6 +1,6 @@
 //! OpenAI Batch API coordinator.
 //!
-//! Mirrors Python [`operon/providers/llms/batch_coordinator.py`](../../../../../operon/providers/llms/batch_coordinator.py).
+//! Mirrors Python [`operonx/providers/llms/batch_coordinator.py`](../../../../../operonx/providers/llms/batch_coordinator.py).
 //! Per plan §5b.9 the coordinator is **per-LLMOp**, not a global service —
 //! each [`LLMOp`](crate::providers::ops::llm) with `batch_mode=true` owns its
 //! own `Arc<BatchCoordinator>`.

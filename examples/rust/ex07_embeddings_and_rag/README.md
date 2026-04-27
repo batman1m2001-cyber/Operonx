@@ -25,7 +25,7 @@ Writes `examples/bench_results/ex07_embeddings_and_rag_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex07_embeddings_and_rag.workflow import build_basic_embedding, build_simple_rag, build_rag_with_rerank
 
 def dump(g):

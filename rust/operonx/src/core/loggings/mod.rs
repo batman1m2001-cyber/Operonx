@@ -1,6 +1,6 @@
 //! Centralized logging for Operon.
 //!
-//! Mirrors Python `operon/core/loggings/`.
+//! Mirrors Python `operonx/core/loggings/`.
 
 pub mod config;
 pub mod events;

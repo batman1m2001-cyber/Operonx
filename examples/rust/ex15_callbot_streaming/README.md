@@ -31,7 +31,7 @@ Writes `examples/bench_results/ex15_callbot_streaming_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex15_callbot_streaming.workflow import build_callbot
 
 def dump(g):

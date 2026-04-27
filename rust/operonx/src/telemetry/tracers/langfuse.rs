@@ -1,6 +1,6 @@
 //! [`LangfuseTracer`] — flush traces to Langfuse cloud (or self-hosted).
 //!
-//! Mirrors Python [`operon/telemetry/tracers/langfuse.py`](../../../../../operon/telemetry/tracers/langfuse.py).
+//! Mirrors Python [`operonx/telemetry/tracers/langfuse.py`](../../../../../operonx/telemetry/tracers/langfuse.py).
 //! Accepts either a direct [`LangfuseConfig`] or a `langfuse:<name>`
 //! resource key per §6b.3. The client is built lazily on first flush.
 

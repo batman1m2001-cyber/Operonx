@@ -1,6 +1,6 @@
 //! `ParserOp` — extract structured data from JSON / XML / YAML text.
 //!
-//! Mirrors Python [`operon/core/ops/transform/parser_op.py`](../../../../../operon/core/ops/transform/parser_op.py).
+//! Mirrors Python [`operonx/core/ops/transform/parser_op.py`](../../../../../operonx/core/ops/transform/parser_op.py).
 //! Parses `input_text` according to `parse_as` (json/xml/yaml) and returns either
 //! the full parsed value or a dot-path–extracted subvalue per field spec.
 //!

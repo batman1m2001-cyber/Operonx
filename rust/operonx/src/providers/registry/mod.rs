@@ -1,6 +1,6 @@
 //! Provider-plugin registration into the global [`ConfigRegistry`].
 //!
-//! Mirrors Python `operon/providers/registry/`.
+//! Mirrors Python `operonx/providers/registry/`.
 //!
 //! Python achieves registration via "import triggers registration" — each
 //! `*_plugin.py` imports register() at module load. Rust doesn't execute

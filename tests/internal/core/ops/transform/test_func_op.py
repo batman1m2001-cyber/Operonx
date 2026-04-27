@@ -2,7 +2,7 @@
 
 import pytest
 
-from operon.core.ops.transform.func_op import FuncOp, op
+from operonx.core.ops.transform.func_op import FuncOp, op
 
 # ============================================================
 # Test Fixtures

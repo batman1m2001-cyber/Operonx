@@ -1,6 +1,6 @@
 //! `HealthCheckResult` — result aggregator for [`ResourceHub::health_check`].
 //!
-//! Mirrors Python [`operon/core/registry/shortcuts/health.py`](../../../../../../operon/core/registry/shortcuts/health.py).
+//! Mirrors Python [`operonx/core/registry/shortcuts/health.py`](../../../../../../operonx/core/registry/shortcuts/health.py).
 //!
 //! [`ResourceHub::health_check`]: crate::core::registry::resource_hub::ResourceHub::health_check
 

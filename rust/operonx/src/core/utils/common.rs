@@ -1,6 +1,6 @@
 //! Shared runtime utilities — `Param` struct.
 //!
-//! Mirrors Python `operon/core/utils/common.py`. Note: Python's `ensure_async`,
+//! Mirrors Python `operonx/core/utils/common.py`. Note: Python's `ensure_async`,
 //! `extract_condition_variables`, and `fake_chunk_from` are Python-specific
 //! (asyncio helpers, regex AST walk, test helpers) — not ported to Rust.
 //!
@@ -9,7 +9,7 @@
 //! into `ref` (a [`RefConfig`](super::super::states::ref_::RefConfig)) or
 //! `literal` (a JSON value) depending on whether the Python side wired a Ref
 //! or a literal value during graph build — see `BaseOp._serialize_params` in
-//! `operon/core/ops/base.py`.
+//! `operonx/core/ops/base.py`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

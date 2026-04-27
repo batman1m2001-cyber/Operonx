@@ -1,6 +1,6 @@
 //! Shared ONNX inference backend.
 //!
-//! Mirrors Python [`operon/providers/onnx/backend.py`](../../../../../operon/providers/onnx/backend.py).
+//! Mirrors Python [`operonx/providers/onnx/backend.py`](../../../../../operonx/providers/onnx/backend.py).
 //! Per plan §5a the shared session pool is extracted from the per-category
 //! `embeddings/onnx.rs` + `rerankers/onnx.rs` files so both reuse it.
 //!

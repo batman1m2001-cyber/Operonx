@@ -1,6 +1,6 @@
 //! Graph op — nested DAG container with its own scheduler.
 //!
-//! Mirrors Python `operon/core/ops/graph/`.
+//! Mirrors Python `operonx/core/ops/graph/`.
 
 pub mod graph_op;
 pub mod task_scheduler;

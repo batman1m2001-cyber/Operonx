@@ -1,7 +1,7 @@
 """Fixture: `PromptOp` with system+user template and one variable."""
 
-from operon.core import END, PARENT, START, GraphOp
-from operon.providers.ops.prompt import PromptOp
+from operonx.core import END, PARENT, START, GraphOp
+from operonx.providers.ops.prompt import PromptOp
 
 
 def build_graph() -> GraphOp:

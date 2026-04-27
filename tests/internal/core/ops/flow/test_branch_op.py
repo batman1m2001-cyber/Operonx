@@ -2,12 +2,12 @@
 
 import pytest
 
-from operon.core.ops.base import END, PARENT, START
-from operon.core.ops.flow.branch_op import Branch, BranchOp, if_
-from operon.core.ops.graph.graph_op import GraphOp
-from operon.core.ops.transform.func_op import FuncOp
-from operon.core.states import MemoryState, StateSchema
-from operon.core.states.ref import Ref
+from operonx.core.ops.base import END, PARENT, START
+from operonx.core.ops.flow.branch_op import Branch, BranchOp, if_
+from operonx.core.ops.graph.graph_op import GraphOp
+from operonx.core.ops.transform.func_op import FuncOp
+from operonx.core.states import MemoryState, StateSchema
+from operonx.core.states.ref import Ref
 
 # ============================================================
 # Test 1: Basic Score Routing

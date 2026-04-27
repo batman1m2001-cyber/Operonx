@@ -1,6 +1,6 @@
 """Fixture: typed list input (`sum_list(xs: list[int])`)."""
 
-from operon.core import END, PARENT, START, GraphOp
+from operonx.core import END, PARENT, START, GraphOp
 
 from tests.spec._ops import sum_list
 

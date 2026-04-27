@@ -1,6 +1,6 @@
 //! Logging handler package.
 //!
-//! Mirrors Python `operon/core/loggings/handlers/`.
+//! Mirrors Python `operonx/core/loggings/handlers/`.
 
 pub mod console;
 pub mod file;

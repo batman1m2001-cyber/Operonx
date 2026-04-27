@@ -1,6 +1,6 @@
 //! `ConfigStorage` — pluggable storage backend for resource configs.
 //!
-//! Mirrors Python [`operon/core/registry/storage/base.py`](../../../../../../operon/core/registry/storage/base.py).
+//! Mirrors Python [`operonx/core/registry/storage/base.py`](../../../../../../operonx/core/registry/storage/base.py).
 //! YAML and JSON backends live alongside this file; user code can implement
 //! this trait for MongoDB, Redis, etc.
 //!

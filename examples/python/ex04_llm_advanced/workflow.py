@@ -7,8 +7,8 @@ Cần: OPENAI_API_KEY trong .env
 
 import json
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.providers import LLMOp, PromptOp
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.providers import LLMOp, PromptOp
 
 # --- Tool calling helpers ---
 

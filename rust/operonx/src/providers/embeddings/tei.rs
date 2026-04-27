@@ -1,6 +1,6 @@
 //! HuggingFace Text Embeddings Inference (TEI) embedding backend.
 //!
-//! Mirrors Python [`operon/providers/embeddings/tei.py`](../../../../../operon/providers/embeddings/tei.py).
+//! Mirrors Python [`operonx/providers/embeddings/tei.py`](../../../../../operonx/providers/embeddings/tei.py).
 //! Net-new Rust port (plan §5a marks this file as 🆕).
 //!
 //! # Phase 5 scope

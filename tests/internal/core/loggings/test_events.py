@@ -1,6 +1,6 @@
 """Tests for shared log event templates and plain-text data formatter."""
 
-from operon.core.loggings.events import format_data, format_event, get_template
+from operonx.core.loggings.events import format_data, format_event, get_template
 
 # ── Template loading ─────────────────────────────────────────────────
 

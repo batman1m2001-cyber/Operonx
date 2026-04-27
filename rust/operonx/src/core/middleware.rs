@@ -1,6 +1,6 @@
 //! `Middleware` — lifecycle hooks around graph execution.
 //!
-//! Mirrors Python [`operon/core/middleware.py`](../../../../operon/core/middleware.py).
+//! Mirrors Python [`operonx/core/middleware.py`](../../../../operonx/core/middleware.py).
 //!
 //! Ops opt into middleware by passing implementors to the engine builder.
 //! Hooks fire in registered order for `before_run` and in reverse order

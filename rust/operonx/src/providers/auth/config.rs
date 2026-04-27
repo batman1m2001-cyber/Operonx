@@ -1,6 +1,6 @@
 //! Auth provider configuration.
 //!
-//! Mirrors Python [`operon/providers/auth/config.py`](../../../../../operon/providers/auth/config.py).
+//! Mirrors Python [`operonx/providers/auth/config.py`](../../../../../operonx/providers/auth/config.py).
 //! Only [`KeycloakTokenConfig`] is defined — per plan §5b.6 `create_auth()`
 //! is Keycloak-only, not a multi-type dispatcher.
 

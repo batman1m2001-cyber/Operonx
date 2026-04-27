@@ -31,7 +31,7 @@ Writes `examples/bench_results/ex05_loops_and_branches_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex05_loops_and_branches.workflow import build_for_loop, build_map_op, build_while_loop, build_branch
 
 def dump(g):

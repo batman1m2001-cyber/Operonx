@@ -7,7 +7,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from operon.core import END, START, GraphOp, Operon, graph
+from operonx.core import END, START, GraphOp, Operon, graph
 
 # ── Helper: mock LLM that returns different content each call ────────
 
@@ -57,11 +57,11 @@ def make_mock_hub(responses):
 @pytest.mark.asyncio
 async def test_extract_basic():
     """ask() parses LLM output into structured fields."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -86,11 +86,11 @@ async def test_extract_basic():
 @pytest.mark.asyncio
 async def test_extract_with_validators():
     """ask() with validators — @-prefixed = default on validation fail."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"])
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -116,11 +116,11 @@ async def test_extract_with_validators():
 @pytest.mark.asyncio
 async def test_extract_multiple_fields():
     """ask() extracts multiple fields from XML."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>DENY</intent><confidence>0.95</confidence>"])
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         @graph
@@ -150,11 +150,11 @@ async def test_extract_multiple_fields():
 @pytest.mark.asyncio
 async def test_extract_retry_validator_reject_uses_default():
     """LLM always returns wrong value → validator rejects → @-default applied."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"] * 3)
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -184,7 +184,7 @@ async def test_extract_retry_validator_reject_uses_default():
 @pytest.mark.asyncio
 async def test_extract_retry_parse_fail_then_success():
     """First call returns garbage → retry → second call returns valid XML."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -193,7 +193,7 @@ async def test_extract_retry_parse_fail_then_success():
         ]
     )
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -221,11 +221,11 @@ async def test_extract_retry_parse_fail_then_success():
 @pytest.mark.asyncio
 async def test_extract_retry_no_retry_default_on_fail():
     """retry=0 → only 1 attempt. Parse fail → @-default applied."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["garbage output"])
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -253,11 +253,11 @@ async def test_extract_retry_no_retry_default_on_fail():
 @pytest.mark.asyncio
 async def test_extract_retry_success_first_try():
     """LLM returns valid output on first try → no retry triggered."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:
@@ -285,7 +285,7 @@ async def test_extract_retry_success_first_try():
 @pytest.mark.asyncio
 async def test_extract_retry_twice_then_success():
     """LLM fails 2 times, succeeds on 3rd attempt."""
-    from operon.providers.ops.chain import ask
+    from operonx.providers.ops.chain import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -295,7 +295,7 @@ async def test_extract_retry_twice_then_success():
         ]
     )
 
-    with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
 
         with GraphOp(name="test_workflow") as g:

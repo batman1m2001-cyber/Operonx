@@ -27,7 +27,7 @@ Writes `examples/bench_results/ex11_parallel_advanced_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex11_parallel_advanced.workflow import build_fan_out, build_iteration, build_partial_failure
 
 def dump(g):

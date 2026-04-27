@@ -1,6 +1,6 @@
 //! `ConfigRegistry` — global registry mapping resource categories to factories.
 //!
-//! Mirrors Python [`operon/core/registry/config_registry.py`](../../../../../operon/core/registry/config_registry.py).
+//! Mirrors Python [`operonx/core/registry/config_registry.py`](../../../../../operonx/core/registry/config_registry.py).
 //!
 //! # Rust-vs-Python tweaks
 //! Python uses the Pydantic config *class* as the registration handle:
@@ -149,7 +149,7 @@ impl ConfigRegistry {
 static GLOBAL: OnceLock<ConfigRegistry> = OnceLock::new();
 
 /// Accessor for the global [`ConfigRegistry`]. Python-parity for
-/// `from operon.core.registry import REGISTRY`.
+/// `from operonx.core.registry import REGISTRY`.
 pub fn registry() -> &'static ConfigRegistry {
     GLOBAL.get_or_init(ConfigRegistry::new)
 }

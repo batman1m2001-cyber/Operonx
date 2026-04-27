@@ -2,7 +2,7 @@
 
 ## Overlap analysis
 
-Comparing `hush-providers/hush/providers/` vs `operon/core/`:
+Comparing `hush-providers/hush/providers/` vs `operonx/core/`:
 
 | Dir | In core? | In providers? | Nature of overlap |
 |-----|----------|---------------|-------------------|
@@ -23,13 +23,13 @@ Heavy dependency on core:
 - `hush.core.utils.{YamlModel, common.Param}`
 - `hush.core.registry.REGISTRY`
 
-All become `operon.core.*` after rename — straightforward.
+All become `operonx.core.*` after rename — straightforward.
 
 ## Three options
 
-### Option A: Sibling under `operon/` (minimal restructure) ⭐ recommended
+### Option A: Sibling under `operonx/` (minimal restructure) ⭐ recommended
 ```
-operon/
+operonx/
 ├── core/                       (existing, unchanged)
 │   ├── ops/          (base, flow, transform, graph)
 │   └── registry/     (ResourceHub, REGISTRY)
@@ -43,13 +43,13 @@ operon/
     ├── registry/     (plugin registrations)
     └── _utils.py
 ```
-Imports: `from operon.providers import LLMOp` (mirrors `from operon.core import Operon`)
+Imports: `from operonx.providers import LLMOp` (mirrors `from operonx.core import Operon`)
 - **Pros**: Clean boundary, easy port (1:1 mapping), matches core migration style
 - **Cons**: "providers" subnamespace stays — could feel like "sub-projects merely renamed"
 
-### Option B: Fully flat (everything under `operon/`)
+### Option B: Fully flat (everything under `operonx/`)
 ```
-operon/
+operonx/
 ├── engine.py, exceptions.py, media.py, ...   (from core)
 ├── ops/                       (merged: base + core ops + provider ops)
 │   ├── base.py
@@ -60,13 +60,13 @@ operon/
 ├── registry/                   (merged: ResourceHub + all plugins)
 ├── states/, tracing/, configs/, loggings/, utils/
 ```
-Imports: `from operon import Operon, LLMOp, GraphOp` — one namespace
+Imports: `from operonx import Operon, LLMOp, GraphOp` — one namespace
 - **Pros**: True merge, flattest structure possible
-- **Cons**: **Requires undoing the `operon/core/` migration I just did** — moving files up one level, rewriting imports again. ~62 files to rewrite.
+- **Cons**: **Requires undoing the `operonx/core/` migration I just did** — moving files up one level, rewriting imports again. ~62 files to rewrite.
 
 ### Option C: Hybrid — merge `ops/` and `registry/`, keep rest in `providers/`
 ```
-operon/
+operonx/
 ├── core/                       (engine, states, tracing, exceptions, media, etc.)
 ├── ops/                        (merged: base + core + provider ops)
 ├── registry/                   (merged core + provider plugins)
@@ -82,20 +82,20 @@ Ship Option A for now — it's a clean 1:1 port mirroring the core migration. If
 
 Rationale:
 - Consistent with the `core/` migration already done
-- Cross-imports stay clear (`operon.core.X` vs `operon.providers.Y`)
-- Re-exports at top-level `operon/__init__.py` can give users both styles
+- Cross-imports stay clear (`operonx.core.X` vs `operonx.providers.Y`)
+- Re-exports at top-level `operonx/__init__.py` can give users both styles
 
 ## Execution steps (assumes Option A)
 
-1. Copy `hush/providers/` → `operon/providers/` verbatim
+1. Copy `hush/providers/` → `operonx/providers/` verbatim
 2. Copy `hush-providers/tests/` → `tests/providers/`
 3. Global rename:
-   - `from hush.core` → `from operon.core`
-   - `from hush.providers` → `from operon.providers`
-   - `import hush.providers.registry` → `import operon.providers.registry`
-   - `hush-providers` → `operon-providers` (docstrings)
+   - `from hush.core` → `from operonx.core`
+   - `from hush.providers` → `from operonx.providers`
+   - `import hush.providers.registry` → `import operonx.providers.registry`
+   - `hush-providers` → `operonx-providers` (docstrings)
 4. Update `pyproject.toml` — merge optional-dep groups (openai, gemini, anthropic, bedrock, onnx, huggingface) already present
-5. Top-level `operon/__init__.py` — re-export `LLMOp`, `EmbeddingOp`, etc. for `from operon import LLMOp` convenience (optional)
+5. Top-level `operonx/__init__.py` — re-export `LLMOp`, `EmbeddingOp`, etc. for `from operonx import LLMOp` convenience (optional)
 6. Run `pytest tests/providers/ -q` — expect ~168 passed (hush-providers baseline)
 
 ## Out of scope

@@ -1,6 +1,6 @@
 //! `LangfuseClient` — stdlib-only HTTP client for Langfuse ingestion.
 //!
-//! Mirrors Python [`operon/telemetry/backends/langfuse/client.py`](../../../../../../operon/telemetry/backends/langfuse/client.py).
+//! Mirrors Python [`operonx/telemetry/backends/langfuse/client.py`](../../../../../../operonx/telemetry/backends/langfuse/client.py).
 //! Per §6b.8 no SDK dependency — just `reqwest::blocking` + Basic auth.
 //!
 //! # Phase 7 scope

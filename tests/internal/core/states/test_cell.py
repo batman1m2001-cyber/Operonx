@@ -1,6 +1,6 @@
 """Tests for Cell - multi-context value storage."""
 
-from operon.core.states.cell import DEFAULT_CONTEXT, Cell
+from operonx.core.states.cell import DEFAULT_CONTEXT, Cell
 
 # ============================================================
 # Test 1: Basic Cell Operations

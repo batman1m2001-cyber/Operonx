@@ -1,6 +1,6 @@
 //! [`BaseLLM`] trait + chat types.
 //!
-//! Mirrors Python [`operon/providers/llms/base.py`](../../../../../operon/providers/llms/base.py#L117).
+//! Mirrors Python [`operonx/providers/llms/base.py`](../../../../../operonx/providers/llms/base.py#L117).
 //! Per plan §5b.2 the trait exposes `generate` / `stream` / `warmup` /
 //! `generate_batch` — no `agenerate` / `astream`.
 //!
@@ -149,7 +149,7 @@ pub struct BatchReq {
 /// The trait every LLM backend (OpenAI, Azure, Gemini, Anthropic, vLLM …)
 /// implements.
 ///
-/// Matches Python's [`BaseLLM`](../../../../../operon/providers/llms/base.py#L117)
+/// Matches Python's [`BaseLLM`](../../../../../operonx/providers/llms/base.py#L117)
 /// — four entry points + shared image-handling helpers that live in
 /// free functions rather than on the trait (see [`super::image`] in Phase 5b).
 #[async_trait]

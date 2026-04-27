@@ -1,7 +1,7 @@
 //! [`LocalTracer`] — write each workflow's trace to a JSON file.
 //!
-//! Mirrors Python [`operon/core/tracing/local.py`](../../../../operon/core/tracing/local.py).
-//! Zero deps, zero setup. One file per request under `~/.operon/traces/`
+//! Mirrors Python [`operonx/core/tracing/local.py`](../../../../operonx/core/tracing/local.py).
+//! Zero deps, zero setup. One file per request under `~/.operonx/traces/`
 //! (or `$OPERON_TRACES_DIR`).
 //!
 //! # Phase 7 scope
@@ -25,7 +25,7 @@ pub struct LocalTracer {
 
 impl LocalTracer {
     /// Build with an explicit path (or `None` to use
-    /// `$OPERON_TRACES_DIR` / `~/.operon/traces`).
+    /// `$OPERON_TRACES_DIR` / `~/.operonx/traces`).
     pub fn new(path: Option<PathBuf>, tags: Vec<String>) -> Self {
         Self {
             path: path.unwrap_or_else(default_traces_dir),
@@ -101,9 +101,9 @@ fn default_traces_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     if let Some(home) = dirs_home() {
-        return home.join(".operon").join("traces");
+        return home.join(".operonx").join("traces");
     }
-    PathBuf::from(".operon/traces")
+    PathBuf::from(".operonx/traces")
 }
 
 /// Portable `~` resolution without pulling the `dirs` crate. Prefers

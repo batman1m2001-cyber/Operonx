@@ -1,6 +1,6 @@
 //! Sentinel op names — `START`, `END`, `PARENT`.
 //!
-//! Mirrors Python [`operon/core/ops/_edges.py`](../../../../operon/core/ops/_edges.py).
+//! Mirrors Python [`operonx/core/ops/_edges.py`](../../../../operonx/core/ops/_edges.py).
 //! In Python, `START`, `END`, `PARENT` are module-level [`DummyOp`] singletons
 //! referenced via `>>` / `~` authoring syntax. They serialize into graph JSON as
 //! string op names — `"__START__"`, `"__END__"`, `"__PARENT__"`.

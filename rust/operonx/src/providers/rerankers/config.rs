@@ -1,6 +1,6 @@
 //! Reranker provider configuration.
 //!
-//! Mirrors Python [`operon/providers/rerankers/config.py`](../../../../../operon/providers/rerankers/config.py).
+//! Mirrors Python [`operonx/providers/rerankers/config.py`](../../../../../operonx/providers/rerankers/config.py).
 
 use serde::{Deserialize, Serialize};
 

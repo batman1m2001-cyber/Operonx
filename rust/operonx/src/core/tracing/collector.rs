@@ -1,6 +1,6 @@
 //! [`TraceCollector`] — build a `TraceData` tree from the executed workflow.
 //!
-//! Mirrors Python [`operon/core/tracing/collector.py`](../../../../operon/core/tracing/collector.py).
+//! Mirrors Python [`operonx/core/tracing/collector.py`](../../../../operonx/core/tracing/collector.py).
 //! Per plan §4b.8, stream items must be grouped under synthetic
 //! `stream_context` wrappers with pre-computed `parent_trace_key`.
 //!

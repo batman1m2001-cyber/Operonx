@@ -1,6 +1,6 @@
 //! `Cell` — multi-context value storage for one workflow variable.
 //!
-//! Mirrors Python [`operon/core/states/cell.py`](../../../../operon/core/states/cell.py).
+//! Mirrors Python [`operonx/core/states/cell.py`](../../../../operonx/core/states/cell.py).
 //! Each workflow variable lives in multiple contexts (loop iterations, stream
 //! items). `Cell` stores all of them and walks the parent-context hierarchy on
 //! read when the exact context isn't found.

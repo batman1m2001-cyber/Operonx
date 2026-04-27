@@ -8,7 +8,7 @@ authoring DSL and run it through `Operon`; on the Rust side the serialized
 `rust/operonx/tests/common/mod.rs`.
 """
 
-from operon.core import op
+from operonx.core import op
 
 
 @op

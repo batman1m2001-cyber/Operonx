@@ -29,7 +29,7 @@ Writes `examples/bench_results/ex10_multi_model_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex10_multi_model.workflow import build_parallel_comparison, build_cost_routing, build_load_balanced, build_fallback, build_ensemble
 
 def dump(g):

@@ -1,6 +1,6 @@
 //! `Operon` engine + `ExecutionHandle`.
 //!
-//! Mirrors Python [`operon/core/engine.py`](../../../../operon/core/engine.py).
+//! Mirrors Python [`operonx/core/engine.py`](../../../../operonx/core/engine.py).
 //!
 //! The engine is the user-facing entry point:
 //!

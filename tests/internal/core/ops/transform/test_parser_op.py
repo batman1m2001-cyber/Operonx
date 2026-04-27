@@ -2,10 +2,10 @@
 
 import pytest
 
-from operon.core.ops.base import END, PARENT, START
-from operon.core.ops.graph.graph_op import GraphOp
-from operon.core.ops.transform.parser_op import ParserOp
-from operon.core.states import MemoryState, StateSchema
+from operonx.core.ops.base import END, PARENT, START
+from operonx.core.ops.graph.graph_op import GraphOp
+from operonx.core.ops.transform.parser_op import ParserOp
+from operonx.core.states import MemoryState, StateSchema
 
 # ============================================================
 # Test 1: JSON Parser
@@ -267,8 +267,8 @@ class TestTypeConversion:
     @pytest.mark.asyncio
     async def test_boolean_in_branch_condition(self):
         """Test boolean extraction works with BranchOp (the original issue)."""
-        from operon.core.ops.flow.branch_op import if_
-        from operon.core.ops.transform.func_op import FuncOp
+        from operonx.core.ops.flow.branch_op import if_
+        from operonx.core.ops.transform.func_op import FuncOp
 
         with GraphOp(name="branch_test") as graph:
             # Simulate LLM extraction returning XML with boolean
