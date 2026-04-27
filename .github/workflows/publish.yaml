@@ -1,6 +1,7 @@
 name: Publish
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -9,71 +10,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── Detect a version bump on push to main ───────────────────────────────
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      python-changed: ${{ steps.check.outputs.python_changed }}
-      rust-changed: ${{ steps.check.outputs.rust_changed }}
+      python-version: ${{ steps.detect.outputs.python_version }}
+      python-changed: ${{ steps.detect.outputs.python_changed }}
+      rust-version: ${{ steps.detect.outputs.rust_version }}
+      rust-changed: ${{ steps.detect.outputs.rust_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - id: check
+      - id: detect
         run: |
-          PYTHON_CHANGED="false"
-          RUST_CHANGED="false"
-
-          # Compare against the previous commit on main (before this merge)
-          # For merge commits: use HEAD^1 (first parent = previous main tip)
-          # For regular commits: use HEAD~1
+          # Compare against the previous commit on main (before this merge).
+          # Merge commit: HEAD^1 = previous main tip. Regular commit: HEAD~1.
           if git rev-parse HEAD^2 >/dev/null 2>&1; then
             BASE="HEAD^1"
           else
             BASE="HEAD~1"
           fi
-
           echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
 
-          for pkg in python/hush-icore python/hush-providers python/hush-telemetry python/hush-serve python/hush-ai; do
-            OLD=$(git show $BASE:$pkg/pyproject.toml 2>/dev/null | grep '^version' | head -1 || echo "")
-            NEW=$(grep '^version' $pkg/pyproject.toml | head -1)
-            if [ "$OLD" != "$NEW" ]; then
-              echo "$pkg: $OLD -> $NEW (CHANGED)"
-              PYTHON_CHANGED="true"
-            fi
-          done
+          # Python — root pyproject.toml
+          PY_OLD=$(git show $BASE:pyproject.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
+          PY_NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' pyproject.toml)
+          if [ "$PY_OLD" != "$PY_NEW" ] && [ -n "$PY_NEW" ]; then
+            echo "python: $PY_OLD -> $PY_NEW (CHANGED)"
+            echo "python_changed=true" >> "$GITHUB_OUTPUT"
+            echo "python_version=$PY_NEW" >> "$GITHUB_OUTPUT"
+          else
+            echo "python: $PY_NEW (unchanged)"
+            echo "python_changed=false" >> "$GITHUB_OUTPUT"
+            echo "python_version=$PY_NEW" >> "$GITHUB_OUTPUT"
+          fi
 
-          for crate in rust/hush-macros rust/hush-icore rust/hush-providers rust/hush-telemetry rust/hush-serve; do
-            OLD=$(git show $BASE:$crate/Cargo.toml 2>/dev/null | grep '^version' | head -1 || echo "")
-            NEW=$(grep '^version' $crate/Cargo.toml | head -1)
-            if [ "$OLD" != "$NEW" ]; then
-              echo "$crate: $OLD -> $NEW (CHANGED)"
-              RUST_CHANGED="true"
-            fi
-          done
+          # Rust — workspace version (rust/Cargo.toml [workspace.package])
+          RUST_OLD=$(git show $BASE:rust/Cargo.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
+          RUST_NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' rust/Cargo.toml)
+          if [ "$RUST_OLD" != "$RUST_NEW" ] && [ -n "$RUST_NEW" ]; then
+            echo "rust: $RUST_OLD -> $RUST_NEW (CHANGED)"
+            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
+            echo "rust_version=$RUST_NEW" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust: $RUST_NEW (unchanged)"
+            echo "rust_changed=false" >> "$GITHUB_OUTPUT"
+            echo "rust_version=$RUST_NEW" >> "$GITHUB_OUTPUT"
+          fi
 
-          echo "python_changed=$PYTHON_CHANGED" >> "$GITHUB_OUTPUT"
-          echo "rust_changed=$RUST_CHANGED" >> "$GITHUB_OUTPUT"
-
+  # ── Publish to PyPI ─────────────────────────────────────────────────────
   publish-pypi:
-    needs: [check-version]
+    needs: check-version
     if: needs.check-version.outputs.python-changed == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 5
-      matrix:
-        include:
-          - package: hush-icore
-            directory: python/hush-icore
-          - package: hush-providers
-            directory: python/hush-providers
-          - package: hush-telemetry
-            directory: python/hush-telemetry
-          - package: hush-serve
-            directory: python/hush-serve
-          - package: hush-ai
-            directory: python/hush-ai
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -85,21 +78,24 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Build package
-        working-directory: ${{ matrix.directory }}
+      - name: Build wheel + sdist
         run: uv build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ${{ matrix.directory }}/dist/
+          packages-dir: dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
 
+  # ── Publish to crates.io ────────────────────────────────────────────────
+  # Two crates, sequential: macros has no deps, operonx depends on macros.
   publish-crates:
-    needs: [check-version]
+    needs: check-version
     if: needs.check-version.outputs.rust-changed == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -120,14 +116,42 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          # Order: macros first (standalone), then icore, then providers (depends on icore),
-          # then telemetry (depends on icore), then serve (depends on all).
-          cargo publish -p hush-macros
+          # Order: macros first (no operonx deps), then the main crate.
+          cargo publish -p operonx-macros
+          # Wait for the index to update before publishing the dependent.
           sleep 30
-          cargo publish -p hush-icore
-          sleep 30
-          cargo publish -p hush-providers
-          sleep 30
-          cargo publish -p hush-telemetry
-          sleep 30
-          cargo publish -p hush-serve
+          cargo publish -p operonx
+
+  # ── Tag the release ─────────────────────────────────────────────────────
+  # Runs after both publish jobs (PyPI + crates) complete. Skips silently
+  # when neither published anything. Uses the Python version as canonical
+  # because that's what most users see (`pip install operonx==X.Y.Z`).
+  tag-release:
+    needs: [check-version, publish-pypi, publish-crates]
+    if: always() && (needs.publish-pypi.result == 'success' || needs.publish-crates.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create git tag
+        env:
+          VERSION: ${{ needs.check-version.outputs.python-version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version detected; skipping tag."
+            exit 0
+          fi
+          TAG="v$VERSION"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; skipping."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"

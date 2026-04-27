@@ -30,7 +30,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -43,6 +48,9 @@ jobs:
             ~/.cargo/git
             rust/target
           key: rust-parity-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Install Python deps
+        run: uv sync --all-extras
 
       - name: Python — run spec fixtures
         run: uv run pytest tests/spec/test_fixtures.py -v
