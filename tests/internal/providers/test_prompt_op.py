@@ -1,6 +1,7 @@
 """Tests for PromptOp functionality."""
 
 import pytest
+
 from operonx.core.states import MemoryState, StateSchema
 
 

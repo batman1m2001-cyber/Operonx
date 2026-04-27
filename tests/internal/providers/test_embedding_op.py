@@ -76,7 +76,6 @@ class TestEmbeddingOpIntegration:
     async def test_embedding_node_with_hub(self, hub):
         """Test EmbeddingOp works with ResourceHub."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import EmbeddingOp
 
         # Check if bge-m3 is available

@@ -199,10 +199,7 @@ impl ExecutionHandle {
     /// Build an empty handle + the [`FrameSender`] the scheduler writes to.
     ///
     /// Engine-internal — callers should use [`Operon::start`].
-    pub(crate) fn new(
-        cancel: CancellationToken,
-        ctx: MiddlewareContext,
-    ) -> (Self, FrameSender) {
+    pub(crate) fn new(cancel: CancellationToken, ctx: MiddlewareContext) -> (Self, FrameSender) {
         Self::new_with_tap(cancel, ctx, None)
     }
 
@@ -234,7 +231,11 @@ impl ExecutionHandle {
                 notified: None,
                 pump: Some(pump),
             },
-            FrameSender { tx, tap, silent: false },
+            FrameSender {
+                tx,
+                tap,
+                silent: false,
+            },
         )
     }
 
@@ -603,9 +604,9 @@ impl GraphEnvelope {
     /// Parse + version-check a serialized workflow JSON.
     pub fn parse(json: &str) -> Result<Self, OperonError> {
         let mut value: Value = serde_json::from_str(json)?;
-        let map = value.as_object_mut().ok_or_else(|| {
-            OperonError::Config("graph JSON must be a top-level object".into())
-        })?;
+        let map = value
+            .as_object_mut()
+            .ok_or_else(|| OperonError::Config("graph JSON must be a top-level object".into()))?;
         let schema_version = map
             .remove("schema_version")
             .ok_or_else(|| OperonError::Config("graph JSON missing schema_version".into()))?;
@@ -846,7 +847,8 @@ impl Operon {
                 // on_error: reverse order.
                 let mut err = e;
                 for mw in self.middleware.iter().rev() {
-                    if let Err(mapped) = mw.on_error(&original_inputs, clone_error(&err), &ctx).await
+                    if let Err(mapped) =
+                        mw.on_error(&original_inputs, clone_error(&err), &ctx).await
                     {
                         err = mapped;
                     }
@@ -1178,7 +1180,11 @@ fn load_dotenv_from_cwd() {
     }
     match dotenvy::from_path_override(&env_path) {
         Ok(()) => debug!(".env loaded from {}", env_path.display()),
-        Err(e) => warn!(".env present but failed to load ({}): {}", env_path.display(), e),
+        Err(e) => warn!(
+            ".env present but failed to load ({}): {}",
+            env_path.display(),
+            e
+        ),
     }
 }
 
@@ -1273,10 +1279,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_resolves_after_frame() {
-        let (handle, sender) = ExecutionHandle::new(
-            CancellationToken::new(),
-            MiddlewareContext::default(),
-        );
+        let (handle, sender) =
+            ExecutionHandle::new(CancellationToken::new(), MiddlewareContext::default());
         let s = sender.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1297,10 +1301,8 @@ mod tests {
 
     #[tokio::test]
     async fn collect_group_merges_by_key() {
-        let (mut handle, sender) = ExecutionHandle::new(
-            CancellationToken::new(),
-            MiddlewareContext::default(),
-        );
+        let (mut handle, sender) =
+            ExecutionHandle::new(CancellationToken::new(), MiddlewareContext::default());
         let s = sender.clone();
         tokio::spawn(async move {
             for i in 0..3 {
@@ -1326,10 +1328,8 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_terminates_stream() {
-        let (mut handle, _sender) = ExecutionHandle::new(
-            CancellationToken::new(),
-            MiddlewareContext::default(),
-        );
+        let (mut handle, _sender) =
+            ExecutionHandle::new(CancellationToken::new(), MiddlewareContext::default());
         handle.cancel();
         assert!(handle.next().await.is_none());
         assert!(handle.is_done());
@@ -1348,9 +1348,7 @@ mod tests {
             middleware: Vec::new(),
             tracers: Vec::new(),
         };
-        let mut handle = engine
-            .start(Map::new(), None, None, None, None)
-            .unwrap();
+        let mut handle = engine.start(Map::new(), None, None, None, None).unwrap();
         let first = handle.next().await;
         assert!(first.is_some());
         let err = first.unwrap().unwrap_err();
@@ -1419,7 +1417,10 @@ mod tests {
         let mut inputs = Map::new();
         inputs.insert("x".into(), Value::from(5));
 
-        let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+        let out = engine
+            .run_json_async(inputs, None, None, None)
+            .await
+            .unwrap();
         let obj = out.as_object().unwrap();
         assert_eq!(obj.get("result"), Some(&Value::from(10)));
     }
@@ -1501,7 +1502,10 @@ mod tests {
         let mut inputs = Map::new();
         inputs.insert("x".into(), Value::from(5));
 
-        let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+        let out = engine
+            .run_json_async(inputs, None, None, None)
+            .await
+            .unwrap();
         let obj = out.as_object().unwrap();
         // double(5) = 10, add_one(10) = 11
         assert_eq!(obj.get("answer"), Some(&Value::from(11)));
@@ -1560,7 +1564,10 @@ mod tests {
         let mut inputs = Map::new();
         inputs.insert("name".into(), Value::from("world"));
 
-        let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+        let out = engine
+            .run_json_async(inputs, None, None, None)
+            .await
+            .unwrap();
         let msgs = out
             .get("messages")
             .expect("messages present")
@@ -1581,8 +1588,7 @@ mod tests {
         use std::fs;
 
         // Isolated trace dir per test.
-        let tmp = std::env::temp_dir()
-            .join(format!("operonx-trace-smoke-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("operonx-trace-smoke-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 

@@ -169,12 +169,9 @@ fn is_value_type(ty: &syn::Type) -> bool {
 /// by name, serde-deserializes it, calls the inner fn, then serde-serializes
 /// the return value. Deserialization / serialization failures are returned
 /// as `{"error": "..."}` in the output `Value`.
-fn generate_typed_wrapper(
-    func: &ItemFn,
-) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+fn generate_typed_wrapper(func: &ItemFn) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let fn_name = &func.sig.ident;
-    let wrapper_name =
-        syn::Ident::new(&format!("__operonx_{}_wrapper", fn_name), fn_name.span());
+    let wrapper_name = syn::Ident::new(&format!("__operonx_{}_wrapper", fn_name), fn_name.span());
 
     let mut deserialize_stmts = Vec::new();
     let mut call_args = Vec::new();

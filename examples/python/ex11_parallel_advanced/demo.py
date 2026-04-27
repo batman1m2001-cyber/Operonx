@@ -25,7 +25,6 @@ from examples.python.ex11_parallel_advanced.workflow import (  # noqa: E402
     build_partial_failure,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 
@@ -33,9 +32,7 @@ INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 SCENARIOS = [
     Scenario(name="fan_out", build=build_fan_out, inputs=INPUTS["fan_out"]),
     Scenario(name="iteration", build=build_iteration, inputs=INPUTS["iteration"]),
-    Scenario(
-        name="partial_failure", build=build_partial_failure, inputs=INPUTS["partial_failure"]
-    ),
+    Scenario(name="partial_failure", build=build_partial_failure, inputs=INPUTS["partial_failure"]),
 ]
 
 

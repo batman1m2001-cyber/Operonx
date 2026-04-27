@@ -79,7 +79,6 @@ class TestLLMOpIntegration:
     async def test_llm_node_with_hub(self, hub):
         """Test LLMOp works with ResourceHub."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         # Check if gpt-4o-mini is available
@@ -106,7 +105,6 @@ class TestLLMOpIntegration:
     async def test_llm_node_streaming_with_tokens(self, hub):
         """Test LLMOp streaming mode accumulates content and tokens."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         # Check if gpt-4o-mini is available
@@ -244,15 +242,12 @@ class TestLLMOpLoadBalancing:
     async def test_load_balancing_execution(self, hub):
         """Test LLMOp execution with load balancing."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
             pytest.skip("Required LLM resources not configured")
 
-        node = LLMOp(
-            name="lb_exec_test", resource=["gpt-4o", "gpt-4o-mini"], ratios=[0.5, 0.5]
-        )
+        node = LLMOp(name="lb_exec_test", resource=["gpt-4o", "gpt-4o-mini"], ratios=[0.5, 0.5])
         node._ensure_initialized()
 
         schema = StateSchema(op=node)
@@ -438,7 +433,6 @@ class TestLLMOpFallback:
     async def test_fallback_with_valid_primary(self, hub):
         """Test normal execution with fallback configured (no fallback triggered)."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o") or not hub.has("llm:gpt-4o-mini"):
@@ -469,7 +463,6 @@ class TestLLMOpTools:
     async def test_tools_function_calling(self, hub):
         """Test LLMOp with tools for function calling."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -533,7 +526,6 @@ class TestLLMOpTools:
     async def test_tools_force_function_call(self, hub):
         """Test LLMOp forcing a specific function call."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -587,7 +579,6 @@ class TestLLMOpResponseFormat:
         import json
 
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -632,7 +623,6 @@ class TestLLMOpResponseFormat:
         import json
 
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -686,7 +676,6 @@ class TestLLMOpVision:
     async def test_image_url_input(self, hub):
         """Test LLMOp with image URL input."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -732,7 +721,6 @@ class TestLLMOpVision:
         import base64
 
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -784,7 +772,6 @@ class TestLLMOpGenerationParams:
     async def test_temperature(self, hub):
         """Test LLMOp with different temperature settings."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -813,7 +800,6 @@ class TestLLMOpGenerationParams:
     async def test_max_tokens(self, hub):
         """Test LLMOp with max_tokens limit."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -848,7 +834,6 @@ class TestLLMOpGenerationParams:
     async def test_stop_sequences(self, hub):
         """Test LLMOp with stop sequences."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -880,7 +865,6 @@ class TestLLMOpGenerationParams:
     async def test_top_p(self, hub):
         """Test LLMOp with top_p (nucleus sampling)."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -908,7 +892,6 @@ class TestLLMOpGenerationParams:
     async def test_frequency_and_presence_penalty(self, hub):
         """Test LLMOp with frequency and presence penalties."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -937,7 +920,6 @@ class TestLLMOpGenerationParams:
     async def test_seed_reproducibility(self, hub):
         """Test LLMOp with seed for reproducible outputs."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -979,7 +961,6 @@ class TestLLMOpLogprobs:
     async def test_logprobs_enabled(self, hub):
         """Test LLMOp with logprobs enabled."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1018,7 +999,6 @@ class TestLLMOpMultipleCompletions:
     async def test_multiple_completions(self, hub):
         """Test LLMOp generating multiple completions."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1054,7 +1034,6 @@ class TestLLMOpUserTracking:
     async def test_user_parameter(self, hub):
         """Test LLMOp with user parameter for tracking."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1088,7 +1067,6 @@ class TestLLMOpAudio:
         import base64
 
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o-audio"):
@@ -1188,7 +1166,6 @@ class TestLLMOpComplexWorkflow:
     async def test_multi_turn_conversation(self, hub):
         """Test LLMOp with multi-turn conversation."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -1235,7 +1212,6 @@ class TestLLMOpComplexWorkflow:
     async def test_system_prompt_behavior(self, hub):
         """Test LLMOp follows system prompt instructions."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):

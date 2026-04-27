@@ -39,7 +39,10 @@ impl OpCache {
             CacheConfig::InMemory(_) => None,
             CacheConfig::File(p) => Some(PathBuf::from(p)),
         };
-        OpCache { map: DashMap::new(), path }
+        OpCache {
+            map: DashMap::new(),
+            path,
+        }
     }
 
     /// Lookup a cached result by input hash.

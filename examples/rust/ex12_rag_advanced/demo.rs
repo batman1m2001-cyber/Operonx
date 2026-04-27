@@ -9,12 +9,19 @@ use operonx::op;
 use serde_json::{json, Value};
 
 fn keyword_search(query: &str, documents: &[String], top_k: usize) -> Vec<String> {
-    let q_terms: HashSet<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+    let q_terms: HashSet<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
     let mut scored: Vec<(usize, &String)> = documents
         .iter()
         .filter_map(|doc| {
-            let d_terms: HashSet<String> =
-                doc.to_lowercase().split_whitespace().map(String::from).collect();
+            let d_terms: HashSet<String> = doc
+                .to_lowercase()
+                .split_whitespace()
+                .map(String::from)
+                .collect();
             let overlap = q_terms.intersection(&d_terms).count();
             if overlap > 0 {
                 Some((overlap, doc))
@@ -24,7 +31,11 @@ fn keyword_search(query: &str, documents: &[String], top_k: usize) -> Vec<String
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(top_k).map(|(_, d)| d.clone()).collect()
+    scored
+        .into_iter()
+        .take(top_k)
+        .map(|(_, d)| d.clone())
+        .collect()
 }
 
 fn cosine_search(
@@ -40,7 +51,11 @@ fn cosine_search(
         .map(|(dv, dtxt)| {
             let dn: f64 = dv.iter().map(|x| x * x).sum::<f64>().sqrt();
             let dot: f64 = query_vec.iter().zip(dv.iter()).map(|(a, b)| a * b).sum();
-            let sim = if qn == 0.0 || dn == 0.0 { 0.0 } else { dot / (qn * dn) };
+            let sim = if qn == 0.0 || dn == 0.0 {
+                0.0
+            } else {
+                dot / (qn * dn)
+            };
             (sim, dtxt.clone())
         })
         .collect();
@@ -130,8 +145,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Huế là cố đô của Việt Nam, nổi tiếng với Đại Nội và ẩm thực đặc sắc.".to_string(),
         "Hạ Long là di sản thiên nhiên thế giới với hàng nghìn hòn đảo đá vôi.".to_string(),
         "Sapa nằm ở Lào Cai, nổi tiếng với ruộng bậc thang và văn hóa dân tộc.".to_string(),
-        "Phú Quốc là đảo lớn nhất Việt Nam, thuộc tỉnh Kiên Giang, nổi tiếng du lịch biển.".to_string(),
-        "Nha Trang thuộc Khánh Hòa, được biết đến với bãi biển đẹp và du lịch nghỉ dưỡng.".to_string(),
+        "Phú Quốc là đảo lớn nhất Việt Nam, thuộc tỉnh Kiên Giang, nổi tiếng du lịch biển."
+            .to_string(),
+        "Nha Trang thuộc Khánh Hòa, được biết đến với bãi biển đẹp và du lịch nghỉ dưỡng."
+            .to_string(),
         "Cần Thơ là thành phố lớn nhất miền Tây, nổi tiếng với chợ nổi Cái Răng.".to_string(),
         "Đà Lạt là thành phố ngàn hoa, nằm trên cao nguyên Lâm Đồng, khí hậu mát mẻ.".to_string(),
     ];

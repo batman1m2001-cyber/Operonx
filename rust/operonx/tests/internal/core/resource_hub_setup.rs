@@ -119,8 +119,7 @@ fn bootstrap_idempotent() {
     let pre = std::sync::Arc::new(ResourceHub::from_yaml(&cfg).unwrap());
     ResourceHub::set_instance(pre.clone());
 
-    let result = bootstrap(BootstrapOpts::new().no_env())
-        .expect("bootstrap returns existing hub");
+    let result = bootstrap(BootstrapOpts::new().no_env()).expect("bootstrap returns existing hub");
     assert!(std::sync::Arc::ptr_eq(&result, &pre));
     reset();
 }

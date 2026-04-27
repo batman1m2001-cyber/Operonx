@@ -9,7 +9,8 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from operonx.core import END, PARENT, START, GraphOp, Operon, Media, op
+
+from operonx.core import END, PARENT, START, GraphOp, Media, Operon, op
 from operonx.core.tracing.collector import TraceCollector
 
 # --------------------------------------------------------------------------- #

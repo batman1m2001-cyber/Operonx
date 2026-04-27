@@ -1,7 +1,6 @@
 """Fixture: single-op graph with implicit `>> END` output forwarding."""
 
 from operonx.core import END, PARENT, START, GraphOp
-
 from tests.spec._ops import lowercase
 
 

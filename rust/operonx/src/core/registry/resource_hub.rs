@@ -97,14 +97,20 @@ impl ResourceHub {
 
     /// Hub backed by a YAML file at `path` (with env-var interpolation).
     pub fn from_yaml(path: impl AsRef<Path>) -> Result<Self, OperonError> {
-        let abs = path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf());
+        let abs = path
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| path.as_ref().to_path_buf());
         let storage = YamlConfigStorage::new(abs.clone())?;
         Ok(Self::new_with_source(Arc::new(storage), Some(abs)))
     }
 
     /// Hub backed by a JSON file at `path`.
     pub fn from_json(path: impl AsRef<Path>) -> Result<Self, OperonError> {
-        let abs = path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf());
+        let abs = path
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| path.as_ref().to_path_buf());
         let storage = JsonConfigStorage::new(abs.clone())?;
         Ok(Self::new_with_source(Arc::new(storage), Some(abs)))
     }

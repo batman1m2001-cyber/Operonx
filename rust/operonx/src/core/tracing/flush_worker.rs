@@ -121,7 +121,10 @@ fn sample_stream_nodes(nodes: &[TraceNode], limit: Option<usize>) -> Vec<TraceNo
     let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
     for n in nodes {
         if let Some(p) = &n.parent_trace_key {
-            children_of.entry(p.clone()).or_default().push(n.trace_key.clone());
+            children_of
+                .entry(p.clone())
+                .or_default()
+                .push(n.trace_key.clone());
         }
     }
     let mut queue: Vec<String> = remove_keys.iter().cloned().collect();

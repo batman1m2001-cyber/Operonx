@@ -156,7 +156,6 @@ class TestOTELTracer:
 
     def test_tracer_inherits_from_new_tracer(self):
         from operonx.core.tracing import Tracer
-
         from operonx.telemetry import OTELTracer
 
         tracer = OTELTracer(resource="otel:jaeger", tags=["test"])

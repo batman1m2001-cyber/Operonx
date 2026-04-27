@@ -80,7 +80,11 @@ pub struct AskArgs {
 /// Mirrors Python's `chat()` output when serialized via
 /// `Operon.export_config()`.
 pub fn build_chat_graph(args: &ChatArgs) -> Value {
-    let graph_name = if args.name.is_empty() { "chat" } else { &args.name };
+    let graph_name = if args.name.is_empty() {
+        "chat"
+    } else {
+        &args.name
+    };
     let prompt_full = format!("{}.prompt", graph_name);
     let llm_full = format!("{}.llm", graph_name);
 
@@ -157,7 +161,11 @@ pub fn build_ask_graph(args: &AskArgs) -> Value {
         !args.fields.is_empty(),
         "build_ask_graph: `fields` is required — matches Python's TypeError"
     );
-    let graph_name = if args.name.is_empty() { "ask" } else { &args.name };
+    let graph_name = if args.name.is_empty() {
+        "ask"
+    } else {
+        &args.name
+    };
     let prompt_full = format!("{}.prompt", graph_name);
     let llm_full = format!("{}.llm", graph_name);
     let parser_full = format!("{}.parser", graph_name);

@@ -39,7 +39,12 @@ impl LLMGenerator {
     /// Build a synthetic chunk — used by `process` for final metadata
     /// emission and by fallback streams for "we failed, here's a canned
     /// reply" messages.
-    pub fn make_chunk(content: &str, model: &str, chat_id: &str, last: bool) -> ChatCompletionChunk {
+    pub fn make_chunk(
+        content: &str,
+        model: &str,
+        chat_id: &str,
+        last: bool,
+    ) -> ChatCompletionChunk {
         let finish_reason = if last { Some("stop".to_string()) } else { None };
         let delta = if last {
             serde_json::json!({})

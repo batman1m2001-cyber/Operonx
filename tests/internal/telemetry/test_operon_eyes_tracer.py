@@ -3,9 +3,9 @@
 import time
 
 import pytest
+
 from operonx.core import END, PARENT, START, GraphOp, Operon
 from operonx.core.ops import FuncOp
-
 from operonx.telemetry import OperonEyesTracer
 
 

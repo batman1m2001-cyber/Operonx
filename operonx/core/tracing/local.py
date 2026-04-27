@@ -39,7 +39,9 @@ class LocalTracer(Tracer):
         tags: Optional[List[str]] = None,
     ):
         super().__init__(tags=tags, stream_trace_limit=None)
-        self._path = Path(path or os.environ.get("OPERON_TRACES_DIR", "~/.operonx/traces")).expanduser()
+        self._path = Path(
+            path or os.environ.get("OPERON_TRACES_DIR", "~/.operonx/traces")
+        ).expanduser()
 
     def flush(self, trace_data: Dict[str, Any]) -> None:
         """Write trace data to a JSON file.

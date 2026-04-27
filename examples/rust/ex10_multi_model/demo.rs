@@ -44,7 +44,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: `routing` uses `if_(...)` — `OpType::Branch` is stubbed in
     // the Rust scheduler; that scenario will fail until branch dispatch
     // lands.
-    let scenarios = ["parallel", "routing", "load_balanced", "fallback", "ensemble"];
+    let scenarios = [
+        "parallel",
+        "routing",
+        "load_balanced",
+        "fallback",
+        "ensemble",
+    ];
     let mut reporter = common::BenchReporter::new(example);
 
     for name in scenarios {

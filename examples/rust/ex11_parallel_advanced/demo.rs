@@ -32,7 +32,11 @@ fn extract_keywords(text: String) -> Value {
     .collect();
     let cleaned: Vec<String> = text
         .split_whitespace()
-        .map(|w| w.to_lowercase().trim_matches(|c: char| ".,!?".contains(c)).to_string())
+        .map(|w| {
+            w.to_lowercase()
+                .trim_matches(|c: char| ".,!?".contains(c))
+                .to_string()
+        })
         .filter(|w| !stop.contains(w.as_str()) && w.chars().count() > 2)
         .collect();
     let top: Vec<&String> = cleaned.iter().take(5).collect();
@@ -73,7 +77,10 @@ fn merge_analysis(s: Value, k: Value, wc: Value, cc: Value, awl: Value) -> Value
 // yet available in the Rust scheduler.
 #[op(name = "each_item")]
 fn each_item(items: Vec<Value>) -> Value {
-    let out: Vec<Value> = items.into_iter().map(|item| json!({ "item": item })).collect();
+    let out: Vec<Value> = items
+        .into_iter()
+        .map(|item| json!({ "item": item }))
+        .collect();
     json!({ "items": out })
 }
 

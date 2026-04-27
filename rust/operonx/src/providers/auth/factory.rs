@@ -12,9 +12,7 @@ use crate::core::exceptions::OperonError;
 
 /// Construct a [`KeycloakTokenProvider`] and start its background refresh
 /// loop.
-pub fn create_auth(
-    config: KeycloakTokenConfig,
-) -> Result<Arc<KeycloakTokenProvider>, OperonError> {
+pub fn create_auth(config: KeycloakTokenConfig) -> Result<Arc<KeycloakTokenProvider>, OperonError> {
     let provider = Arc::new(KeycloakTokenProvider::new(config));
     provider.start();
     Ok(provider)

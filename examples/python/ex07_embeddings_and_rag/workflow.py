@@ -6,6 +6,7 @@ Cần: OPENAI_API_KEY trong .env + resources.yaml (embedding:openai, llm:gpt-4o-
 """
 
 import numpy as np
+
 from operonx.core import END, PARENT, START, GraphOp, op
 from operonx.providers import EmbeddingOp, LLMOp, PromptOp
 

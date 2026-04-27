@@ -73,9 +73,7 @@ impl BaseEmbedder for VllmEmbedder {
             dimensions: self.config.dimensions,
         };
 
-        let mut req = get_client()
-            .post(self.embeddings_url())
-            .json(&body);
+        let mut req = get_client().post(self.embeddings_url()).json(&body);
         if let Some(key) = &self.config.api_key {
             req = req.bearer_auth(key);
         }

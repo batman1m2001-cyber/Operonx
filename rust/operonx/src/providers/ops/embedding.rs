@@ -10,10 +10,7 @@ use crate::core::exceptions::{OpError, OperonError};
 use crate::providers::embeddings::EmbedOpts;
 
 /// Execute the embedding op.
-pub async fn execute(
-    op: &OpConfig,
-    inputs: Map<String, Value>,
-) -> Result<Value, OperonError> {
+pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value, OperonError> {
     let resources = op.resource_keys();
     let key = resources.first().ok_or_else(|| {
         OperonError::Config(format!("EmbeddingOp '{}' missing `resource`", op.full_name))

@@ -32,7 +32,12 @@ use serde_json::Value;
 /// step) is used instead. Tried in order.
 pub fn fixture_path(name: &str) -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest.join("..").join("..").join("tests").join("spec").join(name);
+    let repo_root = manifest
+        .join("..")
+        .join("..")
+        .join("tests")
+        .join("spec")
+        .join(name);
     if repo_root.exists() {
         return repo_root;
     }

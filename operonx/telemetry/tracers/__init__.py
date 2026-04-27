@@ -9,8 +9,8 @@ Available tracers:
 - OTELTracer: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
 """
 
-from operonx.telemetry.tracers.operon_eyes import OperonEyesTracer
 from operonx.telemetry.tracers.langfuse import LangfuseTracer
+from operonx.telemetry.tracers.operon_eyes import OperonEyesTracer
 from operonx.telemetry.tracers.otel import OTELTracer
 
 __all__ = [

@@ -32,10 +32,22 @@ fn calculator(expr: &str) -> Value {
 fn search(query: &str) -> Value {
     let q = query.to_lowercase();
     let knowledge = [
-        ("python", "Python is a high-level programming language created by Guido van Rossum in 1991."),
-        ("operonx", "Operon is an async workflow orchestration engine for GenAI applications."),
-        ("vietnam", "Vietnam is a country in Southeast Asia. Capital: Hanoi. Population: ~100 million."),
-        ("machine learning", "Machine learning is a subset of AI that learns patterns from data."),
+        (
+            "python",
+            "Python is a high-level programming language created by Guido van Rossum in 1991.",
+        ),
+        (
+            "operonx",
+            "Operon is an async workflow orchestration engine for GenAI applications.",
+        ),
+        (
+            "vietnam",
+            "Vietnam is a country in Southeast Asia. Capital: Hanoi. Population: ~100 million.",
+        ),
+        (
+            "machine learning",
+            "Machine learning is a subset of AI that learns patterns from data.",
+        ),
     ];
     for (k, v) in knowledge.iter() {
         if q.contains(k) {

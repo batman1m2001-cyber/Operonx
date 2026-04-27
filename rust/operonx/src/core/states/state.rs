@@ -110,7 +110,12 @@ impl MemoryState {
     }
 
     /// Direct slot-index write, skipping the `(op, var)` lookup.
-    pub fn set_by_index(&mut self, idx: usize, ctx: &ContextId, value: Value) -> Result<(), StateError> {
+    pub fn set_by_index(
+        &mut self,
+        idx: usize,
+        ctx: &ContextId,
+        value: Value,
+    ) -> Result<(), StateError> {
         self.cells
             .get_mut(idx)
             .ok_or(StateError::SlotIndexOutOfRange(idx))?
@@ -188,7 +193,9 @@ mod tests {
     fn unknown_slot_errors() {
         let schema = schema_with_var("op_a", "result");
         let mut state = MemoryState::new(schema, None, None, None, None);
-        let err = state.set("op_b", "nope", &default_context(), json!(1)).unwrap_err();
+        let err = state
+            .set("op_b", "nope", &default_context(), json!(1))
+            .unwrap_err();
         assert!(matches!(err, StateError::UnknownSlot(_, _)));
     }
 }

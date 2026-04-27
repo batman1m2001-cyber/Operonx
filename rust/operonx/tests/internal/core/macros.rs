@@ -5,7 +5,7 @@
 //! `inventory::submit! → auto_register() → InMemoryOpRegistry → scheduler`
 //! pipeline works without any manual `.op(...)` registration.
 
-use operonx::{op, model, Operon};
+use operonx::{model, op, Operon};
 use serde_json::{json, Map, Value};
 
 // ── Typed op — triple input, return a typed struct ────────────────────
@@ -87,7 +87,10 @@ async fn auto_register_dispatches_typed_op() {
     let mut inputs = Map::new();
     inputs.insert("x".into(), Value::from(7));
 
-    let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+    let out = engine
+        .run_json_async(inputs, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(out.get("result"), Some(&Value::from(21)));
 }
 
@@ -104,7 +107,10 @@ async fn auto_register_dispatches_untyped_op() {
     let mut inputs = Map::new();
     inputs.insert("msg".into(), Value::from("hi"));
 
-    let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+    let out = engine
+        .run_json_async(inputs, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(out.get("cry"), Some(&Value::from("HI!")));
 }
 
@@ -124,7 +130,10 @@ async fn typed_op_surfaces_deserialize_error_as_output() {
     let mut inputs = Map::new();
     inputs.insert("x".into(), Value::from("not-a-number"));
 
-    let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+    let out = engine
+        .run_json_async(inputs, None, None, None)
+        .await
+        .unwrap();
     // `result` is schema-declared as an output slot but the wrapper returned
     // `{"error": "..."}` instead — the error *payload* survives by virtue of
     // not being `null`, even though the key doesn't match the `result` slot.

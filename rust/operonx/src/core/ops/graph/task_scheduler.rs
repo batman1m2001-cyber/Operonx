@@ -253,7 +253,10 @@ impl GraphScheduler {
     ) -> Result<(), OperonError> {
         // ── Per-run mutable bookkeeping ───────────────────────────────────
         let mut ready: HashMap<ContextId, HashMap<String, i32>> = HashMap::new();
-        ready.insert(ctx.clone(), self.graph.initial_ready_count.clone().into_iter().collect());
+        ready.insert(
+            ctx.clone(),
+            self.graph.initial_ready_count.clone().into_iter().collect(),
+        );
 
         let mut inflight: i32 = 0;
 
@@ -268,7 +271,9 @@ impl GraphScheduler {
         let mut collect_bufs: HashMap<(String, String), Vec<(ContextId, Map<String, Value>)>> =
             HashMap::new();
 
-        let sem = Arc::new(Semaphore::new(self.graph.max_stream_concurrent.max(1) as usize));
+        let sem = Arc::new(Semaphore::new(
+            self.graph.max_stream_concurrent.max(1) as usize
+        ));
 
         // Internal event queue — op execution tasks post here, the main loop
         // drains it. Bounded per plan §1.
@@ -609,10 +614,7 @@ impl GraphScheduler {
                 cancel.clone(),
             )?;
         } else {
-            seq_queues
-                .entry(key)
-                .or_default()
-                .push_back(ctx.clone());
+            seq_queues.entry(key).or_default().push_back(ctx.clone());
         }
         Ok(())
     }
@@ -621,11 +623,7 @@ impl GraphScheduler {
     /// declared on the dst op's input var that references `src`. Returns
     /// `None` when dst's inputs don't reference src or when none of the
     /// matching refs carry a policy.
-    fn edge_policy(
-        &self,
-        src: &str,
-        dst: &str,
-    ) -> Option<crate::core::states::ref_::StreamPolicy> {
+    fn edge_policy(&self, src: &str, dst: &str) -> Option<crate::core::states::ref_::StreamPolicy> {
         let dst_op = self.graph.ops.get(dst)?;
         let src_full = self
             .graph
@@ -634,7 +632,9 @@ impl GraphScheduler {
             .map(|o| o.full_name.as_str())
             .unwrap_or(src);
         for (_var, param) in &dst_op.inputs {
-            let Some(ref_cfg) = &param.ref_config else { continue };
+            let Some(ref_cfg) = &param.ref_config else {
+                continue;
+            };
             if ref_cfg.source == src || ref_cfg.source == src_full {
                 if let Some(p) = ref_cfg.stream_policy {
                     return Some(p);
@@ -715,14 +715,7 @@ impl GraphScheduler {
                 if let Some(next_ctx) = q.pop_front() {
                     seq_origins.insert((key.1.clone(), next_ctx.clone()), key.clone());
                     *inflight += 1;
-                    self.spawn_op(
-                        key.1.clone(),
-                        next_ctx,
-                        state,
-                        tx,
-                        sem,
-                        cancel.clone(),
-                    )?;
+                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())?;
                 } else {
                     seq_active.insert(key, false);
                 }
@@ -777,7 +770,9 @@ fn compute_out_vars(graph: &OpConfig) -> HashMap<String, Vec<(String, String)>> 
     };
     for (op_name, op_cfg) in &graph.ops {
         for (src_var, param) in &op_cfg.outputs {
-            let Some(ref_cfg) = &param.ref_config else { continue };
+            let Some(ref_cfg) = &param.ref_config else {
+                continue;
+            };
             // Output is forwarded to the parent graph when the ref's source
             // is either the sentinel `__PARENT__` (Rust-emitted JSON) or the
             // graph's own name / full_name (Python-emitted JSON — Python
@@ -835,15 +830,12 @@ fn resolve_ref(
         &ref_cfg.source
     };
     let s = state.lock();
-    let base = s
-        .get(source, &ref_cfg.var, ctx)
-        .cloned()
-        .ok_or_else(|| {
-            OperonError::State(format!(
-                "ref resolution: no value for ({}, {}) at context {:?}",
-                source, ref_cfg.var, ctx
-            ))
-        })?;
+    let base = s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
+        OperonError::State(format!(
+            "ref resolution: no value for ({}, {}) at context {:?}",
+            source, ref_cfg.var, ctx
+        ))
+    })?;
     // Phase 4: transforms are not applied. Refs with transforms remain for
     // Phase 5/6 when the ref evaluator is wired up.
     if !ref_cfg.transforms.is_empty() {
@@ -871,10 +863,7 @@ async fn execute_op(
     match op_cfg.kind {
         OpType::Code | OpType::Lambda => {
             let func_name = op_cfg.func_name.as_deref().ok_or_else(|| {
-                OperonError::Config(format!(
-                    "code op '{}' missing func_name",
-                    op_cfg.full_name
-                ))
+                OperonError::Config(format!("code op '{}' missing func_name", op_cfg.full_name))
             })?;
             // Python emits fully-qualified names (e.g. `tests.spec._ops.double`)
             // while `#[op]` / `OperonBuilder::op` typically register bare names
@@ -966,7 +955,9 @@ fn lookup_operand(token: &str, outputs: &Map<String, Value>) -> Value {
         return Value::from(n);
     }
     if let Ok(n) = token.parse::<f64>() {
-        return serde_json::Number::from_f64(n).map(Value::Number).unwrap_or(Value::Null);
+        return serde_json::Number::from_f64(n)
+            .map(Value::Number)
+            .unwrap_or(Value::Null);
     }
     // Boolean literal
     match token {

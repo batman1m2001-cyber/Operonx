@@ -27,7 +27,6 @@ from examples.python.ex08_error_handling.workflow import (  # noqa: E402
     build_retry_fallback,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

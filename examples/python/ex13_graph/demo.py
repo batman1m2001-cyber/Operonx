@@ -27,7 +27,6 @@ from examples.python.ex13_graph.workflow import (  # noqa: E402
     build_renamed,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+
 from operonx.core.states import MemoryState, StateSchema
 
 # ============================================================
@@ -31,7 +32,6 @@ class TestPromptShorthand:
 
     def test_prompt_shorthand_with_outputs(self):
         from operonx.core.ops.base import PARENT
-
         from operonx.providers.ops.prompt import PromptOp
 
         node = PromptOp.of("Hello", outputs={"*": PARENT})
@@ -113,7 +113,6 @@ class TestLLMShorthand:
 
     def test_llm_shorthand_with_outputs(self, hub):
         from operonx.core.ops.base import PARENT
-
         from operonx.providers.ops.llm import LLMOp
 
         if not hub.has("llm:gpt-4o"):
@@ -172,7 +171,6 @@ class TestEmbeddingShorthand:
 
     def test_embedding_shorthand_with_outputs(self, hub):
         from operonx.core.ops.base import PARENT
-
         from operonx.providers.ops.embedding import EmbeddingOp
 
         if not hub.has("embedding:bge-m3"):
@@ -217,7 +215,6 @@ class TestRerankShorthand:
 
     def test_rerank_shorthand_with_outputs(self, hub):
         from operonx.core.ops.base import PARENT
-
         from operonx.providers.ops.rerank import RerankOp
 
         try:
@@ -246,7 +243,6 @@ class TestChainShorthand:
 
     def test_chain_basic(self):
         from operonx.core.ops import GraphOp
-
         from operonx.providers.ops.chain import chat
 
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
@@ -290,7 +286,6 @@ class TestChainShorthand:
 
     def test_chain_with_outputs(self):
         from operonx.core.ops.base import PARENT
-
         from operonx.providers.ops.chain import chat
 
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:

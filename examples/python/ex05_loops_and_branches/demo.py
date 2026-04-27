@@ -27,7 +27,6 @@ from examples.python.ex05_loops_and_branches.workflow import (  # noqa: E402
     build_while_loop,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

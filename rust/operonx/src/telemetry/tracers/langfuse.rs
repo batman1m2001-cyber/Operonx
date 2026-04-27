@@ -34,10 +34,7 @@ impl LangfuseTracer {
     /// Direct-config constructor — produces `to_config_dict() = Some(...)`
     /// per §6b.1.
     pub fn from_config(config: LangfuseConfig, tags: Vec<String>) -> Self {
-        let auto_filter = config
-            .trace_filter
-            .as_ref()
-            .map(TraceFilter::from_value);
+        let auto_filter = config.trace_filter.as_ref().map(TraceFilter::from_value);
         Self {
             config: Some(config),
             resource: None,
@@ -92,10 +89,7 @@ impl LangfuseTracer {
                         full_key
                     ))
                 })?;
-            return Ok(self
-                .client
-                .get_or_init(|| wrapper.0.clone())
-                .clone());
+            return Ok(self.client.get_or_init(|| wrapper.0.clone()).clone());
         };
         Ok(self.client.get_or_init(|| Arc::new(client)).clone())
     }

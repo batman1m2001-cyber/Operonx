@@ -36,7 +36,9 @@ impl LocalTracer {
 
 impl std::fmt::Debug for LocalTracer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTracer").field("path", &self.path).finish()
+        f.debug_struct("LocalTracer")
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -64,9 +66,8 @@ impl Tracer for LocalTracer {
         })?;
         let final_path = self.path.join(format!("{}.json", trace.request_id));
         let tmp = final_path.with_extension("tmp");
-        let body = serde_json::to_vec_pretty(trace).map_err(|e| {
-            OperonError::Runtime(format!("LocalTracer: serialize failed: {}", e))
-        })?;
+        let body = serde_json::to_vec_pretty(trace)
+            .map_err(|e| OperonError::Runtime(format!("LocalTracer: serialize failed: {}", e)))?;
         fs::write(&tmp, &body).map_err(|e| {
             OperonError::Runtime(format!(
                 "LocalTracer: write {} failed: {}",
@@ -74,23 +75,27 @@ impl Tracer for LocalTracer {
                 e
             ))
         })?;
-        fs::rename(&tmp, &final_path).map_err(|e| {
-            // Atomic-rename can fail on Windows across volumes — fall back
-            // to copy+delete so tests don't flake.
-            warn!(
-                "LocalTracer: rename {} → {} failed ({}); falling back to copy",
-                tmp.display(),
-                final_path.display(),
-                e
-            );
-            if let Err(copy_err) = fs::copy(&tmp, &final_path).and_then(|_| fs::remove_file(&tmp)) {
-                return OperonError::Runtime(format!(
-                    "LocalTracer: fallback copy failed: {}",
-                    copy_err
-                ));
-            }
-            OperonError::Runtime("LocalTracer: rename soft-recovered via copy".into())
-        }).ok();
+        fs::rename(&tmp, &final_path)
+            .map_err(|e| {
+                // Atomic-rename can fail on Windows across volumes — fall back
+                // to copy+delete so tests don't flake.
+                warn!(
+                    "LocalTracer: rename {} → {} failed ({}); falling back to copy",
+                    tmp.display(),
+                    final_path.display(),
+                    e
+                );
+                if let Err(copy_err) =
+                    fs::copy(&tmp, &final_path).and_then(|_| fs::remove_file(&tmp))
+                {
+                    return OperonError::Runtime(format!(
+                        "LocalTracer: fallback copy failed: {}",
+                        copy_err
+                    ));
+                }
+                OperonError::Runtime("LocalTracer: rename soft-recovered via copy".into())
+            })
+            .ok();
         info!("Trace written to {}", final_path.display());
         Ok(())
     }

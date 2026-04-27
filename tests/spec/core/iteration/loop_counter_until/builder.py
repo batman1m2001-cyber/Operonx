@@ -6,7 +6,6 @@ assigns the result back to `PARENT["count"]`.
 """
 
 from operonx.core import END, PARENT, START, GraphOp
-
 from tests.spec._ops import increment
 
 

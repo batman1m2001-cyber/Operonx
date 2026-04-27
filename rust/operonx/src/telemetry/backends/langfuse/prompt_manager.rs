@@ -40,11 +40,7 @@ impl LangfusePromptManager {
 
     /// Retrieve a named prompt (optionally at a specific version). Returns the
     /// cached value when present; otherwise fetches from the backend.
-    pub async fn get(
-        &self,
-        name: &str,
-        version: Option<&str>,
-    ) -> Result<Arc<Value>, OperonError> {
+    pub async fn get(&self, name: &str, version: Option<&str>) -> Result<Arc<Value>, OperonError> {
         let key = match version {
             Some(v) => format!("{}:{}", name, v),
             None => format!("{}:latest", name),

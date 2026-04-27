@@ -11,10 +11,10 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
+
 from operonx.core import END, START, Operon, graph
 from operonx.core.ops import op
 from operonx.core.ops.flow import if_
-
 from operonx.providers.ops import ask
 from tests.internal.providers.test_extract_retry import make_mock_hub
 

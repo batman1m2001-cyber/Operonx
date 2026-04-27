@@ -39,9 +39,8 @@ pub type ResourceInstance = Arc<dyn Any + Send + Sync>;
 ///
 /// The factory owns parsing and validation (`serde_json::from_value`), so the
 /// registry itself stays schema-agnostic.
-pub type Factory = Arc<
-    dyn Fn(ConfigDict) -> Result<ResourceInstance, OperonError> + Send + Sync + 'static,
->;
+pub type Factory =
+    Arc<dyn Fn(ConfigDict) -> Result<ResourceInstance, OperonError> + Send + Sync + 'static>;
 
 /// One registration — a factory plus the optional "schema name" the config
 /// deserializes into (used only for diagnostics / `export_config`).
@@ -123,10 +122,7 @@ impl ConfigRegistry {
         config: ConfigDict,
     ) -> Result<ResourceInstance, OperonError> {
         let factory = self.get_factory(category).ok_or_else(|| {
-            OperonError::ResourceHub(format!(
-                "no factory registered for category '{}'",
-                category
-            ))
+            OperonError::ResourceHub(format!("no factory registered for category '{}'", category))
         })?;
         factory(config)
     }

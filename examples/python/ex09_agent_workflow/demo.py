@@ -21,7 +21,6 @@ from examples.python._common import (  # noqa: E402
 )
 from examples.python.ex09_agent_workflow.workflow import build_agent  # noqa: E402
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

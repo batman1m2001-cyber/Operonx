@@ -351,13 +351,9 @@ class ResourceHub:
         source = str(self._source_path) if self._source_path else "<in-memory storage>"
         if available:
             avail_str = ", ".join(repr(k) for k in available)
-            return (
-                f"Resource '{key}' not found in {source}.\n"
-                f"  Available: [{avail_str}]"
-            )
+            return f"Resource '{key}' not found in {source}.\n  Available: [{avail_str}]"
         return (
-            f"Resource '{key}' not found in {source}.\n"
-            f"  (No resources loaded — file may be empty.)"
+            f"Resource '{key}' not found in {source}.\n  (No resources loaded — file may be empty.)"
         )
 
     def register(self, config: YamlModel, registry_key: Optional[str] = None) -> str:

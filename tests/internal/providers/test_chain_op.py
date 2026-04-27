@@ -391,7 +391,6 @@ class TestChatIntegration:
     @pytest.mark.asyncio
     async def test_simple_generation(self, hub):
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
@@ -420,7 +419,6 @@ class TestChatIntegration:
         import json
 
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
@@ -453,7 +451,6 @@ class TestExtractIntegration:
     @pytest.mark.asyncio
     async def test_structured_output(self, hub):
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import ask
 
         if not hub.has("llm:gpt-4o"):
@@ -487,7 +484,6 @@ class TestExtractRefTemplate:
     def test_prompt_schema_includes_vars_when_template_is_ref(self):
         from operonx.core import END, START
         from operonx.core.ops.graph.graph_op import graph
-
         from operonx.providers.ops import ask
 
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
@@ -519,7 +515,6 @@ class TestExtractRefTemplate:
     def test_static_template_still_works(self):
         from operonx.core import END, START
         from operonx.core.ops.graph.graph_op import graph
-
         from operonx.providers.ops import ask
 
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:

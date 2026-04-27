@@ -25,7 +25,6 @@ from examples.python.ex03_llm_chat.workflow import (  # noqa: E402
     build_summarize,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

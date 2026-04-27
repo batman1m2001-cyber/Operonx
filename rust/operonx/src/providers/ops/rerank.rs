@@ -10,10 +10,7 @@ use crate::core::exceptions::{OpError, OperonError};
 use crate::providers::rerankers::RerankOpts;
 
 /// Execute the rerank op.
-pub async fn execute(
-    op: &OpConfig,
-    inputs: Map<String, Value>,
-) -> Result<Value, OperonError> {
+pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value, OperonError> {
     let resources = op.resource_keys();
     let key = resources.first().ok_or_else(|| {
         OperonError::Config(format!("RerankOp '{}' missing `resource`", op.full_name))
@@ -45,7 +42,11 @@ pub async fn execute(
         .map(|v| v as f32)
         .unwrap_or(0.0);
 
-    let top_k_req = if top_k > 0 { top_k as usize } else { texts.len() };
+    let top_k_req = if top_k > 0 {
+        top_k as usize
+    } else {
+        texts.len()
+    };
     let opts = RerankOpts {
         threshold,
         extras: Default::default(),
@@ -53,7 +54,12 @@ pub async fn execute(
 
     let backend = resolve_reranker(key)?;
     let results = match backend
-        .run(query.clone(), texts.iter().map(|t| Value::from(t.clone())).collect(), top_k_req, &opts)
+        .run(
+            query.clone(),
+            texts.iter().map(|t| Value::from(t.clone())).collect(),
+            top_k_req,
+            &opts,
+        )
         .await
     {
         Ok(r) => r,
@@ -73,10 +79,7 @@ pub async fn execute(
         let idx = r.index.min(docs_arr.len().saturating_sub(1));
         let base = &docs_arr[idx];
         if is_dict {
-            let mut obj = base
-                .as_object()
-                .cloned()
-                .unwrap_or_default();
+            let mut obj = base.as_object().cloned().unwrap_or_default();
             obj.insert("score".into(), json!(r.score));
             reranks.push(Value::Object(obj));
         } else {
@@ -91,7 +94,10 @@ fn extract_texts(docs: &[Value]) -> Result<(Vec<String>, bool), OperonError> {
         return Ok((Vec::new(), false));
     }
     if docs.iter().all(|v| v.is_string()) {
-        let texts = docs.iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let texts = docs
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         return Ok((texts, false));
     }
     if docs.iter().all(|v| v.is_object()) {

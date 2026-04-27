@@ -77,8 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Huế là cố đô của Việt Nam, nổi tiếng với Đại Nội và ẩm thực đặc sắc.".to_string(),
         "Hạ Long là di sản thiên nhiên thế giới với hàng nghìn hòn đảo đá vôi.".to_string(),
         "Sapa nằm ở Lào Cai, nổi tiếng với ruộng bậc thang và văn hóa dân tộc.".to_string(),
-        "Phú Quốc là đảo lớn nhất Việt Nam, thuộc tỉnh Kiên Giang, nổi tiếng du lịch biển.".to_string(),
-        "Nha Trang thuộc Khánh Hòa, được biết đến với bãi biển đẹp và du lịch nghỉ dưỡng.".to_string(),
+        "Phú Quốc là đảo lớn nhất Việt Nam, thuộc tỉnh Kiên Giang, nổi tiếng du lịch biển."
+            .to_string(),
+        "Nha Trang thuộc Khánh Hòa, được biết đến với bãi biển đẹp và du lịch nghỉ dưỡng."
+            .to_string(),
     ];
 
     let scenarios = ["embed", "rag", "rerank"];

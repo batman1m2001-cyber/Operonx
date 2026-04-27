@@ -65,7 +65,7 @@ class FlushWorker:
         try:
             # 1. Collect trace tree (CPU-bound, microseconds)
             trace_data = collector.collect(state)
-        except Exception as e:
+        except Exception:
             LOGGER.exception("Failed to collect trace data")
             raise
 

@@ -4,6 +4,7 @@ Keyword RRF (no API key) + hybrid (vector + keyword) RAG.
 """
 
 import numpy as np
+
 from operonx.core import END, PARENT, START, GraphOp, op
 
 # =============================================================================

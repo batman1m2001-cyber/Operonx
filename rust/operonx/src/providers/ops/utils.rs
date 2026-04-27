@@ -60,13 +60,12 @@ pub fn resolve_reranker(key: &str) -> Result<Arc<dyn BaseReranker>, OperonError>
     let hub = resolve_hub()?;
     let full = format!("reranking:{}", key);
     let instance = hub.get(&full)?;
-    let wrapper: Arc<RerankerResource> =
-        instance.downcast::<RerankerResource>().map_err(|_| {
-            OperonError::ResourceHub(format!(
-                "resource '{}' is not a Reranker (downcast failed)",
-                full
-            ))
-        })?;
+    let wrapper: Arc<RerankerResource> = instance.downcast::<RerankerResource>().map_err(|_| {
+        OperonError::ResourceHub(format!(
+            "resource '{}' is not a Reranker (downcast failed)",
+            full
+        ))
+    })?;
     Ok(wrapper.0.clone())
 }
 
@@ -89,12 +88,11 @@ pub fn resolve_keycloak(key: &str) -> Result<Arc<KeycloakTokenProvider>, OperonE
     let hub = resolve_hub()?;
     let full = format!("keycloak:{}", key);
     let instance = hub.get(&full)?;
-    let wrapper: Arc<KeycloakResource> =
-        instance.downcast::<KeycloakResource>().map_err(|_| {
-            OperonError::ResourceHub(format!(
-                "resource '{}' is not a Keycloak provider (downcast failed)",
-                full
-            ))
-        })?;
+    let wrapper: Arc<KeycloakResource> = instance.downcast::<KeycloakResource>().map_err(|_| {
+        OperonError::ResourceHub(format!(
+            "resource '{}' is not a Keycloak provider (downcast failed)",
+            full
+        ))
+    })?;
     Ok(wrapper.0.clone())
 }

@@ -16,10 +16,7 @@ use crate::core::configs::op_config::OpConfig;
 use crate::core::exceptions::OperonError;
 
 /// Execute a Triton inference op.
-pub async fn execute(
-    op: &OpConfig,
-    _inputs: Map<String, Value>,
-) -> Result<Value, OperonError> {
+pub async fn execute(op: &OpConfig, _inputs: Map<String, Value>) -> Result<Value, OperonError> {
     #[cfg(feature = "triton")]
     {
         return Err(OperonError::Provider(format!(
