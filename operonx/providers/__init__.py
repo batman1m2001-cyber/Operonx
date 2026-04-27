@@ -52,6 +52,7 @@ from operonx.providers.ops import (
     ask,
     chat,
 )
+
 # TritonOp is intentionally NOT in the eager import list — its module
 # pulls numpy. It's accessible lazily via __getattr__ below.
 from operonx.providers.rerankers import (
