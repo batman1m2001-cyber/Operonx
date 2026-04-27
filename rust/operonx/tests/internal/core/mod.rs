@@ -6,4 +6,5 @@
 // Populated as each subsystem lands in Phase 1+.
 
 pub mod macros;
+pub mod resource_hub_setup;
 pub mod stream_policy;

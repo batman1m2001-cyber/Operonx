@@ -25,6 +25,9 @@ Sub-namespaces:
 - ``operon.telemetry``  — Langfuse, OTEL, local tracers
 """
 
+from pathlib import Path
+from typing import Optional, Union
+
 from operon.core import (
     END,
     PARENT,
@@ -40,8 +43,66 @@ from operon.core import (
     graph,
     op,
 )
+from operon.core.registry import (
+    BOOTSTRAP_ENV_PATHS,
+    ResourceHub,
+)
 
 __version__ = "0.6.0"
+
+
+def bootstrap(
+    *,
+    resources: Optional[Union[str, Path]] = None,
+    env: bool = True,
+) -> Optional[ResourceHub]:
+    """One-line setup for ``.env`` and :class:`ResourceHub`.
+
+    - When ``env`` is ``True`` (default), load ``./.env`` from CWD using
+      ``python-dotenv`` (non-override; existing env wins). The path is
+      recorded in ``BOOTSTRAP_ENV_PATHS`` for later diagnostic messages.
+    - When ``resources`` is a path, install the hub via
+      :meth:`ResourceHub.from_yaml`.
+    - When ``resources`` is ``None``, call :meth:`ResourceHub.auto` —
+      which checks ``./resources.yaml`` and warns on miss.
+    - Idempotent: if a hub is already installed, return it unchanged.
+
+    Returns the installed hub, or ``None`` if no ``resources.yaml`` was
+    found and none was provided. Pure-compute graphs that don't need a
+    hub can ignore the return value.
+    """
+    if env:
+        _load_env_into_bootstrap()
+
+    if ResourceHub._instance is not None:
+        return ResourceHub._instance
+
+    if resources is not None:
+        hub = ResourceHub.from_yaml(resources)
+        ResourceHub.set_instance(hub)
+        return hub
+
+    return ResourceHub.auto()
+
+
+def _load_env_into_bootstrap() -> None:
+    """Load ``./.env`` from CWD if it exists; record the path.
+
+    Records the absolute path in ``BOOTSTRAP_ENV_PATHS`` regardless of
+    whether the file existed — this is what the env-var error message
+    surfaces, so users see exactly where ``.env`` was searched.
+    """
+    env_path = (Path.cwd() / ".env").resolve()
+    if env_path not in BOOTSTRAP_ENV_PATHS:
+        BOOTSTRAP_ENV_PATHS.append(env_path)
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(env_path, override=False)
+
 
 __all__ = [
     # Engine
@@ -62,6 +123,9 @@ __all__ = [
     "PENDING",
     # Logging
     "LOGGER",
+    # Setup
+    "bootstrap",
+    "ResourceHub",
     # Version
     "__version__",
 ]

@@ -34,7 +34,6 @@ from operon.core.states import StateSchema
 
 if TYPE_CHECKING:
     from operon.core.ops.base import BaseOp
-    from operon.core.registry import ResourceHub
     from operon.core.tracing import Tracer
 
 
@@ -265,38 +264,35 @@ class Operon:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "_tracer", "resources"]
+    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "_tracer"]
 
     def __init__(
         self,
         graph: Union[GraphOp, Callable[..., GraphOp]],
         *,
         params: Optional[Dict[str, Any]] = None,
-        resources: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
     ):
         """Initialize Operon engine with a GraphOp or a graph factory.
 
-        Loads ``./.env`` from CWD (existing env vars are preserved), then
-        loads ``resources.yaml`` into the global ResourceHub (required).
+        Pure orchestrator — does **not** load ``.env`` or ``resources.yaml``.
+        Call :func:`operon.bootstrap` (or :meth:`ResourceHub.from_yaml` directly)
+        before constructing the engine if your graph uses provider ops.
+        Pure-compute graphs need no setup.
 
         Args:
             graph: A GraphOp workflow, or a callable that returns one.
-                   When a callable is passed, env/resources are loaded first,
-                   then the callable is invoked with ``**params``.
+                   When a callable is passed, it is invoked with ``**params``
+                   immediately — call :func:`operon.bootstrap` first if the
+                   factory needs the hub.
             params: Keyword arguments passed to the graph factory. Ignored
                     when *graph* is already a GraphOp. Defaults to ``{}``.
-            resources: Path to resources.yaml. If None, uses ``./resources.yaml``.
-                       File must exist — raises FileNotFoundError otherwise.
             tracer: Default tracer(s) for all run() calls. Can be overridden per-run.
+
+        Raises:
+            RuntimeError: If a provider op needs the hub but none has been
+                installed. The message points at ``operon.bootstrap()``.
         """
-        # 1. Auto-load .env (non-override, preserves existing env)
-        self._load_env()
-
-        # 2. Load resources.yaml (required)
-        self.resources = self._load_resources(resources)
-
-        # 3. Resolve graph — call factory after env/resources are loaded
         if callable(graph) and not isinstance(graph, GraphOp):
             graph = graph(**(params or {}))
 
@@ -338,43 +334,6 @@ class Operon:
             yield op
             if isinstance(op, GraphOp):
                 yield from Operon._iter_all_ops(op)
-
-    @staticmethod
-    def _load_env() -> None:
-        """Auto-load ./.env from CWD if it exists. Preserves existing env vars."""
-        try:
-            from dotenv import load_dotenv
-        except ImportError:
-            return
-        from pathlib import Path
-
-        env_path = Path.cwd() / ".env"
-        if env_path.exists():
-            load_dotenv(env_path, override=False)
-
-    @staticmethod
-    def _load_resources(resources: Optional[str]) -> "ResourceHub":
-        """Load ResourceHub from resources.yaml (required).
-
-        - If *resources* is None, uses ``./resources.yaml`` in CWD.
-        - File must exist — raises FileNotFoundError otherwise.
-        - Missing ``${VAR}`` env interpolations raise at load time.
-        """
-        from pathlib import Path
-
-        from operon.core.registry import ResourceHub
-
-        path = Path(resources) if resources else Path.cwd() / "resources.yaml"
-
-        if not path.exists():
-            raise FileNotFoundError(
-                f"resources.yaml not found at: {path.resolve()}\n"
-                f"  Create one at your project root, or pass an explicit path:\n"
-                f"    Operon(graph, resources='path/to/resources.yaml')"
-            )
-        hub = ResourceHub.from_yaml(path)
-        ResourceHub.set_instance(hub)
-        return hub
 
     @property
     def schema(self) -> StateSchema:

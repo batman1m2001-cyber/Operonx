@@ -55,6 +55,7 @@ prost                        = { workspace = true, optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"
+tempfile = "3"
 
 # ── Runnable Rust examples — standalone demos under
 #    `examples/rust/<name>/demo.rs`. Each `demo.rs` is self-contained:

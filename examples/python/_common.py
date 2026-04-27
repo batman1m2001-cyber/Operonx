@@ -231,18 +231,48 @@ def build_engine(graph, *, langfuse: bool, name_suffix: str = "_python"):
 
     All the initialisation work — schema build, resource hub lookup,
     tracer hookup — happens **here**, before any timing starts.
+
+    The ResourceHub is installed once at module import via
+    :func:`_ensure_resources_loaded` so a single bootstrap is shared
+    across every scenario.
     """
+    import operon
     from operon.core import Operon
+
+    _ensure_resources_loaded()
 
     if name_suffix and hasattr(graph, "name"):
         graph.name = f"{graph.name}{name_suffix}"
     kwargs: Dict[str, Any] = {}
-    if RESOURCES_FILE.exists():
-        kwargs["resources"] = str(RESOURCES_FILE)
     tracer = build_tracer(langfuse, name_suffix)
     if tracer is not None:
         kwargs["tracer"] = tracer
+    _ = operon  # keep import; bootstrap is reached above
     return Operon(graph, **kwargs)
+
+
+_RESOURCES_BOOTSTRAPPED = False
+
+
+def _ensure_resources_loaded() -> None:
+    """Bootstrap ``.env`` + ``ResourceHub`` once per process.
+
+    Examples assume the repo's ``resources.yaml`` is the source of
+    truth. If it does not exist (e.g. someone copied a single example
+    out of the repo), we still call ``bootstrap()`` with ``resources=None``
+    so pure-compute scenarios run; provider scenarios will then fail with
+    the standard "ResourceHub not initialized" message at op resolution.
+    """
+    global _RESOURCES_BOOTSTRAPPED
+    if _RESOURCES_BOOTSTRAPPED:
+        return
+    import operon
+
+    if RESOURCES_FILE.exists():
+        operon.bootstrap(resources=str(RESOURCES_FILE))
+    else:
+        operon.bootstrap()
+    _RESOURCES_BOOTSTRAPPED = True
 
 
 # ── Async entry-point wrapper ───────────────────────────────────────────

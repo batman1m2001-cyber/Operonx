@@ -530,6 +530,17 @@ fn clone_error(e: &OperonError) -> OperonError {
         OperonError::State(s) => OperonError::State(s.clone()),
         OperonError::Runtime(s) => OperonError::Runtime(s.clone()),
         OperonError::UnsupportedSchema(s) => OperonError::UnsupportedSchema(s.clone()),
+        OperonError::EnvVarUnset {
+            var,
+            key,
+            source_path,
+            env_paths,
+        } => OperonError::EnvVarUnset {
+            var: var.clone(),
+            key: key.clone(),
+            source_path: source_path.clone(),
+            env_paths: env_paths.clone(),
+        },
     }
 }
 
@@ -896,18 +907,28 @@ struct PendingOp {
 
 impl OperonBuilder {
     /// Start building from a serialized graph JSON.
+    ///
+    /// Defaults match Python's pure-orchestrator semantics:
+    /// - `load_dotenv: false` — call [`crate::bootstrap`] before constructing
+    ///   the engine if you need `.env` loaded.
+    /// - `require_resources_file: false` — pure-compute graphs work
+    ///   without any `resources.yaml`. Provider ops surface a typed error
+    ///   at op resolution if no hub is installed.
+    /// - `install_global_hub: true` — kept for backwards compatibility,
+    ///   but a no-op when the resolved hub is empty (no clobbering of
+    ///   pre-installed hubs from [`crate::bootstrap`]).
     pub fn new(graph_json: &str) -> Self {
         Self {
             graph_json: graph_json.to_string(),
             resources_path: None,
-            load_dotenv: true,
+            load_dotenv: false,
             scheduler: None,
             tracers: Vec::new(),
             middleware: Vec::new(),
             install_global_hub: true,
             op_registry: None,
             pending_ops: Vec::new(),
-            require_resources_file: true,
+            require_resources_file: false,
             auto_register: false,
         }
     }
@@ -1018,23 +1039,28 @@ impl OperonBuilder {
             load_dotenv_from_cwd();
         }
 
-        let hub = if self.require_resources_file {
-            let resources_path =
-                self.resources_path.unwrap_or_else(default_resources_path);
-            if !resources_path.exists() {
+        // Hub resolution order (mirrors Python):
+        // 1. Explicit `resources(path)` wins.
+        // 2. Otherwise, reuse a pre-installed singleton if any (do NOT clobber
+        //    a hub set up by `crate::bootstrap` or `set_instance`).
+        // 3. Otherwise, fall back to an empty hub. Provider ops surface a
+        //    typed error at resolution time pointing at `bootstrap()`.
+        let hub: Arc<ResourceHub> = if let Some(path) = self.resources_path {
+            if !path.exists() {
                 return Err(OperonError::Config(format!(
                     "resources.yaml not found at: {}\n\
-                     \u{20} Create one at your project root, or pass an explicit path:\n\
-                     \u{20}   Operon::builder(&json).resources(\"path/to/resources.yaml\")",
-                    resources_path.display()
+                     \u{20} Create the file or omit `.resources(...)` to use \
+                     the auto-discovered path.",
+                    path.display()
                 )));
             }
-            Arc::new(ResourceHub::from_yaml(&resources_path)?)
+            Arc::new(ResourceHub::from_yaml(&path)?)
+        } else if let Ok(existing) = ResourceHub::instance() {
+            existing
         } else {
-            // Empty in-memory hub for tests / graphs that don't need providers.
             Arc::new(ResourceHub::empty())
         };
-        if self.install_global_hub {
+        if self.install_global_hub && ResourceHub::instance().is_err() {
             ResourceHub::set_instance(hub.clone());
         }
 

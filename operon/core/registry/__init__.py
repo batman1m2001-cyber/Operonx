@@ -27,6 +27,11 @@ from .config_registry import (
     ConfigEntry,
     ConfigRegistry,
 )
+from .errors import (
+    BOOTSTRAP_ENV_PATHS,
+    EnvVarUnsetError,
+    ResourceHubWarning,
+)
 from .resource_hub import (
     CacheEntry,
     ResourceHub,
@@ -49,6 +54,10 @@ __all__ = [
     "ResourceHub",
     "CacheEntry",
     "HealthCheckResult",
+    # Errors and warnings
+    "ResourceHubWarning",
+    "EnvVarUnsetError",
+    "BOOTSTRAP_ENV_PATHS",
     # Storage backends
     "ConfigStorage",
     "YamlConfigStorage",

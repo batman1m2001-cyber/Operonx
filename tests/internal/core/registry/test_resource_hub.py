@@ -1,15 +1,20 @@
 """Tests for the ResourceHub and ConfigRegistry system."""
 
+import os
+import warnings
 from typing import ClassVar
 
 import pytest
 
 from operon.core.registry import (
     REGISTRY,
+    BOOTSTRAP_ENV_PATHS,
     CacheEntry,
     ConfigRegistry,
+    EnvVarUnsetError,
     HealthCheckResult,
     ResourceHub,
+    ResourceHubWarning,
 )
 from operon.core.utils.yaml_model import YamlModel
 
@@ -727,3 +732,217 @@ class TestGracefulErrorHandling:
         assert result.api_key == "sk-static-key"
 
         hub.close()
+
+
+# ============================================================================
+# Tests: ResourceHub.auto() — discovery + idempotent install
+# ============================================================================
+
+
+class TestResourceHubAuto:
+    """Test the ``auto()`` discovery method (CWD-only, never raises)."""
+
+    def test_auto_finds_yaml_in_cwd(self, tmp_path, monkeypatch):
+        """auto() finds resources.yaml in CWD, installs hub, sets source_path."""
+        ResourceHub._instance = None
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text("service:default:\n  host: localhost\n  port: 8080\n")
+        monkeypatch.chdir(tmp_path)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning fails the test
+            hub = ResourceHub.auto()
+
+        assert hub is not None
+        assert ResourceHub.instance() is hub
+        assert hub.source_path == cfg.resolve()
+        ResourceHub._instance = None
+
+    def test_auto_warns_when_missing(self, tmp_path, monkeypatch):
+        """auto() emits ResourceHubWarning and returns None when no file at CWD."""
+        ResourceHub._instance = None
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.warns(ResourceHubWarning, match="No resources.yaml found"):
+            hub = ResourceHub.auto()
+
+        assert hub is None
+        assert ResourceHub._instance is None
+
+    def test_auto_idempotent_when_hub_already_set(self, tmp_path, monkeypatch):
+        """auto() returns the existing hub unchanged when one is already installed."""
+        ResourceHub._instance = None
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text("service:a:\n  host: a\n")
+        pre_hub = ResourceHub.from_yaml(cfg)
+        ResourceHub.set_instance(pre_hub)
+
+        # CWD has no resources.yaml — but auto() should not warn or replace
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        monkeypatch.chdir(empty_dir)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # would fail if W1 fires
+            result = ResourceHub.auto()
+
+        assert result is pre_hub
+        assert ResourceHub.instance() is pre_hub
+        ResourceHub._instance = None
+
+
+# ============================================================================
+# Tests: warning W2 — unset ${VAR} references at YAML load
+# ============================================================================
+
+
+class TestUnsetEnvVarWarning:
+    """Storage scans for ${VAR} references whose env vars are unset."""
+
+    def test_warns_on_unset_env_vars(self, tmp_path, monkeypatch):
+        """from_yaml emits W2 listing unset vars and the resources using them."""
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text(
+            "service:a:\n"
+            "  host: ${UNSET_HOST_FOR_TEST}\n"
+            "service:b:\n"
+            "  host: ${ALSO_UNSET_FOR_TEST}\n"
+        )
+        monkeypatch.delenv("UNSET_HOST_FOR_TEST", raising=False)
+        monkeypatch.delenv("ALSO_UNSET_FOR_TEST", raising=False)
+
+        with pytest.warns(ResourceHubWarning) as records:
+            ResourceHub.from_yaml(cfg)
+
+        joined = "\n".join(str(r.message) for r in records)
+        assert "UNSET_HOST_FOR_TEST" in joined
+        assert "ALSO_UNSET_FOR_TEST" in joined
+        assert "service:a" in joined
+        assert "service:b" in joined
+
+    def test_no_warning_when_env_vars_set(self, tmp_path, monkeypatch):
+        """from_yaml does not warn when every ${VAR} is set."""
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text("service:a:\n  host: ${SET_HOST_FOR_TEST}\n")
+        monkeypatch.setenv("SET_HOST_FOR_TEST", "actual-value")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning fails
+            ResourceHub.from_yaml(cfg)
+
+    def test_no_warning_when_default_provided(self, tmp_path):
+        """${VAR:default} syntax never warns even when env var is unset."""
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text("service:a:\n  host: ${MAYBE_UNSET_FOR_TEST:fallback}\n")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ResourceHub.from_yaml(cfg)
+
+
+# ============================================================================
+# Tests: error branches — disambiguated messages on get()
+# ============================================================================
+
+
+class TestDisambiguatedErrors:
+    """The get() error message tells the user *which* fix to apply."""
+
+    def test_branch3_includes_source_path_and_available_keys(
+        self, tmp_path, registry
+    ):
+        """Key-not-found error names the source file and lists available keys."""
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text(
+            "service:alpha:\n  host: a\n"
+            "service:beta:\n  host: b\n"
+        )
+        registry.register(MockServiceConfig, mock_service_factory)
+        hub = ResourceHub.from_yaml(cfg)
+
+        with pytest.raises(KeyError) as exc:
+            hub.get("service:gamma")
+
+        msg = str(exc.value)
+        assert str(cfg.resolve()) in msg
+        assert "service:alpha" in msg
+        assert "service:beta" in msg
+
+    def test_branch4_env_var_unset_uses_envvarunseterror(
+        self, tmp_path, monkeypatch
+    ):
+        """Unresolved ${VAR} at get() time raises EnvVarUnsetError (RuntimeError)."""
+        cfg = tmp_path / "resources.yaml"
+        cfg.write_text("service:a:\n  host: ${UNSET_AT_GET_FOR_TEST}\n")
+        monkeypatch.delenv("UNSET_AT_GET_FOR_TEST", raising=False)
+
+        # Suppress W2 here — we're testing the error path, not the warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceHubWarning)
+            hub = ResourceHub.from_yaml(cfg)
+
+        with pytest.raises(EnvVarUnsetError) as exc:
+            hub.get("service:a")
+
+        assert "UNSET_AT_GET_FOR_TEST" in str(exc.value)
+        # Backwards-compat: must still be catchable as RuntimeError
+        assert isinstance(exc.value, RuntimeError)
+
+
+# ============================================================================
+# Tests: operon.bootstrap()
+# ============================================================================
+
+
+class TestBootstrap:
+    """Test the top-level operon.bootstrap() convenience."""
+
+    def test_bootstrap_with_explicit_path(self, tmp_path, monkeypatch):
+        """bootstrap(resources=...) installs the hub from the given file."""
+        import operon
+
+        ResourceHub._instance = None
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("service:a:\n  host: a\n")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceHubWarning)
+            hub = operon.bootstrap(resources=str(cfg), env=False)
+
+        assert hub is not None
+        assert hub.source_path == cfg.resolve()
+        assert ResourceHub.instance() is hub
+        ResourceHub._instance = None
+
+    def test_bootstrap_idempotent(self, tmp_path, monkeypatch):
+        """bootstrap() returns the existing hub unchanged."""
+        import operon
+
+        ResourceHub._instance = None
+        cfg = tmp_path / "first.yaml"
+        cfg.write_text("service:a:\n  host: a\n")
+        pre_hub = ResourceHub.from_yaml(cfg)
+        ResourceHub.set_instance(pre_hub)
+
+        result = operon.bootstrap(env=False)
+        assert result is pre_hub
+        ResourceHub._instance = None
+
+    def test_bootstrap_records_env_path(self, tmp_path, monkeypatch):
+        """bootstrap(env=True) appends the .env path to BOOTSTRAP_ENV_PATHS."""
+        import operon
+
+        ResourceHub._instance = None
+        BOOTSTRAP_ENV_PATHS.clear()
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=bar\n")
+        monkeypatch.chdir(tmp_path)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceHubWarning)
+            operon.bootstrap(env=True)
+
+        assert (tmp_path / ".env").resolve() in BOOTSTRAP_ENV_PATHS
+        assert os.environ.get("FOO") == "bar"
+        BOOTSTRAP_ENV_PATHS.clear()
+        ResourceHub._instance = None

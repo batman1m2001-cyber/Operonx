@@ -2,6 +2,7 @@
 
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,6 +10,7 @@ import yaml
 
 from operon.core.loggings import LOGGER
 
+from ..errors import BOOTSTRAP_ENV_PATHS, EnvVarUnsetError, ResourceHubWarning
 from .base import ConfigStorage
 
 # Pattern to match ${VAR} or ${VAR:default}
@@ -65,7 +67,13 @@ def _interpolate_env_vars(
 
 
 def _raise_missing_env_vars(missing: List[Tuple[str, str]], source: str) -> None:
-    """Raise a consolidated error listing every unresolved ${VAR} reference."""
+    """Raise a consolidated error listing every unresolved ${VAR} reference.
+
+    Raises ``EnvVarUnsetError`` (a ``RuntimeError`` subclass, so existing
+    ``except RuntimeError`` callers continue to work). The message also
+    includes any ``.env`` paths that ``operon.bootstrap()`` searched, so
+    the user knows where to add the missing variable.
+    """
     # Dedupe vars, keep insertion order of first occurrence for grouping
     var_refs: Dict[str, List[str]] = {}
     for var, path in missing:
@@ -81,11 +89,44 @@ def _raise_missing_env_vars(missing: List[Tuple[str, str]], source: str) -> None
         for p in paths:
             lines.append(f"    {p:40s} = ${{{var}}}")
     lines.append("")
+    if BOOTSTRAP_ENV_PATHS:
+        lines.append("  .env paths searched by operon.bootstrap():")
+        for p in BOOTSTRAP_ENV_PATHS:
+            lines.append(f"    - {p}")
+        lines.append("")
     lines.append("  Tips:")
     lines.append("    - Add them to .env (auto-loaded from CWD)")
     lines.append("    - Or set them in your shell environment")
     lines.append("    - For optional vars, use ${VAR:default} syntax")
-    raise RuntimeError("\n".join(lines))
+    raise EnvVarUnsetError("\n".join(lines))
+
+
+def _scan_unset_env_vars(data: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """Walk the loaded config and collect ``(var, key_path)`` for every
+    ``${VAR}`` reference whose env var is currently unset.
+
+    Used at construction time to emit warning W2 — does not raise.
+    """
+    findings: List[Tuple[str, str]] = []
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, str):
+            for match in ENV_VAR_PATTERN.finditer(value):
+                var_name = match.group(1)
+                default = match.group(2)
+                if default is not None:
+                    continue  # has default — never warns
+                if os.environ.get(var_name) is None:
+                    findings.append((var_name, path))
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                visit(v, f"{path}.{k}" if path else k)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                visit(item, f"{path}[{i}]")
+
+    visit(data, "")
+    return findings
 
 
 class YamlConfigStorage(ConfigStorage):
@@ -125,6 +166,37 @@ class YamlConfigStorage(ConfigStorage):
     def __init__(self, file_path: Path | str):
         self._file_path = Path(file_path)
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._warn_on_unset_env_vars()
+
+    def _warn_on_unset_env_vars(self) -> None:
+        """Scan the YAML once at construction and warn for unset ``${VAR}``.
+
+        Emits one ``ResourceHubWarning`` summarising every unset variable
+        and which resource keys reference them. Failing to load (file
+        missing, malformed YAML) is silent — that's not this scan's job.
+        """
+        if not self._file_path.exists():
+            return
+        try:
+            data = self._load_file()
+        except Exception:
+            return  # malformed file — let load_one/load_all surface it
+        findings = _scan_unset_env_vars(data)
+        if not findings:
+            return
+        var_keys: Dict[str, List[str]] = {}
+        for var, key_path in findings:
+            top = key_path.split(".", 1)[0] if "." in key_path else key_path
+            var_keys.setdefault(var, [])
+            if top not in var_keys[var]:
+                var_keys[var].append(top)
+        lines = [
+            f"resources.yaml at {self._file_path} references unset environment "
+            f"variable(s); resources will fail at resolution unless set before then:"
+        ]
+        for var, keys in var_keys.items():
+            lines.append(f"  - ${{{var}}} (used by: {', '.join(keys)})")
+        warnings.warn("\n".join(lines), ResourceHubWarning, stacklevel=3)
 
     def _load_file(self) -> Dict[str, Any]:
         """Load and flatten YAML. Nested dicts become 'category:name' keys."""

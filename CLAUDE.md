@@ -174,6 +174,8 @@ cp env.example .env
 # Edit .env with your OPENAI_API_KEY, LANGFUSE_* keys, etc.
 ```
 
+The `.env` file is **not** auto-loaded by `Operon(graph)`. Call `operon.bootstrap()` at process startup to load `.env` and `resources.yaml` — see [Resource Setup](#resource-setup-bootstrap--resourcehub) below.
+
 ### Pre-commit Hooks
 
 Auto-format and lint on every commit:
@@ -225,6 +227,59 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full contributor guide, including:
 - Documentation update rules
 
 ## Key Patterns
+
+### Resource Setup (`bootstrap` + `ResourceHub`)
+
+Provider ops (`LLMOp`, `EmbeddingOp`, `RerankOp`, telemetry tracers) resolve credentials and model configs through the global `ResourceHub`. The hub is **not** installed automatically — you must set it up before constructing an `Operon` engine that uses any provider op.
+
+**Convenience (covers 95% of cases):**
+
+```python
+import operon
+from operon.core import Operon
+
+operon.bootstrap()                  # loads ./.env + ./resources.yaml from CWD
+engine = Operon(graph)
+```
+
+**Explicit path (notebooks, multi-config, tests):**
+
+```python
+import operon
+operon.bootstrap(resources="configs/prod.yaml")  # also loads ./.env unless env=False
+```
+
+**Pure-compute graphs need no setup at all** — `Operon(graph)` works hub-free if the graph doesn't reference any resource by name:
+
+```python
+from operon.core import Operon, GraphOp, op, START, END, PARENT
+
+@op
+def double(x: int):
+    return {"result": x * 2}
+
+with GraphOp(name="pure") as graph:
+    step = double(x=PARENT["x"], outputs={"result": PARENT["result"]})
+    START >> step >> END
+
+result = await Operon(graph).run(inputs={"x": 5})  # no .env, no resources.yaml needed
+```
+
+**Behavior reference:**
+
+| Situation | What happens |
+|---|---|
+| `bootstrap()`, no `./resources.yaml` | `ResourceHubWarning` named "No resources.yaml found at ..." — pure compute still works; provider ops will fail at op resolution. |
+| `bootstrap()`, `${VAR}` referenced but unset | `ResourceHubWarning` listing every unset var and the resource that uses it. Setting the var before `engine.run()` resolves it. |
+| `Operon(graph)` with provider op, no hub installed | `RuntimeError("ResourceHub not initialized. ...")` at engine init (eager warmup). |
+| `hub.get("llm:gpt-4o")` with key not present | `KeyError` listing source path and available keys. |
+| `hub.get(key)` with `${VAR}` still unset at resolve time | `EnvVarUnsetError` (subclass of `RuntimeError`) naming the var, source path, and `.env` paths searched. |
+
+**Key invariants:**
+
+- `Operon(graph)` does **not** load `.env` or `resources.yaml`. It does not clobber a pre-installed hub. It is a pure orchestrator.
+- `ResourceHub.set_instance(hub)` is authoritative — `bootstrap()` and `auto()` are idempotent and respect a hub that's already installed.
+- Run from any CWD — `bootstrap(resources="absolute/path.yaml")` decouples setup from working directory.
 
 ### Op Definition
 ```python
