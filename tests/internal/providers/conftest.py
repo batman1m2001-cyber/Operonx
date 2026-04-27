@@ -5,6 +5,7 @@ Discovery: walks up from this file to find the project root (nearest
 If ``resources.yaml`` is missing, all provider tests skip gracefully.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,33 @@ RESOURCES_FILE = ROOT / "resources.yaml"
 # Auto-load .env from project root (non-override, preserves shell env)
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE, override=False)
+
+# CI-safe defaults for env vars that ``resources.yaml`` references. Many
+# provider tests instantiate ops (``LLMOp.of(resource="gpt-4o")``) which
+# resolves the config via ``hub.get(...)`` — that triggers ``${VAR}``
+# interpolation and would raise ``EnvVarUnsetError`` if any referenced
+# variable is missing. The actual network calls are mocked by individual
+# tests; integration tests that need real credentials are auto-marked
+# (see ``pytest_collection_modifyitems`` below) and excluded under the
+# ``-m "not integration"`` selector.
+#
+# ``setdefault`` ensures real values from ``.env`` (loaded above) win on
+# developer machines.
+_CI_DUMMY_ENV = {
+    "OPENAI_API_KEY": "ci-dummy-openai-key",
+    "ANTHROPIC_API_KEY": "ci-dummy-anthropic-key",
+    "ANTHROPIC_BASE_URL": "https://example.invalid",
+    "ANTHROPIC_MODEL": "claude-haiku",
+    "DEEPINFRA_API_KEY": "ci-dummy-deepinfra-key",
+    "BGE_M3_EMBEDDING_PATH": "/tmp/ci-dummy-embedding",
+    "PINECONE_API_KEY": "ci-dummy-pinecone-key",
+    "BGE_M3_RERANKER_PATH": "/tmp/ci-dummy-reranker",
+    "LANGFUSE_PUBLIC_KEY": "ci-dummy-langfuse-public",
+    "LANGFUSE_SECRET_KEY": "ci-dummy-langfuse-secret",
+    "LANGFUSE_HOST": "https://example.invalid",
+}
+for _key, _val in _CI_DUMMY_ENV.items():
+    os.environ.setdefault(_key, _val)
 
 # =============================================================================
 # Skip-all hook — if resources.yaml is missing, skip every test in this suite
