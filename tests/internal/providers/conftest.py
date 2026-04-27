@@ -75,11 +75,18 @@ def pytest_collection_modifyitems(config, items):
 
     1. If ``resources.yaml`` is missing entirely (e.g. fresh clone with no
        config), skip the whole provider suite — nothing reachable.
-    2. Otherwise, auto-mark any test whose class name ends with
-       ``Integration`` (or whose function name contains ``_integration``)
-       with ``pytest.mark.integration`` so the standard ``-m "not
-       integration"`` selector excludes them by default. CI runs without
-       real LLM credentials and shouldn't try to dial out.
+    2. Otherwise, mark **every** test in this directory with
+       ``pytest.mark.integration``. The standard ``-m "not integration"``
+       selector then excludes them by default in CI. Provider tests
+       universally rely on either real API credentials or on resources
+       loaded from a configured ResourceHub — neither is available in
+       CI's default environment.
+
+       Tests that are genuinely mock-only and cheap to run on every PR
+       can opt back in by adding ``@pytest.mark.unit`` — the loop below
+       respects that marker and skips the auto-integration mark for
+       those items. (No tests use it today; it's available for future
+       refactoring.)
     """
     if not RESOURCES_FILE.exists():
         print(
@@ -92,44 +99,21 @@ def pytest_collection_modifyitems(config, items):
         return
 
     integration_marker = pytest.mark.integration
-
-    # Heuristics: a test is integration if any of these match.
-    # - Class name contains a known "exercises real LLM execution" suffix.
-    #   These classes don't mock the network layer, so on CI (with dummy
-    #   keys) they either return empty responses or hit real endpoints
-    #   with invalid creds and 401.
-    integration_class_substrings = (
-        "Integration",  # explicit marker
-        "LoadBalancing",  # multi-resource execution
-        "Fallback",  # primary/fallback execution
-        "Tools",  # function-calling execution
-        "ResponseFormat",  # JSON-mode / structured output execution
-        "Streaming",  # streaming generation (real or fake-streamed API)
-    )
-    integration_name_substrings = (
-        "_real",  # `test_*_real` — explicit "calls real API" naming
-        "_integration",  # explicit "_integration" suffix
-    )
-
+    providers_dir_str = str(Path(__file__).parent.resolve())
     for item in items:
-        # Tests gated by `@pytest.mark.skipif(not API_KEY, ...)` are
-        # integration tests — they only run when real credentials are
-        # present. The CI dummy-env defaults above make those `skipif`
-        # conditions evaluate to "key is set", which would let the test
-        # run against a real endpoint with an invalid key. Treat any
-        # `skipif`-marked provider test as integration.
-        if any(m.name == "skipif" for m in item.iter_markers()):
-            item.add_marker(integration_marker)
+        # Only touch items physically located under this conftest's
+        # directory. `pytest_collection_modifyitems` is called once per
+        # session with **all** collected items, not just those covered by
+        # this conftest.
+        try:
+            item_path = Path(str(item.path)).resolve()
+        except Exception:
             continue
-
-        cls = getattr(item, "cls", None)
-        cls_name = cls.__name__ if cls is not None else ""
-        name_lower = item.name.lower()
-
-        if any(sub in cls_name for sub in integration_class_substrings) or any(
-            sub in name_lower for sub in integration_name_substrings
-        ):
-            item.add_marker(integration_marker)
+        if providers_dir_str not in str(item_path):
+            continue
+        if any(m.name == "unit" for m in item.iter_markers()):
+            continue
+        item.add_marker(integration_marker)
 
 
 # =============================================================================

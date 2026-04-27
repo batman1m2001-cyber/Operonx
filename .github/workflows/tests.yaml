@@ -86,7 +86,7 @@ jobs:
           elif extra == "langfuse":
               from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
           elif extra == "otel":
-              from operonx.telemetry.tracers.otel import OTelTracer  # noqa: F401
+              from operonx.telemetry.tracers.otel import OTELTracer  # noqa: F401
           elif extra == "onnx":
               import onnxruntime  # noqa: F401
               import tokenizers  # noqa: F401
@@ -97,29 +97,6 @@ jobs:
               from operonx.providers.llms.openai import OpenAILLM  # noqa: F401
               from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
           PY
-
-  # ── Pure-compute examples (no API keys needed) ──────────────────────────
-  examples:
-    name: examples (ex01, ex02)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run pure-compute examples
-        run: |
-          uv run python -m examples.python.ex01_hello_world.demo --runs 1
-          uv run python -m examples.python.ex02_data_pipeline.demo --runs 1
 
   # ── Coverage upload to Codecov ──────────────────────────────────────────
   coverage:

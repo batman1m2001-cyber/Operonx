@@ -1,12 +1,15 @@
-"""Factory function for creating embedding backends."""
+"""Factory function for creating embedding backends.
+
+Each backend is **lazy-imported** inside its dispatch branch so that
+``import operonx.providers.embeddings`` doesn't pull in heavy optional
+dependencies (numpy, onnxruntime, transformers, torch). A user who only
+installed ``operonx[anthropic]`` can still import the embeddings package
+without crashing — they only hit the missing-dep error if they actually
+try to instantiate the corresponding backend.
+"""
 
 from operonx.providers.embeddings.base import BaseEmbedder
-from operonx.providers.embeddings.huggingface import HFEmbedding
-from operonx.providers.embeddings.onnx import ONNXEmbedding
-from operonx.providers.embeddings.tei import TEIEmbedding
-from operonx.providers.embeddings.vllm import VLLMEmbedding
-
-from .config import EmbeddingConfig, EmbeddingType
+from operonx.providers.embeddings.config import EmbeddingConfig, EmbeddingType
 
 
 def create_embedding(config: EmbeddingConfig) -> BaseEmbedder:
@@ -20,30 +23,39 @@ def create_embedding(config: EmbeddingConfig) -> BaseEmbedder:
 
     Raises:
         ValueError: If api_type is unsupported.
+        ImportError: With a helpful pointer to the right ``operonx[<extra>]``
+            install when an optional dependency is missing.
     """
     if config.api_type == EmbeddingType.TEXT_EMBEDDING_INFERENCE:
-        model_class = TEIEmbedding
-    elif config.api_type in (EmbeddingType.VLLM, EmbeddingType.OPENAI, EmbeddingType.AZURE):
-        model_class = VLLMEmbedding
-    elif config.api_type == EmbeddingType.HF:
-        model_class = HFEmbedding
-    elif config.api_type == EmbeddingType.ONNX:
-        model_class = ONNXEmbedding
-    else:
-        raise ValueError(f"Unsupported Model: {config.api_type}")
-    return model_class(config)
+        try:
+            from operonx.providers.embeddings.tei import TEIEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("TEIEmbedding", "providers", e)) from e
+        return TEIEmbedding(config)
+    if config.api_type in (EmbeddingType.VLLM, EmbeddingType.OPENAI, EmbeddingType.AZURE):
+        try:
+            from operonx.providers.embeddings.vllm import VLLMEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("VLLMEmbedding", "providers", e)) from e
+        return VLLMEmbedding(config)
+    if config.api_type == EmbeddingType.HF:
+        try:
+            from operonx.providers.embeddings.huggingface import HFEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("HFEmbedding", "huggingface", e)) from e
+        return HFEmbedding(config)
+    if config.api_type == EmbeddingType.ONNX:
+        try:
+            from operonx.providers.embeddings.onnx import ONNXEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("ONNXEmbedding", "onnx", e)) from e
+        return ONNXEmbedding(config)
+    raise ValueError(f"Unsupported Model: {config.api_type}")
 
 
-async def main():
-    embed = create_embedding(config=EmbeddingConfig.default())
-
-    # Test with sample text
-    test_text = "What is machine learning and how does it work?"
-    vectors = await embed.run(test_text)
-    print(f"Generated embedding vectors: {vectors}")
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+def _missing_extra_message(backend: str, extra: str, exc: ImportError) -> str:
+    return (
+        f"{backend} requires additional packages.\n"
+        f"  Install with: pip install operonx[{extra}]\n"
+        f"  Original error: {exc}"
+    )

@@ -1,7 +1,13 @@
-"""LLM providers for operonx workflows."""
+"""LLM providers for operonx workflows.
 
-from operonx.providers.llms.anthropic import AnthropicModel
-from operonx.providers.llms.azure import AzureSDKModel
+Light symbols (config classes, ``BaseLLM``, ``create_llm``,
+``LLMGenerator``) are eager. Backend classes are lazy-loaded via
+module-level ``__getattr__`` so this package can be imported with only
+core dependencies — Gemini's ``google-cloud-aiplatform``, Anthropic's
+``httpx``, etc. are only required when their backend is actually
+accessed.
+"""
+
 from operonx.providers.llms.base import BaseLLM
 from operonx.providers.llms.config import (
     AnthropicConfig,
@@ -12,22 +18,32 @@ from operonx.providers.llms.config import (
     OpenAIConfig,
 )
 from operonx.providers.llms.factory import create_llm
-from operonx.providers.llms.openai import OpenAISDKModel
 from operonx.providers.llms.response import LLMGenerator
 
+_LAZY_BACKENDS = {
+    "OpenAISDKModel": ("operonx.providers.llms.openai", "providers"),
+    "AzureSDKModel": ("operonx.providers.llms.azure", "providers"),
+    "AnthropicModel": ("operonx.providers.llms.anthropic", "anthropic"),
+    "GeminiOpenAISDKModel": ("operonx.providers.llms.gemini", "gemini"),
+}
 
-# Lazy import for Gemini to avoid requiring google-cloud-aiplatform
-def __getattr__(name):
-    if name == "GeminiOpenAISDKModel":
+
+def __getattr__(name: str):
+    if name in _LAZY_BACKENDS:
+        module_path, extra = _LAZY_BACKENDS[name]
         try:
-            from operonx.providers.llms.gemini import GeminiOpenAISDKModel
+            import importlib
 
-            return GeminiOpenAISDKModel
-        except ImportError:
+            module = importlib.import_module(module_path)
+        except ImportError as exc:
             raise ImportError(
-                "Gemini support requires google-cloud-aiplatform. "
-                "Install it with: pip install operonx-providers[gemini]"
-            )
+                f"{name} requires additional packages.\n"
+                f"  Install with: pip install operonx[{extra}]\n"
+                f"  Original error: {exc}"
+            ) from exc
+        cls = getattr(module, name)
+        globals()[name] = cls
+        return cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
