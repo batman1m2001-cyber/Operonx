@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional
@@ -10,6 +11,7 @@ from operon.core.loggings import LOGGER
 from operon.core.utils.yaml_model import YamlModel
 
 from .config_registry import REGISTRY
+from .errors import EnvVarUnsetError, ResourceHubWarning
 from .shortcuts.health import HealthCheckResult
 from .storage import ConfigStorage, YamlConfigStorage
 
@@ -49,14 +51,24 @@ class ResourceHub:
 
     _instance: ClassVar[Optional["ResourceHub"]] = None
 
-    def __init__(self, storage: ConfigStorage):
+    def __init__(self, storage: ConfigStorage, source_path: Optional[Path] = None):
         """Initialize hub with storage backend.
 
         Args:
             storage: Storage backend for configs
+            source_path: Absolute path of the file the storage was loaded
+                from (set by ``from_yaml`` / ``from_json``). ``None`` for
+                in-memory or test-injected storage. Used in error messages
+                to tell the user where to fix things.
         """
         self._storage = storage
         self._cache: Dict[str, CacheEntry] = {}
+        self._source_path: Optional[Path] = source_path
+
+    @property
+    def source_path(self) -> Optional[Path]:
+        """Absolute path the hub was loaded from, or ``None``."""
+        return self._source_path
 
     # ========================================================================
     # Factory Methods
@@ -72,8 +84,9 @@ class ResourceHub:
         Returns:
             ResourceHub instance
         """
-        storage = YamlConfigStorage(Path(path))
-        return cls(storage)
+        abs_path = Path(path).resolve()
+        storage = YamlConfigStorage(abs_path)
+        return cls(storage, source_path=abs_path)
 
     @classmethod
     def from_json(cls, path: str | Path) -> "ResourceHub":
@@ -87,25 +100,61 @@ class ResourceHub:
         """
         from .storage import JsonConfigStorage
 
-        storage = JsonConfigStorage(Path(path))
-        return cls(storage)
+        abs_path = Path(path).resolve()
+        storage = JsonConfigStorage(abs_path)
+        return cls(storage, source_path=abs_path)
+
+    @classmethod
+    def auto(cls) -> Optional["ResourceHub"]:
+        """Try to install ResourceHub from ``./resources.yaml`` in CWD.
+
+        Behavior:
+        - If a hub is already installed, return it unchanged (idempotent).
+        - If ``./resources.yaml`` exists, load it, install the singleton,
+          and return the new hub.
+        - If not found, emit a :class:`ResourceHubWarning` naming the path
+          checked and return ``None``. No singleton is installed.
+
+        Never raises. The warning is the early signal that setup is
+        incomplete; silent miss would defer the problem to first
+        resource resolution.
+        """
+        if cls._instance is not None:
+            return cls._instance
+
+        candidate = (Path.cwd() / "resources.yaml").resolve()
+        if not candidate.exists():
+            warnings.warn(
+                f"No resources.yaml found at {candidate}. "
+                "ResourceHub not installed; provider ops will fail at "
+                "resolution. Call ResourceHub.from_yaml(<path>) with an "
+                "explicit path if your file lives elsewhere.",
+                ResourceHubWarning,
+                stacklevel=2,
+            )
+            return None
+
+        hub = cls.from_yaml(candidate)
+        cls.set_instance(hub)
+        return hub
 
     @classmethod
     def instance(cls) -> "ResourceHub":
         """Get the global ResourceHub singleton.
 
         Raises:
-            RuntimeError: If no hub has been loaded. Usually means the
-                workflow was run without constructing an ``Operon`` engine,
-                or without a ``resources.yaml`` file.
+            RuntimeError: If no hub has been loaded. The message points at
+                ``operon.bootstrap()`` and ``ResourceHub.from_yaml(...)``
+                as the two ways to install one.
         """
         if cls._instance is None:
             raise RuntimeError(
-                "ResourceHub not initialized. Construct an Operon engine first:\n"
-                "  from operon.core import Operon\n"
-                "  engine = Operon(graph)  # auto-loads ./resources.yaml\n"
-                "Or pass an explicit path:\n"
-                "  engine = Operon(graph, resources='path/to/resources.yaml')"
+                "ResourceHub not initialized. Install one before resolving resources:\n"
+                "  import operon\n"
+                "  operon.bootstrap()                            # auto-discover ./resources.yaml + .env\n"
+                "Or with an explicit path:\n"
+                "  from operon.core.registry import ResourceHub\n"
+                "  ResourceHub.set_instance(ResourceHub.from_yaml('path/to/resources.yaml'))"
             )
         return cls._instance
 
@@ -225,7 +274,12 @@ class ResourceHub:
             Initialized resource instance
 
         Raises:
-            KeyError: If key not found or resource failed to initialize
+            KeyError: If key not found or resource failed to initialize.
+                The message includes ``source_path`` and available keys
+                so the user can tell which fix to apply.
+            EnvVarUnsetError: If the resource references a ``${VAR}``
+                whose env var is unset. Subclass of ``RuntimeError`` for
+                backwards compatibility.
         """
         # Return cached instance if available
         if key in self._cache and self._cache[key].instance is not None:
@@ -234,10 +288,12 @@ class ResourceHub:
             self._refresh_keycloak(instance)
             return instance
 
-        # Load config from storage
+        # Load config from storage. ``EnvVarUnsetError`` from missing
+        # ``${VAR}`` interpolation propagates as-is (branch 4) — distinct
+        # from the "key not found" path below.
         config = self._load_config(key)
         if not config:
-            raise KeyError(f"Resource '{key}' not found in registry")
+            raise KeyError(self._not_found_message(key))
 
         # Resolve keycloak token if configured (api_key: "keycloak:xxx")
         resolved_config = self._resolve_keycloak(config)
@@ -278,8 +334,31 @@ class ResourceHub:
         """
         config = self._load_config(key)
         if not config:
-            raise KeyError(f"Config '{key}' not found in registry")
+            raise KeyError(self._not_found_message(key))
         return config
+
+    def _not_found_message(self, key: str) -> str:
+        """Build a 'not found' error string with available keys + source.
+
+        Disambiguates branch (3) from branch (1)/(2): the user knows the
+        hub is configured (``source_path`` is shown) and that the key
+        simply isn't present (``Available`` is shown).
+        """
+        try:
+            available = sorted(self._storage.load_all().keys())
+        except Exception:
+            available = sorted(self._cache.keys())
+        source = str(self._source_path) if self._source_path else "<in-memory storage>"
+        if available:
+            avail_str = ", ".join(repr(k) for k in available)
+            return (
+                f"Resource '{key}' not found in {source}.\n"
+                f"  Available: [{avail_str}]"
+            )
+        return (
+            f"Resource '{key}' not found in {source}.\n"
+            f"  (No resources loaded — file may be empty.)"
+        )
 
     def register(self, config: YamlModel, registry_key: Optional[str] = None) -> str:
         """Register new resource config.

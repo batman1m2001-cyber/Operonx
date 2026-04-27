@@ -28,10 +28,11 @@ use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
 use serde_json::Value;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use super::base::{ConfigDict, ConfigStorage};
 use crate::core::exceptions::OperonError;
+use crate::core::registry::bootstrap_state;
 
 /// YAML-file–backed config store with `${VAR}` interpolation.
 pub struct YamlConfigStorage {
@@ -41,6 +42,14 @@ pub struct YamlConfigStorage {
 
 impl YamlConfigStorage {
     /// Create a storage handle for `file_path`. Parent directory is created if missing.
+    ///
+    /// Performs a one-shot scan of the file at construction time and emits a
+    /// `tracing::warn!` per `${VAR}` whose env var is currently unset, with
+    /// the resource keys that reference it. This matches Python's
+    /// `ResourceHubWarning` (W2) — early signal that a setup gap exists,
+    /// without failing load. Lazy `${VAR}` resolution still happens at
+    /// `load_one` / `load_all` time, where missing vars surface as
+    /// [`OperonError::EnvVarUnset`].
     pub fn new(file_path: impl Into<PathBuf>) -> Result<Self, OperonError> {
         let file_path = file_path.into();
         if let Some(parent) = file_path.parent() {
@@ -48,10 +57,50 @@ impl YamlConfigStorage {
                 fs::create_dir_all(parent)?;
             }
         }
-        Ok(Self {
+        let s = Self {
             file_path,
             write_lock: Mutex::new(()),
-        })
+        };
+        s.warn_on_unset_env_vars();
+        Ok(s)
+    }
+
+    /// Scan once at construction. Best-effort — silently skips if the file
+    /// is missing or malformed, since `load_one`/`load_all` will surface
+    /// those errors at their own call sites.
+    fn warn_on_unset_env_vars(&self) {
+        let data = match self.load_file() {
+            Ok(d) if !d.is_empty() => d,
+            _ => return,
+        };
+
+        // Group findings by var → list of top-level keys (resources) referencing it.
+        let mut var_keys: Vec<(String, Vec<String>)> = Vec::new();
+        for (key, value) in &data {
+            scan_unset_vars(value, |var| {
+                if let Some((_, keys)) = var_keys.iter_mut().find(|(v, _)| v == var) {
+                    if !keys.iter().any(|k| k == key) {
+                        keys.push(key.clone());
+                    }
+                } else {
+                    var_keys.push((var.to_string(), vec![key.clone()]));
+                }
+            });
+        }
+        if var_keys.is_empty() {
+            return;
+        }
+
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "resources.yaml at {} references unset environment variable(s); \
+             resources will fail at resolution unless set before then:",
+            self.file_path_str()
+        ));
+        for (var, keys) in &var_keys {
+            lines.push(format!("  - ${{{}}} (used by: {})", var, keys.join(", ")));
+        }
+        warn!("{}", lines.join("\n"));
     }
 
     /// Load + flatten the YAML file into `"category:name" → Value::Object` map.
@@ -119,7 +168,7 @@ impl ConfigStorage for YamlConfigStorage {
         let mut missing: Vec<(String, String)> = Vec::new();
         let resolved = interpolate_env_vars(&Value::Object(map.clone()), &mut missing, key);
         if !missing.is_empty() {
-            return Err(missing_env_error(&missing, &self.file_path_str()));
+            return Err(missing_env_error(&missing, Some(self.file_path.clone())));
         }
         match resolved {
             Value::Object(m) => Ok(Some(m)),
@@ -146,7 +195,7 @@ impl ConfigStorage for YamlConfigStorage {
             }
         }
         if !missing.is_empty() {
-            return Err(missing_env_error(&missing, &self.file_path_str()));
+            return Err(missing_env_error(&missing, Some(self.file_path.clone())));
         }
         Ok(out)
     }
@@ -262,38 +311,77 @@ fn substitute_placeholders(s: &str, missing: &mut Vec<(String, String)>, path: &
     out
 }
 
-fn missing_env_error(missing: &[(String, String)], source: &str) -> OperonError {
-    // Dedupe, preserving insertion order.
-    let mut var_refs: Vec<(String, Vec<String>)> = Vec::new();
-    for (var, path) in missing {
-        if let Some(entry) = var_refs.iter_mut().find(|(v, _)| v == var) {
-            entry.1.push(path.clone());
-        } else {
-            var_refs.push((var.clone(), vec![path.clone()]));
+fn missing_env_error(
+    missing: &[(String, String)],
+    source_path: Option<PathBuf>,
+) -> OperonError {
+    // Pick the first missing entry as the canonical (var, key) for the typed
+    // variant. The first entry's `path` is something like
+    // `"llm:gpt-4o.api_key"`; we strip the field-suffix to recover the
+    // resource key. Disambiguates branch (4) from generic Config errors so
+    // callers can match on `OperonError::EnvVarUnset`.
+    let (var, key) = if let Some((var, path)) = missing.first() {
+        let key = path.split_once('.').map(|(k, _)| k).unwrap_or(path).to_string();
+        (var.clone(), key)
+    } else {
+        (String::new(), String::new())
+    };
+    OperonError::EnvVarUnset {
+        var,
+        key,
+        source_path,
+        env_paths: bootstrap_state::env_paths(),
+    }
+}
+
+/// Walk `value` and call `on_unset(var)` for every `${VAR}` (no default) whose
+/// env var is currently unset. Used by [`YamlConfigStorage::warn_on_unset_env_vars`].
+fn scan_unset_vars(value: &Value, mut on_unset: impl FnMut(&str)) {
+    fn walk(v: &Value, cb: &mut dyn FnMut(&str)) {
+        match v {
+            Value::String(s) => {
+                let bytes = s.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() {
+                    if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
+                        if let Some(end_rel) = s[i + 2..].find('}') {
+                            let end = i + 2 + end_rel;
+                            let inner = &s[i + 2..end];
+                            // Skip references with defaults (`${VAR:default}`).
+                            let var_name = match inner.find(':') {
+                                Some(_) => {
+                                    i = end + 1;
+                                    continue;
+                                }
+                                None => inner,
+                            };
+                            if !var_name.is_empty()
+                                && !var_name.contains('{')
+                                && std::env::var(var_name).is_err()
+                            {
+                                cb(var_name);
+                            }
+                            i = end + 1;
+                            continue;
+                        }
+                    }
+                    i += s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                }
+            }
+            Value::Object(m) => {
+                for v in m.values() {
+                    walk(v, cb);
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr {
+                    walk(v, cb);
+                }
+            }
+            _ => {}
         }
     }
-
-    let mut lines = Vec::new();
-    lines.push(format!("Missing environment variables referenced in {}", source));
-    lines.push(String::new());
-    lines.push("  Missing:".to_string());
-    for (var, _) in &var_refs {
-        lines.push(format!("    - {}", var));
-    }
-    lines.push(String::new());
-    lines.push("  Referenced by:".to_string());
-    for (var, paths) in &var_refs {
-        for p in paths {
-            lines.push(format!("    {:<40} = ${{{}}}", p, var));
-        }
-    }
-    lines.push(String::new());
-    lines.push("  Tips:".to_string());
-    lines.push("    - Add them to .env (auto-loaded from CWD)".to_string());
-    lines.push("    - Or set them in your shell environment".to_string());
-    lines.push("    - For optional vars, use ${VAR:default} syntax".to_string());
-
-    OperonError::Config(lines.join("\n"))
+    walk(value, &mut on_unset);
 }
 
 // Unused but exposed for potential callers that want just the path string.

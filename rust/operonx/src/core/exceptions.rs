@@ -11,6 +11,7 @@
 //! `isinstance(err, ParserError)`.
 
 use std::error::Error as StdError;
+use std::path::PathBuf;
 
 /// Op-level error categories, mirroring Python's `OpError` subclass hierarchy.
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +59,22 @@ pub enum OperonError {
 
     #[error("schema: unsupported schema_version {0}; expected {expected}", expected = SUPPORTED_SCHEMA_VERSION)]
     UnsupportedSchema(String),
+
+    /// `${VAR}` reference in `resources.yaml` could not be resolved.
+    ///
+    /// Distinct from [`OperonError::ResourceHub`] / [`OperonError::Config`] so
+    /// callers can match specifically on missing-env-var setup problems and
+    /// give the user a tailored remediation hint. Mirrors Python's
+    /// `EnvVarUnsetError` (subclass of `RuntimeError`).
+    #[error(
+        "resource '{key}' references unset environment variable {var:?}\n  source: {source_path:?}\n  .env paths searched: {env_paths:?}"
+    )]
+    EnvVarUnset {
+        var: String,
+        key: String,
+        source_path: Option<PathBuf>,
+        env_paths: Vec<PathBuf>,
+    },
 }
 
 /// The serialized graph schema version Rust accepts. Bump on breaking changes.

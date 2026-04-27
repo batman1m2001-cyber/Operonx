@@ -19,7 +19,7 @@
 //! [`ConfigRegistry`]: crate::core::registry::config_registry::ConfigRegistry
 //! [`ResourceInstance`]: crate::core::registry::config_registry::ResourceInstance
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
@@ -65,6 +65,11 @@ pub struct ResourceHub {
     /// Serializes cache-miss → factory → cache-fill paths so a single slow
     /// factory doesn't run twice under contention.
     load_lock: Mutex<()>,
+    /// Absolute path of the file the storage was loaded from (set by
+    /// `from_yaml` / `from_json`). `None` for in-memory or test-injected
+    /// storage. Surfaced in `get()` error messages so the user knows where
+    /// to fix things.
+    source_path: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for ResourceHub {
@@ -76,31 +81,92 @@ impl std::fmt::Debug for ResourceHub {
 }
 
 impl ResourceHub {
-    /// Build a hub around `storage`.
+    /// Build a hub around `storage` with no source path.
     pub fn new(storage: Arc<dyn ConfigStorage>) -> Self {
+        Self::new_with_source(storage, None)
+    }
+
+    fn new_with_source(storage: Arc<dyn ConfigStorage>, source_path: Option<PathBuf>) -> Self {
         Self {
             storage,
             cache: DashMap::new(),
             load_lock: Mutex::new(()),
+            source_path,
         }
     }
 
     /// Hub backed by a YAML file at `path` (with env-var interpolation).
     pub fn from_yaml(path: impl AsRef<Path>) -> Result<Self, OperonError> {
-        let storage = YamlConfigStorage::new(path.as_ref().to_path_buf())?;
-        Ok(Self::new(Arc::new(storage)))
+        let abs = path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf());
+        let storage = YamlConfigStorage::new(abs.clone())?;
+        Ok(Self::new_with_source(Arc::new(storage), Some(abs)))
     }
 
     /// Hub backed by a JSON file at `path`.
     pub fn from_json(path: impl AsRef<Path>) -> Result<Self, OperonError> {
-        let storage = JsonConfigStorage::new(path.as_ref().to_path_buf())?;
-        Ok(Self::new(Arc::new(storage)))
+        let abs = path.as_ref().canonicalize().unwrap_or_else(|_| path.as_ref().to_path_buf());
+        let storage = JsonConfigStorage::new(abs.clone())?;
+        Ok(Self::new_with_source(Arc::new(storage), Some(abs)))
     }
 
     /// Hub with no provider configs — tests and graphs that never touch a
     /// resource. Every `load_*` / `get_*` call returns `None`.
     pub fn empty() -> Self {
         Self::new(Arc::new(EmptyStorage))
+    }
+
+    /// Absolute path the hub was loaded from, or `None` for in-memory hubs.
+    pub fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
+    }
+
+    /// Try to install a [`ResourceHub`] from `./resources.yaml` in CWD.
+    ///
+    /// Behavior mirrors Python's `ResourceHub.auto()`:
+    /// - If a hub is already installed, return it unchanged (idempotent).
+    /// - If `./resources.yaml` exists, load it, install the singleton,
+    ///   and return the new hub.
+    /// - If not found, emit a `tracing::warn!` and return `None`. No
+    ///   singleton is installed.
+    ///
+    /// Never returns an error from a missing file — the warning is the
+    /// early signal that setup is incomplete.
+    pub fn auto() -> Option<Arc<ResourceHub>> {
+        if let Ok(g) = global().read() {
+            if let Some(existing) = g.clone() {
+                return Some(existing);
+            }
+        }
+
+        let candidate = std::env::current_dir()
+            .map(|p| p.join("resources.yaml"))
+            .unwrap_or_else(|_| PathBuf::from("resources.yaml"));
+        if !candidate.exists() {
+            warn!(
+                "No resources.yaml found at {}. ResourceHub not installed; \
+                 provider ops will fail at resolution. Call \
+                 ResourceHub::from_yaml(<path>) with an explicit path if \
+                 your file lives elsewhere.",
+                candidate.display()
+            );
+            return None;
+        }
+
+        match ResourceHub::from_yaml(&candidate) {
+            Ok(hub) => {
+                let arc = Arc::new(hub);
+                ResourceHub::set_instance(arc.clone());
+                Some(arc)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load resources.yaml at {}: {}",
+                    candidate.display(),
+                    e
+                );
+                None
+            }
+        }
     }
 
     // ── Global singleton ─────────────────────────────────────────────────
@@ -116,10 +182,11 @@ impl ResourceHub {
         let guard = global().read().expect("ResourceHub global lock poisoned");
         guard.clone().ok_or_else(|| {
             OperonError::ResourceHub(
-                "ResourceHub not initialized. Construct an Operon engine first:\n\
-                 \u{20} let engine = Operon::new(graph)?;  // auto-loads ./resources.yaml\n\
-                 Or pass an explicit path:\n\
-                 \u{20} let engine = OperonBuilder::new(graph).resources(\"path/to/resources.yaml\").build()?;"
+                "ResourceHub not initialized. Install one before resolving resources:\n\
+                 \u{20} operonx::bootstrap();                                  // auto-discover ./resources.yaml + .env\n\
+                 Or with an explicit path:\n\
+                 \u{20} operonx::ResourceHub::set_instance(\n\
+                 \u{20}     std::sync::Arc::new(operonx::ResourceHub::from_yaml(\"path/to/resources.yaml\")?));"
                     .to_string(),
             )
         })
@@ -206,7 +273,7 @@ impl ResourceHub {
 
         let config = self
             .load_config(key)?
-            .ok_or_else(|| OperonError::ResourceHub(format!("resource '{}' not found", key)))?;
+            .ok_or_else(|| OperonError::ResourceHub(self.not_found_message(key)))?;
 
         // Category is the prefix before ":".
         let category = key
@@ -240,7 +307,48 @@ impl ResourceHub {
     /// Fetch the config dict for `key` without materializing the instance.
     pub fn get_config(&self, key: &str) -> Result<ConfigDict, OperonError> {
         self.load_config(key)?
-            .ok_or_else(|| OperonError::ResourceHub(format!("config '{}' not found", key)))
+            .ok_or_else(|| OperonError::ResourceHub(self.not_found_message(key)))
+    }
+
+    /// Build a 'not found' error string with available keys + source path.
+    ///
+    /// Disambiguates "key absent" from "hub unconfigured" — the source path
+    /// proves the hub *is* loaded, the available list shows what *is*
+    /// reachable, so the user knows it's a typo and where to fix it.
+    fn not_found_message(&self, key: &str) -> String {
+        let available: Vec<String> = match self.storage.load_all() {
+            Ok(m) => {
+                let mut v: Vec<String> = m.keys().cloned().collect();
+                v.sort();
+                v
+            }
+            Err(_) => {
+                let mut v: Vec<String> = self.cache.iter().map(|r| r.key().clone()).collect();
+                v.sort();
+                v
+            }
+        };
+        let source = self
+            .source_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<in-memory storage>".to_string());
+        if available.is_empty() {
+            format!(
+                "Resource '{}' not found in {}.\n  (No resources loaded — file may be empty.)",
+                key, source
+            )
+        } else {
+            let avail = available
+                .iter()
+                .map(|k| format!("'{}'", k))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Resource '{}' not found in {}.\n  Available: [{}]",
+                key, source, avail
+            )
+        }
     }
 
     /// Register a new config in-memory + persist to storage.

@@ -92,27 +92,37 @@ pub fn example_dir(example: &str) -> PathBuf {
 
 /// Construct ``Operon`` from a graph-JSON string. All heavy init is done
 /// here — timing begins **after** this returns.
+///
+/// Bootstraps `.env` + `ResourceHub` once per process via
+/// [`operonx::bootstrap`] (mirrors Python `examples/python/_common.py`),
+/// then constructs a pure-orchestrator engine. The bootstrap is
+/// idempotent: subsequent calls reuse the installed hub.
 pub fn build_engine(
     graph_json: &str,
     args: &DemoArgs,
 ) -> Result<Operon, Box<dyn Error>> {
-    let resources = repo_root().join("resources.yaml");
-    let mut builder: OperonBuilder = Operon::builder(graph_json)
-        .install_global_hub(false)
-        .load_dotenv(true)
-        .auto_register();
+    ensure_bootstrapped();
 
-    builder = if resources.exists() {
-        builder.resources(resources)
-    } else {
-        builder.no_resources()
-    };
+    let mut builder: OperonBuilder = Operon::builder(graph_json).auto_register();
 
     if args.langfuse {
         builder = attach_langfuse(builder)?;
     }
 
     Ok(builder.build()?)
+}
+
+fn ensure_bootstrapped() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let resources = repo_root().join("resources.yaml");
+        let mut opts = operonx::BootstrapOpts::new();
+        if resources.exists() {
+            opts = opts.resources(resources);
+        }
+        let _ = operonx::bootstrap(opts);
+    });
 }
 
 #[cfg(feature = "langfuse")]
