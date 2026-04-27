@@ -76,10 +76,7 @@ async fn openai_llm_generate_posts_bearer_auth_and_parses_completion() {
         .choices
         .first()
         .expect("response has at least one choice");
-    let message = first
-        .message
-        .as_ref()
-        .expect("choice has a message object");
+    let message = first.message.as_ref().expect("choice has a message object");
     assert_eq!(message.content.as_str(), Some("Hello, world."));
     let usage = result.usage.as_ref().expect("usage is populated");
     assert_eq!(usage.total_tokens, 7);

@@ -48,9 +48,7 @@ def _load_builder(fx: Path):
     builder_path = fx / "builder.py"
     if not builder_path.exists():
         return None
-    spec = importlib.util.spec_from_file_location(
-        f"spec_builder_{fx.name}", builder_path
-    )
+    spec = importlib.util.spec_from_file_location(f"spec_builder_{fx.name}", builder_path)
     module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(module)  # type: ignore[union-attr]
     return module

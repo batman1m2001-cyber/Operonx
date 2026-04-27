@@ -59,8 +59,7 @@ def _interpolate_env_vars(
 
     elif isinstance(value, list):
         return [
-            _interpolate_env_vars(item, missing, f"{path}[{i}]")
-            for i, item in enumerate(value)
+            _interpolate_env_vars(item, missing, f"{path}[{i}]") for i, item in enumerate(value)
         ]
 
     return value

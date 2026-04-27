@@ -31,7 +31,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BENCH_DIR = REPO_ROOT / "examples" / "bench_results"
 ENV_FILE = REPO_ROOT / "examples" / ".env"
@@ -180,7 +179,9 @@ class BenchReporter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "scenarios": self.scenarios,
         }
-        path.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8"
+        )
         print(f"  → report: {path.relative_to(REPO_ROOT)}")
         return path
 
@@ -217,8 +218,12 @@ def parse_args(example: str, argv: Optional[List[str]] = None) -> DemoArgs:
             "latency into examples/bench_results/<example>_python.json."
         ),
     )
-    parser.add_argument("--runs", type=int, default=5, help="Timed iterations per scenario (default 5).")
-    parser.add_argument("--langfuse", action="store_true", help="Attach LangfuseTracer (names suffixed `_python`).")
+    parser.add_argument(
+        "--runs", type=int, default=5, help="Timed iterations per scenario (default 5)."
+    )
+    parser.add_argument(
+        "--langfuse", action="store_true", help="Attach LangfuseTracer (names suffixed `_python`)."
+    )
     args = parser.parse_args(argv)
     return DemoArgs(runs=args.runs, langfuse=args.langfuse)
 

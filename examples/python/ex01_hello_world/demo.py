@@ -29,7 +29,6 @@ from examples.python.ex01_hello_world.workflow import (  # noqa: E402
     build_parallel,
 )
 
-
 HERE = Path(__file__).resolve().parent
 INPUTS = json.loads((HERE / "inputs.json").read_text(encoding="utf-8"))
 

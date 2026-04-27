@@ -97,10 +97,7 @@ pub fn example_dir(example: &str) -> PathBuf {
 /// [`operonx::bootstrap`] (mirrors Python `examples/python/_common.py`),
 /// then constructs a pure-orchestrator engine. The bootstrap is
 /// idempotent: subsequent calls reuse the installed hub.
-pub fn build_engine(
-    graph_json: &str,
-    args: &DemoArgs,
-) -> Result<Operon, Box<dyn Error>> {
+pub fn build_engine(graph_json: &str, args: &DemoArgs) -> Result<Operon, Box<dyn Error>> {
     ensure_bootstrapped();
 
     let mut builder: OperonBuilder = Operon::builder(graph_json).auto_register();
@@ -191,9 +188,7 @@ pub fn rename_graph(graph: Value, name_suffix: &str) -> Value {
                 }
                 Value::Object(out)
             }
-            Value::Array(arr) => {
-                Value::Array(arr.into_iter().map(|v| walk(v, old, new)).collect())
-            }
+            Value::Array(arr) => Value::Array(arr.into_iter().map(|v| walk(v, old, new)).collect()),
             other => other,
         }
     }
@@ -222,7 +217,12 @@ impl BenchReporter {
 
     /// Run one warmup + `runs` timed iterations of the closure and record
     /// per-run latencies plus summary stats.
-    pub fn record<F>(&mut self, name: &str, runs: usize, mut step: F) -> Result<Value, Box<dyn Error>>
+    pub fn record<F>(
+        &mut self,
+        name: &str,
+        runs: usize,
+        mut step: F,
+    ) -> Result<Value, Box<dyn Error>>
     where
         F: FnMut() -> Result<Value, Box<dyn Error>>,
     {
@@ -272,7 +272,10 @@ impl BenchReporter {
             "scenarios": self.scenarios,
         });
         fs::write(&path, serde_json::to_string_pretty(&payload)?)?;
-        println!("  → report: examples/bench_results/{}_rust.json", self.example);
+        println!(
+            "  → report: examples/bench_results/{}_rust.json",
+            self.example
+        );
         Ok(path)
     }
 }

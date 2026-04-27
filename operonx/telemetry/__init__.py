@@ -22,7 +22,6 @@ Prompt management (requires the Langfuse SDK)::
 
 # Auto-register backends to ResourceHub on import
 import operonx.telemetry.plugin  # noqa: F401
-
 from operonx.core.tracing import Tracer
 from operonx.telemetry.backends import (
     LangfuseClient,

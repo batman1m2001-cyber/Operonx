@@ -2,7 +2,7 @@
 
 import pytest
 
-from operonx.core import END, PARENT, START, GraphOp, Operon, Middleware, op
+from operonx.core import END, PARENT, START, GraphOp, Middleware, Operon, op
 
 
 @op

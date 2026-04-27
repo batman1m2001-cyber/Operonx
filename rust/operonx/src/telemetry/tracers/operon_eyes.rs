@@ -31,7 +31,10 @@ pub struct OperonEyesTracer {
 impl std::fmt::Debug for OperonEyesTracer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OperonEyesTracer")
-            .field("url", &format!("http://{}:{}/api/ingest", self.host, self.port))
+            .field(
+                "url",
+                &format!("http://{}:{}/api/ingest", self.host, self.port),
+            )
             .finish()
     }
 }
@@ -94,10 +97,7 @@ impl Tracer for OperonEyesTracer {
     fn flush(&self, trace: &TraceData) -> Result<(), OperonError> {
         let url = self.url();
         let body = serde_json::to_vec(trace).map_err(|e| {
-            OperonError::Runtime(format!(
-                "OperonEyesTracer: serialize trace failed: {}",
-                e
-            ))
+            OperonError::Runtime(format!("OperonEyesTracer: serialize trace failed: {}", e))
         })?;
         match self
             .client()

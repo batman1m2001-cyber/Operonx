@@ -46,7 +46,11 @@ pub struct BatchCoordinator {
 }
 
 impl BatchCoordinator {
-    pub fn new(resource: impl Into<String>, llm: Arc<dyn BaseLLM>, settings: BatchSettings) -> Self {
+    pub fn new(
+        resource: impl Into<String>,
+        llm: Arc<dyn BaseLLM>,
+        settings: BatchSettings,
+    ) -> Self {
         Self {
             resource: resource.into(),
             llm,

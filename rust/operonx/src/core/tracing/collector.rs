@@ -99,11 +99,9 @@ impl TraceCollector {
         for (i, ctx) in ctx_order.iter().enumerate() {
             let wrapper_key = format!("$ctx:{}:{}", self.workflow_name, i);
             // Display tail — e.g. `[0]` for `("main", "[0]")`.
-            let tail = ctx
-                .last()
-                .cloned()
-                .unwrap_or_else(|| format!("[{}]", i));
-            let parent_key = resolve_parent_ctx_key(ctx, &ctx_keys).unwrap_or_else(|| root_key.clone());
+            let tail = ctx.last().cloned().unwrap_or_else(|| format!("[{}]", i));
+            let parent_key =
+                resolve_parent_ctx_key(ctx, &ctx_keys).unwrap_or_else(|| root_key.clone());
             nodes.push(TraceNode {
                 trace_key: wrapper_key,
                 parent_trace_key: Some(parent_key),
@@ -123,12 +121,7 @@ impl TraceCollector {
                 .entry((f.op.clone(), f.context.clone()))
                 .and_modify(|c| *c += 1)
                 .or_insert(0);
-            let trace_key = format!(
-                "{}:{}:{}",
-                f.op,
-                ctx_tail(&f.context),
-                count
-            );
+            let trace_key = format!("{}:{}:{}", f.op, ctx_tail(&f.context), count);
             let parent_key = if f.context.len() > 1 {
                 ctx_keys
                     .get(&f.context)
@@ -151,9 +144,18 @@ impl TraceCollector {
                 trace_key,
                 parent_trace_key: Some(parent_key),
                 op_name: Some(f.op.clone()),
-                display_name: f.op.rsplit_once('.').map(|(_, s)| s).unwrap_or(&f.op).to_string(),
+                display_name: f
+                    .op
+                    .rsplit_once('.')
+                    .map(|(_, s)| s)
+                    .unwrap_or(&f.op)
+                    .to_string(),
                 node_type: "span".into(),
-                kind: if f.context.len() > 1 { "stream_item".into() } else { "batch".into() },
+                kind: if f.context.len() > 1 {
+                    "stream_item".into()
+                } else {
+                    "batch".into()
+                },
                 inputs: Map::new(),
                 outputs,
                 metadata: Map::new(),
@@ -162,10 +164,7 @@ impl TraceCollector {
         }
 
         let summary = TraceSummary {
-            total_ops: nodes
-                .iter()
-                .filter(|n| n.op_name.is_some())
-                .count() as u32,
+            total_ops: nodes.iter().filter(|n| n.op_name.is_some()).count() as u32,
             total_records: frames.len() as u32,
             error_count,
             ..Default::default()
@@ -232,7 +231,10 @@ mod tests {
     #[test]
     fn collects_root_and_flat_spans() {
         let c = TraceCollector::new("main", "req-1");
-        let frames = vec![frame("main.a", json!({"x": 1})), frame("main.b", json!({"y": 2}))];
+        let frames = vec![
+            frame("main.a", json!({"x": 1})),
+            frame("main.b", json!({"y": 2})),
+        ];
         let td = c.collect_from_frames(&frames);
         assert_eq!(td.request_id, "req-1");
         // root + two spans.
@@ -240,7 +242,10 @@ mod tests {
         assert_eq!(td.nodes[0].kind, "graph");
         assert_eq!(td.nodes[0].node_type, "trace");
         assert_eq!(td.nodes[1].op_name.as_deref(), Some("main.a"));
-        assert_eq!(td.nodes[1].parent_trace_key.as_deref(), Some(td.nodes[0].trace_key.as_str()));
+        assert_eq!(
+            td.nodes[1].parent_trace_key.as_deref(),
+            Some(td.nodes[0].trace_key.as_str())
+        );
         assert_eq!(td.summary.total_records, 2);
     }
 
@@ -261,7 +266,11 @@ mod tests {
         let td = c.collect_from_frames(&frames);
         // Expect root + stream_context wrapper + stream_item span.
         assert_eq!(td.nodes.len(), 3);
-        let wrapper = td.nodes.iter().find(|n| n.kind == "stream_context").unwrap();
+        let wrapper = td
+            .nodes
+            .iter()
+            .find(|n| n.kind == "stream_context")
+            .unwrap();
         assert_eq!(wrapper.display_name, "[0]");
         let span = td.nodes.iter().find(|n| n.kind == "stream_item").unwrap();
         assert_eq!(span.parent_trace_key.as_ref(), Some(&wrapper.trace_key));

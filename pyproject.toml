@@ -101,9 +101,27 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 extend-ignore = [
+    # Comparison to True/False — intentional for clarity in some cases.
     "E712",
+    # Unused imports — intentional in __init__.py re-exports.
     "F401",
+    # f-string without placeholders — adjacent literals stay visually
+    # consistent even when the current one has no interpolation.
     "F541",
+    # Line too long — enforced by ruff format, not the linter.
+    "E501",
+    # Module-level import not at top — needed for the `sys.path.insert` +
+    # late-import pattern used by example demo scripts.
+    "E402",
+    # `type(x) == X` — intentional where `isinstance` would be wrong
+    # (subclass-sensitive hot paths).
+    "E721",
+    # Bare except — sparingly used in best-effort cleanup paths.
+    "E722",
+    # Lambda assignment — readability call.
+    "E731",
+    # Unused local variable — used in tests for assert clarity.
+    "F841",
 ]
 
 [tool.ruff.lint.isort]

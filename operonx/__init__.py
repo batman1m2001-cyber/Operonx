@@ -30,13 +30,13 @@ from typing import Optional, Union
 
 from operonx.core import (
     END,
+    LOGGER,
     PARENT,
     PENDING,
     START,
     BranchOp,
     FuncOp,
     GraphOp,
-    LOGGER,
     Middleware,
     Operon,
     ParserOp,

@@ -42,7 +42,11 @@ impl std::fmt::Display for HealthCheckResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let total = self.results.len();
         let passed = self.passed().len();
-        let status = if self.healthy() { "HEALTHY" } else { "UNHEALTHY" };
+        let status = if self.healthy() {
+            "HEALTHY"
+        } else {
+            "UNHEALTHY"
+        };
         write!(f, "<HealthCheckResult {} {}/{}>", status, passed, total)
     }
 }

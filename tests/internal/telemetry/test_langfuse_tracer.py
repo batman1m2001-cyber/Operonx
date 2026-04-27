@@ -86,7 +86,6 @@ def test_langfuse_tracer_creation():
 def test_langfuse_tracer_inherits_from_new_tracer():
     """Test LangfuseTracer inherits from operonx.core.tracing.Tracer."""
     from operonx.core.tracing import Tracer
-
     from operonx.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default", tags=["test"])

@@ -1,7 +1,6 @@
 """Fixture: `double(x=5) -> {result: 10}`."""
 
 from operonx.core import END, PARENT, START, GraphOp
-
 from tests.spec._ops import double
 
 

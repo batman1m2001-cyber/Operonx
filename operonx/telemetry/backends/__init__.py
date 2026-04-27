@@ -9,7 +9,11 @@ Available backends:
 - otel: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
 """
 
-from operonx.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig, LangfusePromptManager
+from operonx.telemetry.backends.langfuse import (
+    LangfuseClient,
+    LangfuseConfig,
+    LangfusePromptManager,
+)
 from operonx.telemetry.backends.otel import OTELClient, OTELConfig
 
 __all__ = [

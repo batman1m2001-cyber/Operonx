@@ -12,7 +12,6 @@ Plugin registration to the core ResourceHub happens automatically on import.
 
 # Auto-register plugins to operonx.core.registry on import
 import operonx.providers.registry  # noqa: F401
-
 from operonx.providers.auth import (
     KeycloakTokenConfig,
     KeycloakTokenProvider,

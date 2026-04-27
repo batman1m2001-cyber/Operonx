@@ -98,7 +98,11 @@ impl TraceFilter {
             for n in &nodes {
                 let op = n.op_name.as_deref().unwrap_or(&n.display_name);
                 let short = op.rsplit_once('.').map(|(_, s)| s).unwrap_or(op);
-                if self.preserve_children_of.iter().any(|p| p == op || p == short) {
+                if self
+                    .preserve_children_of
+                    .iter()
+                    .any(|p| p == op || p == short)
+                {
                     preserved_keys.insert(n.trace_key.clone());
                 }
             }
@@ -193,7 +197,9 @@ impl TraceFilter {
         let op_name = node.op_name.as_ref().unwrap_or(&empty);
         let display = &node.display_name;
         let short = op_name.rsplit_once('.').map(|(_, s)| s).unwrap_or(op_name);
-        op_list.iter().any(|e| e == op_name || e == display || e == short)
+        op_list
+            .iter()
+            .any(|e| e == op_name || e == display || e == short)
     }
 }
 
@@ -335,8 +341,7 @@ mod tests {
     #[test]
     fn max_io_size_truncates_long_strings() {
         let mut n = leaf("n", None, Some("n"), "batch");
-        n.outputs
-            .insert("big".into(), Value::from("x".repeat(100)));
+        n.outputs.insert("big".into(), Value::from("x".repeat(100)));
         let out = TraceFilter {
             max_io_size: 10,
             ..Default::default()

@@ -7,6 +7,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+
 from operonx.core import END, START, GraphOp, Operon, graph
 
 # ── Helper: mock LLM that returns different content each call ────────

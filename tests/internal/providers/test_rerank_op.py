@@ -144,7 +144,6 @@ class TestRerankOpIntegration:
     async def test_rerank_node_with_hub(self, hub):
         """Test RerankOp works with ResourceHub."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import RerankOp
 
         # Skip cleanly if the ONNX runtime deps aren't installed. BaseOp.run()
@@ -190,7 +189,6 @@ class TestRerankOpIntegration:
     async def test_rerank_node_with_pinecone(self, hub):
         """Test RerankOp works with Pinecone API."""
         from operonx.core.states import MemoryState, StateSchema
-
         from operonx.providers.ops import RerankOp
 
         # Check if bge-m3 (Pinecone) reranker is available

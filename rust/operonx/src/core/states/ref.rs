@@ -118,8 +118,8 @@ impl<'de> Deserialize<'de> for RefArg {
         let value = Value::deserialize(deserializer)?;
         if let Value::Object(map) = &value {
             if let Some(inner) = map.get("__ref__") {
-                let nested: RefConfig = serde_json::from_value(inner.clone())
-                    .map_err(serde::de::Error::custom)?;
+                let nested: RefConfig =
+                    serde_json::from_value(inner.clone()).map_err(serde::de::Error::custom)?;
                 return Ok(RefArg::NestedRef(Box::new(nested)));
             }
         }

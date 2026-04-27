@@ -22,7 +22,11 @@ fn process_response(content: Value, tool_calls: Value) -> Value {
             .pointer("/function/arguments")
             .and_then(Value::as_str)
             .and_then(|s| serde_json::from_str::<Value>(s).ok())
-            .and_then(|v| v.get("expression").and_then(Value::as_str).map(str::to_string))
+            .and_then(|v| {
+                v.get("expression")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
             .unwrap_or_default();
         // Rust-side stub — production needs a real expression evaluator.
         Value::String(format!("<computed:{}>", expr))

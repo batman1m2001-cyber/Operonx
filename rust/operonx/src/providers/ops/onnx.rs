@@ -12,10 +12,7 @@ use crate::core::configs::op_config::OpConfig;
 use crate::core::exceptions::OperonError;
 
 /// Execute the ONNX op.
-pub async fn execute(
-    op: &OpConfig,
-    inputs: Map<String, Value>,
-) -> Result<Value, OperonError> {
+pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value, OperonError> {
     let resources = op.resource_keys();
     let key = resources.first().ok_or_else(|| {
         OperonError::Config(format!("OnnxOp '{}' missing `resource`", op.full_name))

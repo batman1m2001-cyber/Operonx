@@ -63,7 +63,9 @@ impl StateSchema {
     /// Look up the slot index for `(op, var)`. Returns `None` if not registered.
     pub fn get_index(&self, op: &str, var: &str) -> Option<usize> {
         // Temporary allocation; will be tightened when hot-path profiling drives a better key.
-        self.var_to_idx.get(&(op.to_string(), var.to_string())).copied()
+        self.var_to_idx
+            .get(&(op.to_string(), var.to_string()))
+            .copied()
     }
 
     /// `true` if the slot is graph-scoped (single value across all contexts).
@@ -88,7 +90,9 @@ impl StateSchema {
 
     /// Stream policy for an input var, if the user marked it `.parallel()` or `.collect()`.
     pub fn stream_policy(&self, op: &str, var: &str) -> Option<StreamPolicy> {
-        self.stream_policies.get(&(op.to_string(), var.to_string())).copied()
+        self.stream_policies
+            .get(&(op.to_string(), var.to_string()))
+            .copied()
     }
 
     // ── Crate-internal builders used by schema-construction logic (Phase 3+) ──

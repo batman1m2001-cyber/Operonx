@@ -82,7 +82,9 @@ impl Cell {
 
     /// Remove a context's value and return what was there (or the default).
     pub fn pop(&mut self, context: &ContextId) -> Option<Value> {
-        self.contexts.remove(context).or_else(|| self.default_value.clone())
+        self.contexts
+            .remove(context)
+            .or_else(|| self.default_value.clone())
     }
 
     /// `true` if an exact-match entry exists for this context (no parent walk).

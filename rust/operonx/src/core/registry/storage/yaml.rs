@@ -126,8 +126,8 @@ impl YamlConfigStorage {
             match &value {
                 Value::Object(inner) if !key.contains(':') => {
                     // Possibly nested: {category: {name: config}}.
-                    let all_dicts = !inner.is_empty()
-                        && inner.values().all(|v| matches!(v, Value::Object(_)));
+                    let all_dicts =
+                        !inner.is_empty() && inner.values().all(|v| matches!(v, Value::Object(_)));
                     if all_dicts {
                         for (name, config) in inner.clone() {
                             flat.insert(format!("{}:{}", key, name), config);
@@ -162,8 +162,12 @@ impl YamlConfigStorage {
 impl ConfigStorage for YamlConfigStorage {
     fn load_one(&self, key: &str) -> Result<Option<ConfigDict>, OperonError> {
         let data = self.load_file()?;
-        let Some(raw) = data.get(key) else { return Ok(None) };
-        let Value::Object(map) = raw else { return Ok(None) };
+        let Some(raw) = data.get(key) else {
+            return Ok(None);
+        };
+        let Value::Object(map) = raw else {
+            return Ok(None);
+        };
 
         let mut missing: Vec<(String, String)> = Vec::new();
         let resolved = interpolate_env_vars(&Value::Object(map.clone()), &mut missing, key);
@@ -311,17 +315,18 @@ fn substitute_placeholders(s: &str, missing: &mut Vec<(String, String)>, path: &
     out
 }
 
-fn missing_env_error(
-    missing: &[(String, String)],
-    source_path: Option<PathBuf>,
-) -> OperonError {
+fn missing_env_error(missing: &[(String, String)], source_path: Option<PathBuf>) -> OperonError {
     // Pick the first missing entry as the canonical (var, key) for the typed
     // variant. The first entry's `path` is something like
     // `"llm:gpt-4o.api_key"`; we strip the field-suffix to recover the
     // resource key. Disambiguates branch (4) from generic Config errors so
     // callers can match on `OperonError::EnvVarUnset`.
     let (var, key) = if let Some((var, path)) = missing.first() {
-        let key = path.split_once('.').map(|(k, _)| k).unwrap_or(path).to_string();
+        let key = path
+            .split_once('.')
+            .map(|(k, _)| k)
+            .unwrap_or(path)
+            .to_string();
         (var.clone(), key)
     } else {
         (String::new(), String::new())
@@ -418,11 +423,8 @@ mod tests {
     fn uses_default_when_unset() {
         unset_var("OPERONX_YAML_TEST_DEFAULT");
         let mut missing = Vec::new();
-        let out = substitute_placeholders(
-            "x=${OPERONX_YAML_TEST_DEFAULT:fallback}",
-            &mut missing,
-            "k",
-        );
+        let out =
+            substitute_placeholders("x=${OPERONX_YAML_TEST_DEFAULT:fallback}", &mut missing, "k");
         assert_eq!(out, "x=fallback");
         assert!(missing.is_empty());
     }

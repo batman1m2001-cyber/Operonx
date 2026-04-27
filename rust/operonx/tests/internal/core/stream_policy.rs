@@ -104,7 +104,10 @@ async fn collect_policy_merges_frames_then_dispatches_once() {
     let mut inputs = Map::new();
     inputs.insert("items".into(), json!([1, 2, 3]));
 
-    let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+    let out = engine
+        .run_json_async(inputs, None, None, None)
+        .await
+        .unwrap();
     // `stream_source` emits one frame `{item: [1,2,3]}`; with `collect` the
     // scheduler wraps it into a list of length 1 then dispatches sink once.
     // Sink echoes its `item` back under `saw` — we assert `saw` is the
@@ -131,6 +134,9 @@ async fn parallel_policy_routes_immediately() {
 
     let mut inputs = Map::new();
     inputs.insert("items".into(), json!("hello"));
-    let out = engine.run_json_async(inputs, None, None, None).await.unwrap();
+    let out = engine
+        .run_json_async(inputs, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(out.get("saw").and_then(|v| v.as_str()), Some("hello"));
 }

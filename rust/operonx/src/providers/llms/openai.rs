@@ -167,7 +167,10 @@ mod tests {
             batch_timeout: 3600.0,
         };
         let llm = OpenAILlm::new(cfg);
-        assert_eq!(llm.completions_url(), "https://my.proxy/v1/chat/completions");
+        assert_eq!(
+            llm.completions_url(),
+            "https://my.proxy/v1/chat/completions"
+        );
     }
 
     #[test]

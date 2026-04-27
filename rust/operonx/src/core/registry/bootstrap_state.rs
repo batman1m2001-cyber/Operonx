@@ -23,10 +23,16 @@ pub fn record_env_path(path: PathBuf) {
 
 /// Snapshot of every `.env` path that [`crate::bootstrap`] has tried to load.
 pub fn env_paths() -> Vec<PathBuf> {
-    paths().read().expect("BOOTSTRAP_ENV_PATHS poisoned").clone()
+    paths()
+        .read()
+        .expect("BOOTSTRAP_ENV_PATHS poisoned")
+        .clone()
 }
 
 /// Clear the path list — tests only.
 pub fn reset_env_paths() {
-    paths().write().expect("BOOTSTRAP_ENV_PATHS poisoned").clear();
+    paths()
+        .write()
+        .expect("BOOTSTRAP_ENV_PATHS poisoned")
+        .clear();
 }

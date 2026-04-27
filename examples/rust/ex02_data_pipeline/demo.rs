@@ -40,7 +40,11 @@ fn aggregate(data: Vec<f64>) -> Value {
 
 #[op(name = "clean_text")]
 fn clean_text(text: String) -> Value {
-    let cleaned: String = text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let cleaned: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
     json!({ "cleaned_text": cleaned })
 }
 

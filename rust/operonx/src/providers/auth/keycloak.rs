@@ -107,10 +107,7 @@ impl KeycloakTokenProvider {
         }
         let (token, expires_in) = self.fetch_token().await?;
         let expires_at = expires_in.map(|secs| {
-            Instant::now()
-                + Duration::from_secs_f64(
-                    (secs - self.config.refresh_buffer).max(0.0),
-                )
+            Instant::now() + Duration::from_secs_f64((secs - self.config.refresh_buffer).max(0.0))
         });
         *cache = Some(CachedToken {
             token: token.clone(),

@@ -26,10 +26,7 @@ use crate::providers::llms::{BaseLLM, ChatCompletion, CompletionChoice, LlmOpts,
 
 /// Execute an LLM op: resolve backends, select one, call `generate()`, fall
 /// back on error.
-pub async fn execute(
-    op: &OpConfig,
-    inputs: Map<String, Value>,
-) -> Result<Value, OperonError> {
+pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value, OperonError> {
     if op.stream {
         return Err(OperonError::Provider(
             "LLMOp streaming not yet wired into ExecutionHandle (Phase 6 follow-up)".into(),
@@ -164,8 +161,14 @@ fn parse_messages(raw: Option<&Value>) -> Result<Vec<Message>, OperonError> {
 
 fn build_opts(inputs: &Map<String, Value>) -> LlmOpts {
     let mut opts = LlmOpts::default();
-    opts.temperature = inputs.get("temperature").and_then(|v| v.as_f64()).map(|v| v as f32);
-    opts.top_p = inputs.get("top_p").and_then(|v| v.as_f64()).map(|v| v as f32);
+    opts.temperature = inputs
+        .get("temperature")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
+    opts.top_p = inputs
+        .get("top_p")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
     opts.max_tokens = inputs
         .get("max_tokens")
         .and_then(|v| v.as_u64())
@@ -181,7 +184,11 @@ fn build_opts(inputs: &Map<String, Value>) -> LlmOpts {
     opts.n = inputs.get("n").and_then(|v| v.as_u64()).map(|v| v as u32);
     opts.stop = inputs.get("stop").and_then(|v| match v {
         Value::String(s) => Some(vec![s.clone()]),
-        Value::Array(a) => Some(a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
+        Value::Array(a) => Some(
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect(),
+        ),
         _ => None,
     });
     opts.response_format = inputs.get("response_format").cloned();
@@ -246,7 +253,11 @@ fn completion_to_output(completion: &ChatCompletion, resource: &str) -> Value {
         .get("tool_calls")
         .cloned()
         .unwrap_or(Value::Array(Vec::new()));
-    let refusal = message.extras.get("refusal").cloned().unwrap_or(Value::Null);
+    let refusal = message
+        .extras
+        .get("refusal")
+        .cloned()
+        .unwrap_or(Value::Null);
     let thinking = message
         .extras
         .get("reasoning_content")

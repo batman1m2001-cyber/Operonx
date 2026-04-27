@@ -7,8 +7,8 @@ from typing import ClassVar
 import pytest
 
 from operonx.core.registry import (
-    REGISTRY,
     BOOTSTRAP_ENV_PATHS,
+    REGISTRY,
     CacheEntry,
     ConfigRegistry,
     EnvVarUnsetError,
@@ -848,15 +848,10 @@ class TestUnsetEnvVarWarning:
 class TestDisambiguatedErrors:
     """The get() error message tells the user *which* fix to apply."""
 
-    def test_branch3_includes_source_path_and_available_keys(
-        self, tmp_path, registry
-    ):
+    def test_branch3_includes_source_path_and_available_keys(self, tmp_path, registry):
         """Key-not-found error names the source file and lists available keys."""
         cfg = tmp_path / "resources.yaml"
-        cfg.write_text(
-            "service:alpha:\n  host: a\n"
-            "service:beta:\n  host: b\n"
-        )
+        cfg.write_text("service:alpha:\n  host: a\nservice:beta:\n  host: b\n")
         registry.register(MockServiceConfig, mock_service_factory)
         hub = ResourceHub.from_yaml(cfg)
 
@@ -868,9 +863,7 @@ class TestDisambiguatedErrors:
         assert "service:alpha" in msg
         assert "service:beta" in msg
 
-    def test_branch4_env_var_unset_uses_envvarunseterror(
-        self, tmp_path, monkeypatch
-    ):
+    def test_branch4_env_var_unset_uses_envvarunseterror(self, tmp_path, monkeypatch):
         """Unresolved ${VAR} at get() time raises EnvVarUnsetError (RuntimeError)."""
         cfg = tmp_path / "resources.yaml"
         cfg.write_text("service:a:\n  host: ${UNSET_AT_GET_FOR_TEST}\n")
