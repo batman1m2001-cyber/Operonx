@@ -92,10 +92,43 @@ def pytest_collection_modifyitems(config, items):
         return
 
     integration_marker = pytest.mark.integration
+
+    # Heuristics: a test is integration if any of these match.
+    # - Class name contains a known "exercises real LLM execution" suffix.
+    #   These classes don't mock the network layer, so on CI (with dummy
+    #   keys) they either return empty responses or hit real endpoints
+    #   with invalid creds and 401.
+    integration_class_substrings = (
+        "Integration",  # explicit marker
+        "LoadBalancing",  # multi-resource execution
+        "Fallback",  # primary/fallback execution
+        "Tools",  # function-calling execution
+        "ResponseFormat",  # JSON-mode / structured output execution
+        "Streaming",  # streaming generation (real or fake-streamed API)
+    )
+    integration_name_substrings = (
+        "_real",  # `test_*_real` — explicit "calls real API" naming
+        "_integration",  # explicit "_integration" suffix
+    )
+
     for item in items:
+        # Tests gated by `@pytest.mark.skipif(not API_KEY, ...)` are
+        # integration tests — they only run when real credentials are
+        # present. The CI dummy-env defaults above make those `skipif`
+        # conditions evaluate to "key is set", which would let the test
+        # run against a real endpoint with an invalid key. Treat any
+        # `skipif`-marked provider test as integration.
+        if any(m.name == "skipif" for m in item.iter_markers()):
+            item.add_marker(integration_marker)
+            continue
+
         cls = getattr(item, "cls", None)
         cls_name = cls.__name__ if cls is not None else ""
-        if cls_name.endswith("Integration") or "_integration" in item.name.lower():
+        name_lower = item.name.lower()
+
+        if any(sub in cls_name for sub in integration_class_substrings) or any(
+            sub in name_lower for sub in integration_name_substrings
+        ):
             item.add_marker(integration_marker)
 
 
