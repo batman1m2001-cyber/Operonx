@@ -26,31 +26,62 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13.0",
     "orjson>=3.9",
-]
-
-[project.optional-dependencies]
-providers = [
+    # Provider plumbing kept in base because the LLM type system
+    # (openai.types.chat.*) is used as the canonical message format
+    # across every provider — trying to optionalize it forced a maze
+    # of transitive extras. These three are small (~10MB combined)
+    # and almost every Operonx program touches at least one of them.
     "openai>=1.0",
     "aiohttp>=3.8",
-    "numpy>=2.2.6",
+    "httpx>=0.24",
+]
+
+# Optional dependency extras. Each extra is **self-contained** — listing
+# every package it needs, including any that other extras also use.
+# Installing one extra cannot rely on another being present.
+#
+#   pip install operonx[anthropic]    # Anthropic provider (httpx + openai types)
+#   pip install operonx[gemini]       # Gemini provider
+#   pip install operonx[bedrock]      # AWS Bedrock provider
+#   pip install operonx[onnx]         # Local ONNX embedding/reranker
+#   pip install operonx[huggingface]  # Local HF embedding/reranker
+#   pip install operonx[langfuse]     # Langfuse tracing
+#   pip install operonx[otel]         # OpenTelemetry tracing
+#   pip install operonx[serve]        # FastAPI HTTP server
+#   pip install operonx[providers]    # All HTTP-based LLM/embedding providers
+#   pip install operonx[standard]     # providers + langfuse + otel + serve
+#   pip install operonx[all]          # Everything except heavy ML deps (huggingface)
+[project.optional-dependencies]
+# HTTP-based LLM + embedding providers (OpenAI, Azure, Anthropic, vLLM,
+# TEI, Pinecone). Bundle of shared deps; importable as a one-shot install.
+providers = [
+    "openai>=1.0",        # canonical ChatCompletion types (used by every LLM backend)
+    "aiohttp>=3.8",       # vLLM/TEI/Pinecone HTTP clients
+    "numpy>=2.2.6",       # vLLM embedding output type
+    "httpx>=0.24",        # Anthropic direct API client
+]
+anthropic = [
+    "openai>=1.0",        # ChatCompletion types
+    "httpx>=0.24",        # direct API client (we don't use the anthropic SDK)
 ]
 gemini = [
     "google-cloud-aiplatform>=1.38",
     "requests>=2.32",
+    "openai>=1.0",        # AsyncOpenAI client + types
 ]
 bedrock = [
     "boto3>=1.28",
-]
-anthropic = [
-    "anthropic>=0.45.0",
+    "openai>=1.0",        # ChatCompletion types
 ]
 onnx = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
+    "numpy>=2.2.6",
 ]
 huggingface = [
     "transformers>=4.30",
     "torch>=2.0",
+    "numpy>=2.2.6",
 ]
 langfuse = [
     "langfuse>=2.6.0,<3.0.0",
@@ -66,8 +97,43 @@ serve = [
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
 ]
+# Production bundle — everything except heavy local-ML deps. This is what
+# most users want.
+standard = [
+    "openai>=1.0",
+    "aiohttp>=3.8",
+    "numpy>=2.2.6",
+    "httpx>=0.24",
+    "langfuse>=2.6.0,<3.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "websockets>=11.0",
+]
+# Everything: standard + every provider extra (Anthropic, Gemini, Bedrock,
+# ONNX). Skips `huggingface` because torch is a 2GB download — opt in
+# explicitly when you need it.
 all = [
-    "operonx[providers,langfuse,otel,serve]",
+    "openai>=1.0",
+    "aiohttp>=3.8",
+    "numpy>=2.2.6",
+    "httpx>=0.24",
+    "google-cloud-aiplatform>=1.38",
+    "requests>=2.32",
+    "boto3>=1.28",
+    "onnxruntime>=1.15,<1.20",
+    "tokenizers>=0.13",
+    "langfuse>=2.6.0,<3.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "websockets>=11.0",
 ]
 dev = [
     "pytest>=9.0.2",
@@ -133,4 +199,5 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (may require external services)",
+    "unit: marks a provider test as a fast mock-only unit test (opts out of the default integration auto-mark in tests/internal/providers/conftest.py)",
 ]
