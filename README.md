@@ -58,18 +58,18 @@ Configure resources in `resources.yaml` and credentials in `.env`, then:
 import asyncio
 import operonx
 from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import chain
+from operonx.providers import chat
 
 async def main():
     operonx.bootstrap()  # loads ./.env + ./resources.yaml
 
     with GraphOp(name="chat") as graph:
-        chat = chain(
+        c = chat(
             resource="gpt-4o",
             template={"system": "You are a helpful assistant.", "user": "{question}"},
             question=PARENT["question"],
         )
-        START >> chat >> END
+        START >> c >> END
 
     result = await Operon(graph).run(inputs={"question": "What is Python?"})
     print(result["content"])
