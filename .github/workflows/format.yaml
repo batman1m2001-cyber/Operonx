@@ -12,7 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  format:
+  python:
+    name: ruff (operonx, tests, examples)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +27,36 @@ jobs:
         run: uv python install 3.10
 
       - name: Check formatting
-        run: uvx ruff format --check .
+        run: uvx ruff format --check operonx/ tests/ examples/python/
 
       - name: Check linting
-        run: uvx ruff check .
+        run: uvx ruff check operonx/ tests/ examples/python/
+
+  rust:
+    name: cargo fmt + clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: rust-fmt-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

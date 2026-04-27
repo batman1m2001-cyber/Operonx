@@ -13,17 +13,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Main test suite (single package, all extras) ────────────────────────
   test:
+    name: pytest (operonx, all extras)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests
+        run: uv run pytest tests/ --tb=short -q -m "not integration"
+
+  # ── Extras smoke matrix — verifies pip install operonx[X] works ─────────
+  extras-smoke:
+    name: extras smoke (${{ matrix.extra }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - python/hush-icore
-          - python/hush-providers
-          - python/hush-telemetry
-          - python/hush-serve
-
+        extra:
+          - anthropic
+          - langfuse
+          - otel
+          - onnx
+          - serve
+          - standard
+          - all
     steps:
       - uses: actions/checkout@v4
 
@@ -35,15 +60,48 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Install dependencies
-        working-directory: ${{ matrix.package }}
-        run: uv sync --all-extras
+      # Build the wheel from this checkout, then install just that wheel
+      # with the requested extra into a fresh venv. This catches missing
+      # dependency declarations (e.g. forgetting to list `boto3` under
+      # `[bedrock]`) before users discover them at install time.
+      - name: Build wheel
+        run: uv build --wheel
 
-      - name: Run tests
-        working-directory: ${{ matrix.package }}
-        run: uv run pytest --tb=short -q -m "not integration"
+      - name: Install operonx[${{ matrix.extra }}] in fresh venv
+        run: |
+          uv venv /tmp/extras-venv
+          source /tmp/extras-venv/bin/activate
+          pip install "$(ls dist/operonx-*.whl)[${{ matrix.extra }}]"
 
+      - name: Verify import surface
+        run: |
+          source /tmp/extras-venv/bin/activate
+          python - <<'PY'
+          import operonx
+          print("operonx", operonx.__version__)
+          # Each extra has at least one optional import path that must work
+          # once installed. Anything below should NOT raise.
+          extra = "${{ matrix.extra }}"
+          if extra == "anthropic":
+              from operonx.providers.llms.anthropic import AnthropicLLM  # noqa: F401
+          elif extra == "langfuse":
+              from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
+          elif extra == "otel":
+              from operonx.telemetry.tracers.otel import OTelTracer  # noqa: F401
+          elif extra == "onnx":
+              import onnxruntime  # noqa: F401
+              import tokenizers  # noqa: F401
+          elif extra == "serve":
+              import fastapi  # noqa: F401
+              import uvicorn  # noqa: F401
+          elif extra in ("standard", "all"):
+              from operonx.providers.llms.openai import OpenAILLM  # noqa: F401
+              from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
+          PY
+
+  # ── Pure-compute examples (no API keys needed) ──────────────────────────
   examples:
+    name: examples (ex01, ex02)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,16 +115,16 @@ jobs:
         run: uv python install 3.10
 
       - name: Install dependencies
-        working-directory: examples
         run: uv sync --all-extras
 
-      - name: Run example smoke tests (no API keys needed)
-        working-directory: examples
+      - name: Run pure-compute examples
         run: |
-          uv run python ex01_hello_world/demo.py
-          uv run python ex02_data_pipeline/demo.py
+          uv run python -m examples.python.ex01_hello_world.demo --runs 1
+          uv run python -m examples.python.ex02_data_pipeline.demo --runs 1
 
+  # ── Coverage upload to Codecov ──────────────────────────────────────────
   coverage:
+    name: coverage
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -80,43 +138,15 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Install hush-icore with dev dependencies
-        working-directory: python/hush-icore
+      - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run coverage
-        working-directory: python/hush-icore
-        run: uv run pytest --cov=hush --cov-report=xml -m "not integration"
+      - name: Run pytest with coverage
+        run: uv run pytest tests/ --cov=operonx --cov-report=xml -m "not integration"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: python/hush-icore/coverage.xml
+          files: coverage.xml
           fail_ci_if_error: false
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install Python packages (for mkdocstrings)
-        run: |
-          cd python/hush-icore && uv sync --all-extras && cd ../..
-          cd python/hush-providers && uv sync --all-extras && cd ../..
-          cd python/hush-telemetry && uv sync --all-extras && cd ../..
-          cd python/hush-serve && uv sync --all-extras && cd ../..
-
-      - name: Install mkdocs
-        run: pip install mkdocs-material "mkdocstrings[python]"
-
-      - name: Build docs (strict mode)
-        run: mkdocs build --strict

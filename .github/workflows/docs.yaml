@@ -1,12 +1,13 @@
 name: Docs
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-    paths: [docs/**, python/**]
+    paths: [docs/**, operonx/**, mkdocs.yml]
   pull_request:
     branches: [main]
-    paths: [docs/**, python/**]
+    paths: [docs/**, operonx/**, mkdocs.yml]
 
 concurrency:
   group: docs-${{ github.ref }}
@@ -15,38 +16,60 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      built: ${{ steps.build.outputs.built }}
     steps:
       - uses: actions/checkout@v4
 
+      # Skip the rest of this job until docs/ scaffolding lands. Once
+      # mkdocs.yml exists, the workflow becomes a real strict-mode build.
+      - name: Detect mkdocs config
+        id: detect
+        run: |
+          if [ -f mkdocs.yml ]; then
+            echo "has_mkdocs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_mkdocs=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::mkdocs.yml not found — docs build skipped (waiting on docs scaffolding)."
+          fi
+
       - name: Install uv
+        if: steps.detect.outputs.has_mkdocs == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
       - name: Set up Python
+        if: steps.detect.outputs.has_mkdocs == 'true'
         run: uv python install 3.10
 
-      - name: Install Python packages (for mkdocstrings)
-        run: |
-          cd python/hush-icore && uv sync --all-extras && cd ../..
-          cd python/hush-providers && uv sync --all-extras && cd ../..
-          cd python/hush-telemetry && uv sync --all-extras && cd ../..
-          cd python/hush-serve && uv sync --all-extras && cd ../..
+      - name: Install operonx (for mkdocstrings imports)
+        if: steps.detect.outputs.has_mkdocs == 'true'
+        run: uv sync --all-extras
 
       - name: Install mkdocs
-        run: pip install mkdocs-material "mkdocstrings[python]"
+        if: steps.detect.outputs.has_mkdocs == 'true'
+        run: uv pip install mkdocs-material "mkdocstrings[python]"
 
-      - name: Build docs
-        run: mkdocs build --strict
+      - name: Build docs (strict)
+        id: build
+        if: steps.detect.outputs.has_mkdocs == 'true'
+        run: |
+          uv run mkdocs build --strict
+          echo "built=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload Pages artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: |
+          steps.detect.outputs.has_mkdocs == 'true' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site/
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: |
+      needs.build.outputs.built == 'true' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
