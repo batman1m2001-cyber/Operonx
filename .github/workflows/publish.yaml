@@ -2,6 +2,11 @@ name: Publish
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even when versions are unchanged from HEAD~1 (use to recover when a version bump and a follow-up commit were pushed together)."
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -24,6 +29,8 @@ jobs:
           fetch-depth: 0
 
       - id: detect
+        env:
+          FORCE: ${{ inputs.force }}
         run: |
           # Compare against the previous commit on main (before this merge).
           # Merge commit: HEAD^1 = previous main tip. Regular commit: HEAD~1.
@@ -33,12 +40,19 @@ jobs:
             BASE="HEAD~1"
           fi
           echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
+          if [ "$FORCE" = "true" ]; then
+            echo "force=true — bypassing version diff and publishing current versions."
+          fi
 
           # Python — root pyproject.toml
           PY_OLD=$(git show $BASE:pyproject.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
           PY_NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' pyproject.toml)
-          if [ "$PY_OLD" != "$PY_NEW" ] && [ -n "$PY_NEW" ]; then
-            echo "python: $PY_OLD -> $PY_NEW (CHANGED)"
+          if { [ "$PY_OLD" != "$PY_NEW" ] || [ "$FORCE" = "true" ]; } && [ -n "$PY_NEW" ]; then
+            if [ "$FORCE" = "true" ] && [ "$PY_OLD" = "$PY_NEW" ]; then
+              echo "python: $PY_NEW (forced)"
+            else
+              echo "python: $PY_OLD -> $PY_NEW (CHANGED)"
+            fi
             echo "python_changed=true" >> "$GITHUB_OUTPUT"
             echo "python_version=$PY_NEW" >> "$GITHUB_OUTPUT"
           else
@@ -50,8 +64,12 @@ jobs:
           # Rust — workspace version (rust/Cargo.toml [workspace.package])
           RUST_OLD=$(git show $BASE:rust/Cargo.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
           RUST_NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' rust/Cargo.toml)
-          if [ "$RUST_OLD" != "$RUST_NEW" ] && [ -n "$RUST_NEW" ]; then
-            echo "rust: $RUST_OLD -> $RUST_NEW (CHANGED)"
+          if { [ "$RUST_OLD" != "$RUST_NEW" ] || [ "$FORCE" = "true" ]; } && [ -n "$RUST_NEW" ]; then
+            if [ "$FORCE" = "true" ] && [ "$RUST_OLD" = "$RUST_NEW" ]; then
+              echo "rust: $RUST_NEW (forced)"
+            else
+              echo "rust: $RUST_OLD -> $RUST_NEW (CHANGED)"
+            fi
             echo "rust_changed=true" >> "$GITHUB_OUTPUT"
             echo "rust_version=$RUST_NEW" >> "$GITHUB_OUTPUT"
           else
