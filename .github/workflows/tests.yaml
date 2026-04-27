@@ -70,13 +70,12 @@ jobs:
       - name: Install operonx[${{ matrix.extra }}] in fresh venv
         run: |
           uv venv /tmp/extras-venv
-          source /tmp/extras-venv/bin/activate
-          pip install "$(ls dist/operonx-*.whl)[${{ matrix.extra }}]"
+          uv pip install --python /tmp/extras-venv/bin/python \
+            "$(ls dist/operonx-*.whl)[${{ matrix.extra }}]"
 
       - name: Verify import surface
         run: |
-          source /tmp/extras-venv/bin/activate
-          python - <<'PY'
+          /tmp/extras-venv/bin/python - <<'PY'
           import operonx
           print("operonx", operonx.__version__)
           # Each extra has at least one optional import path that must work
