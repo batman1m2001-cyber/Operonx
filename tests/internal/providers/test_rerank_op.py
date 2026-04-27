@@ -10,15 +10,15 @@ class TestRerankOp:
 
     def test_import(self):
         """Test RerankOp can be imported."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
         assert RerankOp is not None
 
     def test_node_type(self):
         """Test RerankOp has correct type."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -30,9 +30,9 @@ class TestRerankOp:
 
     def test_input_schema(self):
         """Test RerankOp has query and documents inputs."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -46,9 +46,9 @@ class TestRerankOp:
 
     def test_output_schema(self):
         """Test RerankOp has reranks output."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -59,9 +59,9 @@ class TestRerankOp:
 
     def test_metadata(self):
         """Test specific_metadata returns model info."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -74,9 +74,9 @@ class TestRerankOp:
     @pytest.mark.asyncio
     async def test_process_string_documents(self):
         """Test processing list of string documents."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_reranker = Mock()
             mock_reranker.run = AsyncMock(
                 return_value=[{"index": 1, "score": 0.9}, {"index": 0, "score": 0.7}]
@@ -98,9 +98,9 @@ class TestRerankOp:
     @pytest.mark.asyncio
     async def test_process_dict_documents(self):
         """Test processing list of dict documents."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_reranker = Mock()
             mock_reranker.run = AsyncMock(return_value=[{"index": 0, "score": 0.95}])
             mock_instance = Mock()
@@ -123,9 +123,9 @@ class TestRerankOp:
     @pytest.mark.asyncio
     async def test_process_empty_documents(self):
         """Test processing empty document list."""
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.reranker.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -143,9 +143,9 @@ class TestRerankOpIntegration:
     @pytest.mark.asyncio
     async def test_rerank_node_with_hub(self, hub):
         """Test RerankOp works with ResourceHub."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
         # Skip cleanly if the ONNX runtime deps aren't installed. BaseOp.run()
         # swallows init errors and logs them, so the assertion below would
@@ -189,9 +189,9 @@ class TestRerankOpIntegration:
     @pytest.mark.asyncio
     async def test_rerank_node_with_pinecone(self, hub):
         """Test RerankOp works with Pinecone API."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import RerankOp
+        from operonx.providers.ops import RerankOp
 
         # Check if bge-m3 (Pinecone) reranker is available
         if not hub.has("reranking:bge-m3"):

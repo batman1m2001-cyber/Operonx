@@ -1,6 +1,6 @@
 """Fixture: `classify_size(n, threshold) -> {label}`."""
 
-from operon.core import END, PARENT, START, GraphOp
+from operonx.core import END, PARENT, START, GraphOp
 
 from tests.spec._ops import classify_size
 

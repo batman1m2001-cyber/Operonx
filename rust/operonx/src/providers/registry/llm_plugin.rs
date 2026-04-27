@@ -1,6 +1,6 @@
 //! LLM plugin registration.
 //!
-//! Mirrors Python [`operon/providers/registry/llm_plugin.py`](../../../../../operon/providers/registry/llm_plugin.py).
+//! Mirrors Python [`operonx/providers/registry/llm_plugin.py`](../../../../../operonx/providers/registry/llm_plugin.py).
 //! Binds category `"llm"` in the global [`ConfigRegistry`] to a factory that
 //! deserializes raw config dicts into typed [`LLMConfig`] + constructs the
 //! matching backend via [`create_llm`].

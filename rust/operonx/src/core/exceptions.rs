@@ -1,6 +1,6 @@
 //! Unified exception types for Operon.
 //!
-//! Mirrors Python `operon/core/exceptions.py`:
+//! Mirrors Python `operonx/core/exceptions.py`:
 //! - [`OpError`] — op-level error hierarchy (Parser / Code / Branch / Condition /
 //!   Iteration / Prompt / Embedding / Rerank), matching Python's `OpError` subclasses.
 //! - [`OperonError`] — top-level error type wrapping `OpError` plus engine-level

@@ -1,7 +1,7 @@
 """Tests for op serialize() methods (Phase 2 of Builder-Executor refactor)."""
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.flow.branch_op import if_
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.flow.branch_op import if_
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

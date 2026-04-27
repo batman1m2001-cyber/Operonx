@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon
-from operon.core.ops import FuncOp
-from operon.core.tracing import LocalTracer, TraceCollector, Tracer
-from operon.core.tracing.flush_worker import FlushWorker, _merge_tags
+from operonx.core import END, PARENT, START, GraphOp, Operon
+from operonx.core.ops import FuncOp
+from operonx.core.tracing import LocalTracer, TraceCollector, Tracer
+from operonx.core.tracing.flush_worker import FlushWorker, _merge_tags
 
 
 # ---------------------------------------------------------------------------
@@ -632,7 +632,7 @@ class TestTracerWithIterationNodes:
     @pytest.mark.asyncio
     async def test_tracer_with_generator_iteration(self, tmp_path):
         """Tracers work with generator-based iteration (replaces ForOp)."""
-        from operon.core.ops.transform.func_op import op
+        from operonx.core.ops.transform.func_op import op
 
         @op
         def each_item(items: list):

@@ -1,6 +1,6 @@
 //! Edge config for workflow graphs.
 //!
-//! Mirrors Python `operon/core/configs/edge_config.py`.
+//! Mirrors Python `operonx/core/configs/edge_config.py`.
 
 use serde::{Deserialize, Serialize};
 

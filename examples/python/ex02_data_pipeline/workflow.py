@@ -3,7 +3,7 @@
 Defines ops and graphs for two pure-compute pipelines (no API keys needed).
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 # =============================================================================
 # Pipeline 1: Data transformation ops

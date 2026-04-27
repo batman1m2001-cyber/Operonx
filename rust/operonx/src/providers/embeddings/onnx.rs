@@ -1,6 +1,6 @@
 //! ONNX Runtime embedding backend.
 //!
-//! Mirrors Python [`operon/providers/embeddings/onnx.py`](../../../../../operon/providers/embeddings/onnx.py).
+//! Mirrors Python [`operonx/providers/embeddings/onnx.py`](../../../../../operonx/providers/embeddings/onnx.py).
 //! Feature-gated behind `onnx` — requires `ort` + `tokenizers` crates (see
 //! `Cargo.toml` `[features] onnx = ["dep:ort", "dep:tokenizers"]`).
 //!

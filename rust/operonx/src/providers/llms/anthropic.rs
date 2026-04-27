@@ -1,6 +1,6 @@
 //! Anthropic Claude chat completion backend.
 //!
-//! Mirrors Python [`operon/providers/llms/anthropic.py`](../../../../../operon/providers/llms/anthropic.py).
+//! Mirrors Python [`operonx/providers/llms/anthropic.py`](../../../../../operonx/providers/llms/anthropic.py).
 //! Uses the `/v1/messages` endpoint + translates OpenAI-shaped messages into
 //! Anthropic's `messages` + `system` split. Prompt caching uses
 //! `cache_control: {type: "ephemeral"}` on eligible blocks (see

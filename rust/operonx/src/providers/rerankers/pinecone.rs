@@ -1,6 +1,6 @@
 //! Pinecone reranker backend.
 //!
-//! Mirrors Python [`operon/providers/rerankers/pinecone.py`](../../../../../operon/providers/rerankers/pinecone.py).
+//! Mirrors Python [`operonx/providers/rerankers/pinecone.py`](../../../../../operonx/providers/rerankers/pinecone.py).
 //!
 //! # Phase 5 scope
 //! Struct + trait stub — Phase 5b adds the POST to `/rerank`.

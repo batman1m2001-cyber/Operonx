@@ -2,8 +2,8 @@
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, graph, op
-from operon.core.states import StateSchema
+from operonx.core import END, PARENT, START, GraphOp, graph, op
+from operonx.core.states import StateSchema
 
 # ============================================================
 # Test 1: Simple Counter Loop

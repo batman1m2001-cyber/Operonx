@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from operon.core import END, PARENT, START, GraphOp, Operon
+from operonx.core import END, PARENT, START, GraphOp, Operon
 
 # =============================================================================
 # Mock Helpers
@@ -58,7 +58,7 @@ def make_mock_llm(chunks):
 class TestStreamCoreIsGenerator:
     def test_stream_core_is_async_gen(self, hub):
         """When stream=True, self.core is an async generator function."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -69,7 +69,7 @@ class TestStreamCoreIsGenerator:
 
     def test_non_stream_core_is_not_generator(self, hub):
         """When stream=False, self.core is NOT a generator."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -88,7 +88,7 @@ class TestStreamCoreYields:
     @pytest.mark.asyncio
     async def test_yields_per_token(self, hub):
         """_stream_core yields one dict per content chunk + a final metadata dict."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -128,7 +128,7 @@ class TestStreamCoreYields:
     @pytest.mark.asyncio
     async def test_empty_stream_yields_final_only(self, hub):
         """Stream with no content chunks yields only the final metadata."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -160,7 +160,7 @@ class TestStreamingLLMInGraph:
     @pytest.mark.asyncio
     async def test_streaming_llm_yields_tokens_via_engine(self, hub):
         """LLMOp(stream=True) in a graph delivers frames via engine.start()."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -211,7 +211,7 @@ class TestStreamingLLMInGraph:
         engine.run() delegates to engine.start().collect() internally —
         all yielded frames are merged into a single output dict.
         """
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -255,7 +255,7 @@ class TestStreamingWithThinking:
     @pytest.mark.asyncio
     async def test_thinking_content_accumulated(self, hub):
         """Reasoning content is accumulated in the final yield."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -293,7 +293,7 @@ class TestStreamingFallback:
     @pytest.mark.asyncio
     async def test_fallback_on_primary_failure(self, hub):
         """When primary LLM fails during streaming, fallback LLM is used."""
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")

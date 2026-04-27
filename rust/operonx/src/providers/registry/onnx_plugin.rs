@@ -1,6 +1,6 @@
 //! ONNX plugin registration.
 //!
-//! Mirrors Python [`operon/providers/registry/onnx_plugin.py`](../../../../../operon/providers/registry/onnx_plugin.py).
+//! Mirrors Python [`operonx/providers/registry/onnx_plugin.py`](../../../../../operonx/providers/registry/onnx_plugin.py).
 
 use std::sync::Arc;
 

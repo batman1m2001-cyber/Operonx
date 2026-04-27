@@ -1,13 +1,13 @@
 """Test using ~ (tilde) for soft edges: a >> ~b means soft edge to b
 
-Uses the actual implementation from operon.core.ops.base
+Uses the actual implementation from operonx.core.ops.base
 """
 
 import pytest
 
-from operon.core.ops.base import END, START
-from operon.core.ops.graph.graph_op import GraphOp
-from operon.core.ops.transform.func_op import FuncOp
+from operonx.core.ops.base import END, START
+from operonx.core.ops.graph.graph_op import GraphOp
+from operonx.core.ops.transform.func_op import FuncOp
 
 
 class TestTildeSoftEdge:

@@ -1,6 +1,6 @@
 //! [`LLMGenerator`] — static utility for SSE parsing + synthetic chunks.
 //!
-//! Mirrors Python [`operon/providers/llms/response.py`](../../../../../operon/providers/llms/response.py).
+//! Mirrors Python [`operonx/providers/llms/response.py`](../../../../../operonx/providers/llms/response.py).
 //! Per plan §5b.3 this is a **static utility**, not a stream wrapper — direct
 //! port of the four module-level helpers (`parse`, `make_chunk`, `process`,
 //! `simulate`).

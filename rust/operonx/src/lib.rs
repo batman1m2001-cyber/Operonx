@@ -2,7 +2,7 @@
 //!
 //! High-performance Rust execution backend for Operon workflows.
 //!
-//! Mirrors the Python `operon` package at every level — folder structure,
+//! Mirrors the Python `operonx` package at every level — folder structure,
 //! type names, method names, OOP hierarchy. See [MIGRATION_rust.md](../../../MIGRATION_rust.md).
 //!
 //! ## Module layout

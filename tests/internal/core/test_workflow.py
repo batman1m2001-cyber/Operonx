@@ -2,7 +2,7 @@
 
 import pytest
 
-from operon.core import END, PARENT, START, FuncOp, GraphOp, Operon
+from operonx.core import END, PARENT, START, FuncOp, GraphOp, Operon
 
 
 class TestOperonBasic:
@@ -167,14 +167,14 @@ class TestOperonWithTracer:
         import time
 
         try:
-            from operon.telemetry import LangfuseTracer
+            from operonx.telemetry import LangfuseTracer
         except ImportError:
-            pytest.skip("operon-telemetry not installed")
+            pytest.skip("operonx-telemetry not installed")
 
         tracer = LangfuseTracer(resource="langfuse:default")
 
         # Create a multi-step workflow
-        with GraphOp(name="operon-integration-test") as graph:
+        with GraphOp(name="operonx-integration-test") as graph:
             step1 = FuncOp(
                 name="process_input",
                 code_fn=lambda: {"processed": "Hello from Operon!"},

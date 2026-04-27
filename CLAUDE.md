@@ -174,7 +174,7 @@ cp env.example .env
 # Edit .env with your OPENAI_API_KEY, LANGFUSE_* keys, etc.
 ```
 
-The `.env` file is **not** auto-loaded by `Operon(graph)`. Call `operon.bootstrap()` at process startup to load `.env` and `resources.yaml` — see [Resource Setup](#resource-setup-bootstrap--resourcehub) below.
+The `.env` file is **not** auto-loaded by `Operon(graph)`. Call `operonx.bootstrap()` at process startup to load `.env` and `resources.yaml` — see [Resource Setup](#resource-setup-bootstrap--resourcehub) below.
 
 ### Pre-commit Hooks
 
@@ -235,24 +235,24 @@ Provider ops (`LLMOp`, `EmbeddingOp`, `RerankOp`, telemetry tracers) resolve cre
 **Convenience (covers 95% of cases):**
 
 ```python
-import operon
-from operon.core import Operon
+import operonx
+from operonx.core import Operon
 
-operon.bootstrap()                  # loads ./.env + ./resources.yaml from CWD
+operonx.bootstrap()                  # loads ./.env + ./resources.yaml from CWD
 engine = Operon(graph)
 ```
 
 **Explicit path (notebooks, multi-config, tests):**
 
 ```python
-import operon
-operon.bootstrap(resources="configs/prod.yaml")  # also loads ./.env unless env=False
+import operonx
+operonx.bootstrap(resources="configs/prod.yaml")  # also loads ./.env unless env=False
 ```
 
 **Pure-compute graphs need no setup at all** — `Operon(graph)` works hub-free if the graph doesn't reference any resource by name:
 
 ```python
-from operon.core import Operon, GraphOp, op, START, END, PARENT
+from operonx.core import Operon, GraphOp, op, START, END, PARENT
 
 @op
 def double(x: int):

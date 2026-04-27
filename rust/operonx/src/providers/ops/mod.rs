@@ -1,6 +1,6 @@
 //! Provider op implementations — LLMOp, EmbeddingOp, RerankOp, OnnxOp, TritonOp, PromptOp.
 //!
-//! Mirrors Python `operon/providers/ops/` one-for-one. Python's `chain.py`
+//! Mirrors Python `operonx/providers/ops/` one-for-one. Python's `chain.py`
 //! is authoring-layer (builds a GraphOp from `@graph`-decorated helpers);
 //! the Rust port ships [`chain::build_chat_graph`] / [`chain::build_ask_graph`]
 //! that emit the same serialized JSON shape for Rust-native callers — see

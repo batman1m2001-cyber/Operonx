@@ -10,7 +10,7 @@ import threading
 
 import pytest
 
-from operon.core import (
+from operonx.core import (
     END,
     PARENT,
     START,
@@ -19,7 +19,7 @@ from operon.core import (
     graph,
     op,
 )
-from operon.core.ops.flow import if_
+from operonx.core.ops.flow import if_
 
 # ── Helpers ──
 
@@ -286,7 +286,7 @@ class TestNestedGraph:
 class TestInlineLoop:
     @pytest.mark.asyncio
     async def test_loop_inline(self):
-        from operon.core.states import StateSchema
+        from operonx.core.states import StateSchema
 
         @op
         def increment(counter: int):

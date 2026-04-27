@@ -1,6 +1,6 @@
 //! Tracing — collector, flush worker, tracer base, models.
 //!
-//! Mirrors Python `operon/core/tracing/`.
+//! Mirrors Python `operonx/core/tracing/`.
 
 pub mod base;
 pub mod collector;

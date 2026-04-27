@@ -1,7 +1,7 @@
 //! Telemetry plugin registration — wires `langfuse` (and eventually `otel`)
 //! categories into the global [`ConfigRegistry`].
 //!
-//! Mirrors Python [`operon/telemetry/plugin.py`](../../../../operon/telemetry/plugin.py).
+//! Mirrors Python [`operonx/telemetry/plugin.py`](../../../../operonx/telemetry/plugin.py).
 //! Per §6b.11 the Python guard is a module-level `_registered` flag; Rust's
 //! `register()` functions check the registry to stay idempotent.
 

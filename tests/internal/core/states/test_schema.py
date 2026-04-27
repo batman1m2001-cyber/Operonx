@@ -1,9 +1,9 @@
 """Tests for StateSchema - workflow state structure definition."""
 
-from operon.core.ops.graph.graph_op import END, PARENT, START, GraphOp
-from operon.core.ops.transform.func_op import FuncOp, op
-from operon.core.states.ref import Ref
-from operon.core.states.schema import StateSchema
+from operonx.core.ops.graph.graph_op import END, PARENT, START, GraphOp
+from operonx.core.ops.transform.func_op import FuncOp, op
+from operonx.core.states.ref import Ref
+from operonx.core.states.schema import StateSchema
 
 # ============================================================
 # Test 1: Simple Linear Graph

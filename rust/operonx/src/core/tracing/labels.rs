@@ -1,6 +1,6 @@
 //! [`label()`] — let generator ops name their own yields.
 //!
-//! Mirrors Python [`operon/core/tracing/labels.py`](../../../../operon/core/tracing/labels.py).
+//! Mirrors Python [`operonx/core/tracing/labels.py`](../../../../operonx/core/tracing/labels.py).
 //! Python uses a `ContextVar` pair (active generator key + per-run label
 //! store); Rust uses `tokio::task_local!` with the same two-level design.
 //!

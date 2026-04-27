@@ -9,7 +9,7 @@ Three tiny graphs exercising the three fundamental topologies of Operon:
 No external API keys needed.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 
 @op

@@ -1,7 +1,7 @@
 """Tests for PromptOp functionality."""
 
 import pytest
-from operon.core.states import MemoryState, StateSchema
+from operonx.core.states import MemoryState, StateSchema
 
 
 class TestPromptOpUnified:
@@ -9,13 +9,13 @@ class TestPromptOpUnified:
 
     def test_import(self):
         """Test PromptOp can be imported."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         assert PromptOp is not None
 
     def test_string_prompt_creation(self):
         """Test creating PromptOp with string prompt (user message only)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="string_prompt",
@@ -33,7 +33,7 @@ class TestPromptOpUnified:
 
     def test_dict_prompt_creation(self):
         """Test creating PromptOp with dict prompt (system/user)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="dict_prompt",
@@ -50,7 +50,7 @@ class TestPromptOpUnified:
 
     def test_list_prompt_creation(self):
         """Test creating PromptOp with list prompt (full messages)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="list_prompt",
@@ -78,7 +78,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_format_string_prompt(self):
         """Test formatting string prompt (user message only)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="format_string",
@@ -105,7 +105,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_format_dict_prompt(self):
         """Test formatting dict prompt with system/user keys."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="format_dict",
@@ -134,7 +134,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_format_dict_prompt_user_only(self):
         """Test formatting dict prompt with only user key."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="format_dict_user", inputs={"template": {"user": "Hello {name}!"}, "name": "Bob"}
@@ -155,7 +155,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_format_list_prompt(self):
         """Test formatting list prompt (full messages array)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="format_list",
@@ -184,7 +184,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_format_list_prompt_multimodal(self):
         """Test formatting list prompt with multimodal content."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="format_multimodal",
@@ -219,7 +219,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_prompt_with_conversation_history(self):
         """Test prompt with conversation history injection."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="history_test",
@@ -254,7 +254,7 @@ class TestPromptOpUnified:
     @pytest.mark.asyncio
     async def test_prompt_with_tool_results(self):
         """Test prompt with tool results appended."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="tool_test",
@@ -282,7 +282,7 @@ class TestPromptOpUnified:
 
     def test_metadata_with_prompt(self):
         """Test specific_metadata returns prompt info."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="metadata_test",
@@ -300,7 +300,7 @@ class TestPromptOpSchema:
 
     def test_fixed_schema(self):
         """Test that PromptOp has fixed input schema."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(name="schema_test", inputs={"template": "Test"})
 
@@ -310,7 +310,7 @@ class TestPromptOpSchema:
 
     def test_output_schema(self):
         """Test that output schema has 'messages' key."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(name="output_test", inputs={"template": "Test"})
 
@@ -323,7 +323,7 @@ class TestPromptOpWithVars:
     @pytest.mark.asyncio
     async def test_vars_formatting(self):
         """Test that template vars are used for formatting."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="vars_test",
@@ -348,7 +348,7 @@ class TestPromptOpWithVars:
     @pytest.mark.asyncio
     async def test_vars_from_state(self):
         """Test vars passed via state override defaults."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         # Declare variables in inputs (with defaults) to add them to schema
         node = PromptOp(
@@ -376,7 +376,7 @@ class TestPromptOpWithVars:
     @pytest.mark.asyncio
     async def test_empty_vars(self):
         """Test with no template variables (empty vars)."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(
             name="no_vars_test",
@@ -402,7 +402,7 @@ class TestPromptOpDynamic:
     @pytest.mark.asyncio
     async def test_dynamic_template_from_state(self):
         """Test receiving template dynamically from state."""
-        from operon.providers.ops import PromptOp
+        from operonx.providers.ops import PromptOp
 
         node = PromptOp(name="dynamic_prompt", inputs={"template": None, "name": "default"})
 

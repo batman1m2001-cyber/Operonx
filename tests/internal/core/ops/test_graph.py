@@ -2,11 +2,11 @@
 
 import pytest
 
-from operon.core.engine import Operon
-from operon.core.ops.base import END, PARENT, START
-from operon.core.ops.graph.graph_op import GraphOp, graph
-from operon.core.ops.transform.func_op import op
-from operon.core.states.ref import Ref
+from operonx.core.engine import Operon
+from operonx.core.ops.base import END, PARENT, START
+from operonx.core.ops.graph.graph_op import GraphOp, graph
+from operonx.core.ops.transform.func_op import op
+from operonx.core.states.ref import Ref
 
 
 @op

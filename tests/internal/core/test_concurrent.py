@@ -8,8 +8,8 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon, graph, op
-from operon.core.ops.flow.branch_op import if_
+from operonx.core import END, PARENT, START, GraphOp, Operon, graph, op
+from operonx.core.ops.flow.branch_op import if_
 
 CCU = 5  # Small enough to stay fast in CI, large enough to catch race conditions
 

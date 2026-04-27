@@ -1,6 +1,6 @@
 //! State model — MemoryState, StateSchema, Ref, Cell.
 //!
-//! Mirrors Python `operon/core/states/`.
+//! Mirrors Python `operonx/core/states/`.
 //!
 //! Note: Rust's `ref` is a reserved keyword. The file stays `ref.rs` (matching
 //! Python's `ref.py`) but the module identifier is `ref_` — see §3a.7.

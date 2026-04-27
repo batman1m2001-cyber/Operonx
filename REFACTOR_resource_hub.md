@@ -21,9 +21,9 @@ The refactor splits resource setup into its own layer so the engine becomes a pu
 
 ## Public API after the refactor
 
-### New: `operon.bootstrap()`
+### New: `operonx.bootstrap()`
 
-A free function in `operon/__init__.py`. One-line convenience for the common case.
+A free function in `operonx/__init__.py`. One-line convenience for the common case.
 
 ```python
 def bootstrap(
@@ -75,7 +75,7 @@ def __init__(
 ):
     """Build and prepare a graph for execution.
 
-    Does NOT touch ResourceHub or .env. Call `operon.bootstrap()` or
+    Does NOT touch ResourceHub or .env. Call `operonx.bootstrap()` or
     `ResourceHub.from_yaml(...)` first if your graph uses provider ops.
     """
 ```
@@ -107,7 +107,7 @@ Every error message names the fix. Implemented by adding state to `ResourceHub` 
 
 | # | Trigger | Message | Where raised |
 |---|---|---|---|
-| 1 | `ResourceHub.instance()` called, none installed | `ResourceHub not configured. Call operon.bootstrap() or ResourceHub.from_yaml(<path>) before resolving resources.` | `ResourceHub.instance` |
+| 1 | `ResourceHub.instance()` called, none installed | `ResourceHub not configured. Call operonx.bootstrap() or ResourceHub.from_yaml(<path>) before resolving resources.` | `ResourceHub.instance` |
 | 2 | Hub installed but `source_path is None` (shouldn't happen in practice — `auto()` returns `None` rather than installing an empty hub — but kept for defensive completeness) | `ResourceHub has no source. Re-install via ResourceHub.from_yaml(...).` | `hub.get` when `source_path is None` |
 | 3 | File loaded, key absent | `Resource 'llm:gpt-4o' not found in <source_path>.\nAvailable: <hub.keys()>.` | `hub.get` |
 | 4 | Key present, `${VAR}` interpolation failed at resolve time | `Resource 'llm:gpt-4o': environment variable OPENAI_API_KEY is unset.\nLoaded from: <source_path>. .env searched: <list>.` | `YamlConfigStorage.load_one` (wrapped as `EnvVarUnsetError`) |
@@ -118,7 +118,7 @@ Every error message names the fix. Implemented by adding state to `ResourceHub` 
 Two new attributes on `ResourceHub`:
 
 - `source_path: Optional[Path]` — what `from_yaml` / `from_json` loaded. Used in branch (3) and (4) error messages.
-- A module-level `BOOTSTRAP_ENV_PATHS: list[Path]` populated by `operon.bootstrap()` when it loads `.env`. Used in branch (4) and warning W2.
+- A module-level `BOOTSTRAP_ENV_PATHS: list[Path]` populated by `operonx.bootstrap()` when it loads `.env`. Used in branch (4) and warning W2.
 
 `auto()` does not install an empty hub on miss — it returns `None` and warns (W1). So we don't need a `searched_paths` attribute or an `is_empty()` method on storage.
 
@@ -136,12 +136,12 @@ A user who sets `OPENAI_API_KEY` *after* `bootstrap()` but *before* `engine.run(
 
 | File | Change |
 |---|---|
-| [operon/__init__.py](operon/__init__.py) | Add `bootstrap()` function. Export it. Populate `BOOTSTRAP_ENV_PATHS` when `.env` is loaded. |
-| [operon/core/registry/resource_hub.py](operon/core/registry/resource_hub.py) | Add `auto()` (CWD-only, warns on miss), `source_path` attribute. Update `get()` with disambiguated branches. Update `instance()` error message. Define `ResourceHubWarning` and `EnvVarUnsetError`. |
-| [operon/core/registry/storage.py](operon/core/registry/storage.py) | Scan raw YAML/JSON for `${VAR}` references at `__init__`, emit W2 warnings for unset ones. Wrap env interpolation in `load_one` to raise `EnvVarUnsetError` on miss. |
-| [operon/core/registry/__init__.py](operon/core/registry/__init__.py) | Export `EnvVarUnsetError`, `ResourceHubWarning`. |
-| [operon/core/engine.py](operon/core/engine.py) | Remove `_load_env`, `_load_resources`, `resources=` kwarg. Drop `resources` slot. Update docstring. |
-| [examples/python/_common.py](examples/python/_common.py) | Replace `if RESOURCES_FILE.exists()` block with `operon.bootstrap(resources=str(RESOURCES_FILE))` once at module level (or skip when file is absent). |
+| [operonx/__init__.py](operonx/__init__.py) | Add `bootstrap()` function. Export it. Populate `BOOTSTRAP_ENV_PATHS` when `.env` is loaded. |
+| [operonx/core/registry/resource_hub.py](operonx/core/registry/resource_hub.py) | Add `auto()` (CWD-only, warns on miss), `source_path` attribute. Update `get()` with disambiguated branches. Update `instance()` error message. Define `ResourceHubWarning` and `EnvVarUnsetError`. |
+| [operonx/core/registry/storage.py](operonx/core/registry/storage.py) | Scan raw YAML/JSON for `${VAR}` references at `__init__`, emit W2 warnings for unset ones. Wrap env interpolation in `load_one` to raise `EnvVarUnsetError` on miss. |
+| [operonx/core/registry/__init__.py](operonx/core/registry/__init__.py) | Export `EnvVarUnsetError`, `ResourceHubWarning`. |
+| [operonx/core/engine.py](operonx/core/engine.py) | Remove `_load_env`, `_load_resources`, `resources=` kwarg. Drop `resources` slot. Update docstring. |
+| [examples/python/_common.py](examples/python/_common.py) | Replace `if RESOURCES_FILE.exists()` block with `operonx.bootstrap(resources=str(RESOURCES_FILE))` once at module level (or skip when file is absent). |
 | [tests/internal/providers/conftest.py](tests/internal/providers/conftest.py) | Keep `setup_resource_hub` fixture — it is now *authoritative* (engine no longer clobbers it). |
 | [tests/internal/core/conftest.py](tests/internal/core/conftest.py) | No change — pure-compute graphs no longer require a hub. |
 | [tests/spec/conftest.py](tests/spec/conftest.py) | No change — same as above. |
@@ -151,8 +151,8 @@ A user who sets `OPENAI_API_KEY` *after* `bootstrap()` but *before* `engine.run(
 
 This is a **breaking change** at the API surface, but the surface is small and the migration is mechanical:
 
-- Anyone calling `Operon(graph, resources='...')` must switch to `operon.bootstrap(resources='...')` followed by `Operon(graph)`. There is no shim — the kwarg is removed.
-- Anyone relying on `Operon(graph)` to auto-load `.env` and `resources.yaml` from CWD must add a `operon.bootstrap()` call before it. Without that, pure-compute graphs still work; provider graphs raise the new branch (1) error.
+- Anyone calling `Operon(graph, resources='...')` must switch to `operonx.bootstrap(resources='...')` followed by `Operon(graph)`. There is no shim — the kwarg is removed.
+- Anyone relying on `Operon(graph)` to auto-load `.env` and `resources.yaml` from CWD must add a `operonx.bootstrap()` call before it. Without that, pure-compute graphs still work; provider graphs raise the new branch (1) error.
 
 The error message in branch (1) names the exact fix, so the migration cost for downstream code is one error → one line change.
 
@@ -178,7 +178,7 @@ New tests in `tests/internal/core/test_workflow.py`:
 
 Update existing tests:
 
-- Any test that passes `Operon(graph, resources='...')` becomes `operon.bootstrap(resources='...'); Operon(graph)`.
+- Any test that passes `Operon(graph, resources='...')` becomes `operonx.bootstrap(resources='...'); Operon(graph)`.
 - Any test that runs a provider graph without a fixture-installed hub gains an explicit setup call. Today most providers tests rely on `setup_resource_hub` autouse, which is fine.
 
 ## Migration steps (suggested order)
@@ -226,7 +226,7 @@ Rust has the same coupling. [`Operon::new(graph_json)`](rust/operonx/src/core/en
 
 ## Open questions
 
-1. **Should `bootstrap()` be implicit on `import operon`?** Recommendation: no. Explicit setup is cheaper than the surprise factor of import side-effects, especially in notebooks and embedded use cases. One extra line.
+1. **Should `bootstrap()` be implicit on `import operonx`?** Recommendation: no. Explicit setup is cheaper than the surprise factor of import side-effects, especially in notebooks and embedded use cases. One extra line.
 2. ~~Should `auto()` walk up?~~ **Resolved: no.** CWD-only. Wrappers (conftests, examples) already compute absolute paths in Python and pass them to `from_yaml(...)`; the hub's contract should not include filesystem traversal. Walk-up risks picking up an unrelated parent project's `resources.yaml`.
 3. **Should env-var problems be warning + lazy error, or eager error?** Resolved: warning at load time (W2) + lazy error at `get()` time (branch 4). A user who sets the var between `bootstrap()` and `engine.run()` should not be blocked by an over-eager check.
 4. **Do we keep `Operon(graph, tracer=...)` or move tracer construction out too?** Out of scope for this refactor. Tracer is per-engine, not global state, so the coupling is correct.
@@ -236,7 +236,7 @@ Rust has the same coupling. [`Operon::new(graph_json)`](rust/operonx/src/core/en
 ## Acceptance criteria
 
 - `Operon(pure_compute_graph)` works with no `resources.yaml` and no `.env` anywhere. No warnings fire.
-- `Operon(provider_graph)` without prior `bootstrap()` raises a branch-(1) error that names `operon.bootstrap()` as the fix.
+- `Operon(provider_graph)` without prior `bootstrap()` raises a branch-(1) error that names `operonx.bootstrap()` as the fix.
 - `bootstrap()` with no `resources.yaml` at CWD emits W1 once, returns `None`, installs no hub.
 - `from_yaml(...)` on a file referencing unset `${VAR}` emits W2 once per `(var, key)` pair, still returns a usable hub.
 - `set_instance(hub_A)` followed by `Operon(any_graph)` leaves `hub_A` in place.

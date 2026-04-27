@@ -1,6 +1,6 @@
 //! `EmbeddingOp` — texts → embedding vectors via ResourceHub.
 //!
-//! Mirrors Python [`operon/providers/ops/embedding.py`](../../../../../operon/providers/ops/embedding.py).
+//! Mirrors Python [`operonx/providers/ops/embedding.py`](../../../../../operonx/providers/ops/embedding.py).
 
 use serde_json::{json, Map, Value};
 

@@ -1,6 +1,6 @@
 //! [`BaseReranker`] trait.
 //!
-//! Mirrors Python [`operon/providers/rerankers/base.py`](../../../../../operon/providers/rerankers/base.py).
+//! Mirrors Python [`operonx/providers/rerankers/base.py`](../../../../../operonx/providers/rerankers/base.py).
 //! Per plan §5b.1 the canonical method is `run()` (not `rerank()`).
 
 use async_trait::async_trait;

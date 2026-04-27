@@ -6,8 +6,8 @@ Requires ``OPENAI_API_KEY``.
 
 import json
 
-from operon.core import END, PARENT, START, GraphOp, graph, op
-from operon.providers import LLMOp
+from operonx.core import END, PARENT, START, GraphOp, graph, op
+from operonx.providers import LLMOp
 
 # =============================================================================
 # Tool definitions (OpenAI function calling format)
@@ -27,7 +27,7 @@ def search(query: str) -> dict:
     """Mock search — in production, call real search API."""
     knowledge = {
         "python": "Python is a high-level programming language created by Guido van Rossum in 1991.",
-        "operon": "Operon is an async workflow orchestration engine for GenAI applications.",
+        "operonx": "Operon is an async workflow orchestration engine for GenAI applications.",
         "vietnam": "Vietnam is a country in Southeast Asia. Capital: Hanoi. Population: ~100 million.",
         "machine learning": "Machine learning is a subset of AI that learns patterns from data.",
     }

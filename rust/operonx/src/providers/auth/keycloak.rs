@@ -1,6 +1,6 @@
 //! `KeycloakTokenProvider` — background-refreshed bearer token provider.
 //!
-//! Mirrors Python [`operon/providers/auth/keycloak.py`](../../../../../operon/providers/auth/keycloak.py).
+//! Mirrors Python [`operonx/providers/auth/keycloak.py`](../../../../../operonx/providers/auth/keycloak.py).
 //! Per plan §5b.7 the Python side uses BOTH a background refresh thread AND
 //! a lazy fallback fetch. Rust mirrors this with:
 //! - `tokio::task` background refresher (abort-on-drop, graceful shutdown).

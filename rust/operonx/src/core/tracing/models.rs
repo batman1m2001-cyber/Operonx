@@ -1,6 +1,6 @@
 //! Trace data model — `TraceNode`, `TraceSummary`, `TraceData`.
 //!
-//! Mirrors Python [`operon/core/tracing/models.py`](../../../../operon/core/tracing/models.py)
+//! Mirrors Python [`operonx/core/tracing/models.py`](../../../../operonx/core/tracing/models.py)
 //! per plan §6a (extends with `kind`, `media`, `usage`, `cost`,
 //! `thinking_content`, `parent_trace_key`).
 //!

@@ -1,6 +1,6 @@
 //! HuggingFace Transformers embedding backend.
 //!
-//! Mirrors Python [`operon/providers/embeddings/huggingface.py`](../../../../../operon/providers/embeddings/huggingface.py).
+//! Mirrors Python [`operonx/providers/embeddings/huggingface.py`](../../../../../operonx/providers/embeddings/huggingface.py).
 //! Per plan §5a recommendation, the Rust equivalent stays a **stub** in
 //! v0.6 — the Python HF backend exists for authoring; Rust prod paths use
 //! ONNX exports ([`super::onnx::OnnxEmbedder`]).

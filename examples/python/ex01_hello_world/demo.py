@@ -1,6 +1,6 @@
 """01 Hello World — Python-side demo.
 
-Three tiny graphs, run through :class:`operon.core.Operon`. Only the
+Three tiny graphs, run through :class:`operonx.core.Operon`. Only the
 ``engine.run(...)`` call is timed; all authoring / construction work
 happens before the reporter's clock starts.
 """

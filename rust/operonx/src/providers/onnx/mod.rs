@@ -1,6 +1,6 @@
 //! ONNX inference backend.
 //!
-//! Mirrors Python `operon/providers/onnx/`. Gated behind the `onnx` feature.
+//! Mirrors Python `operonx/providers/onnx/`. Gated behind the `onnx` feature.
 
 pub mod backend;
 pub mod config;

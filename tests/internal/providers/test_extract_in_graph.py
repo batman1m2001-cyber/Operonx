@@ -11,11 +11,11 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
-from operon.core import END, START, Operon, graph
-from operon.core.ops import op
-from operon.core.ops.flow import if_
+from operonx.core import END, START, Operon, graph
+from operonx.core.ops import op
+from operonx.core.ops.flow import if_
 
-from operon.providers.ops import ask
+from operonx.providers.ops import ask
 from tests.internal.providers.test_extract_retry import make_mock_hub
 
 # ── Tests: ask() after if_() branching ──
@@ -38,7 +38,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(responses)
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
@@ -97,7 +97,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(["<result>confirm</result>"])
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
@@ -141,7 +141,7 @@ class TestExtractAfterBranch:
             return {"final": result or llm_result or "none"}
 
         mock_hub, _ = make_mock_hub(["<result>unknown_garbage</result>"])
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_cls:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
 
             @graph
@@ -176,7 +176,7 @@ class TestExtractAfterBranch:
 class TestValidatorsFormat:
     def test_invalid_validators_returns_error(self):
         """validators must be dict, not list."""
-        from operon.core.ops.transform.parser_op import ParserOp
+        from operonx.core.ops.transform.parser_op import ParserOp
 
         parser = ParserOp(format="xml", extract=["result: str"])
         result = asyncio.run(
@@ -190,7 +190,7 @@ class TestValidatorsFormat:
 
     def test_valid_validators_dict(self):
         """Proper dict validators work."""
-        from operon.core.ops.transform.parser_op import ParserOp
+        from operonx.core.ops.transform.parser_op import ParserOp
 
         parser = ParserOp(format="xml", extract=["result: str"])
         result = asyncio.run(
@@ -204,7 +204,7 @@ class TestValidatorsFormat:
 
     def test_validators_default_on_reject(self):
         """@-prefix value used as default when validation fails."""
-        from operon.core.ops.transform.parser_op import ParserOp
+        from operonx.core.ops.transform.parser_op import ParserOp
 
         parser = ParserOp(format="xml", extract=["result: str"])
         result = asyncio.run(

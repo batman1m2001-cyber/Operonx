@@ -13,8 +13,8 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon, graph, op
-from operon.core.tracing.collector import TraceCollector
+from operonx.core import END, PARENT, START, GraphOp, Operon, graph, op
+from operonx.core.tracing.collector import TraceCollector
 
 # =========================================================================
 # Test ops

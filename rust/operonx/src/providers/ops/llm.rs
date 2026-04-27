@@ -1,6 +1,6 @@
 //! `LLMOp` — language-model op.
 //!
-//! Mirrors Python [`operon/providers/ops/llm.py`](../../../../../operon/providers/ops/llm.py).
+//! Mirrors Python [`operonx/providers/ops/llm.py`](../../../../../operonx/providers/ops/llm.py).
 //! Features:
 //! - Single-model or weighted load-balancing across multiple resources.
 //! - Ordered fallback chain on primary failure (per §5b.5).

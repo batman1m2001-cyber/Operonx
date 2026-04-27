@@ -1,6 +1,6 @@
 //! `StateSchema` — compile-time state structure for a workflow.
 //!
-//! Mirrors Python [`operon/core/states/schema.py`](../../../../operon/core/states/schema.py).
+//! Mirrors Python [`operonx/core/states/schema.py`](../../../../operonx/core/states/schema.py).
 //! Each `(op_name, var_name)` pair gets a unique slot index, enabling O(1)
 //! state access. Refs resolve at most 1 hop (see MIGRATION_rust.md §4b.6).
 //!

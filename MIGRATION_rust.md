@@ -1,17 +1,17 @@
 # Rust Backend Migration Plan — `operonx`
 
 **Source:** `Hush-ai/rust/{hush-icore, hush-providers, hush-telemetry}/src/`
-**Target:** `operonx` — **single unified Rust crate** whose `src/` tree mirrors the Python `operon/{core, providers, telemetry}/` tree file-for-file.
+**Target:** `operonx` — **single unified Rust crate** whose `src/` tree mirrors the Python `operonx/{core, providers, telemetry}/` tree file-for-file.
 **Scope (strict):** **core, providers, telemetry only.** Everything else — `hush-serve`, `hush-plugin`, `ui-hush-eyes`, future `operonx-serve`, future trace viz — is **out of scope**. Do not port, do not plan, do not reference.
-**Distribution:** `pip install operonx` / `cargo install operonx`. Python import stays `from operon import ...`.
+**Distribution:** `pip install operonx` / `cargo install operonx`. Python import stays `from operonx import ...`.
 
 ---
 
 ## 1. Guiding principles — full parity with Python
 
-The Rust side must mirror the Python side at **every** level. A developer fluent in `operon` (Python) should be able to navigate `operonx` (Rust) without a map.
+The Rust side must mirror the Python side at **every** level. A developer fluent in `operonx` (Python) should be able to navigate `operonx` (Rust) without a map.
 
-1. **Folder structure parity** — `operon/core/ops/graph/task_scheduler.py` ↔ `operonx/src/core/ops/graph/task_scheduler.rs`. No flattening.
+1. **Folder structure parity** — `operonx/core/ops/graph/task_scheduler.py` ↔ `operonx/src/core/ops/graph/task_scheduler.rs`. No flattening.
 2. **Module/file name parity** — one-to-one. Rust file = Python file with `.rs` instead of `.py`.
 3. **Type name parity** — Python class `GraphOp` ↔ Rust struct `GraphOp`. Python `MemoryState` ↔ Rust `MemoryState`. Not `EngineState`. Not `Hush`. Not `LlmProvider`. Whatever Python calls it, Rust calls it the same.
 4. **Method name parity** — Python `graph.serialize()` ↔ Rust `graph.serialize()`. Python `tracer.flush()` ↔ Rust `tracer.flush()`. Snake_case on both sides; dunder methods (`__getitem__`, `__rshift__`) map to Rust trait impls (`std::ops::Index`, `std::ops::Shr`) or named methods (`get_item`) when no operator trait fits.
@@ -29,9 +29,9 @@ Operon/rust/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                   # pub mod core; pub mod providers; pub mod telemetry;
-│       ├── core/                    # ← mirrors operon/core/
-│       ├── providers/               # ← mirrors operon/providers/
-│       └── telemetry/               # ← mirrors operon/telemetry/
+│       ├── core/                    # ← mirrors operonx/core/
+│       ├── providers/               # ← mirrors operonx/providers/
+│       └── telemetry/               # ← mirrors operonx/telemetry/
 └── operonx-macros/                  # proc-macros (Rust requires separate crate)
     ├── Cargo.toml                   # proc-macro = true
     └── src/lib.rs                   # #[op], #[resource], #[model]
@@ -41,8 +41,8 @@ Operon/rust/
 Feature flags:
 ```toml
 [features]
-default      = ["langfuse", "operon-eyes"]
-operon-eyes  = []
+default      = ["langfuse", "operonx-eyes"]
+operonx-eyes  = []
 langfuse     = []
 otel         = ["dep:opentelemetry", "dep:opentelemetry-otlp"]
 onnx         = ["dep:ort", "dep:tokenizers"]
@@ -68,13 +68,13 @@ Throughout the tables below:
 
 | Python | Rust | Rationale |
 |---|---|---|
-| `class Operon` (in `operon.core.engine`) | `struct Operon` (in `operonx::core::engine`) | Same class name. Crate name `operonx` only exists because PyPI `operon` is squatted — the *type* name mirrors Python. |
+| `class Operon` (in `operonx.core.engine`) | `struct Operon` (in `operonx::core::engine`) | Same class name. Crate name `operonx` only exists because PyPI `operonx` is squatted — the *type* name mirrors Python. |
 | `class ExecutionHandle` | `struct ExecutionHandle` | — |
 | `class Middleware` | `trait Middleware` | Abstract Python base → Rust trait. |
 
 User code:
 ```rust
-use operonx::Operon;                         // ← reads like from operon import Operon
+use operonx::Operon;                         // ← reads like from operonx import Operon
 let engine = Operon::new(&json)?;
 let result = engine.run(inputs).await?;
 ```
@@ -251,7 +251,7 @@ Rust idiom is enum variants (not separate subclasses) — semantically equivalen
 Every Python `__init__.py` with its `__all__` list maps to a Rust `mod.rs` that declares submodules and re-exports with `pub use`:
 
 ```python
-# operon/core/states/__init__.py
+# operonx/core/states/__init__.py
 from .state import MemoryState
 from .ref import Ref, StreamPolicy
 from .schema import StateSchema
@@ -326,7 +326,7 @@ Oversized capacities wasted memory; undersized caps throughput. When in doubt, s
 ## 4. `operonx/src/core/` — file-by-file mapping
 
 ```
-operon/core/ (Python)                         →  operonx/src/core/ (Rust)                    Class
+operonx/core/ (Python)                         →  operonx/src/core/ (Rust)                    Class
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 __init__.py                                   →  mod.rs                                      🔧
 engine.py  (Operon, ExecutionHandle)          →  engine.rs                                   🔧
@@ -522,14 +522,14 @@ Rust has a flat `logging.rs`. Split to match Python's `loggings/{config, events,
 Points where a naive port would silently diverge from Python semantics. Each was confirmed against specific Python source locations.
 
 **4b.1 `graph.serialize()` is NOT JSON-safe — requires a cleanup pass.**
-`BaseOp.serialize()` at [base.py:797-820](../../Operon/operon/core/ops/base.py#L797) includes `python_callable: self.core` — a raw Python function object. Python backend uses it; Rust cannot.
+`BaseOp.serialize()` at [base.py:797-820](../../Operon/operonx/core/ops/base.py#L797) includes `python_callable: self.core` — a raw Python function object. Python backend uses it; Rust cannot.
 
 Resolution:
 - **Python side** adds `Operon.export_config(path: Path, pretty: bool = True) -> None` that walks the `graph.serialize()` dict, drops every `python_callable` key, injects `"schema_version": "1.0"` at the root, and writes JSON. This is the one user-facing entry point to produce a Rust-consumable config file.
 - **Rust side** `GraphConfig` uses `#[serde(default)]` and does not deserialize `python_callable` — unknown-field rejection must *exclude* it so old configs still parse. Prefer `#[serde(skip)]` on the field in Rust-side mirror structs.
 
 **4b.2 `loop_config.until` serialization — strings only.**
-[graph_op.py:551-553](../../Operon/operon/core/ops/graph/graph_op.py#L551) explicitly sets `until` to the string form or `None`; callable conditions are dropped at serialization time. Rust schema:
+[graph_op.py:551-553](../../Operon/operonx/core/ops/graph/graph_op.py#L551) explicitly sets `until` to the string form or `None`; callable conditions are dropped at serialization time. Rust schema:
 ```rust
 pub struct LoopConfig {
     pub until: Option<String>,
@@ -541,7 +541,7 @@ pub struct LoopConfig {
 Rust loop evaluator parses the `until` expression (e.g., `"count >= 5"`) via a small expression evaluator. `loop_eval.rs` in Hush-ai already supports this — reuse.
 
 **4b.3 `Tracer.flush()` is sync, runs on a separate thread (not an async task).**
-[base.py:55-64](../../Operon/operon/core/tracing/base.py#L55) `flush()` is a plain `def`, not `async def`. `FlushWorker` uses `ThreadPoolExecutor` to invoke it off the main asyncio loop.
+[base.py:55-64](../../Operon/operonx/core/tracing/base.py#L55) `flush()` is a plain `def`, not `async def`. `FlushWorker` uses `ThreadPoolExecutor` to invoke it off the main asyncio loop.
 
 Rust trait:
 ```rust
@@ -576,7 +576,7 @@ fn get(&self, op: Spur, var: Spur, ctx: &[Spur]) -> Option<Arc<Value>> {
 This is a small perf cost (a few extra hashmap lookups on miss) but preserves Python semantics exactly. Depth >4 is rare (deep loops), so the SmallVec heap-spill is acceptable.
 
 **4b.5 Middleware execution order — inserted order forward, reversed for after/error.**
-[engine.py:513-535](../../Operon/operon/core/engine.py#L513) — `before_run` called in `self._middlewares` order; `after_run` and `on_error` iterate the **same list in reverse**. This is the classic onion/stack semantics.
+[engine.py:513-535](../../Operon/operonx/core/engine.py#L513) — `before_run` called in `self._middlewares` order; `after_run` and `on_error` iterate the **same list in reverse**. This is the classic onion/stack semantics.
 
 Rust must match:
 ```rust
@@ -592,7 +592,7 @@ A Ref like `op_b["x"]` reads exactly one state cell (`op_b.x` in current context
 Rust `StateSchema` must encode this: each op's `pull_refs` point at exactly one source cell each. The scheduler's push step writes output values into the destination cell; downstream reads pick up the stored value, never re-resolving back through the source. This is the Python behavior and matches how the current Rust already works — keep as-is; do not "optimize" by chasing refs.
 
 **4b.7 `ExecutionHandle` full surface to port.**
-From [engine.py:131-230](../../Operon/operon/core/engine.py#L131):
+From [engine.py:131-230](../../Operon/operonx/core/engine.py#L131):
 ```python
 async for op, ctx, data in handle:  # frame iteration
 value = await handle["op_name", "var_name"]  # point query
@@ -627,7 +627,7 @@ pub enum CollectMode { Group, Flat }
 `wait_for` internally registers a `oneshot::Sender` keyed by `(op, var)`; the frame-processing loop fires matching waiters as frames arrive. `result()` reads the buffered `frames` without consuming the stream.
 
 **4b.8 Collector synthesizes `stream_context` nodes.**
-[collector.py](../../Operon/operon/core/tracing/collector.py) groups `[0]`, `[1]`, ... stream items under a synthetic `TraceNode` with `kind = "stream_context"`. Rust `TraceCollector::collect()` must produce the same synthetic parent — not an emergent structure but an explicit group node inserted during tree build.
+[collector.py](../../Operon/operonx/core/tracing/collector.py) groups `[0]`, `[1]`, ... stream items under a synthetic `TraceNode` with `kind = "stream_context"`. Rust `TraceCollector::collect()` must produce the same synthetic parent — not an emergent structure but an explicit group node inserted during tree build.
 
 **4b.9 `MediaRef` companion to `Media`.**
 Both are dataclasses. `MediaRef.from_media(media, field_path)` produces a reference for traces (media stripped from main payload, kept as referenceable side-channel). Rust needs both:
@@ -647,7 +647,7 @@ impl MediaRef {
 ```
 
 **4b.10 `OpType` is a `Literal` string, not an Enum — and the list is longer than earlier drafts.**
-Full list from [op_config.py:5-34](../../Operon/operon/core/configs/op_config.py#L5):
+Full list from [op_config.py:5-34](../../Operon/operonx/core/configs/op_config.py#L5):
 ```
 data, llm, embedding, rerank, branch, for, while, stream, code, lambda,
 parser, prompt, doc-processor, milvus, mongo, s3, graph, default, dummy,
@@ -688,7 +688,7 @@ pub struct FuncOpConfig {
 Registry dispatch selects the right execution path from these flags.
 
 **4b.12 `SchedulerEvent` — Python has Frame + EOF only; Rust currently has 4 variants.**
-Python [task_scheduler.py](../../Operon/operon/core/ops/graph/task_scheduler.py) emits just `Frame(op, ctx, result)` and `EOF(op, ctx)`. Hush-ai Rust has `SchedulerEvent::{Done, DonePending, Yield, Exhausted}` — different partition.
+Python [task_scheduler.py](../../Operon/operonx/core/ops/graph/task_scheduler.py) emits just `Frame(op, ctx, result)` and `EOF(op, ctx)`. Hush-ai Rust has `SchedulerEvent::{Done, DonePending, Yield, Exhausted}` — different partition.
 
 Resolution — pick the Python shape for parity:
 ```rust
@@ -700,7 +700,7 @@ pub enum SchedulerEvent {
 The PENDING / Yield / Exhausted distinctions collapse into `Frame { result: Arc<Value::Null> }` or are tracked separately in scheduler state, not as event variants.
 
 **4b.13 Minor — `Operon.__call__()` alias for `run()`.**
-[engine.py:539-551](../../Operon/operon/core/engine.py#L539) lets `engine(inputs=...)` work. Rust has no clean mirror for `__call__` on a struct. **Skip** — Rust users write `engine.run(inputs).await?` explicitly; document this as one of the few Python ergonomic shortcuts that doesn't translate.
+[engine.py:539-551](../../Operon/operonx/core/engine.py#L539) lets `engine(inputs=...)` work. Rust has no clean mirror for `__call__` on a struct. **Skip** — Rust users write `engine.run(inputs).await?` explicitly; document this as one of the few Python ergonomic shortcuts that doesn't translate.
 
 **4b.14 `LocalTracer` is a runtime debug tracer, not build-time.**
 Writes traces to a JSON file after each run. Rust [tracing/local.rs](../../Hush-ai/rust/hush-icore/src/tracing/local.rs) already mirrors this.
@@ -713,7 +713,7 @@ Writes traces to a JSON file after each run. Rust [tracing/local.rs](../../Hush-
 ## 5. `operonx/src/providers/` — file-by-file mapping
 
 ```
-operon/providers/ (Python)                    →  operonx/src/providers/ (Rust)              Class
+operonx/providers/ (Python)                    →  operonx/src/providers/ (Rust)              Class
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 __init__.py                                   →  mod.rs                                      🔧
 
@@ -864,7 +864,7 @@ Recommend **A** for v0.6 — Python HF backends exist for authoring; Rust prod u
 Points where the plan would silently diverge from Python semantics. Each confirmed against Python source.
 
 **5b.1 `BaseEmbedder` and `BaseReranker` methods are `run()`, not `embed()` / `rerank()`.**
-From [embeddings/base.py:11](../../Operon/operon/providers/embeddings/base.py#L11) and [rerankers/base.py:9](../../Operon/operon/providers/rerankers/base.py#L9) — both abstract base classes expose a single async method named `run()`. Earlier drafts assumed `embed()`/`aembed()`/`rerank()`/`arerank()` — **wrong.**
+From [embeddings/base.py:11](../../Operon/operonx/providers/embeddings/base.py#L11) and [rerankers/base.py:9](../../Operon/operonx/providers/rerankers/base.py#L9) — both abstract base classes expose a single async method named `run()`. Earlier drafts assumed `embed()`/`aembed()`/`rerank()`/`arerank()` — **wrong.**
 
 Correction — Rust traits must match:
 ```rust
@@ -879,10 +879,10 @@ pub trait BaseReranker: Send + Sync {
     async fn run(&self, query: String, texts: Vec<String>, top_k: usize, threshold: f32) -> Result<Vec<RerankResult>, OperonError>;
 }
 ```
-`OnnxInferenceBackend` also uses `run()` per [onnx/backend.py:45](../../Operon/operon/providers/onnx/backend.py#L45). Same signature shape. §3a.3 method-conventions row for these types must read `run()`, not `embed()`/`rerank()`.
+`OnnxInferenceBackend` also uses `run()` per [onnx/backend.py:45](../../Operon/operonx/providers/onnx/backend.py#L45). Same signature shape. §3a.3 method-conventions row for these types must read `run()`, not `embed()`/`rerank()`.
 
 **5b.2 `BaseLLM` exposes `generate()` / `stream()` / `warmup()` / `generate_batch()` — no `agenerate`/`astream`.**
-From [llms/base.py:117-280](../../Operon/operon/providers/llms/base.py#L117). Rust trait:
+From [llms/base.py:117-280](../../Operon/operonx/providers/llms/base.py#L117). Rust trait:
 ```rust
 #[async_trait]
 pub trait BaseLLM: Send + Sync {
@@ -896,7 +896,7 @@ pub trait BaseLLM: Send + Sync {
 **No `create()` classmethod on the trait** — factory is standalone `create_llm(config)` at `llms/factory.rs`.
 
 **5b.3 `LLMGenerator` is a static utility class, not a streaming wrapper.**
-From [llms/response.py:11-124](../../Operon/operon/providers/llms/response.py#L11). Methods:
+From [llms/response.py:11-124](../../Operon/operonx/providers/llms/response.py#L11). Methods:
 - `parse(line) -> Option<ChatCompletionChunk>` — parse one SSE line
 - `make_chunk(content, model, chat_id, last) -> ChatCompletionChunk` — build a synthetic chunk
 - `process(stream, model, delay) -> AsyncIterator<Chunk>` — post-process a raw stream (throttle, normalize)
@@ -914,7 +914,7 @@ impl LLMGenerator {
 Classification in §5 table: **🔧 reuse concept, rewrite signature — not 🆕.**
 
 **5b.4 `LLMOp` has TWO separate code paths — `_generate_core` and `_stream_core` — not a single unified path.**
-From [ops/llm.py:169-172](../../Operon/operon/providers/ops/llm.py#L169):
+From [ops/llm.py:169-172](../../Operon/operonx/providers/ops/llm.py#L169):
 ```python
 if self.stream:
     self._set_core(self._stream_core)
@@ -936,7 +936,7 @@ impl LLMOp {
 ```
 
 **5b.5 Multi-model selection uses seeded `random.Random` — deterministic only with `seed=`.**
-From [ops/llm.py:111](../../Operon/operon/providers/ops/llm.py#L111):
+From [ops/llm.py:111](../../Operon/operonx/providers/ops/llm.py#L111):
 ```python
 self._rng = random.Random(seed)       # seed=None → non-deterministic but one-shot per request
 # ...
@@ -945,14 +945,14 @@ self._rng.choices(self._llms, weights=self.ratios, k=1)[0]
 Rust equivalent uses `rand::rngs::StdRng::seed_from_u64(seed)` when seed is provided, `StdRng::from_entropy()` when not. One selection per op dispatch — not per-token during streaming.
 
 **5b.6 `create_auth()` only supports Keycloak — not a multi-type dispatcher.**
-From [auth/factory.py:7-16](../../Operon/operon/providers/auth/factory.py#L7). Rust `create_auth()` is simple:
+From [auth/factory.py:7-16](../../Operon/operonx/providers/auth/factory.py#L7). Rust `create_auth()` is simple:
 ```rust
 pub fn create_auth(config: &KeycloakTokenConfig) -> Result<Arc<KeycloakTokenProvider>, OperonError>;
 ```
 Don't over-engineer a plugin dispatcher here; expand only if a second auth provider is added.
 
 **5b.7 `KeycloakTokenProvider` uses BOTH background refresh thread AND lazy fallback.**
-From [auth/keycloak.py:133, 195-226](../../Operon/operon/providers/auth/keycloak.py#L133):
+From [auth/keycloak.py:133, 195-226](../../Operon/operonx/providers/auth/keycloak.py#L133):
 - Background daemon thread wakes at `refresh_interval` to proactively refresh before expiry.
 - `get_token()` does lazy fetch if no token cached yet (on first call or after shutdown/restart).
 - Both mechanisms coexist; neither is "the" refresh path.
@@ -960,7 +960,7 @@ From [auth/keycloak.py:133, 195-226](../../Operon/operon/providers/auth/keycloak
 Rust port: `tokio::task::spawn` for background refresh (abort-on-drop) + `OnceLock<RwLock<Token>>` for the cached token. `get_token()` awaits the lock, returns cached if fresh, otherwise triggers a single re-fetch (deduplicated by the lock).
 
 **5b.8 `ops/_utils.py` has only `resolve_hub()` — no `resolve_llm` or `resolve_embedding`.**
-From [ops/_utils.py:1-12](../../Operon/operon/providers/ops/_utils.py#L1). Earlier draft listed extra helpers — wrong. Rust `ops/utils.rs` contains:
+From [ops/_utils.py:1-12](../../Operon/operonx/providers/ops/_utils.py#L1). Earlier draft listed extra helpers — wrong. Rust `ops/utils.rs` contains:
 ```rust
 pub fn resolve_hub() -> Arc<ResourceHub> {
     ResourceHub::instance()
@@ -969,13 +969,13 @@ pub fn resolve_hub() -> Arc<ResourceHub> {
 That's it. Don't add helpers that don't exist Python-side.
 
 **5b.9 `BatchCoordinator` is per-LLMOp, not a standalone top-level service.**
-From [llms/batch_coordinator.py:110](../../Operon/operon/providers/llms/batch_coordinator.py#L110) `get_coordinator(resource, llm, ...)` is a per-resource singleton created inside `LLMOp._ensure_initialized()` (line 211). Rust: store `Arc<BatchCoordinator>` inside each `LLMOp` that has `batch_mode=true`. Not a global service.
+From [llms/batch_coordinator.py:110](../../Operon/operonx/providers/llms/batch_coordinator.py#L110) `get_coordinator(resource, llm, ...)` is a per-resource singleton created inside `LLMOp._ensure_initialized()` (line 211). Rust: store `Arc<BatchCoordinator>` inside each `LLMOp` that has `batch_mode=true`. Not a global service.
 
 **5b.10 Plugin auto-registration happens at module import in Python.**
-From [providers/__init__.py:14](../../Operon/operon/providers/__init__.py#L14) importing `operon.providers.registry` fires `register()` in each plugin file. In Rust, module import doesn't exist at runtime — use `inventory::submit!` at crate-level so registrations are compiled in, then `inventory::collect()` at first `ResourceHub::instance()` construction assembles them. This is already the plan in §5 — just noting that Python's "import triggers register" semantics don't translate literally.
+From [providers/__init__.py:14](../../Operon/operonx/providers/__init__.py#L14) importing `operonx.providers.registry` fires `register()` in each plugin file. In Rust, module import doesn't exist at runtime — use `inventory::submit!` at crate-level so registrations are compiled in, then `inventory::collect()` at first `ResourceHub::instance()` construction assembles them. This is already the plan in §5 — just noting that Python's "import triggers register" semantics don't translate literally.
 
 **5b.11 Streaming fallback has a type-discipline gap in Python.**
-From [ops/llm.py:305-321](../../Operon/operon/providers/ops/llm.py#L305), the fallback stream iteration mixes chunk dicts with a final metadata dict without a discriminator. **Don't port the bug.** Rust should use an enum:
+From [ops/llm.py:305-321](../../Operon/operonx/providers/ops/llm.py#L305), the fallback stream iteration mixes chunk dicts with a final metadata dict without a discriminator. **Don't port the bug.** Rust should use an enum:
 ```rust
 pub enum StreamItem {
     Chunk(ChatCompletionChunk),
@@ -1003,7 +1003,7 @@ Update the §3a.4 table rows:
 ## 6. `operonx/src/telemetry/` — file-by-file mapping
 
 ```
-operon/telemetry/ (Python)                    →  operonx/src/telemetry/ (Rust)              Class
+operonx/telemetry/ (Python)                    →  operonx/src/telemetry/ (Rust)              Class
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 __init__.py                                   →  mod.rs                                      🔧
 plugin.py (auto-register tracer configs)      →  plugin.rs                                   🆕
@@ -1069,7 +1069,7 @@ Revisit in v0.7 based on demand. Hush-ai's existing OTEL Rust code stays in `Hus
 Points where the plan would silently diverge from Python semantics. Each confirmed against Python source.
 
 **6b.1 `to_config_dict()` returns `None` when tracer is built with a `resource=` key — only direct-config tracers are Rust-serializable.**
-From [langfuse.py:69-80](../../Operon/operon/telemetry/tracers/langfuse.py#L69):
+From [langfuse.py:69-80](../../Operon/operonx/telemetry/tracers/langfuse.py#L69):
 ```python
 def to_config_dict(self):
     if self._config is None:       # resource-based: no config to serialize
@@ -1082,10 +1082,10 @@ Implication for Rust migration:
 - Flag in §4b.1 (`export_config` design): add resource-to-config inlining logic.
 
 **6b.2 `OTELTracer` — DECIDED: Python-only, Rust deferred to v0.7.**
-From [otel.py](../../Operon/operon/telemetry/tracers/otel.py) — `OTELTracer` does not override `to_config_dict()` (inherits `None`). Python OTEL support stays unchanged; Rust does **not** port OTEL in v0.6. See §6a "tracers/otel.rs (⏸ deferred)" for rationale. Python users needing OTEL in prod use the Python backend.
+From [otel.py](../../Operon/operonx/telemetry/tracers/otel.py) — `OTELTracer` does not override `to_config_dict()` (inherits `None`). Python OTEL support stays unchanged; Rust does **not** port OTEL in v0.6. See §6a "tracers/otel.rs (⏸ deferred)" for rationale. Python users needing OTEL in prod use the Python backend.
 
 **6b.3 Resource lookup is lazy — deferred to first `flush()`, not at `__init__`.**
-From [\_base.py:40-46](../../Operon/operon/telemetry/tracers/_base.py#L40) + [langfuse.py:171](../../Operon/operon/telemetry/tracers/langfuse.py#L171). Construction just stores the resource string; `_get_client()` is called from inside `flush()`.
+From [\_base.py:40-46](../../Operon/operonx/telemetry/tracers/_base.py#L40) + [langfuse.py:171](../../Operon/operonx/telemetry/tracers/langfuse.py#L171). Construction just stores the resource string; `_get_client()` is called from inside `flush()`.
 
 Rust must match:
 ```rust
@@ -1109,7 +1109,7 @@ impl LangfuseTracer {
 Constructor does **no** resource validation — mirrors Python's fail-late semantics (§6b.9 below).
 
 **6b.4 `TraceFilter` fields list (exact).**
-From [trace_filter.py:49-56](../../Operon/operon/core/tracing/trace_filter.py#L49):
+From [trace_filter.py:49-56](../../Operon/operonx/core/tracing/trace_filter.py#L49):
 ```rust
 pub struct TraceFilter {
     pub skip_empty: bool,                     // default false
@@ -1125,7 +1125,7 @@ pub struct TraceFilter {
 `TraceFilter::from_dict(Value)` parses YAML dict, **ignoring unknown keys** and **excluding `rewriters`** (Python-specific custom transforms).
 
 **6b.5 `TraceFilter` op-matching is exact string — not regex, not globs.**
-From [trace_filter.py:181-188](../../Operon/operon/core/tracing/trace_filter.py#L181) — matches `node.display_name == entry` OR `node.op_name == entry` OR `node.op_name.endswith("." + entry)`. Short-name matches the last dotted component. No regex, no wildcards.
+From [trace_filter.py:181-188](../../Operon/operonx/core/tracing/trace_filter.py#L181) — matches `node.display_name == entry` OR `node.op_name == entry` OR `node.op_name.endswith("." + entry)`. Short-name matches the last dotted component. No regex, no wildcards.
 
 Rust `TraceFilter::op_matches(node: &TraceNode, entry: &str) -> bool` implements exactly this. Don't add regex unless Python does first.
 
@@ -1133,7 +1133,7 @@ Rust `TraceFilter::op_matches(node: &TraceNode, entry: &str) -> bool` implements
 Not hot-reloaded. If a YAML `resources.yaml` is edited at runtime, existing tracer instances keep their old filter. Document this — the Rust behavior matches.
 
 **6b.7 `LangfuseConfig` / `OTELConfig` `_category` discriminator.**
-From [langfuse/config.py:37](../../Operon/operon/telemetry/backends/langfuse/config.py#L37) and [otel/config.py:62](../../Operon/operon/telemetry/backends/otel/config.py#L62):
+From [langfuse/config.py:37](../../Operon/operonx/telemetry/backends/langfuse/config.py#L37) and [otel/config.py:62](../../Operon/operonx/telemetry/backends/otel/config.py#L62):
 - `LangfuseConfig._category = "langfuse"` → ResourceHub keys are `langfuse:<name>` (default: `langfuse:default`).
 - `OTELConfig._category = "otel"` → ResourceHub keys are `otel:<name>`.
 
@@ -1144,21 +1144,21 @@ impl OTELConfig     { pub const CATEGORY: &'static str = "otel"; }
 ```
 
 **6b.8 `LangfuseClient` uses stdlib only — no Langfuse SDK. `LangfusePromptManager` DOES require SDK.**
-From [client.py:7-12](../../Operon/operon/telemetry/backends/langfuse/client.py#L7) — only `urllib.request, json, base64, hashlib`. Core tracing path has zero SDK dependency.
+From [client.py:7-12](../../Operon/operonx/telemetry/backends/langfuse/client.py#L7) — only `urllib.request, json, base64, hashlib`. Core tracing path has zero SDK dependency.
 
-From [prompt_manager.py:55-69](../../Operon/operon/telemetry/backends/langfuse/prompt_manager.py#L55) — lazily imports the `langfuse` SDK only when a prompt is requested.
+From [prompt_manager.py:55-69](../../Operon/operonx/telemetry/backends/langfuse/prompt_manager.py#L55) — lazily imports the `langfuse` SDK only when a prompt is requested.
 
 Rust implications:
 - `LangfuseClient` → pure `reqwest::blocking` + `base64`. No `langfuse` crate needed.
 - `LangfusePromptManager` → needs the `langfuse` Rust SDK (does it exist on crates.io?) **Verify crate availability during Phase 7; if absent, port this as a direct HTTP client against Langfuse's prompt API rather than depending on an SDK.** Add a TODO in the plan.
 
 **6b.9 Resource name is not validated at `__init__` — fail-late on first `flush()`.**
-From [\_base.py:40-50](../../Operon/operon/telemetry/tracers/_base.py#L40). A typo like `resource="langfse:default"` builds a tracer successfully; error surfaces only when the first trace flushes. This is intentional (allows tracer construction before hub is populated).
+From [\_base.py:40-50](../../Operon/operonx/telemetry/tracers/_base.py#L40). A typo like `resource="langfse:default"` builds a tracer successfully; error surfaces only when the first trace flushes. This is intentional (allows tracer construction before hub is populated).
 
 Rust matches. Document as expected behavior, not a bug to fix.
 
 **6b.10 `flush(trace_data)` input is a fully-serialized dict, NOT `TraceNode` objects.**
-From [langfuse.py:160-168](../../Operon/operon/telemetry/tracers/langfuse.py#L160) docstring + [langfuse.py:173-198](../../Operon/operon/telemetry/tracers/langfuse.py#L173) usage:
+From [langfuse.py:160-168](../../Operon/operonx/telemetry/tracers/langfuse.py#L160) docstring + [langfuse.py:173-198](../../Operon/operonx/telemetry/tracers/langfuse.py#L173) usage:
 ```json
 {
   "request_id": "...",
@@ -1184,17 +1184,17 @@ pub struct TraceData {
 ```
 
 **6b.11 `plugin.py` uses module-level `_registered` guard.**
-From [plugin.py:32-34](../../Operon/operon/telemetry/plugin.py#L32). Idempotent on repeated import.
+From [plugin.py:32-34](../../Operon/operonx/telemetry/plugin.py#L32). Idempotent on repeated import.
 
 Rust `inventory::submit!` is naturally idempotent (compile-time), so this gap disappears. No special handling needed.
 
 **6b.12 `LangfuseTracer.flush()` handles media uploads inline — sync, soft-fail.**
-From [langfuse.py:240, 144-155](../../Operon/operon/telemetry/tracers/langfuse.py#L240) — `_upload_node_media()` does sync HTTP (metadata POST + binary PUT), failures logged but not raised. No retry.
+From [langfuse.py:240, 144-155](../../Operon/operonx/telemetry/tracers/langfuse.py#L240) — `_upload_node_media()` does sync HTTP (metadata POST + binary PUT), failures logged but not raised. No retry.
 
 Rust implementation must match: soft-fail via `log::warn!`, continue without re-throwing. Not a design gap, but document behavior.
 
 **6b.13 `OperonEyesTracer` hardcodes `stream_trace_limit=None`.**
-From [operon_eyes.py:38](../../Operon/operon/telemetry/tracers/operon_eyes.py#L38) — bypasses the base class default of 100. Rationale: ui-operon-eyes handles large traces locally without size caps.
+From [operon_eyes.py:38](../../Operon/operonx/telemetry/tracers/operon_eyes.py#L38) — bypasses the base class default of 100. Rationale: ui-operonx-eyes handles large traces locally without size caps.
 
 Rust `OperonEyesTracer::new()` also hardcodes `None` on the base. Don't expose `stream_trace_limit` on its constructor.
 
@@ -1237,7 +1237,7 @@ Classification: **✅ Reuse as-is** (renames + name shortening).
 
 ```
 Operon/                                       ← Python repo root
-├── operon/                                    ← package source
+├── operonx/                                    ← package source
 ├── tests/
 │   ├── internal/                              ← Python-internal tests
 │   │   ├── core/
@@ -1347,7 +1347,7 @@ Optional additional files for advanced cases:
 # tests/spec/test_fixtures.py
 import json, pytest
 from pathlib import Path
-from operon import Operon
+from operonx import Operon
 
 SPEC_ROOT = Path(__file__).parent
 
@@ -1599,7 +1599,7 @@ edition      = "2021"
 rust-version = "1.75"
 version      = "0.6.0"
 license      = "Apache-2.0"
-repository   = "https://github.com/<org>/operon"
+repository   = "https://github.com/<org>/operonx"
 
 [workspace.dependencies]
 # Runtime
@@ -1693,9 +1693,9 @@ tonic               = { workspace = true, optional = true }
 prost               = { workspace = true, optional = true }
 
 [features]
-default       = ["langfuse", "operon-eyes"]
+default       = ["langfuse", "operonx-eyes"]
 langfuse      = []
-operon-eyes   = []
+operonx-eyes   = []
 onnx          = ["dep:ort", "dep:tokenizers"]
 triton        = ["dep:tonic", "dep:prost"]
 # otel: intentionally not listed — deferred to v0.7
@@ -1844,7 +1844,7 @@ Documenting the delta between the plan as written and what actually landed. Futu
 **As-implemented:**
 - Rust scheduler honours `RefConfig.stream_policy` — frames route sequentially (default), all-at-once (`parallel`), or buffer-then-flush (`collect` + `__collect__` sub-context).
 - `max_stream_concurrent` semaphore enforces the global cap; per-edge `parallel_max` is read but not yet enforced with a dedicated sub-semaphore (left as a follow-up; uses global cap conservatively).
-- **Python `Ref.serialize()` does not yet emit `stream_policy`** — [operon/core/states/ref.py:594-601](operon/core/states/ref.py#L594-L601) returns `{source, var, transforms, is_output}` only. Rust-native callers set `stream_policy` directly on graph JSON; Python → Rust round-trip falls back to sequential until Python serialization is extended. Tracked in [rust/operonx/src/core/states/ref.rs](rust/operonx/src/core/states/ref.rs) (field doc comment).
+- **Python `Ref.serialize()` does not yet emit `stream_policy`** — [operonx/core/states/ref.py:594-601](operonx/core/states/ref.py#L594-L601) returns `{source, var, transforms, is_output}` only. Rust-native callers set `stream_policy` directly on graph JSON; Python → Rust round-trip falls back to sequential until Python serialization is extended. Tracked in [rust/operonx/src/core/states/ref.rs](rust/operonx/src/core/states/ref.rs) (field doc comment).
 
 ### 14.2 `providers/ops/chain.rs` — builder helpers instead of runtime ops (Phase 6)
 
@@ -1912,7 +1912,7 @@ Documenting the delta between the plan as written and what actually landed. Futu
 
 **Plan call:** "Port auth (Keycloak, Google) → `providers/auth/`."
 
-**As-implemented:** Python-side `operon/providers/auth/` ships **only Keycloak** — no `google.py`. The plan's "Google" mention was aspirational; the Rust port matches Python 1:1 (Keycloak only). If Google auth lands on the Python side later, the Rust port should follow.
+**As-implemented:** Python-side `operonx/providers/auth/` ships **only Keycloak** — no `google.py`. The plan's "Google" mention was aspirational; the Rust port matches Python 1:1 (Keycloak only). If Google auth lands on the Python side later, the Rust port should follow.
 
 ### 14.13 crates.io publish is a separate release step
 

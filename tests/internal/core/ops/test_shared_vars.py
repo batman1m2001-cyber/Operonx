@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.states import StateSchema
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.states import StateSchema
 
 
 class TestSharedVarsBasic:
@@ -301,7 +301,7 @@ class TestSharedVarsEdgeCases:
     @pytest.mark.asyncio
     async def test_shared_only_on_parent(self):
         """PARENT.shared() raises if called on non-PARENT."""
-        from operon.core import START as s
+        from operonx.core import START as s
 
         with pytest.raises(TypeError, match="shared.*PARENT"):
             s.shared(x=1)

@@ -1,6 +1,6 @@
 """Fixture: two independent ops off START, both feed PARENT outputs."""
 
-from operon.core import END, PARENT, START, GraphOp
+from operonx.core import END, PARENT, START, GraphOp
 
 from tests.spec._ops import add_one, double
 

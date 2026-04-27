@@ -1,6 +1,6 @@
 //! Auth providers (Keycloak, etc.).
 //!
-//! Mirrors Python `operon/providers/auth/`.
+//! Mirrors Python `operonx/providers/auth/`.
 
 pub mod config;
 pub mod factory;

@@ -28,7 +28,7 @@ Writes `examples/bench_results/ex08_error_handling_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex08_error_handling.workflow import build_error_capture, build_error_routing, build_retry_fallback, build_llm_fallback
 
 def dump(g):

@@ -1,6 +1,6 @@
 """Fixture: rename op output via `outputs={"result": PARENT["renamed"]}`."""
 
-from operon.core import END, PARENT, START, GraphOp
+from operonx.core import END, PARENT, START, GraphOp
 
 from tests.spec._ops import double
 

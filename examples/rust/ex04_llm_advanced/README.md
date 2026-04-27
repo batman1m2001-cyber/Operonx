@@ -27,7 +27,7 @@ Writes `examples/bench_results/ex04_llm_advanced_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex04_llm_advanced.workflow import build_structured_output, build_tool_calling, build_multi_turn
 
 def dump(g):

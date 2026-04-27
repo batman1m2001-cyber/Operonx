@@ -6,8 +6,8 @@ scheduler in GraphOp now handle all iteration patterns.
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.states import MemoryState, StateSchema
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.states import MemoryState, StateSchema
 
 # ============================================================
 # Test 1: Simple Sequential Iteration

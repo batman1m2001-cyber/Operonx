@@ -1,6 +1,6 @@
 //! `GraphOp` — container op that holds and dispatches a DAG of child ops.
 //!
-//! Mirrors Python [`operon/core/ops/graph/graph_op.py`](../../../../../operon/core/ops/graph/graph_op.py).
+//! Mirrors Python [`operonx/core/ops/graph/graph_op.py`](../../../../../operonx/core/ops/graph/graph_op.py).
 //! The Python class owns both the graph metadata *and* an embedded scheduler.
 //! Per plan §4a, Rust splits those concerns:
 //! - `GraphOp` (this file) — metadata wrapper around a serialized [`OpConfig`].

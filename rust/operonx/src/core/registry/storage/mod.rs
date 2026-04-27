@@ -1,6 +1,6 @@
 //! Storage backends for the config registry.
 //!
-//! Mirrors Python `operon/core/registry/storage/`.
+//! Mirrors Python `operonx/core/registry/storage/`.
 
 pub mod base;
 pub mod json;

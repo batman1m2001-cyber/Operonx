@@ -4,8 +4,8 @@ Generator ops (replaces ForOp/MapOp/WhileOp) + ``if_`` branch routing.
 No API keys required — pure compute.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.core.ops.flow.branch_op import if_
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.core.ops.flow.branch_op import if_
 
 # =============================================================================
 # Generator ops (yield-based iteration)

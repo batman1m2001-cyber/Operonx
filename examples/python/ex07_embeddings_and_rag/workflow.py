@@ -6,8 +6,8 @@ Cần: OPENAI_API_KEY trong .env + resources.yaml (embedding:openai, llm:gpt-4o-
 """
 
 import numpy as np
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.providers import EmbeddingOp, LLMOp, PromptOp
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.providers import EmbeddingOp, LLMOp, PromptOp
 
 # =============================================================================
 # Sample data
@@ -112,7 +112,7 @@ def build_simple_rag() -> GraphOp:
 
 def build_rag_with_rerank() -> GraphOp:
     """RAG + RerankOp — Thêm bước reranking."""
-    from operon.providers import RerankOp
+    from operonx.providers import RerankOp
 
     with GraphOp(name="rag-rerank") as graph:
         rr = RerankOp.of(

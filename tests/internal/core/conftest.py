@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 import pytest
 
-from operon.core import (
+from operonx.core import (
     END,
     PARENT,
     START,
@@ -96,7 +96,7 @@ def linear_graph():
 @pytest.fixture(autouse=True)
 def clear_op_cache():
     """Clear the class-level op cache between tests to prevent cross-test pollution."""
-    from operon.core.ops.base import BaseOp
+    from operonx.core.ops.base import BaseOp
 
     yield
     BaseOp._cache_stores.clear()

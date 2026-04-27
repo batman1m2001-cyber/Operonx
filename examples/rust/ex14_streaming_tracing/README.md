@@ -27,7 +27,7 @@ Writes `examples/bench_results/ex14_streaming_tracing_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex14_streaming_tracing.workflow import build_text_pipeline, build_async_pipeline
 
 def dump(g):

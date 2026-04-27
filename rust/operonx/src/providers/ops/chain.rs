@@ -1,6 +1,6 @@
 //! `chat()` / `ask()` — graph-builder helpers for LLM workflows.
 //!
-//! Mirrors Python [`operon/providers/ops/chain.py`](../../../../../operon/providers/ops/chain.py).
+//! Mirrors Python [`operonx/providers/ops/chain.py`](../../../../../operonx/providers/ops/chain.py).
 //!
 //! # What this module actually does
 //!

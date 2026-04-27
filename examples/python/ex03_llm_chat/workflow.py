@@ -5,8 +5,8 @@ Defines LLM chat graphs.
 Cần: OPENAI_API_KEY hoặc OPENROUTER_API_KEY trong .env
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
-from operon.providers import LLMOp, PromptOp, chat
+from operonx.core import END, PARENT, START, GraphOp, op
+from operonx.providers import LLMOp, PromptOp, chat
 
 
 @op

@@ -1,6 +1,6 @@
 //! `TritonOp` — generic Triton Inference Server gRPC client op.
 //!
-//! Mirrors Python [`operon/providers/ops/triton.py`](../../../../../operon/providers/ops/triton.py).
+//! Mirrors Python [`operonx/providers/ops/triton.py`](../../../../../operonx/providers/ops/triton.py).
 //! **New** for Rust (plan §5a marks this 🆕) — the Python impl uses
 //! `tritonclient.grpc.aio`; the Rust port will use `tonic` + `prost` gated
 //! behind the `triton` feature (see `Cargo.toml`).

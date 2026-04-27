@@ -1,6 +1,6 @@
 //! Op base class, sentinels, and concrete op types.
 //!
-//! Mirrors Python `operon/core/ops/`. Also contains `cache.rs` — a Rust-internal
+//! Mirrors Python `operonx/core/ops/`. Also contains `cache.rs` — a Rust-internal
 //! utility (Python equivalent lives in the `cache` field on `BaseOp`, but the
 //! implementation is Rust-only).
 

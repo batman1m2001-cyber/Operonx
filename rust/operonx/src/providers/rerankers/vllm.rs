@@ -1,6 +1,6 @@
 //! vLLM reranker (cross-encoder served via vLLM) — OpenAI-compatible shape.
 //!
-//! Mirrors Python [`operon/providers/rerankers/vllm.py`](../../../../../operon/providers/rerankers/vllm.py).
+//! Mirrors Python [`operonx/providers/rerankers/vllm.py`](../../../../../operonx/providers/rerankers/vllm.py).
 //!
 //! # Phase 5 scope
 //! Struct + trait stub. The HTTP POST round-trip lands in Phase 5b alongside

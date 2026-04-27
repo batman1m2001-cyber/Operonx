@@ -10,15 +10,15 @@ class TestEmbeddingOp:
 
     def test_import(self):
         """Test EmbeddingOp can be imported."""
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
         assert EmbeddingOp is not None
 
     def test_node_type(self):
         """Test EmbeddingOp has correct type."""
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -30,9 +30,9 @@ class TestEmbeddingOp:
 
     def test_input_schema(self):
         """Test EmbeddingOp has texts input."""
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -43,9 +43,9 @@ class TestEmbeddingOp:
 
     def test_output_schema(self):
         """Test EmbeddingOp has embeddings output."""
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -56,9 +56,9 @@ class TestEmbeddingOp:
 
     def test_metadata(self):
         """Test specific_metadata returns model info."""
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.embedding.return_value = Mock(run=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -75,9 +75,9 @@ class TestEmbeddingOpIntegration:
     @pytest.mark.asyncio
     async def test_embedding_node_with_hub(self, hub):
         """Test EmbeddingOp works with ResourceHub."""
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import EmbeddingOp
+        from operonx.providers.ops import EmbeddingOp
 
         # Check if bge-m3 is available
         if not hub.has("embedding:bge-m3"):

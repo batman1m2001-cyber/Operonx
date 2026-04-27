@@ -1,8 +1,8 @@
-"""Tests for unified exception classes in operon.core.exceptions."""
+"""Tests for unified exception classes in operonx.core.exceptions."""
 
 import pytest
 
-from operon.core.exceptions import (
+from operonx.core.exceptions import (
     BranchError,
     CodeError,
     ConditionError,

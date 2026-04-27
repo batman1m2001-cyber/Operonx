@@ -1,7 +1,7 @@
 //! [`ConfigurableTracer`] helper — tracers backed by either a direct config
 //! or a [`ResourceHub`] resource key.
 //!
-//! Mirrors Python [`operon/telemetry/tracers/_base.py`](../../../../../operon/telemetry/tracers/_base.py).
+//! Mirrors Python [`operonx/telemetry/tracers/_base.py`](../../../../../operonx/telemetry/tracers/_base.py).
 //! Per §6b.3 resource lookup is **lazy** — construction just stores the
 //! string; `get_client()` fires on first `flush()`.
 

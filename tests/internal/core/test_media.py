@@ -1,6 +1,6 @@
 """Tests for the Media primitive and extraction helpers."""
 
-from operon.core.media import (
+from operonx.core.media import (
     Media,
     MediaRef,
     extract_media,

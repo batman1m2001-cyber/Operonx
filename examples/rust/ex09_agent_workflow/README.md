@@ -28,7 +28,7 @@ Writes `examples/bench_results/ex09_agent_workflow_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex09_agent_workflow.workflow import build_agent
 
 def dump(g):

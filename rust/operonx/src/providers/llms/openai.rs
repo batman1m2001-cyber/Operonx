@@ -1,6 +1,6 @@
 //! OpenAI (and OpenAI-compatible, e.g. vLLM) chat completion backend.
 //!
-//! Mirrors Python [`operon/providers/llms/openai.py`](../../../../../operon/providers/llms/openai.py).
+//! Mirrors Python [`operonx/providers/llms/openai.py`](../../../../../operonx/providers/llms/openai.py).
 //! Handles both `api_type="openai"` and `api_type="vllm"` (same wire shape).
 //!
 //! # Phase 5 scope

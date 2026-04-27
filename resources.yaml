@@ -101,7 +101,7 @@ langfuse:default:
 otel:default:
   endpoint: ${LANGFUSE_HOST}/api/public/otel/v1/traces
   protocol: http
-  service_name: operon-workflow
+  service_name: operonx-workflow
   auth_type: basic
   public_key: ${LANGFUSE_PUBLIC_KEY}
   secret_key: ${LANGFUSE_SECRET_KEY}

@@ -29,7 +29,7 @@ Writes `examples/bench_results/ex13_graph_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex13_graph.workflow import build_basic, build_chained, build_renamed, build_multi_params, build_nested
 
 def dump(g):

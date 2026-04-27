@@ -4,7 +4,7 @@ Fan-out/fan-in, generator iteration, and partial-failure handling.
 All scenarios are pure compute — no API keys required.
 """
 
-from operon.core import END, PARENT, START, GraphOp, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 # =============================================================================
 # Ops — Fan-out / Fan-in

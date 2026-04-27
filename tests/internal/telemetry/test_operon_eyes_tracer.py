@@ -3,10 +3,10 @@
 import time
 
 import pytest
-from operon.core import END, PARENT, START, GraphOp, Operon
-from operon.core.ops import FuncOp
+from operonx.core import END, PARENT, START, GraphOp, Operon
+from operonx.core.ops import FuncOp
 
-from operon.telemetry import OperonEyesTracer
+from operonx.telemetry import OperonEyesTracer
 
 
 class TestOperonEyesTracerBasic:
@@ -35,13 +35,13 @@ class TestOperonEyesTracerBasic:
 
 
 # ---------------------------------------------------------------------------
-# Integration: OperonEyesTracer (requires running ui-operon-eyes server)
+# Integration: OperonEyesTracer (requires running ui-operonx-eyes server)
 # ---------------------------------------------------------------------------
 @pytest.mark.integration
 class TestOperonEyesIntegration:
     @pytest.mark.asyncio
     async def test_operon_eyes_tracer_end_to_end(self):
-        """End-to-end test: workflow -> OperonEyesTracer -> ui-operon-eyes server."""
+        """End-to-end test: workflow -> OperonEyesTracer -> ui-operonx-eyes server."""
         with GraphOp(name="eyes-test") as graph:
             node = FuncOp(
                 name="double",

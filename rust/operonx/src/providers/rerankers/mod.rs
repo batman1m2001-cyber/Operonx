@@ -1,6 +1,6 @@
 //! Reranker providers.
 //!
-//! Mirrors Python `operon/providers/rerankers/`.
+//! Mirrors Python `operonx/providers/rerankers/`.
 
 pub mod base;
 pub mod config;

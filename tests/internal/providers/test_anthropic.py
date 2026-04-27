@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from operon.providers.llms.anthropic import AnthropicModel
-from operon.providers.llms.config import AnthropicConfig, LLMConfig, LLMType
-from operon.providers.llms.factory import create_llm
+from operonx.providers.llms.anthropic import AnthropicModel
+from operonx.providers.llms.config import AnthropicConfig, LLMConfig, LLMType
+from operonx.providers.llms.factory import create_llm
 
 # ── Load API key ────────────────────────────────────────────────────────
 # .env is auto-loaded by tests/providers/conftest.py

@@ -1,6 +1,6 @@
 //! `FuncOp` — dispatch a Rust function registered via `#[op]`.
 //!
-//! Mirrors Python [`operon/core/ops/transform/func_op.py`](../../../../../operon/core/ops/transform/func_op.py).
+//! Mirrors Python [`operonx/core/ops/transform/func_op.py`](../../../../../operonx/core/ops/transform/func_op.py).
 //! On the Python side `FuncOp` wraps a Python callable. On Rust, the registered
 //! function is looked up by `func_name` in the global `inventory` registry and
 //! invoked.

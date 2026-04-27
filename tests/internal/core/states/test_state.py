@@ -1,9 +1,9 @@
 """Tests for MemoryState - workflow state with Cell-based storage."""
 
-from operon.core.ops.graph.graph_op import END, PARENT, START, GraphOp
-from operon.core.ops.transform.func_op import FuncOp
-from operon.core.states.schema import StateSchema
-from operon.core.states.state import MemoryState
+from operonx.core.ops.graph.graph_op import END, PARENT, START, GraphOp
+from operonx.core.ops.transform.func_op import FuncOp
+from operonx.core.states.schema import StateSchema
+from operonx.core.states.state import MemoryState
 
 # ============================================================
 # Test 1: Simple Linear Graph Value Flow

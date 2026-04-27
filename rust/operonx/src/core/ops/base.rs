@@ -1,6 +1,6 @@
 //! `BaseOp` trait + `OpMeta` — the core op abstraction.
 //!
-//! Mirrors Python [`operon/core/ops/base.py`](../../../../operon/core/ops/base.py).
+//! Mirrors Python [`operonx/core/ops/base.py`](../../../../operonx/core/ops/base.py).
 //! Each concrete op (FuncOp, BranchOp, ParserOp, LLMOp, etc.) is a Rust struct
 //! that holds an [`OpMeta`] as its first field and implements [`BaseOp`]. Shared
 //! behavior (input resolution, caching, timing, state writes) lives in the

@@ -1,6 +1,6 @@
 //! ONNX Runtime reranker (cross-encoder) backend.
 //!
-//! Mirrors Python [`operon/providers/rerankers/onnx.py`](../../../../../operon/providers/rerankers/onnx.py).
+//! Mirrors Python [`operonx/providers/rerankers/onnx.py`](../../../../../operonx/providers/rerankers/onnx.py).
 //! Feature-gated behind `onnx` — requires `ort` + `tokenizers` crates.
 
 use async_trait::async_trait;

@@ -1,11 +1,11 @@
 """Tests for auto_name module: variable name extraction, frame skipping, bytecode analysis."""
 
-from operon.core.ops.base import PARENT, BaseOp
-from operon.core.ops.flow.branch_op import Branch, BranchOp
-from operon.core.ops.graph.graph_op import GraphOp
-from operon.core.ops.transform.func_op import FuncOp, op
-from operon.core.ops.transform.parser_op import ParserOp
-from operon.core.utils.auto_name import (
+from operonx.core.ops.base import PARENT, BaseOp
+from operonx.core.ops.flow.branch_op import Branch, BranchOp
+from operonx.core.ops.graph.graph_op import GraphOp
+from operonx.core.ops.transform.func_op import FuncOp, op
+from operonx.core.ops.transform.parser_op import ParserOp
+from operonx.core.utils.auto_name import (
     _name_from_bytecode,
     _parse_assignment,
     _skip_code_objects,

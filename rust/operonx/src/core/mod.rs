@@ -1,6 +1,6 @@
 //! Core — engine, ops, state, refs, registry, tracing, middleware.
 //!
-//! Mirrors Python `operon/core/`.
+//! Mirrors Python `operonx/core/`.
 
 pub mod configs;
 pub mod engine;

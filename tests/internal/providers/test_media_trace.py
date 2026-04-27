@@ -9,8 +9,8 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from operon.core import END, PARENT, START, GraphOp, Operon, Media, op
-from operon.core.tracing.collector import TraceCollector
+from operonx.core import END, PARENT, START, GraphOp, Operon, Media, op
+from operonx.core.tracing.collector import TraceCollector
 
 # --------------------------------------------------------------------------- #
 # LLMOp.normalize_trace_io unit test (no real LLM call)
@@ -19,7 +19,7 @@ from operon.core.tracing.collector import TraceCollector
 
 class TestLLMOpNormalizeTraceIO:
     def test_image_url_wrapped_as_media(self):
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         node = LLMOp(name="vision_test", resource="gpt-4o")
         inputs = {
@@ -48,7 +48,7 @@ class TestLLMOpNormalizeTraceIO:
         assert wrapped.data.startswith("data:image/png;base64,")
 
     def test_input_audio_wrapped(self):
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         node = LLMOp(name="audio_test", resource="gpt-4o")
         inputs = {
@@ -71,7 +71,7 @@ class TestLLMOpNormalizeTraceIO:
         assert wrapped.mime_type == "audio/wav"
 
     def test_no_multimodal_no_change(self):
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         node = LLMOp(name="text_test", resource="gpt-4o")
         inputs = {"messages": [{"role": "user", "content": "hello"}]}
@@ -79,7 +79,7 @@ class TestLLMOpNormalizeTraceIO:
         assert out_in is inputs  # cheap identity check — no copy
 
     def test_mixed_content_no_image(self):
-        from operon.providers.ops import LLMOp
+        from operonx.providers.ops import LLMOp
 
         node = LLMOp(name="mixed_test", resource="gpt-4o")
         inputs = {

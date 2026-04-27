@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from operon.core import END, PARENT, START, GraphOp, Operon, op
+from operonx.core import END, PARENT, START, GraphOp, Operon, op
 
 # ── BUG-2 ───────────────────────────────────────────────────────────────────
 # Cache hit path skipped store_result() → downstream received None

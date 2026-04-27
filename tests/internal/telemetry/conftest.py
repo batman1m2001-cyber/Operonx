@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures for operon-telemetry tests.
+"""Pytest configuration and shared fixtures for operonx-telemetry tests.
 
 Discovery: walks up from this file to find the project root (nearest
 ``pyproject.toml``), then loads ``.env`` and ``resources.yaml`` from there.
@@ -243,7 +243,7 @@ def sample_iteration_trace_data(sample_request_id):
 @pytest.fixture
 def langfuse_tracer():
     """Create LangfuseTracer with test resource key."""
-    from operon.telemetry import LangfuseTracer
+    from operonx.telemetry import LangfuseTracer
 
     return LangfuseTracer(resource="langfuse:default")
 
@@ -251,7 +251,7 @@ def langfuse_tracer():
 @pytest.fixture
 def langfuse_tracer_with_tags():
     """Create LangfuseTracer with static tags."""
-    from operon.telemetry import LangfuseTracer
+    from operonx.telemetry import LangfuseTracer
 
     return LangfuseTracer(resource="langfuse:default", tags=["test", "unit"])
 
@@ -259,7 +259,7 @@ def langfuse_tracer_with_tags():
 @pytest.fixture
 def otel_tracer():
     """Create OTELTracer with test resource key."""
-    from operon.telemetry import OTELTracer
+    from operonx.telemetry import OTELTracer
 
     return OTELTracer(resource="otel:default")
 
@@ -267,7 +267,7 @@ def otel_tracer():
 @pytest.fixture
 def otel_tracer_with_config():
     """Create OTELTracer with direct config."""
-    from operon.telemetry import OTELConfig, OTELTracer
+    from operonx.telemetry import OTELConfig, OTELTracer
 
     config = OTELConfig.jaeger()
     return OTELTracer(config=config)
@@ -288,10 +288,10 @@ def setup_resource_hub():
         yield None
         return
 
-    from operon.core.registry import ResourceHub
+    from operonx.core.registry import ResourceHub
 
     try:
-        import operon.providers  # noqa: F401 — register provider plugins
+        import operonx.providers  # noqa: F401 — register provider plugins
     except ImportError:
         pass
 

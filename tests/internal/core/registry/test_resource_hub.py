@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from operon.core.registry import (
+from operonx.core.registry import (
     REGISTRY,
     BOOTSTRAP_ENV_PATHS,
     CacheEntry,
@@ -16,7 +16,7 @@ from operon.core.registry import (
     ResourceHub,
     ResourceHubWarning,
 )
-from operon.core.utils.yaml_model import YamlModel
+from operonx.core.utils.yaml_model import YamlModel
 
 # ============================================================================
 # Test Fixtures: Mock Config and Service
@@ -61,7 +61,7 @@ def cleanup_registries():
     """Give each test a clean REGISTRY, then restore outer state after.
 
     Saves whatever plugins the outer suite registered (e.g. from
-    ``operon.providers``), clears the registry so the test gets a blank
+    ``operonx.providers``), clears the registry so the test gets a blank
     slate, then restores the saved state on teardown.
     """
     reg = REGISTRY
@@ -890,16 +890,16 @@ class TestDisambiguatedErrors:
 
 
 # ============================================================================
-# Tests: operon.bootstrap()
+# Tests: operonx.bootstrap()
 # ============================================================================
 
 
 class TestBootstrap:
-    """Test the top-level operon.bootstrap() convenience."""
+    """Test the top-level operonx.bootstrap() convenience."""
 
     def test_bootstrap_with_explicit_path(self, tmp_path, monkeypatch):
         """bootstrap(resources=...) installs the hub from the given file."""
-        import operon
+        import operonx
 
         ResourceHub._instance = None
         cfg = tmp_path / "config.yaml"
@@ -907,7 +907,7 @@ class TestBootstrap:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceHubWarning)
-            hub = operon.bootstrap(resources=str(cfg), env=False)
+            hub = operonx.bootstrap(resources=str(cfg), env=False)
 
         assert hub is not None
         assert hub.source_path == cfg.resolve()
@@ -916,7 +916,7 @@ class TestBootstrap:
 
     def test_bootstrap_idempotent(self, tmp_path, monkeypatch):
         """bootstrap() returns the existing hub unchanged."""
-        import operon
+        import operonx
 
         ResourceHub._instance = None
         cfg = tmp_path / "first.yaml"
@@ -924,13 +924,13 @@ class TestBootstrap:
         pre_hub = ResourceHub.from_yaml(cfg)
         ResourceHub.set_instance(pre_hub)
 
-        result = operon.bootstrap(env=False)
+        result = operonx.bootstrap(env=False)
         assert result is pre_hub
         ResourceHub._instance = None
 
     def test_bootstrap_records_env_path(self, tmp_path, monkeypatch):
         """bootstrap(env=True) appends the .env path to BOOTSTRAP_ENV_PATHS."""
-        import operon
+        import operonx
 
         ResourceHub._instance = None
         BOOTSTRAP_ENV_PATHS.clear()
@@ -940,7 +940,7 @@ class TestBootstrap:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceHubWarning)
-            operon.bootstrap(env=True)
+            operonx.bootstrap(env=True)
 
         assert (tmp_path / ".env").resolve() in BOOTSTRAP_ENV_PATHS
         assert os.environ.get("FOO") == "bar"

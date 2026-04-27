@@ -1,6 +1,6 @@
 //! Langfuse configuration.
 //!
-//! Mirrors Python [`operon/telemetry/backends/langfuse/config.py`](../../../../../../operon/telemetry/backends/langfuse/config.py).
+//! Mirrors Python [`operonx/telemetry/backends/langfuse/config.py`](../../../../../../operonx/telemetry/backends/langfuse/config.py).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

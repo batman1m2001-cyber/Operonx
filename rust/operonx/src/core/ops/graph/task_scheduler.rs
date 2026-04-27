@@ -1,6 +1,6 @@
 //! Task-based workflow scheduler.
 //!
-//! Mirrors Python [`operon/core/ops/graph/task_scheduler.py`](../../../../../operon/core/ops/graph/task_scheduler.py).
+//! Mirrors Python [`operonx/core/ops/graph/task_scheduler.py`](../../../../../operonx/core/ops/graph/task_scheduler.py).
 //! One scheduler per workflow execution; event-driven over a bounded mpsc
 //! channel. `Frame` events carry op results forward, `Eof` events flush
 //! collect buffers and advance loop iterations.

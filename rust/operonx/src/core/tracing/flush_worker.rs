@@ -1,6 +1,6 @@
 //! [`FlushWorker`] — hand collected trace data to every registered tracer.
 //!
-//! Mirrors Python [`operon/core/tracing/flush_worker.py`](../../../../operon/core/tracing/flush_worker.py).
+//! Mirrors Python [`operonx/core/tracing/flush_worker.py`](../../../../operonx/core/tracing/flush_worker.py).
 //! Python uses a `ThreadPoolExecutor`; Rust uses `tokio::task::spawn_blocking`
 //! so `Tracer::flush()` implementations (which are sync per §4b.3) run off
 //! the async runtime.

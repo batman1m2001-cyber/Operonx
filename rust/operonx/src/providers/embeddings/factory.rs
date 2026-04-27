@@ -1,6 +1,6 @@
 //! `create_embedder` — dispatch an [`EmbeddingConfig`] to the matching backend.
 //!
-//! Mirrors Python [`operon/providers/embeddings/factory.py`](../../../../../operon/providers/embeddings/factory.py).
+//! Mirrors Python [`operonx/providers/embeddings/factory.py`](../../../../../operonx/providers/embeddings/factory.py).
 
 use std::sync::Arc;
 

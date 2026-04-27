@@ -1,6 +1,6 @@
 //! ONNX inference configuration.
 //!
-//! Mirrors Python [`operon/providers/onnx/config.py`](../../../../../operon/providers/onnx/config.py).
+//! Mirrors Python [`operonx/providers/onnx/config.py`](../../../../../operonx/providers/onnx/config.py).
 
 use serde::{Deserialize, Serialize};
 

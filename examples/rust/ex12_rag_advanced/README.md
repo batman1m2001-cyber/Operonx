@@ -26,7 +26,7 @@ Writes `examples/bench_results/ex12_rag_advanced_rust.json`.
 uv run python -c "
 import json, pathlib, sys
 sys.path.insert(0, '.')
-from operon.core import Operon
+from operonx.core import Operon
 from examples.python.ex12_rag_advanced.workflow import build_keyword_rrf, build_hybrid_rag
 
 def dump(g):

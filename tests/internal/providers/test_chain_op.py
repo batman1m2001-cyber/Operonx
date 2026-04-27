@@ -9,14 +9,14 @@ class TestChat:
     """Tests for chat()."""
 
     def test_import(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
         assert chat is not None
 
     def test_simple_creation(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -32,9 +32,9 @@ class TestChat:
             assert node.type == "graph"
 
     def test_has_internal_nodes(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -50,9 +50,9 @@ class TestChat:
             assert "llm" in node._ops
 
     def test_auto_naming(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -61,9 +61,9 @@ class TestChat:
             assert my_chat.name == "my_chat"
 
     def test_with_messages_template(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -88,9 +88,9 @@ class TestChat:
             assert node.name == "vision_chat"
 
     def test_contain_generation_explicit(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -109,9 +109,9 @@ class TestChatLoadBalancing:
     """Tests for chat() load balancing."""
 
     def test_load_balancing_creation(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -129,9 +129,9 @@ class TestChatLoadBalancing:
             assert llm_op.ratios == [0.7, 0.3]
 
     def test_load_balancing_with_ratios(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -152,9 +152,9 @@ class TestChatFallback:
     """Tests for chat() fallback."""
 
     def test_fallback_creation(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -176,9 +176,9 @@ class TestChatResponseFormat:
     """Tests for chat() response_format (JSON mode)."""
 
     def test_response_format_creation(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -199,20 +199,20 @@ class TestExtract:
     """Tests for ask()."""
 
     def test_import(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
         assert ask is not None
 
     def test_requires_fields(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
         with pytest.raises(TypeError):
             ask(resource="gpt-4", template="Test")
 
     def test_creation(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -230,9 +230,9 @@ class TestExtract:
             assert "prompt" in node._ops
 
     def test_with_retry(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -254,9 +254,9 @@ class TestExtract:
             assert node._loop_config.max_iterations == 3  # retry=2 → 3 attempts
 
     def test_with_validators(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -273,9 +273,9 @@ class TestExtract:
             assert "validators" in parser_op.inputs
 
     def test_no_retry_is_simple_graph(self):
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -297,9 +297,9 @@ class TestChatCombined:
     """Tests for chat() with combined features."""
 
     def test_combined_load_balancing_and_fallback(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -323,9 +323,9 @@ class TestChatPromptFormats:
     """Tests for chat() with different prompt formats."""
 
     def test_string_prompt(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -341,9 +341,9 @@ class TestChatPromptFormats:
             assert node.name == "string_prompt_chat"
 
     def test_dict_prompt(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -360,9 +360,9 @@ class TestChatPromptFormats:
             assert "prompt" in node._ops
 
     def test_list_prompt(self):
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -390,9 +390,9 @@ class TestChatIntegration:
 
     @pytest.mark.asyncio
     async def test_simple_generation(self, hub):
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -419,9 +419,9 @@ class TestChatIntegration:
     async def test_json_mode(self, hub):
         import json
 
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import chat
+        from operonx.providers.ops import chat
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -452,9 +452,9 @@ class TestExtractIntegration:
 
     @pytest.mark.asyncio
     async def test_structured_output(self, hub):
-        from operon.core.states import MemoryState, StateSchema
+        from operonx.core.states import MemoryState, StateSchema
 
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
         if not hub.has("llm:gpt-4o"):
             pytest.skip("llm:gpt-4o not configured")
@@ -485,12 +485,12 @@ class TestExtractRefTemplate:
     """Tests for ask() when template is a Ref (inside @graph)."""
 
     def test_prompt_schema_includes_vars_when_template_is_ref(self):
-        from operon.core import END, START
-        from operon.core.ops.graph.graph_op import graph
+        from operonx.core import END, START
+        from operonx.core.ops.graph.graph_op import graph
 
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance
@@ -517,12 +517,12 @@ class TestExtractRefTemplate:
             assert "transcript" in prompt_op.inputs
 
     def test_static_template_still_works(self):
-        from operon.core import END, START
-        from operon.core.ops.graph.graph_op import graph
+        from operonx.core import END, START
+        from operonx.core.ops.graph.graph_op import graph
 
-        from operon.providers.ops import ask
+        from operonx.providers.ops import ask
 
-        with patch("operon.providers.ops._utils.ResourceHub") as mock_hub:
+        with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_instance = Mock()
             mock_instance.llm.return_value = Mock(generate=AsyncMock(), stream=AsyncMock())
             mock_hub.instance.return_value = mock_instance

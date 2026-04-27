@@ -1,7 +1,7 @@
 """Fixture: `PromptOp` with a literal messages list (no rendering)."""
 
-from operon.core import END, PARENT, START, GraphOp
-from operon.providers.ops.prompt import PromptOp
+from operonx.core import END, PARENT, START, GraphOp
+from operonx.providers.ops.prompt import PromptOp
 
 
 def build_graph() -> GraphOp:

@@ -1,6 +1,6 @@
 //! HuggingFace Text Embeddings Inference (TEI) reranker backend.
 //!
-//! Mirrors Python [`operon/providers/rerankers/tei.py`](../../../../../operon/providers/rerankers/tei.py).
+//! Mirrors Python [`operonx/providers/rerankers/tei.py`](../../../../../operonx/providers/rerankers/tei.py).
 //! Net-new Rust port (plan §5a marks this file as 🆕).
 
 use async_trait::async_trait;

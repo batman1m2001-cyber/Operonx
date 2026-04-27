@@ -1,10 +1,10 @@
 """Test that all provider imports resolve correctly and expose the expected interface."""
 
-from operon.core.utils import YamlModel
+from operonx.core.utils import YamlModel
 
 
 def test_llm_imports():
-    from operon.providers import BaseLLM, LLMConfig, LLMType
+    from operonx.providers import BaseLLM, LLMConfig, LLMType
 
     assert hasattr(BaseLLM, "generate"), "BaseLLM must have generate()"
     assert hasattr(BaseLLM, "stream"), "BaseLLM must have stream()"
@@ -13,7 +13,7 @@ def test_llm_imports():
 
 
 def test_embedding_imports():
-    from operon.providers import BaseEmbedder, EmbeddingConfig, EmbeddingType
+    from operonx.providers import BaseEmbedder, EmbeddingConfig, EmbeddingType
 
     assert hasattr(BaseEmbedder, "run"), "BaseEmbedder must have run()"
     assert EmbeddingType.ONNX.value == "onnx"
@@ -21,7 +21,7 @@ def test_embedding_imports():
 
 
 def test_reranker_imports():
-    from operon.providers import BaseReranker, RerankingConfig, RerankingType
+    from operonx.providers import BaseReranker, RerankingConfig, RerankingType
 
     assert hasattr(BaseReranker, "run"), "BaseReranker must have run()"
     assert RerankingType.ONNX.value == "onnx"
@@ -29,9 +29,9 @@ def test_reranker_imports():
 
 
 def test_op_imports():
-    from operon.core.ops import BaseOp
+    from operonx.core.ops import BaseOp
 
-    from operon.providers import EmbeddingOp, LLMOp, RerankOp
+    from operonx.providers import EmbeddingOp, LLMOp, RerankOp
 
     assert issubclass(LLMOp, BaseOp)
     assert issubclass(EmbeddingOp, BaseOp)
@@ -39,7 +39,7 @@ def test_op_imports():
 
 
 def test_config_creation():
-    from operon.providers import LLMConfig, LLMType
+    from operonx.providers import LLMConfig, LLMType
 
     config = LLMConfig.create_config(
         {

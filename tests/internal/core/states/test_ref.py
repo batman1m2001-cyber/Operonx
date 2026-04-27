@@ -2,7 +2,7 @@
 
 import pytest
 
-from operon.core.states.ref import Ref
+from operonx.core.states.ref import Ref
 
 # ============================================================
 # Helper Classes

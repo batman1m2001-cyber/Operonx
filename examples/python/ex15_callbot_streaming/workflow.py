@@ -5,7 +5,7 @@ Multi-level streaming callbot pipeline: audio → VAD → STT → LLM router →
 
 import asyncio
 
-from operon.core import END, PARENT, START, GraphOp, graph, op
+from operonx.core import END, PARENT, START, GraphOp, graph, op
 
 # =============================================================================
 # Mock ops — simulate a voice callbot pipeline

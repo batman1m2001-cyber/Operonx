@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "operon"
+name = "operonx"
 version = "0.6.0"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
@@ -67,7 +67,7 @@ serve = [
     "websockets>=11.0",
 ]
 all = [
-    "operon[providers,langfuse,otel,serve]",
+    "operonx[providers,langfuse,otel,serve]",
 ]
 dev = [
     "pytest>=9.0.2",
@@ -81,7 +81,7 @@ dev = [
 ]
 
 [project.scripts]
-operon = "operon.cli:main"
+operonx = "operonx.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operon"
@@ -89,10 +89,10 @@ Documentation = "https://github.com/batman1m2001-cyber/Operon#readme"
 Repository = "https://github.com/batman1m2001-cyber/Operon"
 
 [tool.hatch.build.targets.wheel]
-packages = ["operon"]
+packages = ["operonx"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/operon"]
+include = ["/operonx"]
 
 [tool.ruff]
 line-length = 100
@@ -107,7 +107,7 @@ extend-ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["operon"]
+known-first-party = ["operonx"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -3,7 +3,7 @@
 //! when surfacing setup-related warnings and errors.
 //!
 //! Mirrors Python's module-level `BOOTSTRAP_ENV_PATHS` list in
-//! `operon/core/registry/errors.py`.
+//! `operonx/core/registry/errors.py`.
 
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};

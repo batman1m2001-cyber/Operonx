@@ -1,6 +1,6 @@
 //! Config and resource registries.
 //!
-//! Mirrors Python `operon/core/registry/`.
+//! Mirrors Python `operonx/core/registry/`.
 
 pub mod bootstrap_state;
 pub mod config_registry;

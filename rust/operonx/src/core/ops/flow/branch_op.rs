@@ -1,6 +1,6 @@
 //! `BranchOp` — conditional routing based on a ref-evaluated condition.
 //!
-//! Mirrors Python [`operon/core/ops/flow/branch_op.py`](../../../../../operon/core/ops/flow/branch_op.py).
+//! Mirrors Python [`operonx/core/ops/flow/branch_op.py`](../../../../../operonx/core/ops/flow/branch_op.py).
 //! At runtime, evaluates each `Branch` case in order and emits the first matching
 //! target name via the `__branch_target__` output key; the scheduler uses this
 //! to route downstream.

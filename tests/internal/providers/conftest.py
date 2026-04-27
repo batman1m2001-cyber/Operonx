@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures for operon-providers tests.
+"""Pytest configuration and shared fixtures for operonx-providers tests.
 
 Discovery: walks up from this file to find the project root (nearest
 ``pyproject.toml``), then loads ``.env`` and ``resources.yaml`` from there.
@@ -63,7 +63,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture(scope="session", autouse=True)
 def setup_resource_hub():
     """Load ResourceHub from resources.yaml for the whole test session."""
-    from operon.core.registry import ResourceHub
+    from operonx.core.registry import ResourceHub
 
     hub = ResourceHub.from_yaml(RESOURCES_FILE)
     ResourceHub.set_instance(hub)

@@ -1,6 +1,6 @@
 //! `ResourceHub` — centralized registry with lazy loading + pluggable storage.
 //!
-//! Mirrors Python [`operon/core/registry/resource_hub.py`](../../../../../operon/core/registry/resource_hub.py).
+//! Mirrors Python [`operonx/core/registry/resource_hub.py`](../../../../../operonx/core/registry/resource_hub.py).
 //!
 //! # Lifecycle
 //! 1. `ResourceHub::from_yaml(path)` / `from_json(path)` builds a hub around

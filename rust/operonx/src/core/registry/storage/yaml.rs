@@ -1,6 +1,6 @@
 //! `YamlConfigStorage` — all configs in a single YAML file with env-var interpolation.
 //!
-//! Mirrors Python [`operon/core/registry/storage/yaml.py`](../../../../../../operon/core/registry/storage/yaml.py).
+//! Mirrors Python [`operonx/core/registry/storage/yaml.py`](../../../../../../operonx/core/registry/storage/yaml.py).
 //!
 //! Supports both nested and flat key formats (both resolve to `"category:name"`):
 //!

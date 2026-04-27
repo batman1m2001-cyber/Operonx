@@ -1,6 +1,6 @@
 //! `Ref` — variable references with chainable transforms.
 //!
-//! Mirrors Python `operon/core/states/ref.py`. The serde-facing structs mirror
+//! Mirrors Python `operonx/core/states/ref.py`. The serde-facing structs mirror
 //! the output of `Ref.serialize()` in Python (see `BaseOp._serialize_params`).
 //!
 //! # Phase 1 scope

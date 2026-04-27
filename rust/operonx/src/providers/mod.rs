@@ -1,6 +1,6 @@
 //! Provider integrations — LLM, embedding, reranker, ONNX, Triton, auth.
 //!
-//! Mirrors Python `operon/providers/`.
+//! Mirrors Python `operonx/providers/`.
 
 pub mod auth;
 pub mod embeddings;

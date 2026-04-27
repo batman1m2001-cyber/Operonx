@@ -1,6 +1,6 @@
 //! `LangfusePromptManager` — versioned prompt retrieval + caching.
 //!
-//! Mirrors Python [`operon/telemetry/backends/langfuse/prompt_manager.py`](../../../../../../operon/telemetry/backends/langfuse/prompt_manager.py).
+//! Mirrors Python [`operonx/telemetry/backends/langfuse/prompt_manager.py`](../../../../../../operonx/telemetry/backends/langfuse/prompt_manager.py).
 //!
 //! # Phase 7 scope
 //! Stub. Per §6b.8 the Python side lazy-imports the `langfuse` SDK here —

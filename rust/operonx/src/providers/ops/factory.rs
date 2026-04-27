@@ -1,7 +1,7 @@
 //! Dispatch from [`OpType`] → the matching provider-op `execute` function.
 //!
 //! Mirrors the role of Python's dispatch table in
-//! [`operon/providers/ops/factory.py`](../../../../../operon/providers/ops/factory.py).
+//! [`operonx/providers/ops/factory.py`](../../../../../operonx/providers/ops/factory.py).
 //! The scheduler calls [`is_provider_kind`] to decide whether to route the
 //! op here; when it does, [`execute_provider_op`] picks the right backend
 //! function by `kind`.
