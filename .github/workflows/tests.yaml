@@ -82,7 +82,7 @@ jobs:
           # once installed. Anything below should NOT raise.
           extra = "${{ matrix.extra }}"
           if extra == "anthropic":
-              from operonx.providers.llms.anthropic import AnthropicLLM  # noqa: F401
+              from operonx.providers.llms.anthropic import AnthropicModel  # noqa: F401
           elif extra == "langfuse":
               from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
           elif extra == "otel":
@@ -94,7 +94,7 @@ jobs:
               import fastapi  # noqa: F401
               import uvicorn  # noqa: F401
           elif extra in ("standard", "all"):
-              from operonx.providers.llms.openai import OpenAILLM  # noqa: F401
+              from operonx.providers.llms.openai import OpenAISDKModel  # noqa: F401
               from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
           PY
 
