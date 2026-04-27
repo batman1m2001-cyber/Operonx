@@ -28,6 +28,12 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
+    # Pin uv to the matrix Python via env var — covers `sync`, `run`, and
+    # implicit `.venv/` creation. Avoids the "uv picks highest installed"
+    # ambiguity when multiple Python versions are present on the runner.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +46,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --python ${{ matrix.python-version }}
+        run: uv sync --all-extras
 
       - name: Verify import
         run: uv run python -c "import operonx; from operonx.core import GraphOp, FuncOp, START, END, op"
