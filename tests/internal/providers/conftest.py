@@ -43,16 +43,32 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip all tests if resources.yaml is not present at the project root."""
-    if RESOURCES_FILE.exists():
+    """Adjust the provider test collection.
+
+    1. If ``resources.yaml`` is missing entirely (e.g. fresh clone with no
+       config), skip the whole provider suite — nothing reachable.
+    2. Otherwise, auto-mark any test whose class name ends with
+       ``Integration`` (or whose function name contains ``_integration``)
+       with ``pytest.mark.integration`` so the standard ``-m "not
+       integration"`` selector excludes them by default. CI runs without
+       real LLM credentials and shouldn't try to dial out.
+    """
+    if not RESOURCES_FILE.exists():
+        print(
+            f"resources.yaml not found at {RESOURCES_FILE} — skipping provider tests.",
+            file=sys.stderr,
+        )
+        skip_marker = pytest.mark.skip(reason=f"resources.yaml not found at {RESOURCES_FILE}")
+        for item in items:
+            item.add_marker(skip_marker)
         return
-    print(
-        f"resources.yaml not found at {RESOURCES_FILE} — skipping provider tests.",
-        file=sys.stderr,
-    )
-    skip_marker = pytest.mark.skip(reason=f"resources.yaml not found at {RESOURCES_FILE}")
+
+    integration_marker = pytest.mark.integration
     for item in items:
-        item.add_marker(skip_marker)
+        cls = getattr(item, "cls", None)
+        cls_name = cls.__name__ if cls is not None else ""
+        if cls_name.endswith("Integration") or "_integration" in item.name.lower():
+            item.add_marker(integration_marker)
 
 
 # =============================================================================
