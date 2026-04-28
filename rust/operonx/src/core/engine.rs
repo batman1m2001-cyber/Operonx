@@ -193,6 +193,24 @@ impl FrameSender {
             silent: true,
         }
     }
+
+    /// Standalone sender that captures only into a [`TraceTap`] — no
+    /// `ExecutionHandle`, no `pump_loop`, no live channel reader.
+    ///
+    /// Used by the nested-`@graph` fast-path: a sub-`GraphScheduler` runs
+    /// inline in the parent task, emits its output frames into the tap,
+    /// and the caller harvests the tap once `scheduler.run` returns. The
+    /// dummy `mpsc` is never read — `silent: true` short-circuits every
+    /// `send`/`finish`/`fail` away from the channel.
+    pub fn tap_only(tap: TraceTap) -> Self {
+        // Capacity 1 — the sender is silent so the channel is never used.
+        let (tx, _rx) = mpsc::channel::<PumpMsg>(1);
+        Self {
+            tx,
+            tap: Some(tap),
+            silent: true,
+        }
+    }
 }
 
 impl ExecutionHandle {

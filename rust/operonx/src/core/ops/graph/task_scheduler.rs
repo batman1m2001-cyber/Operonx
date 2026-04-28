@@ -116,6 +116,14 @@ pub struct GraphScheduler {
     /// `outputs[var].ref` points at PARENT with `is_output = true`. These are
     /// the ones the scheduler forwards to the external frame stream.
     out_vars: HashMap<String, Vec<(String, String)>>,
+    /// Pre-built sub-schedulers for every nested `OpType::Graph` op, keyed
+    /// by the child op's `full_name`. Built recursively at parent
+    /// construction so the runtime hot path never builds a sub-engine —
+    /// nested dispatch is a single map lookup + inline `run_collect`.
+    /// Wrapped in `Arc` for cheap cloning into spawned op-execution
+    /// tasks (the io/cpu dispatch path uses `tokio::spawn` with a `move`
+    /// closure).
+    child_schedulers: Arc<HashMap<String, Arc<GraphScheduler>>>,
 }
 
 impl std::fmt::Debug for GraphScheduler {
@@ -129,7 +137,10 @@ impl std::fmt::Debug for GraphScheduler {
 
 impl GraphScheduler {
     /// Build a scheduler for `graph`. Validates that the top-level op is a
-    /// graph and pre-computes PARENT-bound output var mappings.
+    /// graph, pre-computes PARENT-bound output var mappings, and
+    /// recursively constructs sub-schedulers for every nested
+    /// `OpType::Graph` so the runtime nested-dispatch path is a single
+    /// map lookup.
     pub fn new(graph: Arc<OpConfig>, registry: Arc<dyn OpRegistry>) -> Result<Self, OperonError> {
         if !graph.is_graph() {
             return Err(OperonError::Config(format!(
@@ -138,10 +149,12 @@ impl GraphScheduler {
             )));
         }
         let out_vars = compute_out_vars(&graph);
+        let child_schedulers = Arc::new(build_child_schedulers(&graph, &registry)?);
         Ok(Self {
             graph,
             registry,
             out_vars,
+            child_schedulers,
         })
     }
 
@@ -154,6 +167,64 @@ impl GraphScheduler {
             &self.graph.full_name
         }
     }
+
+    /// Inline nested-dispatch fast-path. Runs this scheduler in the
+    /// caller's task with a tap-only `FrameSender` (no `tokio::spawn`,
+    /// no `mpsc::channel(64)` allocation, no `pump_loop`, no UUID gen,
+    /// no middleware). Returns the aggregated PARENT-bound outputs as
+    /// a `Map<String, Value>` ready to flow into the calling op's
+    /// frame.
+    ///
+    /// This is what `OpType::Graph` calls in `execute_op` instead of
+    /// the heavy `Operon::run_json_async` round-trip.
+    pub async fn run_collect(
+        &self,
+        inputs: Map<String, Value>,
+    ) -> Result<Value, OperonError> {
+        use crate::core::engine::{FrameSender, TraceTap};
+
+        let tap: TraceTap = Arc::new(Mutex::new(Vec::new()));
+        let sender = FrameSender::tap_only(tap.clone());
+        let cancel = CancellationToken::new();
+        let ctx = MiddlewareContext::default();
+
+        // `run` only emits external frames via `sender.send` for
+        // PARENT-bound output ops (and the loop summary frame), so the
+        // tap accumulates exactly what we want and nothing else.
+        Scheduler::run(self, inputs, ctx, sender, cancel).await?;
+
+        // Merge every captured frame's `data` map. Multiple output ops
+        // each contribute their dst_var → value pairs; later frames
+        // overwrite earlier ones for the same key (Python parity).
+        let frames = std::mem::take(&mut *tap.lock());
+        let mut out: Map<String, Value> = Map::new();
+        for frame in frames {
+            for (k, v) in frame.data {
+                out.insert(k, v);
+            }
+        }
+        Ok(Value::Object(out))
+    }
+}
+
+/// Recursively build sub-schedulers for every nested `OpType::Graph` in
+/// `graph`. Each child gets its own `GraphScheduler` (with its own child
+/// map, recursively) so the runtime never builds a sub-engine on the
+/// hot path. Sub-schedulers share the parent's `OpRegistry` so
+/// `#[op]`-registered functions resolve identically at every depth.
+fn build_child_schedulers(
+    graph: &OpConfig,
+    registry: &Arc<dyn OpRegistry>,
+) -> Result<HashMap<String, Arc<GraphScheduler>>, OperonError> {
+    let mut out: HashMap<String, Arc<GraphScheduler>> = HashMap::new();
+    for (_, child) in &graph.ops {
+        if matches!(child.kind, OpType::Graph) {
+            let sub =
+                Arc::new(GraphScheduler::new(Arc::new(child.clone()), registry.clone())?);
+            out.insert(child.full_name.clone(), sub);
+        }
+    }
+    Ok(out)
 }
 
 #[async_trait]
@@ -392,6 +463,7 @@ impl GraphScheduler {
             .ok_or_else(|| OperonError::Config(format!("op '{}' not in graph", op_name)))?
             .clone();
         let registry = self.registry.clone();
+        let child_schedulers = self.child_schedulers.clone();
         let graph_key = self.graph_key().to_string();
 
         // ── Inline fast path for sync ops ──────────────────────────────────
@@ -401,7 +473,7 @@ impl GraphScheduler {
             }
             let result_map = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
                 Err(e) => error_frame(&e),
-                Ok(inputs) => match execute_op(&op_cfg, &registry, inputs).await {
+                Ok(inputs) => match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
                     Ok(value) => {
                         let map = value_to_map(value);
                         {
@@ -467,7 +539,7 @@ impl GraphScheduler {
                 }
             };
 
-            let exec_result = execute_op(&op_cfg, &registry, inputs).await;
+            let exec_result = execute_op(&op_cfg, &registry, inputs, &child_schedulers).await;
 
             match exec_result {
                 Ok(value) => {
@@ -914,6 +986,7 @@ async fn execute_op(
     op_cfg: &OpConfig,
     registry: &Arc<dyn OpRegistry>,
     inputs: Map<String, Value>,
+    child_schedulers: &Arc<HashMap<String, Arc<GraphScheduler>>>,
 ) -> Result<Value, OperonError> {
     use crate::providers::ops::{execute_provider_op, is_provider_kind};
 
@@ -946,61 +1019,21 @@ async fn execute_op(
             func(inputs).await
         }
         OpType::Graph => {
-            // Nested @graph dispatch: build a sub-engine on the fly the
-            // first time we see this nested config, cache it process-wide
-            // by `full_name`, then `run_json_async` the cached engine for
-            // every subsequent invocation.
-            //
-            // The roundtrip via JSON adds the `schema_version` field that
-            // `Operon::builder` requires; `auto_register()` pulls in the
-            // same `#[op]` inventory the outer engine uses.
-            use crate::core::engine::Operon;
-            use std::collections::HashMap;
-            use std::sync::OnceLock;
-            use std::sync::Mutex as StdMutex;
-
-            static NESTED_ENGINE_CACHE: OnceLock<StdMutex<HashMap<String, Arc<Operon>>>> =
-                OnceLock::new();
-            let cache = NESTED_ENGINE_CACHE.get_or_init(|| StdMutex::new(HashMap::new()));
-
-            let cached: Option<Arc<Operon>> = {
-                let guard = cache
-                    .lock()
-                    .map_err(|e| OperonError::Runtime(format!("nested cache poisoned: {e}")))?;
-                guard.get(&op_cfg.full_name).cloned()
-            };
-
-            let nested_engine = if let Some(e) = cached {
-                e
-            } else {
-                let mut nested_value: Value =
-                    serde_json::to_value(op_cfg).map_err(|e| {
-                        OperonError::Config(format!(
-                            "failed to round-trip nested graph '{}': {}",
-                            op_cfg.full_name, e
-                        ))
-                    })?;
-                if let Value::Object(obj) = &mut nested_value {
-                    obj.insert("schema_version".into(), Value::String("1.0".into()));
-                }
-                let nested_json = serde_json::to_string(&nested_value).map_err(|e| {
-                    OperonError::Config(format!(
-                        "failed to re-serialise nested graph '{}': {}",
-                        op_cfg.full_name, e
-                    ))
-                })?;
-                let engine =
-                    Arc::new(Operon::builder(&nested_json).auto_register().build()?);
-                cache
-                    .lock()
-                    .map_err(|e| OperonError::Runtime(format!("nested cache poisoned: {e}")))?
-                    .insert(op_cfg.full_name.clone(), engine.clone());
-                engine
-            };
-
-            nested_engine
-                .run_json_async(inputs, None, None, None)
-                .await
+            // Nested @graph dispatch — single map lookup into the parent
+            // scheduler's pre-built child schedulers, then `run_collect`
+            // inline (no `tokio::spawn`, no `mpsc::channel(64)`, no UUID
+            // gen, no middleware). Mirrors Python's
+            // `child._scheduler.run(state, ctx)` which is the same
+            // shape: a recursive call into a pre-built scheduler with
+            // shared state semantics.
+            let child = child_schedulers.get(&op_cfg.full_name).ok_or_else(|| {
+                OperonError::Runtime(format!(
+                    "nested graph '{}' not in parent scheduler's child map; \
+                     this should have been built at parent construction time",
+                    op_cfg.full_name
+                ))
+            })?;
+            child.run_collect(inputs).await
         }
         other => Err(OperonError::Runtime(format!(
             "op type {:?} not yet implemented for {}",

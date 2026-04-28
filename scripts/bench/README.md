@@ -45,7 +45,7 @@ fan-in, nesting, branching, and production-shaped pipelines.
 | `parallel_{5,10,20}` | n parallel `bench_noop` → `combine_all` | Fan-out / fan-in |
 | `matrix_chain_{5x30,5x60,10x40,5x100}` | chain of `bench_matrix` (naive O(n³) mat-mul) | Pure interpreted compute — fair Python↔Rust |
 | `cpu_contention_{3h_10l,5h_10l}_30m` | n_heavy `bench_matrix(30)` + n_light `bench_noop` in parallel | Mixed CPU contention under scheduler |
-| `nested_{2,5,10}` | top-level chain of `mid_pipeline` (@graph nesting 3 levels deep, fib compute inside) | Nested `@graph` dispatch + bounded CPU |
+| `nested_{2,5,10}` | top-level chain of `mid_pipeline` (@graph nesting 3 levels deep, pure `bench_noop`) | Nested `@graph` dispatch — pure scheduler overhead |
 | `branching_{5,10}` | n stages of `classify → if_() → 4 paths → merge` | `if_()` branch routing |
 | `production_{3,5}` | n parallel `verify_case` (@graph w/ `if_()` + `bench_matrix(30)`) → `combine_all` → noop | Realistic mixed workload |
 
@@ -70,32 +70,33 @@ discovers patterns by scanning `data/`, so any matching
 
 | Pattern | Python mean | Rust mean | Rust speedup |
 |---|---|---|---|
-| linear_50 | 2.80 ms | 0.91 ms | **3.1×** |
-| linear_100 | 4.17 ms | 1.58 ms | **2.6×** |
-| linear_200 | 6.41 ms | 2.98 ms | **2.2×** |
-| linear_500 | 15.96 ms | 7.46 ms | **2.1×** |
-| fib_chain_10x500 | 0.97 ms | 0.41 ms | **2.4×** |
-| fib_chain_20x500 | 1.64 ms | 0.63 ms | **2.6×** |
-| parallel_5 | 0.47 ms | 0.29 ms | **1.6×** |
-| parallel_10 | 0.58 ms | 0.34 ms | **1.7×** |
-| parallel_20 | 0.78 ms | 0.46 ms | **1.7×** |
-| **matrix_chain_5x30** | 16.91 ms | 0.99 ms | **17.0×** |
-| **matrix_chain_5x60** | 123.23 ms | 4.54 ms | **27.2×** |
-| **matrix_chain_10x40** | 76.26 ms | 3.34 ms | **22.8×** |
-| **matrix_chain_5x100** | **616.27 ms** | **17.78 ms** | **34.7×** |
-| **cpu_contention_3h_10l_30m** | 10.93 ms | 0.77 ms | **14.3×** |
-| **cpu_contention_5h_10l_30m** | 17.66 ms | 1.06 ms | **16.7×** |
-| nested_2 | 3.62 ms | 1.61 ms | **2.2×** |
-| nested_5 | 8.58 ms | 3.77 ms | **2.3×** |
-| nested_10 | 15.86 ms | 7.34 ms | **2.2×** |
-| branching_5 | 1.03 ms | 0.90 ms | **1.1×** (see caveat) |
-| branching_10 | 2.38 ms | 1.57 ms | **1.5×** (see caveat) |
-| **production_3** | 10.95 ms | 1.41 ms | **7.8×** (see caveat) |
-| **production_5** | 18.21 ms | 2.00 ms | **9.1×** (see caveat) |
+| linear_50 | 2.82 ms | 0.90 ms | **3.1×** |
+| linear_100 | 3.77 ms | 1.62 ms | **2.3×** |
+| linear_200 | 7.68 ms | 3.11 ms | **2.5×** |
+| linear_500 | 16.70 ms | 7.59 ms | **2.2×** |
+| fib_chain_10x500 | 1.00 ms | 0.42 ms | **2.4×** |
+| fib_chain_20x500 | 1.73 ms | 0.67 ms | **2.6×** |
+| parallel_5 | 0.42 ms | 0.28 ms | **1.5×** |
+| parallel_10 | 0.56 ms | 0.33 ms | **1.7×** |
+| parallel_20 | 0.87 ms | 0.48 ms | **1.8×** |
+| **matrix_chain_5x30** | 16.80 ms | 0.94 ms | **17.9×** |
+| **matrix_chain_5x60** | 137.12 ms | 4.65 ms | **29.5×** |
+| **matrix_chain_10x40** | 86.78 ms | 3.29 ms | **26.4×** |
+| **matrix_chain_5x100** | **706.43 ms** | **18.03 ms** | **39.2×** |
+| **cpu_contention_3h_10l_30m** | 12.29 ms | 0.77 ms | **16.0×** |
+| **cpu_contention_5h_10l_30m** | 20.84 ms | 1.04 ms | **20.0×** |
+| nested_2 | 1.21 ms | 0.96 ms | **1.3×** |
+| nested_5 | 2.51 ms | 1.72 ms | **1.5×** |
+| nested_10 | 4.55 ms | 2.95 ms | **1.5×** |
+| branching_5 | 1.16 ms | 0.91 ms | **1.3×** (see caveat) |
+| branching_10 | 2.58 ms | 1.58 ms | **1.6×** (see caveat) |
+| **production_3** | 12.24 ms | 1.19 ms | **10.3×** (see caveat) |
+| **production_5** | 20.49 ms | 1.86 ms | **11.0×** (see caveat) |
 
-**Headline:** Rust wins every pattern. **2–3×** on linear / fan-out /
-nested-with-compute, **7–9×** on production-shape, **14–17×** under
-mixed CPU contention, and **17–35×** on pure-compute matrix work.
+**Headline:** Rust wins every pattern. **2–3×** on linear / fan-out,
+**1.3–1.5×** on pure-noop nested @graph dispatch (now), **10–11×** on
+production-shape, **16–20×** under mixed CPU contention, and
+**18–39×** on pure-compute matrix work.
 
 **Caveat on branching/production:** these patterns parse and run, but
 the `if_()` dispatch in Rust is partial — `cases` deserialise fine
@@ -106,16 +107,17 @@ produce different results would diverge. Real branch dispatch needs
 the ref-transform evaluator to land in Rust first — see
 `REFACTOR_post_v0.6.2.md` ("Rust `if_()` branch routing dispatch").
 
-**Caveat on nested:** `inner_pipeline` ops use `bench_fib(fib_n=2000)`
-rather than `bench_noop` so the nested-@graph dispatch overhead is
-amortized across actual CPU work. Pure-noop nesting is dominated by
-Rust's per-sub-engine setup cost (each nested call goes through
-`run_json_async` → `tokio::spawn` + new mpsc channel + UUID gen),
-which is heavier than Python's nested @graph (which just recursively
-calls `self._scheduler.run(state, context_id)` with no spawn). The
-proper fix is for Rust nested @graph dispatch to share the parent's
-scheduler/state instead of spawning a new sub-engine — logged in
-`REFACTOR_post_v0.6.2.md`.
+**Nested @graph dispatch — closed.** Previously Rust lost on pure-noop
+nesting because each nested call went through full `run_json_async`
+(per-call `tokio::spawn` + new `mpsc::channel(64)` + UUID gen +
+`pump_loop` task + middleware). The fast-path now precomputes a child
+`GraphScheduler` for every nested `OpType::Graph` at parent build time
+and dispatches via `child.run_collect(inputs)` inline in the caller's
+task — no `spawn`, no channel allocation, no UUID gen. Mirrors
+Python's `child._scheduler.run(state, ctx)` shape. Result:
+`nested_{2,5,10}` are 1.3–1.5× Rust faster on pure noops, and
+`production_*` jumped from 7.8× to **10–11×** because every nested
+`verify_case` now uses the fast path.
 
 ## Notes
 

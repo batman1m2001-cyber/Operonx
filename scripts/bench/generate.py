@@ -165,17 +165,12 @@ def build_matrix_chain(n: int, size: int) -> GraphOp:
 
 @graph
 def inner_pipeline(x):
-    """Inner subgraph: 3-step linear chain with light fib compute.
-
-    Includes a small `bench_fib` so the nested-@graph dispatch overhead
-    is amortized across actual CPU work. Pure-noop nesting is dominated
-    by Rust's per-sub-engine setup cost (`tokio::spawn` + new mpsc
-    channel + UUID gen per nested call) — adding even tiny compute lets
-    the native iteration speed close the gap and pull ahead.
+    """Inner subgraph: 3-step linear chain of bench_noop. Stresses pure
+    nested-`@graph` dispatch overhead with no compute to hide behind.
     """
-    a = bench_fib(x=x, fib_n=2000, name="inner_a")
-    b = bench_fib(x=a["x"], fib_n=2000, name="inner_b")
-    c = bench_fib(x=b["x"], fib_n=2000, name="inner_c")
+    a = bench_noop(x=x, name="inner_a")
+    b = bench_noop(x=a["x"], name="inner_b")
+    c = bench_noop(x=b["x"], name="inner_c")
     START >> a >> b >> c >> END
 
 
