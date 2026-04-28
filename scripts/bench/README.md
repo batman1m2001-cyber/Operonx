@@ -70,42 +70,59 @@ discovers patterns by scanning `data/`, so any matching
 
 | Pattern | Python mean | Rust mean | Rust speedup |
 |---|---|---|---|
-| linear_50 | 2.82 ms | 0.90 ms | **3.1×** |
-| linear_100 | 3.77 ms | 1.62 ms | **2.3×** |
+| linear_50 | 2.82 ms | 0.89 ms | **3.2×** |
+| linear_100 | 3.77 ms | 1.59 ms | **2.4×** |
 | linear_200 | 7.68 ms | 3.11 ms | **2.5×** |
-| linear_500 | 16.70 ms | 7.59 ms | **2.2×** |
-| fib_chain_10x500 | 1.00 ms | 0.42 ms | **2.4×** |
+| linear_500 | 16.70 ms | 7.73 ms | **2.2×** |
+| fib_chain_10x500 | 1.00 ms | 0.43 ms | **2.3×** |
 | fib_chain_20x500 | 1.73 ms | 0.67 ms | **2.6×** |
-| parallel_5 | 0.42 ms | 0.28 ms | **1.5×** |
-| parallel_10 | 0.56 ms | 0.33 ms | **1.7×** |
-| parallel_20 | 0.87 ms | 0.48 ms | **1.8×** |
-| **matrix_chain_5x30** | 16.80 ms | 0.94 ms | **17.9×** |
-| **matrix_chain_5x60** | 137.12 ms | 4.65 ms | **29.5×** |
-| **matrix_chain_10x40** | 86.78 ms | 3.29 ms | **26.4×** |
-| **matrix_chain_5x100** | **706.43 ms** | **18.03 ms** | **39.2×** |
-| **cpu_contention_3h_10l_30m** | 12.29 ms | 0.77 ms | **16.0×** |
-| **cpu_contention_5h_10l_30m** | 20.84 ms | 1.04 ms | **20.0×** |
-| nested_2 | 1.21 ms | 0.96 ms | **1.3×** |
-| nested_5 | 2.51 ms | 1.72 ms | **1.5×** |
-| nested_10 | 4.55 ms | 2.95 ms | **1.5×** |
-| branching_5 | 1.16 ms | 0.91 ms | **1.3×** (see caveat) |
-| branching_10 | 2.58 ms | 1.58 ms | **1.6×** (see caveat) |
-| **production_3** | 12.24 ms | 1.19 ms | **10.3×** (see caveat) |
-| **production_5** | 20.49 ms | 1.86 ms | **11.0×** (see caveat) |
+| parallel_5 | 0.42 ms | 0.30 ms | **1.4×** |
+| parallel_10 | 0.56 ms | 0.34 ms | **1.6×** |
+| parallel_20 | 0.87 ms | 0.49 ms | **1.8×** |
+| **matrix_chain_5x30** | 16.80 ms | 0.97 ms | **17.3×** |
+| **matrix_chain_5x60** | 137.12 ms | 4.76 ms | **28.8×** |
+| **matrix_chain_10x40** | 86.78 ms | 3.46 ms | **25.1×** |
+| **matrix_chain_5x100** | **706.43 ms** | **18.55 ms** | **38.1×** |
+| **cpu_contention_3h_10l_30m** | 12.29 ms | 0.78 ms | **15.7×** |
+| **cpu_contention_5h_10l_30m** | 20.84 ms | 1.05 ms | **19.8×** |
+| nested_2 | 1.21 ms | 0.78 ms | **1.5×** |
+| nested_5 | 2.51 ms | 1.58 ms | **1.6×** |
+| nested_10 | 4.55 ms | 2.96 ms | **1.5×** |
+| **branching_5** | 1.16 ms | **0.57 ms** | **2.0×** |
+| **branching_10** | 2.58 ms | **0.96 ms** | **2.7×** |
+| **production_3** | 12.24 ms | 1.11 ms | **11.0×** |
+| **production_5** | 20.49 ms | 1.64 ms | **12.5×** |
 
 **Headline:** Rust wins every pattern. **2–3×** on linear / fan-out,
-**1.3–1.5×** on pure-noop nested @graph dispatch (now), **10–11×** on
-production-shape, **16–20×** under mixed CPU contention, and
-**18–39×** on pure-compute matrix work.
+**1.5–1.6×** on pure-noop nested @graph dispatch, **2.0–2.7×** on
+`if_()`-routed branching, **11–12×** on production-shape, **15–20×**
+under mixed CPU contention, and **17–38×** on pure-compute matrix
+work.
 
-**Caveat on branching/production:** these patterns parse and run, but
-the `if_()` dispatch in Rust is partial — `cases` deserialise fine
-(the `candidates` field landed) and the scheduler runs every branch
-target, then a soft-edge merge picks the answer. Output values match
-Python by coincidence in this bench; a graph where different branches
-produce different results would diverge. Real branch dispatch needs
-the ref-transform evaluator to land in Rust first — see
-`REFACTOR_post_v0.6.2.md` ("Rust `if_()` branch routing dispatch").
+**`if_()` branch routing — closed.** Previously the Rust scheduler
+deserialised `cases` / `default` / `candidates` but had no
+`OpType::Branch` execution path — every case target fired and a
+soft-edge merge picked the answer (semantically wrong; output matched
+Python only by coincidence). The Rust runtime now ships:
+
+1. A **ref-transform evaluator** in `resolve_ref` covering `eq` / `ne`
+   / `lt` / `le` / `gt` / `ge` / `contains` / `getitem` / `getattr` /
+   boolean `and_` / `or_` / `not_` / arithmetic `add` / `sub` / `mul`
+   / `truediv` / `floordiv` / `mod` / `pow` (and r-variants) / unary
+   `neg` / `pos` / `abs`. Mirrors Python `Ref._wrap`.
+2. A dedicated **`OpType::Branch` dispatch path** in `spawn_op`'s
+   inline fast-path: walks `op_cfg.cases`, resolves each
+   condition Ref through the new evaluator, picks the first truthy
+   target (or `default`), and emits
+   `{"__branch_target__": "<name>"}`. The existing scheduler edge
+   routing already honours `__branch_target__` to fire only the
+   matching `EdgeType::Condition` edge.
+
+Result: branching now executes only the chosen branch (was firing 4
+of 4 paths), so `branching_5` dropped from 0.91 ms → **0.57 ms** and
+`branching_10` from 1.58 ms → **0.96 ms**. Production also tightened
+slightly (each `verify_case` was firing pass + fail + soft-edge merge
+before).
 
 **Nested @graph dispatch — closed.** Previously Rust lost on pure-noop
 nesting because each nested call went through full `run_json_async`
