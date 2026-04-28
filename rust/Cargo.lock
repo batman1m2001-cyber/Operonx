@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "operonx"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1325,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "operonx-macros"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "proc-macro2",
  "quote",

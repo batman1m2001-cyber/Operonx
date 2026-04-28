@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-28
+
+### Added
+- `examples/{python,rust}/exNN_*/` are now standalone project templates —
+  per-example `pyproject.toml` / `Cargo.toml`, single-file `main.py` /
+  `main.rs`, and a per-example `.env.example` + `resources.yaml` where
+  relevant. `examples/rust/.cargo/config.toml` patches `operonx` to the
+  workspace path for in-repo development; users copying an example out
+  of the repo pick up the registry version.
+- `scripts/bench/` — Python ↔ Rust e2e bench: `generate.py` dumps 22
+  shared `graph.json` patterns, `main.py` runs the Python engine,
+  `cargo run --release` from `scripts/bench/` runs the Rust engine.
+  Headline: Rust wins every pattern (2-3× linear/fan-out/nested,
+  7-9× production-shape, 14-17× CPU contention, 17-35× pure-compute
+  matmul).
+
+### Changed
+- Rust scheduler: sync ops (`OpBound::Sync`) take an inline fast path —
+  no `tokio::spawn`, no semaphore acquire, events go onto the queue via
+  `try_send`. Per-op floor 44 µs → 15 µs.
+- Rust `OpType::Graph` now dispatches nested `@graph`s via a
+  process-wide cached sub-`Operon` keyed by `full_name` — first call
+  builds the sub-engine, subsequent calls reuse it. (Real fix —
+  precompute child engines at parent build time + `run_json_nested`
+  fast-path — logged in `REFACTOR_post_v0.6.2.md`.)
+- Rust `OpConfig` accepts `cases` / `default` / `candidates` (and a new
+  `BranchCase` struct) so `branching_*` / `production_*` graphs
+  deserialise. Real branch routing still pending the ref-transform
+  evaluator.
+
 ## [0.6.2] - 2026-04-28
 
 ### Fixed
@@ -84,6 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/batman1m2001-cyber/Operonx/releases/tag/v0.6.0
