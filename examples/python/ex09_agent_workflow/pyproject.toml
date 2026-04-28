@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex09-agent-workflow"
+version = "0.1.0"
+description = "Operonx tool-calling agent on @graph.loop."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx[openai]>=0.6.2",
+]

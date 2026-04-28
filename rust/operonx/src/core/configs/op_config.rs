@@ -25,7 +25,20 @@ use serde_json::Value;
 
 use super::edge_config::EdgeConfig;
 use crate::core::ops::cache::CacheConfig;
+use crate::core::states::ref_::RefConfig;
 use crate::core::utils::common::Param;
+
+/// One condition → target case in a [`BranchOp`](OpType::Branch).
+///
+/// Python emits this as `{"condition": <RefConfig>, "target": "name"}`.
+/// The condition is a Ref whose chain of `transforms` evaluates to a
+/// truthy value when this case should fire.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BranchCase {
+    pub condition: RefConfig,
+    pub target: String,
+}
 
 /// All op types supported in a workflow graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -259,6 +272,23 @@ pub struct OpConfig {
     #[serde(default)]
     pub is_generator: bool,
 
+    // ── BranchOp (`type = "branch"`) fields ───────────────────────────────
+    /// Ordered (condition, target) cases. The first case whose condition
+    /// evaluates truthy wins. Python's `BranchOp.serialize()` emits the
+    /// condition as a `Ref` with `transforms` (e.g. an `eq` / `ge` pair).
+    #[serde(default)]
+    pub cases: Vec<BranchCase>,
+
+    /// Fallback target when no case matches. `None` surfaces a runtime
+    /// error in that scenario.
+    #[serde(default)]
+    pub default: Option<String>,
+
+    /// Explicit list of valid target names. Optional — when omitted, the
+    /// runtime can derive it from `cases` + `default`.
+    #[serde(default)]
+    pub candidates: Option<Vec<String>>,
+
     // ── GraphOp (`type = "graph"`) fields ─────────────────────────────────
     #[serde(default)]
     pub ops: BTreeMap<String, OpConfig>,
@@ -347,6 +377,9 @@ impl Default for OpConfig {
             func_name: None,
             is_async: false,
             is_generator: false,
+            cases: Vec::new(),
+            default: None,
+            candidates: None,
             ops: BTreeMap::new(),
             edges: Vec::new(),
             entries: Vec::new(),

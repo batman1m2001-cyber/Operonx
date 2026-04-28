@@ -32,7 +32,7 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::core::configs::op_config::{CompiledLink, LoopConfig, OpConfig, OpType};
+use crate::core::configs::op_config::{CompiledLink, LoopConfig, OpBound, OpConfig, OpType};
 use crate::core::engine::{FrameEvent, FrameSender, Scheduler};
 use crate::core::exceptions::{OpError, OperonError};
 use crate::core::middleware::MiddlewareContext;
@@ -276,8 +276,10 @@ impl GraphScheduler {
         ));
 
         // Internal event queue — op execution tasks post here, the main loop
-        // drains it. Bounded per plan §1.
-        let (tx, mut rx) = mpsc::channel::<SchedulerEvent>(256);
+        // drains it. Sized generously so the inline fast path (sync ops that
+        // bypass `tokio::spawn` and post events from inside `on_frame`) can
+        // never deadlock by filling the channel mid-handler.
+        let (tx, mut rx) = mpsc::channel::<SchedulerEvent>(8192);
 
         // ── Seed entry ops ────────────────────────────────────────────────
         for entry in &self.graph.entries {
@@ -289,7 +291,8 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         }
 
         // ── Main event loop ───────────────────────────────────────────────
@@ -346,7 +349,8 @@ impl GraphScheduler {
                                 tx.clone(),
                                 sem.clone(),
                                 cancel,
-                            )?;
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -358,7 +362,21 @@ impl GraphScheduler {
 
     /// Dispatch one op — resolve its inputs, call the function, push Frame/Eof
     /// events back onto the scheduler's internal queue.
-    fn spawn_op(
+    ///
+    /// Two dispatch paths:
+    ///
+    /// * **Inline (`bound: Sync`)** — runs in the caller's task with no
+    ///   `tokio::spawn`, no semaphore acquire, and the events go onto the
+    ///   queue via `try_send`. This is the hot path: a 500-op linear chain
+    ///   of sync ops doesn't pay 500 task spawns + 500 semaphore awaits.
+    /// * **Spawned (`bound: Io | Cpu`)** — existing `tokio::spawn` path with
+    ///   the concurrency semaphore. Required for ops that may yield on I/O
+    ///   or do real CPU work that would block the scheduler task.
+    ///
+    /// The op's `Future` is awaited in both paths; for sync ops the
+    /// future-from-`#[op]` resolves on the first poll without yielding so
+    /// "inline" is essentially synchronous.
+    async fn spawn_op(
         &self,
         op_name: String,
         ctx: ContextId,
@@ -376,6 +394,55 @@ impl GraphScheduler {
         let registry = self.registry.clone();
         let graph_key = self.graph_key().to_string();
 
+        // ── Inline fast path for sync ops ──────────────────────────────────
+        if matches!(op_cfg.bound, OpBound::Sync) {
+            if cancel.is_cancelled() {
+                return Ok(());
+            }
+            let result_map = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+                Err(e) => error_frame(&e),
+                Ok(inputs) => match execute_op(&op_cfg, &registry, inputs).await {
+                    Ok(value) => {
+                        let map = value_to_map(value);
+                        {
+                            let mut s = state.lock();
+                            for (k, v) in &map {
+                                s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                            }
+                        }
+                        map
+                    }
+                    Err(e) => {
+                        {
+                            let mut s = state.lock();
+                            s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                        }
+                        error_frame(&e)
+                    }
+                },
+            };
+            // `try_send` keeps the inline path zero-await on the happy path.
+            // Channel is sized generously (8192) so this is overflow-only;
+            // fall back to `send().await` if it ever fills.
+            for ev in [
+                SchedulerEvent::Frame {
+                    op: op_name.clone(),
+                    ctx: ctx.clone(),
+                    result: result_map,
+                },
+                SchedulerEvent::Eof {
+                    op: op_name,
+                    ctx: ctx.clone(),
+                },
+            ] {
+                if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(ev) {
+                    let _ = tx.send(ev).await;
+                }
+            }
+            return Ok(());
+        }
+
+        // ── Spawn path for io/cpu ──────────────────────────────────────────
         tokio::spawn(async move {
             let _permit = match sem.acquire_owned().await {
                 Ok(p) => p,
@@ -385,8 +452,6 @@ impl GraphScheduler {
                 return;
             }
 
-            // Resolve inputs from state via the op's ref/literal/default
-            // declarations.
             let inputs = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
                 Ok(m) => m,
                 Err(e) => {
@@ -406,16 +471,7 @@ impl GraphScheduler {
 
             match exec_result {
                 Ok(value) => {
-                    let result_map = match value {
-                        Value::Object(m) => m,
-                        other => {
-                            let mut m = Map::new();
-                            m.insert("result".into(), other);
-                            m
-                        }
-                    };
-                    // Persist the op's outputs into state before emitting the
-                    // Frame so downstream ops see them.
+                    let result_map = value_to_map(value);
                     {
                         let mut s = state.lock();
                         for (k, v) in &result_map {
@@ -518,7 +574,7 @@ impl GraphScheduler {
                     continue;
                 }
             }
-            self.route_edge(
+            self.route_edge_async(
                 op,
                 &link,
                 ctx,
@@ -533,13 +589,14 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel,
-            )?;
+            )
+            .await?;
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn route_edge(
+    async fn route_edge_async(
         &self,
         src: &str,
         link: &CompiledLink,
@@ -594,7 +651,8 @@ impl GraphScheduler {
                     tx,
                     sem,
                     cancel.clone(),
-                )?;
+                )
+                .await?;
                 return Ok(());
             }
         }
@@ -612,7 +670,8 @@ impl GraphScheduler {
                 tx,
                 sem,
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         } else {
             seq_queues.entry(key).or_default().push_back(ctx.clone());
         }
@@ -645,7 +704,7 @@ impl GraphScheduler {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn on_eof(
+    async fn on_eof(
         &self,
         op: &str,
         ctx: &ContextId,
@@ -706,7 +765,8 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         }
 
         // Advance the sequential queue if this EOF unblocks a following item.
@@ -715,7 +775,8 @@ impl GraphScheduler {
                 if let Some(next_ctx) = q.pop_front() {
                     seq_origins.insert((key.1.clone(), next_ctx.clone()), key.clone());
                     *inflight += 1;
-                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())?;
+                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())
+                        .await?;
                 } else {
                     seq_active.insert(key, false);
                 }
@@ -884,10 +945,63 @@ async fn execute_op(
                 })?;
             func(inputs).await
         }
-        OpType::Graph => Err(OperonError::Runtime(format!(
-            "nested graph ops not yet supported — deferred past Phase 4 ({})",
-            op_cfg.full_name
-        ))),
+        OpType::Graph => {
+            // Nested @graph dispatch: build a sub-engine on the fly the
+            // first time we see this nested config, cache it process-wide
+            // by `full_name`, then `run_json_async` the cached engine for
+            // every subsequent invocation.
+            //
+            // The roundtrip via JSON adds the `schema_version` field that
+            // `Operon::builder` requires; `auto_register()` pulls in the
+            // same `#[op]` inventory the outer engine uses.
+            use crate::core::engine::Operon;
+            use std::collections::HashMap;
+            use std::sync::OnceLock;
+            use std::sync::Mutex as StdMutex;
+
+            static NESTED_ENGINE_CACHE: OnceLock<StdMutex<HashMap<String, Arc<Operon>>>> =
+                OnceLock::new();
+            let cache = NESTED_ENGINE_CACHE.get_or_init(|| StdMutex::new(HashMap::new()));
+
+            let cached: Option<Arc<Operon>> = {
+                let guard = cache
+                    .lock()
+                    .map_err(|e| OperonError::Runtime(format!("nested cache poisoned: {e}")))?;
+                guard.get(&op_cfg.full_name).cloned()
+            };
+
+            let nested_engine = if let Some(e) = cached {
+                e
+            } else {
+                let mut nested_value: Value =
+                    serde_json::to_value(op_cfg).map_err(|e| {
+                        OperonError::Config(format!(
+                            "failed to round-trip nested graph '{}': {}",
+                            op_cfg.full_name, e
+                        ))
+                    })?;
+                if let Value::Object(obj) = &mut nested_value {
+                    obj.insert("schema_version".into(), Value::String("1.0".into()));
+                }
+                let nested_json = serde_json::to_string(&nested_value).map_err(|e| {
+                    OperonError::Config(format!(
+                        "failed to re-serialise nested graph '{}': {}",
+                        op_cfg.full_name, e
+                    ))
+                })?;
+                let engine =
+                    Arc::new(Operon::builder(&nested_json).auto_register().build()?);
+                cache
+                    .lock()
+                    .map_err(|e| OperonError::Runtime(format!("nested cache poisoned: {e}")))?
+                    .insert(op_cfg.full_name.clone(), engine.clone());
+                engine
+            };
+
+            nested_engine
+                .run_json_async(inputs, None, None, None)
+                .await
+        }
         other => Err(OperonError::Runtime(format!(
             "op type {:?} not yet implemented for {}",
             other, op_cfg.full_name
@@ -900,6 +1014,20 @@ fn error_frame(e: &OperonError) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("error".into(), Value::from(e.to_string()));
     m
+}
+
+/// Coerce an op's return value into a frame map. Object values pass through;
+/// scalar / array results are wrapped in a `{"result": <value>}` envelope —
+/// matches Python's `FuncOp` behaviour.
+fn value_to_map(value: Value) -> Map<String, Value> {
+    match value {
+        Value::Object(m) => m,
+        other => {
+            let mut m = Map::new();
+            m.insert("result".into(), other);
+            m
+        }
+    }
 }
 
 /// Compute the next loop-iteration context. Matches Python:

@@ -1,0 +1,7 @@
+# Resource references this example uses. operonx::bootstrap() loads this
+# at startup; OPENAI_API_KEY comes from .env (see .env.example).
+llm:gpt-4o-mini:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini

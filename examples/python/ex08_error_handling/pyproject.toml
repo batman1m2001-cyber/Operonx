@@ -1,0 +1,10 @@
+[project]
+name = "operonx-ex08-error-handling"
+version = "0.1.0"
+description = "Operonx error handling — capture, route, retry, LLM fallback."
+requires-python = ">=3.10"
+dependencies = [
+    # `[openai]` is only needed for the llm_fallback scenario; pure-compute
+    # scenarios run with bare `operonx`.
+    "operonx[openai]>=0.6.2",
+]

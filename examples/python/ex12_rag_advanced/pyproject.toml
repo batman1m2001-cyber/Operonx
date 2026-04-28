@@ -1,0 +1,9 @@
+[project]
+name = "operonx-ex12-rag-advanced"
+version = "0.1.0"
+description = "Operonx keyword RRF + hybrid (vector + keyword) RAG."
+requires-python = ">=3.10"
+dependencies = [
+    # numpy + openai for hybrid; keyword_rrf alone runs at tier 1.
+    "operonx[providers]>=0.6.2",
+]

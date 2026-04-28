@@ -26,42 +26,41 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13.0",
     "orjson>=3.9",
-    # Provider plumbing kept in base because the LLM type system
-    # (openai.types.chat.*) is used as the canonical message format
-    # across every provider — trying to optionalize it forced a maze
-    # of transitive extras. These three are small (~10MB combined)
-    # and almost every Operonx program touches at least one of them.
-    "openai>=1.0",
-    "aiohttp>=3.8",
-    "httpx>=0.24",
 ]
 
 # Optional dependency extras. Each extra is **self-contained** — listing
 # every package it needs, including any that other extras also use.
 # Installing one extra cannot rely on another being present.
 #
-#   pip install operonx[anthropic]    # Anthropic provider (httpx + openai types)
-#   pip install operonx[gemini]       # Gemini provider
-#   pip install operonx[bedrock]      # AWS Bedrock provider
-#   pip install operonx[onnx]         # Local ONNX embedding/reranker
-#   pip install operonx[huggingface]  # Local HF embedding/reranker
-#   pip install operonx[langfuse]     # Langfuse tracing
-#   pip install operonx[otel]         # OpenTelemetry tracing
-#   pip install operonx[serve]        # FastAPI HTTP server
-#   pip install operonx[providers]    # All HTTP-based LLM/embedding providers
-#   pip install operonx[standard]     # providers + langfuse + otel + serve
-#   pip install operonx[all]          # Everything except heavy ML deps (huggingface)
+# Install tiers:
+#
+#   Tier 1 — engine only (no providers):
+#     pip install operonx
+#
+#   Tier 2 — single provider:
+#     pip install operonx[openai]      # OpenAI / Azure OpenAI
+#     pip install operonx[anthropic]   # Anthropic
+#     pip install operonx[gemini]      # Google Gemini (Vertex AI)
+#     pip install operonx[bedrock]     # AWS Bedrock
+#
+#   Tier 3 — feature extras (additive on top of tier 1 or 2):
+#     pip install operonx[langfuse]    # Langfuse tracing
+#     pip install operonx[otel]        # OpenTelemetry tracing
+#     pip install operonx[serve]       # FastAPI HTTP server
+#     pip install operonx[onnx]        # Local ONNX embedding/reranker
+#     pip install operonx[huggingface] # Local HF embedding/reranker
+#
+#   Tier 4 — meta bundles:
+#     pip install operonx[providers]   # All HTTP-based LLM/embedding providers
+#     pip install operonx[standard]    # providers + langfuse + otel + serve
+#     pip install operonx[all]         # everything except torch/HF
 [project.optional-dependencies]
-# HTTP-based LLM + embedding providers (OpenAI, Azure, Anthropic, vLLM,
-# TEI, Pinecone). Bundle of shared deps; importable as a one-shot install.
-providers = [
-    "openai>=1.0",        # canonical ChatCompletion types (used by every LLM backend)
-    "aiohttp>=3.8",       # vLLM/TEI/Pinecone HTTP clients
-    "numpy>=2.2.6",       # vLLM embedding output type
-    "httpx>=0.24",        # Anthropic direct API client
+# Single-provider extras — each pins only the SDK that provider needs.
+openai = [
+    "openai>=1.0",
 ]
 anthropic = [
-    "openai>=1.0",        # ChatCompletion types
+    "openai>=1.0",        # ChatCompletion types (canonical message format)
     "httpx>=0.24",        # direct API client (we don't use the anthropic SDK)
 ]
 gemini = [

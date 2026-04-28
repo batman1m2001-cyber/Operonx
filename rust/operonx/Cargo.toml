@@ -57,68 +57,11 @@ prost                        = { workspace = true, optional = true }
 wiremock = "0.6"
 tempfile = "3"
 
-# ── Runnable Rust examples — standalone demos under
-#    `examples/rust/<name>/demo.rs`. Each `demo.rs` is self-contained:
-#    declares its `#[op]` functions, reads its sibling `graph.json` +
-#    `inputs.json`, runs the engine with `engine.run_json()` **after**
-#    construction has finished, and saves a latency report to
-#    `examples/bench_results/<name>_rust.json`. Shared reporter lives in
-#    `examples/rust/_common.rs` (pulled in via `#[path]`).
-[[example]]
-name = "ex01_hello_world"
-path = "../../examples/rust/ex01_hello_world/demo.rs"
-
-[[example]]
-name = "ex02_data_pipeline"
-path = "../../examples/rust/ex02_data_pipeline/demo.rs"
-
-[[example]]
-name = "ex03_llm_chat"
-path = "../../examples/rust/ex03_llm_chat/demo.rs"
-
-[[example]]
-name = "ex04_llm_advanced"
-path = "../../examples/rust/ex04_llm_advanced/demo.rs"
-
-[[example]]
-name = "ex05_loops_and_branches"
-path = "../../examples/rust/ex05_loops_and_branches/demo.rs"
-
-[[example]]
-name = "ex07_embeddings_and_rag"
-path = "../../examples/rust/ex07_embeddings_and_rag/demo.rs"
-
-[[example]]
-name = "ex08_error_handling"
-path = "../../examples/rust/ex08_error_handling/demo.rs"
-
-[[example]]
-name = "ex09_agent_workflow"
-path = "../../examples/rust/ex09_agent_workflow/demo.rs"
-
-[[example]]
-name = "ex10_multi_model"
-path = "../../examples/rust/ex10_multi_model/demo.rs"
-
-[[example]]
-name = "ex11_parallel_advanced"
-path = "../../examples/rust/ex11_parallel_advanced/demo.rs"
-
-[[example]]
-name = "ex12_rag_advanced"
-path = "../../examples/rust/ex12_rag_advanced/demo.rs"
-
-[[example]]
-name = "ex13_graph"
-path = "../../examples/rust/ex13_graph/demo.rs"
-
-[[example]]
-name = "ex14_streaming_tracing"
-path = "../../examples/rust/ex14_streaming_tracing/demo.rs"
-
-[[example]]
-name = "ex15_callbot_streaming"
-path = "../../examples/rust/ex15_callbot_streaming/demo.rs"
+# Each example under `examples/rust/<name>/` is now an independent crate
+# with its own `Cargo.toml` and `src/main.rs`. Run any example with
+# `cd examples/rust/<name> && cargo run --release`. The shared workspace
+# operonx is patched in via `examples/rust/.cargo/config.toml` so engine
+# devs build against unpublished changes.
 
 [features]
 default       = ["langfuse", "operonx-eyes"]

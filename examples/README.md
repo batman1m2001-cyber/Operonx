@@ -1,93 +1,103 @@
-# Operon Examples — Usage Guide
+# Operonx Examples
 
-This directory is a learning resource for people picking up either engine. It does **not** orchestrate cross-language benchmarks — each side stands on its own:
+Each subdirectory under `python/` and `rust/` is an **independent
+project template** — self-contained `pyproject.toml` / `Cargo.toml`,
+its own `.env.example` and `resources.yaml` where relevant, no shared
+boilerplate. Copy any example out of the repo and it just works.
 
 ```
 examples/
-├── python/                ← runnable Python demos
-│   ├── ex01_hello_world/
-│   ├── ex02_data_pipeline/
-│   └── …
-├── rust/                  ← runnable Rust demos
-│   ├── ex01_hello_world/
-│   ├── ex02_data_pipeline/
-│   └── …
-└── bench_results/         ← latency reports land here as JSON
+├── python/
+│   ├── ex01_hello_world/         (tier 1, no API)
+│   ├── ex02_data_pipeline/       (tier 1)
+│   ├── ex03_llm_chat/            (tier 2, [openai])
+│   ├── …
+│   └── ex15_callbot_streaming/   (tier 1, streaming demo)
+└── rust/
+    ├── ex01_hello_world/
+    ├── …
+    └── ex15_callbot_streaming/
 ```
 
 ## Running an example
 
-Pick a language, pick an example, run it. Each demo is fully self-contained.
+Pick a language, pick an example, run it. Every demo flows top to
+bottom in a single file.
 
 ```bash
 # Python
-uv run python -m examples.python.ex01_hello_world.demo
+cd examples/python/ex01_hello_world
+uv sync
+uv run python main.py
 
 # Rust
-cargo run --release -p operonx --example ex01_hello_world
+cd examples/rust/ex01_hello_world
+cargo run --release
 ```
 
-Each run writes a JSON report to `examples/bench_results/<name>_<lang>.json` containing per-scenario latencies.
+Examples that need API keys ship a `.env.example`. Copy it to `.env`
+and fill in the values before running.
 
-Both entry points accept the same pair of flags:
+## Index
 
-```bash
-# 20 timed iterations per scenario, with Langfuse tracing attached
-uv run python -m examples.python.ex01_hello_world.demo --runs 20 --langfuse
-cargo run --release -p operonx --example ex01_hello_world -- --runs 20 --langfuse
-```
+| # | Example | Tier (Python) | What it teaches |
+|---|---------|---------------|-----------------|
+| 01 | `ex01_hello_world` | tier 1 | `@op`, `@graph`, `>>`, START/END |
+| 02 | `ex02_data_pipeline` | tier 1 | Linear pipelines |
+| 03 | `ex03_llm_chat` | `[openai]` | `PromptOp` / `LLMOp` / `chat()` |
+| 04 | `ex04_llm_advanced` | `[openai]` | Structured output, tool calling, multi-turn |
+| 05 | `ex05_loops_and_branches` | tier 1 | Generator ops + `if_()` routing |
+| 07 | `ex07_embeddings_and_rag` | `[providers]` | `EmbeddingOp` + cosine RAG + optional reranker |
+| 08 | `ex08_error_handling` | `[openai]` | Capture, route, retry, LLM fallback |
+| 09 | `ex09_agent_workflow` | `[openai]` | Tool-calling agent on `@graph.loop` |
+| 10 | `ex10_multi_model` | `[openai]` | Parallel, routing, load-balance, fallback, ensemble |
+| 11 | `ex11_parallel_advanced` | tier 1 | Fan-out/fan-in, generator iteration, partial failure |
+| 12 | `ex12_rag_advanced` | `[providers]` | Keyword RRF + hybrid (vector + keyword) RAG |
+| 13 | `ex13_graph` | tier 1 | `@graph` composition + nesting |
+| 14 | `ex14_streaming_tracing` | tier 1 | Generator pipelines, sync + async |
+| 15 | `ex15_callbot_streaming` | tier 1 | Multi-level streaming pipeline |
 
-## Timing discipline
+ex06 is intentionally omitted (was a tracing tutorial; every example
+that uses an LLM now documents its own tracing setup).
 
-The reported latency covers **only** the engine execution — `engine.run(...)` in Python, `engine.run_json(...)` in Rust. Everything before (graph authoring, schema building, JSON parsing) happens outside the timed span so numbers reflect pure runtime performance.
+## Install tiers (Python)
 
-Each scenario goes through:
+| Tier | Install | What's in |
+|------|---------|-----------|
+| 1 | `pip install operonx` | Engine + ops DSL only (no provider SDKs). ~10 MB. |
+| 2 | `operonx[openai]` / `[anthropic]` / `[gemini]` / `[bedrock]` | Tier 1 + that one provider |
+| 3 | `operonx[langfuse]` / `[otel]` / `[serve]` / `[onnx]` | Feature extras, additive |
+| 4 | `operonx[providers]` / `[standard]` / `[all]` | Pre-bundled meta combos |
 
-1. One **untimed warmup** run — populates caches, resolves providers, pays any first-run cost.
-2. N **timed runs** (default 5) — latencies recorded, p50 / p95 / mean reported.
+## Rust dev mode
 
-## Report format
+Each `examples/rust/exNN_*/Cargo.toml` depends on
+`operonx = "0.6.x"` from crates.io. When you run from inside this
+repo, `examples/rust/.cargo/config.toml` patches that to the local
+workspace via `[patch.crates-io]` so engine devs see their unpublished
+changes immediately. Users copying an example dir out of the repo drop
+that override and the registry version takes over.
 
-`examples/bench_results/<example>_<lang>.json`:
+## Rust runtime parity
 
-```json
-{
-  "example": "ex01_hello_world",
-  "language": "python",
-  "timestamp": "2026-04-22T14:30:00Z",
-  "scenarios": {
-    "hello":    { "warmup_ms": 2.3, "runs_ms": [0.4, 0.3, 0.4, 0.5, 0.4],
-                  "p50_ms": 0.4, "p95_ms": 0.5, "mean_ms": 0.40,
-                  "output": { "greeting": "Xin chào, Operon!" } },
-    "chain":    { … },
-    "parallel": { … }
-  }
-}
-```
+Some examples flag scenarios as **runs (limited)** or **not run yet**
+on the Rust side. Today's known gaps:
 
-Run both sides, then diff / plot / tabulate the two files however you like.
+- Generator per-item dispatch (the streaming scheduler accumulates
+  yields into a list rather than fanning out per frame).
+- `if_()` branch routing (`OpType::Branch` is stubbed).
+- Nested `@graph` composition (returns empty for `OpType::Graph`).
+- `engine.stream(...)` real-time delivery handle.
 
-## Langfuse
+These are all v0.7+ work; the Python side is the canonical
+implementation. See each Rust example's README for per-scenario
+status.
 
-Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` (+ optional `LANGFUSE_HOST`) in `.env` and pass `--langfuse`. Workflow names are suffixed `_python` / `_rust` in the Langfuse dashboard so the two runs don't collide.
+## Regenerating `graph.json`
 
-## Example index
-
-| # | Folder | Highlights | Needs API keys? |
-|---|--------|-----------|:---:|
-| 01 | `ex01_hello_world` | Single op, chain, parallel-merge | – |
-| 02 | `ex02_data_pipeline` | Data + text pipelines | – |
-| 03 | `ex03_llm_chat` | `PromptOp` + `LLMOp`, `chat()` builder | ✓ |
-| 04 | `ex04_llm_advanced` | Streaming, multi-turn, structured output | ✓ |
-| 05 | `ex05_loops_and_branches` | `GraphOp.loop()`, branch routing | – |
-| 07 | `ex07_embeddings_and_rag` | Embedding + RAG retrieval | ✓ |
-| 08 | `ex08_error_handling` | Retry, fallback, error routing | – |
-| 09 | `ex09_agent_workflow` | Tool-calling agent | ✓ |
-| 10 | `ex10_multi_model` | Weighted load balancing, fallback chain | ✓ |
-| 11 | `ex11_parallel_advanced` | Stream policies, `collect` / `parallel` | – |
-| 12 | `ex12_rag_advanced` | Multi-stage RAG with rerank | ✓ |
-| 13 | `ex13_graph` | `@graph` modular workflows | – |
-| 14 | `ex14_streaming_tracing` | Streaming + media + trace collection | ✓ |
-| 15 | `ex15_callbot_streaming` | End-to-end callbot pipeline | ✓ |
-
-(ex06 — dedicated tracing tutorial — removed; every example carries its own `--langfuse` toggle.)
+The Rust examples that compose graphs through provider ops ship a
+checked-in `graph.json` produced from the matching Python builder. The
+helper that regenerates these lives at
+[`tools/dump-graph.py`](../tools/dump-graph.py). It needs an update to
+match the new single-file `main.py` layout — track that in
+`REFACTOR_post_v0.6.2.md`.

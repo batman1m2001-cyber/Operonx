@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex02-data-pipeline"
+version = "0.1.0"
+description = "Operonx data pipelines — pure compute, no API keys."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx>=0.6.2",
+]

@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex04-llm-advanced"
+version = "0.1.0"
+description = "Operonx LLM advanced — structured output, tool calling, multi-turn."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx[openai]>=0.6.2",
+]

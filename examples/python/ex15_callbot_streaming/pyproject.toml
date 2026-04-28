@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex15-callbot-streaming"
+version = "0.1.0"
+description = "Operonx multi-level streaming callbot pipeline."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx>=0.6.2",
+]
