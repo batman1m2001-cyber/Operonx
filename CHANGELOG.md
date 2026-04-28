@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-28
+
+### Fixed
+- Publish workflow: added a `force` input on `workflow_dispatch` so a release
+  can be re-run when a version-bump commit and a follow-up commit land in the
+  same push (the diff-based detector otherwise sees the version as unchanged
+  at `HEAD~1` and skips both publish jobs). Recovery path:
+  `gh workflow run publish.yaml -f force=true`.
+- README badges pinned to `?branch=main` so the shields endpoint resolves
+  correctly; added a Docs badge linking to the published GitHub Pages site.
+
 ## [0.6.1] - 2026-04-28
 
 ### Added
