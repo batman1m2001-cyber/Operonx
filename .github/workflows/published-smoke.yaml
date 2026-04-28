@@ -1,0 +1,88 @@
+name: Published smoke
+
+# Smoke-test the **published** Python package by installing each tier-1
+# example as if a user did. Runs after `Publish` completes, on
+# `push` to `main`, or on demand. Does **not** gate `publish.yaml` —
+# this only catches regressions in what's already on PyPI.
+#
+# Each example installs from its own `pyproject.toml`, which pins
+# `operonx>=0.6.X` from the registry. We verify:
+#   1. `pip show operonx` resolves to site-packages (not the source
+#      tree) — proves the install is truly the published version.
+#   2. For tier-1 examples, `openai` and `httpx` are NOT in `pip list`
+#      — proves the lean-install promise.
+#   3. `python main.py` exits 0 within 60 s.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Publish"]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - 'examples/python/**'
+      - '.github/workflows/published-smoke.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: published smoke (${{ matrix.example }})
+    runs-on: ubuntu-latest
+    # Only run after a successful publish (when triggered by workflow_run).
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Tier-1 (no API keys, no network for the demo run). These three
+        # exercise: linear pipelines, data flow, @graph composition.
+        example:
+          - ex01_hello_world
+          - ex02_data_pipeline
+          - ex13_graph
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Create fresh venv and install example from its pyproject.toml
+        run: |
+          uv venv /tmp/smoke-venv
+          uv pip install --python /tmp/smoke-venv/bin/python \
+            -e examples/python/${{ matrix.example }}
+
+      - name: Verify operonx resolves to site-packages, not source tree
+        run: |
+          /tmp/smoke-venv/bin/python - <<'PY'
+          import operonx, sys
+          path = operonx.__file__
+          print("operonx loaded from:", path)
+          assert "site-packages" in path, (
+              f"expected site-packages, got {path}. "
+              "Examples must depend on the published wheel, not the repo."
+          )
+          print("operonx version:", operonx.__version__)
+          PY
+
+      - name: Verify lean-install promise (no openai/httpx in tier 1)
+        run: |
+          /tmp/smoke-venv/bin/pip list --format=freeze > /tmp/installed.txt
+          if grep -iE '^(openai|httpx|aiohttp)=' /tmp/installed.txt ; then
+            echo "::error::tier-1 example pulled openai/httpx/aiohttp — extras misdeclared"
+            exit 1
+          fi
+          echo "tier-1 install is lean — no provider SDKs present."
+
+      - name: Run example main.py
+        timeout-minutes: 1
+        working-directory: examples/python/${{ matrix.example }}
+        run: /tmp/smoke-venv/bin/python main.py

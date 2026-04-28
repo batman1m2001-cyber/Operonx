@@ -85,9 +85,24 @@ on the Rust side. Today's known gaps:
 
 - Generator per-item dispatch (the streaming scheduler accumulates
   yields into a list rather than fanning out per frame).
-- `if_()` branch routing (`OpType::Branch` is stubbed).
-- Nested `@graph` composition (returns empty for `OpType::Graph`).
+- `if_()` branch routing — `OpConfig` deserialises `cases` / `default`
+  / `candidates` (so graphs using `if_()` parse cleanly), but the
+  scheduler fires *every* case target and lets a soft-edge merge pick
+  the answer. Real selective routing is blocked on the ref-transform
+  evaluator (`eq` / `ne` / `ge` / `gt` / `le` / `lt` / `getitem`).
 - `engine.stream(...)` real-time delivery handle.
+
+Recently closed:
+
+- ✅ Nested `@graph` composition — `OpType::Graph` now dispatches via
+  a process-wide cached sub-`Operon` (built lazily on first call,
+  reused thereafter). Python's nested @graph still wins for pure-noop
+  trees because Python pre-builds the child scheduler at parent
+  build time and just calls `child._scheduler.run(state, ctx)` —
+  Rust's per-call `tokio::spawn` + `mpsc::channel` + UUID gen is
+  measurable. Real fix (precompute child engines + `run_json_nested`
+  fast-path) is logged in `REFACTOR_post_v0.6.2.md`. See
+  `scripts/bench/` for the parity table.
 
 These are all v0.7+ work; the Python side is the canonical
 implementation. See each Rust example's README for per-scenario

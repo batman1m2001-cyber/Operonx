@@ -25,6 +25,7 @@ Sub-namespaces:
 - ``operonx.telemetry``  — Langfuse, OTEL, local tracers
 """
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional, Union
 
@@ -48,7 +49,10 @@ from operonx.core.registry import (
     ResourceHub,
 )
 
-__version__ = "0.6.3"
+try:
+    __version__ = version("operonx")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
 
 
 def bootstrap(

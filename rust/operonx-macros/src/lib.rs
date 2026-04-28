@@ -116,7 +116,7 @@ pub fn op(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let submit = quote! {
-        ::inventory::submit! {
+        ::operonx::inventory::submit! {
             #ctor(#op_name, module_path!(), #call_expr)
         }
     };
@@ -269,7 +269,7 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     let resource_name = &args.name;
 
     let submit = quote! {
-        ::inventory::submit! {
+        ::operonx::inventory::submit! {
             ::operonx::ResourceEntry::new(#resource_name, |config| {
                 ::std::boxed::Box::new(#fn_name(config))
                     as ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send + ::std::marker::Sync>
