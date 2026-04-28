@@ -2,16 +2,28 @@
 
 Keyword RRF (pure compute) + hybrid (vector + keyword) RAG.
 
-| Scenario      | Shape                                                            | Needs key?              |
-|---------------|------------------------------------------------------------------|-------------------------|
-| `keyword_rrf` | Two keyword searches in parallel → RRF merge                     | No                      |
-| `hybrid`      | `[keyword, EmbeddingOp → vec_search]` → merge → prompt → LLM     | `OPENAI_API_KEY`        |
+| Scenario      | Shape                                                            | Needs key?       |
+|---------------|------------------------------------------------------------------|------------------|
+| `keyword_rrf` | Two keyword searches in parallel → RRF merge                     | No               |
+| `hybrid`      | `[keyword, EmbeddingOp → vec_search]` → merge → prompt → LLM     | `OPENAI_API_KEY` |
+
+The `hybrid` scenario gracefully skips if no API key is present.
+
+## Project layout
+
+```
+ex12_rag_advanced/
+├── pyproject.toml      # operonx[providers]>=0.6.2 (numpy + openai)
+├── README.md
+├── .env.example        # OPENAI_API_KEY (only for hybrid)
+├── resources.yaml      # embedding:openai + llm:gpt-4o-mini
+└── main.py
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex12_rag_advanced.demo
-uv run python -m examples.python.ex12_rag_advanced.demo --runs 5
+uv sync
+cp .env.example .env
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex12_rag_advanced_python.json`.

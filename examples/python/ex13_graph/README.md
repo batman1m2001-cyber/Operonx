@@ -1,20 +1,28 @@
 # 13 — @graph (Python)
 
-Modular, reusable workflow components via `@graph`. No API keys.
+Modular, reusable workflow components via `@graph`. Tier 1 — pure
+compute, no API keys.
 
-| Scenario       | Description                                                    |
-|----------------|----------------------------------------------------------------|
-| `basic`        | `@graph` basic — auto-naming + `>> END` forwarding.            |
-| `chained`      | Three `double_flow` instances chained (3 → 6 → 12 → 24).       |
-| `renamed`      | Output renaming via `op["key"] >> PARENT["new_key"]`.          |
-| `multi_params` | `@graph` taking two parameters.                                |
-| `nested`       | `quad_flow` = `double_flow(double_flow(x))`.                   |
+| Scenario       | Description                                                |
+|----------------|------------------------------------------------------------|
+| `basic`        | `@graph` basic — auto-naming + `>> END` forwarding         |
+| `chained`      | Three `double_flow` instances chained (3 → 6 → 12 → 24)    |
+| `renamed`      | Output renaming via `op["key"] >> PARENT["new_key"]`       |
+| `multi_params` | `@graph` taking two parameters                             |
+| `nested`       | `quad_flow` = `double_flow(double_flow(x))`                |
+
+## Project layout
+
+```
+ex13_graph/
+├── pyproject.toml    # operonx>=0.6.2 (tier 1)
+├── README.md
+└── main.py
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex13_graph.demo
-uv run python -m examples.python.ex13_graph.demo --runs 20
+uv sync
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex13_graph_python.json`.

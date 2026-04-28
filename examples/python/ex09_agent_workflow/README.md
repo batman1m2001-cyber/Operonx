@@ -1,6 +1,8 @@
 # 09 — Agent Workflow (Python)
 
-Tool-calling agent driven by `@graph.loop`. Requires `OPENAI_API_KEY`.
+Tool-calling agent built on `@graph.loop`. The loop body sends the
+conversation to the LLM, runs any tool calls, and stops when the LLM
+stops calling tools.
 
 | Scenario   | Example query                                                     |
 |------------|-------------------------------------------------------------------|
@@ -8,14 +10,22 @@ Tool-calling agent driven by `@graph.loop`. Requires `OPENAI_API_KEY`.
 | `search`   | `Tell me about Python programming language.` — exercises `search` |
 | `combined` | Combined math + search in one turn                                |
 
-The agent body is identical across scenarios; only inputs vary.
+## Project layout
+
+```
+ex09_agent_workflow/
+├── pyproject.toml      # operonx[openai]>=0.6.2
+├── README.md
+├── .env.example        # OPENAI_API_KEY
+├── resources.yaml      # llm:gpt-4o-mini
+└── main.py             # tools + ops + @graph.loop body + outer @graph
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex09_agent_workflow.demo
-uv run python -m examples.python.ex09_agent_workflow.demo --runs 5
-uv run python -m examples.python.ex09_agent_workflow.demo --langfuse
+uv sync
+cp .env.example .env
+# Edit .env — fill in OPENAI_API_KEY
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex09_agent_workflow_python.json`.

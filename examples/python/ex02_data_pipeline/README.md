@@ -1,18 +1,25 @@
 # 02 — Data Pipeline (Python)
 
-Two pure-compute pipelines, no API keys. Demonstrates linear ops chained through a graph.
+Two tiny pure-compute pipelines, no API keys. Demonstrates linear
+chains of ops feeding output of one into input of the next.
 
-| Scenario | Ops                                    | Shape             |
-|----------|----------------------------------------|-------------------|
-| `data`   | `fetch_data → transform → aggregate`   | 3 nodes in series |
-| `text`   | `clean_text → count_words → summarize` | 3 nodes in series |
+| Scenario | Ops                                    | Shape          |
+|----------|----------------------------------------|----------------|
+| `data`   | `fetch_data → transform → aggregate`   | 3 nodes linear |
+| `text`   | `clean_text → count_words → summarize` | 3 nodes linear |
+
+## Project layout
+
+```
+ex02_data_pipeline/
+├── pyproject.toml    # depends only on operonx (tier 1, no providers)
+├── README.md
+└── main.py           # ops + @graph factories + asyncio.run
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex02_data_pipeline.demo
-uv run python -m examples.python.ex02_data_pipeline.demo --runs 20
-uv run python -m examples.python.ex02_data_pipeline.demo --langfuse
+uv sync
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex02_data_pipeline_python.json`.

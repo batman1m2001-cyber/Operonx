@@ -1,6 +1,7 @@
 # 14 — Streaming & Tracing (Python)
 
-Generator pipelines — sync and async. No API keys.
+Generator pipelines — sync and async. Tier 1 — pure compute, no API
+keys.
 
 | Scenario        | Shape                                        |
 |-----------------|----------------------------------------------|
@@ -9,15 +10,22 @@ Generator pipelines — sync and async. No API keys.
 
 `engine.run(...)` accumulates yielded frames into lists. The streaming
 `engine.start(...)` real-time delivery path is covered in the
-[streaming guide](../../../docs/guide/06-streaming.md) but not timed here
-— add it yourself once you're ready to see the frame-by-frame view.
+streaming docs; this demo exercises the generator scheduler plumbing
+itself. Add a `LangfuseTracer` (or any tracer) at `Operon(g, tracer=...)`
+to see frame-by-frame spans.
+
+## Project layout
+
+```
+ex14_streaming_tracing/
+├── pyproject.toml    # operonx>=0.6.2 (tier 1)
+├── README.md
+└── main.py
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex14_streaming_tracing.demo
-uv run python -m examples.python.ex14_streaming_tracing.demo --runs 20
-uv run python -m examples.python.ex14_streaming_tracing.demo --langfuse
+uv sync
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex14_streaming_tracing_python.json`.

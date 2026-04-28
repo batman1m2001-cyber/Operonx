@@ -1,6 +1,8 @@
 # 01 — Hello World (Python)
 
-Three tiny graphs, no API keys. Good first read if you're learning Operon's authoring DSL.
+Three tiny graphs, no API keys. Good first read for the Operonx
+authoring DSL — covers `@op`, `@graph`, `>>`, `START`, and `END` in
+under 80 lines.
 
 | Scenario   | Ops                       | Shape             |
 |------------|---------------------------|-------------------|
@@ -8,12 +10,31 @@ Three tiny graphs, no API keys. Good first read if you're learning Operon's auth
 | `chain`    | `greet_en → upper`        | 2 nodes in series |
 | `parallel` | `step_a + step_b → merge` | fan-out + fan-in  |
 
+## Project layout
+
+```
+ex01_hello_world/
+├── pyproject.toml    # depends only on operonx (tier 1, no providers)
+├── README.md         # this file
+└── main.py           # ops + @graph factories + asyncio.run
+```
+
+This directory is a self-contained starter project. Copy it anywhere,
+run `uv sync`, and you have a working Operonx workspace to build on.
+At tier 1 (no providers, no telemetry extras) the install is ~10 MB —
+just `pydantic`, `pyyaml`, `rich`, `orjson`.
+
 ## Run
 
 ```bash
-uv run python -m examples.python.ex01_hello_world.demo
-uv run python -m examples.python.ex01_hello_world.demo --runs 20
-uv run python -m examples.python.ex01_hello_world.demo --langfuse
+uv sync
+uv run python main.py
 ```
 
-Prints a per-scenario latency summary and writes `examples/bench_results/ex01_hello_world_python.json`.
+Or with a stdlib venv:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+python main.py
+```

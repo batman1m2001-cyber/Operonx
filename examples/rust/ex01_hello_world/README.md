@@ -1,6 +1,7 @@
 # 01 — Hello World (Rust)
 
-Three tiny graphs mirroring the Python side. All `#[op]` bodies are declared inline in `demo.rs`; the pre-serialized graphs live in `graph.json`.
+Three tiny graphs, no API keys. Mirrors the Python `ex01_hello_world`
+example so you can compare the two runtimes side by side.
 
 | Scenario   | Ops                       | Shape             |
 |------------|---------------------------|-------------------|
@@ -8,26 +9,35 @@ Three tiny graphs mirroring the Python side. All `#[op]` bodies are declared inl
 | `chain`    | `greet_en → upper`        | 2 nodes in series |
 | `parallel` | `step_a + step_b → merge` | fan-out + fan-in  |
 
+## Project layout
+
+```
+ex01_hello_world/
+├── Cargo.toml         # operonx + inventory + serde_json
+├── src/main.rs        # #[op] declarations + run loop
+├── graph.json         # graph specs (one per scenario)
+└── inputs.json        # illustrative inputs
+```
+
+The `inventory` dep is required at the call site because the `#[op]`
+proc-macro expands to an `inventory::submit!{ ... }` block. Once the
+macro re-exports its dependencies through `operonx::*` you will be able
+to drop it; for v0.6.2 it stays explicit.
+
+This directory is a self-contained starter crate. Copy it anywhere, run
+`cargo run --release`, and you have a working Operonx Rust workspace to
+build on.
+
 ## Run
 
 ```bash
-cargo run --release -p operonx --example ex01_hello_world
-cargo run --release -p operonx --example ex01_hello_world -- --runs 20
-cargo run --release -p operonx --example ex01_hello_world -- --langfuse
+cargo run --release
 ```
 
-Writes `examples/bench_results/ex01_hello_world_rust.json`.
+## Authoring graph specs
 
-## Regenerating `graph.json`
-
-When `examples/python/ex01_hello_world/workflow.py` changes, regenerate with
-[`examples/python/_dump_graph.py`](../../python/_dump_graph.py) — it strips
-`python_callable` and redacts any `api_key` / `secret_key` / token fields
-that `resources.yaml` expansion would otherwise inline:
-
-```bash
-uv run python -m examples.python._dump_graph ex01_hello_world \
-    --scenarios hello chain parallel \
-    --factories build_hello build_chain build_parallel
-```
-
+The `graph.json` here was produced by serialising the matching Python
+graphs (see `examples/python/ex01_hello_world/workflow.py`). When you
+write a brand-new Rust workflow you can either author the JSON directly
+(it is a stable, documented schema) or build it via the Python DSL and
+ship the JSON alongside your Rust binary. Both are first-class.
