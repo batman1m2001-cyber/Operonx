@@ -1,18 +1,21 @@
 """Regenerate ``examples/rust/<name>/graph.json`` from Python's authoring DSL.
 
-Used when an example's ``workflow.py`` changes. Walks each ``build_*``
-factory, serializes via ``graph.serialize()``, then strips:
+Used when an example's ``main.py`` changes — the Rust binary loads the
+checked-in JSON instead of round-tripping through Python at runtime.
+
+Walks each ``@graph``-decorated factory in the example's ``main.py``,
+calls it with ``None`` for every parameter (so each parameter becomes
+an external input ref rather than a literal), then serialises via
+``GraphOp.serialize()``. Strips:
 
 - ``python_callable`` — Python-only repr pointer.
 - ``resource_config`` / ``resource_configs`` / ``fallback_configs`` —
   inline caches that Python populates from ``resources.yaml`` expansion.
-  These are the ones that caused the OpenAI-key leak: they embed live
-  env-resolved values. The Rust engine never reads them — it resolves
-  by name (``resource: "gpt-4o"``) via its own ``ResourceHub``, which
-  reads the same ``resources.yaml`` at run time and does the
-  ``${VAR}`` interpolation itself. Stripping the cache keeps secrets
-  out of the serialized graph entirely; both engines read them from
-  env at run time.
+  These embed live env-resolved values (the OpenAI-key leak vector).
+  The Rust engine never reads them — it resolves by name
+  (``resource: "gpt-4o"``) via its own ``ResourceHub``, which reads the
+  same ``resources.yaml`` at run time and does the ``${VAR}``
+  interpolation itself.
 
 Any lingering secret-bearing fields (in case a user attaches custom
 config blobs outside the known cache fields) are redacted to
@@ -20,22 +23,23 @@ config blobs outside the known cache fields) are redacted to
 
 Usage::
 
-    uv run python tools/dump-graph.py <example> \\
-        --scenarios hello chain parallel \\
-        --factories build_hello build_chain build_parallel
+    uv run python tools/dump-graph.py ex03_llm_chat \\
+        --scenarios basic chain summarize \\
+        --factories basic_chat chain_chat summarize_pipeline
 
-NOTE: Following the post-v0.6.2 example refactor, each example's ops and
-builders live inline in ``main.py`` rather than a separate
-``workflow.py``. This tool will need updating before it can re-import
-the new layout. For now the checked-in ``graph.json`` files are the
-source of truth — regen by hand if you change a paired example.
+Each ``--factories`` entry must be a ``@graph``-decorated function in
+the example's ``main.py``. The tool jumps into the example directory
+and calls ``operonx.bootstrap()`` so provider ops can resolve their
+``resources.yaml`` at build time.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -80,8 +84,11 @@ def _scrub(node):
     return node
 
 
-def dump_graph(factory) -> dict:
-    graph = factory()
+def dump_graph(factory, scenario: str) -> dict:
+    """Call a @graph factory with `None` placeholders, build, serialize, scrub."""
+    sig = inspect.signature(factory)
+    kwargs = {p: None for p in sig.parameters}
+    graph = factory(**kwargs, name=scenario)
     if hasattr(graph, "build"):
         graph.build()
     data = graph.serialize()
@@ -91,7 +98,7 @@ def dump_graph(factory) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="_dump_graph")
+    parser = argparse.ArgumentParser(prog="dump-graph")
     parser.add_argument("example", help="Example name, e.g. ex01_hello_world.")
     parser.add_argument(
         "--scenarios",
@@ -103,20 +110,34 @@ def main(argv: list[str] | None = None) -> int:
         "--factories",
         nargs="+",
         required=True,
-        help="Factory function names (one per scenario, same order).",
+        help="@graph factory function names (one per scenario, same order).",
     )
     args = parser.parse_args(argv)
 
     if len(args.scenarios) != len(args.factories):
         parser.error("--scenarios and --factories must have the same length.")
 
+    # Run from the example dir so .env + resources.yaml resolve relative to
+    # the example. Provider ops resolve their resource hub at build time.
+    example_dir = REPO_ROOT / "examples" / "python" / args.example
+    if not example_dir.is_dir():
+        parser.error(f"example directory not found: {example_dir}")
+
     sys.path.insert(0, str(REPO_ROOT))
-    mod = importlib.import_module(f"examples.python.{args.example}.workflow")
+    os.chdir(example_dir)
+
+    import operonx
+
+    operonx.bootstrap()
+
+    mod = importlib.import_module(f"examples.python.{args.example}.main")
 
     bundle = {}
     for scenario, factory_name in zip(args.scenarios, args.factories):
-        factory = getattr(mod, factory_name)
-        bundle[scenario] = dump_graph(factory)
+        factory = getattr(mod, factory_name, None)
+        if factory is None:
+            parser.error(f"factory {factory_name!r} not found in {args.example}/main.py")
+        bundle[scenario] = dump_graph(factory, scenario)
 
     out_path = REPO_ROOT / "examples" / "rust" / args.example / "graph.json"
     out_path.write_text(

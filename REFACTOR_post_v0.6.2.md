@@ -72,25 +72,22 @@ issue, not an import-graph one. Tier 1 ships clean. The deeper cleanup
 below would also tighten `import operonx.providers`. Track for a
 future minor.
 
-- [ ] Finish lazy provider exports — `_LAZY_BACKENDS` dict + module
-      `__getattr__` already landed for the heavy backend classes
-      (`OpenAISDKModel`, `AnthropicModel`, `HFEmbedding`, etc.), so
-      `import operonx.providers.llms.anthropic` works under just
-      `operonx[anthropic]`. **Still eager** at the top of
-      `operonx/providers/__init__.py`: factory functions + configs
-      (`from operonx.providers.auth/embeddings/llms/ops/rerankers
-      import …`). These pull every provider's `factory.py` /
-      `config.py`, which today is OK because the factories themselves
-      are lazy dispatchers. The remaining ask is to move these into
-      `_LAZY_BACKENDS` too so a tier-1 user accidentally importing
-      `operonx.providers` gets a clear "install operonx[X]" message
-      rather than a transitive `ModuleNotFoundError`.
-- [ ] Define `operonx.core.types.ChatMessage` (TypedDict) once we
-      actually want providers to stop returning openai-SDK types.
-      Today's providers reformat into `openai.types.chat.ChatCompletion`
-      so any caller that pattern-matches on those types keeps working.
-      The local TypedDict pays off only when paired with a converter
-      layer at the LLMOp boundary; not worth doing without that.
+- [x] Finish lazy provider exports — `_LAZY_BACKENDS` now covers the
+      full public surface in `operonx/providers/__init__.py` (configs
+      + factories + base classes + ops + heavy backends). The eager
+      `from operonx.providers.auth/embeddings/llms/ops/rerankers
+      import …` lines are gone. `import operonx.providers` on a
+      tier-1 install no longer pulls `httpx` / `openai` / `numpy`.
+      `auth/factory.py` was the one factory that eagerly imported a
+      heavy backend (`keycloak.py` → `httpx`); fixed by deferring the
+      `from .keycloak import KeycloakTokenProvider` to inside
+      `create_auth()` with a typed missing-dep ImportError.
+- [x] Define `operonx.core.types.ChatMessage` (TypedDict) — landed
+      with `ChatRole` Literal + a TypedDict body in
+      `operonx/core/types/chat.py`. No converter at the LLMOp
+      boundary yet (still emitting `openai.types.chat.ChatCompletion`
+      for backwards compat); this just gives the converter layer a
+      target type to land in v0.7.
 
 **Steps — Rust (deferred to v0.7):**
 
@@ -307,56 +304,60 @@ only on that extra/feature so each demo proves a real install slice.
       engine setup overhead dominated. Replaced trailing noop with
       `bench_matrix(size=30)`. Result: Rust went from parity (0.94-
       0.99×) to **7.8-9.1× faster**.
-- [ ] **`__version__` source of truth**: `operonx/__init__.py:51`
-      hardcodes `__version__ = "0.6.1"`. The wheel published as 0.6.2
-      because the build reads `pyproject.toml`, but `import operonx;
-      operonx.__version__` reports 0.6.1. Move the literal to
-      `importlib.metadata.version("operonx")` so the next bump cannot
-      drift again. Same pattern for `operonx-macros` if it has one.
-- [ ] **`#[op]` macro hygiene**: the proc-macro emits
-      `inventory::submit!{ ... }` referencing `::inventory`, forcing
-      every consumer crate to add `inventory = "0.3"` as a direct dep.
-      Fix in `operonx-macros`: re-export inventory from the main
-      `operonx` crate (`pub use inventory;`) and rewrite the macro to
-      use `::operonx::inventory::submit!`. Drop the `inventory` dep
-      from each example crate's `Cargo.toml` once the fix lands.
+- [x] **`__version__` source of truth**: `operonx/__init__.py` now
+      reads `importlib.metadata.version("operonx")` with a
+      `PackageNotFoundError` fallback to `"0.0.0+unknown"`. Editing the
+      version in `pyproject.toml` is now the single source of truth.
+- [x] **`#[op]` macro hygiene**: `operonx` now re-exports `inventory`
+      via `pub use ::inventory;`, and both `#[op]` and `#[resource]`
+      macros emit `::operonx::inventory::submit!` instead of bare
+      `::inventory::submit!`. Dropped `inventory = "0.3"` from every
+      example crate's `Cargo.toml` and from `scripts/bench/Cargo.toml`
+      — verified `cd scripts/bench && cargo build --release` and
+      `cd examples/rust/ex01_hello_world && cargo build --release`
+      both succeed without the direct dep.
 
 ### Steps — shared
 
 - [x] **Top-level `examples/README.md`** — landed (103-line index with
       per-example tier mapping, install tiers table, Rust dev-mode
       override section, runtime parity caveats).
-- [ ] **Refresh runtime-parity caveats in `examples/README.md`** — the
-      current copy still says "Nested @graph composition (returns empty
-      for `OpType::Graph`)" which was true at v0.6.2 but no longer:
-      this session shipped real nested dispatch. Drop / rephrase that
-      bullet. Also revisit the "if_() branch routing" bullet in light of
-      the partial `cases`/`default`/`candidates` fields landing.
-- [ ] **Per-language indexes** `examples/python/README.md` +
-      `examples/rust/README.md` — missing entirely. Each should be a
-      narrower index: which extra/feature each example needs, what it
-      teaches, the cd-and-run command. Top-level README points down to
-      these.
-- [ ] **`tools/dump-graph.py` update** — exists but predates the
-      single-file `main.py` layout (assumes the old `workflow.py` /
-      `demo.py` split). Update so it can re-emit `graph.json` for the
-      Rust examples that need a checked-in spec.
+- [x] **Refresh runtime-parity caveats in `examples/README.md`** —
+      Nested `@graph` moved out of the "known gaps" list into
+      "recently closed". The `if_()` bullet now spells out that
+      `cases` / `default` / `candidates` deserialise but the scheduler
+      fires every case target (real selective routing blocked on the
+      ref-transform evaluator).
+- [x] **Per-language indexes** `examples/python/README.md` +
+      `examples/rust/README.md` — landed. Each maps every example to
+      its install (extras for Python, features for Rust), spells out
+      the cd-and-run command, and (Rust) carries the runtime-status
+      caveats per example. Top-level `examples/README.md` points down
+      to these.
+- [x] **`tools/dump-graph.py` update** — rewritten for the
+      `main.py` layout. Imports `examples.python.{ex}.main`, calls
+      each `@graph` factory with `None` for every parameter (which
+      becomes a PARENT external-input ref), runs `operonx.bootstrap()`
+      from inside the example dir so provider ops resolve `resources.
+      yaml`. Each scenario gets its own top-level GraphOp `name` so
+      the bundled output mirrors the previous shape.
+      `dump_graph(factory, scenario)` is the new core. **Note:**
+      regenerating overwrites the checked-in `graph.json` and changes
+      `full_name` / op naming relative to the v0.6.2 emit; per-example
+      regen is opt-in by the example author.
 - [x] **CI extras-smoke matrix** — landed in
       [`.github/workflows/tests.yaml`](.github/workflows/tests.yaml)
       `extras-smoke` job (anthropic / langfuse / otel / onnx / serve /
       standard / all). Catches missing dep declarations.
-- [ ] **CI `published-smoke` job** — separate post-publish job that,
-      for each no-API Python example (ex01, ex02, ex13):
-      1. Spins a fresh venv,
-      2. `uv pip install -e examples/python/exNN_*` (verify `pip show
-         operonx` resolves to site-packages, not the source tree, and
-         that `openai` is **not** in `pip list` for tier-1 examples),
-      3. Runs `python main.py` with a 60 s timeout.
-      Rust examples are **not** in this CI lane — `rust/` tests remain
-      the release gate, and the `[patch.crates-io]` override means even
-      if a future job ran them they would not exercise the published
-      crate. Run on `push` to `main` and `workflow_dispatch`. Do **not**
-      gate `publish.yaml` on this.
+- [x] **CI `published-smoke` job** — landed in
+      `.github/workflows/published-smoke.yaml`. Triggers on
+      `workflow_dispatch`, `workflow_run` after `Publish` succeeds,
+      and `push` to `main` (when example or workflow files change).
+      Matrix over the three tier-1 examples (ex01, ex02, ex13): fresh
+      `uv venv`, `uv pip install -e examples/python/exNN_*`, asserts
+      `operonx` resolves to site-packages and `openai`/`httpx`/
+      `aiohttp` are absent from `pip list`, then runs `python main.py`
+      with a 60 s timeout. Does NOT gate `publish.yaml`.
 
 ---
 
@@ -419,12 +420,13 @@ If a future contributor finds the badge misleading, revisit then.
 
 - [x] **Python tier 1 lean**: `pip install operonx` in a clean env does
       not install `openai`/`aiohttp`/`httpx`; `from operonx.core import
-      Operon` works and `sys.modules` carries no provider SDK.
+      Operon` works and `sys.modules` carries no provider SDK. The
+      `import operonx.providers` path also stays lean now.
 - [ ] **Rust tier 1 lean**: deferred to v0.7 — see P1.A "Steps — Rust".
 - [x] **Each `examples/{python,rust}/exNN_*/` is a standalone project**
       with one entry-point file and a manifest pinning the right tier.
-      (Per-language `README.md` indexes still pending — see P1.B
-      "Steps — shared".)
-- [ ] `published-smoke` CI green on `main`.
+      Per-language `README.md` indexes also landed.
+- [ ] `published-smoke` CI green on `main` — workflow added; needs the
+      first publish run to verify it works against the registry wheel.
 - [ ] `docs/architecture/` pages each carry at least one diagram.
 - [ ] This file deleted in the same PR as the last P-item lands.
