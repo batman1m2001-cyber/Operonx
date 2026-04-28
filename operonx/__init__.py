@@ -48,7 +48,7 @@ from operonx.core.registry import (
     ResourceHub,
 )
 
-__version__ = "0.6.1"
+__version__ = "0.6.3"
 
 
 def bootstrap(
