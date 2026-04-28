@@ -234,35 +234,34 @@ only on that extra/feature so each demo proves a real install slice.
       `run_json_async`s with the resolved inputs and returns its
       outputs as the parent op's frame value. `nested_{2,5,10}`
       patterns produce real outputs.
-- [ ] **Rust nested `@graph` precompute + fast-path dispatch** —
-      Python pre-builds each child `GraphOp`'s scheduler at
-      `with`-block exit, so a nested run is just
-      `child._scheduler.run(state, ctx)` — zero engine construction
-      and shared state. Rust today does the opposite: at run time
-      `OpType::Graph` lazily round-trips `op_cfg` through JSON,
-      `Operon::builder(...).auto_register().build()`s a sub-engine,
-      and stashes it in a `static NESTED_ENGINE_CACHE: Mutex<HashMap<
-      String, Arc<Operon>>>` keyed by `full_name`. The cache only
-      exists because we couldn't pre-build. **Two-part fix:**
-      1. **Precompute child engines at parent build time.** Walk the
-         op tree in `Operon::build()` and recursively build a sub-
-         `Operon` for every `OpType::Graph`, attaching them to the
-         parent (e.g. on `OpConfig`, or in a child-engine map keyed
-         by op path). Drop the process-wide static cache.
-      2. **`run_json_nested` fast-path.** Add an entry point that
-         reuses the parent's scheduler / state — no `tokio::spawn`,
-         no `mpsc::channel(64)` allocation, no per-call UUID gen, no
-         middleware loop. The current dispatch goes through full
-         `run_json_async` which spawns **two** tokio tasks
-         (pump_loop + scheduler task) per nested call.
-      Python's nested @graph has none of that overhead, which is
-      why pure-noop nested patterns lose to Python. Workaround
-      shipped in [`scripts/bench/generate.py`](scripts/bench/generate.py):
-      `inner_pipeline` now uses `bench_fib(fib_n=2000)` so dispatch
-      overhead is amortized; with that, `nested_{2,5,10}` are
-      **2.2-2.3× Rust faster**. The proper fix above would buy back
-      the missing 50-100 µs per nested call and let pure-noop nesting
-      also win.
+- [x] **Rust nested `@graph` precompute + fast-path dispatch** —
+      landed. Two-part fix shipped:
+      1. `GraphScheduler::new` now recursively builds a child
+         `GraphScheduler` for every nested `OpType::Graph` op
+         (`build_child_schedulers` in
+         [`task_scheduler.rs`](rust/operonx/src/core/ops/graph/task_scheduler.rs)),
+         keyed by the child's `full_name` and stored on the parent
+         scheduler in `Arc<HashMap<String, Arc<GraphScheduler>>>`.
+         Sub-schedulers share the parent's `OpRegistry`. The
+         process-wide `static NESTED_ENGINE_CACHE` is gone.
+      2. `GraphScheduler::run_collect(inputs)` is the inline
+         fast-path: builds a `FrameSender::tap_only(tap)`, calls
+         `Scheduler::run(self, ...)` directly in the caller's task,
+         then aggregates the captured frames' `data` maps into the
+         result `Value`. No `tokio::spawn`, no
+         `mpsc::channel(64)` allocation, no `pump_loop`, no UUID
+         gen, no middleware. The `OpType::Graph` arm in `execute_op`
+         is a single map lookup + this `run_collect` call.
+      Mirrors Python's `child._scheduler.run(state, ctx)` shape.
+      Bench results (after reverting the `bench_fib(2000)`
+      workaround in `inner_pipeline` so nested ops are pure noops
+      again):
+      - `nested_2`:  Python 1.21 ms vs Rust **0.96 ms** (1.3× faster)
+      - `nested_5`:  Python 2.51 ms vs Rust **1.72 ms** (1.5× faster)
+      - `nested_10`: Python 4.55 ms vs Rust **2.95 ms** (1.5× faster)
+      - `production_3`: 7.8× → **10.3×** (every nested `verify_case`
+        now takes the fast-path)
+      - `production_5`: 9.1× → **11.0×**
 - [x] **Rust `BranchOp` config fields** — added `cases`, `default`,
       `candidates` (and a new `BranchCase` struct) to
       [`rust/operonx/src/core/configs/op_config.rs`](rust/operonx/src/core/configs/op_config.rs).
