@@ -30,7 +30,6 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
 
 use crate::core::configs::op_config::{CompiledLink, LoopConfig, OpBound, OpConfig, OpType};
 use crate::core::engine::{FrameEvent, FrameSender, Scheduler};
@@ -39,7 +38,7 @@ use crate::core::middleware::MiddlewareContext;
 use crate::core::ops::edges::PARENT;
 use crate::core::registry::OpRegistry;
 use crate::core::states::cell::{default_context, ContextId};
-use crate::core::states::ref_::RefConfig;
+use crate::core::states::ref_::{RefArg, RefConfig, RefTransform};
 
 // ── State slot key ────────────────────────────────────────────────────────
 
@@ -471,18 +470,20 @@ impl GraphScheduler {
             if cancel.is_cancelled() {
                 return Ok(());
             }
-            let result_map = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
-                Err(e) => error_frame(&e),
-                Ok(inputs) => match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
-                    Ok(value) => {
-                        let map = value_to_map(value);
+            let result_map = if matches!(op_cfg.kind, OpType::Branch) {
+                // Branch ops never call user code — the "execution" is a
+                // condition-eval loop over `op_cfg.cases`. Done inline so
+                // we can read state without re-locking through the
+                // resolve_inputs/execute_op split.
+                match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
+                    Ok(target) => {
+                        let mut m = Map::new();
+                        m.insert("__branch_target__".into(), Value::from(target.clone()));
                         {
                             let mut s = state.lock();
-                            for (k, v) in &map {
-                                s.set(&op_cfg.full_name, k, &ctx, v.clone());
-                            }
+                            s.set(&op_cfg.full_name, "__branch_target__", &ctx, Value::from(target));
                         }
-                        map
+                        m
                     }
                     Err(e) => {
                         {
@@ -491,7 +492,30 @@ impl GraphScheduler {
                         }
                         error_frame(&e)
                     }
-                },
+                }
+            } else {
+                match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+                    Err(e) => error_frame(&e),
+                    Ok(inputs) => match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
+                        Ok(value) => {
+                            let map = value_to_map(value);
+                            {
+                                let mut s = state.lock();
+                                for (k, v) in &map {
+                                    s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                                }
+                            }
+                            map
+                        }
+                        Err(e) => {
+                            {
+                                let mut s = state.lock();
+                                s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                            }
+                            error_frame(&e)
+                        }
+                    },
+                }
             };
             // `try_send` keeps the inline path zero-await on the happy path.
             // Channel is sized generously (8192) so this is overflow-only;
@@ -962,24 +986,282 @@ fn resolve_ref(
     } else {
         &ref_cfg.source
     };
-    let s = state.lock();
-    let base = s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
-        OperonError::State(format!(
-            "ref resolution: no value for ({}, {}) at context {:?}",
-            source, ref_cfg.var, ctx
-        ))
-    })?;
-    // Phase 4: transforms are not applied. Refs with transforms remain for
-    // Phase 5/6 when the ref evaluator is wired up.
-    if !ref_cfg.transforms.is_empty() {
-        debug!(
-            "ref transforms not yet applied (target: {}.{}, {} transforms)",
-            source,
-            ref_cfg.var,
-            ref_cfg.transforms.len()
-        );
+    let base = {
+        let s = state.lock();
+        s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
+            OperonError::State(format!(
+                "ref resolution: no value for ({}, {}) at context {:?}",
+                source, ref_cfg.var, ctx
+            ))
+        })?
+    };
+
+    // Walk the chain — each transform takes the running value + its
+    // (literal | nested-Ref) args and produces the next running value.
+    let mut current = base;
+    for transform in &ref_cfg.transforms {
+        current = apply_transform(current, transform, graph_key, ctx, state)?;
     }
-    Ok(base)
+    Ok(current)
+}
+
+/// Resolve one [`RefArg`] to a concrete `Value`. Literals pass through;
+/// nested Refs are recursively resolved (used by boolean operators that
+/// combine two Refs).
+fn resolve_ref_arg(
+    arg: &RefArg,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    match arg {
+        RefArg::Literal(v) => Ok(v.clone()),
+        RefArg::NestedRef(inner) => resolve_ref(inner, graph_key, ctx, state),
+    }
+}
+
+/// Apply one [`RefTransform`] to `value`. Mirrors Python's
+/// `Ref._wrap` dispatch table — every operator that the Python decorator
+/// emits via `_with_transform` has a branch here.
+///
+/// Numeric arithmetic is performed on `f64` (Python parity for mixed
+/// int/float). Comparisons accept any JSON `Value`; boolean operators
+/// short-circuit using JSON-truthiness rules.
+///
+/// Operators not implemented yet: `apply` (Python-callable),
+/// `matmul`/`rmatmul` (numpy-only), `call` (Python-callable).
+fn apply_transform(
+    value: Value,
+    transform: &RefTransform,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    let name = transform.name.as_str();
+    let args = &transform.args;
+    let arg0 = || -> Result<Value, OperonError> {
+        match args.first() {
+            Some(a) => resolve_ref_arg(a, graph_key, ctx, state),
+            None => Ok(Value::Null),
+        }
+    };
+
+    match name {
+        // ── Comparison ──────────────────────────────────────────────────
+        "eq" => Ok(Value::Bool(values_equal(&value, &arg0()?))),
+        "ne" => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
+        "lt" => cmp_op(&value, &arg0()?, |o| o.is_lt()),
+        "le" => cmp_op(&value, &arg0()?, |o| o.is_le()),
+        "gt" => cmp_op(&value, &arg0()?, |o| o.is_gt()),
+        "ge" => cmp_op(&value, &arg0()?, |o| o.is_ge()),
+        "contains" => Ok(Value::Bool(value_contains(&value, &arg0()?))),
+
+        // ── Access ──────────────────────────────────────────────────────
+        "getitem" | "getattr" => Ok(value_getitem(&value, &arg0()?)),
+
+        // ── Boolean ─────────────────────────────────────────────────────
+        "and_" => {
+            if !value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        "rand_" => {
+            let lhs = arg0()?;
+            if !value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        "or_" => {
+            if value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        "ror_" => {
+            let lhs = arg0()?;
+            if value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        "not_" => Ok(Value::Bool(!value_truthy(&value))),
+
+        // ── Arithmetic ──────────────────────────────────────────────────
+        "add" => arith(&value, &arg0()?, |l, r| l + r),
+        "radd" => arith(&arg0()?, &value, |l, r| l + r),
+        "sub" => arith(&value, &arg0()?, |l, r| l - r),
+        "rsub" => arith(&arg0()?, &value, |l, r| l - r),
+        "mul" => arith(&value, &arg0()?, |l, r| l * r),
+        "rmul" => arith(&arg0()?, &value, |l, r| l * r),
+        "truediv" => arith(&value, &arg0()?, |l, r| l / r),
+        "rtruediv" => arith(&arg0()?, &value, |l, r| l / r),
+        "floordiv" => arith(&value, &arg0()?, |l, r| (l / r).floor()),
+        "rfloordiv" => arith(&arg0()?, &value, |l, r| (l / r).floor()),
+        "mod" => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
+        "rmod" => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
+        "pow" => arith(&value, &arg0()?, |l, r| l.powf(r)),
+        "rpow" => arith(&arg0()?, &value, |l, r| l.powf(r)),
+
+        // ── Unary ───────────────────────────────────────────────────────
+        "neg" => unary(&value, |v| -v),
+        "pos" => unary(&value, |v| v),
+        "abs" => unary(&value, |v| v.abs()),
+
+        // ── Not yet implemented ─────────────────────────────────────────
+        other => Err(OperonError::Runtime(format!(
+            "ref transform '{}' not implemented in Rust runtime (target: {}.{})",
+            other, graph_key, ref_cfg_var_for_error(transform)
+        ))),
+    }
+}
+
+/// Best-effort var label for error messages — the transform itself doesn't
+/// know which var it belongs to, so we just return the op name.
+fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
+    "<transform>"
+}
+
+/// Evaluate a `BranchOp`'s cases. Walks `op_cfg.cases` in order, resolving
+/// each `condition` Ref (with its transforms) to a `Value`, and returns
+/// the `target` of the first case whose condition is truthy. If no case
+/// matches and `op_cfg.default` is set, returns that. Otherwise errors
+/// — Python's `BranchOp.run` raises `BranchError` in the same scenario.
+fn evaluate_branch(
+    op_cfg: &OpConfig,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<String, OperonError> {
+    for case in &op_cfg.cases {
+        let v = resolve_ref(&case.condition, graph_key, ctx, state)?;
+        if value_truthy(&v) {
+            return Ok(case.target.clone());
+        }
+    }
+    if let Some(d) = &op_cfg.default {
+        return Ok(d.clone());
+    }
+    Err(OperonError::Runtime(format!(
+        "branch '{}' has no matching case and no default",
+        op_cfg.full_name
+    )))
+}
+
+/// JSON-value equality with Python-ish numeric coercion (3 == 3.0).
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(an), Value::Number(bn)) => match (an.as_f64(), bn.as_f64()) {
+            (Some(af), Some(bf)) => af == bf,
+            _ => an == bn,
+        },
+        _ => a == b,
+    }
+}
+
+fn cmp_op(
+    a: &Value,
+    b: &Value,
+    pred: impl Fn(std::cmp::Ordering) -> bool,
+) -> Result<Value, OperonError> {
+    use std::cmp::Ordering;
+    let ord = match (a, b) {
+        (Value::Number(an), Value::Number(bn)) => match (an.as_f64(), bn.as_f64()) {
+            (Some(af), Some(bf)) => af.partial_cmp(&bf).unwrap_or(Ordering::Equal),
+            _ => Ordering::Equal,
+        },
+        (Value::String(a), Value::String(b)) => a.cmp(b),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        _ => {
+            return Err(OperonError::Runtime(format!(
+                "ref comparison: cannot compare {:?} and {:?}",
+                a, b
+            )));
+        }
+    };
+    Ok(Value::Bool(pred(ord)))
+}
+
+fn value_contains(haystack: &Value, needle: &Value) -> bool {
+    match haystack {
+        Value::Array(items) => items.iter().any(|x| values_equal(x, needle)),
+        Value::Object(map) => match needle {
+            Value::String(s) => map.contains_key(s),
+            _ => false,
+        },
+        Value::String(s) => match needle {
+            Value::String(sub) => s.contains(sub.as_str()),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// `value[key]` — for objects (string key) and arrays (numeric index).
+/// Returns `Value::Null` on miss to match Python's KeyError-vs-None
+/// nuance loosely; pure-bool transforms downstream see Null as falsy.
+fn value_getitem(value: &Value, key: &Value) -> Value {
+    match (value, key) {
+        (Value::Object(map), Value::String(k)) => map.get(k).cloned().unwrap_or(Value::Null),
+        (Value::Array(items), Value::Number(n)) => {
+            if let Some(i) = n.as_i64() {
+                let idx = if i < 0 {
+                    (items.len() as i64 + i) as usize
+                } else {
+                    i as usize
+                };
+                items.get(idx).cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
+/// Python truthiness: `False`, `None`/null, 0, "", [], {} are falsy.
+fn value_truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(m) => !m.is_empty(),
+    }
+}
+
+/// Coerce two `Value`s to f64 and apply `op`. Returns the result as a
+/// `Value::Number`. Errors when either side isn't a number.
+fn arith(a: &Value, b: &Value, op: impl Fn(f64, f64) -> f64) -> Result<Value, OperonError> {
+    let (af, bf) = match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => (x, y),
+        _ => {
+            return Err(OperonError::Runtime(format!(
+                "ref arithmetic: non-numeric operands {:?} and {:?}",
+                a, b
+            )))
+        }
+    };
+    let result = op(af, bf);
+    serde_json::Number::from_f64(result)
+        .map(Value::Number)
+        .ok_or_else(|| OperonError::Runtime(format!("ref arithmetic produced non-finite: {}", result)))
+}
+
+fn unary(a: &Value, op: impl Fn(f64) -> f64) -> Result<Value, OperonError> {
+    let af = a.as_f64().ok_or_else(|| {
+        OperonError::Runtime(format!("ref unary op: non-numeric operand {:?}", a))
+    })?;
+    let result = op(af);
+    serde_json::Number::from_f64(result)
+        .map(Value::Number)
+        .ok_or_else(|| OperonError::Runtime(format!("ref unary op produced non-finite: {}", result)))
 }
 
 async fn execute_op(

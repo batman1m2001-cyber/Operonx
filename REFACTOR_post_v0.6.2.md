@@ -270,19 +270,39 @@ only on that extra/feature so each demo proves a real install slice.
       (see next bullet), but the bench runs and outputs match Python
       because every case target fires and the soft-edge merge picks
       the answer.
-- [ ] **Rust `if_()` branch routing dispatch** — the scheduler still
-      needs a real `OpType::Branch` execution path: read each case's
-      condition `Ref`, apply its `transforms` (`eq`/`ne`/`ge`/`gt`/
-      `le`/`lt`/`getitem` at minimum), pick the first truthy target
-      or `default`, emit a Frame with `target: <name>`, and route
-      only the matching `EdgeType::Condition` edge downstream.
-      **Blocked on the ref-transform evaluator** —
-      [`task_scheduler.rs::resolve_ref`](rust/operonx/src/core/ops/graph/task_scheduler.rs)
-      currently logs `"ref transforms not yet applied"` and returns
-      the raw base value. That evaluator is the prerequisite for
-      branching to produce semantically-correct output (not just
-      coincidental output that happens to match Python because every
-      branch fires).
+- [x] **Rust `if_()` branch routing dispatch** — landed. Two phases:
+      1. **Ref-transform evaluator** in
+         [`task_scheduler.rs::resolve_ref`](rust/operonx/src/core/ops/graph/task_scheduler.rs).
+         Walks `RefConfig.transforms` and applies each via
+         `apply_transform`. Coverage: comparison (`eq` / `ne` / `lt`
+         / `le` / `gt` / `ge`), `contains`, access (`getitem` /
+         `getattr` — same handler for objects), boolean (`and_` /
+         `or_` / `not_` with short-circuit + nested-Ref operand
+         resolution via `RefArg::NestedRef`), arithmetic (`add` /
+         `sub` / `mul` / `truediv` / `floordiv` / `mod` / `pow`
+         and r-variants on f64), unary (`neg` / `pos` / `abs`).
+         Truthiness rules match Python (`null` / `false` / `0` /
+         `""` / `[]` / `{}` falsy). Not implemented: `apply` /
+         `call` (Python-callable specific), `matmul` /
+         `rmatmul` (numpy-only).
+      2. **`OpType::Branch` dispatch** in `spawn_op`'s inline
+         fast-path. New `evaluate_branch` helper walks
+         `op_cfg.cases`, resolves each condition Ref through the new
+         evaluator, returns the first truthy `target` (or `default`,
+         or a typed error). The result map carries
+         `{"__branch_target__": "<name>"}`, and the existing
+         scheduler edge router already filters out non-matching
+         edges when that key is present.
+      Result on the bench:
+      - `branching_5`:  0.91 ms → **0.57 ms** (1.6× faster — only the
+        chosen branch fires now, not all four)
+      - `branching_10`: 1.58 ms → **0.96 ms** (1.6× faster)
+      - `production_*`: marginal speedup (each `verify_case` no
+        longer fires both pass + fail)
+      Output values previously matched Python by coincidence (every
+      branch fired and the soft-edge merge picked one); now Rust is
+      semantically correct and would not diverge on a graph where
+      different branches produce different results.
 - [x] **CPU-bound bench shows real Rust speedup** — added
       `bench_matrix(size)` (naive O(n³) matmul, no library shortcut)
       and `matrix_chain_*` patterns to `scripts/bench/`. Headline:
