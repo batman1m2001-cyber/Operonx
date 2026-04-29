@@ -46,14 +46,6 @@ lean imports, full docs depth pass.
   carry one diagram. Mkdocs wires the mermaid loader via
   `extra_javascript` plus a tiny init script that re-renders on
   Material's light/dark palette toggle.
-- `published-smoke` CI workflow — installs each tier-1 example
-  (ex01, ex02, ex13) from its own `pyproject.toml` against the
-  published wheel, asserts `operonx` resolves to site-packages and
-  no provider SDKs leak in, runs `python main.py`. Triggers on
-  `workflow_dispatch`, `workflow_run` after `Publish` succeeds, and
-  `push` to `main` (when example or workflow files change). Does
-  **not** gate `publish.yaml`.
-
 ### Changed
 - **Rust scheduler — sync-op inline fast-path.** `OpBound::Sync` ops
   bypass `tokio::spawn` + semaphore + await; events go onto the queue
