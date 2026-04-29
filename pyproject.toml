@@ -152,6 +152,7 @@ docs = [
 
 [project.scripts]
 operonx = "operonx.cli:main"
+operonx-pack = "operonx.tools.pack:main"
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operonx"

@@ -364,6 +364,33 @@ only on that extra/feature so each demo proves a real install slice.
       regenerating overwrites the checked-in `graph.json` and changes
       `full_name` / op naming relative to the v0.6.2 emit; per-example
       regen is opt-in by the example author.
+- [x] **Elevate `dump-graph` to a packaged CLI** — landed as
+      `operonx-pack`. New module
+      [`operonx/tools/pack.py`](operonx/tools/pack.py) +
+      `[project.scripts] operonx-pack = "operonx.tools.pack:main"`
+      in [`pyproject.toml`](pyproject.toml). Targets are pytest-style
+      `module::symbol` positionals. Default to stdout JSON; `-o PATH`
+      writes to file. Bundle key = symbol name when multiple targets
+      are passed; single target dumps the spec at top level. Auto
+      `operonx.bootstrap()` from CWD; `--no-bootstrap` flag skips it
+      for pure-compute graphs. The old standalone `tools/dump-graph.py`
+      is gone (and the `tools/` directory with it).
+      ```bash
+      cd examples/python/ex03_llm_chat
+      operonx-pack main::basic_chat -o ../../rust/ex03_llm_chat/graph.json
+      operonx-pack m::a m::b m::c -o bundle.json
+      operonx-pack --no-bootstrap m::pure_compute   # tier-1, no resources.yaml
+      ```
+      Explicitly **not** in this pass: subcommand hub (`operonx graph
+      dump …`), literal-value param flags (`--params x=5`).
+- [ ] **Regenerate example `graph.json` files** with the new CLI
+      (depends on the CLI landing). Today's checked-in
+      `examples/rust/exNN_*/graph.json` files predate the
+      example-refactor and carry stale `full_name` / op naming. Per
+      example: `cd examples/python/exNN && operonx-dump-graph
+      main::<factory> -o ../../rust/exNN/graph.json`. Each Rust
+      example needs to be rerun afterward to verify the new graph
+      shape still produces the expected output.
 - [x] **CI extras-smoke matrix** — landed in
       [`.github/workflows/tests.yaml`](.github/workflows/tests.yaml)
       `extras-smoke` job (anthropic / langfuse / otel / onnx / serve /

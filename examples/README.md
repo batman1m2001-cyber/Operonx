@@ -111,8 +111,16 @@ status.
 ## Regenerating `graph.json`
 
 The Rust examples that compose graphs through provider ops ship a
-checked-in `graph.json` produced from the matching Python builder. The
-helper that regenerates these lives at
-[`tools/dump-graph.py`](../tools/dump-graph.py). It needs an update to
-match the new single-file `main.py` layout — track that in
-`REFACTOR_post_v0.6.2.md`.
+checked-in `graph.json` produced from the matching Python builder.
+The `operonx-pack` CLI (registered by `pip install operonx`) re-emits
+it. Targets use pytest-style `module::symbol`. From inside the
+example dir:
+
+```bash
+cd examples/python/ex03_llm_chat
+operonx-pack main::basic_chat main::chain_chat main::summarize_pipeline \
+    -o ../../rust/ex03_llm_chat/graph.json
+```
+
+Pass `--no-bootstrap` for pure-compute examples that don't need a
+`resources.yaml` lookup at build time.
