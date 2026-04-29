@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-29
+
+Follow-up to v0.7.0 — bug fixes + perf precompute work, all Python ↔
+Rust parity preserved (22 / 22 bench patterns byte-equal). No public
+API changes.
+
+### Fixed
+- **Rust LLM examples returned empty `{}`** (ex03 / ex04 / ex07 / ex08
+  / ex09 / ex10 / ex12). `operonx::bootstrap()` didn't call
+  `providers::registry::register_all()`, so the resource hub failed
+  every `llm:gpt-4o-mini` lookup with `no factory registered for
+  category 'llm'` before any HTTP request. Bootstrap now registers
+  every built-in provider plugin idempotently, mirroring Python's
+  "import triggers registration" pattern. Verified end-to-end against
+  real OpenAI calls.
+- **Generator ops collapsed to a single frame on Rust.** `is_generator:
+  true` ops were treated as regular code ops; the `for_loop` /
+  `map_op` scenarios in ex05, both `ex11.iteration` /
+  `partial_failure`, ex14, and ex15 all returned `{}` because
+  downstream per-item ops never dispatched. New `fan_out_value()`
+  helper plus a switch in both the inline-sync fast-path and the
+  spawn (io/cpu) path: generator ops now return `Value::Array` and
+  the scheduler emits one Frame per element on a fresh `(parent_ctx,
+  "yield_N")` sub-context. Empty array = zero frames (matches
+  Python's skipped `yield`, used by ex15's `vad`).
+- **Stale fixtures + pin** in the rust example bundles. `ex01`'s
+  `inputs.json` and `main.rs` op params used `name` while the current
+  Python factory takes `who`; `ex13` used `input` instead of `val`.
+  Every `examples/rust/*/Cargo.toml` was pinned to `operonx =
+  "0.6.2"` — semver-incompatible with the workspace's `0.7.x`, so
+  `[patch.crates-io]` silently dropped through to the published 0.6.3
+  wheel and the older `#[op]` macro errored on bare
+  `::inventory::submit!`. Bumped to `0.7.1`.
+- **`extras smoke (anthropic)` regression on PR #1.**
+  `operonx/providers/llms/response.py` did a top-level `import
+  aiohttp` that the anthropic extra (which ships `httpx`) didn't
+  provide; deferred via `TYPE_CHECKING` + lazy import inside the demo
+  helpers.
+- **Anthropic + rerank integration tests no longer fail when their
+  config is unavailable.** Anthropic `*_real` tests treat the
+  `ci-dummy-…` key the providers conftest plants as "no key" and skip;
+  the rerank `with_hub` test probes `hub.get("reranking:bge-m3-onnx")`
+  up front and skips with the real reason instead of letting
+  `_process()` swallow the model-dir-missing error.
+
+### Changed
+- **Rust scheduler — 5 precompute wins on the hot path.** All four
+  pieces moved from per-frame work to `GraphScheduler::new` (per-engine
+  build):
+  1. `initial_ready_count` pre-converted from `BTreeMap` to `HashMap`
+     — clones once per never-seen `ContextId` instead of converting.
+  2. `RuntimeState::with_capacity(n)` — slot map pre-sized to
+     `Σ (inputs + outputs)` across ops, eliminating the resize cycle.
+  3. `seq_queues` / `seq_active` / `collect_bufs` pre-sized to the
+     graph's edge counts.
+  4. `edge_policies: HashMap<(src, dst), StreamPolicy>` cached at
+     construction; `route_edge_async` does an O(1) lookup instead of
+     re-walking `dst.inputs`.
+  5. **Compiled ref pipeline.** Walks every `RefConfig` (op-input
+     refs + branch case conditions, recursively into nested refs) and
+     produces an enum-tagged `CompiledRef` / `CompiledOp` /
+     `TransformKind` chain at construction. `__PARENT__` already
+     substituted with the graph key. Per-op `Vec<InputSlot>` plan
+     classifies each input as `Ref / Lit / Default / RequiredMissing
+     / Null` up front. Runtime drops `transform.name.as_str()` matches
+     for enum dispatch and replaces `for (var, param) in
+     op_cfg.inputs` + per-input `match param.ref_config` with a tight
+     slice walk.
+- Net bench delta: scheduler-bound patterns (linear chains, branching,
+  small parallel) ~5–12 % faster vs the v0.7.0 baseline; CPU-bound
+  patterns (matrix chain) unchanged because they're dominated by
+  matmul time. Numbers within run-to-run noise on the existing
+  bench set; transform-heavy graphs (long ref chains) should see the
+  bigger win from the compiled-ref dispatch.
+
+### Added
+- **`scripts/bench/parity.py` + `--probe` mode on the bench binary.**
+  Runs every `<name>.graph.json` / `<name>.inputs.json` pair through
+  both runtimes (Python `@graph` factory + Rust `operonx-bench
+  --probe`) and diffs the output dicts key-by-key. Reports
+  `PASS <name>` / `FAIL <name>` per pattern. Used to verify the
+  precompute changes don't perturb output.
+
+### Removed
+- `published-smoke` CI workflow (was racy by design — fired on
+  push-to-main before `Publish` had pushed the wheel; site-packages
+  assertion picked up the source tree from CWD anyway). Regular
+  tests + extras-smoke matrix already cover the surface.
+
 ## [0.7.0] - 2026-04-29
 
 Major scheduler upgrades, a new packaged CLI, lazy providers for tier-1
