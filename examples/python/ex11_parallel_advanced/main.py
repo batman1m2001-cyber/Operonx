@@ -15,7 +15,9 @@ from operonx.core import END, PARENT, START, Operon, graph, op
 
 @op
 def analyze_sentiment(text: str):
-    pos = sum(1 for w in text.lower().split() if w in {"good", "great", "excellent", "love", "happy"})
+    pos = sum(
+        1 for w in text.lower().split() if w in {"good", "great", "excellent", "love", "happy"}
+    )
     neg = sum(1 for w in text.lower().split() if w in {"bad", "terrible", "hate", "awful", "sad"})
     if pos > neg:
         s = "positive"
@@ -112,12 +114,17 @@ def partial_failure(items):
 
 async def main() -> None:
     runs = [
-        ("fan_out", fan_out(text=PARENT["text"]),
-            {"text": "This is a great excellent product with good quality and love it"}),
-        ("iteration", iteration(items=PARENT["items"]),
-            {"items": [1, 2, 3, 4, 5, 6, 7, 8, 9]}),
-        ("partial_failure", partial_failure(items=PARENT["items"]),
-            {"items": [1, 2, 3, 4, 5, 6, 7]}),
+        (
+            "fan_out",
+            fan_out(text=PARENT["text"]),
+            {"text": "This is a great excellent product with good quality and love it"},
+        ),
+        ("iteration", iteration(items=PARENT["items"]), {"items": [1, 2, 3, 4, 5, 6, 7, 8, 9]}),
+        (
+            "partial_failure",
+            partial_failure(items=PARENT["items"]),
+            {"items": [1, 2, 3, 4, 5, 6, 7]},
+        ),
     ]
     for label, g, inputs in runs:
         result = await Operon(g).run(inputs=inputs)

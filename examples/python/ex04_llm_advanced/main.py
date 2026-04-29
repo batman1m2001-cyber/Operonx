@@ -17,7 +17,6 @@ import operonx
 from operonx.core import END, START, Operon, graph, op
 from operonx.providers import LLMOp, PromptOp
 
-
 # ── Tool-calling helpers ────────────────────────────────────────────────
 
 CALC_TOOLS = [

@@ -176,10 +176,7 @@ impl GraphScheduler {
     ///
     /// This is what `OpType::Graph` calls in `execute_op` instead of
     /// the heavy `Operon::run_json_async` round-trip.
-    pub async fn run_collect(
-        &self,
-        inputs: Map<String, Value>,
-    ) -> Result<Value, OperonError> {
+    pub async fn run_collect(&self, inputs: Map<String, Value>) -> Result<Value, OperonError> {
         use crate::core::engine::{FrameSender, TraceTap};
 
         let tap: TraceTap = Arc::new(Mutex::new(Vec::new()));
@@ -218,8 +215,10 @@ fn build_child_schedulers(
     let mut out: HashMap<String, Arc<GraphScheduler>> = HashMap::new();
     for (_, child) in &graph.ops {
         if matches!(child.kind, OpType::Graph) {
-            let sub =
-                Arc::new(GraphScheduler::new(Arc::new(child.clone()), registry.clone())?);
+            let sub = Arc::new(GraphScheduler::new(
+                Arc::new(child.clone()),
+                registry.clone(),
+            )?);
             out.insert(child.full_name.clone(), sub);
         }
     }
@@ -481,7 +480,12 @@ impl GraphScheduler {
                         m.insert("__branch_target__".into(), Value::from(target.clone()));
                         {
                             let mut s = state.lock();
-                            s.set(&op_cfg.full_name, "__branch_target__", &ctx, Value::from(target));
+                            s.set(
+                                &op_cfg.full_name,
+                                "__branch_target__",
+                                &ctx,
+                                Value::from(target),
+                            );
                         }
                         m
                     }
@@ -496,25 +500,32 @@ impl GraphScheduler {
             } else {
                 match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
                     Err(e) => error_frame(&e),
-                    Ok(inputs) => match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
-                        Ok(value) => {
-                            let map = value_to_map(value);
-                            {
-                                let mut s = state.lock();
-                                for (k, v) in &map {
-                                    s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                    Ok(inputs) => {
+                        match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
+                            Ok(value) => {
+                                let map = value_to_map(value);
+                                {
+                                    let mut s = state.lock();
+                                    for (k, v) in &map {
+                                        s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                                    }
                                 }
+                                map
                             }
-                            map
-                        }
-                        Err(e) => {
-                            {
-                                let mut s = state.lock();
-                                s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                            Err(e) => {
+                                {
+                                    let mut s = state.lock();
+                                    s.set(
+                                        &op_cfg.full_name,
+                                        "error",
+                                        &ctx,
+                                        Value::from(e.to_string()),
+                                    );
+                                }
+                                error_frame(&e)
                             }
-                            error_frame(&e)
                         }
-                    },
+                    }
                 }
             };
             // `try_send` keeps the inline path zero-await on the happy path.
@@ -1116,7 +1127,9 @@ fn apply_transform(
         // ── Not yet implemented ─────────────────────────────────────────
         other => Err(OperonError::Runtime(format!(
             "ref transform '{}' not implemented in Rust runtime (target: {}.{})",
-            other, graph_key, ref_cfg_var_for_error(transform)
+            other,
+            graph_key,
+            ref_cfg_var_for_error(transform)
         ))),
     }
 }
@@ -1251,7 +1264,9 @@ fn arith(a: &Value, b: &Value, op: impl Fn(f64, f64) -> f64) -> Result<Value, Op
     let result = op(af, bf);
     serde_json::Number::from_f64(result)
         .map(Value::Number)
-        .ok_or_else(|| OperonError::Runtime(format!("ref arithmetic produced non-finite: {}", result)))
+        .ok_or_else(|| {
+            OperonError::Runtime(format!("ref arithmetic produced non-finite: {}", result))
+        })
 }
 
 fn unary(a: &Value, op: impl Fn(f64) -> f64) -> Result<Value, OperonError> {
@@ -1261,7 +1276,9 @@ fn unary(a: &Value, op: impl Fn(f64) -> f64) -> Result<Value, OperonError> {
     let result = op(af);
     serde_json::Number::from_f64(result)
         .map(Value::Number)
-        .ok_or_else(|| OperonError::Runtime(format!("ref unary op produced non-finite: {}", result)))
+        .ok_or_else(|| {
+            OperonError::Runtime(format!("ref unary op produced non-finite: {}", result))
+        })
 }
 
 async fn execute_op(

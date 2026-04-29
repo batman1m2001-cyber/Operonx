@@ -21,7 +21,6 @@ import operonx
 from operonx.core import END, PARENT, START, Operon, graph, op
 from operonx.providers import EmbeddingOp, LLMOp, PromptOp
 
-
 DOCUMENTS = [
     "Hà Nội là thủ đô của Việt Nam, nằm ở miền Bắc, có hơn 1000 năm lịch sử.",
     "TP.HCM là thành phố lớn nhất Việt Nam về dân số, trung tâm kinh tế phía Nam.",
