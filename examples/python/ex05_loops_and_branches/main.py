@@ -97,12 +97,7 @@ def while_loop(start_value):
 @graph
 def branch(score):
     """if_() — conditional routing with soft edges."""
-    grade_router = (
-        if_(score >= 90, "ex")
-        .if_(score >= 70, "gd")
-        .if_(score >= 50, "av")
-        .else_("fl")
-    )
+    grade_router = if_(score >= 90, "ex").if_(score >= 70, "gd").if_(score >= 50, "av").else_("fl")
 
     ex = excellent()
     gd = good()
@@ -119,14 +114,14 @@ def branch(score):
 
 async def main() -> None:
     runs = [
-        ("for_loop", for_loop(items=PARENT["items"], prefix=PARENT["prefix"]),
-            {"items": ["apple", "banana", "cherry"], "prefix": "Fruit"}),
-        ("map_op", map_op(numbers=PARENT["numbers"]),
-            {"numbers": [1, 2, 3, 4, 5]}),
-        ("while_loop", while_loop(start_value=PARENT["start_value"]),
-            {"start_value": 256}),
-        ("branch", branch(score=PARENT["score"]),
-            {"score": 95}),
+        (
+            "for_loop",
+            for_loop(items=PARENT["items"], prefix=PARENT["prefix"]),
+            {"items": ["apple", "banana", "cherry"], "prefix": "Fruit"},
+        ),
+        ("map_op", map_op(numbers=PARENT["numbers"]), {"numbers": [1, 2, 3, 4, 5]}),
+        ("while_loop", while_loop(start_value=PARENT["start_value"]), {"start_value": 256}),
+        ("branch", branch(score=PARENT["score"]), {"score": 95}),
     ]
     for label, g, inputs in runs:
         result = await Operon(g).run(inputs=inputs)

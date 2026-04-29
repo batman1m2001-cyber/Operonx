@@ -100,8 +100,7 @@ def _split_target(target: str) -> tuple[str, str, str]:
     """
     if "::" not in target:
         raise SystemExit(
-            f"target {target!r} must be of the form 'module.path::symbol' "
-            "(pytest-style)."
+            f"target {target!r} must be of the form 'module.path::symbol' (pytest-style)."
         )
     module, rest = target.split("::", 1)
     if "=" in rest:

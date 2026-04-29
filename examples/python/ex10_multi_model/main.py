@@ -142,16 +142,23 @@ async def main() -> None:
     operonx.bootstrap()
 
     runs = [
-        ("parallel", parallel_comparison(query=PARENT["query"]),
-            {"query": "What is machine learning?"}),
-        ("routing", cost_routing(query=PARENT["query"]),
-            {"query": "Explain supervised vs unsupervised learning with examples."}),
-        ("load_balanced", load_balanced(query=PARENT["query"]),
-            {"query": "Say hello #1"}),
-        ("fallback", fallback_chain(query=PARENT["query"]),
-            {"query": "What is Python?"}),
-        ("ensemble", ensemble(query=PARENT["query"]),
-            {"query": "What causes the seasons on Earth?"}),
+        (
+            "parallel",
+            parallel_comparison(query=PARENT["query"]),
+            {"query": "What is machine learning?"},
+        ),
+        (
+            "routing",
+            cost_routing(query=PARENT["query"]),
+            {"query": "Explain supervised vs unsupervised learning with examples."},
+        ),
+        ("load_balanced", load_balanced(query=PARENT["query"]), {"query": "Say hello #1"}),
+        ("fallback", fallback_chain(query=PARENT["query"]), {"query": "What is Python?"}),
+        (
+            "ensemble",
+            ensemble(query=PARENT["query"]),
+            {"query": "What causes the seasons on Earth?"},
+        ),
     ]
     for label, g, inputs in runs:
         try:

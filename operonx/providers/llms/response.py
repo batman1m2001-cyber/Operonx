@@ -2,10 +2,12 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import AsyncIterator, Dict, Optional, Union
+from typing import TYPE_CHECKING, AsyncIterator, Dict, Optional, Union
 
-import aiohttp
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+
+if TYPE_CHECKING:
+    import aiohttp
 
 
 class LLMGenerator:
@@ -125,7 +127,7 @@ class LLMGenerator:
 
 
 # Example adapter for HTTP responses
-async def response_to_text(response: aiohttp.ClientResponse) -> AsyncIterator[str]:
+async def response_to_text(response: "aiohttp.ClientResponse") -> AsyncIterator[str]:
     """Convert HTTP response to text stream."""
     async for line in response.content:
         yield line.decode("utf-8")
@@ -134,6 +136,8 @@ async def response_to_text(response: aiohttp.ClientResponse) -> AsyncIterator[st
 # Usage example
 async def main():
     import os
+
+    import aiohttp
 
     url = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
 
@@ -170,6 +174,8 @@ async def main():
 
 async def simple_test():
     import os
+
+    import aiohttp
 
     # API configuration
     url = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
