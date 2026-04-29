@@ -614,12 +614,7 @@ impl GraphScheduler {
                         Err(e) => {
                             {
                                 let mut s = state.lock();
-                                s.set(
-                                    &op_cfg.full_name,
-                                    "error",
-                                    &ctx,
-                                    Value::from(e.to_string()),
-                                );
+                                s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
                             }
                             error_frame(&e)
                         }
@@ -910,7 +905,6 @@ impl GraphScheduler {
         Ok(())
     }
 
-
     #[allow(clippy::too_many_arguments)]
     async fn on_eof(
         &self,
@@ -1154,11 +1148,7 @@ fn compile_op(t: &RefTransform, graph_key: &str) -> CompiledOp {
         "abs" => TransformKind::Abs,
         other => TransformKind::Unknown(other.to_string()),
     };
-    let args = t
-        .args
-        .iter()
-        .map(|a| compile_arg(a, graph_key))
-        .collect();
+    let args = t.args.iter().map(|a| compile_arg(a, graph_key)).collect();
     CompiledOp { kind, args }
 }
 
@@ -1313,10 +1303,7 @@ struct InputSlot {
 /// `OpConfig.inputs`). Built once at construction so the runtime hot
 /// path replaces `for (var, param) in &op_cfg.inputs` + per-input
 /// `match param` with a single `for slot in plan` walk.
-fn compile_input_plans(
-    graph: &OpConfig,
-    graph_key: &str,
-) -> HashMap<String, Vec<InputSlot>> {
+fn compile_input_plans(graph: &OpConfig, graph_key: &str) -> HashMap<String, Vec<InputSlot>> {
     let mut out: HashMap<String, Vec<InputSlot>> = HashMap::with_capacity(graph.ops.len());
     for (op_name, op_cfg) in &graph.ops {
         let mut slots = Vec::with_capacity(op_cfg.inputs.len());
