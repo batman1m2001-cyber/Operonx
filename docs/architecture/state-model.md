@@ -3,6 +3,45 @@
 Every op has a typed input and output dict. Edges between ops are wired by
 **reference**, not by string lookup at runtime.
 
+## Cell layout
+
+State lives in a triple-keyed cell map: `(op_full_name, var_name, context_id) → Value`.
+The context tuple is how parent ↔ child boundaries stay correct in
+nested `@graph`s and how generator-op iterations stay isolated:
+
+```mermaid
+flowchart LR
+    subgraph PARENT["parent: GraphOp 'main' &nbsp;(context = ())"]
+        P_score["('main', 'score', ())"]
+        P_size["('main', 'size', ())"]
+    end
+
+    subgraph CHILD["child: nested @graph 'verify' &nbsp;(context = ('verify',))"]
+        C_grade["('verify.cls', 'grade', ('verify',))"]
+        C_score["('verify.cls', 'score', ('verify',))"]
+        C_out["('verify.work', 'trace', ('verify',))"]
+    end
+
+    P_score -->|"verify(score=PARENT['score'])"| C_grade
+    P_size -->|"verify(size=PARENT['size'])"| C_score
+    C_out -->|"work['trace'] >> PARENT['trace']"| P_size
+
+    classDef parent fill:#ede7f6,stroke:#5e35b1,color:#311b92
+    classDef child fill:#e0f2f1,stroke:#00897b,color:#004d40
+    class P_score,P_size parent
+    class C_grade,C_score,C_out child
+```
+
+Three rules fall out of this layout:
+
+- **`PARENT["k"]` reads from the enclosing context.** From the child's
+  point of view, `PARENT` is the immediate parent — the runtime walks
+  the context tuple upward until it finds `k`.
+- **`op["k"]` reads from a sibling at the same context.** No walk —
+  same context, different op name.
+- **`op["src"] >> PARENT["dst"]` writes upward.** The scheduler emits
+  the frame to both the child's own state and the parent's slot.
+
 ## PARENT vs op["key"]
 
 **Use `op["key"]` to pass data between sibling ops. Use `PARENT["key"]`

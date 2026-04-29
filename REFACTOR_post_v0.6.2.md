@@ -435,32 +435,31 @@ contributors see them.
       30-second `@op` + `>>` quick-start. Still missing the "When to use
       Operonx vs X" comparison table (vs Airflow, vs Prefect, vs
       LangGraph) — track separately if needed.
-- [ ] **docs/architecture/overview.md**: add a mermaid diagram showing
-      `Operon` → `GraphOp` → `Op` → `State` → `Tracer`. Include the
-      Python ↔ Rust runtime split.
-- [ ] **docs/architecture/execution-flow.md**: add a sequence diagram for
-      a 3-op linear graph: build → schedule → run → record. Annotate which
-      steps are pre-engine (untimed) vs in `engine.run()`.
-- [ ] **docs/architecture/state-model.md**: add a diagram of `MemoryState`
-      cells, `PARENT` references, and the parent ↔ child boundary in
-      nested `GraphOp`s. Spell out the "use `op[\"key\"]` for siblings,
-      `PARENT[\"key\"]` for external inputs" rule that today only lives
-      in CLAUDE.md.
-- [ ] **docs/architecture/streaming.md**: add the streaming-scheduler
-      timing diagram (yield → downstream parallel run). Expand the
-      generator-op vs `GraphOp.loop` distinction with one concrete
-      example each.
-- [ ] **docs/architecture/rust-python.md**: diagram of the Rust runtime's
-      `inventory!` registry, the JSON-spec round-trip, and the parity
-      contract enforced by `tests/spec/`.
-- [ ] **docs/guide/ — new page** `docs/guide/00b-patterns.md` (or fold
-      into `01-first-workflow.md`): the @op / @graph / `>>` / `>>~` /
-      PARENT / `Op.of()` / loop patterns currently in CLAUDE.md
-      "Key Patterns". Internal contributors get them from CLAUDE.md;
-      external readers should not have to grep that file.
-- [x] **mkdocs.yml** — `pymdownx.superfences` is already in
-      `markdown_extensions`. Mermaid blocks will render once the
-      diagrams above are added.
+- [x] **docs/architecture/overview.md** — flowchart of
+      `Operon` → `GraphOp` → `Op` → `State` → `Tracer` plus the Python
+      ↔ Rust runtime split (highlights the `graph.serialize()` JSON
+      hand-off).
+- [x] **docs/architecture/execution-flow.md** — sequence diagram for a
+      3-op linear graph (Construction → Init → Run, with rect shading
+      to mark pre-engine vs `engine.run()` phases).
+- [x] **docs/architecture/state-model.md** — flowchart of the cell
+      grid `(op_full_name, var_name, context_id) → Value`, showing
+      parent ↔ child context boundaries in nested `@graph`s.
+- [x] **docs/architecture/streaming.md** — sequenceDiagram for
+      per-yield parallel dispatch (generator op → 3 concurrent
+      downstream ops + EOF + collected results).
+- [x] **docs/architecture/rust-python.md** — flowchart of the
+      cross-runtime contract: Python authoring → JSON spec → Rust
+      `Operon::builder` + `#[op]` inventory → scheduler, with
+      `tests/spec/` as the parity surface both runtimes hit.
+- [x] **docs/guide/00b-patterns.md** — landed. Lifts the Key Patterns
+      section out of CLAUDE.md into a public guide page (decorators,
+      edges, refs, output mapping, iteration, `@graph.loop`,
+      `if_()` routing, end-to-end composition example).
+- [x] **mkdocs.yml** — `pymdownx.superfences` now has the mermaid
+      custom fence; `extra_javascript` loads `mermaid@11` plus a
+      tiny `docs/js/mermaid-init.js` that re-renders on Material's
+      light/dark palette toggle.
 
 Skip: theme overhaul, custom CSS, switching docs framework. Material
 defaults are fine.
@@ -491,5 +490,5 @@ If a future contributor finds the badge misleading, revisit then.
       Per-language `README.md` indexes also landed.
 - [ ] `published-smoke` CI green on `main` — workflow added; needs the
       first publish run to verify it works against the registry wheel.
-- [ ] `docs/architecture/` pages each carry at least one diagram.
+- [x] `docs/architecture/` pages each carry at least one diagram.
 - [ ] This file deleted in the same PR as the last P-item lands.

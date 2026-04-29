@@ -4,6 +4,59 @@ Operonx ships as a **single Python package** with optional extras and a
 **single Rust crate**. Both backends share the same workflow contract — a
 graph defined once, runnable on either runtime.
 
+## Component map
+
+```mermaid
+flowchart TB
+    User["User code<br/>(@op functions, @graph builders)"]
+
+    subgraph CORE["operonx.core"]
+        Operon["Operon (engine)"]
+        GraphOp["GraphOp"]
+        Op["Op (FuncOp / BranchOp / GraphOp)"]
+        State["MemoryState<br/>(PARENT / op refs)"]
+        ResourceHub["ResourceHub<br/>(resources.yaml)"]
+        Tracers["Tracers<br/>(local, Langfuse, OTEL)"]
+    end
+
+    subgraph PROV["operonx.providers"]
+        LLMOp["LLMOp"]
+        EmbeddingOp["EmbeddingOp"]
+        RerankOp["RerankOp"]
+    end
+
+    subgraph RUST["rust/operonx"]
+        OperonRs["Operon (Rust)"]
+        Scheduler["GraphScheduler<br/>(+ child schedulers)"]
+        Inventory["#[op] inventory"]
+    end
+
+    User -->|builds| GraphOp
+    GraphOp -->|owns| Op
+    Op -.->|reads/writes| State
+    User -->|constructs| Operon
+    Operon -->|drives| GraphOp
+    Operon -.->|emits frames| Tracers
+    Op -.->|resolves resource:name| ResourceHub
+    LLMOp & EmbeddingOp & RerankOp -.->|are kinds of| Op
+
+    GraphOp ==>|graph.serialize()<br/>JSON spec| OperonRs
+    OperonRs --> Scheduler
+    Scheduler -.->|looks up #[op] funcs| Inventory
+
+    classDef core fill:#ede7f6,stroke:#5e35b1,color:#311b92
+    classDef prov fill:#e0f2f1,stroke:#00897b,color:#004d40
+    classDef rust fill:#fff3e0,stroke:#f57c00,color:#e65100
+    class Operon,GraphOp,Op,State,ResourceHub,Tracers core
+    class LLMOp,EmbeddingOp,RerankOp prov
+    class OperonRs,Scheduler,Inventory rust
+```
+
+The thick arrow from `GraphOp` to the Rust `Operon` is the JSON
+hand-off: `graph.serialize()` produces a portable spec the Rust
+runtime loads and runs against the same op semantics. See
+[Rust and Python](rust-python.md) for the parity contract.
+
 ## Source layout
 
 ```
