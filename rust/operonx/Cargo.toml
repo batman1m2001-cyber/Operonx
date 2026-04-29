@@ -24,7 +24,7 @@ include = [
 ]
 
 [dependencies]
-operonx-macros               = { version = "0.6.3", path = "../operonx-macros" }
+operonx-macros               = { version = "0.7.0", path = "../operonx-macros" }
 tokio.workspace              = true
 tokio-util.workspace         = true
 futures.workspace            = true
