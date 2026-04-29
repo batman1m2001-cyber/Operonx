@@ -41,13 +41,32 @@ plugins:
         python:
           paths: [.]
           options:
+            # Docstring extraction
             docstring_style: google
+            docstring_section_style: table
             merge_init_into_class: true
+            # Headings + signatures
             show_root_heading: true
+            show_root_full_path: false
+            show_object_full_path: false
             show_signature_annotations: true
             separate_signature: true
-            filters: ["!^_"]
+            line_length: 80
             heading_level: 2
+            # Member rendering
+            members_order: source
+            group_by_category: true
+            show_category_heading: true
+            inherited_members: false
+            show_if_no_docstring: false
+            filters: ["!^_"]
+            # Source links — keep them, but collapsible
+            show_source: true
+            show_bases: true
+            # Cross-references
+            show_root_toc_entry: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
 
 markdown_extensions:
   - admonition
