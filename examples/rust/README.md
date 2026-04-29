@@ -72,6 +72,18 @@ for the canonical list. Highlights:
 ## Regenerating `graph.json`
 
 LLM-using examples ship a checked-in `graph.json` so the Rust binary
-doesn't need a Python build step. The helper at
-[`tools/dump-graph.py`](../../tools/dump-graph.py) re-emits it from
-the matching Python builder.
+doesn't need a Python build step. The `operonx-pack` CLI (registered
+by `pip install operonx`) re-emits it from the matching Python
+builder. From inside the example dir:
+
+```bash
+cd examples/python/ex03_llm_chat
+operonx-pack \
+    main::basic_chat \
+    main::chain_chat \
+    main::summarize_pipeline \
+    -o ../../rust/ex03_llm_chat/graph.json
+```
+
+Pass `--no-bootstrap` for pure-compute examples that don't need a
+`resources.yaml` lookup at build time.
