@@ -104,11 +104,15 @@ fn process_grade(grade: String, score: i64) -> Value {
 struct Args {
     runs: usize,
     warmup: usize,
+    /// Probe mode: skip timing, run each pattern once, emit
+    /// `RESULT <name> <json>` lines so `parity.py` can diff outputs.
+    probe: bool,
 }
 
 fn parse_args() -> Args {
     let mut runs = 200_usize;
     let mut warmup = 5_usize;
+    let mut probe = false;
     let argv: Vec<String> = std::env::args().collect();
     let mut i = 1;
     while i < argv.len() {
@@ -121,10 +125,18 @@ fn parse_args() -> Args {
                 warmup = argv.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(warmup);
                 i += 2;
             }
+            "--probe" => {
+                probe = true;
+                i += 1;
+            }
             _ => i += 1,
         }
     }
-    Args { runs, warmup }
+    Args {
+        runs,
+        warmup,
+        probe,
+    }
 }
 
 // ── Bench plumbing ───────────────────────────────────────────────────────
@@ -276,6 +288,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if patterns.is_empty() {
         eprintln!("  no *.graph.json found in {} — run generate.py first.", data.display());
         std::process::exit(1);
+    }
+
+    if args.probe {
+        // Output-parity mode: build engine once per pattern, run once,
+        // emit a single `RESULT <name> <json>` line. Consumed by
+        // `scripts/bench/parity.py`.
+        for (name, graph_path, inputs_path) in patterns {
+            let graph_json = fs::read_to_string(&graph_path)?;
+            let inputs_value: Value = serde_json::from_str(&fs::read_to_string(&inputs_path)?)?;
+            let inputs = inputs_value.as_object().cloned().unwrap_or_else(Map::new);
+            let engine = Operon::builder(&graph_json).auto_register().build()?;
+            let out = engine.run_json(inputs, None, None, None)?;
+            println!("RESULT {name} {out}");
+        }
+        return Ok(());
     }
 
     println!(
