@@ -13,5 +13,5 @@ lazily — installing `operonx[anthropic]` does not require numpy / onnxruntime
 
 ## High-level helpers
 
-::: operonx.providers.chat
-::: operonx.providers.ask
+::: operonx.providers.ops.chat
+::: operonx.providers.ops.ask

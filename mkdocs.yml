@@ -63,7 +63,11 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
 
@@ -71,6 +75,7 @@ nav:
   - Home: index.md
   - Guide:
       - Installation: guide/00-installation.md
+      - Patterns: guide/00b-patterns.md
       - First workflow: guide/01-first-workflow.md
       - LLM chat: guide/02-llm-chat.md
       - Loops and branches: guide/03-loops-and-branches.md
@@ -92,3 +97,10 @@ nav:
       - operonx.providers: api/providers.md
       - operonx.telemetry: api/telemetry.md
       - operonx.core.registry: api/registry.md
+
+# Mermaid loader — Material renders any <pre class="mermaid"> block
+# (produced by the pymdownx.superfences custom fence above) once this
+# script is present.
+extra_javascript:
+  - https://unpkg.com/mermaid@11/dist/mermaid.min.js
+  - js/mermaid-init.js
