@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex05-loops-and-branches"
+version = "0.1.0"
+description = "Operonx generator ops + if_ branching — pure compute."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx>=0.6.2",
+]

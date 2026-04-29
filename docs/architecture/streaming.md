@@ -3,6 +3,55 @@
 Operonx is **streaming-first**. The classic `ForOp` / `MapOp` / `WhileOp`
 classes were replaced by two patterns: generator ops and `GraphOp.loop`.
 
+## Per-yield dispatch
+
+When a generator op `yield`s, the scheduler treats each yield as an
+independent frame and dispatches downstream ops in parallel — not in
+a serial loop:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Scheduler
+    participant G as each_item (gen)
+    participant D1 as double #1
+    participant D2 as double #2
+    participant D3 as double #3
+    participant E as END
+
+    S->>G: dispatch (items=[1,2,3])
+    par per yield
+        G-->>S: Frame(value=1)
+        S->>D1: dispatch (value=1)
+    and
+        G-->>S: Frame(value=2)
+        S->>D2: dispatch (value=2)
+    and
+        G-->>S: Frame(value=3)
+        S->>D3: dispatch (value=3)
+    end
+    G-->>S: EOF
+    par per result
+        D1-->>S: Frame(result=2)
+        D2-->>S: Frame(result=4)
+        D3-->>S: Frame(result=6)
+    end
+    S-->>E: collected results
+```
+
+`G` doesn't wait for `D1` to finish before yielding the second item;
+the scheduler picks frames off `G` as fast as `G` can emit them, and
+each downstream `double` runs concurrently. Concurrency is bounded by
+the graph's `max_stream_concurrent` (per-op semaphore) and the
+runtime's `tokio` / `asyncio` thread pools.
+
+If you want collected-list semantics — wait for all yields, then run
+the next op once — apply `Ref.collect()` on the consumer's input:
+
+```python
+step = downstream(items=gen["value"].collect())
+```
+
 ## Generator ops
 
 Use `yield` inside an `@op` to iterate. Downstream ops run in parallel per

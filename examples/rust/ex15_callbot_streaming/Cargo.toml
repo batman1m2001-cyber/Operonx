@@ -1,0 +1,9 @@
+[package]
+name = "operonx-ex15-callbot-streaming"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+operonx = "0.6.2"
+serde_json = "1"

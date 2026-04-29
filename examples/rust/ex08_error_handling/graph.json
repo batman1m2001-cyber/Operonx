@@ -1,8 +1,8 @@
 {
   "capture": {
     "type": "graph",
-    "full_name": "error-capture",
-    "name": "error-capture",
+    "full_name": "capture",
+    "name": "capture",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -22,9 +22,9 @@
     "ops": {
       "fail": {
         "type": "code",
-        "full_name": "error-capture.fail",
+        "full_name": "capture.fail",
         "name": "fail",
-        "func_name": "examples.python.ex08_error_handling.workflow.failing",
+        "func_name": "failing",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -37,7 +37,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "error-capture",
+              "source": "capture",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -67,8 +67,8 @@
   },
   "routing": {
     "type": "graph",
-    "full_name": "error-routing",
-    "name": "error-routing",
+    "full_name": "routing",
+    "name": "routing",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -101,9 +101,9 @@
     "ops": {
       "divide": {
         "type": "code",
-        "full_name": "error-routing.divide",
+        "full_name": "routing.divide",
         "name": "divide",
-        "func_name": "examples.python.ex08_error_handling.workflow.safe_divide",
+        "func_name": "safe_divide",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -115,7 +115,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "error-routing",
+              "source": "routing",
               "var": "a",
               "transforms": [],
               "is_output": false
@@ -126,7 +126,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "error-routing",
+              "source": "routing",
               "var": "b",
               "transforms": [],
               "is_output": false
@@ -157,7 +157,7 @@
       },
       "router": {
         "type": "branch",
-        "full_name": "error-routing.router",
+        "full_name": "routing.router",
         "name": "router",
         "func_name": "core",
         "is_async": false,
@@ -177,7 +177,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "error-routing.divide",
+              "source": "routing.divide",
               "var": "success",
               "transforms": [],
               "is_output": false
@@ -208,7 +208,7 @@
         "cases": [
           {
             "condition": {
-              "source": "error-routing.divide",
+              "source": "routing.divide",
               "var": "success",
               "transforms": [],
               "is_output": false
@@ -221,9 +221,9 @@
       },
       "on_success": {
         "type": "code",
-        "full_name": "error-routing.on_success",
+        "full_name": "routing.on_success",
         "name": "on_success",
-        "func_name": "examples.python.ex08_error_handling.workflow.handle_success",
+        "func_name": "handle_success",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -235,7 +235,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "error-routing.divide",
+              "source": "routing.divide",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -248,7 +248,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "error-routing",
+              "source": "routing",
               "var": "output",
               "transforms": [],
               "is_output": false
@@ -259,9 +259,9 @@
       },
       "on_error": {
         "type": "code",
-        "full_name": "error-routing.on_error",
+        "full_name": "routing.on_error",
         "name": "on_error",
-        "func_name": "examples.python.ex08_error_handling.workflow.handle_error",
+        "func_name": "handle_error",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -273,7 +273,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "error-routing.divide",
+              "source": "routing.divide",
               "var": "error",
               "transforms": [],
               "is_output": false
@@ -286,7 +286,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "error-routing",
+              "source": "routing",
               "var": "output",
               "transforms": [],
               "is_output": false
@@ -353,8 +353,8 @@
   },
   "retry": {
     "type": "graph",
-    "full_name": "retry-fallback",
-    "name": "retry-fallback",
+    "full_name": "retry",
+    "name": "retry",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -387,9 +387,9 @@
     "ops": {
       "api_call": {
         "type": "code",
-        "full_name": "retry-fallback.api_call",
+        "full_name": "retry.api_call",
         "name": "api_call",
-        "func_name": "examples.python.ex08_error_handling.workflow.retry_with_backoff",
+        "func_name": "retry_with_backoff",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -401,7 +401,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "retry-fallback",
+              "source": "retry",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -430,11 +430,11 @@
           }
         }
       },
-      "fallback": {
+      "fb": {
         "type": "code",
-        "full_name": "retry-fallback.fallback",
-        "name": "fallback",
-        "func_name": "examples.python.ex08_error_handling.workflow.with_fallback",
+        "full_name": "retry.fb",
+        "name": "fb",
+        "func_name": "with_fallback",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -446,7 +446,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "retry-fallback.api_call",
+              "source": "retry.api_call",
               "var": "answer",
               "transforms": [],
               "is_output": false
@@ -457,7 +457,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "retry-fallback.api_call",
+              "source": "retry.api_call",
               "var": "success",
               "transforms": [],
               "is_output": false
@@ -470,7 +470,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "retry-fallback",
+              "source": "retry",
               "var": "output",
               "transforms": [],
               "is_output": false
@@ -481,7 +481,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "retry-fallback",
+              "source": "retry",
               "var": "used_fallback",
               "transforms": [],
               "is_output": false
@@ -494,7 +494,7 @@
     "edges": [
       {
         "from": "api_call",
-        "to": "fallback",
+        "to": "fb",
         "soft": false
       }
     ],
@@ -502,20 +502,20 @@
       "api_call"
     ],
     "exits": [
-      "fallback"
+      "fb"
     ],
     "initial_ready_count": {
       "api_call": 0,
-      "fallback": 1
+      "fb": 1
     },
     "compiled_adj": {
       "api_call": [
         [
-          "fallback",
+          "fb",
           false
         ]
       ],
-      "fallback": []
+      "fb": []
     },
     "stream_initial_ready": {},
     "loop_config": null,
@@ -524,8 +524,8 @@
   },
   "llm_fallback": {
     "type": "graph",
-    "full_name": "llm-fallback",
-    "name": "llm-fallback",
+    "full_name": "llm_fallback",
+    "name": "llm_fallback",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -542,15 +542,45 @@
       }
     },
     "outputs": {
-      "answer": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
         "ref": null,
         "literal": null
       },
-      "model": {
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -558,7 +588,7 @@
     "ops": {
       "p": {
         "type": "prompt",
-        "full_name": "llm-fallback.p",
+        "full_name": "llm_fallback.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -593,7 +623,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "llm-fallback",
+              "source": "llm_fallback",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -612,7 +642,7 @@
       },
       "llm": {
         "type": "llm",
-        "full_name": "llm-fallback.llm",
+        "full_name": "llm_fallback.llm",
         "name": "llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -626,7 +656,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "llm-fallback.p",
+              "source": "llm_fallback.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -722,15 +752,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "llm_fallback",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "llm-fallback",
-              "var": "answer",
+              "source": "llm_fallback",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -739,15 +774,20 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "llm_fallback",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "llm-fallback",
-              "var": "model",
+              "source": "llm_fallback",
+              "var": "model_used",
               "transforms": [],
               "is_output": false
             },
@@ -756,19 +796,34 @@
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "llm_fallback",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "llm_fallback",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "llm_fallback",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },

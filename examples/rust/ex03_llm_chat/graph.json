@@ -1,8 +1,8 @@
 {
   "basic": {
     "type": "graph",
-    "full_name": "basic-chat",
-    "name": "basic-chat",
+    "full_name": "basic",
+    "name": "basic",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -19,9 +19,45 @@
       }
     },
     "outputs": {
-      "answer": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -29,7 +65,7 @@
     "ops": {
       "p": {
         "type": "prompt",
-        "full_name": "basic-chat.p",
+        "full_name": "basic.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -64,7 +100,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "basic-chat",
+              "source": "basic",
               "var": "question",
               "transforms": [],
               "is_output": false
@@ -83,7 +119,7 @@
       },
       "llm": {
         "type": "llm",
-        "full_name": "basic-chat.llm",
+        "full_name": "basic.llm",
         "name": "llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -97,7 +133,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "basic-chat.p",
+              "source": "basic.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -193,15 +229,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "basic-chat",
-              "var": "answer",
+              "source": "basic",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -210,31 +251,56 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "model_used",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "basic",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },
@@ -279,8 +345,8 @@
   },
   "chain": {
     "type": "graph",
-    "full_name": "chain-chat",
-    "name": "chain-chat",
+    "full_name": "chain",
+    "name": "chain",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -297,9 +363,45 @@
       }
     },
     "outputs": {
-      "response": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -307,7 +409,7 @@
     "ops": {
       "c": {
         "type": "graph",
-        "full_name": "chain-chat.c",
+        "full_name": "chain.c",
         "name": "c",
         "func_name": null,
         "is_async": false,
@@ -333,7 +435,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "chain-chat",
+              "source": "chain",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -360,15 +462,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "chain-chat",
-              "var": "response",
+              "source": "chain",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -377,38 +484,63 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "model_used",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "chain",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },
         "ops": {
           "prompt": {
             "type": "prompt",
-            "full_name": "chain-chat.c.prompt",
+            "full_name": "chain.c.prompt",
             "name": "prompt",
             "func_name": "_format",
             "is_async": true,
@@ -431,7 +563,7 @@
                 "default": [],
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "conversation_history",
                   "transforms": [],
                   "is_output": false
@@ -442,7 +574,7 @@
                 "default": [],
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "tool_results",
                   "transforms": [],
                   "is_output": false
@@ -453,7 +585,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "query",
                   "transforms": [],
                   "is_output": false
@@ -472,7 +604,7 @@
           },
           "llm": {
             "type": "llm",
-            "full_name": "chain-chat.c.llm",
+            "full_name": "chain.c.llm",
             "name": "llm",
             "func_name": "_generate_core",
             "is_async": true,
@@ -486,7 +618,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-chat.c.prompt",
+                  "source": "chain.c.prompt",
                   "var": "messages",
                   "transforms": [],
                   "is_output": false
@@ -583,7 +715,7 @@
                 "default": "assistant",
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "role",
                   "transforms": [],
                   "is_output": false
@@ -594,7 +726,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "content",
                   "transforms": [],
                   "is_output": false
@@ -605,7 +737,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "finish_reason",
                   "transforms": [],
                   "is_output": false
@@ -616,7 +748,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "model_used",
                   "transforms": [],
                   "is_output": false
@@ -627,7 +759,7 @@
                 "default": [],
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "tool_calls",
                   "transforms": [],
                   "is_output": false
@@ -638,7 +770,7 @@
                 "default": {},
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "usage",
                   "transforms": [],
                   "is_output": false
@@ -649,7 +781,7 @@
                 "default": {},
                 "required": false,
                 "ref": {
-                  "source": "chain-chat.c",
+                  "source": "chain.c",
                   "var": "extras",
                   "transforms": [],
                   "is_output": false
@@ -716,8 +848,8 @@
   },
   "summarize": {
     "type": "graph",
-    "full_name": "summarize-pipeline",
-    "name": "summarize-pipeline",
+    "full_name": "summarize",
+    "name": "summarize",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -734,19 +866,55 @@
       }
     },
     "outputs": {
-      "summary": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
     },
     "ops": {
-      "preprocess": {
+      "pre": {
         "type": "code",
-        "full_name": "summarize-pipeline.preprocess",
-        "name": "preprocess",
-        "func_name": "examples.python.ex03_llm_chat.workflow.clean_text",
+        "full_name": "summarize.pre",
+        "name": "pre",
+        "func_name": "clean_text",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -758,7 +926,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "summarize-pipeline",
+              "source": "summarize",
               "var": "text",
               "transforms": [],
               "is_output": false
@@ -777,7 +945,7 @@
       },
       "p": {
         "type": "prompt",
-        "full_name": "summarize-pipeline.p",
+        "full_name": "summarize.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -812,7 +980,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "summarize-pipeline.preprocess",
+              "source": "summarize.pre",
               "var": "cleaned_text",
               "transforms": [],
               "is_output": false
@@ -831,7 +999,7 @@
       },
       "summarize": {
         "type": "llm",
-        "full_name": "summarize-pipeline.summarize",
+        "full_name": "summarize.summarize",
         "name": "summarize",
         "func_name": "_generate_core",
         "is_async": true,
@@ -845,7 +1013,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "summarize-pipeline.p",
+              "source": "summarize.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -941,15 +1109,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "summarize-pipeline",
-              "var": "summary",
+              "source": "summarize",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -958,31 +1131,56 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "model_used",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "summarize",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },
@@ -996,7 +1194,7 @@
     },
     "edges": [
       {
-        "from": "preprocess",
+        "from": "pre",
         "to": "p",
         "soft": false
       },
@@ -1007,18 +1205,18 @@
       }
     ],
     "entries": [
-      "preprocess"
+      "pre"
     ],
     "exits": [
       "summarize"
     ],
     "initial_ready_count": {
-      "preprocess": 0,
+      "pre": 0,
       "p": 1,
       "summarize": 1
     },
     "compiled_adj": {
-      "preprocess": [
+      "pre": [
         [
           "p",
           false

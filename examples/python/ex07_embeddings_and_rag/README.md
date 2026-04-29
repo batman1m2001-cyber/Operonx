@@ -1,20 +1,33 @@
 # 07 — Embeddings & RAG (Python)
 
-Embedding-only, simple RAG with cosine search, and optional RAG with reranker.
+Embed text into vectors, run cosine search RAG, and (optionally) gate
+results through a reranker.
 
-| Scenario | Ops                                                                 | Notes                                      |
-|----------|---------------------------------------------------------------------|--------------------------------------------|
-| `embed`  | `EmbeddingOp`                                                       | Plain embedding of two short texts.        |
-| `rag`    | `EmbeddingOp → retrieve → PromptOp → LLMOp`                         | Cosine search against pre-embedded docs.   |
-| `rerank` | `RerankOp → PromptOp → LLMOp`                                       | Uses a `bge-m3` reranker resource.         |
+| Scenario | Ops                                                       | Notes                                      |
+|----------|-----------------------------------------------------------|--------------------------------------------|
+| `embed`  | `EmbeddingOp`                                             | Plain embedding of two short texts         |
+| `rag`    | `EmbeddingOp → retrieve → PromptOp → LLMOp`               | Cosine search against pre-embedded docs    |
+| `rerank` | `RerankOp → PromptOp → LLMOp`                             | Uses a `bge-m3` reranker resource          |
 
-Requires `OPENAI_API_KEY` in `.env`. The `rerank` scenario additionally needs a reranker resource (e.g. `bge-m3`) exposed in `resources.yaml`.
+The `rerank` scenario gracefully skips if `reranker:bge-m3` isn't
+configured in `resources.yaml`.
+
+## Project layout
+
+```
+ex07_embeddings_and_rag/
+├── pyproject.toml      # operonx[providers]>=0.6.2 (tier 4 meta — pulls numpy + aiohttp)
+├── README.md
+├── .env.example        # OPENAI_API_KEY
+├── resources.yaml      # embedding:openai + llm:gpt-4o-mini (+ optional reranker:bge-m3)
+└── main.py
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex07_embeddings_and_rag.demo
-uv run python -m examples.python.ex07_embeddings_and_rag.demo --runs 5
+uv sync
+cp .env.example .env
+# Edit .env — fill in OPENAI_API_KEY
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex07_embeddings_and_rag_python.json`.

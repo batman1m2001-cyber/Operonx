@@ -1,0 +1,9 @@
+[project]
+name = "operonx-ex07-embeddings-and-rag"
+version = "0.1.0"
+description = "Operonx embeddings + RAG with optional reranker."
+requires-python = ">=3.10"
+dependencies = [
+    # Tier 4 meta — pulls openai SDK, aiohttp (for vLLM/TEI clients), numpy.
+    "operonx[providers]>=0.6.2",
+]

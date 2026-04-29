@@ -1,6 +1,0 @@
-{
-  "capture": {},
-  "routing": {"a": 10, "b": 3},
-  "retry": {"query": "What is AI?"},
-  "llm_fallback": {"query": "What is Python?"}
-}

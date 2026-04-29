@@ -1,8 +1,8 @@
 {
   "keyword_rrf": {
     "type": "graph",
-    "full_name": "keyword-rrf",
-    "name": "keyword-rrf",
+    "full_name": "keyword_rrf",
+    "name": "keyword_rrf",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -35,9 +35,9 @@
     "ops": {
       "s_orig": {
         "type": "code",
-        "full_name": "keyword-rrf.s_orig",
+        "full_name": "keyword_rrf.s_orig",
         "name": "s_orig",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.search_original",
+        "func_name": "search_original",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -49,7 +49,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf",
+              "source": "keyword_rrf",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -60,7 +60,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf",
+              "source": "keyword_rrf",
               "var": "documents",
               "transforms": [],
               "is_output": false
@@ -79,9 +79,9 @@
       },
       "s_exp": {
         "type": "code",
-        "full_name": "keyword-rrf.s_exp",
+        "full_name": "keyword_rrf.s_exp",
         "name": "s_exp",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.search_expanded",
+        "func_name": "search_expanded",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -93,7 +93,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf",
+              "source": "keyword_rrf",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -104,7 +104,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf",
+              "source": "keyword_rrf",
               "var": "documents",
               "transforms": [],
               "is_output": false
@@ -123,9 +123,9 @@
       },
       "m": {
         "type": "code",
-        "full_name": "keyword-rrf.m",
+        "full_name": "keyword_rrf.m",
         "name": "m",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.rrf_merge",
+        "func_name": "rrf_merge",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -137,7 +137,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf.s_orig",
+              "source": "keyword_rrf.s_orig",
               "var": "results",
               "transforms": [],
               "is_output": false
@@ -148,7 +148,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "keyword-rrf.s_exp",
+              "source": "keyword_rrf.s_exp",
               "var": "results",
               "transforms": [],
               "is_output": false
@@ -161,7 +161,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "keyword-rrf",
+              "source": "keyword_rrf",
               "var": "results",
               "transforms": [],
               "is_output": false
@@ -217,8 +217,8 @@
   },
   "hybrid": {
     "type": "graph",
-    "full_name": "hybrid-rag",
-    "name": "hybrid-rag",
+    "full_name": "hybrid",
+    "name": "hybrid",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -253,9 +253,45 @@
         "ref": null,
         "literal": null
       },
-      "answer": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
+        "default": null,
+        "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -263,9 +299,9 @@
     "ops": {
       "kw": {
         "type": "code",
-        "full_name": "hybrid-rag.kw",
+        "full_name": "hybrid.kw",
         "name": "kw",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.kw_search_fn",
+        "func_name": "kw_search_fn",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -277,7 +313,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -288,7 +324,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "documents",
               "transforms": [],
               "is_output": false
@@ -307,7 +343,7 @@
       },
       "embed_q": {
         "type": "embedding",
-        "full_name": "hybrid-rag.embed_q",
+        "full_name": "hybrid.embed_q",
         "name": "embed_q",
         "func_name": "_process",
         "is_async": true,
@@ -321,7 +357,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -341,9 +377,9 @@
       },
       "vec": {
         "type": "code",
-        "full_name": "hybrid-rag.vec",
+        "full_name": "hybrid.vec",
         "name": "vec",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.vec_search_fn",
+        "func_name": "vec_search_fn",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -355,7 +391,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag.embed_q",
+              "source": "hybrid.embed_q",
               "var": "embeddings",
               "transforms": [],
               "is_output": false
@@ -366,7 +402,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "documents",
               "transforms": [],
               "is_output": false
@@ -377,7 +413,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "doc_vectors",
               "transforms": [],
               "is_output": false
@@ -396,9 +432,9 @@
       },
       "mrg": {
         "type": "code",
-        "full_name": "hybrid-rag.mrg",
+        "full_name": "hybrid.mrg",
         "name": "mrg",
-        "func_name": "examples.python.ex12_rag_advanced.workflow.merge_results",
+        "func_name": "merge_results",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -410,7 +446,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag.kw",
+              "source": "hybrid.kw",
               "var": "results",
               "transforms": [],
               "is_output": false
@@ -421,7 +457,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag.vec",
+              "source": "hybrid.vec",
               "var": "results",
               "transforms": [],
               "is_output": false
@@ -434,7 +470,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "sources",
               "transforms": [],
               "is_output": false
@@ -445,7 +481,7 @@
       },
       "p": {
         "type": "prompt",
-        "full_name": "hybrid-rag.p",
+        "full_name": "hybrid.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -480,7 +516,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "hybrid-rag.mrg",
+              "source": "hybrid.mrg",
               "var": "context_docs",
               "transforms": [],
               "is_output": false
@@ -491,7 +527,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "hybrid-rag",
+              "source": "hybrid",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -510,7 +546,7 @@
       },
       "llm": {
         "type": "llm",
-        "full_name": "hybrid-rag.llm",
+        "full_name": "hybrid.llm",
         "name": "llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -524,7 +560,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag.p",
+              "source": "hybrid.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -620,15 +656,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "hybrid-rag",
-              "var": "answer",
+              "source": "hybrid",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -637,31 +678,56 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "model_used",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "hybrid",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },

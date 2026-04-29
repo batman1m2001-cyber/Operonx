@@ -30,16 +30,15 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
 
-use crate::core::configs::op_config::{CompiledLink, LoopConfig, OpConfig, OpType};
+use crate::core::configs::op_config::{CompiledLink, LoopConfig, OpBound, OpConfig, OpType};
 use crate::core::engine::{FrameEvent, FrameSender, Scheduler};
 use crate::core::exceptions::{OpError, OperonError};
 use crate::core::middleware::MiddlewareContext;
 use crate::core::ops::edges::PARENT;
 use crate::core::registry::OpRegistry;
 use crate::core::states::cell::{default_context, ContextId};
-use crate::core::states::ref_::RefConfig;
+use crate::core::states::ref_::{RefArg, RefConfig, RefTransform};
 
 // ── State slot key ────────────────────────────────────────────────────────
 
@@ -116,6 +115,14 @@ pub struct GraphScheduler {
     /// `outputs[var].ref` points at PARENT with `is_output = true`. These are
     /// the ones the scheduler forwards to the external frame stream.
     out_vars: HashMap<String, Vec<(String, String)>>,
+    /// Pre-built sub-schedulers for every nested `OpType::Graph` op, keyed
+    /// by the child op's `full_name`. Built recursively at parent
+    /// construction so the runtime hot path never builds a sub-engine —
+    /// nested dispatch is a single map lookup + inline `run_collect`.
+    /// Wrapped in `Arc` for cheap cloning into spawned op-execution
+    /// tasks (the io/cpu dispatch path uses `tokio::spawn` with a `move`
+    /// closure).
+    child_schedulers: Arc<HashMap<String, Arc<GraphScheduler>>>,
 }
 
 impl std::fmt::Debug for GraphScheduler {
@@ -129,7 +136,10 @@ impl std::fmt::Debug for GraphScheduler {
 
 impl GraphScheduler {
     /// Build a scheduler for `graph`. Validates that the top-level op is a
-    /// graph and pre-computes PARENT-bound output var mappings.
+    /// graph, pre-computes PARENT-bound output var mappings, and
+    /// recursively constructs sub-schedulers for every nested
+    /// `OpType::Graph` so the runtime nested-dispatch path is a single
+    /// map lookup.
     pub fn new(graph: Arc<OpConfig>, registry: Arc<dyn OpRegistry>) -> Result<Self, OperonError> {
         if !graph.is_graph() {
             return Err(OperonError::Config(format!(
@@ -138,10 +148,12 @@ impl GraphScheduler {
             )));
         }
         let out_vars = compute_out_vars(&graph);
+        let child_schedulers = Arc::new(build_child_schedulers(&graph, &registry)?);
         Ok(Self {
             graph,
             registry,
             out_vars,
+            child_schedulers,
         })
     }
 
@@ -154,6 +166,63 @@ impl GraphScheduler {
             &self.graph.full_name
         }
     }
+
+    /// Inline nested-dispatch fast-path. Runs this scheduler in the
+    /// caller's task with a tap-only `FrameSender` (no `tokio::spawn`,
+    /// no `mpsc::channel(64)` allocation, no `pump_loop`, no UUID gen,
+    /// no middleware). Returns the aggregated PARENT-bound outputs as
+    /// a `Map<String, Value>` ready to flow into the calling op's
+    /// frame.
+    ///
+    /// This is what `OpType::Graph` calls in `execute_op` instead of
+    /// the heavy `Operon::run_json_async` round-trip.
+    pub async fn run_collect(&self, inputs: Map<String, Value>) -> Result<Value, OperonError> {
+        use crate::core::engine::{FrameSender, TraceTap};
+
+        let tap: TraceTap = Arc::new(Mutex::new(Vec::new()));
+        let sender = FrameSender::tap_only(tap.clone());
+        let cancel = CancellationToken::new();
+        let ctx = MiddlewareContext::default();
+
+        // `run` only emits external frames via `sender.send` for
+        // PARENT-bound output ops (and the loop summary frame), so the
+        // tap accumulates exactly what we want and nothing else.
+        Scheduler::run(self, inputs, ctx, sender, cancel).await?;
+
+        // Merge every captured frame's `data` map. Multiple output ops
+        // each contribute their dst_var → value pairs; later frames
+        // overwrite earlier ones for the same key (Python parity).
+        let frames = std::mem::take(&mut *tap.lock());
+        let mut out: Map<String, Value> = Map::new();
+        for frame in frames {
+            for (k, v) in frame.data {
+                out.insert(k, v);
+            }
+        }
+        Ok(Value::Object(out))
+    }
+}
+
+/// Recursively build sub-schedulers for every nested `OpType::Graph` in
+/// `graph`. Each child gets its own `GraphScheduler` (with its own child
+/// map, recursively) so the runtime never builds a sub-engine on the
+/// hot path. Sub-schedulers share the parent's `OpRegistry` so
+/// `#[op]`-registered functions resolve identically at every depth.
+fn build_child_schedulers(
+    graph: &OpConfig,
+    registry: &Arc<dyn OpRegistry>,
+) -> Result<HashMap<String, Arc<GraphScheduler>>, OperonError> {
+    let mut out: HashMap<String, Arc<GraphScheduler>> = HashMap::new();
+    for (_, child) in &graph.ops {
+        if matches!(child.kind, OpType::Graph) {
+            let sub = Arc::new(GraphScheduler::new(
+                Arc::new(child.clone()),
+                registry.clone(),
+            )?);
+            out.insert(child.full_name.clone(), sub);
+        }
+    }
+    Ok(out)
 }
 
 #[async_trait]
@@ -276,8 +345,10 @@ impl GraphScheduler {
         ));
 
         // Internal event queue — op execution tasks post here, the main loop
-        // drains it. Bounded per plan §1.
-        let (tx, mut rx) = mpsc::channel::<SchedulerEvent>(256);
+        // drains it. Sized generously so the inline fast path (sync ops that
+        // bypass `tokio::spawn` and post events from inside `on_frame`) can
+        // never deadlock by filling the channel mid-handler.
+        let (tx, mut rx) = mpsc::channel::<SchedulerEvent>(8192);
 
         // ── Seed entry ops ────────────────────────────────────────────────
         for entry in &self.graph.entries {
@@ -289,7 +360,8 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         }
 
         // ── Main event loop ───────────────────────────────────────────────
@@ -346,7 +418,8 @@ impl GraphScheduler {
                                 tx.clone(),
                                 sem.clone(),
                                 cancel,
-                            )?;
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -358,7 +431,21 @@ impl GraphScheduler {
 
     /// Dispatch one op — resolve its inputs, call the function, push Frame/Eof
     /// events back onto the scheduler's internal queue.
-    fn spawn_op(
+    ///
+    /// Two dispatch paths:
+    ///
+    /// * **Inline (`bound: Sync`)** — runs in the caller's task with no
+    ///   `tokio::spawn`, no semaphore acquire, and the events go onto the
+    ///   queue via `try_send`. This is the hot path: a 500-op linear chain
+    ///   of sync ops doesn't pay 500 task spawns + 500 semaphore awaits.
+    /// * **Spawned (`bound: Io | Cpu`)** — existing `tokio::spawn` path with
+    ///   the concurrency semaphore. Required for ops that may yield on I/O
+    ///   or do real CPU work that would block the scheduler task.
+    ///
+    /// The op's `Future` is awaited in both paths; for sync ops the
+    /// future-from-`#[op]` resolves on the first poll without yielding so
+    /// "inline" is essentially synchronous.
+    async fn spawn_op(
         &self,
         op_name: String,
         ctx: ContextId,
@@ -374,8 +461,95 @@ impl GraphScheduler {
             .ok_or_else(|| OperonError::Config(format!("op '{}' not in graph", op_name)))?
             .clone();
         let registry = self.registry.clone();
+        let child_schedulers = self.child_schedulers.clone();
         let graph_key = self.graph_key().to_string();
 
+        // ── Inline fast path for sync ops ──────────────────────────────────
+        if matches!(op_cfg.bound, OpBound::Sync) {
+            if cancel.is_cancelled() {
+                return Ok(());
+            }
+            let result_map = if matches!(op_cfg.kind, OpType::Branch) {
+                // Branch ops never call user code — the "execution" is a
+                // condition-eval loop over `op_cfg.cases`. Done inline so
+                // we can read state without re-locking through the
+                // resolve_inputs/execute_op split.
+                match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
+                    Ok(target) => {
+                        let mut m = Map::new();
+                        m.insert("__branch_target__".into(), Value::from(target.clone()));
+                        {
+                            let mut s = state.lock();
+                            s.set(
+                                &op_cfg.full_name,
+                                "__branch_target__",
+                                &ctx,
+                                Value::from(target),
+                            );
+                        }
+                        m
+                    }
+                    Err(e) => {
+                        {
+                            let mut s = state.lock();
+                            s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                        }
+                        error_frame(&e)
+                    }
+                }
+            } else {
+                match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+                    Err(e) => error_frame(&e),
+                    Ok(inputs) => {
+                        match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
+                            Ok(value) => {
+                                let map = value_to_map(value);
+                                {
+                                    let mut s = state.lock();
+                                    for (k, v) in &map {
+                                        s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                                    }
+                                }
+                                map
+                            }
+                            Err(e) => {
+                                {
+                                    let mut s = state.lock();
+                                    s.set(
+                                        &op_cfg.full_name,
+                                        "error",
+                                        &ctx,
+                                        Value::from(e.to_string()),
+                                    );
+                                }
+                                error_frame(&e)
+                            }
+                        }
+                    }
+                }
+            };
+            // `try_send` keeps the inline path zero-await on the happy path.
+            // Channel is sized generously (8192) so this is overflow-only;
+            // fall back to `send().await` if it ever fills.
+            for ev in [
+                SchedulerEvent::Frame {
+                    op: op_name.clone(),
+                    ctx: ctx.clone(),
+                    result: result_map,
+                },
+                SchedulerEvent::Eof {
+                    op: op_name,
+                    ctx: ctx.clone(),
+                },
+            ] {
+                if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(ev) {
+                    let _ = tx.send(ev).await;
+                }
+            }
+            return Ok(());
+        }
+
+        // ── Spawn path for io/cpu ──────────────────────────────────────────
         tokio::spawn(async move {
             let _permit = match sem.acquire_owned().await {
                 Ok(p) => p,
@@ -385,8 +559,6 @@ impl GraphScheduler {
                 return;
             }
 
-            // Resolve inputs from state via the op's ref/literal/default
-            // declarations.
             let inputs = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
                 Ok(m) => m,
                 Err(e) => {
@@ -402,20 +574,11 @@ impl GraphScheduler {
                 }
             };
 
-            let exec_result = execute_op(&op_cfg, &registry, inputs).await;
+            let exec_result = execute_op(&op_cfg, &registry, inputs, &child_schedulers).await;
 
             match exec_result {
                 Ok(value) => {
-                    let result_map = match value {
-                        Value::Object(m) => m,
-                        other => {
-                            let mut m = Map::new();
-                            m.insert("result".into(), other);
-                            m
-                        }
-                    };
-                    // Persist the op's outputs into state before emitting the
-                    // Frame so downstream ops see them.
+                    let result_map = value_to_map(value);
                     {
                         let mut s = state.lock();
                         for (k, v) in &result_map {
@@ -518,7 +681,7 @@ impl GraphScheduler {
                     continue;
                 }
             }
-            self.route_edge(
+            self.route_edge_async(
                 op,
                 &link,
                 ctx,
@@ -533,13 +696,14 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel,
-            )?;
+            )
+            .await?;
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn route_edge(
+    async fn route_edge_async(
         &self,
         src: &str,
         link: &CompiledLink,
@@ -594,7 +758,8 @@ impl GraphScheduler {
                     tx,
                     sem,
                     cancel.clone(),
-                )?;
+                )
+                .await?;
                 return Ok(());
             }
         }
@@ -612,7 +777,8 @@ impl GraphScheduler {
                 tx,
                 sem,
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         } else {
             seq_queues.entry(key).or_default().push_back(ctx.clone());
         }
@@ -645,7 +811,7 @@ impl GraphScheduler {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn on_eof(
+    async fn on_eof(
         &self,
         op: &str,
         ctx: &ContextId,
@@ -706,7 +872,8 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
-            )?;
+            )
+            .await?;
         }
 
         // Advance the sequential queue if this EOF unblocks a following item.
@@ -715,7 +882,8 @@ impl GraphScheduler {
                 if let Some(next_ctx) = q.pop_front() {
                     seq_origins.insert((key.1.clone(), next_ctx.clone()), key.clone());
                     *inflight += 1;
-                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())?;
+                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())
+                        .await?;
                 } else {
                     seq_active.insert(key, false);
                 }
@@ -829,30 +997,295 @@ fn resolve_ref(
     } else {
         &ref_cfg.source
     };
-    let s = state.lock();
-    let base = s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
-        OperonError::State(format!(
-            "ref resolution: no value for ({}, {}) at context {:?}",
-            source, ref_cfg.var, ctx
-        ))
-    })?;
-    // Phase 4: transforms are not applied. Refs with transforms remain for
-    // Phase 5/6 when the ref evaluator is wired up.
-    if !ref_cfg.transforms.is_empty() {
-        debug!(
-            "ref transforms not yet applied (target: {}.{}, {} transforms)",
-            source,
-            ref_cfg.var,
-            ref_cfg.transforms.len()
-        );
+    let base = {
+        let s = state.lock();
+        s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
+            OperonError::State(format!(
+                "ref resolution: no value for ({}, {}) at context {:?}",
+                source, ref_cfg.var, ctx
+            ))
+        })?
+    };
+
+    // Walk the chain — each transform takes the running value + its
+    // (literal | nested-Ref) args and produces the next running value.
+    let mut current = base;
+    for transform in &ref_cfg.transforms {
+        current = apply_transform(current, transform, graph_key, ctx, state)?;
     }
-    Ok(base)
+    Ok(current)
+}
+
+/// Resolve one [`RefArg`] to a concrete `Value`. Literals pass through;
+/// nested Refs are recursively resolved (used by boolean operators that
+/// combine two Refs).
+fn resolve_ref_arg(
+    arg: &RefArg,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    match arg {
+        RefArg::Literal(v) => Ok(v.clone()),
+        RefArg::NestedRef(inner) => resolve_ref(inner, graph_key, ctx, state),
+    }
+}
+
+/// Apply one [`RefTransform`] to `value`. Mirrors Python's
+/// `Ref._wrap` dispatch table — every operator that the Python decorator
+/// emits via `_with_transform` has a branch here.
+///
+/// Numeric arithmetic is performed on `f64` (Python parity for mixed
+/// int/float). Comparisons accept any JSON `Value`; boolean operators
+/// short-circuit using JSON-truthiness rules.
+///
+/// Operators not implemented yet: `apply` (Python-callable),
+/// `matmul`/`rmatmul` (numpy-only), `call` (Python-callable).
+fn apply_transform(
+    value: Value,
+    transform: &RefTransform,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    let name = transform.name.as_str();
+    let args = &transform.args;
+    let arg0 = || -> Result<Value, OperonError> {
+        match args.first() {
+            Some(a) => resolve_ref_arg(a, graph_key, ctx, state),
+            None => Ok(Value::Null),
+        }
+    };
+
+    match name {
+        // ── Comparison ──────────────────────────────────────────────────
+        "eq" => Ok(Value::Bool(values_equal(&value, &arg0()?))),
+        "ne" => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
+        "lt" => cmp_op(&value, &arg0()?, |o| o.is_lt()),
+        "le" => cmp_op(&value, &arg0()?, |o| o.is_le()),
+        "gt" => cmp_op(&value, &arg0()?, |o| o.is_gt()),
+        "ge" => cmp_op(&value, &arg0()?, |o| o.is_ge()),
+        "contains" => Ok(Value::Bool(value_contains(&value, &arg0()?))),
+
+        // ── Access ──────────────────────────────────────────────────────
+        "getitem" | "getattr" => Ok(value_getitem(&value, &arg0()?)),
+
+        // ── Boolean ─────────────────────────────────────────────────────
+        "and_" => {
+            if !value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        "rand_" => {
+            let lhs = arg0()?;
+            if !value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        "or_" => {
+            if value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        "ror_" => {
+            let lhs = arg0()?;
+            if value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        "not_" => Ok(Value::Bool(!value_truthy(&value))),
+
+        // ── Arithmetic ──────────────────────────────────────────────────
+        "add" => arith(&value, &arg0()?, |l, r| l + r),
+        "radd" => arith(&arg0()?, &value, |l, r| l + r),
+        "sub" => arith(&value, &arg0()?, |l, r| l - r),
+        "rsub" => arith(&arg0()?, &value, |l, r| l - r),
+        "mul" => arith(&value, &arg0()?, |l, r| l * r),
+        "rmul" => arith(&arg0()?, &value, |l, r| l * r),
+        "truediv" => arith(&value, &arg0()?, |l, r| l / r),
+        "rtruediv" => arith(&arg0()?, &value, |l, r| l / r),
+        "floordiv" => arith(&value, &arg0()?, |l, r| (l / r).floor()),
+        "rfloordiv" => arith(&arg0()?, &value, |l, r| (l / r).floor()),
+        "mod" => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
+        "rmod" => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
+        "pow" => arith(&value, &arg0()?, |l, r| l.powf(r)),
+        "rpow" => arith(&arg0()?, &value, |l, r| l.powf(r)),
+
+        // ── Unary ───────────────────────────────────────────────────────
+        "neg" => unary(&value, |v| -v),
+        "pos" => unary(&value, |v| v),
+        "abs" => unary(&value, |v| v.abs()),
+
+        // ── Not yet implemented ─────────────────────────────────────────
+        other => Err(OperonError::Runtime(format!(
+            "ref transform '{}' not implemented in Rust runtime (target: {}.{})",
+            other,
+            graph_key,
+            ref_cfg_var_for_error(transform)
+        ))),
+    }
+}
+
+/// Best-effort var label for error messages — the transform itself doesn't
+/// know which var it belongs to, so we just return the op name.
+fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
+    "<transform>"
+}
+
+/// Evaluate a `BranchOp`'s cases. Walks `op_cfg.cases` in order, resolving
+/// each `condition` Ref (with its transforms) to a `Value`, and returns
+/// the `target` of the first case whose condition is truthy. If no case
+/// matches and `op_cfg.default` is set, returns that. Otherwise errors
+/// — Python's `BranchOp.run` raises `BranchError` in the same scenario.
+fn evaluate_branch(
+    op_cfg: &OpConfig,
+    graph_key: &str,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<String, OperonError> {
+    for case in &op_cfg.cases {
+        let v = resolve_ref(&case.condition, graph_key, ctx, state)?;
+        if value_truthy(&v) {
+            return Ok(case.target.clone());
+        }
+    }
+    if let Some(d) = &op_cfg.default {
+        return Ok(d.clone());
+    }
+    Err(OperonError::Runtime(format!(
+        "branch '{}' has no matching case and no default",
+        op_cfg.full_name
+    )))
+}
+
+/// JSON-value equality with Python-ish numeric coercion (3 == 3.0).
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(an), Value::Number(bn)) => match (an.as_f64(), bn.as_f64()) {
+            (Some(af), Some(bf)) => af == bf,
+            _ => an == bn,
+        },
+        _ => a == b,
+    }
+}
+
+fn cmp_op(
+    a: &Value,
+    b: &Value,
+    pred: impl Fn(std::cmp::Ordering) -> bool,
+) -> Result<Value, OperonError> {
+    use std::cmp::Ordering;
+    let ord = match (a, b) {
+        (Value::Number(an), Value::Number(bn)) => match (an.as_f64(), bn.as_f64()) {
+            (Some(af), Some(bf)) => af.partial_cmp(&bf).unwrap_or(Ordering::Equal),
+            _ => Ordering::Equal,
+        },
+        (Value::String(a), Value::String(b)) => a.cmp(b),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        _ => {
+            return Err(OperonError::Runtime(format!(
+                "ref comparison: cannot compare {:?} and {:?}",
+                a, b
+            )));
+        }
+    };
+    Ok(Value::Bool(pred(ord)))
+}
+
+fn value_contains(haystack: &Value, needle: &Value) -> bool {
+    match haystack {
+        Value::Array(items) => items.iter().any(|x| values_equal(x, needle)),
+        Value::Object(map) => match needle {
+            Value::String(s) => map.contains_key(s),
+            _ => false,
+        },
+        Value::String(s) => match needle {
+            Value::String(sub) => s.contains(sub.as_str()),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// `value[key]` — for objects (string key) and arrays (numeric index).
+/// Returns `Value::Null` on miss to match Python's KeyError-vs-None
+/// nuance loosely; pure-bool transforms downstream see Null as falsy.
+fn value_getitem(value: &Value, key: &Value) -> Value {
+    match (value, key) {
+        (Value::Object(map), Value::String(k)) => map.get(k).cloned().unwrap_or(Value::Null),
+        (Value::Array(items), Value::Number(n)) => {
+            if let Some(i) = n.as_i64() {
+                let idx = if i < 0 {
+                    (items.len() as i64 + i) as usize
+                } else {
+                    i as usize
+                };
+                items.get(idx).cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
+/// Python truthiness: `False`, `None`/null, 0, "", [], {} are falsy.
+fn value_truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(m) => !m.is_empty(),
+    }
+}
+
+/// Coerce two `Value`s to f64 and apply `op`. Returns the result as a
+/// `Value::Number`. Errors when either side isn't a number.
+fn arith(a: &Value, b: &Value, op: impl Fn(f64, f64) -> f64) -> Result<Value, OperonError> {
+    let (af, bf) = match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => (x, y),
+        _ => {
+            return Err(OperonError::Runtime(format!(
+                "ref arithmetic: non-numeric operands {:?} and {:?}",
+                a, b
+            )))
+        }
+    };
+    let result = op(af, bf);
+    serde_json::Number::from_f64(result)
+        .map(Value::Number)
+        .ok_or_else(|| {
+            OperonError::Runtime(format!("ref arithmetic produced non-finite: {}", result))
+        })
+}
+
+fn unary(a: &Value, op: impl Fn(f64) -> f64) -> Result<Value, OperonError> {
+    let af = a.as_f64().ok_or_else(|| {
+        OperonError::Runtime(format!("ref unary op: non-numeric operand {:?}", a))
+    })?;
+    let result = op(af);
+    serde_json::Number::from_f64(result)
+        .map(Value::Number)
+        .ok_or_else(|| {
+            OperonError::Runtime(format!("ref unary op produced non-finite: {}", result))
+        })
 }
 
 async fn execute_op(
     op_cfg: &OpConfig,
     registry: &Arc<dyn OpRegistry>,
     inputs: Map<String, Value>,
+    child_schedulers: &Arc<HashMap<String, Arc<GraphScheduler>>>,
 ) -> Result<Value, OperonError> {
     use crate::providers::ops::{execute_provider_op, is_provider_kind};
 
@@ -884,10 +1317,23 @@ async fn execute_op(
                 })?;
             func(inputs).await
         }
-        OpType::Graph => Err(OperonError::Runtime(format!(
-            "nested graph ops not yet supported — deferred past Phase 4 ({})",
-            op_cfg.full_name
-        ))),
+        OpType::Graph => {
+            // Nested @graph dispatch — single map lookup into the parent
+            // scheduler's pre-built child schedulers, then `run_collect`
+            // inline (no `tokio::spawn`, no `mpsc::channel(64)`, no UUID
+            // gen, no middleware). Mirrors Python's
+            // `child._scheduler.run(state, ctx)` which is the same
+            // shape: a recursive call into a pre-built scheduler with
+            // shared state semantics.
+            let child = child_schedulers.get(&op_cfg.full_name).ok_or_else(|| {
+                OperonError::Runtime(format!(
+                    "nested graph '{}' not in parent scheduler's child map; \
+                     this should have been built at parent construction time",
+                    op_cfg.full_name
+                ))
+            })?;
+            child.run_collect(inputs).await
+        }
         other => Err(OperonError::Runtime(format!(
             "op type {:?} not yet implemented for {}",
             other, op_cfg.full_name
@@ -900,6 +1346,20 @@ fn error_frame(e: &OperonError) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("error".into(), Value::from(e.to_string()));
     m
+}
+
+/// Coerce an op's return value into a frame map. Object values pass through;
+/// scalar / array results are wrapped in a `{"result": <value>}` envelope —
+/// matches Python's `FuncOp` behaviour.
+fn value_to_map(value: Value) -> Map<String, Value> {
+    match value {
+        Value::Object(m) => m,
+        other => {
+            let mut m = Map::new();
+            m.insert("result".into(), other);
+            m
+        }
+    }
 }
 
 /// Compute the next loop-iteration context. Matches Python:

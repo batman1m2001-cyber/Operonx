@@ -2,6 +2,64 @@
 
 This page walks one full call to `Operon(graph).run(...)` end-to-end.
 
+## Sequence — a 3-op linear graph
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant G as GraphOp
+    participant E as Operon
+    participant S as Scheduler
+    participant A as op_a
+    participant B as op_b
+    participant C as op_c
+    participant T as Tracer
+
+    rect rgb(237, 231, 246)
+    Note over U,G: Construction (untimed)
+    U->>G: with GraphOp(...) as g:
+    U->>G: a = op_a(...); b = op_b(...); c = op_c(...)
+    U->>G: START >> a >> b >> c >> END
+    G->>G: __exit__: build() → resolve refs, freeze schema
+    end
+
+    rect rgb(224, 242, 241)
+    Note over U,T: Init
+    U->>E: engine = Operon(graph, tracer=t)
+    E->>E: eager warmup (resource resolution)
+    end
+
+    rect rgb(255, 243, 224)
+    Note over U,T: Run
+    U->>E: await engine.run(inputs={"x": 5})
+    E->>S: seed state, START → ready queue
+    S->>A: dispatch (inputs from PARENT)
+    A->>T: span_start(a)
+    A-->>S: Frame(outputs)
+    S->>S: write a-outputs to state
+    A->>T: span_end(a)
+    S->>B: dispatch (reads a["..."])
+    B-->>S: Frame
+    S->>C: dispatch (reads b["..."])
+    C-->>S: Frame, EOF
+    S->>S: collect + auto-forward via >> END
+    E-->>U: result
+    end
+```
+
+Three observations:
+
+- **Construction is build-time, not run-time.** Reference resolution
+  happens once at `__exit__`; the engine just executes against a frozen
+  schema.
+- **Eager warmup at init.** Resource lookups, `#[op]` registry checks,
+  and any expensive schema validation are paid before `engine.run` is
+  ever called. Run-time errors are caller-data errors.
+- **The scheduler is the only thing that holds state across ops.** Ops
+  themselves are stateless functions — if you need shared state, write
+  it to PARENT or pipe through siblings.
+
 ## Phase 1 — Graph construction
 
 `with GraphOp(name="g") as graph:` enters a build context. Op constructors

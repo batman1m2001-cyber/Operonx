@@ -1,19 +1,30 @@
 # 04 — LLM Advanced (Python)
 
-Structured output, tool calling, multi-turn chat. Requires `OPENAI_API_KEY` in `.env`.
+Structured output (JSON schema), tool calling, multi-turn chat. Tier-2
+install — depends on `operonx[openai]`.
 
 | Scenario     | Ops                              | Notes                                        |
 |--------------|----------------------------------|----------------------------------------------|
-| `structured` | `PromptOp → LLMOp`               | Forces JSON schema response.                 |
-| `tool`       | `PromptOp → LLMOp → process`     | Calculator tool; `process_response` runs it. |
-| `multi_turn` | `PromptOp → LLMOp → update`      | Appends user+assistant to history.           |
+| `structured` | `PromptOp → LLMOp`               | Forces JSON-schema response                  |
+| `tool`       | `PromptOp → LLMOp → process`     | Calculator tool; `process_response` runs it  |
+| `multi_turn` | `PromptOp → LLMOp → update`      | Appends user+assistant to history            |
+
+## Project layout
+
+```
+ex04_llm_advanced/
+├── pyproject.toml      # operonx[openai]>=0.6.2
+├── README.md
+├── .env.example        # OPENAI_API_KEY
+├── resources.yaml      # llm:gpt-4o-mini
+└── main.py             # @graph factories + LLMOp + tool helpers
+```
 
 ## Run
 
 ```bash
-uv run python -m examples.python.ex04_llm_advanced.demo
-uv run python -m examples.python.ex04_llm_advanced.demo --runs 5
-uv run python -m examples.python.ex04_llm_advanced.demo --langfuse
+uv sync
+cp .env.example .env
+# Edit .env — fill in OPENAI_API_KEY
+uv run python main.py
 ```
-
-Writes `examples/bench_results/ex04_llm_advanced_python.json`.

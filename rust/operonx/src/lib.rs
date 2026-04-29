@@ -20,6 +20,12 @@ pub mod telemetry;
 // Re-export the proc macros from operonx-macros for ergonomic `use operonx::{op, resource, model};`
 pub use operonx_macros::{model, op, resource};
 
+// Re-export `inventory` so consumers don't need to declare it as a direct
+// dependency. The `#[op]` and `#[resource]` macros expand to
+// `::operonx::inventory::submit!{...}` so any crate that depends on
+// `operonx` can use the macros without an extra `inventory = "0.3"` line.
+pub use ::inventory;
+
 // User-facing API (per MIGRATION_rust.md §3a.1).
 pub use core::engine::{
     CollectMode, ExecutionHandle, FrameEvent, FrameSender, GraphEnvelope, Operon, OperonBuilder,

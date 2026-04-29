@@ -9,85 +9,79 @@ Includes:
 
 Plugin registration to the core ResourceHub happens automatically on import.
 
-Backend classes (``OpenAISDKModel``, ``AnthropicModel``, ``HFEmbedding``,
-etc.) are **lazy-loaded** through module-level ``__getattr__`` so that
-``import operonx.providers`` works with only the dependencies of the
-installed extra. A user with just ``operonx[anthropic]`` can do
-``from operonx.providers.llms.anthropic import AnthropicModel`` without
-the import chain crashing on a missing ``numpy`` or ``onnxruntime``.
+**All public names are lazy-loaded** via module-level ``__getattr__``
+(PEP 562). ``import operonx.providers`` only runs the plugin
+registration step — config / factory / op / backend symbols are not
+materialised until they are actually accessed. A tier-1 install
+(``pip install operonx``) can ``import operonx.providers`` without
+crashing on missing ``openai`` / ``anthropic`` / ``httpx`` /
+``numpy``; missing-dep ``ImportError`` surfaces only when the user
+actually touches a backend or factory that needs it.
 """
 
 # Auto-register plugins to operonx.core.registry on import. The plugin
-# modules only import the *factories* (which are themselves lazy
-# dispatchers), not the heavy backend modules.
+# modules import their respective config classes (light) and factory
+# functions (light — heavy backends are deferred inside each factory).
 import operonx.providers.registry  # noqa: F401
-from operonx.providers.auth import (
-    KeycloakTokenConfig,
-    KeycloakTokenProvider,
-    create_auth,
-)
-from operonx.providers.embeddings import (
-    BaseEmbedder,
-    EmbeddingConfig,
-    EmbeddingType,
-    create_embedding,
-)
-from operonx.providers.llms import (
-    AnthropicConfig,
-    AzureConfig,
-    BaseLLM,
-    GeminiConfig,
-    LLMConfig,
-    LLMGenerator,
-    LLMType,
-    OpenAIConfig,
-    create_llm,
-)
-from operonx.providers.ops import (
-    EmbeddingOp,
-    LLMOp,
-    OnnxOp,
-    PromptOp,
-    RerankOp,
-    ask,
-    chat,
-)
 
-# TritonOp is intentionally NOT in the eager import list — its module
-# pulls numpy. It's accessible lazily via __getattr__ below.
-from operonx.providers.rerankers import (
-    BaseReranker,
-    RerankingConfig,
-    RerankingType,
-    create_reranking,
-)
-
-# ── Lazy-loaded backend classes ─────────────────────────────────────────
+# ── Lazy-loaded public surface ──────────────────────────────────────────
 # Each entry maps a public name to the dotted submodule that owns it.
-# On first access via __getattr__, the module is imported, the class is
+# On first access via __getattr__, the module is imported, the attr is
 # fetched, and the result is cached in module globals.
 #
-# These classes are kept out of the eager imports above because their
-# defining modules pull optional deps (numpy, onnxruntime, transformers,
-# torch, google-cloud-aiplatform). Eager-importing here would force every
-# user to install every optional extra.
+# Light symbols (config classes, factories, base classes, ops) sit
+# alongside heavy backend classes here so a tier-1 install can do
+# ``import operonx.providers`` without pulling in optional deps. The
+# real cost is only paid on first attribute access.
 _LAZY_BACKENDS = {
-    # LLMs
-    "OpenAISDKModel": "operonx.providers.llms",
-    "AzureSDKModel": "operonx.providers.llms",
-    "AnthropicModel": "operonx.providers.llms",
-    "GeminiOpenAISDKModel": "operonx.providers.llms",
-    # Embeddings
+    # Auth
+    "KeycloakTokenConfig": "operonx.providers.auth",
+    "KeycloakTokenProvider": "operonx.providers.auth",
+    "create_auth": "operonx.providers.auth",
+    # Embeddings (light surface)
+    "BaseEmbedder": "operonx.providers.embeddings",
+    "EmbeddingConfig": "operonx.providers.embeddings",
+    "EmbeddingType": "operonx.providers.embeddings",
+    "create_embedding": "operonx.providers.embeddings",
+    # Embedding backends (heavy — defining modules pull numpy/onnx/torch)
     "VLLMEmbedding": "operonx.providers.embeddings",
     "TEIEmbedding": "operonx.providers.embeddings",
     "HFEmbedding": "operonx.providers.embeddings",
     "ONNXEmbedding": "operonx.providers.embeddings",
-    # Rerankers
+    # LLMs (light surface)
+    "BaseLLM": "operonx.providers.llms",
+    "LLMConfig": "operonx.providers.llms",
+    "LLMType": "operonx.providers.llms",
+    "LLMGenerator": "operonx.providers.llms",
+    "OpenAIConfig": "operonx.providers.llms",
+    "AzureConfig": "operonx.providers.llms",
+    "GeminiConfig": "operonx.providers.llms",
+    "AnthropicConfig": "operonx.providers.llms",
+    "create_llm": "operonx.providers.llms",
+    # LLM backends (heavy)
+    "OpenAISDKModel": "operonx.providers.llms",
+    "AzureSDKModel": "operonx.providers.llms",
+    "AnthropicModel": "operonx.providers.llms",
+    "GeminiOpenAISDKModel": "operonx.providers.llms",
+    # Rerankers (light surface)
+    "BaseReranker": "operonx.providers.rerankers",
+    "RerankingConfig": "operonx.providers.rerankers",
+    "RerankingType": "operonx.providers.rerankers",
+    "create_reranking": "operonx.providers.rerankers",
+    # Reranker backends (heavy)
     "VLLMReranker": "operonx.providers.rerankers",
     "TEIReranker": "operonx.providers.rerankers",
     "HFReranker": "operonx.providers.rerankers",
     "ONNXReranker": "operonx.providers.rerankers",
     "PineconeReranker": "operonx.providers.rerankers",
+    # Workflow ops
+    "LLMOp": "operonx.providers.ops",
+    "EmbeddingOp": "operonx.providers.ops",
+    "RerankOp": "operonx.providers.ops",
+    "OnnxOp": "operonx.providers.ops",
+    "PromptOp": "operonx.providers.ops",
+    "chat": "operonx.providers.ops",
+    "ask": "operonx.providers.ops",
     # Ops with heavy module-level deps (numpy, etc.)
     "TritonOp": "operonx.providers.ops",
 }
