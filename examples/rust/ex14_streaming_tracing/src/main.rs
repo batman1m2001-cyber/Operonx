@@ -1,10 +1,8 @@
 //! 14 Streaming & Tracing — Rust-side demo.
 //!
-//! Mirrors `examples/python/ex14_streaming_tracing/main.py`.
-//!
-//! ⚠️  Rust-runtime limitation: per-item generator dispatch + streaming
-//! aren't exposed yet. The `chunk_text` / `async_counter` ops accumulate
-//! their list and return single-shot, so downstream ops don't fan out.
+//! Mirrors `examples/python/ex14_streaming_tracing/main.py`. Generator
+//! ops return `Value::Array`; the scheduler fans each element out as
+//! one yield-frame so downstream ops dispatch per-item.
 
 use operonx::{op, Operon};
 use serde_json::Value;
@@ -20,7 +18,7 @@ fn chunk_text(text: String, chunk_size: i64) -> Value {
             "index": idx as i64,
         }));
     }
-    serde_json::json!({ "chunks": out })
+    Value::Array(out)
 }
 
 #[op(name = "analyze_chunk")]
@@ -37,10 +35,11 @@ fn analyze_chunk(chunk: String, index: i64) -> Value {
 
 #[op(name = "async_counter")]
 fn async_counter(n: i64) -> Value {
-    let out: Vec<Value> = (1..=n)
-        .map(|i| serde_json::json!({ "number": i, "squared": i * i }))
-        .collect();
-    serde_json::json!({ "items": out })
+    Value::Array(
+        (1..=n)
+            .map(|i| serde_json::json!({ "number": i, "squared": i * i }))
+            .collect(),
+    )
 }
 
 #[op(name = "format_square")]

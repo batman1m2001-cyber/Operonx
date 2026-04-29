@@ -1,10 +1,8 @@
 //! 11 Parallel Advanced — Rust-side demo.
 //!
-//! Mirrors `examples/python/ex11_parallel_advanced/main.py`.
-//!
-//! ⚠️  Generator scenarios (`iteration`, `partial_failure`) accumulate a
-//! list rather than dispatching per-item — the Rust streaming scheduler
-//! does not yet fan out yields.
+//! Mirrors `examples/python/ex11_parallel_advanced/main.py`. Generator
+//! ops (e.g. `each_item`) return `Value::Array`; the scheduler fans
+//! each element out as one yield-frame per Python parity.
 
 use operonx::{op, Operon};
 use serde_json::Value;
@@ -57,10 +55,14 @@ fn count_stats(text: String) -> Value {
     } else {
         0.0
     };
+    // `format!("{:.1}")` rounds half-to-even (banker's rounding),
+    // matching Python's `round(x, 1)` semantics — keeps ex11 parity
+    // with the Python side on tie cases like `63/12 = 5.25 -> 5.2`.
+    let avg_word_len: f64 = format!("{avg:.1}").parse().unwrap_or(avg);
     serde_json::json!({
         "word_count": word_count,
         "char_count": char_count,
-        "avg_word_len": (avg * 10.0).round() / 10.0,
+        "avg_word_len": avg_word_len,
     })
 }
 
@@ -79,11 +81,12 @@ fn merge_analysis(s: Value, k: Value, wc: Value, cc: Value, awl: Value) -> Value
 
 #[op(name = "each_item")]
 fn each_item(items: Vec<Value>) -> Value {
-    let out: Vec<Value> = items
-        .into_iter()
-        .map(|item| serde_json::json!({ "item": item }))
-        .collect();
-    serde_json::json!({ "items": out })
+    Value::Array(
+        items
+            .into_iter()
+            .map(|item| serde_json::json!({ "item": item }))
+            .collect(),
+    )
 }
 
 #[op(name = "process_item")]
