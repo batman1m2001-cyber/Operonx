@@ -38,7 +38,7 @@ use crate::core::middleware::MiddlewareContext;
 use crate::core::ops::edges::PARENT;
 use crate::core::registry::OpRegistry;
 use crate::core::states::cell::{default_context, ContextId};
-use crate::core::states::ref_::{RefArg, RefConfig, RefTransform};
+use crate::core::states::ref_::{RefArg, RefConfig, RefTransform, StreamPolicy};
 
 // ── State slot key ────────────────────────────────────────────────────────
 
@@ -59,8 +59,18 @@ struct RuntimeState {
 }
 
 impl RuntimeState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
+    }
+
+    /// Pre-size the slot map to roughly fit the graph. Avoids the
+    /// log(n) resize cycle that happens when ops `set()` slot keys
+    /// during execution.
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            slots: HashMap::with_capacity(cap),
+        }
     }
 
     /// Store a value at `(op, var, ctx)`.
@@ -123,6 +133,29 @@ pub struct GraphScheduler {
     /// tasks (the io/cpu dispatch path uses `tokio::spawn` with a `move`
     /// closure).
     child_schedulers: Arc<HashMap<String, Arc<GraphScheduler>>>,
+    /// Pre-converted `initial_ready_count` (the `BTreeMap` lives on
+    /// [`OpConfig`]). Cloned per context every time a fresh frame opens
+    /// a never-seen `ContextId`; pre-converting once at construction
+    /// drops a `clone()` + `into_iter().collect()` from `run_once` and
+    /// `on_frame`.
+    initial_ready_hm: HashMap<String, i32>,
+    /// Pre-counted `(op_full_name, var)` pairs across the graph; used as
+    /// the initial capacity for [`RuntimeState::slots`] so the per-run
+    /// `HashMap` never grows in steps. Hash resizes amortise to ~zero
+    /// for graphs that build the slot table once and never delete.
+    slot_capacity: usize,
+    /// Pre-counted edge totals to size the per-run sequential and
+    /// collect bookkeeping `HashMap`s. Sequential edges and collect
+    /// edges are mutually exclusive on a given `(src, dst)` link, so
+    /// each link contributes to exactly one of the two counters.
+    seq_edge_capacity: usize,
+    collect_edge_capacity: usize,
+    /// Cached `(src, dst) -> StreamPolicy` lookups. `route_edge_async`
+    /// fires once per Frame per outgoing edge; the old per-call
+    /// `edge_policy()` walked `dst.inputs` and string-matched. Map
+    /// lookup is O(1) by hash — and on a 50-edge graph with 100 frames
+    /// that's 5,000 walks → 5,000 hash lookups.
+    edge_policies: HashMap<(String, String), StreamPolicy>,
 }
 
 impl std::fmt::Debug for GraphScheduler {
@@ -149,11 +182,58 @@ impl GraphScheduler {
         }
         let out_vars = compute_out_vars(&graph);
         let child_schedulers = Arc::new(build_child_schedulers(&graph, &registry)?);
+
+        // Pre-convert `initial_ready_count` BTreeMap → HashMap once.
+        let initial_ready_hm: HashMap<String, i32> = graph
+            .initial_ready_count
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+
+        // Count `(op_full_name, var)` slot pairs across the graph for
+        // RuntimeState pre-sizing. Each op contributes one slot per
+        // input + one per output; over-estimating is fine.
+        let slot_capacity: usize = graph
+            .ops
+            .values()
+            .map(|op| op.inputs.len() + op.outputs.len())
+            .sum::<usize>()
+            .max(16);
+
+        // Tally seq-vs-collect edge counts via the same policy lookup
+        // we're about to cache. A single pass populates both
+        // `edge_policies` and the capacity hints.
+        let mut edge_policies: HashMap<(String, String), StreamPolicy> = HashMap::new();
+        let mut seq_edge_capacity = 0usize;
+        let mut collect_edge_capacity = 0usize;
+        for (src_name, links) in &graph.compiled_adj {
+            for link in links {
+                let key = (src_name.clone(), link.dst.clone());
+                let policy = resolve_edge_policy(&graph, src_name, &link.dst);
+                if let Some(p) = policy {
+                    edge_policies.insert(key.clone(), p);
+                    if p.collect {
+                        collect_edge_capacity += 1;
+                    } else {
+                        seq_edge_capacity += 1;
+                    }
+                } else {
+                    // No policy = sequential default; still counts.
+                    seq_edge_capacity += 1;
+                }
+            }
+        }
+
         Ok(Self {
             graph,
             registry,
             out_vars,
             child_schedulers,
+            initial_ready_hm,
+            slot_capacity,
+            seq_edge_capacity: seq_edge_capacity.max(4),
+            collect_edge_capacity: collect_edge_capacity.max(4),
+            edge_policies,
         })
     }
 
@@ -234,7 +314,7 @@ impl Scheduler for GraphScheduler {
         sender: FrameSender,
         cancel: CancellationToken,
     ) -> Result<(), OperonError> {
-        let state = Arc::new(Mutex::new(RuntimeState::new()));
+        let state = Arc::new(Mutex::new(RuntimeState::with_capacity(self.slot_capacity)));
 
         // Seed PARENT-level inputs at root context. Caller-provided `inputs`
         // override graph-declared literals (e.g. `GraphOp.loop(count=0)` is
@@ -322,23 +402,25 @@ impl GraphScheduler {
     ) -> Result<(), OperonError> {
         // ── Per-run mutable bookkeeping ───────────────────────────────────
         let mut ready: HashMap<ContextId, HashMap<String, i32>> = HashMap::new();
-        ready.insert(
-            ctx.clone(),
-            self.graph.initial_ready_count.clone().into_iter().collect(),
-        );
+        ready.insert(ctx.clone(), self.initial_ready_hm.clone());
 
         let mut inflight: i32 = 0;
 
         // Sequential per-edge queueing — matches Python seq_queues/seq_active.
-        let mut seq_queues: HashMap<(String, String), VecDeque<ContextId>> = HashMap::new();
-        let mut seq_active: HashMap<(String, String), bool> = HashMap::new();
+        // Pre-sized to the graph's seq edge count so the per-frame
+        // `entry().or_default()` calls don't trigger HashMap resizes
+        // mid-run.
+        let mut seq_queues: HashMap<(String, String), VecDeque<ContextId>> =
+            HashMap::with_capacity(self.seq_edge_capacity);
+        let mut seq_active: HashMap<(String, String), bool> =
+            HashMap::with_capacity(self.seq_edge_capacity);
         let mut seq_origins: HashMap<(String, ContextId), (String, String)> = HashMap::new();
 
         // Collect buffers — `(src, dst) → [(frame_ctx, result), ...]`. Python
         // parity: flushed when src emits Eof; merged per-key into lists, one
         // dispatch of dst under a `__collect__` sub-context.
         let mut collect_bufs: HashMap<(String, String), Vec<(ContextId, Map<String, Value>)>> =
-            HashMap::new();
+            HashMap::with_capacity(self.collect_edge_capacity);
 
         let sem = Arc::new(Semaphore::new(
             self.graph.max_stream_concurrent.max(1) as usize
@@ -638,8 +720,7 @@ impl GraphScheduler {
     ) -> Result<(), OperonError> {
         // Seed ready counts for a never-seen context.
         if !ready.contains_key(ctx) {
-            let base = self.graph.initial_ready_count.clone().into_iter().collect();
-            ready.insert(ctx.clone(), base);
+            ready.insert(ctx.clone(), self.initial_ready_hm.clone());
         }
 
         // Forward any PARENT-bound output vars to the external frame stream,
@@ -736,10 +817,13 @@ impl GraphScheduler {
             return Ok(());
         }
 
-        // Consult the dst op's per-var stream policy — the input var whose
-        // ref.source == src carries the `StreamPolicy`. Python's equivalent
-        // lookup lives in task_scheduler.py _route.
-        let policy = self.edge_policy(src, &link.dst);
+        // Consult the dst op's per-var stream policy — pre-cached at
+        // construction in `edge_policies`. Python's equivalent lookup
+        // lives in task_scheduler.py _route.
+        let policy = self
+            .edge_policies
+            .get(&(src.to_string(), link.dst.clone()))
+            .copied();
 
         // `Collect` — buffer the frame and wait for src's Eof.
         if let Some(p) = &policy {
@@ -789,30 +873,6 @@ impl GraphScheduler {
         Ok(())
     }
 
-    /// Resolve the [`StreamPolicy`](crate::core::states::ref_::StreamPolicy)
-    /// declared on the dst op's input var that references `src`. Returns
-    /// `None` when dst's inputs don't reference src or when none of the
-    /// matching refs carry a policy.
-    fn edge_policy(&self, src: &str, dst: &str) -> Option<crate::core::states::ref_::StreamPolicy> {
-        let dst_op = self.graph.ops.get(dst)?;
-        let src_full = self
-            .graph
-            .ops
-            .get(src)
-            .map(|o| o.full_name.as_str())
-            .unwrap_or(src);
-        for (_var, param) in &dst_op.inputs {
-            let Some(ref_cfg) = &param.ref_config else {
-                continue;
-            };
-            if ref_cfg.source == src || ref_cfg.source == src_full {
-                if let Some(p) = ref_cfg.stream_policy {
-                    return Some(p);
-                }
-            }
-        }
-        None
-    }
 
     #[allow(clippy::too_many_arguments)]
     async fn on_eof(
@@ -961,6 +1021,31 @@ fn compute_out_vars(graph: &OpConfig) -> HashMap<String, Vec<(String, String)>> 
         }
     }
     map
+}
+
+/// Walk `dst.inputs` looking for a ref whose `source` matches `src` (by
+/// short name or `full_name`). Returns the first carrying a
+/// `StreamPolicy`. Pulled out of `GraphScheduler` so the constructor
+/// can pre-cache the lookup at build time — `route_edge_async` then
+/// hits `edge_policies` instead of re-walking inputs per frame.
+fn resolve_edge_policy(graph: &OpConfig, src: &str, dst: &str) -> Option<StreamPolicy> {
+    let dst_op = graph.ops.get(dst)?;
+    let src_full = graph
+        .ops
+        .get(src)
+        .map(|o| o.full_name.as_str())
+        .unwrap_or(src);
+    for (_var, param) in &dst_op.inputs {
+        let Some(ref_cfg) = &param.ref_config else {
+            continue;
+        };
+        if ref_cfg.source == src || ref_cfg.source == src_full {
+            if let Some(p) = ref_cfg.stream_policy {
+                return Some(p);
+            }
+        }
+    }
+    None
 }
 
 fn resolve_inputs(
