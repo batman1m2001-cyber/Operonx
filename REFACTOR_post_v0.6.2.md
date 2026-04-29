@@ -383,14 +383,31 @@ only on that extra/feature so each demo proves a real install slice.
       ```
       Explicitly **not** in this pass: subcommand hub (`operonx graph
       dump …`), literal-value param flags (`--params x=5`).
-- [ ] **Regenerate example `graph.json` files** with the new CLI
-      (depends on the CLI landing). Today's checked-in
-      `examples/rust/exNN_*/graph.json` files predate the
-      example-refactor and carry stale `full_name` / op naming. Per
-      example: `cd examples/python/exNN && operonx-dump-graph
-      main::<factory> -o ../../rust/exNN/graph.json`. Each Rust
-      example needs to be rerun afterward to verify the new graph
-      shape still produces the expected output.
+- [x] **Regenerate example `graph.json` files** — done across 14
+      examples via `operonx-pack`. The CLI gained a small
+      `module::symbol=customkey` syntax so example regen can keep its
+      existing scenario nicknames (`hello`, `chain`, `parallel`)
+      pinned to the longer Python factory names (`hello_world`,
+      `two_steps`, `fan_out_in`) — avoids cross-language renames.
+      Output is now always a `{key: spec, …}` bundle even with a
+      single target (matches what every Rust `main.rs` indexes by).
+      Touched files:
+      - `examples/python/{ex07,ex12}/resources.yaml` — added
+        `dimensions: 1536` so the OpenAI-flavoured embedding config
+        passes VLLMEmbedding's runtime validation at serialise time.
+        ex07's optional `reranker:bge-m3` stays commented out — the
+        rerank scenario isn't bundled unless the user enables it.
+      - `examples/rust/ex07_embeddings_and_rag/src/main.rs` — handles
+        a missing `rerank` bundle entry gracefully (prints "skipped"
+        instead of panicking on `expect`).
+      - `examples/rust/ex09_agent_workflow/src/main.rs` — refactored
+        to load the single `agent` graph once and run it against three
+        scenario inputs (calc / search / combined). Old code expected
+        three separate graphs in the bundle, but the post-refactor
+        Python builder only exposes `agent`.
+      `cargo check --release` passes for the two examples whose Rust
+      code changed (ex07, ex09); the other 12 only got graph.json
+      regen (loaded at runtime, not compile-time).
 - [x] **CI extras-smoke matrix** — landed in
       [`.github/workflows/tests.yaml`](.github/workflows/tests.yaml)
       `extras-smoke` job (anthropic / langfuse / otel / onnx / serve /

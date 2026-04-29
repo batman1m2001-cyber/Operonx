@@ -8,8 +8,10 @@ called with ``None`` for every parameter — those become PARENT external
 inputs in the serialised graph rather than literals.
 
 Output goes to **stdout** by default; pass ``-o <path>`` to write a file.
-When more than one target is supplied, the result is a JSON object whose
-keys are the symbol names and whose values are the per-target specs.
+The result is always a JSON object ``{key: spec, ...}`` (a bundle) —
+even with a single target — because that's what the Rust example
+binaries expect (each `main.rs` indexes by scenario key). The key is
+the symbol name unless ``=customkey`` overrides it (see below).
 
 Usage::
 
@@ -82,24 +84,40 @@ def _scrub(node: Any) -> Any:
     return node
 
 
-def _split_target(target: str) -> tuple[str, str]:
-    """``"pkg.mod::factory"`` → ``("pkg.mod", "factory")``."""
+def _split_target(target: str) -> tuple[str, str, str]:
+    """Parse a target spec into ``(module, symbol, key)``.
+
+    Default form is ``module.path::symbol`` — the bundle key is just
+    the symbol. Add ``=customkey`` to override the key:
+
+    - ``"pkg.mod::basic_chat"``        → ``("pkg.mod", "basic_chat", "basic_chat")``
+    - ``"pkg.mod::basic_chat=basic"``  → ``("pkg.mod", "basic_chat", "basic")``
+
+    Renaming exists so an example whose Rust binary expects a short
+    nickname (``"basic"``) can stay locked to the longer factory name
+    (``basic_chat``) on the Python side without forcing a cross-language
+    rename.
+    """
     if "::" not in target:
         raise SystemExit(
             f"target {target!r} must be of the form 'module.path::symbol' "
             "(pytest-style)."
         )
-    module, symbol = target.split("::", 1)
-    if not module or not symbol:
+    module, rest = target.split("::", 1)
+    if "=" in rest:
+        symbol, key = rest.split("=", 1)
+    else:
+        symbol, key = rest, rest
+    if not module or not symbol or not key:
         raise SystemExit(
-            f"target {target!r} has an empty module or symbol; expected "
-            "'module.path::symbol'."
+            f"target {target!r} has an empty module / symbol / key; expected "
+            "'module.path::symbol' or 'module.path::symbol=customkey'."
         )
-    return module, symbol
+    return module, symbol, key
 
 
-def _load_factory(target: str) -> Callable[..., Any]:
-    module_path, symbol = _split_target(target)
+def _load_factory(target: str) -> tuple[Callable[..., Any], str]:
+    module_path, symbol, key = _split_target(target)
     try:
         mod = importlib.import_module(module_path)
     except ImportError as e:
@@ -109,7 +127,7 @@ def _load_factory(target: str) -> Callable[..., Any]:
         raise SystemExit(f"symbol {symbol!r} not found in {module_path!r}")
     if not callable(factory):
         raise SystemExit(f"{target!r} is not callable")
-    return factory
+    return factory, key
 
 
 def pack_one(factory: Callable[..., Any], scenario: str) -> dict:
@@ -179,13 +197,13 @@ def main(argv: list[str] | None = None) -> int:
 
     bundle: dict = {}
     for target in args.targets:
-        _, symbol = _split_target(target)
-        factory = _load_factory(target)
-        bundle[symbol] = pack_one(factory, symbol)
+        factory, key = _load_factory(target)
+        bundle[key] = pack_one(factory, key)
 
-    # Single target → top-level spec; multi-target → keyed bundle.
-    payload = next(iter(bundle.values())) if len(bundle) == 1 else bundle
-    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    # Always emit a `{key: spec, …}` bundle — that's what Rust
+    # `examples/rust/exNN_*/main.rs` expects. Single-target callers can
+    # `jq '.<key>'` if they need the spec at top level.
+    text = json.dumps(bundle, indent=2, ensure_ascii=False)
 
     if args.output is None:
         sys.stdout.write(text + "\n")

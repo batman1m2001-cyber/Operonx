@@ -1,8 +1,8 @@
 {
   "text": {
     "type": "graph",
-    "full_name": "text-chunker",
-    "name": "text-chunker",
+    "full_name": "text",
+    "name": "text",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -35,9 +35,9 @@
     "ops": {
       "chunker": {
         "type": "code",
-        "full_name": "text-chunker.chunker",
+        "full_name": "text.chunker",
         "name": "chunker",
-        "func_name": "examples.python.ex14_streaming_tracing.workflow.chunk_text",
+        "func_name": "chunk_text",
         "is_async": false,
         "is_generator": true,
         "enabled": true,
@@ -49,7 +49,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "text-chunker",
+              "source": "text",
               "var": "text",
               "transforms": [],
               "is_output": false
@@ -60,7 +60,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "text-chunker",
+              "source": "text",
               "var": "chunk_size",
               "transforms": [],
               "is_output": false
@@ -85,9 +85,9 @@
       },
       "analyzer": {
         "type": "code",
-        "full_name": "text-chunker.analyzer",
+        "full_name": "text.analyzer",
         "name": "analyzer",
-        "func_name": "examples.python.ex14_streaming_tracing.workflow.analyze_chunk",
+        "func_name": "analyze_chunk",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -99,7 +99,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "text-chunker.chunker",
+              "source": "text.chunker",
               "var": "chunk",
               "transforms": [],
               "is_output": false
@@ -110,7 +110,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "text-chunker.chunker",
+              "source": "text.chunker",
               "var": "index",
               "transforms": [],
               "is_output": false
@@ -123,7 +123,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "text-chunker",
+              "source": "text",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -166,8 +166,8 @@
   },
   "async_counter": {
     "type": "graph",
-    "full_name": "async-counter",
-    "name": "async-counter",
+    "full_name": "async_counter",
+    "name": "async_counter",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -194,9 +194,9 @@
     "ops": {
       "counter": {
         "type": "code",
-        "full_name": "async-counter.counter",
+        "full_name": "async_counter.counter",
         "name": "counter",
-        "func_name": "examples.python.ex14_streaming_tracing.workflow.async_counter",
+        "func_name": "async_counter",
         "is_async": false,
         "is_generator": true,
         "enabled": true,
@@ -208,7 +208,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "async-counter",
+              "source": "async_counter",
               "var": "n",
               "transforms": [],
               "is_output": false
@@ -233,9 +233,9 @@
       },
       "fmt": {
         "type": "code",
-        "full_name": "async-counter.fmt",
+        "full_name": "async_counter.fmt",
         "name": "fmt",
-        "func_name": "examples.python.ex14_streaming_tracing.workflow.format_square",
+        "func_name": "format_square",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -247,7 +247,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "async-counter.counter",
+              "source": "async_counter.counter",
               "var": "number",
               "transforms": [],
               "is_output": false
@@ -258,7 +258,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "async-counter.counter",
+              "source": "async_counter.counter",
               "var": "squared",
               "transforms": [],
               "is_output": false
@@ -271,7 +271,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "async-counter",
+              "source": "async_counter",
               "var": "label",
               "transforms": [],
               "is_output": false

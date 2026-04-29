@@ -1,8 +1,8 @@
 {
   "parallel": {
     "type": "graph",
-    "full_name": "multi-model-parallel",
-    "name": "multi-model-parallel",
+    "full_name": "parallel",
+    "name": "parallel",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -41,7 +41,7 @@
     "ops": {
       "p": {
         "type": "prompt",
-        "full_name": "multi-model-parallel.p",
+        "full_name": "parallel.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -76,7 +76,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "multi-model-parallel",
+              "source": "parallel",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -95,7 +95,7 @@
       },
       "gpt4o": {
         "type": "llm",
-        "full_name": "multi-model-parallel.gpt4o",
+        "full_name": "parallel.gpt4o",
         "name": "gpt4o",
         "func_name": "_generate_core",
         "is_async": true,
@@ -109,7 +109,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-model-parallel.p",
+              "source": "parallel.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -254,7 +254,7 @@
       },
       "gpt4o_mini": {
         "type": "llm",
-        "full_name": "multi-model-parallel.gpt4o_mini",
+        "full_name": "parallel.gpt4o_mini",
         "name": "gpt4o_mini",
         "func_name": "_generate_core",
         "is_async": true,
@@ -268,7 +268,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-model-parallel.p",
+              "source": "parallel.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -413,9 +413,9 @@
       },
       "cmp": {
         "type": "code",
-        "full_name": "multi-model-parallel.cmp",
+        "full_name": "parallel.cmp",
         "name": "cmp",
-        "func_name": "examples.python.ex10_multi_model.workflow.compare",
+        "func_name": "compare",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -427,7 +427,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-model-parallel.gpt4o",
+              "source": "parallel.gpt4o",
               "var": "content",
               "transforms": [],
               "is_output": false
@@ -438,7 +438,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-model-parallel.gpt4o_mini",
+              "source": "parallel.gpt4o_mini",
               "var": "content",
               "transforms": [],
               "is_output": false
@@ -451,7 +451,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "multi-model-parallel",
+              "source": "parallel",
               "var": "gpt4o",
               "transforms": [],
               "is_output": false
@@ -462,7 +462,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "multi-model-parallel",
+              "source": "parallel",
               "var": "gpt4o_mini",
               "transforms": [],
               "is_output": false
@@ -473,7 +473,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "multi-model-parallel",
+              "source": "parallel",
               "var": "same_length",
               "transforms": [],
               "is_output": false
@@ -549,8 +549,8 @@
   },
   "routing": {
     "type": "graph",
-    "full_name": "smart-routing",
-    "name": "smart-routing",
+    "full_name": "routing",
+    "name": "routing",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -564,21 +564,9 @@
         "required": false,
         "ref": null,
         "literal": null
-      },
-      "classification": {
-        "default": null,
-        "required": true,
-        "ref": null,
-        "literal": null
       }
     },
     "outputs": {
-      "classification": {
-        "default": null,
-        "required": true,
-        "ref": null,
-        "literal": null
-      },
       "answer": {
         "default": null,
         "required": true,
@@ -589,7 +577,7 @@
     "ops": {
       "cls_p": {
         "type": "prompt",
-        "full_name": "smart-routing.cls_p",
+        "full_name": "routing.cls_p",
         "name": "cls_p",
         "func_name": "_format",
         "is_async": true,
@@ -624,7 +612,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "smart-routing",
+              "source": "routing",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -643,7 +631,7 @@
       },
       "classifier": {
         "type": "llm",
-        "full_name": "smart-routing.classifier",
+        "full_name": "routing.classifier",
         "name": "classifier",
         "func_name": "_generate_core",
         "is_async": true,
@@ -657,7 +645,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing.cls_p",
+              "source": "routing.cls_p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -759,12 +747,7 @@
           "content": {
             "default": null,
             "required": true,
-            "ref": {
-              "source": "smart-routing",
-              "var": "classification",
-              "transforms": [],
-              "is_output": false
-            },
+            "ref": null,
             "literal": null
           },
           "finish_reason": {
@@ -807,9 +790,9 @@
       },
       "check": {
         "type": "code",
-        "full_name": "smart-routing.check",
+        "full_name": "routing.check",
         "name": "check",
-        "func_name": "examples.python.ex10_multi_model.workflow.is_simple",
+        "func_name": "is_simple",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -821,8 +804,8 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing",
-              "var": "classification",
+              "source": "routing.classifier",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -840,7 +823,7 @@
       },
       "router": {
         "type": "branch",
-        "full_name": "smart-routing.router",
+        "full_name": "routing.router",
         "name": "router",
         "func_name": "core",
         "is_async": false,
@@ -860,7 +843,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing.check",
+              "source": "routing.check",
               "var": "is_simple",
               "transforms": [],
               "is_output": false
@@ -891,21 +874,21 @@
         "cases": [
           {
             "condition": {
-              "source": "smart-routing.check",
+              "source": "routing.check",
               "var": "is_simple",
               "transforms": [],
               "is_output": false
             },
-            "target": "simple_prompt"
+            "target": "simple_p"
           }
         ],
-        "default": "complex_prompt",
+        "default": "complex_p",
         "candidates": null
       },
-      "simple_prompt": {
+      "simple_p": {
         "type": "prompt",
-        "full_name": "smart-routing.simple_prompt",
-        "name": "simple_prompt",
+        "full_name": "routing.simple_p",
+        "name": "simple_p",
         "func_name": "_format",
         "is_async": true,
         "is_generator": false,
@@ -939,7 +922,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "smart-routing",
+              "source": "routing",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -958,7 +941,7 @@
       },
       "simple_llm": {
         "type": "llm",
-        "full_name": "smart-routing.simple_llm",
+        "full_name": "routing.simple_llm",
         "name": "simple_llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -972,7 +955,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing.simple_prompt",
+              "source": "routing.simple_p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -1075,7 +1058,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing",
+              "source": "routing",
               "var": "answer",
               "transforms": [],
               "is_output": false
@@ -1120,10 +1103,10 @@
         "fallback": null,
         "batch_mode": false
       },
-      "complex_prompt": {
+      "complex_p": {
         "type": "prompt",
-        "full_name": "smart-routing.complex_prompt",
-        "name": "complex_prompt",
+        "full_name": "routing.complex_p",
+        "name": "complex_p",
         "func_name": "_format",
         "is_async": true,
         "is_generator": false,
@@ -1157,7 +1140,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "smart-routing",
+              "source": "routing",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -1176,7 +1159,7 @@
       },
       "complex_llm": {
         "type": "llm",
-        "full_name": "smart-routing.complex_llm",
+        "full_name": "routing.complex_llm",
         "name": "complex_llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -1190,7 +1173,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing.complex_prompt",
+              "source": "routing.complex_p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -1293,7 +1276,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "smart-routing",
+              "source": "routing",
               "var": "answer",
               "transforms": [],
               "is_output": false
@@ -1357,21 +1340,21 @@
       },
       {
         "from": "router",
-        "to": "simple_prompt",
+        "to": "simple_p",
         "soft": false
       },
       {
-        "from": "simple_prompt",
+        "from": "simple_p",
         "to": "simple_llm",
         "soft": false
       },
       {
         "from": "router",
-        "to": "complex_prompt",
+        "to": "complex_p",
         "soft": false
       },
       {
-        "from": "complex_prompt",
+        "from": "complex_p",
         "to": "complex_llm",
         "soft": false
       }
@@ -1388,9 +1371,9 @@
       "classifier": 1,
       "check": 1,
       "router": 1,
-      "simple_prompt": 1,
+      "simple_p": 1,
       "simple_llm": 1,
-      "complex_prompt": 1,
+      "complex_p": 1,
       "complex_llm": 1
     },
     "compiled_adj": {
@@ -1414,22 +1397,22 @@
       ],
       "router": [
         [
-          "simple_prompt",
+          "simple_p",
           false
         ],
         [
-          "complex_prompt",
+          "complex_p",
           false
         ]
       ],
-      "simple_prompt": [
+      "simple_p": [
         [
           "simple_llm",
           false
         ]
       ],
       "simple_llm": [],
-      "complex_prompt": [
+      "complex_p": [
         [
           "complex_llm",
           false
@@ -1444,8 +1427,8 @@
   },
   "load_balanced": {
     "type": "graph",
-    "full_name": "load-balanced",
-    "name": "load-balanced",
+    "full_name": "load_balanced",
+    "name": "load_balanced",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -1462,15 +1445,45 @@
       }
     },
     "outputs": {
-      "answer": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
         "ref": null,
         "literal": null
       },
-      "model": {
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -1478,7 +1491,7 @@
     "ops": {
       "p": {
         "type": "prompt",
-        "full_name": "load-balanced.p",
+        "full_name": "load_balanced.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -1513,7 +1526,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "load-balanced",
+              "source": "load_balanced",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -1532,7 +1545,7 @@
       },
       "llm": {
         "type": "llm",
-        "full_name": "load-balanced.llm",
+        "full_name": "load_balanced.llm",
         "name": "llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -1546,7 +1559,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "load-balanced.p",
+              "source": "load_balanced.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -1642,15 +1655,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "load_balanced",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "load-balanced",
-              "var": "answer",
+              "source": "load_balanced",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -1659,15 +1677,20 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "load_balanced",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "load-balanced",
-              "var": "model",
+              "source": "load_balanced",
+              "var": "model_used",
               "transforms": [],
               "is_output": false
             },
@@ -1676,19 +1699,34 @@
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "load_balanced",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "load_balanced",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "load_balanced",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },
@@ -1737,8 +1775,8 @@
   },
   "fallback": {
     "type": "graph",
-    "full_name": "fallback-demo",
-    "name": "fallback-demo",
+    "full_name": "fallback",
+    "name": "fallback",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -1755,15 +1793,45 @@
       }
     },
     "outputs": {
-      "answer": {
+      "role": {
+        "default": "assistant",
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "content": {
         "default": null,
         "required": true,
         "ref": null,
         "literal": null
       },
-      "model": {
+      "finish_reason": {
+        "default": null,
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "model_used": {
         "default": null,
         "required": true,
+        "ref": null,
+        "literal": null
+      },
+      "tool_calls": {
+        "default": [],
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "usage": {
+        "default": {},
+        "required": false,
+        "ref": null,
+        "literal": null
+      },
+      "extras": {
+        "default": {},
+        "required": false,
         "ref": null,
         "literal": null
       }
@@ -1771,7 +1839,7 @@
     "ops": {
       "p": {
         "type": "prompt",
-        "full_name": "fallback-demo.p",
+        "full_name": "fallback.p",
         "name": "p",
         "func_name": "_format",
         "is_async": true,
@@ -1806,7 +1874,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "fallback-demo",
+              "source": "fallback",
               "var": "query",
               "transforms": [],
               "is_output": false
@@ -1825,7 +1893,7 @@
       },
       "llm": {
         "type": "llm",
-        "full_name": "fallback-demo.llm",
+        "full_name": "fallback.llm",
         "name": "llm",
         "func_name": "_generate_core",
         "is_async": true,
@@ -1839,7 +1907,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "fallback-demo.p",
+              "source": "fallback.p",
               "var": "messages",
               "transforms": [],
               "is_output": false
@@ -1935,15 +2003,20 @@
           "role": {
             "default": "assistant",
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "fallback",
+              "var": "role",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "content": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "fallback-demo",
-              "var": "answer",
+              "source": "fallback",
+              "var": "content",
               "transforms": [],
               "is_output": false
             },
@@ -1952,15 +2025,20 @@
           "finish_reason": {
             "default": null,
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "fallback",
+              "var": "finish_reason",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "model_used": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "fallback-demo",
-              "var": "model",
+              "source": "fallback",
+              "var": "model_used",
               "transforms": [],
               "is_output": false
             },
@@ -1969,19 +2047,34 @@
           "tool_calls": {
             "default": [],
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "fallback",
+              "var": "tool_calls",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "usage": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "fallback",
+              "var": "usage",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           },
           "extras": {
             "default": {},
             "required": false,
-            "ref": null,
+            "ref": {
+              "source": "fallback",
+              "var": "extras",
+              "transforms": [],
+              "is_output": false
+            },
             "literal": null
           }
         },
@@ -2671,7 +2764,7 @@
         "type": "code",
         "full_name": "ensemble.sel",
         "name": "sel",
-        "func_name": "examples.python.ex10_multi_model.workflow.select",
+        "func_name": "select",
         "is_async": false,
         "is_generator": false,
         "enabled": true,

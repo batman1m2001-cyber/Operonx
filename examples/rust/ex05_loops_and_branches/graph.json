@@ -1,8 +1,8 @@
 {
   "for_loop": {
     "type": "graph",
-    "full_name": "for-loop",
-    "name": "for-loop",
+    "full_name": "for_loop",
+    "name": "for_loop",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -35,9 +35,9 @@
     "ops": {
       "src": {
         "type": "code",
-        "full_name": "for-loop.src",
+        "full_name": "for_loop.src",
         "name": "src",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.each_item",
+        "func_name": "each_item",
         "is_async": false,
         "is_generator": true,
         "enabled": true,
@@ -49,7 +49,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "for-loop",
+              "source": "for_loop",
               "var": "items",
               "transforms": [],
               "is_output": false
@@ -60,7 +60,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "for-loop",
+              "source": "for_loop",
               "var": "prefix",
               "transforms": [],
               "is_output": false
@@ -85,9 +85,9 @@
       },
       "step": {
         "type": "code",
-        "full_name": "for-loop.step",
+        "full_name": "for_loop.step",
         "name": "step",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.process_item",
+        "func_name": "process_item",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -99,7 +99,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "for-loop.src",
+              "source": "for_loop.src",
               "var": "item",
               "transforms": [],
               "is_output": false
@@ -110,7 +110,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "for-loop.src",
+              "source": "for_loop.src",
               "var": "prefix",
               "transforms": [],
               "is_output": false
@@ -123,7 +123,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "for-loop",
+              "source": "for_loop",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -166,8 +166,8 @@
   },
   "map_op": {
     "type": "graph",
-    "full_name": "map-op",
-    "name": "map-op",
+    "full_name": "map_op",
+    "name": "map_op",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -194,9 +194,9 @@
     "ops": {
       "src": {
         "type": "code",
-        "full_name": "map-op.src",
+        "full_name": "map_op.src",
         "name": "src",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.each_number",
+        "func_name": "each_number",
         "is_async": false,
         "is_generator": true,
         "enabled": true,
@@ -208,7 +208,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "map-op",
+              "source": "map_op",
               "var": "numbers",
               "transforms": [],
               "is_output": false
@@ -227,9 +227,9 @@
       },
       "step": {
         "type": "code",
-        "full_name": "map-op.step",
+        "full_name": "map_op.step",
         "name": "step",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.square",
+        "func_name": "square",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -241,7 +241,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "map-op.src",
+              "source": "map_op.src",
               "var": "x",
               "transforms": [],
               "is_output": false
@@ -254,7 +254,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "map-op",
+              "source": "map_op",
               "var": "squared",
               "transforms": [],
               "is_output": false
@@ -297,8 +297,8 @@
   },
   "while_loop": {
     "type": "graph",
-    "full_name": "while-loop",
-    "name": "while-loop",
+    "full_name": "while_loop",
+    "name": "while_loop",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -325,9 +325,9 @@
     "ops": {
       "src": {
         "type": "code",
-        "full_name": "while-loop.src",
+        "full_name": "while_loop.src",
         "name": "src",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.halve_until",
+        "func_name": "halve_until",
         "is_async": false,
         "is_generator": true,
         "enabled": true,
@@ -339,7 +339,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "while-loop",
+              "source": "while_loop",
               "var": "start_value",
               "transforms": [],
               "is_output": false
@@ -352,7 +352,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "while-loop",
+              "source": "while_loop",
               "var": "value",
               "transforms": [],
               "is_output": false
@@ -382,8 +382,8 @@
   },
   "branch": {
     "type": "graph",
-    "full_name": "grade-workflow",
-    "name": "grade-workflow",
+    "full_name": "branch",
+    "name": "branch",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -416,7 +416,7 @@
     "ops": {
       "grade_router": {
         "type": "branch",
-        "full_name": "grade-workflow.grade_router",
+        "full_name": "branch.grade_router",
         "name": "grade_router",
         "func_name": "core",
         "is_async": false,
@@ -436,7 +436,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "score",
               "transforms": [],
               "is_output": false
@@ -519,9 +519,9 @@
       },
       "ex": {
         "type": "code",
-        "full_name": "grade-workflow.ex",
+        "full_name": "branch.ex",
         "name": "ex",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.excellent",
+        "func_name": "excellent",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -534,7 +534,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "grade",
               "transforms": [],
               "is_output": false
@@ -545,7 +545,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "message",
               "transforms": [],
               "is_output": false
@@ -556,9 +556,9 @@
       },
       "gd": {
         "type": "code",
-        "full_name": "grade-workflow.gd",
+        "full_name": "branch.gd",
         "name": "gd",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.good",
+        "func_name": "good",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -571,7 +571,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "grade",
               "transforms": [],
               "is_output": false
@@ -582,7 +582,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "message",
               "transforms": [],
               "is_output": false
@@ -593,9 +593,9 @@
       },
       "av": {
         "type": "code",
-        "full_name": "grade-workflow.av",
+        "full_name": "branch.av",
         "name": "av",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.average",
+        "func_name": "average",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -608,7 +608,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "grade",
               "transforms": [],
               "is_output": false
@@ -619,7 +619,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "message",
               "transforms": [],
               "is_output": false
@@ -630,9 +630,9 @@
       },
       "fl": {
         "type": "code",
-        "full_name": "grade-workflow.fl",
+        "full_name": "branch.fl",
         "name": "fl",
-        "func_name": "examples.python.ex05_loops_and_branches.workflow.fail",
+        "func_name": "fail",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -645,7 +645,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "grade",
               "transforms": [],
               "is_output": false
@@ -656,7 +656,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "grade-workflow",
+              "source": "branch",
               "var": "message",
               "transforms": [],
               "is_output": false

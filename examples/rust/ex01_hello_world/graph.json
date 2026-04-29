@@ -1,8 +1,8 @@
 {
   "hello": {
     "type": "graph",
-    "full_name": "hello-world",
-    "name": "hello-world",
+    "full_name": "hello",
+    "name": "hello",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -11,7 +11,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "name": {
+      "who": {
         "default": null,
         "required": true,
         "ref": null,
@@ -29,9 +29,9 @@
     "ops": {
       "g": {
         "type": "code",
-        "full_name": "hello-world.g",
+        "full_name": "hello.g",
         "name": "g",
-        "func_name": "examples.python.ex01_hello_world.workflow.greet",
+        "func_name": "greet",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -39,12 +39,12 @@
         "stream": false,
         "bound": "sync",
         "inputs": {
-          "name": {
+          "who": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "hello-world",
-              "var": "name",
+              "source": "hello",
+              "var": "who",
               "transforms": [],
               "is_output": false
             },
@@ -56,7 +56,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "hello-world",
+              "source": "hello",
               "var": "greeting",
               "transforms": [],
               "is_output": false
@@ -86,8 +86,8 @@
   },
   "chain": {
     "type": "graph",
-    "full_name": "two-steps",
-    "name": "two-steps",
+    "full_name": "chain",
+    "name": "chain",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -96,7 +96,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "name": {
+      "who": {
         "default": null,
         "required": true,
         "ref": null,
@@ -104,12 +104,6 @@
       }
     },
     "outputs": {
-      "greeting": {
-        "default": null,
-        "required": false,
-        "ref": null,
-        "literal": null
-      },
       "result": {
         "default": null,
         "required": false,
@@ -120,9 +114,9 @@
     "ops": {
       "g": {
         "type": "code",
-        "full_name": "two-steps.g",
+        "full_name": "chain.g",
         "name": "g",
-        "func_name": "examples.python.ex01_hello_world.workflow.greet_en",
+        "func_name": "greet_en",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -130,12 +124,12 @@
         "stream": false,
         "bound": "sync",
         "inputs": {
-          "name": {
+          "who": {
             "default": null,
             "required": true,
             "ref": {
-              "source": "two-steps",
-              "var": "name",
+              "source": "chain",
+              "var": "who",
               "transforms": [],
               "is_output": false
             },
@@ -146,21 +140,16 @@
           "greeting": {
             "default": null,
             "required": false,
-            "ref": {
-              "source": "two-steps",
-              "var": "greeting",
-              "transforms": [],
-              "is_output": false
-            },
+            "ref": null,
             "literal": null
           }
         }
       },
       "u": {
         "type": "code",
-        "full_name": "two-steps.u",
+        "full_name": "chain.u",
         "name": "u",
-        "func_name": "examples.python.ex01_hello_world.workflow.upper",
+        "func_name": "upper",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -172,7 +161,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "two-steps.g",
+              "source": "chain.g",
               "var": "greeting",
               "transforms": [],
               "is_output": false
@@ -185,7 +174,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "two-steps",
+              "source": "chain",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -251,7 +240,7 @@
         "type": "code",
         "full_name": "parallel.a",
         "name": "a",
-        "func_name": "examples.python.ex01_hello_world.workflow.step_a",
+        "func_name": "step_a",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -272,7 +261,7 @@
         "type": "code",
         "full_name": "parallel.b",
         "name": "b",
-        "func_name": "examples.python.ex01_hello_world.workflow.step_b",
+        "func_name": "step_b",
         "is_async": false,
         "is_generator": false,
         "enabled": true,
@@ -293,7 +282,7 @@
         "type": "code",
         "full_name": "parallel.m",
         "name": "m",
-        "func_name": "examples.python.ex01_hello_world.workflow.merge",
+        "func_name": "merge",
         "is_async": false,
         "is_generator": false,
         "enabled": true,

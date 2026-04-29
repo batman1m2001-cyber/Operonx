@@ -1,8 +1,8 @@
 {
   "basic": {
     "type": "graph",
-    "full_name": "basic-demo",
-    "name": "basic-demo",
+    "full_name": "basic",
+    "name": "basic",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -11,7 +11,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "input": {
+      "val": {
         "default": null,
         "required": true,
         "ref": null,
@@ -29,7 +29,7 @@
     "ops": {
       "d": {
         "type": "graph",
-        "full_name": "basic-demo.d",
+        "full_name": "basic.d",
         "name": "d",
         "func_name": null,
         "is_async": false,
@@ -43,8 +43,8 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "basic-demo",
-              "var": "input",
+              "source": "basic",
+              "var": "val",
               "transforms": [],
               "is_output": false
             },
@@ -56,7 +56,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "basic-demo",
+              "source": "basic",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -67,9 +67,9 @@
         "ops": {
           "step": {
             "type": "code",
-            "full_name": "basic-demo.d.step",
+            "full_name": "basic.d.step",
             "name": "step",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -81,7 +81,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "basic-demo.d",
+                  "source": "basic.d",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -94,7 +94,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "basic-demo.d",
+                  "source": "basic.d",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -142,8 +142,8 @@
   },
   "chained": {
     "type": "graph",
-    "full_name": "chain-demo",
-    "name": "chain-demo",
+    "full_name": "chained",
+    "name": "chained",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -152,7 +152,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "input": {
+      "val": {
         "default": null,
         "required": true,
         "ref": null,
@@ -170,7 +170,7 @@
     "ops": {
       "d1": {
         "type": "graph",
-        "full_name": "chain-demo.d1",
+        "full_name": "chained.d1",
         "name": "d1",
         "func_name": null,
         "is_async": false,
@@ -184,8 +184,8 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "chain-demo",
-              "var": "input",
+              "source": "chained",
+              "var": "val",
               "transforms": [],
               "is_output": false
             },
@@ -203,9 +203,9 @@
         "ops": {
           "step": {
             "type": "code",
-            "full_name": "chain-demo.d1.step",
+            "full_name": "chained.d1.step",
             "name": "step",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -217,7 +217,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-demo.d1",
+                  "source": "chained.d1",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -230,7 +230,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "chain-demo.d1",
+                  "source": "chained.d1",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -259,7 +259,7 @@
       },
       "d2": {
         "type": "graph",
-        "full_name": "chain-demo.d2",
+        "full_name": "chained.d2",
         "name": "d2",
         "func_name": null,
         "is_async": false,
@@ -273,7 +273,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "chain-demo.d1",
+              "source": "chained.d1",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -292,9 +292,9 @@
         "ops": {
           "step": {
             "type": "code",
-            "full_name": "chain-demo.d2.step",
+            "full_name": "chained.d2.step",
             "name": "step",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -306,7 +306,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-demo.d2",
+                  "source": "chained.d2",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -319,7 +319,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "chain-demo.d2",
+                  "source": "chained.d2",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -348,7 +348,7 @@
       },
       "d3": {
         "type": "graph",
-        "full_name": "chain-demo.d3",
+        "full_name": "chained.d3",
         "name": "d3",
         "func_name": null,
         "is_async": false,
@@ -362,7 +362,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "chain-demo.d2",
+              "source": "chained.d2",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -375,7 +375,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "chain-demo",
+              "source": "chained",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -386,9 +386,9 @@
         "ops": {
           "step": {
             "type": "code",
-            "full_name": "chain-demo.d3.step",
+            "full_name": "chained.d3.step",
             "name": "step",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -400,7 +400,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "chain-demo.d3",
+                  "source": "chained.d3",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -413,7 +413,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "chain-demo.d3",
+                  "source": "chained.d3",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -486,8 +486,8 @@
   },
   "renamed": {
     "type": "graph",
-    "full_name": "rename-demo",
-    "name": "rename-demo",
+    "full_name": "renamed",
+    "name": "renamed",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -496,7 +496,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "input": {
+      "val": {
         "default": null,
         "required": true,
         "ref": null,
@@ -514,7 +514,7 @@
     "ops": {
       "d": {
         "type": "graph",
-        "full_name": "rename-demo.d",
+        "full_name": "renamed.d",
         "name": "d",
         "func_name": null,
         "is_async": false,
@@ -528,8 +528,8 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "rename-demo",
-              "var": "input",
+              "source": "renamed",
+              "var": "val",
               "transforms": [],
               "is_output": false
             },
@@ -541,7 +541,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "rename-demo",
+              "source": "renamed",
               "var": "answer",
               "transforms": [],
               "is_output": false
@@ -552,9 +552,9 @@
         "ops": {
           "step": {
             "type": "code",
-            "full_name": "rename-demo.d.step",
+            "full_name": "renamed.d.step",
             "name": "step",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -566,7 +566,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "rename-demo.d",
+                  "source": "renamed.d",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -579,7 +579,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "rename-demo.d",
+                  "source": "renamed.d",
                   "var": "doubled",
                   "transforms": [],
                   "is_output": false
@@ -627,8 +627,8 @@
   },
   "multi_params": {
     "type": "graph",
-    "full_name": "multi-param",
-    "name": "multi-param",
+    "full_name": "multi_params",
+    "name": "multi_params",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -661,7 +661,7 @@
     "ops": {
       "calc": {
         "type": "graph",
-        "full_name": "multi-param.calc",
+        "full_name": "multi_params.calc",
         "name": "calc",
         "func_name": null,
         "is_async": false,
@@ -675,7 +675,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-param",
+              "source": "multi_params",
               "var": "x",
               "transforms": [],
               "is_output": false
@@ -686,7 +686,7 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "multi-param",
+              "source": "multi_params",
               "var": "y",
               "transforms": [],
               "is_output": false
@@ -699,7 +699,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "multi-param",
+              "source": "multi_params",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -710,9 +710,9 @@
         "ops": {
           "s": {
             "type": "code",
-            "full_name": "multi-param.calc.s",
+            "full_name": "multi_params.calc.s",
             "name": "s",
-            "func_name": "examples.python.ex13_graph.workflow.add",
+            "func_name": "add",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -724,7 +724,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "multi-param.calc",
+                  "source": "multi_params.calc",
                   "var": "a",
                   "transforms": [],
                   "is_output": false
@@ -735,7 +735,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "multi-param.calc",
+                  "source": "multi_params.calc",
                   "var": "b",
                   "transforms": [],
                   "is_output": false
@@ -754,9 +754,9 @@
           },
           "d": {
             "type": "code",
-            "full_name": "multi-param.calc.d",
+            "full_name": "multi_params.calc.d",
             "name": "d",
-            "func_name": "examples.python.ex13_graph.workflow.double",
+            "func_name": "double",
             "is_async": false,
             "is_generator": false,
             "enabled": true,
@@ -768,7 +768,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "multi-param.calc.s",
+                  "source": "multi_params.calc.s",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -781,7 +781,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "multi-param.calc",
+                  "source": "multi_params.calc",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -842,8 +842,8 @@
   },
   "nested": {
     "type": "graph",
-    "full_name": "nested-demo",
-    "name": "nested-demo",
+    "full_name": "nested",
+    "name": "nested",
     "func_name": null,
     "is_async": false,
     "is_generator": false,
@@ -852,7 +852,7 @@
     "stream": false,
     "bound": "sync",
     "inputs": {
-      "input": {
+      "val": {
         "default": null,
         "required": true,
         "ref": null,
@@ -870,7 +870,7 @@
     "ops": {
       "q": {
         "type": "graph",
-        "full_name": "nested-demo.q",
+        "full_name": "nested.q",
         "name": "q",
         "func_name": null,
         "is_async": false,
@@ -884,8 +884,8 @@
             "default": null,
             "required": true,
             "ref": {
-              "source": "nested-demo",
-              "var": "input",
+              "source": "nested",
+              "var": "val",
               "transforms": [],
               "is_output": false
             },
@@ -897,7 +897,7 @@
             "default": null,
             "required": false,
             "ref": {
-              "source": "nested-demo",
+              "source": "nested",
               "var": "result",
               "transforms": [],
               "is_output": false
@@ -908,7 +908,7 @@
         "ops": {
           "d1": {
             "type": "graph",
-            "full_name": "nested-demo.q.d1",
+            "full_name": "nested.q.d1",
             "name": "d1",
             "func_name": null,
             "is_async": false,
@@ -922,7 +922,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "nested-demo.q",
+                  "source": "nested.q",
                   "var": "val",
                   "transforms": [],
                   "is_output": false
@@ -941,9 +941,9 @@
             "ops": {
               "step": {
                 "type": "code",
-                "full_name": "nested-demo.q.d1.step",
+                "full_name": "nested.q.d1.step",
                 "name": "step",
-                "func_name": "examples.python.ex13_graph.workflow.double",
+                "func_name": "double",
                 "is_async": false,
                 "is_generator": false,
                 "enabled": true,
@@ -955,7 +955,7 @@
                     "default": null,
                     "required": true,
                     "ref": {
-                      "source": "nested-demo.q.d1",
+                      "source": "nested.q.d1",
                       "var": "val",
                       "transforms": [],
                       "is_output": false
@@ -968,7 +968,7 @@
                     "default": null,
                     "required": false,
                     "ref": {
-                      "source": "nested-demo.q.d1",
+                      "source": "nested.q.d1",
                       "var": "result",
                       "transforms": [],
                       "is_output": false
@@ -997,7 +997,7 @@
           },
           "d2": {
             "type": "graph",
-            "full_name": "nested-demo.q.d2",
+            "full_name": "nested.q.d2",
             "name": "d2",
             "func_name": null,
             "is_async": false,
@@ -1011,7 +1011,7 @@
                 "default": null,
                 "required": true,
                 "ref": {
-                  "source": "nested-demo.q.d1",
+                  "source": "nested.q.d1",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -1024,7 +1024,7 @@
                 "default": null,
                 "required": false,
                 "ref": {
-                  "source": "nested-demo.q",
+                  "source": "nested.q",
                   "var": "result",
                   "transforms": [],
                   "is_output": false
@@ -1035,9 +1035,9 @@
             "ops": {
               "step": {
                 "type": "code",
-                "full_name": "nested-demo.q.d2.step",
+                "full_name": "nested.q.d2.step",
                 "name": "step",
-                "func_name": "examples.python.ex13_graph.workflow.double",
+                "func_name": "double",
                 "is_async": false,
                 "is_generator": false,
                 "enabled": true,
@@ -1049,7 +1049,7 @@
                     "default": null,
                     "required": true,
                     "ref": {
-                      "source": "nested-demo.q.d2",
+                      "source": "nested.q.d2",
                       "var": "val",
                       "transforms": [],
                       "is_output": false
@@ -1062,7 +1062,7 @@
                     "default": null,
                     "required": false,
                     "ref": {
-                      "source": "nested-demo.q.d2",
+                      "source": "nested.q.d2",
                       "var": "result",
                       "transforms": [],
                       "is_output": false
