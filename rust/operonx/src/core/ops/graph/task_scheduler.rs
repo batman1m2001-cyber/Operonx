@@ -469,82 +469,90 @@ impl GraphScheduler {
             if cancel.is_cancelled() {
                 return Ok(());
             }
-            let result_map = if matches!(op_cfg.kind, OpType::Branch) {
-                // Branch ops never call user code — the "execution" is a
-                // condition-eval loop over `op_cfg.cases`. Done inline so
-                // we can read state without re-locking through the
-                // resolve_inputs/execute_op split.
-                match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
-                    Ok(target) => {
-                        let mut m = Map::new();
-                        m.insert("__branch_target__".into(), Value::from(target.clone()));
-                        {
-                            let mut s = state.lock();
-                            s.set(
-                                &op_cfg.full_name,
-                                "__branch_target__",
-                                &ctx,
-                                Value::from(target),
-                            );
+            // Frames to post: one per "yield" for generators, exactly one
+            // for everything else. Each entry is `(ctx, frame_map)`; a
+            // single trailing `Eof` on the original `ctx` follows.
+            let frames: Vec<(ContextId, Map<String, Value>)> =
+                if matches!(op_cfg.kind, OpType::Branch) {
+                    // Branch ops never call user code — the "execution" is a
+                    // condition-eval loop over `op_cfg.cases`. Done inline so
+                    // we can read state without re-locking through the
+                    // resolve_inputs/execute_op split.
+                    let single = match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
+                        Ok(target) => {
+                            let mut m = Map::new();
+                            m.insert("__branch_target__".into(), Value::from(target.clone()));
+                            {
+                                let mut s = state.lock();
+                                s.set(
+                                    &op_cfg.full_name,
+                                    "__branch_target__",
+                                    &ctx,
+                                    Value::from(target),
+                                );
+                            }
+                            m
                         }
-                        m
-                    }
-                    Err(e) => {
-                        {
-                            let mut s = state.lock();
-                            s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                        Err(e) => {
+                            {
+                                let mut s = state.lock();
+                                s.set(
+                                    &op_cfg.full_name,
+                                    "error",
+                                    &ctx,
+                                    Value::from(e.to_string()),
+                                );
+                            }
+                            error_frame(&e)
                         }
-                        error_frame(&e)
-                    }
-                }
-            } else {
-                match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
-                    Err(e) => error_frame(&e),
-                    Ok(inputs) => {
-                        match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
-                            Ok(value) => {
-                                let map = value_to_map(value);
-                                {
-                                    let mut s = state.lock();
-                                    for (k, v) in &map {
-                                        s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                    };
+                    vec![(ctx.clone(), single)]
+                } else {
+                    match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+                        Err(e) => vec![(ctx.clone(), error_frame(&e))],
+                        Ok(inputs) => {
+                            match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers)
+                                .await
+                            {
+                                Ok(value) => fan_out_value(&op_cfg, &ctx, value, &state),
+                                Err(e) => {
+                                    {
+                                        let mut s = state.lock();
+                                        s.set(
+                                            &op_cfg.full_name,
+                                            "error",
+                                            &ctx,
+                                            Value::from(e.to_string()),
+                                        );
                                     }
+                                    vec![(ctx.clone(), error_frame(&e))]
                                 }
-                                map
-                            }
-                            Err(e) => {
-                                {
-                                    let mut s = state.lock();
-                                    s.set(
-                                        &op_cfg.full_name,
-                                        "error",
-                                        &ctx,
-                                        Value::from(e.to_string()),
-                                    );
-                                }
-                                error_frame(&e)
                             }
                         }
                     }
-                }
-            };
-            // `try_send` keeps the inline path zero-await on the happy path.
-            // Channel is sized generously (8192) so this is overflow-only;
-            // fall back to `send().await` if it ever fills.
-            for ev in [
-                SchedulerEvent::Frame {
+                };
+
+            // Post Frame events (one per generator yield, or just one) +
+            // a single trailing Eof on the parent context.
+            // `try_send` keeps the inline path zero-await on the happy
+            // path. Channel is sized generously (8192) so this is
+            // overflow-only; fall back to `send().await` if it ever fills.
+            for (frame_ctx, frame_map) in frames {
+                let ev = SchedulerEvent::Frame {
                     op: op_name.clone(),
-                    ctx: ctx.clone(),
-                    result: result_map,
-                },
-                SchedulerEvent::Eof {
-                    op: op_name,
-                    ctx: ctx.clone(),
-                },
-            ] {
+                    ctx: frame_ctx,
+                    result: frame_map,
+                };
                 if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(ev) {
                     let _ = tx.send(ev).await;
                 }
+            }
+            let eof = SchedulerEvent::Eof {
+                op: op_name,
+                ctx: ctx.clone(),
+            };
+            if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(eof) {
+                let _ = tx.send(ev).await;
             }
             return Ok(());
         }
@@ -578,20 +586,16 @@ impl GraphScheduler {
 
             match exec_result {
                 Ok(value) => {
-                    let result_map = value_to_map(value);
-                    {
-                        let mut s = state.lock();
-                        for (k, v) in &result_map {
-                            s.set(&op_cfg.full_name, k, &ctx, v.clone());
-                        }
+                    let frames = fan_out_value(&op_cfg, &ctx, value, &state);
+                    for (frame_ctx, frame_map) in frames {
+                        let _ = tx
+                            .send(SchedulerEvent::Frame {
+                                op: op_name.clone(),
+                                ctx: frame_ctx,
+                                result: frame_map,
+                            })
+                            .await;
                     }
-                    let _ = tx
-                        .send(SchedulerEvent::Frame {
-                            op: op_name.clone(),
-                            ctx: ctx.clone(),
-                            result: result_map,
-                        })
-                        .await;
                     let _ = tx.send(SchedulerEvent::Eof { op: op_name, ctx }).await;
                 }
                 Err(e) => {
@@ -1359,6 +1363,52 @@ fn value_to_map(value: Value) -> Map<String, Value> {
             m.insert("result".into(), other);
             m
         }
+    }
+}
+
+/// Fan an op's return value out into the per-yield frames the scheduler
+/// will post. Generators emit one frame per element of a `Value::Array`
+/// (each frame at a `(parent_ctx, "yield_N")` sub-context); regular ops
+/// emit exactly one frame on `parent_ctx`. State is mutated in place so
+/// downstream `resolve_ref` calls can read each yield at its own
+/// sub-context.
+fn fan_out_value(
+    op_cfg: &OpConfig,
+    parent_ctx: &ContextId,
+    value: Value,
+    state: &Arc<Mutex<RuntimeState>>,
+) -> Vec<(ContextId, Map<String, Value>)> {
+    if op_cfg.is_generator {
+        let items = match value {
+            Value::Array(a) => a,
+            // Be lenient — a generator that returned a single object
+            // collapses to a one-yield list, matching Python's
+            // single-yield iteration.
+            other => vec![other],
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for (i, item) in items.into_iter().enumerate() {
+            let mut yield_ctx = parent_ctx.clone();
+            yield_ctx.push(format!("yield_{i}"));
+            let item_map = value_to_map(item);
+            {
+                let mut s = state.lock();
+                for (k, v) in &item_map {
+                    s.set(&op_cfg.full_name, k, &yield_ctx, v.clone());
+                }
+            }
+            out.push((yield_ctx, item_map));
+        }
+        out
+    } else {
+        let map = value_to_map(value);
+        {
+            let mut s = state.lock();
+            for (k, v) in &map {
+                s.set(&op_cfg.full_name, k, parent_ctx, v.clone());
+            }
+        }
+        vec![(parent_ctx.clone(), map)]
     }
 }
 

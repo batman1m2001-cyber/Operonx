@@ -14,27 +14,28 @@ use serde_json::Value;
 
 #[op(name = "customer_audio")]
 fn customer_audio(sample_count: i64) -> Value {
-    let out: Vec<Value> = (0..sample_count)
-        .map(|i| serde_json::json!({ "audio": format!("chunk_{i}"), "timestamp_ms": i * 32 }))
-        .collect();
-    serde_json::json!({ "items": out })
+    Value::Array(
+        (0..sample_count)
+            .map(|i| serde_json::json!({ "audio": format!("chunk_{i}"), "timestamp_ms": i * 32 }))
+            .collect(),
+    )
 }
 
 #[op(name = "vad")]
 fn vad(audio: String, timestamp_ms: i64) -> Value {
+    // Generator op (graph.json marks `is_generator: true`): yield once
+    // for speech timestamps, zero times otherwise. Empty `Value::Array`
+    // means no downstream dispatch — matches Python's `yield` skipped
+    // on non-speech frames.
     let speech_timestamps = [64_i64, 128_i64];
     if speech_timestamps.contains(&timestamp_ms) {
-        serde_json::json!({
+        Value::Array(vec![serde_json::json!({
             "segment": format!("speech_from_{audio}"),
             "start_ms": timestamp_ms,
             "end_ms": timestamp_ms + 32,
-        })
+        })])
     } else {
-        serde_json::json!({
-            "segment": Value::Null,
-            "start_ms": Value::Null,
-            "end_ms": Value::Null,
-        })
+        Value::Array(vec![])
     }
 }
 
@@ -65,12 +66,15 @@ fn handle_intent(intent: String, transcript: String) -> Value {
 
 #[op(name = "tts")]
 fn tts(response: String) -> Value {
-    let out: Vec<Value> = response
-        .split_whitespace()
-        .enumerate()
-        .map(|(i, word)| serde_json::json!({ "audio_out": format!("tts_{i}_{word}"), "index": i }))
-        .collect();
-    serde_json::json!({ "items": out })
+    Value::Array(
+        response
+            .split_whitespace()
+            .enumerate()
+            .map(|(i, word)| {
+                serde_json::json!({ "audio_out": format!("tts_{i}_{word}"), "index": i })
+            })
+            .collect(),
+    )
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

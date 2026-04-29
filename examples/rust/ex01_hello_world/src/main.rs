@@ -10,13 +10,13 @@ use operonx::{op, Operon};
 use serde_json::Value;
 
 #[op(name = "greet")]
-fn greet(name: String) -> Value {
-    serde_json::json!({ "greeting": format!("Xin chào, {}!", name) })
+fn greet(who: String) -> Value {
+    serde_json::json!({ "greeting": format!("Xin chào, {}!", who) })
 }
 
 #[op(name = "greet_en")]
-fn greet_en(name: String) -> Value {
-    serde_json::json!({ "greeting": format!("Hello, {}!", name) })
+fn greet_en(who: String) -> Value {
+    serde_json::json!({ "greeting": format!("Hello, {}!", who) })
 }
 
 #[op(name = "upper")]
