@@ -110,19 +110,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let inputs_bundle: Value =
         serde_json::from_slice(&std::fs::read(here.join("inputs.json"))?)?;
 
-    for name in ["calc", "search", "combined"] {
-        let graph_v = graph_bundle
-            .get(name)
-            .ok_or_else(|| format!("graph.json missing `{name}` entry"))?;
-        let graph_json = serde_json::to_string(graph_v)?;
+    // The Python builder exposes a single `agent` @graph that wraps the
+    // tool-calling loop. The bundle also keeps inputs keyed by scenario
+    // name (calc / search / combined) so each iteration runs the same
+    // graph against a different query.
+    let graph_v = graph_bundle
+        .get("agent")
+        .ok_or("graph.json missing `agent` entry")?;
+    let graph_json = serde_json::to_string(graph_v)?;
+    let engine = Operon::builder(&graph_json).auto_register().build()?;
 
+    for name in ["calc", "search", "combined"] {
         let inputs_obj = inputs_bundle
             .get(name)
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-
-        let engine = Operon::builder(&graph_json).auto_register().build()?;
         match engine.run_json(inputs_obj, None, None, None) {
             Ok(r) => println!("[{name}] {r}"),
             Err(e) => println!("[{name}] error: {e}"),

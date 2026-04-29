@@ -116,17 +116,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r = run_scenario(rag_v, rag_inputs)?;
     println!("[rag] {}", r);
 
-    // 4. RAG + rerank — skip cleanly if reranker isn't configured.
-    let mut rer_inputs = serde_json::Map::new();
-    rer_inputs.insert(
-        "query".into(),
-        serde_json::json!("Thành phố biển đẹp nhất Việt Nam?"),
-    );
-    rer_inputs.insert("documents".into(), serde_json::json!(documents));
-    let rer_v = graph_bundle.get("rerank").expect("rerank graph");
-    match run_scenario(rer_v, rer_inputs) {
-        Ok(r) => println!("[rerank] {}", r),
-        Err(e) => println!("[rerank] skipped: {e}"),
+    // 4. RAG + rerank — skip cleanly if the rerank graph isn't bundled
+    // (the Python builder leaves it out unless the bge-m3 backend is
+    // configured at serialise time) or if the runtime backend isn't
+    // available.
+    if let Some(rer_v) = graph_bundle.get("rerank") {
+        let mut rer_inputs = serde_json::Map::new();
+        rer_inputs.insert(
+            "query".into(),
+            serde_json::json!("Thành phố biển đẹp nhất Việt Nam?"),
+        );
+        rer_inputs.insert("documents".into(), serde_json::json!(documents));
+        match run_scenario(rer_v, rer_inputs) {
+            Ok(r) => println!("[rerank] {}", r),
+            Err(e) => println!("[rerank] skipped: {e}"),
+        }
+    } else {
+        println!("[rerank] skipped: no `rerank` entry in graph.json (re-pack with reranker:bge-m3 configured)");
     }
 
     Ok(())
