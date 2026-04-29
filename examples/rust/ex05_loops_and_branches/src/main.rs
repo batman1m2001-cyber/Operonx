@@ -1,27 +1,28 @@
 //! 05 Loops & Branches — Rust-side demo.
 //!
 //! Generator ops + `if_()` branch routing, mirroring
-//! `examples/python/ex05_loops_and_branches/main.py`.
-//!
-//! ⚠️  **Rust-runtime limitations** (today, v0.6.2):
-//! - The streaming scheduler does not yet dispatch generator yields per
-//!   item, so `each_item` / `each_number` / `halve_until` return the
-//!   accumulated list as a single-shot value. Downstream per-item ops
-//!   won't fan out the way they do in Python.
-//! - `if_()` branch routing is a stub in the Rust scheduler — the
-//!   `branch` scenario will fail at run time. We still ship its
-//!   `#[op]` bodies so the regen path can keep both languages aligned.
+//! `examples/python/ex05_loops_and_branches/main.py`. Generator ops
+//! (`each_item`, `each_number`) return `Value::Array`; the Rust
+//! scheduler fans each element out as one yield-frame so downstream
+//! ops dispatch per item, matching Python's `yield` semantics.
+//! `OpType::Branch` dispatch + ref-transform evaluator land the
+//! `branch` scenario end-to-end.
 
 use operonx::{op, Operon};
 use serde_json::Value;
 
 #[op(name = "each_item")]
 fn each_item(items: Vec<Value>, prefix: String) -> Value {
-    let out: Vec<Value> = items
-        .into_iter()
-        .map(|item| serde_json::json!({ "item": item, "prefix": prefix.clone() }))
-        .collect();
-    serde_json::json!({ "items": out })
+    // Generator op (graph.json marks `is_generator: true`): return a
+    // `Value::Array` of per-yield frames. The Rust scheduler iterates
+    // and dispatches downstream once per element, mirroring Python's
+    // `for item in items: yield {...}`.
+    Value::Array(
+        items
+            .into_iter()
+            .map(|item| serde_json::json!({ "item": item, "prefix": prefix.clone() }))
+            .collect(),
+    )
 }
 
 #[op(name = "process_item")]
@@ -31,11 +32,12 @@ fn process_item(item: String, prefix: String) -> Value {
 
 #[op(name = "each_number")]
 fn each_number(numbers: Vec<i64>) -> Value {
-    let out: Vec<Value> = numbers
-        .into_iter()
-        .map(|x| serde_json::json!({ "x": x }))
-        .collect();
-    serde_json::json!({ "items": out })
+    Value::Array(
+        numbers
+            .into_iter()
+            .map(|x| serde_json::json!({ "x": x }))
+            .collect(),
+    )
 }
 
 #[op(name = "square")]
@@ -81,10 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let inputs_bundle: Value =
         serde_json::from_slice(&std::fs::read(here.join("inputs.json"))?)?;
 
-    // Branch scenario is known-broken on the Rust runtime today; skip it
-    // to keep the demo runnable. Drop `branch` from this list once
-    // scheduler support lands.
-    for name in ["for_loop", "map_op", "while_loop"] {
+    for name in ["for_loop", "map_op", "while_loop", "branch"] {
         let graph_v = graph_bundle
             .get(name)
             .ok_or_else(|| format!("graph.json missing `{name}` entry"))?;

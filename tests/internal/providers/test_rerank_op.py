@@ -156,6 +156,17 @@ class TestRerankOpIntegration:
         if not hub.has("reranking:bge-m3-onnx"):
             pytest.skip("reranking:bge-m3-onnx not configured in resources.yaml")
 
+        # Probe the actual backend init — `hub.has` only confirms the
+        # config block exists, not that the model files are reachable.
+        # On dev boxes without the local `bge-m3-reranker` directory the
+        # backend constructor raises here; skip cleanly instead of
+        # letting `_process()` swallow the error and surface a confusing
+        # `reranks not in result` AssertionError.
+        try:
+            hub.get("reranking:bge-m3-onnx")
+        except Exception as exc:
+            pytest.skip(f"reranking:bge-m3-onnx not available ({exc})")
+
         try:
             node = RerankOp(name="rerank", resource="bge-m3-onnx")
         except (KeyError, ImportError):

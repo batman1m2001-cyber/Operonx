@@ -38,7 +38,7 @@ use crate::core::middleware::MiddlewareContext;
 use crate::core::ops::edges::PARENT;
 use crate::core::registry::OpRegistry;
 use crate::core::states::cell::{default_context, ContextId};
-use crate::core::states::ref_::{RefArg, RefConfig, RefTransform};
+use crate::core::states::ref_::{RefArg, RefConfig, RefTransform, StreamPolicy};
 
 // ── State slot key ────────────────────────────────────────────────────────
 
@@ -59,8 +59,18 @@ struct RuntimeState {
 }
 
 impl RuntimeState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
+    }
+
+    /// Pre-size the slot map to roughly fit the graph. Avoids the
+    /// log(n) resize cycle that happens when ops `set()` slot keys
+    /// during execution.
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            slots: HashMap::with_capacity(cap),
+        }
     }
 
     /// Store a value at `(op, var, ctx)`.
@@ -123,6 +133,43 @@ pub struct GraphScheduler {
     /// tasks (the io/cpu dispatch path uses `tokio::spawn` with a `move`
     /// closure).
     child_schedulers: Arc<HashMap<String, Arc<GraphScheduler>>>,
+    /// Pre-converted `initial_ready_count` (the `BTreeMap` lives on
+    /// [`OpConfig`]). Cloned per context every time a fresh frame opens
+    /// a never-seen `ContextId`; pre-converting once at construction
+    /// drops a `clone()` + `into_iter().collect()` from `run_once` and
+    /// `on_frame`.
+    initial_ready_hm: HashMap<String, i32>,
+    /// Pre-counted `(op_full_name, var)` pairs across the graph; used as
+    /// the initial capacity for [`RuntimeState::slots`] so the per-run
+    /// `HashMap` never grows in steps. Hash resizes amortise to ~zero
+    /// for graphs that build the slot table once and never delete.
+    slot_capacity: usize,
+    /// Pre-counted edge totals to size the per-run sequential and
+    /// collect bookkeeping `HashMap`s. Sequential edges and collect
+    /// edges are mutually exclusive on a given `(src, dst)` link, so
+    /// each link contributes to exactly one of the two counters.
+    seq_edge_capacity: usize,
+    collect_edge_capacity: usize,
+    /// Cached `(src, dst) -> StreamPolicy` lookups. `route_edge_async`
+    /// fires once per Frame per outgoing edge; the old per-call
+    /// `edge_policy()` walked `dst.inputs` and string-matched. Map
+    /// lookup is O(1) by hash — and on a 50-edge graph with 100 frames
+    /// that's 5,000 walks → 5,000 hash lookups.
+    edge_policies: HashMap<(String, String), StreamPolicy>,
+    /// Pre-compiled per-op input plans. One `Vec<InputSlot>` per op,
+    /// preserving the input declaration order. Each slot carries either
+    /// a `CompiledRef` (resolved against state at runtime) or a
+    /// pre-cloned literal/default value. The runtime walks the slot
+    /// list once per op invocation — no `match param.ref_config`
+    /// per input, no transform-name string match. PARENT is already
+    /// substituted with the graph key at compile time. Wrapped in
+    /// `Arc` so the spawn (io/cpu) path clones cheaply into the
+    /// `tokio::spawn` move closure.
+    input_plans: Arc<HashMap<String, Vec<InputSlot>>>,
+    /// Pre-compiled branch case conditions, keyed by branch op name.
+    /// Each entry is `(Vec<(CompiledRef, target)>, Option<default>)`.
+    /// Empty for graphs with no branch ops.
+    branches: Arc<HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)>>,
 }
 
 impl std::fmt::Debug for GraphScheduler {
@@ -149,11 +196,71 @@ impl GraphScheduler {
         }
         let out_vars = compute_out_vars(&graph);
         let child_schedulers = Arc::new(build_child_schedulers(&graph, &registry)?);
+
+        // Pre-convert `initial_ready_count` BTreeMap → HashMap once.
+        let initial_ready_hm: HashMap<String, i32> = graph
+            .initial_ready_count
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+
+        // Count `(op_full_name, var)` slot pairs across the graph for
+        // RuntimeState pre-sizing. Each op contributes one slot per
+        // input + one per output; over-estimating is fine.
+        let slot_capacity: usize = graph
+            .ops
+            .values()
+            .map(|op| op.inputs.len() + op.outputs.len())
+            .sum::<usize>()
+            .max(16);
+
+        // Tally seq-vs-collect edge counts via the same policy lookup
+        // we're about to cache. A single pass populates both
+        // `edge_policies` and the capacity hints.
+        let mut edge_policies: HashMap<(String, String), StreamPolicy> = HashMap::new();
+        let mut seq_edge_capacity = 0usize;
+        let mut collect_edge_capacity = 0usize;
+        for (src_name, links) in &graph.compiled_adj {
+            for link in links {
+                let key = (src_name.clone(), link.dst.clone());
+                let policy = resolve_edge_policy(&graph, src_name, &link.dst);
+                if let Some(p) = policy {
+                    edge_policies.insert(key.clone(), p);
+                    if p.collect {
+                        collect_edge_capacity += 1;
+                    } else {
+                        seq_edge_capacity += 1;
+                    }
+                } else {
+                    // No policy = sequential default; still counts.
+                    seq_edge_capacity += 1;
+                }
+            }
+        }
+
+        // Pre-compile every input ref + branch case condition.
+        // `graph_key` substitutes the PARENT sentinel at compile time
+        // so `eval_ref` skips the per-call branch.
+        let graph_key_owned = if graph.full_name.is_empty() {
+            graph.name.clone()
+        } else {
+            graph.full_name.clone()
+        };
+        let input_plans = Arc::new(compile_input_plans(&graph, &graph_key_owned));
+        let branches = Arc::new(compile_branches(&graph, &graph_key_owned));
+
         Ok(Self {
             graph,
             registry,
             out_vars,
             child_schedulers,
+            initial_ready_hm,
+            slot_capacity,
+            seq_edge_capacity: seq_edge_capacity.max(4),
+            collect_edge_capacity: collect_edge_capacity.max(4),
+            edge_policies,
+            input_plans,
+            branches,
         })
     }
 
@@ -234,7 +341,7 @@ impl Scheduler for GraphScheduler {
         sender: FrameSender,
         cancel: CancellationToken,
     ) -> Result<(), OperonError> {
-        let state = Arc::new(Mutex::new(RuntimeState::new()));
+        let state = Arc::new(Mutex::new(RuntimeState::with_capacity(self.slot_capacity)));
 
         // Seed PARENT-level inputs at root context. Caller-provided `inputs`
         // override graph-declared literals (e.g. `GraphOp.loop(count=0)` is
@@ -322,23 +429,25 @@ impl GraphScheduler {
     ) -> Result<(), OperonError> {
         // ── Per-run mutable bookkeeping ───────────────────────────────────
         let mut ready: HashMap<ContextId, HashMap<String, i32>> = HashMap::new();
-        ready.insert(
-            ctx.clone(),
-            self.graph.initial_ready_count.clone().into_iter().collect(),
-        );
+        ready.insert(ctx.clone(), self.initial_ready_hm.clone());
 
         let mut inflight: i32 = 0;
 
         // Sequential per-edge queueing — matches Python seq_queues/seq_active.
-        let mut seq_queues: HashMap<(String, String), VecDeque<ContextId>> = HashMap::new();
-        let mut seq_active: HashMap<(String, String), bool> = HashMap::new();
+        // Pre-sized to the graph's seq edge count so the per-frame
+        // `entry().or_default()` calls don't trigger HashMap resizes
+        // mid-run.
+        let mut seq_queues: HashMap<(String, String), VecDeque<ContextId>> =
+            HashMap::with_capacity(self.seq_edge_capacity);
+        let mut seq_active: HashMap<(String, String), bool> =
+            HashMap::with_capacity(self.seq_edge_capacity);
         let mut seq_origins: HashMap<(String, ContextId), (String, String)> = HashMap::new();
 
         // Collect buffers — `(src, dst) → [(frame_ctx, result), ...]`. Python
         // parity: flushed when src emits Eof; merged per-key into lists, one
         // dispatch of dst under a `__collect__` sub-context.
         let mut collect_bufs: HashMap<(String, String), Vec<(ContextId, Map<String, Value>)>> =
-            HashMap::new();
+            HashMap::with_capacity(self.collect_edge_capacity);
 
         let sem = Arc::new(Semaphore::new(
             self.graph.max_stream_concurrent.max(1) as usize
@@ -462,94 +571,107 @@ impl GraphScheduler {
             .clone();
         let registry = self.registry.clone();
         let child_schedulers = self.child_schedulers.clone();
-        let graph_key = self.graph_key().to_string();
+        // One HashMap lookup per op invocation (not per input). The
+        // returned `&[InputSlot]` borrows from `self.input_plans`; in
+        // the spawn path we clone the slice into the closure as a
+        // small `Vec<InputSlot>` (bounded by the op's input count, ~8
+        // for typical ops).
+        let plan_slice: &[InputSlot] = self
+            .input_plans
+            .get(&op_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
 
         // ── Inline fast path for sync ops ──────────────────────────────────
         if matches!(op_cfg.bound, OpBound::Sync) {
             if cancel.is_cancelled() {
                 return Ok(());
             }
-            let result_map = if matches!(op_cfg.kind, OpType::Branch) {
-                // Branch ops never call user code — the "execution" is a
-                // condition-eval loop over `op_cfg.cases`. Done inline so
-                // we can read state without re-locking through the
-                // resolve_inputs/execute_op split.
-                match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
-                    Ok(target) => {
-                        let mut m = Map::new();
-                        m.insert("__branch_target__".into(), Value::from(target.clone()));
-                        {
-                            let mut s = state.lock();
-                            s.set(
-                                &op_cfg.full_name,
-                                "__branch_target__",
-                                &ctx,
-                                Value::from(target),
-                            );
+            // Frames to post: one per "yield" for generators, exactly one
+            // for everything else. Each entry is `(ctx, frame_map)`; a
+            // single trailing `Eof` on the original `ctx` follows.
+            let frames: Vec<(ContextId, Map<String, Value>)> =
+                if matches!(op_cfg.kind, OpType::Branch) {
+                    // Branch ops never call user code — the "execution" is a
+                    // condition-eval loop over `op_cfg.cases`. Done inline so
+                    // we can read state without re-locking through the
+                    // resolve_inputs/execute_op split.
+                    let single = match evaluate_branch(&op_cfg, &self.branches, &ctx, &state) {
+                        Ok(target) => {
+                            let mut m = Map::new();
+                            m.insert("__branch_target__".into(), Value::from(target.clone()));
+                            {
+                                let mut s = state.lock();
+                                s.set(
+                                    &op_cfg.full_name,
+                                    "__branch_target__",
+                                    &ctx,
+                                    Value::from(target),
+                                );
+                            }
+                            m
                         }
-                        m
-                    }
-                    Err(e) => {
-                        {
-                            let mut s = state.lock();
-                            s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                        Err(e) => {
+                            {
+                                let mut s = state.lock();
+                                s.set(&op_cfg.full_name, "error", &ctx, Value::from(e.to_string()));
+                            }
+                            error_frame(&e)
                         }
-                        error_frame(&e)
-                    }
-                }
-            } else {
-                match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
-                    Err(e) => error_frame(&e),
-                    Ok(inputs) => {
-                        match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers).await {
-                            Ok(value) => {
-                                let map = value_to_map(value);
-                                {
-                                    let mut s = state.lock();
-                                    for (k, v) in &map {
-                                        s.set(&op_cfg.full_name, k, &ctx, v.clone());
+                    };
+                    vec![(ctx.clone(), single)]
+                } else {
+                    match resolve_inputs(&op_cfg, plan_slice, &ctx, &state) {
+                        Err(e) => vec![(ctx.clone(), error_frame(&e))],
+                        Ok(inputs) => {
+                            match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers)
+                                .await
+                            {
+                                Ok(value) => fan_out_value(&op_cfg, &ctx, value, &state),
+                                Err(e) => {
+                                    {
+                                        let mut s = state.lock();
+                                        s.set(
+                                            &op_cfg.full_name,
+                                            "error",
+                                            &ctx,
+                                            Value::from(e.to_string()),
+                                        );
                                     }
+                                    vec![(ctx.clone(), error_frame(&e))]
                                 }
-                                map
-                            }
-                            Err(e) => {
-                                {
-                                    let mut s = state.lock();
-                                    s.set(
-                                        &op_cfg.full_name,
-                                        "error",
-                                        &ctx,
-                                        Value::from(e.to_string()),
-                                    );
-                                }
-                                error_frame(&e)
                             }
                         }
                     }
-                }
-            };
-            // `try_send` keeps the inline path zero-await on the happy path.
-            // Channel is sized generously (8192) so this is overflow-only;
-            // fall back to `send().await` if it ever fills.
-            for ev in [
-                SchedulerEvent::Frame {
+                };
+
+            // Post Frame events (one per generator yield, or just one) +
+            // a single trailing Eof on the parent context.
+            // `try_send` keeps the inline path zero-await on the happy
+            // path. Channel is sized generously (8192) so this is
+            // overflow-only; fall back to `send().await` if it ever fills.
+            for (frame_ctx, frame_map) in frames {
+                let ev = SchedulerEvent::Frame {
                     op: op_name.clone(),
-                    ctx: ctx.clone(),
-                    result: result_map,
-                },
-                SchedulerEvent::Eof {
-                    op: op_name,
-                    ctx: ctx.clone(),
-                },
-            ] {
+                    ctx: frame_ctx,
+                    result: frame_map,
+                };
                 if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(ev) {
                     let _ = tx.send(ev).await;
                 }
+            }
+            let eof = SchedulerEvent::Eof {
+                op: op_name,
+                ctx: ctx.clone(),
+            };
+            if let Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) = tx.try_send(eof) {
+                let _ = tx.send(ev).await;
             }
             return Ok(());
         }
 
         // ── Spawn path for io/cpu ──────────────────────────────────────────
+        let owned_plan: Vec<InputSlot> = plan_slice.to_vec();
         tokio::spawn(async move {
             let _permit = match sem.acquire_owned().await {
                 Ok(p) => p,
@@ -559,7 +681,7 @@ impl GraphScheduler {
                 return;
             }
 
-            let inputs = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+            let inputs = match resolve_inputs(&op_cfg, &owned_plan, &ctx, &state) {
                 Ok(m) => m,
                 Err(e) => {
                     let _ = tx
@@ -578,20 +700,16 @@ impl GraphScheduler {
 
             match exec_result {
                 Ok(value) => {
-                    let result_map = value_to_map(value);
-                    {
-                        let mut s = state.lock();
-                        for (k, v) in &result_map {
-                            s.set(&op_cfg.full_name, k, &ctx, v.clone());
-                        }
+                    let frames = fan_out_value(&op_cfg, &ctx, value, &state);
+                    for (frame_ctx, frame_map) in frames {
+                        let _ = tx
+                            .send(SchedulerEvent::Frame {
+                                op: op_name.clone(),
+                                ctx: frame_ctx,
+                                result: frame_map,
+                            })
+                            .await;
                     }
-                    let _ = tx
-                        .send(SchedulerEvent::Frame {
-                            op: op_name.clone(),
-                            ctx: ctx.clone(),
-                            result: result_map,
-                        })
-                        .await;
                     let _ = tx.send(SchedulerEvent::Eof { op: op_name, ctx }).await;
                 }
                 Err(e) => {
@@ -634,8 +752,7 @@ impl GraphScheduler {
     ) -> Result<(), OperonError> {
         // Seed ready counts for a never-seen context.
         if !ready.contains_key(ctx) {
-            let base = self.graph.initial_ready_count.clone().into_iter().collect();
-            ready.insert(ctx.clone(), base);
+            ready.insert(ctx.clone(), self.initial_ready_hm.clone());
         }
 
         // Forward any PARENT-bound output vars to the external frame stream,
@@ -732,10 +849,13 @@ impl GraphScheduler {
             return Ok(());
         }
 
-        // Consult the dst op's per-var stream policy — the input var whose
-        // ref.source == src carries the `StreamPolicy`. Python's equivalent
-        // lookup lives in task_scheduler.py _route.
-        let policy = self.edge_policy(src, &link.dst);
+        // Consult the dst op's per-var stream policy — pre-cached at
+        // construction in `edge_policies`. Python's equivalent lookup
+        // lives in task_scheduler.py _route.
+        let policy = self
+            .edge_policies
+            .get(&(src.to_string(), link.dst.clone()))
+            .copied();
 
         // `Collect` — buffer the frame and wait for src's Eof.
         if let Some(p) = &policy {
@@ -783,31 +903,6 @@ impl GraphScheduler {
             seq_queues.entry(key).or_default().push_back(ctx.clone());
         }
         Ok(())
-    }
-
-    /// Resolve the [`StreamPolicy`](crate::core::states::ref_::StreamPolicy)
-    /// declared on the dst op's input var that references `src`. Returns
-    /// `None` when dst's inputs don't reference src or when none of the
-    /// matching refs carry a policy.
-    fn edge_policy(&self, src: &str, dst: &str) -> Option<crate::core::states::ref_::StreamPolicy> {
-        let dst_op = self.graph.ops.get(dst)?;
-        let src_full = self
-            .graph
-            .ops
-            .get(src)
-            .map(|o| o.full_name.as_str())
-            .unwrap_or(src);
-        for (_var, param) in &dst_op.inputs {
-            let Some(ref_cfg) = &param.ref_config else {
-                continue;
-            };
-            if ref_cfg.source == src || ref_cfg.source == src_full {
-                if let Some(p) = ref_cfg.stream_policy {
-                    return Some(p);
-                }
-            }
-        }
-        None
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -927,6 +1022,334 @@ impl GraphScheduler {
     }
 }
 
+// ── Compiled ref-transform pipeline ──────────────────────────────────────
+//
+// At construction time we walk every `RefConfig` in the graph (op-input
+// refs + branch case conditions, recursively into nested refs) and
+// produce a flattened, enum-tagged form. The runtime hot path then
+// reads one `CompiledRef` per input via a HashMap lookup and dispatches
+// each step through a single `match` on `TransformKind` — no
+// `transform.name.as_str()` walk, no `if source == PARENT` branch
+// (PARENT is already substituted with the graph key at compile time).
+//
+// `Unknown(name)` falls through to a runtime `not implemented` error,
+// matching the previous string-match path's behaviour for ops we haven't
+// promoted (e.g. `apply`, `call`, `matmul`).
+
+#[derive(Debug, Clone)]
+struct CompiledRef {
+    /// Final state-source key — `__PARENT__` already replaced with the
+    /// enclosing graph's key.
+    source: String,
+    var: String,
+    /// Transform pipeline in evaluation order. Empty for plain refs.
+    chain: Vec<CompiledOp>,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledOp {
+    kind: TransformKind,
+    args: Vec<CompiledArg>,
+}
+
+#[derive(Debug, Clone)]
+enum CompiledArg {
+    Lit(Value),
+    Ref(Box<CompiledRef>),
+}
+
+#[derive(Debug, Clone)]
+enum TransformKind {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Contains,
+    GetItem, // also handles `getattr`
+    And,
+    RAnd,
+    Or,
+    ROr,
+    Not,
+    Add,
+    RAdd,
+    Sub,
+    RSub,
+    Mul,
+    RMul,
+    TrueDiv,
+    RTrueDiv,
+    FloorDiv,
+    RFloorDiv,
+    Mod,
+    RMod,
+    Pow,
+    RPow,
+    Neg,
+    Pos,
+    Abs,
+    /// Unrecognised transform name — surfaces at runtime as
+    /// `OperonError::Runtime` matching the legacy path's error.
+    Unknown(String),
+}
+
+/// Compile a `RefConfig` (recursively into nested arg refs).
+fn compile_ref(rc: &RefConfig, graph_key: &str) -> CompiledRef {
+    let source = if rc.source == PARENT {
+        graph_key.to_string()
+    } else {
+        rc.source.clone()
+    };
+    let chain = rc
+        .transforms
+        .iter()
+        .map(|t| compile_op(t, graph_key))
+        .collect();
+    CompiledRef {
+        source,
+        var: rc.var.clone(),
+        chain,
+    }
+}
+
+fn compile_op(t: &RefTransform, graph_key: &str) -> CompiledOp {
+    let kind = match t.name.as_str() {
+        "eq" => TransformKind::Eq,
+        "ne" => TransformKind::Ne,
+        "lt" => TransformKind::Lt,
+        "le" => TransformKind::Le,
+        "gt" => TransformKind::Gt,
+        "ge" => TransformKind::Ge,
+        "contains" => TransformKind::Contains,
+        "getitem" | "getattr" => TransformKind::GetItem,
+        "and_" => TransformKind::And,
+        "rand_" => TransformKind::RAnd,
+        "or_" => TransformKind::Or,
+        "ror_" => TransformKind::ROr,
+        "not_" => TransformKind::Not,
+        "add" => TransformKind::Add,
+        "radd" => TransformKind::RAdd,
+        "sub" => TransformKind::Sub,
+        "rsub" => TransformKind::RSub,
+        "mul" => TransformKind::Mul,
+        "rmul" => TransformKind::RMul,
+        "truediv" => TransformKind::TrueDiv,
+        "rtruediv" => TransformKind::RTrueDiv,
+        "floordiv" => TransformKind::FloorDiv,
+        "rfloordiv" => TransformKind::RFloorDiv,
+        "mod" => TransformKind::Mod,
+        "rmod" => TransformKind::RMod,
+        "pow" => TransformKind::Pow,
+        "rpow" => TransformKind::RPow,
+        "neg" => TransformKind::Neg,
+        "pos" => TransformKind::Pos,
+        "abs" => TransformKind::Abs,
+        other => TransformKind::Unknown(other.to_string()),
+    };
+    let args = t.args.iter().map(|a| compile_arg(a, graph_key)).collect();
+    CompiledOp { kind, args }
+}
+
+fn compile_arg(a: &RefArg, graph_key: &str) -> CompiledArg {
+    match a {
+        RefArg::Literal(v) => CompiledArg::Lit(v.clone()),
+        RefArg::NestedRef(r) => CompiledArg::Ref(Box::new(compile_ref(r, graph_key))),
+    }
+}
+
+/// Evaluate a compiled ref against runtime state. Walks the transform
+/// chain in order, threading the running value.
+fn eval_ref(
+    cref: &CompiledRef,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    let base = {
+        let s = state.lock();
+        s.get(&cref.source, &cref.var, ctx)
+            .cloned()
+            .ok_or_else(|| {
+                OperonError::State(format!(
+                    "ref resolution: no value for ({}, {}) at context {:?}",
+                    cref.source, cref.var, ctx
+                ))
+            })?
+    };
+    let mut current = base;
+    for cop in &cref.chain {
+        current = eval_op(current, cop, ctx, state)?;
+    }
+    Ok(current)
+}
+
+fn eval_arg(
+    a: &CompiledArg,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    match a {
+        CompiledArg::Lit(v) => Ok(v.clone()),
+        CompiledArg::Ref(r) => eval_ref(r, ctx, state),
+    }
+}
+
+fn eval_op(
+    value: Value,
+    cop: &CompiledOp,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    use TransformKind::*;
+    let arg0 = || -> Result<Value, OperonError> {
+        match cop.args.first() {
+            Some(a) => eval_arg(a, ctx, state),
+            None => Ok(Value::Null),
+        }
+    };
+    match &cop.kind {
+        Eq => Ok(Value::Bool(values_equal(&value, &arg0()?))),
+        Ne => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
+        Lt => cmp_op(&value, &arg0()?, |o| o.is_lt()),
+        Le => cmp_op(&value, &arg0()?, |o| o.is_le()),
+        Gt => cmp_op(&value, &arg0()?, |o| o.is_gt()),
+        Ge => cmp_op(&value, &arg0()?, |o| o.is_ge()),
+        Contains => Ok(Value::Bool(value_contains(&value, &arg0()?))),
+        GetItem => Ok(value_getitem(&value, &arg0()?)),
+        And => {
+            if !value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        RAnd => {
+            let lhs = arg0()?;
+            if !value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        Or => {
+            if value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        ROr => {
+            let lhs = arg0()?;
+            if value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        Not => Ok(Value::Bool(!value_truthy(&value))),
+        Add => arith(&value, &arg0()?, |l, r| l + r),
+        RAdd => arith(&arg0()?, &value, |l, r| l + r),
+        Sub => arith(&value, &arg0()?, |l, r| l - r),
+        RSub => arith(&arg0()?, &value, |l, r| l - r),
+        Mul => arith(&value, &arg0()?, |l, r| l * r),
+        RMul => arith(&arg0()?, &value, |l, r| l * r),
+        TrueDiv => arith(&value, &arg0()?, |l, r| l / r),
+        RTrueDiv => arith(&arg0()?, &value, |l, r| l / r),
+        FloorDiv => arith(&value, &arg0()?, |l, r| (l / r).floor()),
+        RFloorDiv => arith(&arg0()?, &value, |l, r| (l / r).floor()),
+        Mod => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
+        RMod => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
+        Pow => arith(&value, &arg0()?, |l, r| l.powf(r)),
+        RPow => arith(&arg0()?, &value, |l, r| l.powf(r)),
+        Neg => unary(&value, |v| -v),
+        Pos => unary(&value, |v| v),
+        Abs => unary(&value, |v| v.abs()),
+        Unknown(name) => Err(OperonError::Runtime(format!(
+            "ref transform '{}' not implemented in Rust runtime",
+            name
+        ))),
+    }
+}
+
+/// One entry in an op's pre-compiled input plan. Mirrors the four
+/// branches of the legacy `resolve_inputs` body (ref / literal /
+/// default / required-missing) but pre-resolves which path each input
+/// takes, so the runtime walks a tight `Vec` instead of re-reading
+/// `Param` flags per frame.
+#[derive(Debug, Clone)]
+enum InputResolver {
+    /// Resolve from runtime state (with optional transforms).
+    Ref(CompiledRef),
+    /// Inlined literal — `Value` cloned on each invocation.
+    Lit(Value),
+    /// Default — same as `Lit` but kept distinct for readability.
+    Default(Value),
+    /// `param.required && param.literal.is_none() && param.default.is_none()`.
+    /// Surfaces the same error the legacy path did.
+    RequiredMissing,
+    /// Optional input with no value — yields `Value::Null`.
+    Null,
+}
+
+#[derive(Debug, Clone)]
+struct InputSlot {
+    /// Output key under which the resolved value lands in the inputs map.
+    var: String,
+    plan: InputResolver,
+}
+
+/// One input plan per op (preserves insertion order from
+/// `OpConfig.inputs`). Built once at construction so the runtime hot
+/// path replaces `for (var, param) in &op_cfg.inputs` + per-input
+/// `match param` with a single `for slot in plan` walk.
+fn compile_input_plans(graph: &OpConfig, graph_key: &str) -> HashMap<String, Vec<InputSlot>> {
+    let mut out: HashMap<String, Vec<InputSlot>> = HashMap::with_capacity(graph.ops.len());
+    for (op_name, op_cfg) in &graph.ops {
+        let mut slots = Vec::with_capacity(op_cfg.inputs.len());
+        for (var, param) in &op_cfg.inputs {
+            let plan = if let Some(rc) = &param.ref_config {
+                InputResolver::Ref(compile_ref(rc, graph_key))
+            } else if let Some(lit) = &param.literal {
+                InputResolver::Lit(lit.clone())
+            } else if let Some(def) = &param.default {
+                InputResolver::Default(def.clone())
+            } else if param.required {
+                InputResolver::RequiredMissing
+            } else {
+                InputResolver::Null
+            };
+            slots.push(InputSlot {
+                var: var.clone(),
+                plan,
+            });
+        }
+        out.insert(op_name.clone(), slots);
+    }
+    out
+}
+
+/// `op_name -> (Vec<(condition, target)>, default)`. Empty when there
+/// are no branch ops in the graph.
+fn compile_branches(
+    graph: &OpConfig,
+    graph_key: &str,
+) -> HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)> {
+    let mut out = HashMap::new();
+    for (op_name, op_cfg) in &graph.ops {
+        if !matches!(op_cfg.kind, OpType::Branch) {
+            continue;
+        }
+        let cases = op_cfg
+            .cases
+            .iter()
+            .map(|c| (compile_ref(&c.condition, graph_key), c.target.clone()))
+            .collect();
+        out.insert(op_name.clone(), (cases, op_cfg.default.clone()));
+    }
+    out
+}
+
 // ── Helper functions ──────────────────────────────────────────────────────
 
 fn compute_out_vars(graph: &OpConfig) -> HashMap<String, Vec<(String, String)>> {
@@ -959,185 +1382,53 @@ fn compute_out_vars(graph: &OpConfig) -> HashMap<String, Vec<(String, String)>> 
     map
 }
 
+/// Walk `dst.inputs` looking for a ref whose `source` matches `src` (by
+/// short name or `full_name`). Returns the first carrying a
+/// `StreamPolicy`. Pulled out of `GraphScheduler` so the constructor
+/// can pre-cache the lookup at build time — `route_edge_async` then
+/// hits `edge_policies` instead of re-walking inputs per frame.
+fn resolve_edge_policy(graph: &OpConfig, src: &str, dst: &str) -> Option<StreamPolicy> {
+    let dst_op = graph.ops.get(dst)?;
+    let src_full = graph
+        .ops
+        .get(src)
+        .map(|o| o.full_name.as_str())
+        .unwrap_or(src);
+    for (_var, param) in &dst_op.inputs {
+        let Some(ref_cfg) = &param.ref_config else {
+            continue;
+        };
+        if ref_cfg.source == src || ref_cfg.source == src_full {
+            if let Some(p) = ref_cfg.stream_policy {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 fn resolve_inputs(
     op_cfg: &OpConfig,
-    graph_key: &str,
+    plan: &[InputSlot],
     ctx: &ContextId,
     state: &Mutex<RuntimeState>,
 ) -> Result<Map<String, Value>, OperonError> {
-    let mut resolved = Map::new();
-    for (var, param) in &op_cfg.inputs {
-        let value = if let Some(ref_cfg) = &param.ref_config {
-            resolve_ref(ref_cfg, graph_key, ctx, state)?
-        } else if let Some(lit) = &param.literal {
-            lit.clone()
-        } else if let Some(default) = &param.default {
-            default.clone()
-        } else if param.required {
-            return Err(OperonError::Op(OpError::Code(format!(
-                "op '{}': required input '{}' not provided",
-                op_cfg.full_name, var
-            ))));
-        } else {
-            Value::Null
+    let mut resolved = Map::with_capacity(plan.len());
+    for slot in plan {
+        let value = match &slot.plan {
+            InputResolver::Ref(cref) => eval_ref(cref, ctx, state)?,
+            InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
+            InputResolver::RequiredMissing => {
+                return Err(OperonError::Op(OpError::Code(format!(
+                    "op '{}': required input '{}' not provided",
+                    op_cfg.full_name, slot.var
+                ))));
+            }
+            InputResolver::Null => Value::Null,
         };
-        resolved.insert(var.clone(), value);
+        resolved.insert(slot.var.clone(), value);
     }
     Ok(resolved)
-}
-
-fn resolve_ref(
-    ref_cfg: &RefConfig,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    let source = if ref_cfg.source == PARENT {
-        graph_key
-    } else {
-        &ref_cfg.source
-    };
-    let base = {
-        let s = state.lock();
-        s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
-            OperonError::State(format!(
-                "ref resolution: no value for ({}, {}) at context {:?}",
-                source, ref_cfg.var, ctx
-            ))
-        })?
-    };
-
-    // Walk the chain — each transform takes the running value + its
-    // (literal | nested-Ref) args and produces the next running value.
-    let mut current = base;
-    for transform in &ref_cfg.transforms {
-        current = apply_transform(current, transform, graph_key, ctx, state)?;
-    }
-    Ok(current)
-}
-
-/// Resolve one [`RefArg`] to a concrete `Value`. Literals pass through;
-/// nested Refs are recursively resolved (used by boolean operators that
-/// combine two Refs).
-fn resolve_ref_arg(
-    arg: &RefArg,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    match arg {
-        RefArg::Literal(v) => Ok(v.clone()),
-        RefArg::NestedRef(inner) => resolve_ref(inner, graph_key, ctx, state),
-    }
-}
-
-/// Apply one [`RefTransform`] to `value`. Mirrors Python's
-/// `Ref._wrap` dispatch table — every operator that the Python decorator
-/// emits via `_with_transform` has a branch here.
-///
-/// Numeric arithmetic is performed on `f64` (Python parity for mixed
-/// int/float). Comparisons accept any JSON `Value`; boolean operators
-/// short-circuit using JSON-truthiness rules.
-///
-/// Operators not implemented yet: `apply` (Python-callable),
-/// `matmul`/`rmatmul` (numpy-only), `call` (Python-callable).
-fn apply_transform(
-    value: Value,
-    transform: &RefTransform,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    let name = transform.name.as_str();
-    let args = &transform.args;
-    let arg0 = || -> Result<Value, OperonError> {
-        match args.first() {
-            Some(a) => resolve_ref_arg(a, graph_key, ctx, state),
-            None => Ok(Value::Null),
-        }
-    };
-
-    match name {
-        // ── Comparison ──────────────────────────────────────────────────
-        "eq" => Ok(Value::Bool(values_equal(&value, &arg0()?))),
-        "ne" => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
-        "lt" => cmp_op(&value, &arg0()?, |o| o.is_lt()),
-        "le" => cmp_op(&value, &arg0()?, |o| o.is_le()),
-        "gt" => cmp_op(&value, &arg0()?, |o| o.is_gt()),
-        "ge" => cmp_op(&value, &arg0()?, |o| o.is_ge()),
-        "contains" => Ok(Value::Bool(value_contains(&value, &arg0()?))),
-
-        // ── Access ──────────────────────────────────────────────────────
-        "getitem" | "getattr" => Ok(value_getitem(&value, &arg0()?)),
-
-        // ── Boolean ─────────────────────────────────────────────────────
-        "and_" => {
-            if !value_truthy(&value) {
-                Ok(value)
-            } else {
-                Ok(arg0()?)
-            }
-        }
-        "rand_" => {
-            let lhs = arg0()?;
-            if !value_truthy(&lhs) {
-                Ok(lhs)
-            } else {
-                Ok(value)
-            }
-        }
-        "or_" => {
-            if value_truthy(&value) {
-                Ok(value)
-            } else {
-                Ok(arg0()?)
-            }
-        }
-        "ror_" => {
-            let lhs = arg0()?;
-            if value_truthy(&lhs) {
-                Ok(lhs)
-            } else {
-                Ok(value)
-            }
-        }
-        "not_" => Ok(Value::Bool(!value_truthy(&value))),
-
-        // ── Arithmetic ──────────────────────────────────────────────────
-        "add" => arith(&value, &arg0()?, |l, r| l + r),
-        "radd" => arith(&arg0()?, &value, |l, r| l + r),
-        "sub" => arith(&value, &arg0()?, |l, r| l - r),
-        "rsub" => arith(&arg0()?, &value, |l, r| l - r),
-        "mul" => arith(&value, &arg0()?, |l, r| l * r),
-        "rmul" => arith(&arg0()?, &value, |l, r| l * r),
-        "truediv" => arith(&value, &arg0()?, |l, r| l / r),
-        "rtruediv" => arith(&arg0()?, &value, |l, r| l / r),
-        "floordiv" => arith(&value, &arg0()?, |l, r| (l / r).floor()),
-        "rfloordiv" => arith(&arg0()?, &value, |l, r| (l / r).floor()),
-        "mod" => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
-        "rmod" => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
-        "pow" => arith(&value, &arg0()?, |l, r| l.powf(r)),
-        "rpow" => arith(&arg0()?, &value, |l, r| l.powf(r)),
-
-        // ── Unary ───────────────────────────────────────────────────────
-        "neg" => unary(&value, |v| -v),
-        "pos" => unary(&value, |v| v),
-        "abs" => unary(&value, |v| v.abs()),
-
-        // ── Not yet implemented ─────────────────────────────────────────
-        other => Err(OperonError::Runtime(format!(
-            "ref transform '{}' not implemented in Rust runtime (target: {}.{})",
-            other,
-            graph_key,
-            ref_cfg_var_for_error(transform)
-        ))),
-    }
-}
-
-/// Best-effort var label for error messages — the transform itself doesn't
-/// know which var it belongs to, so we just return the op name.
-fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
-    "<transform>"
 }
 
 /// Evaluate a `BranchOp`'s cases. Walks `op_cfg.cases` in order, resolving
@@ -1147,17 +1438,23 @@ fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
 /// — Python's `BranchOp.run` raises `BranchError` in the same scenario.
 fn evaluate_branch(
     op_cfg: &OpConfig,
-    graph_key: &str,
+    branches: &HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)>,
     ctx: &ContextId,
     state: &Mutex<RuntimeState>,
 ) -> Result<String, OperonError> {
-    for case in &op_cfg.cases {
-        let v = resolve_ref(&case.condition, graph_key, ctx, state)?;
+    let entry = branches.get(&op_cfg.name).ok_or_else(|| {
+        OperonError::Runtime(format!(
+            "branch '{}' missing pre-compiled case table",
+            op_cfg.full_name
+        ))
+    })?;
+    for (cond, target) in &entry.0 {
+        let v = eval_ref(cond, ctx, state)?;
         if value_truthy(&v) {
-            return Ok(case.target.clone());
+            return Ok(target.clone());
         }
     }
-    if let Some(d) = &op_cfg.default {
+    if let Some(d) = &entry.1 {
         return Ok(d.clone());
     }
     Err(OperonError::Runtime(format!(
@@ -1359,6 +1656,52 @@ fn value_to_map(value: Value) -> Map<String, Value> {
             m.insert("result".into(), other);
             m
         }
+    }
+}
+
+/// Fan an op's return value out into the per-yield frames the scheduler
+/// will post. Generators emit one frame per element of a `Value::Array`
+/// (each frame at a `(parent_ctx, "yield_N")` sub-context); regular ops
+/// emit exactly one frame on `parent_ctx`. State is mutated in place so
+/// downstream `resolve_ref` calls can read each yield at its own
+/// sub-context.
+fn fan_out_value(
+    op_cfg: &OpConfig,
+    parent_ctx: &ContextId,
+    value: Value,
+    state: &Arc<Mutex<RuntimeState>>,
+) -> Vec<(ContextId, Map<String, Value>)> {
+    if op_cfg.is_generator {
+        let items = match value {
+            Value::Array(a) => a,
+            // Be lenient — a generator that returned a single object
+            // collapses to a one-yield list, matching Python's
+            // single-yield iteration.
+            other => vec![other],
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for (i, item) in items.into_iter().enumerate() {
+            let mut yield_ctx = parent_ctx.clone();
+            yield_ctx.push(format!("yield_{i}"));
+            let item_map = value_to_map(item);
+            {
+                let mut s = state.lock();
+                for (k, v) in &item_map {
+                    s.set(&op_cfg.full_name, k, &yield_ctx, v.clone());
+                }
+            }
+            out.push((yield_ctx, item_map));
+        }
+        out
+    } else {
+        let map = value_to_map(value);
+        {
+            let mut s = state.lock();
+            for (k, v) in &map {
+                s.set(&op_cfg.full_name, k, parent_ctx, v.clone());
+            }
+        }
+        vec![(parent_ctx.clone(), map)]
     }
 }
 

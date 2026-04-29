@@ -1,5 +1,5 @@
 {
-  "hello": {"name": "Operon"},
-  "chain": {"name": "Operon User"},
+  "hello": {"who": "Operon"},
+  "chain": {"who": "Operon User"},
   "parallel": {}
 }

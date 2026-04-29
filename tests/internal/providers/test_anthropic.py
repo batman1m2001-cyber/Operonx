@@ -11,8 +11,12 @@ from operonx.providers.llms.factory import create_llm
 # ── Load API key ────────────────────────────────────────────────────────
 # .env is auto-loaded by tests/providers/conftest.py
 
-API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-SKIP_REASON = "ANTHROPIC_API_KEY not set"
+_RAW_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Reject the CI dummy that `tests/internal/providers/conftest.py` plants
+# when no real key is in the environment — otherwise `not API_KEY`
+# stays falsy and the real-API tests run against the dummy and 401.
+API_KEY = "" if _RAW_KEY.startswith("ci-dummy") else _RAW_KEY
+SKIP_REASON = "ANTHROPIC_API_KEY not set (or is the CI dummy)"
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────

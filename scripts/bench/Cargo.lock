@@ -806,7 +806,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "operonx"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "operonx-macros"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "proc-macro2",
  "quote",

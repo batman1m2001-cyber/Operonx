@@ -60,6 +60,15 @@ pub fn bootstrap(opts: BootstrapOpts) -> Option<std::sync::Arc<ResourceHub>> {
         load_env_into_bootstrap();
     }
 
+    // Register every built-in provider factory (llm / embedding / rerank
+    // / keycloak / onnx) into the global `ConfigRegistry`. Mirrors
+    // Python's "import operonx.providers triggers registration"
+    // pattern — without this the resource hub fails LLM lookups with
+    // `no factory registered for category 'llm'`. Idempotent on
+    // repeat calls; ignored on individual feature errors so a tier-1
+    // build that disabled `onnx` still bootstraps cleanly.
+    let _ = crate::providers::registry::register_all();
+
     if let Ok(g) = ResourceHub::instance() {
         return Some(g);
     }
