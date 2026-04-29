@@ -156,6 +156,20 @@ pub struct GraphScheduler {
     /// lookup is O(1) by hash — and on a 50-edge graph with 100 frames
     /// that's 5,000 walks → 5,000 hash lookups.
     edge_policies: HashMap<(String, String), StreamPolicy>,
+    /// Pre-compiled per-op input plans. One `Vec<InputSlot>` per op,
+    /// preserving the input declaration order. Each slot carries either
+    /// a `CompiledRef` (resolved against state at runtime) or a
+    /// pre-cloned literal/default value. The runtime walks the slot
+    /// list once per op invocation — no `match param.ref_config`
+    /// per input, no transform-name string match. PARENT is already
+    /// substituted with the graph key at compile time. Wrapped in
+    /// `Arc` so the spawn (io/cpu) path clones cheaply into the
+    /// `tokio::spawn` move closure.
+    input_plans: Arc<HashMap<String, Vec<InputSlot>>>,
+    /// Pre-compiled branch case conditions, keyed by branch op name.
+    /// Each entry is `(Vec<(CompiledRef, target)>, Option<default>)`.
+    /// Empty for graphs with no branch ops.
+    branches: Arc<HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)>>,
 }
 
 impl std::fmt::Debug for GraphScheduler {
@@ -224,6 +238,17 @@ impl GraphScheduler {
             }
         }
 
+        // Pre-compile every input ref + branch case condition.
+        // `graph_key` substitutes the PARENT sentinel at compile time
+        // so `eval_ref` skips the per-call branch.
+        let graph_key_owned = if graph.full_name.is_empty() {
+            graph.name.clone()
+        } else {
+            graph.full_name.clone()
+        };
+        let input_plans = Arc::new(compile_input_plans(&graph, &graph_key_owned));
+        let branches = Arc::new(compile_branches(&graph, &graph_key_owned));
+
         Ok(Self {
             graph,
             registry,
@@ -234,6 +259,8 @@ impl GraphScheduler {
             seq_edge_capacity: seq_edge_capacity.max(4),
             collect_edge_capacity: collect_edge_capacity.max(4),
             edge_policies,
+            input_plans,
+            branches,
         })
     }
 
@@ -544,7 +571,16 @@ impl GraphScheduler {
             .clone();
         let registry = self.registry.clone();
         let child_schedulers = self.child_schedulers.clone();
-        let graph_key = self.graph_key().to_string();
+        // One HashMap lookup per op invocation (not per input). The
+        // returned `&[InputSlot]` borrows from `self.input_plans`; in
+        // the spawn path we clone the slice into the closure as a
+        // small `Vec<InputSlot>` (bounded by the op's input count, ~8
+        // for typical ops).
+        let plan_slice: &[InputSlot] = self
+            .input_plans
+            .get(&op_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
 
         // ── Inline fast path for sync ops ──────────────────────────────────
         if matches!(op_cfg.bound, OpBound::Sync) {
@@ -560,7 +596,7 @@ impl GraphScheduler {
                     // condition-eval loop over `op_cfg.cases`. Done inline so
                     // we can read state without re-locking through the
                     // resolve_inputs/execute_op split.
-                    let single = match evaluate_branch(&op_cfg, &graph_key, &ctx, &state) {
+                    let single = match evaluate_branch(&op_cfg, &self.branches, &ctx, &state) {
                         Ok(target) => {
                             let mut m = Map::new();
                             m.insert("__branch_target__".into(), Value::from(target.clone()));
@@ -590,7 +626,7 @@ impl GraphScheduler {
                     };
                     vec![(ctx.clone(), single)]
                 } else {
-                    match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+                    match resolve_inputs(&op_cfg, plan_slice, &ctx, &state) {
                         Err(e) => vec![(ctx.clone(), error_frame(&e))],
                         Ok(inputs) => {
                             match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers)
@@ -640,6 +676,7 @@ impl GraphScheduler {
         }
 
         // ── Spawn path for io/cpu ──────────────────────────────────────────
+        let owned_plan: Vec<InputSlot> = plan_slice.to_vec();
         tokio::spawn(async move {
             let _permit = match sem.acquire_owned().await {
                 Ok(p) => p,
@@ -649,7 +686,7 @@ impl GraphScheduler {
                 return;
             }
 
-            let inputs = match resolve_inputs(&op_cfg, &graph_key, &ctx, &state) {
+            let inputs = match resolve_inputs(&op_cfg, &owned_plan, &ctx, &state) {
                 Ok(m) => m,
                 Err(e) => {
                     let _ = tx
@@ -991,6 +1028,341 @@ impl GraphScheduler {
     }
 }
 
+// ── Compiled ref-transform pipeline ──────────────────────────────────────
+//
+// At construction time we walk every `RefConfig` in the graph (op-input
+// refs + branch case conditions, recursively into nested refs) and
+// produce a flattened, enum-tagged form. The runtime hot path then
+// reads one `CompiledRef` per input via a HashMap lookup and dispatches
+// each step through a single `match` on `TransformKind` — no
+// `transform.name.as_str()` walk, no `if source == PARENT` branch
+// (PARENT is already substituted with the graph key at compile time).
+//
+// `Unknown(name)` falls through to a runtime `not implemented` error,
+// matching the previous string-match path's behaviour for ops we haven't
+// promoted (e.g. `apply`, `call`, `matmul`).
+
+#[derive(Debug, Clone)]
+struct CompiledRef {
+    /// Final state-source key — `__PARENT__` already replaced with the
+    /// enclosing graph's key.
+    source: String,
+    var: String,
+    /// Transform pipeline in evaluation order. Empty for plain refs.
+    chain: Vec<CompiledOp>,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledOp {
+    kind: TransformKind,
+    args: Vec<CompiledArg>,
+}
+
+#[derive(Debug, Clone)]
+enum CompiledArg {
+    Lit(Value),
+    Ref(Box<CompiledRef>),
+}
+
+#[derive(Debug, Clone)]
+enum TransformKind {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Contains,
+    GetItem, // also handles `getattr`
+    And,
+    RAnd,
+    Or,
+    ROr,
+    Not,
+    Add,
+    RAdd,
+    Sub,
+    RSub,
+    Mul,
+    RMul,
+    TrueDiv,
+    RTrueDiv,
+    FloorDiv,
+    RFloorDiv,
+    Mod,
+    RMod,
+    Pow,
+    RPow,
+    Neg,
+    Pos,
+    Abs,
+    /// Unrecognised transform name — surfaces at runtime as
+    /// `OperonError::Runtime` matching the legacy path's error.
+    Unknown(String),
+}
+
+/// Compile a `RefConfig` (recursively into nested arg refs).
+fn compile_ref(rc: &RefConfig, graph_key: &str) -> CompiledRef {
+    let source = if rc.source == PARENT {
+        graph_key.to_string()
+    } else {
+        rc.source.clone()
+    };
+    let chain = rc
+        .transforms
+        .iter()
+        .map(|t| compile_op(t, graph_key))
+        .collect();
+    CompiledRef {
+        source,
+        var: rc.var.clone(),
+        chain,
+    }
+}
+
+fn compile_op(t: &RefTransform, graph_key: &str) -> CompiledOp {
+    let kind = match t.name.as_str() {
+        "eq" => TransformKind::Eq,
+        "ne" => TransformKind::Ne,
+        "lt" => TransformKind::Lt,
+        "le" => TransformKind::Le,
+        "gt" => TransformKind::Gt,
+        "ge" => TransformKind::Ge,
+        "contains" => TransformKind::Contains,
+        "getitem" | "getattr" => TransformKind::GetItem,
+        "and_" => TransformKind::And,
+        "rand_" => TransformKind::RAnd,
+        "or_" => TransformKind::Or,
+        "ror_" => TransformKind::ROr,
+        "not_" => TransformKind::Not,
+        "add" => TransformKind::Add,
+        "radd" => TransformKind::RAdd,
+        "sub" => TransformKind::Sub,
+        "rsub" => TransformKind::RSub,
+        "mul" => TransformKind::Mul,
+        "rmul" => TransformKind::RMul,
+        "truediv" => TransformKind::TrueDiv,
+        "rtruediv" => TransformKind::RTrueDiv,
+        "floordiv" => TransformKind::FloorDiv,
+        "rfloordiv" => TransformKind::RFloorDiv,
+        "mod" => TransformKind::Mod,
+        "rmod" => TransformKind::RMod,
+        "pow" => TransformKind::Pow,
+        "rpow" => TransformKind::RPow,
+        "neg" => TransformKind::Neg,
+        "pos" => TransformKind::Pos,
+        "abs" => TransformKind::Abs,
+        other => TransformKind::Unknown(other.to_string()),
+    };
+    let args = t
+        .args
+        .iter()
+        .map(|a| compile_arg(a, graph_key))
+        .collect();
+    CompiledOp { kind, args }
+}
+
+fn compile_arg(a: &RefArg, graph_key: &str) -> CompiledArg {
+    match a {
+        RefArg::Literal(v) => CompiledArg::Lit(v.clone()),
+        RefArg::NestedRef(r) => CompiledArg::Ref(Box::new(compile_ref(r, graph_key))),
+    }
+}
+
+/// Evaluate a compiled ref against runtime state. Walks the transform
+/// chain in order, threading the running value.
+fn eval_ref(
+    cref: &CompiledRef,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    let base = {
+        let s = state.lock();
+        s.get(&cref.source, &cref.var, ctx)
+            .cloned()
+            .ok_or_else(|| {
+                OperonError::State(format!(
+                    "ref resolution: no value for ({}, {}) at context {:?}",
+                    cref.source, cref.var, ctx
+                ))
+            })?
+    };
+    let mut current = base;
+    for cop in &cref.chain {
+        current = eval_op(current, cop, ctx, state)?;
+    }
+    Ok(current)
+}
+
+fn eval_arg(
+    a: &CompiledArg,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    match a {
+        CompiledArg::Lit(v) => Ok(v.clone()),
+        CompiledArg::Ref(r) => eval_ref(r, ctx, state),
+    }
+}
+
+fn eval_op(
+    value: Value,
+    cop: &CompiledOp,
+    ctx: &ContextId,
+    state: &Mutex<RuntimeState>,
+) -> Result<Value, OperonError> {
+    use TransformKind::*;
+    let arg0 = || -> Result<Value, OperonError> {
+        match cop.args.first() {
+            Some(a) => eval_arg(a, ctx, state),
+            None => Ok(Value::Null),
+        }
+    };
+    match &cop.kind {
+        Eq => Ok(Value::Bool(values_equal(&value, &arg0()?))),
+        Ne => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
+        Lt => cmp_op(&value, &arg0()?, |o| o.is_lt()),
+        Le => cmp_op(&value, &arg0()?, |o| o.is_le()),
+        Gt => cmp_op(&value, &arg0()?, |o| o.is_gt()),
+        Ge => cmp_op(&value, &arg0()?, |o| o.is_ge()),
+        Contains => Ok(Value::Bool(value_contains(&value, &arg0()?))),
+        GetItem => Ok(value_getitem(&value, &arg0()?)),
+        And => {
+            if !value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        RAnd => {
+            let lhs = arg0()?;
+            if !value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        Or => {
+            if value_truthy(&value) {
+                Ok(value)
+            } else {
+                Ok(arg0()?)
+            }
+        }
+        ROr => {
+            let lhs = arg0()?;
+            if value_truthy(&lhs) {
+                Ok(lhs)
+            } else {
+                Ok(value)
+            }
+        }
+        Not => Ok(Value::Bool(!value_truthy(&value))),
+        Add => arith(&value, &arg0()?, |l, r| l + r),
+        RAdd => arith(&arg0()?, &value, |l, r| l + r),
+        Sub => arith(&value, &arg0()?, |l, r| l - r),
+        RSub => arith(&arg0()?, &value, |l, r| l - r),
+        Mul => arith(&value, &arg0()?, |l, r| l * r),
+        RMul => arith(&arg0()?, &value, |l, r| l * r),
+        TrueDiv => arith(&value, &arg0()?, |l, r| l / r),
+        RTrueDiv => arith(&arg0()?, &value, |l, r| l / r),
+        FloorDiv => arith(&value, &arg0()?, |l, r| (l / r).floor()),
+        RFloorDiv => arith(&arg0()?, &value, |l, r| (l / r).floor()),
+        Mod => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
+        RMod => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
+        Pow => arith(&value, &arg0()?, |l, r| l.powf(r)),
+        RPow => arith(&arg0()?, &value, |l, r| l.powf(r)),
+        Neg => unary(&value, |v| -v),
+        Pos => unary(&value, |v| v),
+        Abs => unary(&value, |v| v.abs()),
+        Unknown(name) => Err(OperonError::Runtime(format!(
+            "ref transform '{}' not implemented in Rust runtime",
+            name
+        ))),
+    }
+}
+
+/// One entry in an op's pre-compiled input plan. Mirrors the four
+/// branches of the legacy `resolve_inputs` body (ref / literal /
+/// default / required-missing) but pre-resolves which path each input
+/// takes, so the runtime walks a tight `Vec` instead of re-reading
+/// `Param` flags per frame.
+#[derive(Debug, Clone)]
+enum InputResolver {
+    /// Resolve from runtime state (with optional transforms).
+    Ref(CompiledRef),
+    /// Inlined literal — `Value` cloned on each invocation.
+    Lit(Value),
+    /// Default — same as `Lit` but kept distinct for readability.
+    Default(Value),
+    /// `param.required && param.literal.is_none() && param.default.is_none()`.
+    /// Surfaces the same error the legacy path did.
+    RequiredMissing,
+    /// Optional input with no value — yields `Value::Null`.
+    Null,
+}
+
+#[derive(Debug, Clone)]
+struct InputSlot {
+    /// Output key under which the resolved value lands in the inputs map.
+    var: String,
+    plan: InputResolver,
+}
+
+/// One input plan per op (preserves insertion order from
+/// `OpConfig.inputs`). Built once at construction so the runtime hot
+/// path replaces `for (var, param) in &op_cfg.inputs` + per-input
+/// `match param` with a single `for slot in plan` walk.
+fn compile_input_plans(
+    graph: &OpConfig,
+    graph_key: &str,
+) -> HashMap<String, Vec<InputSlot>> {
+    let mut out: HashMap<String, Vec<InputSlot>> = HashMap::with_capacity(graph.ops.len());
+    for (op_name, op_cfg) in &graph.ops {
+        let mut slots = Vec::with_capacity(op_cfg.inputs.len());
+        for (var, param) in &op_cfg.inputs {
+            let plan = if let Some(rc) = &param.ref_config {
+                InputResolver::Ref(compile_ref(rc, graph_key))
+            } else if let Some(lit) = &param.literal {
+                InputResolver::Lit(lit.clone())
+            } else if let Some(def) = &param.default {
+                InputResolver::Default(def.clone())
+            } else if param.required {
+                InputResolver::RequiredMissing
+            } else {
+                InputResolver::Null
+            };
+            slots.push(InputSlot {
+                var: var.clone(),
+                plan,
+            });
+        }
+        out.insert(op_name.clone(), slots);
+    }
+    out
+}
+
+/// `op_name -> (Vec<(condition, target)>, default)`. Empty when there
+/// are no branch ops in the graph.
+fn compile_branches(
+    graph: &OpConfig,
+    graph_key: &str,
+) -> HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)> {
+    let mut out = HashMap::new();
+    for (op_name, op_cfg) in &graph.ops {
+        if !matches!(op_cfg.kind, OpType::Branch) {
+            continue;
+        }
+        let cases = op_cfg
+            .cases
+            .iter()
+            .map(|c| (compile_ref(&c.condition, graph_key), c.target.clone()))
+            .collect();
+        out.insert(op_name.clone(), (cases, op_cfg.default.clone()));
+    }
+    out
+}
+
 // ── Helper functions ──────────────────────────────────────────────────────
 
 fn compute_out_vars(graph: &OpConfig) -> HashMap<String, Vec<(String, String)>> {
@@ -1050,183 +1422,26 @@ fn resolve_edge_policy(graph: &OpConfig, src: &str, dst: &str) -> Option<StreamP
 
 fn resolve_inputs(
     op_cfg: &OpConfig,
-    graph_key: &str,
+    plan: &[InputSlot],
     ctx: &ContextId,
     state: &Mutex<RuntimeState>,
 ) -> Result<Map<String, Value>, OperonError> {
-    let mut resolved = Map::new();
-    for (var, param) in &op_cfg.inputs {
-        let value = if let Some(ref_cfg) = &param.ref_config {
-            resolve_ref(ref_cfg, graph_key, ctx, state)?
-        } else if let Some(lit) = &param.literal {
-            lit.clone()
-        } else if let Some(default) = &param.default {
-            default.clone()
-        } else if param.required {
-            return Err(OperonError::Op(OpError::Code(format!(
-                "op '{}': required input '{}' not provided",
-                op_cfg.full_name, var
-            ))));
-        } else {
-            Value::Null
+    let mut resolved = Map::with_capacity(plan.len());
+    for slot in plan {
+        let value = match &slot.plan {
+            InputResolver::Ref(cref) => eval_ref(cref, ctx, state)?,
+            InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
+            InputResolver::RequiredMissing => {
+                return Err(OperonError::Op(OpError::Code(format!(
+                    "op '{}': required input '{}' not provided",
+                    op_cfg.full_name, slot.var
+                ))));
+            }
+            InputResolver::Null => Value::Null,
         };
-        resolved.insert(var.clone(), value);
+        resolved.insert(slot.var.clone(), value);
     }
     Ok(resolved)
-}
-
-fn resolve_ref(
-    ref_cfg: &RefConfig,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    let source = if ref_cfg.source == PARENT {
-        graph_key
-    } else {
-        &ref_cfg.source
-    };
-    let base = {
-        let s = state.lock();
-        s.get(source, &ref_cfg.var, ctx).cloned().ok_or_else(|| {
-            OperonError::State(format!(
-                "ref resolution: no value for ({}, {}) at context {:?}",
-                source, ref_cfg.var, ctx
-            ))
-        })?
-    };
-
-    // Walk the chain — each transform takes the running value + its
-    // (literal | nested-Ref) args and produces the next running value.
-    let mut current = base;
-    for transform in &ref_cfg.transforms {
-        current = apply_transform(current, transform, graph_key, ctx, state)?;
-    }
-    Ok(current)
-}
-
-/// Resolve one [`RefArg`] to a concrete `Value`. Literals pass through;
-/// nested Refs are recursively resolved (used by boolean operators that
-/// combine two Refs).
-fn resolve_ref_arg(
-    arg: &RefArg,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    match arg {
-        RefArg::Literal(v) => Ok(v.clone()),
-        RefArg::NestedRef(inner) => resolve_ref(inner, graph_key, ctx, state),
-    }
-}
-
-/// Apply one [`RefTransform`] to `value`. Mirrors Python's
-/// `Ref._wrap` dispatch table — every operator that the Python decorator
-/// emits via `_with_transform` has a branch here.
-///
-/// Numeric arithmetic is performed on `f64` (Python parity for mixed
-/// int/float). Comparisons accept any JSON `Value`; boolean operators
-/// short-circuit using JSON-truthiness rules.
-///
-/// Operators not implemented yet: `apply` (Python-callable),
-/// `matmul`/`rmatmul` (numpy-only), `call` (Python-callable).
-fn apply_transform(
-    value: Value,
-    transform: &RefTransform,
-    graph_key: &str,
-    ctx: &ContextId,
-    state: &Mutex<RuntimeState>,
-) -> Result<Value, OperonError> {
-    let name = transform.name.as_str();
-    let args = &transform.args;
-    let arg0 = || -> Result<Value, OperonError> {
-        match args.first() {
-            Some(a) => resolve_ref_arg(a, graph_key, ctx, state),
-            None => Ok(Value::Null),
-        }
-    };
-
-    match name {
-        // ── Comparison ──────────────────────────────────────────────────
-        "eq" => Ok(Value::Bool(values_equal(&value, &arg0()?))),
-        "ne" => Ok(Value::Bool(!values_equal(&value, &arg0()?))),
-        "lt" => cmp_op(&value, &arg0()?, |o| o.is_lt()),
-        "le" => cmp_op(&value, &arg0()?, |o| o.is_le()),
-        "gt" => cmp_op(&value, &arg0()?, |o| o.is_gt()),
-        "ge" => cmp_op(&value, &arg0()?, |o| o.is_ge()),
-        "contains" => Ok(Value::Bool(value_contains(&value, &arg0()?))),
-
-        // ── Access ──────────────────────────────────────────────────────
-        "getitem" | "getattr" => Ok(value_getitem(&value, &arg0()?)),
-
-        // ── Boolean ─────────────────────────────────────────────────────
-        "and_" => {
-            if !value_truthy(&value) {
-                Ok(value)
-            } else {
-                Ok(arg0()?)
-            }
-        }
-        "rand_" => {
-            let lhs = arg0()?;
-            if !value_truthy(&lhs) {
-                Ok(lhs)
-            } else {
-                Ok(value)
-            }
-        }
-        "or_" => {
-            if value_truthy(&value) {
-                Ok(value)
-            } else {
-                Ok(arg0()?)
-            }
-        }
-        "ror_" => {
-            let lhs = arg0()?;
-            if value_truthy(&lhs) {
-                Ok(lhs)
-            } else {
-                Ok(value)
-            }
-        }
-        "not_" => Ok(Value::Bool(!value_truthy(&value))),
-
-        // ── Arithmetic ──────────────────────────────────────────────────
-        "add" => arith(&value, &arg0()?, |l, r| l + r),
-        "radd" => arith(&arg0()?, &value, |l, r| l + r),
-        "sub" => arith(&value, &arg0()?, |l, r| l - r),
-        "rsub" => arith(&arg0()?, &value, |l, r| l - r),
-        "mul" => arith(&value, &arg0()?, |l, r| l * r),
-        "rmul" => arith(&arg0()?, &value, |l, r| l * r),
-        "truediv" => arith(&value, &arg0()?, |l, r| l / r),
-        "rtruediv" => arith(&arg0()?, &value, |l, r| l / r),
-        "floordiv" => arith(&value, &arg0()?, |l, r| (l / r).floor()),
-        "rfloordiv" => arith(&arg0()?, &value, |l, r| (l / r).floor()),
-        "mod" => arith(&value, &arg0()?, |l, r| l.rem_euclid(r)),
-        "rmod" => arith(&arg0()?, &value, |l, r| l.rem_euclid(r)),
-        "pow" => arith(&value, &arg0()?, |l, r| l.powf(r)),
-        "rpow" => arith(&arg0()?, &value, |l, r| l.powf(r)),
-
-        // ── Unary ───────────────────────────────────────────────────────
-        "neg" => unary(&value, |v| -v),
-        "pos" => unary(&value, |v| v),
-        "abs" => unary(&value, |v| v.abs()),
-
-        // ── Not yet implemented ─────────────────────────────────────────
-        other => Err(OperonError::Runtime(format!(
-            "ref transform '{}' not implemented in Rust runtime (target: {}.{})",
-            other,
-            graph_key,
-            ref_cfg_var_for_error(transform)
-        ))),
-    }
-}
-
-/// Best-effort var label for error messages — the transform itself doesn't
-/// know which var it belongs to, so we just return the op name.
-fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
-    "<transform>"
 }
 
 /// Evaluate a `BranchOp`'s cases. Walks `op_cfg.cases` in order, resolving
@@ -1236,17 +1451,23 @@ fn ref_cfg_var_for_error(_t: &RefTransform) -> &'static str {
 /// — Python's `BranchOp.run` raises `BranchError` in the same scenario.
 fn evaluate_branch(
     op_cfg: &OpConfig,
-    graph_key: &str,
+    branches: &HashMap<String, (Vec<(CompiledRef, String)>, Option<String>)>,
     ctx: &ContextId,
     state: &Mutex<RuntimeState>,
 ) -> Result<String, OperonError> {
-    for case in &op_cfg.cases {
-        let v = resolve_ref(&case.condition, graph_key, ctx, state)?;
+    let entry = branches.get(&op_cfg.name).ok_or_else(|| {
+        OperonError::Runtime(format!(
+            "branch '{}' missing pre-compiled case table",
+            op_cfg.full_name
+        ))
+    })?;
+    for (cond, target) in &entry.0 {
+        let v = eval_ref(cond, ctx, state)?;
         if value_truthy(&v) {
-            return Ok(case.target.clone());
+            return Ok(target.clone());
         }
     }
-    if let Some(d) = &op_cfg.default {
+    if let Some(d) = &entry.1 {
         return Ok(d.clone());
     }
     Err(OperonError::Runtime(format!(
