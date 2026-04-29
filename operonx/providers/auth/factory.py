@@ -9,7 +9,7 @@ when a caller actually instantiates the auth provider.
 from .config import KeycloakTokenConfig
 
 
-def create_auth(config: KeycloakTokenConfig):
+def create_auth(config: KeycloakTokenConfig) -> "KeycloakTokenProvider":  # noqa: F821
     """Create a KeycloakTokenProvider from config.
 
     Args:
