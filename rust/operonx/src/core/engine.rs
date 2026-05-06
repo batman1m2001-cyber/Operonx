@@ -779,13 +779,7 @@ impl Operon {
         let task = tokio::spawn(async move {
             let sender_finish = sender.clone();
             let result = scheduler
-                .run(
-                    inputs,
-                    run_ctx.clone(),
-                    sender.clone(),
-                    cancel_run,
-                    scratch,
-                )
+                .run(inputs, run_ctx.clone(), sender.clone(), cancel_run, scratch)
                 .await;
             match &result {
                 Ok(()) => sender_finish.finish().await,
@@ -1395,7 +1389,9 @@ mod tests {
             middleware: Vec::new(),
             tracers: Vec::new(),
         };
-        let mut handle = engine.start(Map::new(), None, None, None, None, None).unwrap();
+        let mut handle = engine
+            .start(Map::new(), None, None, None, None, None)
+            .unwrap();
         let first = handle.next().await;
         assert!(first.is_some());
         let err = first.unwrap().unwrap_err();

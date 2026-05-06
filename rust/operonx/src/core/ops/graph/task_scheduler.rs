@@ -867,17 +867,16 @@ impl GraphScheduler {
                                     // Detect Interrupt return — emit a
                                     // SchedulerEvent::Interrupt instead of
                                     // a Frame, then EOF normally.
-                                    if let Some((ctx_to_cancel, reason)) = parse_interrupt(&value)
-                                    {
+                                    if let Some((ctx_to_cancel, reason)) = parse_interrupt(&value) {
                                         let irq = SchedulerEvent::Interrupt {
                                             op: op_name.clone(),
                                             ctx: ctx.clone(),
                                             ctx_to_cancel,
                                             reason,
                                         };
-                                        if let Err(
-                                            tokio::sync::mpsc::error::TrySendError::Full(ev),
-                                        ) = tx.try_send(irq)
+                                        if let Err(tokio::sync::mpsc::error::TrySendError::Full(
+                                            ev,
+                                        )) = tx.try_send(irq)
                                         {
                                             let _ = tx.send(ev).await;
                                         }
@@ -885,9 +884,9 @@ impl GraphScheduler {
                                             op: op_name,
                                             ctx: ctx.clone(),
                                         };
-                                        if let Err(
-                                            tokio::sync::mpsc::error::TrySendError::Full(ev),
-                                        ) = tx.try_send(eof)
+                                        if let Err(tokio::sync::mpsc::error::TrySendError::Full(
+                                            ev,
+                                        )) = tx.try_send(eof)
                                         {
                                             let _ = tx.send(ev).await;
                                         }
