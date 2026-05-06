@@ -19,7 +19,7 @@
 //! let result = engine.run_json(inputs, None, None, None)?;
 //!
 //! // Streaming:
-//! let handle = engine.start(inputs, None, None, None, None)?;
+//! let handle = engine.start(inputs, None, None, None, None, None)?;
 //! while let Some(frame) = handle.next().await { ... }
 //! ```
 //!
@@ -575,12 +575,18 @@ fn clone_error(e: &OperonError) -> OperonError {
 pub trait Scheduler: Send + Sync {
     /// Run the workflow: consume `inputs`, write frames to `sender`, then
     /// `sender.finish()` on success or `sender.fail(e)` on error.
+    ///
+    /// `scratch` pre-seeds the per-call scratch space; it is applied
+    /// synchronously before the scheduler dispatches any op so entry ops
+    /// see seeded values race-free. Mirrors Python's
+    /// `engine.start(scratch={...})`.
     async fn run(
         &self,
         inputs: Map<String, Value>,
         context: MiddlewareContext,
         sender: FrameSender,
         cancel: CancellationToken,
+        scratch: Option<Map<String, Value>>,
     ) -> Result<(), OperonError>;
 }
 
@@ -596,6 +602,7 @@ impl Scheduler for NotImplementedScheduler {
         _context: MiddlewareContext,
         sender: FrameSender,
         _cancel: CancellationToken,
+        _scratch: Option<Map<String, Value>>,
     ) -> Result<(), OperonError> {
         let err = OperonError::Runtime(
             "scheduler not yet implemented — lands in Phase 4 per MIGRATION_rust.md §11"
@@ -735,6 +742,7 @@ impl Operon {
         session_id: Option<String>,
         request_id: Option<String>,
         tracer_override: Option<Vec<Arc<dyn Tracer>>>,
+        scratch: Option<Map<String, Value>>,
     ) -> Result<ExecutionHandle, OperonError> {
         let ctx = MiddlewareContext {
             user_id: user_id.unwrap_or_else(new_uuid),
@@ -771,7 +779,7 @@ impl Operon {
         let task = tokio::spawn(async move {
             let sender_finish = sender.clone();
             let result = scheduler
-                .run(inputs, run_ctx.clone(), sender.clone(), cancel_run)
+                .run(inputs, run_ctx.clone(), sender.clone(), cancel_run, scratch)
                 .await;
             match &result {
                 Ok(()) => sender_finish.finish().await,
@@ -833,10 +841,24 @@ impl Operon {
     /// returns the aggregated result dict.
     pub async fn run_json_async(
         &self,
+        inputs: Map<String, Value>,
+        user_id: Option<String>,
+        session_id: Option<String>,
+        request_id: Option<String>,
+    ) -> Result<Value, OperonError> {
+        self.run_json_async_with_scratch(inputs, user_id, session_id, request_id, None)
+            .await
+    }
+
+    /// Like [`run_json_async`] but also accepts an initial scratch seed.
+    /// Mirrors Python's `engine.run(inputs, scratch={...})`.
+    pub async fn run_json_async_with_scratch(
+        &self,
         mut inputs: Map<String, Value>,
         user_id: Option<String>,
         session_id: Option<String>,
         request_id: Option<String>,
+        scratch: Option<Map<String, Value>>,
     ) -> Result<Value, OperonError> {
         let ctx = MiddlewareContext {
             user_id: user_id.clone().unwrap_or_else(new_uuid),
@@ -857,6 +879,7 @@ impl Operon {
             Some(ctx.session_id.clone()),
             Some(ctx.request_id.clone()),
             None,
+            scratch,
         )?;
 
         let collected = match handle.collect(CollectMode::Group, true).await {
@@ -1366,7 +1389,9 @@ mod tests {
             middleware: Vec::new(),
             tracers: Vec::new(),
         };
-        let mut handle = engine.start(Map::new(), None, None, None, None).unwrap();
+        let mut handle = engine
+            .start(Map::new(), None, None, None, None, None)
+            .unwrap();
         let first = handle.next().await;
         assert!(first.is_some());
         let err = first.unwrap().unwrap_err();

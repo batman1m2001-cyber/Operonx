@@ -176,6 +176,32 @@ class ExecutionHandle:
         """Number of frames received so far."""
         return len(self._frames)
 
+    @property
+    def scratch(self) -> Dict[str, Any]:
+        """Per-call scratch dict on the underlying MemoryState.
+
+        Read-anywhere; writes are race-free only when performed
+        synchronously between ``engine.start()`` and the next ``await``.
+        Prefer ``engine.start(scratch=...)`` to seed values entry ops will
+        read.
+        """
+        return self.state._scratch
+
+    @property
+    def interrupts(self) -> list:
+        """List of Interrupt events forwarded by the scheduler so far.
+
+        Filters ``self._frames`` for the synthetic ``__interrupt__`` op tag
+        and unwraps the payload, returning the original ``Interrupt``
+        objects in arrival order. Useful for tests and consumer code that
+        wants typed access without iterating frames manually.
+        """
+        return [
+            data["__interrupt__"]
+            for op, _ctx, data in self._frames
+            if op == "__interrupt__" and isinstance(data, dict) and "__interrupt__" in data
+        ]
+
     async def collect(
         self, mode: str = "group", unwrap: bool = False
     ) -> dict[str, Any] | list[dict[str, Any]]:
@@ -190,6 +216,7 @@ class ExecutionHandle:
             frames: list[dict[str, Any]] = []
             async for _, _, data in self:
                 frames.append(data)
+            await self._await_scheduler_completion()
             return frames
 
         # mode == "group"
@@ -198,9 +225,27 @@ class ExecutionHandle:
             for k, v in data.items():
                 out.setdefault(k, []).append(v)
 
+        await self._await_scheduler_completion()
         if unwrap:
             return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
         return out
+
+    async def _await_scheduler_completion(self) -> None:
+        """Wait for the scheduler task's finally to complete before returning.
+
+        ``_pump`` sets ``_done`` as soon as the scheduler puts ``None`` on
+        the output queue at EOF — but that happens BEFORE the scheduler
+        task's ``finally`` block runs (legacy flush_worker submit, new
+        TracePipeline awaited flush, ContextVar resets). Awaiting the task
+        ensures all teardown is observable by the caller of ``collect()``.
+        """
+        if not self._scheduler_task.done():
+            try:
+                await self._scheduler_task
+            except (Exception, asyncio.CancelledError):
+                # Errors from the scheduler task are already surfaced via
+                # ``self._error`` / ``raise`` in __anext__. Don't double-raise.
+                pass
 
     async def result(self, unwrap: bool = True) -> Dict[str, Any]:
         """Build result from all buffered frames (does not consume).
@@ -303,11 +348,6 @@ class Operon:
         # Build graph and create schema immediately
         self.graph.build()
         self._schema = StateSchema(self.graph)
-
-        # Precompute trace collector (graph metadata, topo order)
-        from operonx.core.tracing import TraceCollector
-
-        self._collector = TraceCollector(self.graph)
         self._middleware: List[Middleware] = []
 
         # Eagerly init backends if a hub is already configured
@@ -360,6 +400,7 @@ class Operon:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        scratch: Optional[Dict[str, Any]] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -375,6 +416,11 @@ class Operon:
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
             tracer: Optional tracer(s) — overrides engine default for this execution.
+            scratch: Optional initial values for per-call scratch space. Applied
+                synchronously before the scheduler task is created — race-free.
+                Equivalent to writing ``handle.scratch[k] = v`` before the first
+                ``await`` after ``start()``, but guaranteed to be visible to
+                entry ops.
 
         Returns:
             ExecutionHandle — async-iterable, supports ``await handle["op","var"]``
@@ -384,9 +430,26 @@ class Operon:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        # Resolve tracers: per-call overrides engine default
+        # Resolve tracer: per-call overrides engine default. The only
+        # tracer shape supported now is ``TracePipeline`` (or a subclass —
+        # ``LangfuseTracer`` is one). Legacy Tracer subclasses were retired
+        # in T2.13.
         effective = tracer if tracer is not None else self._tracer
-        tracers = (effective if isinstance(effective, list) else [effective]) if effective else []
+        tracers_raw = (
+            effective if isinstance(effective, list) else ([effective] if effective else [])
+        )
+
+        from operonx.core.tracing.pipeline import TracePipeline as _TracePipeline
+
+        pipelines = [t for t in tracers_raw if isinstance(t, _TracePipeline)]
+        invalid = [t for t in tracers_raw if not isinstance(t, _TracePipeline)]
+        if invalid:
+            raise TypeError(
+                f"Engine accepts only TracePipeline instances as `tracer=`; "
+                f"got {[type(t).__name__ for t in invalid]}. The legacy Tracer "
+                "API was removed in T2.13 — use ``LangfuseTracer`` (a "
+                "TracePipeline subclass) or build a ``TracePipeline`` directly."
+            )
 
         state = self._schema.create_state(
             inputs=inputs,
@@ -394,17 +457,48 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
-        state.tracing = bool(tracers)  # skip per-op metrics/datetime when no tracer
+        # Legacy ``state.tracing`` flag retained for back-compat with code
+        # that reads it (e.g. inside op.run() for per-op metric writes).
+        # No longer load-bearing for trace dispatch.
+        state.tracing = False
+
+        # Seed scratch synchronously before the scheduler task is created.
+        if scratch:
+            state._scratch.update(scratch)
+
+        # Bind emitter for the event-stream pipeline. NullEmitter when no
+        # pipeline configured — keeps op code's ``current_emitter().emit_*``
+        # calls cheap (one method-table dispatch).
+        from operonx.core.tracing.emitter import (
+            NullEmitter as _NullEmitter,
+        )
+        from operonx.core.tracing.emitter import (
+            _current_emitter_var,
+        )
+
+        if pipelines:
+            # First pipeline drives the emitter; secondary pipelines (rare)
+            # could subscribe via _push fanout if needed in the future.
+            primary = pipelines[0]
+            primary_state_tags = list(state.tags) if getattr(state, "tags", None) else []
+            new_emitter = primary.emitter(
+                request_id=request_id,
+                workflow_name=self.name,
+                user_id=user_id,
+                session_id=session_id,
+                tags=primary_state_tags,
+            )
+        else:
+            primary = None
+            new_emitter = _NullEmitter()
 
         LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 
-        # Capture references for the closure
-        collector = self._collector
         graph_name = self.name
-
         queue: asyncio.Queue = asyncio.Queue()
 
         async def _run() -> None:
+            emitter_token = _current_emitter_var.set(new_emitter)
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
             except Exception as e:
@@ -413,12 +507,15 @@ class Operon:
                 queue.put_nowait(None)
                 raise
             finally:
-                # Flush tracers in background thread (fire-and-forget).
-                # State is complete at this point — safe to collect traces.
-                if tracers:
-                    from operonx.core.tracing import get_flush_worker
-
-                    get_flush_worker().submit(tracers, collector, state)
+                # Pipeline final flush — drains buffered events through
+                # processors + exporters. Awaited inline so engine.run()
+                # returns only after every exporter has finished posting.
+                if primary is not None:
+                    try:
+                        await primary.flush(partial=False)
+                    except Exception:
+                        LOGGER.exception("trace pipeline final flush failed")
+                _current_emitter_var.reset(emitter_token)
                 LOGGER.info(
                     format_event("workflow_done", request_id=request_id, graph_name=graph_name)
                 )
@@ -434,6 +531,7 @@ class Operon:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        scratch: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -453,6 +551,7 @@ class Operon:
             request_id: Optional request identifier (auto-generated if not provided)
             tracer: Optional tracer or list of tracers for observability.
                     Overrides the default tracer set in ``Operon(..., tracer=...)``.
+            scratch: Optional initial values for per-call scratch space.
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -478,6 +577,7 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
             tracer=tracer,
+            scratch=scratch,
         )
 
         try:

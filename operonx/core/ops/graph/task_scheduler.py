@@ -12,34 +12,9 @@ from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
+from operonx.core.ops._events import EOF, Frame, Interrupt
+from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
-
-
-@dataclass
-class Frame:
-    """One result yielded by an op during execution.
-
-    Created by ``Scheduler._pump()`` for every ``(ctx, result)`` tuple that
-    ``op.run()`` yields.  User code never constructs Frame directly — just
-    ``return`` or ``yield`` from an ``@op`` function.
-    """
-
-    op: str
-    ctx: tuple
-    result: dict
-
-
-@dataclass
-class EOF:
-    """Marker that an op's async generator has exhausted.
-
-    Created by ``Scheduler._pump()`` after ``op.run()`` stops yielding
-    (i.e. the underlying function returned or its generator was exhausted).
-    User code never yields EOF — it is emitted implicitly when the op finishes.
-    """
-
-    op: str
-    ctx: tuple
 
 
 @dataclass
@@ -156,16 +131,11 @@ class Scheduler:
         _start_time = datetime.now(timezone.utc)
         _perf_start = perf_counter()
 
-        # Bind the labels store for operonx.core.tracing.label(). Uses a
-        # ContextVar so concurrent engine.run() calls get independent
-        # stores (each pointing at its own state._iter_labels dict).
-        from operonx.core.tracing.labels import (
-            _advance_yield,
-            _reset_labels_store,
-            _set_labels_store,
-        )
-
-        _labels_store_token = _set_labels_store(state._iter_labels)
+        # Bind the active MemoryState for this run. Read by the SCRATCH
+        # accessor and the post-resolve pass in BaseOp.get_inputs(). Inherited
+        # via PEP 567 by every asyncio.create_task / asyncio.to_thread spawned
+        # below — concurrent runs see independent values.
+        _state_var_token = _set_state(state)
 
         # All Frame/EOF events flow through here — the main event loop dequeues them.
         queue: asyncio.Queue = asyncio.Queue()
@@ -217,6 +187,11 @@ class Scheduler:
         # Prevents thundering herd when many stream items dispatch at once.
         _sem = asyncio.Semaphore(g.concurrency)
 
+        # tasks_by_ctx[ctx][op_name] = live _pump Task. Used by _sweep_ctx()
+        # to cancel the right tasks when an Interrupt event arrives. Keyed
+        # by (ctx, op_name) — at most one (op, ctx) pair runs concurrently.
+        tasks_by_ctx: Dict[tuple, Dict[str, asyncio.Task]] = {}
+
         def dispatch(op_name: str, ctx: tuple) -> None:
             """Schedule op based on its bound (sync=inline, io/cpu=task)."""
             nonlocal inflight
@@ -225,7 +200,8 @@ class Scheduler:
                 inline_pending.append((op_name, ctx))
             else:
                 inflight += 1
-                asyncio.create_task(_pump(op_name, ctx))
+                task = asyncio.create_task(_pump(op_name, ctx))
+                tasks_by_ctx.setdefault(ctx, {})[op_name] = task
 
         async def _pump(op_name: str, ctx: tuple) -> None:
             """Drive one op to completion and emit Frame/EOF events.
@@ -242,29 +218,38 @@ class Scheduler:
             """
             nonlocal inflight
             op = g._ops[op_name]
-            from operonx.core.tracing.labels import _reset_gen_key, _set_gen_key
 
             async with _sem:
-                # Bind label() target so the op body can name its yields.
-                # Use full_name so the collector (which also uses full_name)
-                # can look up labels by the same key.
-                _label_token = _set_gen_key(op.full_name, ctx)
                 try:
                     async for item_ctx, result in op.run(state, ctx):
-                        queue.put_nowait(Frame(op_name, item_ctx, result))
+                        if isinstance(result, Interrupt):
+                            # Stamp emitter identity so the main loop
+                            # knows which task to skip during the
+                            # self-cancel guard.
+                            result.op = op_name
+                            result.ctx = ctx
+                            queue.put_nowait(result)
+                        else:
+                            queue.put_nowait(Frame(op_name, item_ctx, result))
                         inflight += 1
-                        # Advance the "next-yield" cursor so subsequent
-                        # label() calls write to the next slot.
-                        _advance_yield(op.full_name, ctx)
                     queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1
+                except asyncio.CancelledError:
+                    # Cancelled by _sweep_ctx — do not enqueue EOF (the
+                    # sweep already accounted for queued frames + cleared
+                    # the consumer bookkeeping).
+                    raise
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1  # account for the EOF we just put on queue
                 finally:
-                    _reset_gen_key(_label_token)
                     inflight -= 1
+                    bucket = tasks_by_ctx.get(ctx)
+                    if bucket is not None:
+                        bucket.pop(op_name, None)
+                        if not bucket:
+                            tasks_by_ctx.pop(ctx, None)
 
         async def _drain_inline() -> None:
             """Process all pending inline ops — no task creation, no queue.
@@ -274,22 +259,25 @@ class Scheduler:
             (e.g. downstream sync ops becoming ready), the while-loop picks
             them up immediately.
             """
-            from operonx.core.tracing.labels import _reset_gen_key, _set_gen_key
-
             while inline_pending:
                 op_name, ctx = inline_pending.pop(0)
                 op = g._ops[op_name]
-                _label_token = _set_gen_key(op.full_name, ctx)
                 try:
                     async for item_ctx, result in op.run(state, ctx):
-                        _on_frame(Frame(op_name, item_ctx, result))
-                        _advance_yield(op.full_name, ctx)
+                        if isinstance(result, Interrupt):
+                            result.op = op_name
+                            result.ctx = ctx
+                            await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
+                            if output_queue is not None:
+                                output_queue.put_nowait(
+                                    ("__interrupt__", ctx, {"__interrupt__": result})
+                                )
+                        else:
+                            _on_frame(Frame(op_name, item_ctx, result))
                     _on_eof(EOF(op_name, ctx))
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     _on_eof(EOF(op_name, ctx))
-                finally:
-                    _reset_gen_key(_label_token)
 
         def _on_frame(event: Frame) -> None:
             """Handle one Frame: seed item ctx, decrement ready, route when ready."""
@@ -399,6 +387,84 @@ class Scheduler:
                         state[op.full_name, var, next_ctx] = val
                     dispatch(event.op, next_ctx)
 
+        def _is_descendant_or_equal(child: tuple, parent: tuple) -> bool:
+            """True if `child` is `parent` itself or a deeper context."""
+            n = len(parent)
+            return len(child) >= n and child[:n] == parent
+
+        async def _sweep_ctx(ctx_prefix: tuple, exclude: Tuple[str, tuple] = None) -> None:
+            """Drop queued events + cancel in-flight tasks at ctx_prefix
+            (and descendants), preserving the inflight invariant.
+
+            `exclude` is the ``(op, ctx)`` of the Interrupt emitter — its
+            own pump task is spared so the emitter can finish cleanly
+            (its EOF and finally block decrement inflight as normal).
+            """
+            nonlocal inflight
+
+            # 1. Drain queue. Frame/EOF/Interrupt items at descendant ctxs
+            #    get dropped; inflight is decremented by exactly the drop
+            #    count (these were queued events, not in-flight tasks).
+            keep: List = []
+            drop_count = 0
+            while not queue.empty():
+                try:
+                    item = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                item_ctx = getattr(item, "ctx", None)
+                if item_ctx is not None and _is_descendant_or_equal(item_ctx, ctx_prefix):
+                    drop_count += 1
+                else:
+                    keep.append(item)
+            for item in keep:
+                queue.put_nowait(item)
+            inflight -= drop_count
+
+            # 2. Cancel matching in-flight pump tasks (skip the emitter).
+            #    For tasks that ran their body, _pump.finally decrements
+            #    inflight + cleans tasks_by_ctx. For cancel-before-start,
+            #    the body never runs and finally never fires — we detect
+            #    that case below and brutally clean up after gather.
+            cancelled: List[Tuple[str, tuple, asyncio.Task]] = []
+            for ctx in list(tasks_by_ctx):
+                if not _is_descendant_or_equal(ctx, ctx_prefix):
+                    continue
+                for op_name, task in list(tasks_by_ctx[ctx].items()):
+                    if exclude == (op_name, ctx):
+                        continue
+                    if not task.done():
+                        task.cancel()
+                        cancelled.append((op_name, ctx, task))
+            if cancelled:
+                await asyncio.gather(*(t for _, _, t in cancelled), return_exceptions=True)
+                # Idempotent post-cleanup: if a cancelled task's finally
+                # ran, its bucket entry is already gone — skip. Otherwise
+                # (cancel-before-start) the bucket still has the entry and
+                # inflight wasn't decremented — fix that here.
+                for op_name, ctx, _task in cancelled:
+                    bucket = tasks_by_ctx.get(ctx)
+                    if bucket is not None and op_name in bucket:
+                        bucket.pop(op_name, None)
+                        if not bucket:
+                            tasks_by_ctx.pop(ctx, None)
+                        inflight -= 1
+
+            # 3. Clear bookkeeping at descendant ctxs (skip emitter's ctx
+            #    so its own pump can complete normally).
+            emitter_ctx = exclude[1] if exclude else None
+            for ctx in list(ready):
+                if _is_descendant_or_equal(ctx, ctx_prefix) and ctx != emitter_ctx:
+                    ready.pop(ctx, None)
+            for key in list(seq_origins):
+                _op_name, _ctx = key
+                if _is_descendant_or_equal(_ctx, ctx_prefix) and _ctx != emitter_ctx:
+                    seq_origins.pop(key, None)
+            for key in list(collect_bufs):
+                buf = collect_bufs[key]
+                if any(_is_descendant_or_equal(ictx, ctx_prefix) for ictx, _ in buf):
+                    collect_bufs.pop(key, None)
+
         # Seed entry ops.
         for entry in g.entries:
             dispatch(entry, context_id)
@@ -412,6 +478,10 @@ class Scheduler:
             inflight -= 1
             if isinstance(event, Frame):
                 _on_frame(event)
+            elif isinstance(event, Interrupt):
+                await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
+                if output_queue is not None:
+                    output_queue.put_nowait(("__interrupt__", event.ctx, {"__interrupt__": event}))
             else:
                 _on_eof(event)
             # Drain any inline ops triggered by the queue event.
@@ -430,7 +500,6 @@ class Scheduler:
         # Collect final outputs at root context.
         outputs = g.get_outputs(state, context_id)
 
-        # Clear the labels store binding for this run.
-        _reset_labels_store(_labels_store_token)
+        _reset_state(_state_var_token)
 
         return outputs, item_ctxs

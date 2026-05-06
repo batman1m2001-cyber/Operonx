@@ -12,9 +12,12 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Opt
 
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
+from operonx.core.ops._events import Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.states.ref import Ref
+from operonx.core.states.scratch_ref import ScratchRef
+from operonx.core.tracing.emitter import _current_op_var, current_emitter
 from operonx.core.utils.auto_name import auto_name, unique_name
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import get_current
@@ -397,6 +400,10 @@ class BaseOp(ABC):
                     result[var_name] = value
                 elif fallback is not None:
                     result[var_name] = fallback
+            for var_name in list(result):
+                val = result[var_name]
+                if isinstance(val, ScratchRef):
+                    result[var_name] = state._scratch.get(val.key)
             return result
 
         # First call (or schema changed): build index cache
@@ -418,6 +425,10 @@ class BaseOp(ABC):
             elif fallback is not None:
                 result[var_name] = fallback
         self._input_cache = (state.schema, entries)
+        for var_name in list(result):
+            val = result[var_name]
+            if isinstance(val, ScratchRef):
+                result[var_name] = state._scratch.get(val.key)
         _unwrap_media_in_place(result)
         return result
 
@@ -437,7 +448,7 @@ class BaseOp(ABC):
     def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
         """Produce a trace-time view of this op's I/O.
 
-        Called by the tracing collector before media extraction. Subclasses
+        Called by ``_extract_trace_io`` before media extraction. Subclasses
         override when their I/O carries media in a non-``Media`` shape (e.g.
         LLMOp wraps OpenAI chat-format ``image_url`` blocks into ``Media``
         instances). The real state value is untouched — this returns copies
@@ -446,6 +457,28 @@ class BaseOp(ABC):
         Default is identity: most ops never override.
         """
         return inputs, outputs
+
+    def _extract_trace_io(self, side_dict: Dict[str, Any], *, root: str) -> tuple:
+        """Compute trace-time view of one I/O side: normalize + extract media.
+
+        Returns ``(stripped, media_refs)`` where ``stripped`` is a copy of
+        ``side_dict`` with each ``Media`` instance replaced by a
+        ``"<media:N>"`` placeholder, and ``media_refs`` is the parallel
+        ``list[MediaRef]`` carrying blobs + field paths. Empty list when no
+        Media was found.
+
+        ``root`` must be ``"inputs"`` or ``"outputs"`` — used as the field
+        path prefix so the exporter knows which side to substitute into.
+        """
+        from operonx.core.media import extract_media
+
+        if not side_dict:
+            return side_dict, []
+        if root == "inputs":
+            normed, _ = self.normalize_trace_io(side_dict, {})
+        else:
+            _, normed = self.normalize_trace_io({}, side_dict)
+        return extract_media(normed, root)
 
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
         """Store result dict into state.
@@ -679,6 +712,16 @@ class BaseOp(ABC):
         _outputs = {}
         error_msg = None
 
+        # New event-stream tracing: emit hooks alongside legacy state-cell writes.
+        # Lookup is one ContextVar.get — cached as local to keep emit O(1).
+        # NullEmitter when no pipeline bound, so calls cost ~one method dispatch.
+        emitter = current_emitter()
+        op_var_token = None
+        idx = 0
+        op_started = False
+        op_cancelled = False
+        ctx_for_end = context_id if context_id is not None else DEFAULT_CONTEXT
+
         try:
             if self.delay > 0:
                 await asyncio.sleep(self.delay)
@@ -689,6 +732,20 @@ class BaseOp(ABC):
             # not time spent waiting for upstream ops in the scheduler queue.
             start_time = datetime.now(timezone.utc) if _tracing else None
             perf_start = perf_counter()
+
+            # New tracing: OP_START fires after inputs resolve, before exec.
+            # Tracks start_time on the emitter for cancel-emit duration calc (Rule 3).
+            # Media extraction: walk inputs once, replace Media instances with
+            # placeholder strings + accumulate refs for the exporter to upload.
+            _trace_inputs, _input_media = self._extract_trace_io(_inputs, root="inputs")
+            emitter.op_start(
+                self.full_name,
+                ctx_for_end,
+                _trace_inputs,
+                media_refs=_input_media,
+            )
+            op_started = True
+            op_var_token = _current_op_var.set((self.full_name, ctx_for_end))
 
             # Cache check
             if self.cache is not None:
@@ -701,10 +758,16 @@ class BaseOp(ABC):
                     return
 
             base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
-            idx = 0
             _yield_start = perf_counter()
             async for result in self._exec_core(_inputs):
                 ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
+                # Interrupt is a scheduler control event, not a result dict.
+                # Forward it untouched — _pump puts it on the queue as-is.
+                if isinstance(result, Interrupt):
+                    yield ctx, result
+                    idx += 1
+                    _yield_start = perf_counter()
+                    continue
                 self.store_result(state, result, ctx)
                 _outputs = result
                 if self.is_gen and _tracing:
@@ -726,10 +789,33 @@ class BaseOp(ABC):
                     duration_ms = (_batch_end - perf_start) * 1000
                 if not self.is_gen and self.cache is not None:
                     _cache_store[_cache_key] = result
+                # New tracing: per-yield event for generator ops only.
+                # Threshold (`@op(emit_yields=N)`) is a T2 task — for now N=1.
+                # Strip Media off the yielded dict so raw bytes don't sit in
+                # the buffer; the parent observation's outputs (last yielded)
+                # gets media uploaded via the OP_END path instead.
+                if self.is_gen:
+                    _trace_yielded, _yield_media = self._extract_trace_io(
+                        result,
+                        root="outputs",
+                    )
+                    emitter.op_yield(
+                        self.full_name,
+                        ctx,
+                        _trace_yielded,
+                        idx,
+                        media_refs=_yield_media,
+                    )
                 yield ctx, result
                 idx += 1
                 _yield_start = perf_counter()
 
+        except asyncio.CancelledError:
+            # Mark for the OP_END emit below. finally still runs because Python
+            # guarantees it on CancelledError. Re-raise so the scheduler sees
+            # cancellation propagate through normally (Phase B Interrupt sweep).
+            op_cancelled = True
+            raise
         except Exception:
             import sys
 
@@ -780,6 +866,38 @@ class BaseOp(ABC):
             if _tracing:
                 self._log(state.request_id, context_id, _inputs, _outputs, duration_ms)
 
+            # New tracing: OP_END fires regardless of legacy `_tracing` flag
+            # — the emitter is NullEmitter when no pipeline is bound, so this
+            # is free in the no-tracer path. Status reflects what happened.
+            #
+            # Cancel-before-start case (op_started=False): the body never ran,
+            # no OP_START was emitted, so we skip OP_END too — no orphan event.
+            if op_started:
+                if op_cancelled:
+                    status = "cancelled"
+                elif error_msg is not None:
+                    status = "error"
+                else:
+                    status = "ok"
+                if status == "ok":
+                    _trace_outputs, _output_media = self._extract_trace_io(
+                        _outputs,
+                        root="outputs",
+                    )
+                else:
+                    _trace_outputs, _output_media = {}, []
+                emitter.op_end(
+                    self.full_name,
+                    ctx_for_end,
+                    outputs=_trace_outputs,
+                    status=status,
+                    duration_ms=duration_ms,
+                    yield_count=idx,
+                    media_refs=_output_media,
+                )
+            if op_var_token is not None:
+                _current_op_var.reset(op_var_token)
+
             if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(
                     format_event(
@@ -829,10 +947,13 @@ class BaseOp(ABC):
                 "default": param.default,
                 "required": param.required,
                 "ref": None,
+                "scratch": None,
                 "literal": None,
             }
             if isinstance(param.value, Ref):
                 entry["ref"] = param.value.serialize()
+            elif isinstance(param.value, ScratchRef):
+                entry["scratch"] = {"key": param.value.key}
             elif param.value is not None:
                 entry["literal"] = param.value
             result[name] = entry
@@ -850,6 +971,8 @@ class BaseOp(ABC):
         def get_connect_key(param: Param):
             if isinstance(param.value, Ref):
                 return {param.value.source: param.value.var}
+            if isinstance(param.value, ScratchRef):
+                return {"$scratch": param.value.key}
             return param.value
 
         result = {
@@ -883,4 +1006,12 @@ class BaseOp(ABC):
 
 
 # Re-export edge classes and singletons for backward compatibility
-from operonx.core.ops._edges import END, PARENT, START, DummyOp, SoftEdge  # noqa: E402, F401
+from operonx.core.ops._edges import (  # noqa: E402, F401
+    END,
+    PARENT,
+    SCRATCH,
+    START,
+    DummyOp,
+    ScratchAccessor,
+    SoftEdge,
+)

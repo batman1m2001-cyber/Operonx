@@ -1,4 +1,4 @@
-"""Edge classes, DummyOp, and global singletons (START, END, PARENT).
+"""Edge classes, DummyOp, and global singletons (START, END, PARENT, SCRATCH).
 
 Provides the edge-connectivity classes and sentinel ops used by the
 ``>>`` / ``>`` operator syntax for wiring ops in a GraphOp.
@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from operonx.core.ops._utils import _set_wildcard_outputs
 from operonx.core.ops.base import BaseOp
+from operonx.core.states._scratch_var import _current_state_var
+from operonx.core.states.scratch_ref import ScratchRef
 from operonx.core.utils.context import get_current
 
 if TYPE_CHECKING:
@@ -165,3 +167,51 @@ class DummyOp(BaseOp):
 START = DummyOp("__START__")
 END = DummyOp("__END__")
 PARENT = DummyOp("__PARENT__")
+
+
+class ScratchAccessor:
+    """Dict-like accessor for per-call scratch space.
+
+    - Inside an op body (ContextVar bound): reads/writes the live scratch
+      dict on the current MemoryState.
+    - At graph-construction time (ContextVar unbound): ``__getitem__`` returns
+      a ``ScratchRef`` marker, post-resolved by ``BaseOp.get_inputs()``.
+      ``__setitem__`` raises — write-outside-run is a programming error.
+    """
+
+    __slots__ = ()
+
+    def __getitem__(self, key: str):
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return ScratchRef(key)
+        return state._scratch.get(key)
+
+    def __setitem__(self, key: str, value) -> None:
+        try:
+            state = _current_state_var.get()
+        except LookupError as e:
+            raise RuntimeError(
+                f"SCRATCH[{key!r}] = ... called outside an active run. "
+                "Write SCRATCH inside an @op body, or seed via "
+                "engine.start(scratch={...})."
+            ) from e
+        state._scratch[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        try:
+            state = _current_state_var.get()
+        except LookupError as e:
+            raise RuntimeError(f"del SCRATCH[{key!r}] called outside an active run.") from e
+        state._scratch.pop(key, None)
+
+    def __contains__(self, key: str) -> bool:
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return False
+        return key in state._scratch
+
+
+SCRATCH = ScratchAccessor()

@@ -44,7 +44,6 @@ jobs:
         extra:
           - anthropic
           - langfuse
-          - otel
           - onnx
           - serve
           - standard
@@ -85,8 +84,6 @@ jobs:
               from operonx.providers.llms.anthropic import AnthropicModel  # noqa: F401
           elif extra == "langfuse":
               from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
-          elif extra == "otel":
-              from operonx.telemetry.tracers.otel import OTELTracer  # noqa: F401
           elif extra == "onnx":
               import onnxruntime  # noqa: F401
               import tokenizers  # noqa: F401

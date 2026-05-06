@@ -1,16 +1,26 @@
-"""Operon telemetry — Langfuse, OpenTelemetry, and OperonEyes tracers.
+"""Operon telemetry — Langfuse exporter + backwards-compat shims.
 
-Backend-agnostic observability: every tracer extends ``operonx.core.tracing.Tracer``
-and flushes in the background thread pool, never blocking the main async thread.
+The new event-stream pipeline lives in ``operonx.core.tracing``. Heavier
+exporters (Langfuse) live here under ``operonx.telemetry.exporters``;
+their HTTP clients live under ``operonx.telemetry.backends``.
 
-Example::
+Example — explicit pipeline (recommended for new code)::
 
     from operonx import Operon
+    from operonx.core.tracing import TracePipeline
+    from operonx.telemetry.exporters import LangfuseTreeExporter
+
+    pipeline = TracePipeline(exporters=[
+        LangfuseTreeExporter(resource="langfuse:default"),
+    ])
+    engine = Operon(graph, tracer=pipeline)
+
+Example — legacy constructor (kept for back-compat)::
+
     from operonx.telemetry import LangfuseTracer
 
-    tracer = LangfuseTracer(resource="langfuse:default")
+    tracer = LangfuseTracer(resource="langfuse:default")  # IS a TracePipeline
     engine = Operon(graph, tracer=tracer)
-    result = await engine.run(inputs={...})
 
 Prompt management (requires the Langfuse SDK)::
 
@@ -22,32 +32,16 @@ Prompt management (requires the Langfuse SDK)::
 
 # Auto-register backends to ResourceHub on import
 import operonx.telemetry.plugin  # noqa: F401
-from operonx.core.tracing import Tracer
 from operonx.telemetry.backends import (
     LangfuseClient,
     LangfuseConfig,
     LangfusePromptManager,
-    OTELClient,
-    OTELConfig,
 )
-from operonx.telemetry.tracers import (
-    LangfuseTracer,
-    OperonEyesTracer,
-    OTELTracer,
-)
+from operonx.telemetry.tracers import LangfuseTracer
 
 __all__ = [
-    # Base (re-exported from operonx.core.tracing for convenience)
-    "Tracer",
-    # Tracers
     "LangfuseTracer",
-    "OTELTracer",
-    "OperonEyesTracer",
-    # Configs
     "LangfuseConfig",
-    "OTELConfig",
-    # Clients
     "LangfuseClient",
     "LangfusePromptManager",
-    "OTELClient",
 ]

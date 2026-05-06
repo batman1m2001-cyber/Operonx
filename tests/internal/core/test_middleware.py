@@ -199,14 +199,10 @@ async def test_stream_with_middleware():
 @pytest.mark.asyncio
 async def test_tracer_passed_to_start():
     """tracer= on run() is forwarded to start() and available on handle."""
-    from unittest.mock import MagicMock
+    from operonx.core.tracing import TracePipeline
 
     engine = _make_engine()
 
-    mock_tracer = MagicMock()
-    mock_tracer.tags = []
-    mock_tracer.stream_trace_limit = 100
-
-    # Should not warn — tracer= is a first-class parameter now
-    result = await engine.run(inputs={"x": 1}, tracer=mock_tracer)
+    pipeline = TracePipeline()
+    result = await engine.run(inputs={"x": 1}, tracer=pipeline)
     assert result["result"] == 2

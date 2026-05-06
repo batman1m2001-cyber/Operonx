@@ -15,18 +15,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::core::states::ref_::RefConfig;
+use crate::core::states::scratch_ref::ScratchRef;
 
 /// A single input/output parameter of an op.
 ///
 /// Rust mirror of Python's `Param` dataclass. Python fields (`type`, `required`,
 /// `default`, `description`, `value`) map onto Rust's serialized shape used in
-/// `graph.serialize()`: `{default, required, ref, literal}`. Python's single
-/// `value` union is split here into discriminated `ref_config` / `literal`
-/// fields.
+/// `graph.serialize()`: `{default, required, ref, scratch, literal}`. Python's
+/// single `value` union is split here into discriminated
+/// `ref_config` / `scratch` / `literal` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Param {
-    /// Default value if neither `ref` nor `literal` is present.
+    /// Default value if none of `ref` / `scratch` / `literal` is present.
     #[serde(default)]
     pub default: Option<Value>,
 
@@ -37,6 +38,11 @@ pub struct Param {
     /// If set, the param's value is pulled from another op's state via this Ref.
     #[serde(rename = "ref", default)]
     pub ref_config: Option<RefConfig>,
+
+    /// If set, the param's value is read from per-call scratch space at the
+    /// given key (resolved by `InputResolver::Scratch` at op-execution time).
+    #[serde(default)]
+    pub scratch: Option<ScratchRef>,
 
     /// If set, the param's value is this literal constant.
     #[serde(default)]

@@ -1,23 +1,22 @@
-"""Test LangfuseTracer with direct HTTP API (no SDK).
+"""Tests for the legacy LangfuseTracer constructor surface + LangfuseClient.
 
-Tests cover:
-- LangfuseConfig/Client creation
-- LangfuseTracer creation and validation
-- Inheritance from operonx.core.tracing.Tracer
-- flush() builds correct batch events from nodes format
-- Batch event structure (trace-create, span-create, generation-create)
+Post-T2.12, ``LangfuseTracer`` is a thin pipeline-shaped shim — its
+constructor builds a ``TracePipeline`` underneath, but the public attribute
+surface (``.tags``, ``.resource``, ``_get_client()``, ``to_config_dict()``,
+``__repr__``) is preserved so existing user code keeps working.
+
+The actual trace-batch building and HTTP I/O lives in:
+  - ``LangfuseTreeExporter`` (unit tests in ``test_langfuse_tree_exporter.py``)
+  - ``LangfuseClient`` (HTTP layer — tested below)
+  - ``scripts/probe_langfuse_edupia_roundtrip.py`` (real round-trip)
 """
 
 import os
 import urllib.error
-import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-# Langfuse credentials for integration tests. Uses the standard Langfuse SDK
-# env var names (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST).
-# Tests skip when these are unset.
 LANGFUSE_CONFIG = {
     "public_key": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
     "secret_key": os.environ.get("LANGFUSE_SECRET_KEY", ""),
@@ -25,8 +24,12 @@ LANGFUSE_CONFIG = {
 }
 
 
+# =============================================================================
+# LangfuseConfig + LangfuseClient (HTTP layer — unchanged by the redesign)
+# =============================================================================
+
+
 def test_langfuse_config_creation():
-    """Test LangfuseConfig can be created."""
     from operonx.telemetry import LangfuseConfig
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
@@ -36,63 +39,94 @@ def test_langfuse_config_creation():
 
 
 def test_langfuse_client_creation():
-    """Test LangfuseClient can be created (no SDK needed)."""
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     client = LangfuseClient(config)
-
     assert client.config == config
     assert repr(client) == f"<LangfuseClient host={config.host}>"
 
 
 def test_langfuse_client_has_ingest_method():
-    """Test LangfuseClient has ingest() and trace_url() methods."""
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
     client = LangfuseClient(config)
-
     assert hasattr(client, "ingest")
     assert hasattr(client, "trace_url")
     assert client.trace_url("test-id") == f"{config.host}/trace/test-id"
 
 
 def test_langfuse_client_auth_header():
-    """Test LangfuseClient builds correct Basic auth header."""
     import base64
 
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
     config = LangfuseConfig(public_key="pk-test", secret_key="sk-test", host="https://example.com")
     client = LangfuseClient(config)
-
     expected = base64.b64encode(b"pk-test:sk-test").decode()
     assert client._auth == expected
 
 
+def test_langfuse_client_ingest_http_error():
+    from operonx.telemetry import LangfuseClient, LangfuseConfig
+
+    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test", host="https://example.com")
+    client = LangfuseClient(config)
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://example.com",
+            code=500,
+            msg="Server Error",
+            hdrs=None,
+            fp=None,
+        )
+        with pytest.raises(urllib.error.HTTPError):
+            client.ingest([{"id": "test", "type": "trace-create", "body": {}}])
+
+
+def test_langfuse_client_auth_check_failure():
+    from operonx.telemetry import LangfuseClient, LangfuseConfig
+
+    config = LangfuseConfig(public_key="pk-bad", secret_key="sk-bad", host="https://example.com")
+    client = LangfuseClient(config)
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://example.com",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=None,
+        )
+        assert client.auth_check() is False
+
+
+# =============================================================================
+# LangfuseTracer — constructor + legacy attribute surface
+# =============================================================================
+
+
 def test_langfuse_tracer_creation():
-    """Test LangfuseTracer can be created with resource."""
+    """Constructor accepts a resource key + exposes ``.resource``."""
     from operonx.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default")
-
     assert tracer.resource == "langfuse:default"
     assert repr(tracer) == "<LangfuseTracer resource=langfuse:default>"
 
 
-def test_langfuse_tracer_inherits_from_new_tracer():
-    """Test LangfuseTracer inherits from operonx.core.tracing.Tracer."""
-    from operonx.core.tracing import Tracer
+def test_langfuse_tracer_is_a_trace_pipeline():
+    """Post-T2.12: LangfuseTracer IS a TracePipeline so the engine routes
+    through the new event-stream path automatically."""
+    from operonx.core.tracing.pipeline import TracePipeline
     from operonx.telemetry import LangfuseTracer
 
     tracer = LangfuseTracer(resource="langfuse:default", tags=["test"])
-    assert isinstance(tracer, Tracer)
+    assert isinstance(tracer, TracePipeline)
     assert tracer.tags == ["test"]
 
 
 def test_langfuse_tracer_requires_config_or_resource():
-    """Test LangfuseTracer raises error if neither config nor resource provided."""
     from operonx.telemetry import LangfuseTracer
 
     with pytest.raises(ValueError, match="Must provide either"):
@@ -100,7 +134,6 @@ def test_langfuse_tracer_requires_config_or_resource():
 
 
 def test_langfuse_tracer_rejects_both_config_and_resource():
-    """Test LangfuseTracer raises error if both config and resource provided."""
     from operonx.telemetry import LangfuseConfig, LangfuseTracer
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
@@ -108,371 +141,64 @@ def test_langfuse_tracer_rejects_both_config_and_resource():
         LangfuseTracer(config=config, resource="langfuse:default")
 
 
-def test_langfuse_tracer_flush_builds_correct_batch(sample_trace_data):
-    """Test flush() builds correct batch events from nodes."""
-    from operonx.telemetry import LangfuseTracer
+def test_langfuse_tracer_has_exporter_in_pipeline():
+    """The shim wires up a ``LangfuseTreeExporter`` automatically."""
+    from operonx.telemetry import LangfuseConfig, LangfuseTracer
+    from operonx.telemetry.exporters import LangfuseTreeExporter
 
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    captured_batch = []
-
-    mock_client = MagicMock()
-    mock_client.ingest.return_value = {"successes": [], "errors": []}
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    def capture_ingest(batch):
-        captured_batch.extend(batch)
-        return {"successes": [], "errors": []}
-
-    mock_client.ingest.side_effect = capture_ingest
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        tracer.flush(sample_trace_data)
-
-    # Should have 3 events: 1 trace-create, 1 span-create, 1 generation-create
-    assert len(captured_batch) == 3
-
-    # Event types
-    types = [e["type"] for e in captured_batch]
-    assert types[0] == "trace-create"
-    assert "span-create" in types
-    assert "generation-create" in types
-
-    # Root trace event
-    trace_event = captured_batch[0]
-    assert trace_event["body"]["name"] == "test-workflow"
-    assert trace_event["body"]["userId"] == "test-user"
-    assert trace_event["body"]["sessionId"] == "test-session"
-
-    # Generation event (llm-node)
-    gen_events = [e for e in captured_batch if e["type"] == "generation-create"]
-    assert len(gen_events) == 1
-    gen_body = gen_events[0]["body"]
-    assert gen_body["name"] == "llm-node"
-    assert gen_body["model"] == "gpt-4"
-    assert gen_body["usageDetails"] == {"input": 10, "output": 20, "total": 30}
-    assert gen_body["costDetails"] == {"total": 0.0015}
-
-    # Client methods called correctly
-    mock_client.ingest.assert_called_once()
-    mock_client.trace_url.assert_called_once()
+    config = LangfuseConfig(**LANGFUSE_CONFIG)
+    tracer = LangfuseTracer(config=config, tags=["t1"])
+    assert len(tracer.exporters) == 1
+    assert isinstance(tracer.exporters[0], LangfuseTreeExporter)
 
 
-def test_langfuse_tracer_flush_with_direct_config(sample_trace_data):
-    """Test flush() with direct config (no ResourceHub)."""
+def test_langfuse_tracer_with_trace_filter_builds_processors():
+    """A passed ``trace_filter`` is converted to processors via the
+    legacy adapter."""
+    from operonx.core.tracing.trace_filter import TraceFilter
     from operonx.telemetry import LangfuseConfig, LangfuseTracer
 
     config = LangfuseConfig(**LANGFUSE_CONFIG)
-    tracer = LangfuseTracer(config=config)
-
-    mock_client = MagicMock()
-    mock_client.ingest.return_value = {"successes": [], "errors": []}
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    with patch(
-        "operonx.telemetry.backends.langfuse.LangfuseClient", return_value=mock_client
-    ) as MockClient:
-        tracer.flush(sample_trace_data)
-
-    MockClient.assert_called_once_with(config)
-    mock_client.ingest.assert_called_once()
-
-
-def test_langfuse_tracer_flush_parent_linking(sample_iteration_trace_data):
-    """Test flush() correctly sets parentObservationId for nested nodes."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    captured_batch = []
-
-    mock_client = MagicMock()
-    mock_client.ingest.side_effect = lambda b: (
-        captured_batch.extend(b),
-        {"successes": [], "errors": []},
-    )[1]
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        tracer.flush(sample_iteration_trace_data)
-
-    # 9 nodes: 1 trace + 1 generator + 3 stream_contexts + 3 stream_items + 1 aggregate
-    assert len(captured_batch) == 9
-
-    # Extract events by type
-    trace_events = [e for e in captured_batch if e["type"] == "trace-create"]
-    span_events = [e for e in captured_batch if e["type"] == "span-create"]
-
-    assert len(trace_events) == 1
-    assert len(span_events) == 8  # all non-trace nodes are spans
-
-    # Direct children of root (map_op, 3 stream_contexts, aggregate) should NOT have parentObservationId
-    # (they are direct children of the trace, linked only via traceId)
-    root_children = [
-        e
-        for e in span_events
-        if "parentObservationId" not in e["body"] or e["body"]["parentObservationId"] is None
-    ]
-    # map_op + 3 stream_contexts + aggregate = 5 direct children
-    assert len(root_children) == 5
-
-    # Stream items should have parentObservationId pointing to their stream_context
-    items_with_parent = [e for e in span_events if e["body"].get("parentObservationId")]
-    assert len(items_with_parent) == 3  # 3 process nodes inside stream contexts
-
-    mock_client.ingest.assert_called_once()
-
-
-def test_langfuse_tracer_flush_all_events_have_trace_id(sample_trace_data):
-    """Test all span/generation events reference the correct traceId."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    captured_batch = []
-
-    mock_client = MagicMock()
-    mock_client.ingest.side_effect = lambda b: (
-        captured_batch.extend(b),
-        {"successes": [], "errors": []},
-    )[1]
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        tracer.flush(sample_trace_data)
-
-    trace_id = sample_trace_data["request_id"]
-    for event in captured_batch:
-        if event["type"] != "trace-create":
-            assert event["body"]["traceId"] == trace_id
-
-
-# ============================================================================
-# Error Handling Tests
-# ============================================================================
-
-
-def test_langfuse_tracer_flush_raises_on_http_error(sample_trace_data):
-    """Test flush() propagates HTTP errors from ingest."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_client = MagicMock()
-    mock_client.ingest.side_effect = urllib.error.HTTPError(
-        url="https://example.com", code=401, msg="Unauthorized", hdrs=None, fp=None
-    )
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        with pytest.raises(urllib.error.HTTPError):
-            tracer.flush(sample_trace_data)
-
-
-def test_langfuse_tracer_flush_raises_on_connection_error(sample_trace_data):
-    """Test flush() propagates connection errors."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_client = MagicMock()
-    mock_client.ingest.side_effect = urllib.error.URLError("Connection refused")
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        with pytest.raises(urllib.error.URLError):
-            tracer.flush(sample_trace_data)
-
-
-def test_langfuse_tracer_flush_raises_on_timeout(sample_trace_data):
-    """Test flush() propagates timeout errors."""
-    import socket
-
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_client = MagicMock()
-    mock_client.ingest.side_effect = socket.timeout("timed out")
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        with pytest.raises(socket.timeout):
-            tracer.flush(sample_trace_data)
-
-
-def test_langfuse_tracer_flush_raises_on_hub_not_found(sample_trace_data):
-    """Test flush() propagates missing ResourceHub errors."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_hub = MagicMock()
-    mock_hub.get.side_effect = KeyError("langfuse:default not found")
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        with pytest.raises(KeyError):
-            tracer.flush(sample_trace_data)
-
-
-def test_langfuse_tracer_flush_raises_on_partial_errors(sample_trace_data):
-    """Test flush() raises RuntimeError when ingest returns partial errors."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_client = MagicMock()
-    mock_client.ingest.return_value = {
-        "successes": [{"id": "evt-1", "status": 201}],
-        "errors": [{"id": "evt-2", "status": 400, "message": "Invalid body"}],
-    }
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        with pytest.raises(RuntimeError, match="ingestion had 1 error"):
-            tracer.flush(sample_trace_data)
-
-    mock_client.ingest.assert_called_once()
-
-
-def test_langfuse_tracer_flush_empty_nodes():
-    """Test flush() handles trace_data with empty nodes list."""
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")
-
-    mock_client = MagicMock()
-    mock_client.ingest.return_value = {"successes": [], "errors": []}
-    mock_client.trace_url.return_value = "https://example.com/trace/test"
-
-    mock_hub = MagicMock()
-    mock_hub.get.return_value = mock_client
-
-    trace_data = {
-        "workflow_name": "empty",
-        "request_id": "test-123",
-        "nodes": [],
-    }
-
-    with patch("operonx.core.registry.ResourceHub.instance", return_value=mock_hub):
-        tracer.flush(trace_data)
-
-    # Should still call ingest with empty batch
-    mock_client.ingest.assert_called_once_with([])
-
-
-def test_langfuse_client_ingest_http_error():
-    """Test LangfuseClient.ingest() raises on HTTP errors."""
-    from operonx.telemetry import LangfuseClient, LangfuseConfig
-
-    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test", host="https://example.com")
-    client = LangfuseClient(config)
-
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://example.com", code=500, msg="Server Error", hdrs=None, fp=None
-        )
-        with pytest.raises(urllib.error.HTTPError):
-            client.ingest([{"id": "test", "type": "trace-create", "body": {}}])
-
-
-def test_langfuse_client_auth_check_failure():
-    """Test LangfuseClient.auth_check() returns False on failure."""
-    from operonx.telemetry import LangfuseClient, LangfuseConfig
-
-    config = LangfuseConfig(public_key="pk-bad", secret_key="sk-bad", host="https://example.com")
-    client = LangfuseClient(config)
-
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://example.com", code=401, msg="Unauthorized", hdrs=None, fp=None
-        )
-        assert client.auth_check() is False
-
-
-@pytest.mark.integration
-def test_langfuse_tracer_flush_integration():
-    """Test LangfuseTracer.flush() end-to-end with real Langfuse cloud."""
+    tf = TraceFilter(skip_empty=True, exclude_ops=["picker"], max_io_size=2000)
+    tracer = LangfuseTracer(config=config, trace_filter=tf)
+    types = [type(p).__name__ for p in tracer.processors]
+    assert "DropOps" in types
+    assert "DropEmpty" in types
+    assert "TruncateIO" in types
+
+
+def test_langfuse_tracer_to_config_dict_for_rust_backend():
+    """``to_config_dict()`` returns the dict the Rust runtime needs."""
     from operonx.telemetry import LangfuseConfig, LangfuseTracer
 
-    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
-        pytest.skip("LANGFUSE keys not set")
-
-    config = LangfuseConfig(**LANGFUSE_CONFIG)
+    config = LangfuseConfig(public_key="pk", secret_key="sk", host="https://x")
     tracer = LangfuseTracer(config=config)
+    d = tracer.to_config_dict()
+    assert d == {"public_key": "pk", "secret_key": "sk", "host": "https://x"}
 
-    request_id = str(uuid.uuid4())
-    trace_data = {
-        "workflow_name": "test-workflow",
-        "request_id": request_id,
-        "user_id": "test-user",
-        "session_id": "test-session",
-        "tags": ["integration", "test", "no-sdk"],
-        "nodes": [
-            {
-                "trace_key": "root",
-                "parent_trace_key": None,
-                "op_name": "root",
-                "display_name": "test-workflow",
-                "node_type": "trace",
-                "kind": "graph",
-                "inputs": {"workflow": "test"},
-                "outputs": {"status": "completed"},
-                "start_time": "2026-03-08T20:00:00Z",
-                "end_time": "2026-03-08T20:00:01Z",
-                "metadata": {"version": "1.0"},
-            },
-            {
-                "trace_key": "root.child-1",
-                "parent_trace_key": "root",
-                "op_name": "root.child-1",
-                "display_name": "child-1",
-                "node_type": "span",
-                "kind": "batch",
-                "inputs": {"step": 1},
-                "outputs": {"processed": True},
-                "start_time": "2026-03-08T20:00:00Z",
-                "end_time": "2026-03-08T20:00:00.500Z",
-                "metadata": {},
-            },
-            {
-                "trace_key": "root.llm-node",
-                "parent_trace_key": "root",
-                "op_name": "root.llm-node",
-                "display_name": "llm-node",
-                "node_type": "generation",
-                "kind": "batch",
-                "inputs": {"prompt": "Test prompt"},
-                "outputs": {"completion": "Test response"},
-                "start_time": "2026-03-08T20:00:00.500Z",
-                "end_time": "2026-03-08T20:00:01Z",
-                "model": "gpt-4",
-                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-                "cost": 0.0015,
-                "metadata": {"temperature": 0.7},
-            },
-        ],
-    }
 
-    tracer.flush(trace_data)
+def test_langfuse_tracer_to_config_dict_none_when_resource_based():
+    """Resource-based tracers return ``None`` from ``to_config_dict()`` —
+    Rust resolves the resource itself."""
+    from operonx.telemetry import LangfuseTracer
 
-    print(f"\nTrace created with request_id: {request_id}")
-    print(f"View: {config.host}/trace/{request_id}")
+    tracer = LangfuseTracer(resource="langfuse:default")
+    assert tracer.to_config_dict() is None
+
+
+def test_langfuse_tracer_get_client_delegates_to_exporter():
+    """Legacy ``_get_client()`` callers still work — delegates to the
+    underlying exporter's HTTP client."""
+    from operonx.telemetry import LangfuseClient, LangfuseConfig, LangfuseTracer
+
+    config = LangfuseConfig(public_key="pk", secret_key="sk", host="https://x")
+    tracer = LangfuseTracer(config=config)
+    assert isinstance(tracer._get_client(), LangfuseClient)
+
+
+def test_langfuse_tracer_repr_with_config():
+    from operonx.telemetry import LangfuseConfig, LangfuseTracer
+
+    config = LangfuseConfig(public_key="pk", secret_key="sk", host="https://example.com")
+    tracer = LangfuseTracer(config=config)
+    assert repr(tracer) == "<LangfuseTracer host=https://example.com>"

@@ -36,7 +36,7 @@ class MemoryState:
         "_request_id",
         "_tags",
         "tracing",
-        "_iter_labels",
+        "_scratch",
     )
 
     def __init__(
@@ -69,11 +69,10 @@ class MemoryState:
         self._tags: List[str] = []
         self.tracing = True  # default on; engine sets False when no tracer
 
-        # Per-execution store for operonx.core.tracing.label(). Keyed by
-        # (gen_op_full_name, ctx) → {"labels": [str], "next_idx": int}.
-        # Populated by label() calls inside generator ops, drained by
-        # TraceCollector when building stream_context synthetics.
-        self._iter_labels: Dict[Tuple[str, tuple], Dict[str, Any]] = {}
+        # Free-form per-call scratch space. Last-write-wins. Read/written via
+        # the `SCRATCH` accessor (operonx/core/ops/_edges.py) which resolves
+        # to this dict via the `_current_state_var` ContextVar.
+        self._scratch: Dict[str, Any] = {}
 
         # Apply initial inputs
         if inputs:
@@ -256,6 +255,11 @@ class MemoryState:
     def tags(self) -> List[str]:
         """Dynamic tags collected during execution."""
         return self._tags.copy()
+
+    @property
+    def scratch(self) -> Dict[str, Any]:
+        """Per-call free-form scratch dict. Aliased identity, not a copy."""
+        return self._scratch
 
     def add_tag(self, tag: str) -> None:
         """Add a dynamic tag to this execution.
