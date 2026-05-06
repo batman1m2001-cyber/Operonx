@@ -45,14 +45,13 @@ dependencies = [
 #
 #   Tier 3 — feature extras (additive on top of tier 1 or 2):
 #     pip install operonx[langfuse]    # Langfuse tracing
-#     pip install operonx[otel]        # OpenTelemetry tracing
 #     pip install operonx[serve]       # FastAPI HTTP server
 #     pip install operonx[onnx]        # Local ONNX embedding/reranker
 #     pip install operonx[huggingface] # Local HF embedding/reranker
 #
 #   Tier 4 — meta bundles:
 #     pip install operonx[providers]   # All HTTP-based LLM/embedding providers
-#     pip install operonx[standard]    # providers + langfuse + otel + serve
+#     pip install operonx[standard]    # providers + langfuse + serve
 #     pip install operonx[all]         # everything except torch/HF
 [project.optional-dependencies]
 # Single-provider extras — each pins only the SDK that provider needs.
@@ -85,12 +84,6 @@ huggingface = [
 langfuse = [
     "langfuse>=2.6.0,<3.0.0",
 ]
-otel = [
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
-]
 serve = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
@@ -104,10 +97,6 @@ standard = [
     "numpy>=2.2.6",
     "httpx>=0.24",
     "langfuse>=2.6.0,<3.0.0",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
@@ -126,10 +115,6 @@ all = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
     "langfuse>=2.6.0,<3.0.0",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
