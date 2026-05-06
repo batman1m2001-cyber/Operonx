@@ -23,7 +23,6 @@ from operonx.core.states.schema import StateSchema
 from operonx.core.states.state import MemoryState
 from operonx.core.testing import scratch_active
 
-
 # =============================================================================
 # Shared ops (defined once, reused across tests)
 # =============================================================================

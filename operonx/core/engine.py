@@ -471,6 +471,8 @@ class Operon:
         # calls cheap (one method-table dispatch).
         from operonx.core.tracing.emitter import (
             NullEmitter as _NullEmitter,
+        )
+        from operonx.core.tracing.emitter import (
             _current_emitter_var,
         )
 

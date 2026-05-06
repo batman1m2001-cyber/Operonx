@@ -14,10 +14,10 @@ from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
 from operonx.core.ops._events import Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
-from operonx.core.tracing.emitter import _current_op_var, current_emitter
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.states.ref import Ref
 from operonx.core.states.scratch_ref import ScratchRef
+from operonx.core.tracing.emitter import _current_op_var, current_emitter
 from operonx.core.utils.auto_name import auto_name, unique_name
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import get_current

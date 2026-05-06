@@ -13,7 +13,6 @@ import pytest
 
 from operonx.core import END, PARENT, START, GraphOp, Media, Operon, op
 
-
 # ---------------------------------------------------------------------------
 # LLMOp.normalize_trace_io
 # ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ from operonx.core.tracing.processors.drop import DropEmpty, DropOps, KeepOps
 from operonx.core.tracing.processors.truncate import TruncateIO
 from operonx.core.tracing.trace_filter import TraceFilter
 
-
 # =============================================================================
 # trace_filter_to_processors
 # =============================================================================
@@ -113,6 +112,7 @@ class TestLegacyRewriter:
         wrapped = LegacyRewriter(fn)
         # Build a couple of fake events
         from datetime import datetime, timezone
+
         from operonx.core.tracing.events import TraceEvent
 
         events = [

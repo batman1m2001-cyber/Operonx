@@ -189,7 +189,7 @@ def test_langfuse_tracer_to_config_dict_none_when_resource_based():
 def test_langfuse_tracer_get_client_delegates_to_exporter():
     """Legacy ``_get_client()`` callers still work — delegates to the
     underlying exporter's HTTP client."""
-    from operonx.telemetry import LangfuseConfig, LangfuseClient, LangfuseTracer
+    from operonx.telemetry import LangfuseClient, LangfuseConfig, LangfuseTracer
 
     config = LangfuseConfig(public_key="pk", secret_key="sk", host="https://x")
     tracer = LangfuseTracer(config=config)
