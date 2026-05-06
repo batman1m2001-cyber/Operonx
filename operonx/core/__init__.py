@@ -28,14 +28,17 @@ from operonx.core.ops import (
     END,
     PARENT,
     PENDING,
+    SCRATCH,
     START,
     BaseOp,
     BranchOp,
     DummyOp,
     FuncOp,
     GraphOp,
+    Interrupt,
     ParserOp,
     ParserType,
+    ScratchAccessor,
     graph,
     op,
 )
@@ -50,7 +53,7 @@ from operonx.core.registry import (
     ResourceHub,
     YamlConfigStorage,
 )
-from operonx.core.states import Cell, MemoryState, Ref, StateSchema
+from operonx.core.states import Cell, MemoryState, Ref, ScratchRef, StateSchema
 from operonx.core.utils import Param
 
 __all__ = [
@@ -65,6 +68,10 @@ __all__ = [
     "END",
     "PARENT",
     "PENDING",
+    "SCRATCH",
+    "ScratchAccessor",
+    # Scheduler events
+    "Interrupt",
     # Op types
     "GraphOp",
     "BranchOp",
@@ -79,6 +86,7 @@ __all__ = [
     "MemoryState",
     "Ref",
     "Cell",
+    "ScratchRef",
     # Configs / params
     "EdgeConfig",
     "EdgeType",

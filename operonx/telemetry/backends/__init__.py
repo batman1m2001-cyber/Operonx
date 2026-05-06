@@ -1,12 +1,11 @@
-"""Observability backends for various providers.
+"""Observability backends.
 
 Each backend provides:
-- Config class (YamlModel): For ResourceHub registration
-- Client class: For interacting with the backend
+  - Config class: registered to ResourceHub via the YAML config layer
+  - Client class: HTTP/grpc transport, used by exporters
 
 Available backends:
-- langfuse: Langfuse observability platform
-- otel: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
+  - langfuse: Langfuse observability platform
 """
 
 from operonx.telemetry.backends.langfuse import (
@@ -14,14 +13,9 @@ from operonx.telemetry.backends.langfuse import (
     LangfuseConfig,
     LangfusePromptManager,
 )
-from operonx.telemetry.backends.otel import OTELClient, OTELConfig
 
 __all__ = [
-    # Langfuse
     "LangfuseConfig",
     "LangfuseClient",
     "LangfusePromptManager",
-    # OpenTelemetry
-    "OTELConfig",
-    "OTELClient",
 ]

@@ -1,4 +1,4 @@
-//! State / Ref parity fixtures.
+//! State / Ref / SCRATCH parity fixtures.
 
 use crate::common::run_fixture;
 
@@ -15,4 +15,12 @@ async fn explicit_output_mapping() {
 #[tokio::test]
 async fn sum_list_input() {
     run_fixture("core/state/sum_list_input").await;
+}
+
+/// Declarative `SCRATCH["k"]` in `inputs={...}` resolves at op-execute time
+/// from the per-call scratch space, pre-seeded via
+/// `engine.run(scratch=...)`.
+#[tokio::test]
+async fn scratch_ref_input() {
+    run_fixture("core/state/scratch_ref_input").await;
 }

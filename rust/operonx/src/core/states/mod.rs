@@ -9,4 +9,5 @@ pub mod cell;
 #[path = "ref.rs"]
 pub mod ref_;
 pub mod schema;
+pub mod scratch_ref;
 pub mod state;

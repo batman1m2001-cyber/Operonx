@@ -1,0 +1,78 @@
+{
+    "type": "graph",
+    "full_name": "main",
+    "name": "main",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {},
+    "outputs": {
+        "result": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "scratch": null,
+            "literal": null
+        }
+    },
+    "ops": {
+        "out": {
+            "type": "code",
+            "full_name": "main.out",
+            "name": "out",
+            "func_name": "tests.spec._ops.passthrough",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+                "value": {
+                    "default": null,
+                    "required": true,
+                    "ref": null,
+                    "scratch": {
+                        "key": "phase"
+                    },
+                    "literal": null
+                }
+            },
+            "outputs": {
+                "value": {
+                    "default": null,
+                    "required": false,
+                    "ref": {
+                        "source": "main",
+                        "var": "result",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                }
+            }
+        }
+    },
+    "edges": [],
+    "entries": [
+        "out"
+    ],
+    "exits": [
+        "out"
+    ],
+    "initial_ready_count": {
+        "out": 0
+    },
+    "compiled_adj": {
+        "out": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+}

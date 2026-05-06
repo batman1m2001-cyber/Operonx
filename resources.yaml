@@ -97,6 +97,14 @@ langfuse:default:
   enabled: true
   sample_rate: 1.0
 
+# Langfuse Edupia (self-hosted) — used by tracing redesign integration tests
+langfuse:edupia:
+  public_key: ${LANGFUSE_EDUPIA_PUBLIC_KEY}
+  secret_key: ${LANGFUSE_EDUPIA_SECRET_KEY}
+  host: ${LANGFUSE_EDUPIA_BASE_URL}
+  enabled: true
+  sample_rate: 1.0
+
 # OpenTelemetry exporter (points to Langfuse OTLP endpoint)
 otel:default:
   endpoint: ${LANGFUSE_HOST}/api/public/otel/v1/traces

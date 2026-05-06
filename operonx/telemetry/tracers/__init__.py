@@ -1,20 +1,12 @@
-"""Tracers for various observability backends.
+"""Backwards-compat shim for the legacy tracer constructor.
 
-Each tracer extends operonx.core.tracing.Tracer. Flush runs in
-FlushWorker's thread pool, never blocking the main async thread.
-
-Available tracers:
-- OperonEyesTracer: HTTP POST to ui-operonx-eyes local server (zero external deps)
-- LangfuseTracer: Langfuse observability platform
-- OTELTracer: OpenTelemetry (vendor-neutral, exports to Jaeger/Zipkin/Datadog/etc.)
+Pre-T2: each backend had its own ``Tracer`` subclass.
+Post-T2.12: ``LangfuseTracer`` is a ``TracePipeline`` subclass that wires
+up a ``LangfuseTreeExporter`` internally. New code should use
+``operonx.telemetry.exporters.LangfuseTreeExporter`` (or
+``LangfuseGroupedTimelineExporter``) inside an explicit ``TracePipeline``.
 """
 
 from operonx.telemetry.tracers.langfuse import LangfuseTracer
-from operonx.telemetry.tracers.operon_eyes import OperonEyesTracer
-from operonx.telemetry.tracers.otel import OTELTracer
 
-__all__ = [
-    "OperonEyesTracer",
-    "LangfuseTracer",
-    "OTELTracer",
-]
+__all__ = ["LangfuseTracer"]

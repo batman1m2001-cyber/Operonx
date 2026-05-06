@@ -1,0 +1,215 @@
+{
+    "type": "graph",
+    "full_name": "main",
+    "name": "main",
+    "func_name": null,
+    "is_async": false,
+    "is_generator": false,
+    "enabled": true,
+    "verbose": true,
+    "stream": false,
+    "bound": "sync",
+    "inputs": {
+        "k": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "scratch": null,
+            "literal": null
+        },
+        "v": {
+            "default": null,
+            "required": true,
+            "ref": null,
+            "scratch": null,
+            "literal": null
+        }
+    },
+    "outputs": {
+        "result": {
+            "default": null,
+            "required": false,
+            "ref": null,
+            "scratch": null,
+            "literal": null
+        }
+    },
+    "ops": {
+        "writer": {
+            "type": "code",
+            "full_name": "main.writer",
+            "name": "writer",
+            "func_name": "tests.spec._ops.scratch_write",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+                "key": {
+                    "default": null,
+                    "required": true,
+                    "ref": {
+                        "source": "main",
+                        "var": "k",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                },
+                "value": {
+                    "default": null,
+                    "required": true,
+                    "ref": {
+                        "source": "main",
+                        "var": "v",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                }
+            },
+            "outputs": {
+                "signal": {
+                    "default": null,
+                    "required": false,
+                    "ref": null,
+                    "scratch": null,
+                    "literal": null
+                }
+            }
+        },
+        "reader": {
+            "type": "code",
+            "full_name": "main.reader",
+            "name": "reader",
+            "func_name": "tests.spec._ops.scratch_read",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+                "key": {
+                    "default": null,
+                    "required": true,
+                    "ref": {
+                        "source": "main",
+                        "var": "k",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                },
+                "_signal": {
+                    "default": null,
+                    "required": false,
+                    "ref": {
+                        "source": "main.writer",
+                        "var": "signal",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                }
+            },
+            "outputs": {
+                "value": {
+                    "default": null,
+                    "required": false,
+                    "ref": null,
+                    "scratch": null,
+                    "literal": null
+                }
+            }
+        },
+        "out": {
+            "type": "code",
+            "full_name": "main.out",
+            "name": "out",
+            "func_name": "tests.spec._ops.passthrough",
+            "is_async": false,
+            "is_generator": false,
+            "enabled": true,
+            "verbose": true,
+            "stream": false,
+            "bound": "sync",
+            "inputs": {
+                "value": {
+                    "default": null,
+                    "required": true,
+                    "ref": {
+                        "source": "main.reader",
+                        "var": "value",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                }
+            },
+            "outputs": {
+                "value": {
+                    "default": null,
+                    "required": false,
+                    "ref": {
+                        "source": "main",
+                        "var": "result",
+                        "transforms": [],
+                        "is_output": false
+                    },
+                    "scratch": null,
+                    "literal": null
+                }
+            }
+        }
+    },
+    "edges": [
+        {
+            "from": "writer",
+            "to": "reader",
+            "soft": false
+        },
+        {
+            "from": "reader",
+            "to": "out",
+            "soft": false
+        }
+    ],
+    "entries": [
+        "writer"
+    ],
+    "exits": [
+        "out"
+    ],
+    "initial_ready_count": {
+        "writer": 0,
+        "reader": 1,
+        "out": 1
+    },
+    "compiled_adj": {
+        "writer": [
+            [
+                "reader",
+                false
+            ]
+        ],
+        "reader": [
+            [
+                "out",
+                false
+            ]
+        ],
+        "out": []
+    },
+    "stream_initial_ready": {},
+    "loop_config": null,
+    "max_stream_concurrent": 64,
+    "schema_version": "1.0"
+}

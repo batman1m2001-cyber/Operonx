@@ -8,12 +8,28 @@ authoring DSL and run it through `Operon`; on the Rust side the serialized
 `rust/operonx/tests/common/mod.rs`.
 """
 
-from operonx.core import op
+from operonx.core import SCRATCH, op
 
 
 @op
 def double(x: int):
     return {"result": x * 2}
+
+
+@op
+def scratch_write(key: str, value):
+    SCRATCH[key] = value
+    return {"signal": True}
+
+
+@op
+def scratch_read(key: str, _signal=None):
+    return {"value": SCRATCH[key]}
+
+
+@op
+def passthrough(value):
+    return {"value": value}
 
 
 @op

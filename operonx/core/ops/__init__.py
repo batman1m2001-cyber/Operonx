@@ -13,12 +13,15 @@ Decorators: ``op``, ``graph``, ``if_``.
 
 from operonx.core.configs.op_config import OpType
 
+from ._events import EOF, Frame, Interrupt
 from .base import (
     END,
     PARENT,
+    SCRATCH,
     START,
     BaseOp,
     DummyOp,
+    ScratchAccessor,
     SoftEdge,
     shorthand,
     split_shorthand_kwargs,
@@ -54,6 +57,12 @@ __all__ = [
     "END",
     "PARENT",
     "PENDING",
+    "SCRATCH",
+    "ScratchAccessor",
+    # Scheduler events
+    "Frame",
+    "EOF",
+    "Interrupt",
     # Graph
     "GraphOp",
     "graph",
