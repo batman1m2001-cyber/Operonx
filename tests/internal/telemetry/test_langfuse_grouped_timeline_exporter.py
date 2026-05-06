@@ -15,7 +15,6 @@ import pytest
 from operonx.core.tracing.events import EventKind, TraceEvent
 from operonx.telemetry.exporters import LangfuseGroupedTimelineExporter
 
-
 # =============================================================================
 # Test helpers
 # =============================================================================

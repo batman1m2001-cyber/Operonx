@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 from operonx.core.tracing.events import EventKind, TraceEvent
 
-
 # ---------------------------------------------------------------------------
 # GroupBy — emit synthetic group markers at boundaries
 # ---------------------------------------------------------------------------

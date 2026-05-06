@@ -12,7 +12,6 @@ import pytest
 from operonx.core.tracing.events import EventKind, TraceEvent
 from operonx.telemetry.exporters import LangfuseTreeExporter
 
-
 # =============================================================================
 # Test helpers
 # =============================================================================
@@ -680,8 +679,9 @@ class TestMediaUpload:
         assert body["output"]["audio"] == "[media upload failed: audio/wav, 100B]"
 
     def test_data_url_decoded_then_uploaded(self):
-        from operonx.core.media import Media, extract_media
         import base64
+
+        from operonx.core.media import Media, extract_media
 
         client = _MediaClient()
         exp = _exporter_with(client)
