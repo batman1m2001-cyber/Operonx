@@ -87,6 +87,7 @@ class FlushOnGroupEnd:
         if event.kind is not EventKind.GROUP_END:
             return False
         from fnmatch import fnmatchcase
+
         name = event.payload.get("name") or ""
         return fnmatchcase(name, self.pattern)
 
@@ -176,7 +177,9 @@ class TracePipeline:
                     "trace buffer overflow at request_id=%s — dropped %d oldest "
                     "events (max_buffered_events=%d). Consider FlushOnGroupEnd "
                     "or FlushOnSize for long-running calls.",
-                    event.request_id, drop_count, self.max_buffered_events,
+                    event.request_id,
+                    drop_count,
+                    self.max_buffered_events,
                 )
                 self._overflow_warned = True
 
@@ -243,12 +246,17 @@ class TracePipeline:
         for exporter in self.exporters:
             try:
                 await loop.run_in_executor(
-                    None, exporter.export, processed, request_id, metadata,
+                    None,
+                    exporter.export,
+                    processed,
+                    request_id,
+                    metadata,
                 )
             except Exception:
                 LOGGER.exception(
                     "exporter %s failed for request_id=%s",
-                    type(exporter).__name__, request_id,
+                    type(exporter).__name__,
+                    request_id,
                 )
 
     def _flush_sync(self, partial: bool) -> None:
@@ -279,5 +287,6 @@ class TracePipeline:
             except Exception:
                 LOGGER.exception(
                     "exporter %s failed (sync) for request_id=%s",
-                    type(exporter).__name__, request_id,
+                    type(exporter).__name__,
+                    request_id,
                 )

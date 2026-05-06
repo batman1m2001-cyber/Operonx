@@ -267,9 +267,7 @@ class Scheduler:
                         if isinstance(result, Interrupt):
                             result.op = op_name
                             result.ctx = ctx
-                            await _sweep_ctx(
-                                result.ctx_to_cancel, exclude=(op_name, ctx)
-                            )
+                            await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             if output_queue is not None:
                                 output_queue.put_nowait(
                                     ("__interrupt__", ctx, {"__interrupt__": result})
@@ -394,9 +392,7 @@ class Scheduler:
             n = len(parent)
             return len(child) >= n and child[:n] == parent
 
-        async def _sweep_ctx(
-            ctx_prefix: tuple, exclude: Tuple[str, tuple] = None
-        ) -> None:
+        async def _sweep_ctx(ctx_prefix: tuple, exclude: Tuple[str, tuple] = None) -> None:
             """Drop queued events + cancel in-flight tasks at ctx_prefix
             (and descendants), preserving the inflight invariant.
 
@@ -441,9 +437,7 @@ class Scheduler:
                         task.cancel()
                         cancelled.append((op_name, ctx, task))
             if cancelled:
-                await asyncio.gather(
-                    *(t for _, _, t in cancelled), return_exceptions=True
-                )
+                await asyncio.gather(*(t for _, _, t in cancelled), return_exceptions=True)
                 # Idempotent post-cleanup: if a cancelled task's finally
                 # ran, its bucket entry is already gone — skip. Otherwise
                 # (cancel-before-start) the bucket still has the entry and
@@ -487,9 +481,7 @@ class Scheduler:
             elif isinstance(event, Interrupt):
                 await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
                 if output_queue is not None:
-                    output_queue.put_nowait(
-                        ("__interrupt__", event.ctx, {"__interrupt__": event})
-                    )
+                    output_queue.put_nowait(("__interrupt__", event.ctx, {"__interrupt__": event}))
             else:
                 _on_eof(event)
             # Drain any inline ops triggered by the queue event.

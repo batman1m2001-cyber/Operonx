@@ -32,14 +32,10 @@ if TYPE_CHECKING:
     from operonx.core.tracing.pipeline import TracePipeline
 
 
-_current_emitter_var: ContextVar["EventEmitter"] = ContextVar(
-    "operonx_current_emitter"
-)
+_current_emitter_var: ContextVar["EventEmitter"] = ContextVar("operonx_current_emitter")
 """Per-call binding of the active emitter. Set by ``engine.start()``."""
 
-_current_op_var: ContextVar[Tuple[str, Tuple[str, ...]]] = ContextVar(
-    "operonx_current_op"
-)
+_current_op_var: ContextVar[Tuple[str, Tuple[str, ...]]] = ContextVar("operonx_current_op")
 """``(op_name, ctx)`` of the op currently executing. Set/cleared by ``_pump``
 around each op invocation."""
 
@@ -107,10 +103,17 @@ class EventEmitter:
         ``inputs``. Empty list when no Media instances were found.
         """
         self._start_times[(op_name, ctx)] = perf_counter()
-        self.emit(self._build(EventKind.OP_START, op_name, ctx, {
-            "inputs": inputs or {},
-            "media_refs": media_refs or [],
-        }))
+        self.emit(
+            self._build(
+                EventKind.OP_START,
+                op_name,
+                ctx,
+                {
+                    "inputs": inputs or {},
+                    "media_refs": media_refs or [],
+                },
+            )
+        )
 
     def op_end(
         self,
@@ -138,13 +141,20 @@ class EventEmitter:
         if duration_ms is None:
             duration_ms = (perf_counter() - self._start_times[key]) * 1000.0
         del self._start_times[key]
-        self.emit(self._build(EventKind.OP_END, op_name, ctx, {
-            "outputs": outputs or {},
-            "status": status,
-            "duration_ms": duration_ms,
-            "yield_count": yield_count,
-            "media_refs": media_refs or [],
-        }))
+        self.emit(
+            self._build(
+                EventKind.OP_END,
+                op_name,
+                ctx,
+                {
+                    "outputs": outputs or {},
+                    "status": status,
+                    "duration_ms": duration_ms,
+                    "yield_count": yield_count,
+                    "media_refs": media_refs or [],
+                },
+            )
+        )
 
     def op_yield(
         self,
@@ -162,11 +172,18 @@ class EventEmitter:
         ``last_yielded`` metadata) — present for forward-compat with custom
         exporters that render per-yield observations.
         """
-        self.emit(self._build(EventKind.OP_YIELD, op_name, ctx, {
-            "yielded": yielded,
-            "idx": idx,
-            "media_refs": media_refs or [],
-        }))
+        self.emit(
+            self._build(
+                EventKind.OP_YIELD,
+                op_name,
+                ctx,
+                {
+                    "yielded": yielded,
+                    "idx": idx,
+                    "media_refs": media_refs or [],
+                },
+            )
+        )
 
     def annotate(self, key: str, value: Any) -> None:
         """Attach metadata to the currently executing op.
@@ -175,10 +192,17 @@ class EventEmitter:
         if called outside an op scope — programming error.
         """
         op_name, ctx = _current_op_var.get()
-        self.emit(self._build(EventKind.ANNOTATION, op_name, ctx, {
-            "key": key,
-            "value": value,
-        }))
+        self.emit(
+            self._build(
+                EventKind.ANNOTATION,
+                op_name,
+                ctx,
+                {
+                    "key": key,
+                    "value": value,
+                },
+            )
+        )
 
     def llm_usage(
         self,
@@ -191,13 +215,20 @@ class EventEmitter:
         cost_usd: float = 0.0,
     ) -> None:
         """Token / cost report. MUST be called before the matching OP_END."""
-        self.emit(self._build(EventKind.LLM_USAGE, op_name, ctx, {
-            "model": model,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "cost_usd": cost_usd,
-        }))
+        self.emit(
+            self._build(
+                EventKind.LLM_USAGE,
+                op_name,
+                ctx,
+                {
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_usd": cost_usd,
+                },
+            )
+        )
 
     def media_ref(
         self,
@@ -210,11 +241,18 @@ class EventEmitter:
         """Reference a blob stored separately in the pipeline's MediaStore.
         Bytes are NOT in the event payload — call
         ``pipeline.media_store.put(handle, data, mime)`` first."""
-        self.emit(self._build(EventKind.MEDIA_REF, op_name, ctx, {
-            "handle": handle,
-            "mime": mime,
-            "size_bytes": size_bytes,
-        }))
+        self.emit(
+            self._build(
+                EventKind.MEDIA_REF,
+                op_name,
+                ctx,
+                {
+                    "handle": handle,
+                    "mime": mime,
+                    "size_bytes": size_bytes,
+                },
+            )
+        )
 
     @contextmanager
     def group(self, name: str, **metadata: Any) -> Iterator[None]:
@@ -225,15 +263,31 @@ class EventEmitter:
         stream. Use this when grouping is structural in user code rather
         than derived from events.
         """
-        self.emit(self._build(EventKind.GROUP_START, None, (), {
-            "name": name, **metadata,
-        }))
+        self.emit(
+            self._build(
+                EventKind.GROUP_START,
+                None,
+                (),
+                {
+                    "name": name,
+                    **metadata,
+                },
+            )
+        )
         try:
             yield
         finally:
-            self.emit(self._build(EventKind.GROUP_END, None, (), {
-                "name": name, "status": "ok",
-            }))
+            self.emit(
+                self._build(
+                    EventKind.GROUP_END,
+                    None,
+                    (),
+                    {
+                        "name": name,
+                        "status": "ok",
+                    },
+                )
+            )
 
     # ------------------------------------------------------------------
     # Read-only accessors used by the scheduler for cancel-emit (Rule 3)

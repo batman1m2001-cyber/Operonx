@@ -62,8 +62,7 @@ def test_langfuse_client_auth_header():
 
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
-    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test",
-                            host="https://example.com")
+    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test", host="https://example.com")
     client = LangfuseClient(config)
     expected = base64.b64encode(b"pk-test:sk-test").decode()
     assert client._auth == expected
@@ -72,13 +71,15 @@ def test_langfuse_client_auth_header():
 def test_langfuse_client_ingest_http_error():
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
-    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test",
-                            host="https://example.com")
+    config = LangfuseConfig(public_key="pk-test", secret_key="sk-test", host="https://example.com")
     client = LangfuseClient(config)
     with patch("urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://example.com", code=500, msg="Server Error",
-            hdrs=None, fp=None,
+            url="https://example.com",
+            code=500,
+            msg="Server Error",
+            hdrs=None,
+            fp=None,
         )
         with pytest.raises(urllib.error.HTTPError):
             client.ingest([{"id": "test", "type": "trace-create", "body": {}}])
@@ -87,13 +88,15 @@ def test_langfuse_client_ingest_http_error():
 def test_langfuse_client_auth_check_failure():
     from operonx.telemetry import LangfuseClient, LangfuseConfig
 
-    config = LangfuseConfig(public_key="pk-bad", secret_key="sk-bad",
-                            host="https://example.com")
+    config = LangfuseConfig(public_key="pk-bad", secret_key="sk-bad", host="https://example.com")
     client = LangfuseClient(config)
     with patch("urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://example.com", code=401, msg="Unauthorized",
-            hdrs=None, fp=None,
+            url="https://example.com",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=None,
         )
         assert client.auth_check() is False
 
@@ -196,7 +199,6 @@ def test_langfuse_tracer_get_client_delegates_to_exporter():
 def test_langfuse_tracer_repr_with_config():
     from operonx.telemetry import LangfuseConfig, LangfuseTracer
 
-    config = LangfuseConfig(public_key="pk", secret_key="sk",
-                            host="https://example.com")
+    config = LangfuseConfig(public_key="pk", secret_key="sk", host="https://example.com")
     tracer = LangfuseTracer(config=config)
     assert repr(tracer) == "<LangfuseTracer host=https://example.com>"

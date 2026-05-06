@@ -77,12 +77,15 @@ class TestGroupRendering:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.a", ctx=("main",), seq=2,
-                payload={"outputs": {"r": 1}, "status": "ok"}),
-            _ev(EventKind.GROUP_END, seq=3,
-                payload={"name": "turn-0", "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.a",
+                ctx=("main",),
+                seq=2,
+                payload={"outputs": {"r": 1}, "status": "ok"},
+            ),
+            _ev(EventKind.GROUP_END, seq=3, payload={"name": "turn-0", "status": "ok"}),
         ]
         exp.export(events, "req-1", {})
 
@@ -102,29 +105,39 @@ class TestGroupRendering:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.a", ctx=("main",), seq=2,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.a",
+                ctx=("main",),
+                seq=2,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             _ev(EventKind.GROUP_END, seq=3, payload={"name": "turn-0"}),
         ]
         exp.export(events, "req-1", {})
 
         batch = client.batches[0]
-        group_span = next(e["body"] for e in batch
-                          if e["type"] == "span-create" and e["body"]["name"] == "turn-0")
-        op_span = next(e["body"] for e in batch
-                       if e["type"] == "span-create" and e["body"]["name"] == "a")
+        group_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "turn-0"
+        )
+        op_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "a"
+        )
         assert op_span["parentObservationId"] == group_span["id"]
 
     def test_op_outside_any_group_attaches_to_trace_root(self):
         """Op without an enclosing group has no parentObservationId."""
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.solo", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.solo", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.solo", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.solo",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
 
@@ -139,31 +152,44 @@ class TestMultipleGroups:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.a", ctx=("main",), seq=2,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.a", ctx=("main",), seq=1, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.a",
+                ctx=("main",),
+                seq=2,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             _ev(EventKind.GROUP_END, seq=3, payload={"name": "turn-0"}),
             _ev(EventKind.GROUP_START, seq=4, payload={"name": "turn-1"}),
-            _ev(EventKind.OP_START, op_name="g.b", ctx=("main",), seq=5,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.b", ctx=("main",), seq=6,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.b", ctx=("main",), seq=5, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.b",
+                ctx=("main",),
+                seq=6,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             _ev(EventKind.GROUP_END, seq=7, payload={"name": "turn-1"}),
         ]
         exp.export(events, "req-1", {})
 
         batch = client.batches[0]
-        group_spans = [e["body"] for e in batch
-                       if e["type"] == "span-create" and e["body"]["name"].startswith("turn-")]
+        group_spans = [
+            e["body"]
+            for e in batch
+            if e["type"] == "span-create" and e["body"]["name"].startswith("turn-")
+        ]
         assert {g["name"] for g in group_spans} == {"turn-0", "turn-1"}
         assert len({g["id"] for g in group_spans}) == 2  # distinct ids
 
         # Each op attaches to its own turn
-        a_span = next(e["body"] for e in batch
-                      if e["type"] == "span-create" and e["body"]["name"] == "a")
-        b_span = next(e["body"] for e in batch
-                      if e["type"] == "span-create" and e["body"]["name"] == "b")
+        a_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "a"
+        )
+        b_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "b"
+        )
         turn0_id = next(g["id"] for g in group_spans if g["name"] == "turn-0")
         turn1_id = next(g["id"] for g in group_spans if g["name"] == "turn-1")
         assert a_span["parentObservationId"] == turn0_id
@@ -177,21 +203,32 @@ class TestAnnotationSummaryOnGroup:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.OP_START, op_name="g.audio", ctx=("main",), seq=1,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.audio", ctx=("main",), seq=2,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(
+                EventKind.OP_START, op_name="g.audio", ctx=("main",), seq=1, payload={"inputs": {}}
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.audio",
+                ctx=("main",),
+                seq=2,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             # Aggregate emits annotation with op_name=None
-            _ev(EventKind.ANNOTATION, op_name=None, ctx=(), seq=3,
-                payload={"key": "summary:g.audio",
-                         "value": {"chunk_count": 1500, "avg_ms": 20}}),
+            _ev(
+                EventKind.ANNOTATION,
+                op_name=None,
+                ctx=(),
+                seq=3,
+                payload={"key": "summary:g.audio", "value": {"chunk_count": 1500, "avg_ms": 20}},
+            ),
             _ev(EventKind.GROUP_END, seq=4, payload={"name": "turn-0"}),
         ]
         exp.export(events, "req-1", {})
 
         batch = client.batches[0]
-        group_span = next(e["body"] for e in batch
-                          if e["type"] == "span-create" and e["body"]["name"] == "turn-0")
+        group_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "turn-0"
+        )
         meta = group_span.get("metadata") or {}
         assert meta.get("summary:g.audio") == {"chunk_count": 1500, "avg_ms": 20}
 
@@ -200,23 +237,34 @@ class TestAnnotationSummaryOnGroup:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=1,
-                payload={"inputs": {}}),
-            _ev(EventKind.ANNOTATION, op_name="g.x", ctx=("main",), seq=2,
-                payload={"key": "user_id", "value": "u-7"}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=3,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=1, payload={"inputs": {}}),
+            _ev(
+                EventKind.ANNOTATION,
+                op_name="g.x",
+                ctx=("main",),
+                seq=2,
+                payload={"key": "user_id", "value": "u-7"},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=3,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             _ev(EventKind.GROUP_END, seq=4, payload={"name": "turn-0"}),
         ]
         exp.export(events, "req-1", {})
 
         batch = client.batches[0]
-        op_span = next(e["body"] for e in batch
-                       if e["type"] == "span-create" and e["body"]["name"] == "x")
+        op_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "x"
+        )
         assert (op_span.get("metadata") or {}).get("user_id") == "u-7"
         # The group span shouldn't have user_id (it was op-scoped)
-        group_span = next(e["body"] for e in batch
-                          if e["type"] == "span-create" and e["body"]["name"] == "turn-0")
+        group_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "turn-0"
+        )
         assert "user_id" not in (group_span.get("metadata") or {})
 
 
@@ -227,12 +275,12 @@ class TestTruncatedGroupStatus:
         exp, client = _exporter()
         events = [
             _ev(EventKind.GROUP_START, seq=0, payload={"name": "turn-0"}),
-            _ev(EventKind.GROUP_END, seq=1,
-                payload={"name": "turn-0", "status": "truncated"}),
+            _ev(EventKind.GROUP_END, seq=1, payload={"name": "turn-0", "status": "truncated"}),
         ]
         exp.export(events, "req-1", {})
 
         batch = client.batches[0]
-        group_span = next(e["body"] for e in batch
-                          if e["type"] == "span-create" and e["body"]["name"] == "turn-0")
+        group_span = next(
+            e["body"] for e in batch if e["type"] == "span-create" and e["body"]["name"] == "turn-0"
+        )
         assert group_span.get("level") == "WARNING"

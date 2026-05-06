@@ -27,11 +27,13 @@ class _CollectingExporter:
         self.calls: list = []
 
     def export(self, events, request_id, metadata):
-        self.calls.append({
-            "events": list(events),
-            "request_id": request_id,
-            "metadata": dict(metadata),
-        })
+        self.calls.append(
+            {
+                "events": list(events),
+                "request_id": request_id,
+                "metadata": dict(metadata),
+            }
+        )
 
 
 class TestPushAndBuffer:
@@ -226,6 +228,4 @@ class TestProcessorsAndExporters:
         # 20 ticks at 10ms each ~= 200ms. Exporter also took 200ms.
         # If they ran sequentially total would be ~400ms; concurrent ~200ms.
         elapsed = ticks[-1] - ticks[0]
-        assert elapsed < 0.4, (
-            f"main loop was blocked during flush; ticker took {elapsed:.2f}s"
-        )
+        assert elapsed < 0.4, f"main loop was blocked during flush; ticker took {elapsed:.2f}s"

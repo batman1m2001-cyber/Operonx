@@ -739,7 +739,9 @@ class BaseOp(ABC):
             # placeholder strings + accumulate refs for the exporter to upload.
             _trace_inputs, _input_media = self._extract_trace_io(_inputs, root="inputs")
             emitter.op_start(
-                self.full_name, ctx_for_end, _trace_inputs,
+                self.full_name,
+                ctx_for_end,
+                _trace_inputs,
                 media_refs=_input_media,
             )
             op_started = True
@@ -794,10 +796,14 @@ class BaseOp(ABC):
                 # gets media uploaded via the OP_END path instead.
                 if self.is_gen:
                     _trace_yielded, _yield_media = self._extract_trace_io(
-                        result, root="outputs",
+                        result,
+                        root="outputs",
                     )
                     emitter.op_yield(
-                        self.full_name, ctx, _trace_yielded, idx,
+                        self.full_name,
+                        ctx,
+                        _trace_yielded,
+                        idx,
                         media_refs=_yield_media,
                     )
                 yield ctx, result
@@ -875,7 +881,8 @@ class BaseOp(ABC):
                     status = "ok"
                 if status == "ok":
                     _trace_outputs, _output_media = self._extract_trace_io(
-                        _outputs, root="outputs",
+                        _outputs,
+                        root="outputs",
                     )
                 else:
                     _trace_outputs, _output_media = {}, []

@@ -79,9 +79,11 @@ class LangfuseTreeExporter:
             return self._client_cache
         if self._config is not None:
             from operonx.telemetry.backends.langfuse import LangfuseClient
+
             self._client_cache = LangfuseClient(self._config)
         else:
             from operonx.core.registry import ResourceHub
+
             self._client_cache = ResourceHub.instance().get(self._resource)
         return self._client_cache
 
@@ -200,19 +202,21 @@ class LangfuseTreeExporter:
             trace_body["tags"] = tags
         if metadata.get("workflow_inputs"):
             trace_body["input"] = metadata["workflow_inputs"]
-        batch.append({
-            "id": str(uuid.uuid4()),
-            "type": "trace-create",
-            "timestamp": trace_ts,
-            "body": trace_body,
-        })
+        batch.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "trace-create",
+                "timestamp": trace_ts,
+                "body": trace_body,
+            }
+        )
 
         # 2. one observation per op
         for key, data in op_data.items():
             start_event: Optional[TraceEvent] = data["start"]
             end_event: Optional[TraceEvent] = data["end"]
             if start_event is None:
-                continue   # cancel-before-start: nothing to render
+                continue  # cancel-before-start: nothing to render
 
             op_name, ctx = key
             short = _short_name(op_name)
@@ -232,9 +236,7 @@ class LangfuseTreeExporter:
             if yield_count:
                 obs_metadata["yield_count"] = yield_count
             if data["yields"]:
-                obs_metadata["last_yielded"] = (
-                    data["yields"][-1].payload.get("yielded")
-                )
+                obs_metadata["last_yielded"] = data["yields"][-1].payload.get("yielded")
             for ann in data["annotations"]:
                 k = ann.payload.get("key")
                 v = ann.payload.get("value")
@@ -295,12 +297,14 @@ class LangfuseTreeExporter:
                     if up.get("cost_usd"):
                         body["costDetails"] = {"total": up["cost_usd"]}
 
-            batch.append({
-                "id": str(uuid.uuid4()),
-                "type": event_type,
-                "timestamp": start_ts,
-                "body": body,
-            })
+            batch.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": event_type,
+                    "timestamp": start_ts,
+                    "body": body,
+                }
+            )
 
         return batch
 
@@ -430,9 +434,7 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
         groups, op_to_group = _gather_groups(events)
 
         if not op_data and not groups:
-            LOGGER.debug(
-                "LangfuseGroupedTimelineExporter: no ops or groups; skipping"
-            )
+            LOGGER.debug("LangfuseGroupedTimelineExporter: no ops or groups; skipping")
             return
 
         trace_id = request_id
@@ -463,7 +465,10 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
         successes = result.get("successes") or []
         LOGGER.info(
             "Workflow: %s, Request ID: %s, Langfuse grouped trace created (%d events). View: %s",
-            workflow_name, trace_id, len(successes), client.trace_url(trace_id),
+            workflow_name,
+            trace_id,
+            len(successes),
+            client.trace_url(trace_id),
         )
 
     # ------------------------------------------------------------------
@@ -488,9 +493,7 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
         obs_ids: Dict[Tuple[str, Tuple[str, ...]], str] = {
             key: str(uuid.uuid4()) for key in op_data
         }
-        group_obs_ids: Dict[str, str] = {
-            g["key"]: str(uuid.uuid4()) for g in groups
-        }
+        group_obs_ids: Dict[str, str] = {g["key"]: str(uuid.uuid4()) for g in groups}
 
         # Earliest start across both ops and groups → trace timestamp
         all_starts: List[datetime] = []
@@ -506,8 +509,10 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
 
         # 1. trace-create
         trace_body: Dict[str, Any] = {
-            "id": trace_id, "name": workflow_name,
-            "timestamp": trace_ts, "environment": "default",
+            "id": trace_id,
+            "name": workflow_name,
+            "timestamp": trace_ts,
+            "environment": "default",
         }
         if metadata.get("user_id"):
             trace_body["userId"] = metadata["user_id"]
@@ -515,10 +520,14 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
             trace_body["sessionId"] = metadata["session_id"]
         if tags:
             trace_body["tags"] = tags
-        batch.append({
-            "id": str(uuid.uuid4()), "type": "trace-create",
-            "timestamp": trace_ts, "body": trace_body,
-        })
+        batch.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "trace-create",
+                "timestamp": trace_ts,
+                "body": trace_body,
+            }
+        )
 
         # 2. one synthetic span per group
         for g in groups:
@@ -526,8 +535,10 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
             start_ts = _utc_iso(g["start"].timestamp)
             end_ts = _utc_iso(g["end"].timestamp) if g["end"] else None
             body: Dict[str, Any] = {
-                "id": group_id, "traceId": trace_id,
-                "name": g["name"], "startTime": start_ts,
+                "id": group_id,
+                "traceId": trace_id,
+                "name": g["name"],
+                "startTime": start_ts,
             }
             if end_ts:
                 body["endTime"] = end_ts
@@ -544,10 +555,14 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
                     body["metadata"] = meta
             if g["end"] and (g["end"].payload or {}).get("status") == "truncated":
                 body["level"] = "WARNING"
-            batch.append({
-                "id": str(uuid.uuid4()), "type": "span-create",
-                "timestamp": start_ts, "body": body,
-            })
+            batch.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "span-create",
+                    "timestamp": start_ts,
+                    "body": body,
+                }
+            )
 
         # 3. op observations — parent = active group OR trace
         for key, data in op_data.items():
@@ -585,7 +600,9 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
                 obs_metadata["status"] = status
 
             body = {
-                "id": obs_id, "traceId": trace_id, "name": short,
+                "id": obs_id,
+                "traceId": trace_id,
+                "name": short,
                 "startTime": start_ts,
             }
             if end_ts:
@@ -631,10 +648,14 @@ class LangfuseGroupedTimelineExporter(LangfuseTreeExporter):
                     if up.get("cost_usd"):
                         body["costDetails"] = {"total": up["cost_usd"]}
 
-            batch.append({
-                "id": str(uuid.uuid4()), "type": event_type,
-                "timestamp": start_ts, "body": body,
-            })
+            batch.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": event_type,
+                    "timestamp": start_ts,
+                    "body": body,
+                }
+            )
 
         return batch
 
@@ -679,8 +700,7 @@ def _gather_groups(
             active_record = None
         elif e.kind is EventKind.OP_START and active_key is not None:
             op_to_group[(e.op_name, e.ctx)] = active_key
-        elif (e.kind is EventKind.ANNOTATION and e.op_name is None
-              and active_record is not None):
+        elif e.kind is EventKind.ANNOTATION and e.op_name is None and active_record is not None:
             # op_name=None means it was synthesized by a processor (Aggregate).
             # Belongs on the group, not on any specific op.
             active_record["annotations"].append(e)
@@ -716,8 +736,10 @@ def _apply_media_refs(
         refs = (event.payload or {}).get("media_refs") or []
         for ref in refs:
             _apply_one_media_ref(
-                body, ref,
-                client=client, trace_id=trace_id,
+                body,
+                ref,
+                client=client,
+                trace_id=trace_id,
                 observation_id=observation_id,
             )
 

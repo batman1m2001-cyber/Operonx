@@ -66,9 +66,7 @@ class TestTraceFilterToProcessors:
 
     def test_preserve_children_of_dropped_silently(self):
         # No-longer-needed field; drops cleanly without warning.
-        out = trace_filter_to_processors(
-            TraceFilter(preserve_children_of=["audio", "vad"])
-        )
+        out = trace_filter_to_processors(TraceFilter(preserve_children_of=["audio", "vad"]))
         assert out == []
 
     def test_protected_types_default_dropped_silently(self):
@@ -116,12 +114,17 @@ class TestLegacyRewriter:
         # Build a couple of fake events
         from datetime import datetime, timezone
         from operonx.core.tracing.events import TraceEvent
+
         events = [
             TraceEvent(
-                event_id="e-0", request_id="r", kind=EventKind.OP_START,
-                op_name="x", ctx=(),
+                event_id="e-0",
+                request_id="r",
+                kind=EventKind.OP_START,
+                op_name="x",
+                ctx=(),
                 timestamp=datetime(2026, 5, 5, tzinfo=timezone.utc),
-                seq=0, payload={},
+                seq=0,
+                payload={},
             ),
         ]
         out = list(wrapped(events))
@@ -143,14 +146,18 @@ class TestLangfuseTracerAsPipeline:
 
         # Use a fake config to avoid hitting ResourceHub
         from operonx.telemetry.backends.langfuse import LangfuseConfig
+
         config = LangfuseConfig(
-            public_key="pk-x", secret_key="sk-x", host="https://mock.local",
+            public_key="pk-x",
+            secret_key="sk-x",
+            host="https://mock.local",
         )
         pipeline = LangfuseTracer.as_pipeline(config=config, tags=["test"])
         assert isinstance(pipeline, TracePipeline)
         assert len(pipeline.exporters) == 1
         # default = tree exporter
         from operonx.telemetry.exporters import LangfuseTreeExporter
+
         assert isinstance(pipeline.exporters[0], LangfuseTreeExporter)
 
     def test_grouped_timeline_returns_grouped_exporter(self):
@@ -159,10 +166,13 @@ class TestLangfuseTracerAsPipeline:
         from operonx.telemetry.exporters import LangfuseGroupedTimelineExporter
 
         config = LangfuseConfig(
-            public_key="pk-x", secret_key="sk-x", host="https://mock.local",
+            public_key="pk-x",
+            secret_key="sk-x",
+            host="https://mock.local",
         )
         pipeline = LangfuseTracer.as_pipeline(
-            config=config, grouped_timeline=True,
+            config=config,
+            grouped_timeline=True,
         )
         assert isinstance(pipeline.exporters[0], LangfuseGroupedTimelineExporter)
 
@@ -171,7 +181,9 @@ class TestLangfuseTracerAsPipeline:
         from operonx.telemetry.backends.langfuse import LangfuseConfig
 
         config = LangfuseConfig(
-            public_key="pk-x", secret_key="sk-x", host="https://mock.local",
+            public_key="pk-x",
+            secret_key="sk-x",
+            host="https://mock.local",
         )
         tf = TraceFilter(
             skip_empty=True,
@@ -189,7 +201,9 @@ class TestLangfuseTracerAsPipeline:
         from operonx.telemetry.backends.langfuse import LangfuseConfig
 
         config = LangfuseConfig(
-            public_key="pk-x", secret_key="sk-x", host="https://mock.local",
+            public_key="pk-x",
+            secret_key="sk-x",
+            host="https://mock.local",
         )
         pipeline = LangfuseTracer.as_pipeline(config=config)
         assert pipeline.processors == []
