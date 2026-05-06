@@ -6,6 +6,7 @@ Each fixture folder under `tests/spec/<area>/<name>/` contains:
 - ``inputs.json``  — inputs passed to the engine
 - ``expected.json``— expected outputs (timing keys stripped before compare)
 - ``builder.py``   — ``build_graph() -> GraphOp`` — Python-side constructor
+- ``scratch.json`` — optional; values seeded into ``engine.run(scratch=...)``
 
 The driver discovers every fixture by globbing for ``graph.json``, imports
 the adjacent ``builder.py`` via ``importlib``, builds the ``GraphOp``,
@@ -66,10 +67,14 @@ async def test_fixture(fx: Path):
 
     inputs: Dict[str, Any] = json.loads((fx / "inputs.json").read_text())
     expected: Any = json.loads((fx / "expected.json").read_text())
+    scratch_path = fx / "scratch.json"
+    scratch: Dict[str, Any] | None = (
+        json.loads(scratch_path.read_text()) if scratch_path.exists() else None
+    )
 
     graph = builder.build_graph()
     engine = Operon(graph)
-    result = await engine.run(inputs=inputs)
+    result = await engine.run(inputs=inputs, scratch=scratch)
 
     # Python's engine.run() returns `{**outputs, "$state": MemoryState}`;
     # the fixture only describes the user-facing outputs.

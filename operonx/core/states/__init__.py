@@ -25,6 +25,7 @@ Example:
 from operonx.core.states.cell import Cell
 from operonx.core.states.ref import Ref
 from operonx.core.states.schema import StateSchema
+from operonx.core.states.scratch_ref import ScratchRef
 from operonx.core.states.state import MemoryState
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "StateSchema",
     "MemoryState",
     "Cell",
+    "ScratchRef",
 ]

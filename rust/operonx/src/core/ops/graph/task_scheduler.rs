@@ -56,6 +56,10 @@ type SlotKey = (String, String, ContextId);
 #[derive(Debug, Default)]
 struct RuntimeState {
     slots: HashMap<SlotKey, Value>,
+    /// Per-call free-form scratch space. Mirrors Python's
+    /// `MemoryState._scratch`. Read by `InputResolver::Scratch` and
+    /// pre-seeded via `engine.start(scratch=...)`.
+    scratch: HashMap<String, Value>,
 }
 
 impl RuntimeState {
@@ -70,6 +74,7 @@ impl RuntimeState {
     fn with_capacity(cap: usize) -> Self {
         Self {
             slots: HashMap::with_capacity(cap),
+            scratch: HashMap::new(),
         }
     }
 
@@ -95,12 +100,18 @@ impl RuntimeState {
             probe.pop();
         }
     }
+
+    /// Read scratch value, returning `Value::Null` for missing keys
+    /// (matches Python's `SCRATCH[k]` returning `None`).
+    fn scratch_get(&self, key: &str) -> Value {
+        self.scratch.get(key).cloned().unwrap_or(Value::Null)
+    }
 }
 
 // ── Internal scheduler events ────────────────────────────────────────────
 
 /// Events pushed onto the scheduler's internal queue. Matches Python's
-/// `Frame` + `EOF` variants (§4b.12).
+/// `Frame` / `EOF` / `Interrupt` variants (§4b.12, §4.3).
 #[derive(Debug)]
 enum SchedulerEvent {
     Frame {
@@ -112,6 +123,168 @@ enum SchedulerEvent {
         op: String,
         ctx: ContextId,
     },
+    /// In-band cancellation event. Mirrors Python's `Interrupt` dataclass.
+    /// Emitted by ops that return a `{"__interrupt__": {...}}` value (see
+    /// `parse_interrupt`). The scheduler runs `sweep_ctx` to drop queued
+    /// events + abort tasks at `ctx_to_cancel` and descendants, then
+    /// forwards the synthetic `__interrupt__` frame to the public sender.
+    Interrupt {
+        op: String,
+        ctx: ContextId,
+        ctx_to_cancel: ContextId,
+        reason: String,
+    },
+}
+
+/// Detect the `{"__interrupt__": {"ctx_to_cancel": [...], "reason": "..."}}`
+/// shape an op can return to emit an Interrupt. Returns `(ctx_to_cancel,
+/// reason)` when the value matches, else `None`. Mirrors how Python's
+/// `op.run()` recognises an `Interrupt` instance via `isinstance` and
+/// forwards it onto the scheduler queue without `store_result`.
+fn parse_interrupt(value: &Value) -> Option<(ContextId, String)> {
+    let payload = value.as_object()?.get("__interrupt__")?.as_object()?;
+    let ctx_arr = payload.get("ctx_to_cancel")?.as_array()?;
+    let ctx: ContextId = ctx_arr
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+    let reason = payload
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some((ctx, reason))
+}
+
+/// True if `child` is `parent` itself or a deeper context tuple.
+fn is_descendant_or_equal(child: &ContextId, parent: &ContextId) -> bool {
+    child.len() >= parent.len() && child[..parent.len()] == parent[..]
+}
+
+/// Drop queued events at descendants of `ctx_prefix`, abort matching tasks
+/// (skip the emitter via `exclude`), then brutal-idempotent post-cleanup
+/// for tasks that were aborted before their wrapper ran. Mirrors Python's
+/// `_sweep_ctx` (plan §4.3 + §4.3a).
+#[allow(clippy::too_many_arguments)]
+async fn sweep_ctx(
+    ctx_prefix: &ContextId,
+    exclude: &(String, ContextId),
+    rx: &mut mpsc::Receiver<SchedulerEvent>,
+    tx: mpsc::Sender<SchedulerEvent>,
+    tasks_by_ctx: Arc<Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>>,
+    inflight: &mut i32,
+    ready: &mut HashMap<ContextId, HashMap<String, i32>>,
+    seq_origins: &mut HashMap<(String, ContextId), (String, String)>,
+    collect_bufs: &mut HashMap<(String, String), Vec<(ContextId, Map<String, Value>)>>,
+) {
+    // 1. Drain all queued events. Drop those at descendants of ctx_prefix.
+    //    Re-enqueue the rest. EOF events at descendants of ctx_prefix get
+    //    dropped → inflight is decremented by 1 per drop (matches Python).
+    let mut keep: Vec<SchedulerEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        let drop_it = is_descendant_or_equal(event_ctx(&ev), ctx_prefix);
+        if drop_it {
+            // Per-Python: only EOF (task-done signal) decrements inflight
+            // here; Frame events don't bump inflight, so dropping them is
+            // free.
+            if matches!(&ev, SchedulerEvent::Eof { .. }) {
+                *inflight -= 1;
+            }
+        } else {
+            keep.push(ev);
+        }
+    }
+    for ev in keep {
+        let _ = tx.try_send(ev);
+    }
+
+    // 2. Abort matching tasks (skip emitter). Snapshot first so we can
+    //    drop the lock before awaiting.
+    let mut to_await: Vec<(String, ContextId, tokio::task::JoinHandle<()>)> = Vec::new();
+    {
+        let mut t = tasks_by_ctx.lock();
+        let ctxs: Vec<ContextId> = t
+            .keys()
+            .filter(|c| is_descendant_or_equal(c, ctx_prefix))
+            .cloned()
+            .collect();
+        for ctx in ctxs {
+            let bucket = t.get_mut(&ctx).unwrap();
+            let op_names: Vec<String> = bucket.keys().cloned().collect();
+            for op_name in op_names {
+                if &(op_name.clone(), ctx.clone()) == exclude {
+                    continue;
+                }
+                let Some(handle) = bucket.remove(&op_name) else {
+                    continue;
+                };
+                if !handle.is_finished() {
+                    handle.abort();
+                    *inflight -= 1; // EOF won't arrive for aborted task.
+                }
+                to_await.push((op_name, ctx.clone(), handle));
+            }
+            if bucket.is_empty() {
+                t.remove(&ctx);
+            }
+        }
+    }
+
+    // 3. Await aborted tasks so their JoinHandle fully resolves before we
+    //    move on. Aborted handles return JoinError::is_cancelled; we
+    //    swallow it.
+    for (_op, _ctx, h) in to_await {
+        let _ = h.await;
+    }
+
+    // 4. Clear per-ctx bookkeeping at descendants (skip emitter ctx so the
+    //    emitter's own pump can complete normally).
+    let emitter_ctx = &exclude.1;
+    let to_clear: Vec<ContextId> = ready
+        .keys()
+        .filter(|c| is_descendant_or_equal(c, ctx_prefix) && *c != emitter_ctx)
+        .cloned()
+        .collect();
+    for c in to_clear {
+        ready.remove(&c);
+    }
+    let so_keys: Vec<(String, ContextId)> = seq_origins
+        .keys()
+        .filter(|(_op, c)| is_descendant_or_equal(c, ctx_prefix) && c != emitter_ctx)
+        .cloned()
+        .collect();
+    for k in so_keys {
+        seq_origins.remove(&k);
+    }
+    let cb_keys: Vec<(String, String)> = collect_bufs
+        .iter()
+        .filter(|(_k, buf)| {
+            buf.iter()
+                .any(|(c, _)| is_descendant_or_equal(c, ctx_prefix))
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in cb_keys {
+        collect_bufs.remove(&k);
+    }
+}
+
+/// Extract the `ctx` field from any `SchedulerEvent` variant.
+fn event_ctx(ev: &SchedulerEvent) -> &ContextId {
+    match ev {
+        SchedulerEvent::Frame { ctx, .. } => ctx,
+        SchedulerEvent::Eof { ctx, .. } => ctx,
+        SchedulerEvent::Interrupt { ctx, .. } => ctx,
+    }
+}
+
+/// Extract the `op` field from any `SchedulerEvent` variant.
+fn event_op(ev: &SchedulerEvent) -> &str {
+    match ev {
+        SchedulerEvent::Frame { op, .. } => op,
+        SchedulerEvent::Eof { op, .. } => op,
+        SchedulerEvent::Interrupt { op, .. } => op,
+    }
 }
 
 // ── GraphScheduler ───────────────────────────────────────────────────────
@@ -294,7 +467,7 @@ impl GraphScheduler {
         // `run` only emits external frames via `sender.send` for
         // PARENT-bound output ops (and the loop summary frame), so the
         // tap accumulates exactly what we want and nothing else.
-        Scheduler::run(self, inputs, ctx, sender, cancel).await?;
+        Scheduler::run(self, inputs, ctx, sender, cancel, None).await?;
 
         // Merge every captured frame's `data` map. Multiple output ops
         // each contribute their dst_var → value pairs; later frames
@@ -340,6 +513,7 @@ impl Scheduler for GraphScheduler {
         _context: MiddlewareContext,
         sender: FrameSender,
         cancel: CancellationToken,
+        scratch: Option<Map<String, Value>>,
     ) -> Result<(), OperonError> {
         let state = Arc::new(Mutex::new(RuntimeState::with_capacity(self.slot_capacity)));
 
@@ -362,6 +536,13 @@ impl Scheduler for GraphScheduler {
             }
             for (k, v) in &inputs {
                 s.set(self.graph_key(), k, &root_ctx, v.clone());
+            }
+            // Pre-seed scratch synchronously before any op dispatches —
+            // race-free, mirrors Python's engine.start(scratch=...).
+            if let Some(seed) = scratch {
+                for (k, v) in seed {
+                    s.scratch.insert(k, v);
+                }
             }
         }
 
@@ -459,6 +640,13 @@ impl GraphScheduler {
         // never deadlock by filling the channel mid-handler.
         let (tx, mut rx) = mpsc::channel::<SchedulerEvent>(8192);
 
+        // tasks_by_ctx: per-ctx map of live spawned `JoinHandle`s. Used by
+        // sweep_ctx to abort tasks at the swept ctx subtree on Interrupt.
+        // Mirrors Python's `tasks_by_ctx` local (see plan §4.3 + §4.3a).
+        let tasks_by_ctx: Arc<
+            Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>,
+        > = Arc::new(Mutex::new(HashMap::new()));
+
         // ── Seed entry ops ────────────────────────────────────────────────
         for entry in &self.graph.entries {
             inflight += 1;
@@ -469,6 +657,7 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
+                tasks_by_ctx.clone(),
             )
             .await?;
         }
@@ -507,6 +696,7 @@ impl GraphScheduler {
                                 sem.clone(),
                                 cancel,
                                 sender,
+                                tasks_by_ctx.clone(),
                             )
                             .await?;
                         }
@@ -527,8 +717,53 @@ impl GraphScheduler {
                                 tx.clone(),
                                 sem.clone(),
                                 cancel,
+                                tasks_by_ctx.clone(),
                             )
                             .await?;
+                        }
+                        SchedulerEvent::Interrupt {
+                            op: emit_op,
+                            ctx: emit_ctx,
+                            ctx_to_cancel,
+                            reason,
+                        } => {
+                            // Sweep target ctx subtree: drop queued events,
+                            // abort tasks (skip emitter), brutal cleanup.
+                            sweep_ctx(
+                                &ctx_to_cancel,
+                                &(emit_op.clone(), emit_ctx.clone()),
+                                &mut rx,
+                                tx.clone(),
+                                tasks_by_ctx.clone(),
+                                &mut inflight,
+                                &mut ready,
+                                &mut seq_origins,
+                                &mut collect_bufs,
+                            )
+                            .await;
+                            // Forward synthetic `__interrupt__` frame to the
+                            // public sender so consumers can react.
+                            let mut payload = Map::new();
+                            let mut irq = Map::new();
+                            irq.insert(
+                                "ctx_to_cancel".into(),
+                                Value::Array(
+                                    ctx_to_cancel
+                                        .iter()
+                                        .map(|s| Value::String(s.clone()))
+                                        .collect(),
+                                ),
+                            );
+                            irq.insert("reason".into(), Value::String(reason.clone()));
+                            irq.insert("op".into(), Value::String(emit_op.clone()));
+                            payload.insert("__interrupt__".into(), Value::Object(irq));
+                            sender
+                                .send(crate::core::engine::FrameEvent {
+                                    op: "__interrupt__".to_string(),
+                                    context: emit_ctx,
+                                    data: payload,
+                                })
+                                .await;
                         }
                     }
                 }
@@ -562,6 +797,7 @@ impl GraphScheduler {
         tx: mpsc::Sender<SchedulerEvent>,
         sem: Arc<Semaphore>,
         cancel: CancellationToken,
+        tasks_by_ctx: Arc<Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>>,
     ) -> Result<(), OperonError> {
         let op_cfg = self
             .graph
@@ -627,7 +863,38 @@ impl GraphScheduler {
                             match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers)
                                 .await
                             {
-                                Ok(value) => fan_out_value(&op_cfg, &ctx, value, &state),
+                                Ok(value) => {
+                                    // Detect Interrupt return — emit a
+                                    // SchedulerEvent::Interrupt instead of
+                                    // a Frame, then EOF normally.
+                                    if let Some((ctx_to_cancel, reason)) = parse_interrupt(&value)
+                                    {
+                                        let irq = SchedulerEvent::Interrupt {
+                                            op: op_name.clone(),
+                                            ctx: ctx.clone(),
+                                            ctx_to_cancel,
+                                            reason,
+                                        };
+                                        if let Err(
+                                            tokio::sync::mpsc::error::TrySendError::Full(ev),
+                                        ) = tx.try_send(irq)
+                                        {
+                                            let _ = tx.send(ev).await;
+                                        }
+                                        let eof = SchedulerEvent::Eof {
+                                            op: op_name,
+                                            ctx: ctx.clone(),
+                                        };
+                                        if let Err(
+                                            tokio::sync::mpsc::error::TrySendError::Full(ev),
+                                        ) = tx.try_send(eof)
+                                        {
+                                            let _ = tx.send(ev).await;
+                                        }
+                                        return Ok(());
+                                    }
+                                    fan_out_value(&op_cfg, &ctx, value, &state)
+                                }
                                 Err(e) => {
                                     {
                                         let mut s = state.lock();
@@ -672,7 +939,9 @@ impl GraphScheduler {
 
         // ── Spawn path for io/cpu ──────────────────────────────────────────
         let owned_plan: Vec<InputSlot> = plan_slice.to_vec();
-        tokio::spawn(async move {
+        let registry_op_name = op_name.clone();
+        let registry_ctx = ctx.clone();
+        let task = tokio::spawn(async move {
             let _permit = match sem.acquire_owned().await {
                 Ok(p) => p,
                 Err(_) => return, // semaphore closed — nothing more to do
@@ -700,6 +969,18 @@ impl GraphScheduler {
 
             match exec_result {
                 Ok(value) => {
+                    if let Some((ctx_to_cancel, reason)) = parse_interrupt(&value) {
+                        let _ = tx
+                            .send(SchedulerEvent::Interrupt {
+                                op: op_name.clone(),
+                                ctx: ctx.clone(),
+                                ctx_to_cancel,
+                                reason,
+                            })
+                            .await;
+                        let _ = tx.send(SchedulerEvent::Eof { op: op_name, ctx }).await;
+                        return;
+                    }
                     let frames = fan_out_value(&op_cfg, &ctx, value, &state);
                     for (frame_ctx, frame_map) in frames {
                         let _ = tx
@@ -729,6 +1010,15 @@ impl GraphScheduler {
             }
         });
 
+        // Register the spawned task so `sweep_ctx` can abort it on Interrupt.
+        // Bucket entries are removed lazily in sweep when found-finished;
+        // the per-run lifetime keeps the map bounded.
+        tasks_by_ctx
+            .lock()
+            .entry(registry_ctx)
+            .or_default()
+            .insert(registry_op_name, task);
+
         Ok(())
     }
 
@@ -749,6 +1039,7 @@ impl GraphScheduler {
         sem: Arc<Semaphore>,
         cancel: &CancellationToken,
         sender: &FrameSender,
+        tasks_by_ctx: Arc<Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>>,
     ) -> Result<(), OperonError> {
         // Seed ready counts for a never-seen context.
         if !ready.contains_key(ctx) {
@@ -813,6 +1104,7 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel,
+                tasks_by_ctx.clone(),
             )
             .await?;
         }
@@ -836,6 +1128,7 @@ impl GraphScheduler {
         tx: mpsc::Sender<SchedulerEvent>,
         sem: Arc<Semaphore>,
         cancel: &CancellationToken,
+        tasks_by_ctx: Arc<Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>>,
     ) -> Result<(), OperonError> {
         let rc = ready.get_mut(ctx).expect("ready entry seeded earlier");
         let Some(count) = rc.get_mut(&link.dst) else {
@@ -878,6 +1171,7 @@ impl GraphScheduler {
                     tx,
                     sem,
                     cancel.clone(),
+                    tasks_by_ctx,
                 )
                 .await?;
                 return Ok(());
@@ -897,6 +1191,7 @@ impl GraphScheduler {
                 tx,
                 sem,
                 cancel.clone(),
+                tasks_by_ctx,
             )
             .await?;
         } else {
@@ -919,6 +1214,7 @@ impl GraphScheduler {
         tx: mpsc::Sender<SchedulerEvent>,
         sem: Arc<Semaphore>,
         cancel: &CancellationToken,
+        tasks_by_ctx: Arc<Mutex<HashMap<ContextId, HashMap<String, tokio::task::JoinHandle<()>>>>>,
     ) -> Result<(), OperonError> {
         // Flush any `collect` buffers sourced from this op. Per Python parity:
         // merge per-key into lists, persist the merged result to src's state
@@ -967,6 +1263,7 @@ impl GraphScheduler {
                 tx.clone(),
                 sem.clone(),
                 cancel.clone(),
+                tasks_by_ctx.clone(),
             )
             .await?;
         }
@@ -977,8 +1274,16 @@ impl GraphScheduler {
                 if let Some(next_ctx) = q.pop_front() {
                     seq_origins.insert((key.1.clone(), next_ctx.clone()), key.clone());
                     *inflight += 1;
-                    self.spawn_op(key.1.clone(), next_ctx, state, tx, sem, cancel.clone())
-                        .await?;
+                    self.spawn_op(
+                        key.1.clone(),
+                        next_ctx,
+                        state,
+                        tx,
+                        sem,
+                        cancel.clone(),
+                        tasks_by_ctx,
+                    )
+                    .await?;
                 } else {
                     seq_active.insert(key, false);
                 }
@@ -1272,8 +1577,8 @@ fn eval_op(
     }
 }
 
-/// One entry in an op's pre-compiled input plan. Mirrors the four
-/// branches of the legacy `resolve_inputs` body (ref / literal /
+/// One entry in an op's pre-compiled input plan. Mirrors the five
+/// branches of the legacy `resolve_inputs` body (ref / scratch / literal /
 /// default / required-missing) but pre-resolves which path each input
 /// takes, so the runtime walks a tight `Vec` instead of re-reading
 /// `Param` flags per frame.
@@ -1281,6 +1586,10 @@ fn eval_op(
 enum InputResolver {
     /// Resolve from runtime state (with optional transforms).
     Ref(CompiledRef),
+    /// Resolve from per-call scratch space at `key`. Yields `Value::Null`
+    /// when the key is missing — matches Python's `SCRATCH[k]` returning
+    /// `None` for unset keys.
+    Scratch(String),
     /// Inlined literal — `Value` cloned on each invocation.
     Lit(Value),
     /// Default — same as `Lit` but kept distinct for readability.
@@ -1310,6 +1619,8 @@ fn compile_input_plans(graph: &OpConfig, graph_key: &str) -> HashMap<String, Vec
         for (var, param) in &op_cfg.inputs {
             let plan = if let Some(rc) = &param.ref_config {
                 InputResolver::Ref(compile_ref(rc, graph_key))
+            } else if let Some(sr) = &param.scratch {
+                InputResolver::Scratch(sr.key.clone())
             } else if let Some(lit) = &param.literal {
                 InputResolver::Lit(lit.clone())
             } else if let Some(def) = &param.default {
@@ -1417,6 +1728,7 @@ fn resolve_inputs(
     for slot in plan {
         let value = match &slot.plan {
             InputResolver::Ref(cref) => eval_ref(cref, ctx, state)?,
+            InputResolver::Scratch(key) => state.lock().scratch_get(key),
             InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
             InputResolver::RequiredMissing => {
                 return Err(OperonError::Op(OpError::Code(format!(

@@ -8,6 +8,7 @@ import base64
 import hashlib
 import json
 import logging
+import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -220,6 +221,32 @@ class LangfuseClient:
     def trace_url(self, trace_id: str) -> str:
         """Build the Langfuse UI URL for a trace."""
         return f"{self._config.host.rstrip('/')}/trace/{trace_id}"
+
+    def fetch_trace(self, trace_id: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+        """GET /api/public/traces/{traceId} — fetch a posted trace for verification.
+
+        Returns the parsed JSON body (trace + nested observations) on success,
+        or None if the trace is not found / unauthorized / unreachable. Used
+        by integration tests to verify trace structure landed correctly.
+        """
+        url = f"{self._config.host.rstrip('/')}/api/public/traces/{trace_id}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Basic {self._auth}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                body = resp.read().decode("utf-8")
+                return json.loads(body)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None  # not yet ingested or wrong id
+            raise
+        except Exception:
+            return None
 
     def auth_check(self) -> bool:
         """Check authentication by hitting the health endpoint.

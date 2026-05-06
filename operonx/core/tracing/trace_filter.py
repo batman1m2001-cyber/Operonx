@@ -56,6 +56,16 @@ class TraceFilter:
     rewriters: List[Callable] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        import warnings
+        warnings.warn(
+            "TraceFilter is deprecated and will be removed in a future release. "
+            "Migrate to an explicit processor list — see operonx.core.tracing.processors "
+            "(DropOps, KeepOps, DropEmpty, TruncateIO, GroupBy, Aggregate). For "
+            "rewriter-based shapes, use GroupBy + Aggregate. See "
+            "docs/TRACING_REDESIGN_PLAN.md §6.",
+            DeprecationWarning, stacklevel=2,
+        )
+
         if self.exclude_ops and self.include_ops:
             raise ValueError("Cannot set both exclude_ops and include_ops — use one or the other")
 

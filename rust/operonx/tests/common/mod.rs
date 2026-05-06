@@ -56,6 +56,10 @@ pub fn load_json(path: &Path) -> Value {
 ///
 /// `name` is the path under `tests/spec/`, e.g.
 /// `"core/scheduler/single_code_op"`.
+///
+/// If the fixture folder has an optional `scratch.json`, its contents seed
+/// the per-call scratch space — mirrors Python's
+/// `engine.run(scratch=...)`.
 pub async fn run_fixture(name: &str) {
     ensure_test_setup();
 
@@ -63,6 +67,11 @@ pub async fn run_fixture(name: &str) {
     let graph = load_json(&dir.join("graph.json"));
     let inputs = load_json(&dir.join("inputs.json"));
     let expected = load_json(&dir.join("expected.json"));
+    let scratch_path = dir.join("scratch.json");
+    let scratch = scratch_path
+        .exists()
+        .then(|| load_json(&scratch_path))
+        .and_then(|v| v.as_object().cloned());
 
     let graph_str = serde_json::to_string(&graph).expect("serialize graph");
     let engine = Operon::builder(&graph_str)
@@ -75,7 +84,7 @@ pub async fn run_fixture(name: &str) {
 
     let inputs_map = inputs.as_object().cloned().unwrap_or_default();
     let got = engine
-        .run_json_async(inputs_map, None, None, None)
+        .run_json_async_with_scratch(inputs_map, None, None, None, scratch)
         .await
         .unwrap_or_else(|e| panic!("fixture '{}' runtime error: {}", name, e));
 
@@ -167,6 +176,13 @@ fn sum_list(xs: Vec<i64>) -> Value {
 #[op(name = "increment")]
 fn increment(counter: i64) -> Value {
     serde_json::json!({ "counter": counter + 1 })
+}
+
+/// Pass an arbitrary value through unchanged. Used by SCRATCH fixtures to
+/// observe a declarative `inputs={"value": SCRATCH["k"]}` resolution.
+#[op(name = "passthrough")]
+fn passthrough(value: Value) -> Value {
+    serde_json::json!({ "value": value })
 }
 
 // ── One-time setup ────────────────────────────────────────────────────────

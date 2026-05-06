@@ -34,10 +34,12 @@ from operonx.core import (
     LOGGER,
     PARENT,
     PENDING,
+    SCRATCH,
     START,
     BranchOp,
     FuncOp,
     GraphOp,
+    Interrupt,
     Middleware,
     Operon,
     ParserOp,
@@ -125,6 +127,9 @@ __all__ = [
     "END",
     "PARENT",
     "PENDING",
+    "SCRATCH",
+    # Scheduler events
+    "Interrupt",
     # Logging
     "LOGGER",
     # Setup

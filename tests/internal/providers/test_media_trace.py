@@ -1,9 +1,10 @@
-"""End-to-end tests for Media trace extraction.
+"""Media trace extraction — LLMOp normalize + producer/consumer auto-unwrap.
 
-Covers:
-  - LLMOp.normalize_trace_io wraps OpenAI multimodal blocks as Media
-  - BaseOp auto-unwrap: consumer ops receive raw bytes when producer returns Media
-  - Collector extracts Media into node.media with correct field_path
+The collector-based piece of the legacy test is now in
+``tests/internal/core/tracing/test_engine_wiring.py`` (event-stream form).
+This module covers the parts that still live in the same place under the
+new pipeline: the ``normalize_trace_io`` hook on LLMOp + the consumer-side
+auto-unwrap.
 """
 
 from __future__ import annotations
@@ -11,11 +12,11 @@ from __future__ import annotations
 import pytest
 
 from operonx.core import END, PARENT, START, GraphOp, Media, Operon, op
-from operonx.core.tracing.collector import TraceCollector
 
-# --------------------------------------------------------------------------- #
-# LLMOp.normalize_trace_io unit test (no real LLM call)
-# --------------------------------------------------------------------------- #
+
+# ---------------------------------------------------------------------------
+# LLMOp.normalize_trace_io
+# ---------------------------------------------------------------------------
 
 
 class TestLLMOpNormalizeTraceIO:
@@ -79,25 +80,10 @@ class TestLLMOpNormalizeTraceIO:
         out_in, _ = node.normalize_trace_io(inputs, {})
         assert out_in is inputs  # cheap identity check — no copy
 
-    def test_mixed_content_no_image(self):
-        from operonx.providers.ops import LLMOp
 
-        node = LLMOp(name="mixed_test", resource="gpt-4o")
-        inputs = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": "hi"}],
-                }
-            ]
-        }
-        out_in, _ = node.normalize_trace_io(inputs, {})
-        assert out_in is inputs  # no change
-
-
-# --------------------------------------------------------------------------- #
-# Producer/consumer auto-unwrap
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
+# Producer / consumer auto-unwrap (Ref binding strips Media → bytes)
+# ---------------------------------------------------------------------------
 
 
 @op
@@ -107,7 +93,7 @@ def produce_audio(label: str):
 
 @op
 def consume_audio(audio: bytes, label: str):
-    # Consumer schema type is bytes — confirms auto-unwrap worked.
+    # Schema type = bytes — confirms auto-unwrap from Media → raw bytes worked.
     assert isinstance(audio, bytes), f"Expected bytes, got {type(audio).__name__}"
     assert audio == b"wav_bytes"
     return {"seen_label": label, "seen_size": len(audio)}
@@ -125,43 +111,3 @@ class TestAutoUnwrap:
         result = await engine.run(inputs={"label": "hello"})
         assert result["seen_size"] == len(b"wav_bytes")
         assert result["seen_label"] == "hello"
-
-
-# --------------------------------------------------------------------------- #
-# Collector media extraction
-# --------------------------------------------------------------------------- #
-
-
-class TestCollectorExtractsMedia:
-    @pytest.mark.asyncio
-    async def test_media_surfaces_in_node_media(self):
-        with GraphOp(name="media_graph") as g:
-            producer = produce_audio(label=PARENT["label"])
-            consumer = consume_audio(audio=producer["audio"], label=producer["label"])
-            START >> producer >> consumer >> END
-
-        engine = Operon(g)
-        handle = engine.start(inputs={"label": "hi"})
-        await handle.collect()
-        state = handle.state
-
-        collector = TraceCollector(g)
-        trace_data = collector.collect(state)
-
-        # Find the producer node in the collected trace — it returned a
-        # top-level Media in outputs, which should appear on node.media.
-        producer_nodes = [
-            n for n in trace_data["nodes"] if n.get("op_name", "").endswith("producer")
-        ]
-        assert producer_nodes, "producer node not found in trace"
-        prod = producer_nodes[0]
-
-        # outputs should carry a placeholder, NOT the raw bytes
-        assert prod["outputs"]["audio"].startswith("<media:")
-        # media list should have the extracted blob
-        media_list = prod["media"]
-        assert len(media_list) == 1
-        blob = media_list[0]
-        assert blob["field_path"] == "outputs.audio"
-        assert blob["data"] == b"wav_bytes"
-        assert blob["mime_type"] == "audio/wav"
