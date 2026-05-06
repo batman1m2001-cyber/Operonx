@@ -143,7 +143,9 @@ class Aggregate:
                 # Emit the synthetic ANNOTATION with the summary, THEN the GROUP_END.
                 if active_state is not None and active_group_event is not None:
                     yield _make_summary_annotation(
-                        active_group_event, op_name, emit(active_state),
+                        active_group_event,
+                        op_name,
+                        emit(active_state),
                     )
                 active_state = None
                 active_group_event = None

@@ -51,9 +51,7 @@ class TestB1DropQueuedFrames:
         with GraphOp(name="b1") as g:
             gen = gen_n(n=PARENT["n"])
             cons = slow_consumer(i=gen["i"].parallel())
-            em = emit_interrupt_after(
-                j=cons["j"], target_ctx_str=PARENT["target_ctx_str"]
-            )
+            em = emit_interrupt_after(j=cons["j"], target_ctx_str=PARENT["target_ctx_str"])
             START >> gen >> cons >> em >> END
 
         engine = Operon(g)
@@ -314,11 +312,7 @@ class TestB9HandlePropagation:
         # Drain entire stream — collect handles unknown op tags gracefully.
         await h.collect()
 
-        synth = [
-            (op, ctx, data)
-            for op, ctx, data in h._frames
-            if op == "__interrupt__"
-        ]
+        synth = [(op, ctx, data) for op, ctx, data in h._frames if op == "__interrupt__"]
         assert len(synth) == 1
         op_name, ctx, data = synth[0]
         assert op_name == "__interrupt__"

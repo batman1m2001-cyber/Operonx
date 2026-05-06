@@ -76,10 +76,8 @@ class TestPipelineBinding:
         kinds = [e.kind for e in exp.events]
         assert EventKind.OP_START in kinds
         assert EventKind.OP_END in kinds
-        starts = [e for e in exp.events
-                  if e.kind is EventKind.OP_START and e.op_name == "g.d"]
-        ends = [e for e in exp.events
-                if e.kind is EventKind.OP_END and e.op_name == "g.d"]
+        starts = [e for e in exp.events if e.kind is EventKind.OP_START and e.op_name == "g.d"]
+        ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.d"]
         assert len(starts) == 1
         assert len(ends) == 1
         assert starts[0].payload["inputs"] == {"x": 5}
@@ -101,14 +99,12 @@ class TestPipelineBinding:
         await engine.run(inputs={"seed": 1})
 
         # Op name is "g.gen" (graph + variable name)
-        yields = [e for e in exp.events
-                  if e.kind is EventKind.OP_YIELD and e.op_name == "g.gen"]
+        yields = [e for e in exp.events if e.kind is EventKind.OP_YIELD and e.op_name == "g.gen"]
         assert len(yields) == 3
         assert [y.payload["idx"] for y in yields] == [0, 1, 2]
         assert [y.payload["yielded"] for y in yields] == [{"v": 1}, {"v": 2}, {"v": 3}]
         # OP_END carries yield_count
-        end = next(e for e in exp.events
-                   if e.kind is EventKind.OP_END and e.op_name == "g.gen")
+        end = next(e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.gen")
         assert end.payload["yield_count"] == 3
 
     @pytest.mark.asyncio
@@ -131,8 +127,7 @@ class TestPipelineBinding:
         except Exception:
             pass
 
-        boom_ends = [e for e in exp.events
-                     if e.kind is EventKind.OP_END and e.op_name == "g.b"]
+        boom_ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.b"]
         assert len(boom_ends) == 1
         assert boom_ends[0].payload["status"] == "error"
 
@@ -205,8 +200,7 @@ class TestMediaExtraction:
         engine = Operon(g, tracer=pipe)
         await engine.run(inputs={})
 
-        ends = [e for e in exp.events if e.kind is EventKind.OP_END
-                and e.op_name == "g.p"]
+        ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.p"]
         assert len(ends) == 1
         end = ends[0]
 
@@ -235,7 +229,6 @@ class TestMediaExtraction:
         engine = Operon(g, tracer=pipe)
         await engine.run(inputs={})
 
-        ends = [e for e in exp.events if e.kind is EventKind.OP_END
-                and e.op_name == "g.o"]
+        ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.o"]
         assert len(ends) == 1
         assert ends[0].payload["media_refs"] == []

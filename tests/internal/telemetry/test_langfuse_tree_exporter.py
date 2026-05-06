@@ -82,10 +82,14 @@ class TestExportEarlyReturn:
     def test_only_synthetic_events_no_op_data_no_post(self):
         """A stream of only GROUP_START/END (no OP_START) → nothing to render."""
         exp, client = _exporter()
-        exp.export([
-            _ev(EventKind.GROUP_START, payload={"name": "g"}, seq=0),
-            _ev(EventKind.GROUP_END, payload={"name": "g", "status": "ok"}, seq=1),
-        ], "req-1", {})
+        exp.export(
+            [
+                _ev(EventKind.GROUP_START, payload={"name": "g"}, seq=0),
+                _ev(EventKind.GROUP_END, payload={"name": "g", "status": "ok"}, seq=1),
+            ],
+            "req-1",
+            {},
+        )
         assert client.batches == []
 
 
@@ -93,13 +97,21 @@ class TestSimpleOp:
     def test_single_op_produces_trace_plus_span(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.add",
-                ctx=("main",), seq=0, payload={"inputs": {"x": 5}}),
-            _ev(EventKind.OP_END, op_name="g.add",
-                ctx=("main",), seq=1,
-                payload={"outputs": {"r": 6}, "status": "ok",
-                         "duration_ms": 1.2, "yield_count": 0},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.add",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {"x": 5}},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.add",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {"r": 6}, "status": "ok", "duration_ms": 1.2, "yield_count": 0},
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-1", {"user_id": "u-1", "session_id": "s-1"})
 
@@ -127,8 +139,7 @@ class TestSimpleOp:
         says start without end is rare but we don't want to crash on it."""
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
         ]
         exp.export(events, "req-1", {})
         batch = client.batches[0]
@@ -141,14 +152,33 @@ class TestGenerationDetection:
     def test_llm_usage_promotes_op_to_generation(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.ask", ctx=("main",), seq=0,
-                payload={"inputs": {"prompt": "hi"}}),
-            _ev(EventKind.LLM_USAGE, op_name="g.ask", ctx=("main",), seq=1,
-                payload={"model": "gpt-4o", "prompt_tokens": 10,
-                         "completion_tokens": 20, "total_tokens": 30,
-                         "cost_usd": 0.001}),
-            _ev(EventKind.OP_END, op_name="g.ask", ctx=("main",), seq=2,
-                payload={"outputs": {"r": "hello"}, "status": "ok"}),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.ask",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {"prompt": "hi"}},
+            ),
+            _ev(
+                EventKind.LLM_USAGE,
+                op_name="g.ask",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "model": "gpt-4o",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                    "cost_usd": 0.001,
+                },
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.ask",
+                ctx=("main",),
+                seq=2,
+                payload={"outputs": {"r": "hello"}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         batch = client.batches[0]
@@ -163,10 +193,16 @@ class TestGenerationDetection:
         """Op without LLM_USAGE renders as a plain span, not a generation."""
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.plain", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.plain", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(
+                EventKind.OP_START, op_name="g.plain", ctx=("main",), seq=0, payload={"inputs": {}}
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.plain",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         assert client.batches[0][1]["type"] == "span-create"
@@ -178,40 +214,61 @@ class TestParentLinking:
         exp, client = _exporter()
         events = [
             # Parent
-            _ev(EventKind.OP_START, op_name="g.gen", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.gen", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.gen", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.gen",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
             # Child at deeper ctx (would normally be a sub-op via item ctx)
-            _ev(EventKind.OP_START, op_name="g.child",
-                ctx=("main", "[0]"), seq=2, payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.child",
-                ctx=("main", "[0]"), seq=3,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.child",
+                ctx=("main", "[0]"),
+                seq=2,
+                payload={"inputs": {}},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.child",
+                ctx=("main", "[0]"),
+                seq=3,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         batch = client.batches[0]
 
         # Find the child span
-        child_obs = next(e["body"] for e in batch
-                         if e["type"] in ("span-create", "generation-create")
-                         and e["body"]["name"] == "child")
+        child_obs = next(
+            e["body"]
+            for e in batch
+            if e["type"] in ("span-create", "generation-create") and e["body"]["name"] == "child"
+        )
         # Should reference the parent's observation id
         assert "parentObservationId" in child_obs
 
-        parent_obs = next(e["body"] for e in batch
-                          if e["type"] in ("span-create", "generation-create")
-                          and e["body"]["name"] == "gen")
+        parent_obs = next(
+            e["body"]
+            for e in batch
+            if e["type"] in ("span-create", "generation-create") and e["body"]["name"] == "gen"
+        )
         assert child_obs["parentObservationId"] == parent_obs["id"]
 
     def test_root_op_has_no_parent_observation(self):
         """An op at ctx ('main',) should NOT have parentObservationId."""
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.root", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.root", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.root", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.root",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         batch = client.batches[0]
@@ -223,10 +280,14 @@ class TestStatusAndLevel:
     def test_error_sets_level_error(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.boom", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.boom", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "error"}),
+            _ev(EventKind.OP_START, op_name="g.boom", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.boom",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "error"},
+            ),
         ]
         exp.export(events, "req-1", {})
         span = client.batches[0][1]["body"]
@@ -236,10 +297,14 @@ class TestStatusAndLevel:
     def test_cancelled_sets_level_warning(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.slow", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.slow", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "cancelled"}),
+            _ev(EventKind.OP_START, op_name="g.slow", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.slow",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "cancelled"},
+            ),
         ]
         exp.export(events, "req-1", {})
         span = client.batches[0][1]["body"]
@@ -249,10 +314,14 @@ class TestStatusAndLevel:
     def test_ok_sets_no_level(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.ok", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.ok", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.ok", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.ok",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         span = client.batches[0][1]["body"]
@@ -265,19 +334,35 @@ class TestYieldsAndAnnotations:
         separate observations (matching legacy: one gen op = one span)."""
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.gen", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_YIELD, op_name="g.gen",
-                ctx=("main", "[0]"), seq=1,
-                payload={"yielded": {"v": 1}, "idx": 0}),
-            _ev(EventKind.OP_YIELD, op_name="g.gen",
-                ctx=("main", "[1]"), seq=2,
-                payload={"yielded": {"v": 2}, "idx": 1}),
-            _ev(EventKind.OP_YIELD, op_name="g.gen",
-                ctx=("main", "[2]"), seq=3,
-                payload={"yielded": {"v": 3}, "idx": 2}),
-            _ev(EventKind.OP_END, op_name="g.gen", ctx=("main",), seq=4,
-                payload={"outputs": {}, "status": "ok", "yield_count": 3}),
+            _ev(EventKind.OP_START, op_name="g.gen", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_YIELD,
+                op_name="g.gen",
+                ctx=("main", "[0]"),
+                seq=1,
+                payload={"yielded": {"v": 1}, "idx": 0},
+            ),
+            _ev(
+                EventKind.OP_YIELD,
+                op_name="g.gen",
+                ctx=("main", "[1]"),
+                seq=2,
+                payload={"yielded": {"v": 2}, "idx": 1},
+            ),
+            _ev(
+                EventKind.OP_YIELD,
+                op_name="g.gen",
+                ctx=("main", "[2]"),
+                seq=3,
+                payload={"yielded": {"v": 3}, "idx": 2},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.gen",
+                ctx=("main",),
+                seq=4,
+                payload={"outputs": {}, "status": "ok", "yield_count": 3},
+            ),
         ]
         exp.export(events, "req-1", {})
         # ONE span observation for g.gen (yields folded in)
@@ -290,14 +375,28 @@ class TestYieldsAndAnnotations:
     def test_annotations_land_in_metadata(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.ANNOTATION, op_name="g.x", ctx=("main",), seq=1,
-                payload={"key": "user_id", "value": "u-7"}),
-            _ev(EventKind.ANNOTATION, op_name="g.x", ctx=("main",), seq=2,
-                payload={"key": "tag", "value": "important"}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=3,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.ANNOTATION,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={"key": "user_id", "value": "u-7"},
+            ),
+            _ev(
+                EventKind.ANNOTATION,
+                op_name="g.x",
+                ctx=("main",),
+                seq=2,
+                payload={"key": "tag", "value": "important"},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=3,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         meta = client.batches[0][1]["body"]["metadata"]
@@ -311,10 +410,14 @@ class TestTagsAndMetadata:
         exp, client = _exporter()
         exp.tags = ["prod", "callbot"]
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {"tags": ["live", "prod"]})
         trace = client.batches[0][0]["body"]
@@ -324,10 +427,14 @@ class TestTagsAndMetadata:
     def test_no_tags_means_no_tags_field(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {})
         trace = client.batches[0][0]["body"]
@@ -336,10 +443,14 @@ class TestTagsAndMetadata:
     def test_workflow_name_from_metadata_overrides_default(self):
         exp, client = _exporter()
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         exp.export(events, "req-1", {"workflow_name": "callbot"})
         trace = client.batches[0][0]["body"]
@@ -360,10 +471,14 @@ class TestErrorPropagation:
         exp, _ = _exporter()
         exp._client_cache = _ErrClient()
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {}}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=1,
-                payload={"outputs": {}, "status": "ok"}),
+            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0, payload={"inputs": {}}),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={"outputs": {}, "status": "ok"},
+            ),
         ]
         with pytest.raises(RuntimeError, match="ingestion had 1 error"):
             exp.export(events, "req-1", {})
@@ -393,13 +508,18 @@ class _MediaClient(_MockClient):
         self._fail = fail
         self._counter = 0
 
-    def upload_media(self, *, trace_id, field, content_type, content,
-                     observation_id=None, timeout: int = 30):
-        self.uploads.append({
-            "trace_id": trace_id, "field": field,
-            "content_type": content_type, "content": content,
-            "observation_id": observation_id,
-        })
+    def upload_media(
+        self, *, trace_id, field, content_type, content, observation_id=None, timeout: int = 30
+    ):
+        self.uploads.append(
+            {
+                "trace_id": trace_id,
+                "field": field,
+                "content_type": content_type,
+                "content": content,
+                "observation_id": observation_id,
+            }
+        )
         if self._fail:
             return None
         self._counter += 1
@@ -429,13 +549,27 @@ class TestMediaUpload:
         stripped, refs = extract_media(outputs, "outputs")
 
         events = [
-            _ev(EventKind.OP_START, op_name="g.tts", ctx=("main",), seq=0,
-                payload={"inputs": {"text": "hello"}, "media_refs": []}),
-            _ev(EventKind.OP_END, op_name="g.tts", ctx=("main",), seq=1,
-                payload={"outputs": stripped, "status": "ok",
-                         "duration_ms": 1.0, "yield_count": 0,
-                         "media_refs": refs},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.tts",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {"text": "hello"}, "media_refs": []},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.tts",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "outputs": stripped,
+                    "status": "ok",
+                    "duration_ms": 1.0,
+                    "yield_count": 0,
+                    "media_refs": refs,
+                },
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-media", {})
 
@@ -462,20 +596,41 @@ class TestMediaUpload:
 
         # Vision-shaped input — image is at messages[0].content[1].image_url
         img = Media(data=b"png_bytes", mime_type="image/png")
-        inputs = {"messages": [{"role": "user", "content": [
-            {"type": "text", "text": "what?"},
-            {"type": "image_url", "image_url": img},
-        ]}]}
+        inputs = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what?"},
+                        {"type": "image_url", "image_url": img},
+                    ],
+                }
+            ]
+        }
         stripped_in, refs_in = extract_media(inputs, "inputs")
 
         events = [
-            _ev(EventKind.OP_START, op_name="g.ask", ctx=("main",), seq=0,
-                payload={"inputs": stripped_in, "media_refs": refs_in}),
-            _ev(EventKind.OP_END, op_name="g.ask", ctx=("main",), seq=1,
-                payload={"outputs": {"answer": "a cat"}, "status": "ok",
-                         "duration_ms": 1.0, "yield_count": 0,
-                         "media_refs": []},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.ask",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": stripped_in, "media_refs": refs_in},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.ask",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "outputs": {"answer": "a cat"},
+                    "status": "ok",
+                    "duration_ms": 1.0,
+                    "yield_count": 0,
+                    "media_refs": [],
+                },
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-vision", {})
 
@@ -497,13 +652,27 @@ class TestMediaUpload:
         outputs = {"audio": Media(data=b"x" * 100, mime_type="audio/wav")}
         stripped, refs = extract_media(outputs, "outputs")
         events = [
-            _ev(EventKind.OP_START, op_name="g.tts", ctx=("main",), seq=0,
-                payload={"inputs": {}, "media_refs": []}),
-            _ev(EventKind.OP_END, op_name="g.tts", ctx=("main",), seq=1,
-                payload={"outputs": stripped, "status": "ok",
-                         "duration_ms": 1.0, "yield_count": 0,
-                         "media_refs": refs},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.tts",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {}, "media_refs": []},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.tts",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "outputs": stripped,
+                    "status": "ok",
+                    "duration_ms": 1.0,
+                    "yield_count": 0,
+                    "media_refs": refs,
+                },
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-fail", {})
 
@@ -524,13 +693,27 @@ class TestMediaUpload:
         stripped, refs = extract_media(outputs, "outputs")
 
         events = [
-            _ev(EventKind.OP_START, op_name="g.gen", ctx=("main",), seq=0,
-                payload={"inputs": {}, "media_refs": []}),
-            _ev(EventKind.OP_END, op_name="g.gen", ctx=("main",), seq=1,
-                payload={"outputs": stripped, "status": "ok",
-                         "duration_ms": 1.0, "yield_count": 0,
-                         "media_refs": refs},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.gen",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {}, "media_refs": []},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.gen",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "outputs": stripped,
+                    "status": "ok",
+                    "duration_ms": 1.0,
+                    "yield_count": 0,
+                    "media_refs": refs,
+                },
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-dataurl", {})
 
@@ -541,13 +724,27 @@ class TestMediaUpload:
         client = _MediaClient()
         exp = _exporter_with(client)
         events = [
-            _ev(EventKind.OP_START, op_name="g.x", ctx=("main",), seq=0,
-                payload={"inputs": {"a": 1}, "media_refs": []}),
-            _ev(EventKind.OP_END, op_name="g.x", ctx=("main",), seq=1,
-                payload={"outputs": {"r": 2}, "status": "ok",
-                         "duration_ms": 1.0, "yield_count": 0,
-                         "media_refs": []},
-                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc)),
+            _ev(
+                EventKind.OP_START,
+                op_name="g.x",
+                ctx=("main",),
+                seq=0,
+                payload={"inputs": {"a": 1}, "media_refs": []},
+            ),
+            _ev(
+                EventKind.OP_END,
+                op_name="g.x",
+                ctx=("main",),
+                seq=1,
+                payload={
+                    "outputs": {"r": 2},
+                    "status": "ok",
+                    "duration_ms": 1.0,
+                    "yield_count": 0,
+                    "media_refs": [],
+                },
+                timestamp=datetime(2026, 5, 5, 12, 0, 0, 1000, tzinfo=timezone.utc),
+            ),
         ]
         exp.export(events, "req-clean", {})
         assert client.uploads == []

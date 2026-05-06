@@ -70,10 +70,10 @@ class TestCancelledOpEnd:
             timeout=2.0,
         )
 
-        slow_starts = [e for e in exp.events
-                       if e.kind is EventKind.OP_START and e.op_name == "g.slow"]
-        slow_ends = [e for e in exp.events
-                     if e.kind is EventKind.OP_END and e.op_name == "g.slow"]
+        slow_starts = [
+            e for e in exp.events if e.kind is EventKind.OP_START and e.op_name == "g.slow"
+        ]
+        slow_ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.slow"]
         assert len(slow_starts) == 1, "slow op should have emitted exactly one OP_START"
         assert len(slow_ends) == 1, "slow op should have exactly one OP_END (no double-emit)"
         assert slow_ends[0].payload["status"] == "cancelled"
@@ -99,8 +99,7 @@ class TestCancelledOpEnd:
             timeout=2.0,
         )
 
-        kick_ends = [e for e in exp.events
-                     if e.kind is EventKind.OP_END and e.op_name == "g.kick"]
+        kick_ends = [e for e in exp.events if e.kind is EventKind.OP_END and e.op_name == "g.kick"]
         assert len(kick_ends) == 1
         # The kick op's finally runs to completion before sweep cancels anything
         # at its ctx; status reflects normal completion.

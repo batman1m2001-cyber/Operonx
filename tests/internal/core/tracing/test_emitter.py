@@ -73,19 +73,27 @@ class TestEventEmitterBasics:
 
     def test_llm_usage_event(self):
         p, em = _new_pipeline_emitter()
-        em.llm_usage("ask", ("main",), model="gpt-4o", prompt_tokens=10,
-                     completion_tokens=20, total_tokens=30, cost_usd=0.001)
+        em.llm_usage(
+            "ask",
+            ("main",),
+            model="gpt-4o",
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            cost_usd=0.001,
+        )
         assert p._buffer[0].kind is EventKind.LLM_USAGE
         assert p._buffer[0].payload["model"] == "gpt-4o"
         assert p._buffer[0].payload["total_tokens"] == 30
 
     def test_media_ref_handle_only(self):
         p, em = _new_pipeline_emitter()
-        em.media_ref("tts", ("main",), handle="h-123", mime="audio/wav",
-                     size_bytes=4096)
+        em.media_ref("tts", ("main",), handle="h-123", mime="audio/wav", size_bytes=4096)
         assert p._buffer[0].kind is EventKind.MEDIA_REF
         assert p._buffer[0].payload == {
-            "handle": "h-123", "mime": "audio/wav", "size_bytes": 4096,
+            "handle": "h-123",
+            "mime": "audio/wav",
+            "size_bytes": 4096,
         }
 
     def test_group_context_manager_emits_start_and_end(self):

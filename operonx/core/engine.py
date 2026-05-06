@@ -435,9 +435,12 @@ class Operon:
         # ``LangfuseTracer`` is one). Legacy Tracer subclasses were retired
         # in T2.13.
         effective = tracer if tracer is not None else self._tracer
-        tracers_raw = effective if isinstance(effective, list) else ([effective] if effective else [])
+        tracers_raw = (
+            effective if isinstance(effective, list) else ([effective] if effective else [])
+        )
 
         from operonx.core.tracing.pipeline import TracePipeline as _TracePipeline
+
         pipelines = [t for t in tracers_raw if isinstance(t, _TracePipeline)]
         invalid = [t for t in tracers_raw if not isinstance(t, _TracePipeline)]
         if invalid:
@@ -470,6 +473,7 @@ class Operon:
             NullEmitter as _NullEmitter,
             _current_emitter_var,
         )
+
         if pipelines:
             # First pipeline drives the emitter; secondary pipelines (rare)
             # could subscribe via _push fanout if needed in the future.

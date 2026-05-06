@@ -58,7 +58,10 @@ def trace_filter_to_processors(tf: "TraceFilter") -> List[Processor]:
     iteration scaffolding that the new event model doesn't emit at all.
     """
     from operonx.core.tracing.processors import (
-        DropEmpty, DropOps, KeepOps, TruncateIO,
+        DropEmpty,
+        DropOps,
+        KeepOps,
+        TruncateIO,
     )
 
     out: List[Processor] = []
@@ -93,12 +96,14 @@ def trace_filter_to_processors(tf: "TraceFilter") -> List[Processor]:
         )
     if tf.rewriters:
         import warnings
+
         warnings.warn(
             f"trace_filter_to_processors: wrapping {len(tf.rewriters)} "
             "rewriter(s) via LegacyRewriter. Rewriters consume a tree shape "
             "that doesn't exist in the new pipeline; consider migrating to "
             "GroupBy + Aggregate processors instead.",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
         for r in tf.rewriters:
             out.append(LegacyRewriter(r))

@@ -16,9 +16,7 @@ if TYPE_CHECKING:
     from operonx.core.states.state import MemoryState
 
 
-_current_state_var: contextvars.ContextVar = contextvars.ContextVar(
-    "operonx_current_state"
-)
+_current_state_var: contextvars.ContextVar = contextvars.ContextVar("operonx_current_state")
 
 
 def _set_state(state: "MemoryState") -> contextvars.Token:

@@ -58,12 +58,14 @@ class LangfuseTracer(TracePipeline):
         trace_filter: Optional["TraceFilter"] = None,
     ) -> None:
         import warnings
+
         warnings.warn(
             "LangfuseTracer(...) is deprecated and will be removed in a future "
             "release. Migrate to TracePipeline + LangfuseTreeExporter directly, "
             "or use LangfuseTracer.as_pipeline(...) as a one-line transitional "
             "shim. See docs/TRACING_REDESIGN_PLAN.md §10 (educa migration).",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
 
         if config is None and resource is None:
@@ -78,16 +80,19 @@ class LangfuseTracer(TracePipeline):
 
         # Build the new exporter + processor chain
         from operonx.telemetry.exporters import LangfuseTreeExporter
+
         exporter = LangfuseTreeExporter(
-            config=config, resource=resource, tags=tags,
+            config=config,
+            resource=resource,
+            tags=tags,
         )
-        processors = (
-            trace_filter_to_processors(trace_filter) if trace_filter else []
-        )
+        processors = trace_filter_to_processors(trace_filter) if trace_filter else []
 
         # Initialize as a TracePipeline so the engine routes through the new path
         TracePipeline.__init__(
-            self, processors=processors, exporters=[exporter],
+            self,
+            processors=processors,
+            exporters=[exporter],
         )
 
         # Legacy public attrs — kept so existing callers reading .tags /
@@ -171,14 +176,9 @@ class LangfuseTracer(TracePipeline):
         if trace_filter is None and resource is not None:
             trace_filter = cls._auto_load_trace_filter_from_resource(resource)
 
-        processors = (
-            trace_filter_to_processors(trace_filter) if trace_filter else []
-        )
+        processors = trace_filter_to_processors(trace_filter) if trace_filter else []
 
-        exporter_cls = (
-            LangfuseGroupedTimelineExporter
-            if grouped_timeline else LangfuseTreeExporter
-        )
+        exporter_cls = LangfuseGroupedTimelineExporter if grouped_timeline else LangfuseTreeExporter
         exporter = exporter_cls(config=config, resource=resource, tags=tags)
         return TracePipeline(processors=processors, exporters=[exporter])
 
@@ -201,6 +201,7 @@ class LangfuseTracer(TracePipeline):
 
         try:
             from operonx.core.registry import ResourceHub
+
             config = ResourceHub.instance().get_config(resource)
             raw = config if isinstance(config, dict) else config.model_dump()
             tf_dict = raw.get("trace_filter")

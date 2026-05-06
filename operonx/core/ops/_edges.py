@@ -203,9 +203,7 @@ class ScratchAccessor:
         try:
             state = _current_state_var.get()
         except LookupError as e:
-            raise RuntimeError(
-                f"del SCRATCH[{key!r}] called outside an active run."
-            ) from e
+            raise RuntimeError(f"del SCRATCH[{key!r}] called outside an active run.") from e
         state._scratch.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
