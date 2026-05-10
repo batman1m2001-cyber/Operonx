@@ -456,10 +456,43 @@ class Scheduler:
             for ctx in list(ready):
                 if _is_descendant_or_equal(ctx, ctx_prefix) and ctx != emitter_ctx:
                     ready.pop(ctx, None)
+
+            # Sequential edges: every cancelled (op_name, ctx) that was
+            # holding a `seq_active` slot must release it — otherwise the
+            # next item waiting in `seq_queues` for the same edge stays
+            # stuck forever (the cancelled pump emitted no EOF, so
+            # `_on_eof`'s normal advance path never runs). This mirrors
+            # the EOF advance logic at lines ~363-373: drop the
+            # seq_origins entry, then either dispatch the next queued
+            # item (filtering descendants of ctx_prefix, which are being
+            # swept too) or reset seq_active=False.
             for key in list(seq_origins):
                 _op_name, _ctx = key
-                if _is_descendant_or_equal(_ctx, ctx_prefix) and _ctx != emitter_ctx:
-                    seq_origins.pop(key, None)
+                if not _is_descendant_or_equal(_ctx, ctx_prefix) or _ctx == emitter_ctx:
+                    continue
+
+                seq_key = seq_origins.pop(key, None)
+                if seq_key is None:
+                    continue
+
+                _src, dst = seq_key
+                q = seq_queues.get(seq_key)
+                if not q:
+                    seq_active[seq_key] = False
+                    continue
+
+                # Filter queued ctxs to keep only siblings (not descendants
+                # of the swept prefix — those are being cancelled too).
+                kept = deque(c for c in q if not _is_descendant_or_equal(c, ctx_prefix))
+                if kept:
+                    next_ctx = kept.popleft()
+                    seq_queues[seq_key] = kept
+                    seq_origins[(dst, next_ctx)] = seq_key
+                    dispatch(dst, next_ctx)
+                else:
+                    seq_queues.pop(seq_key, None)
+                    seq_active[seq_key] = False
+
             for key in list(collect_bufs):
                 buf = collect_bufs[key]
                 if any(_is_descendant_or_equal(ictx, ctx_prefix) for ictx, _ in buf):
