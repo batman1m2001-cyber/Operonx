@@ -620,7 +620,6 @@ class TestB1bSequentialAdvanceAfterCancel:
             if op_name == "s" and isinstance(data, dict) and "j" in data
         ]
         assert slow_frames == [], (
-            "subtree sweep should have dropped all queued items; "
-            f"got slow frames {slow_frames}"
+            f"subtree sweep should have dropped all queued items; got slow frames {slow_frames}"
         )
         assert len(h.interrupts) == 1
