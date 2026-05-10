@@ -492,3 +492,134 @@ class TestB14ConsumerQueueNotDrained:
         assert consumer_q.qsize() == 5
         items = [consumer_q.get_nowait() for _ in range(5)]
         assert items == [("audio_frame", i) for i in range(5)]
+
+
+# =============================================================================
+# B1b: Sequential edge advances after cancel
+# =============================================================================
+
+
+class TestB1bSequentialAdvanceAfterCancel:
+    """Regression test for the seq_queues stall on Interrupt.
+
+    Setup: a generator emits N items into a sequential edge (default
+    policy). The active item is cancelled mid-flight by an Interrupt
+    targeting its ctx. The next items waiting in ``seq_queues`` for the
+    same edge MUST advance — otherwise they sit stuck forever and the
+    rest of the work is silently dropped.
+
+    Before the fix, ``_sweep_ctx`` only cleared ``seq_origins`` for the
+    cancelled (op, ctx) pair, leaving ``seq_active[(src,dst)] = True``
+    and ``seq_queues[(src,dst)]`` intact. ``_on_eof`` never ran for the
+    cancelled task (cancellation skips EOF emission), so the advance
+    path that normally fires there never ran either.
+
+    The B11 sibling-dispatch test only exercises the parallel-edge
+    case; this test covers the missing sequential-edge case.
+    """
+
+    @pytest.mark.asyncio
+    async def test_siblings_dispatch_after_active_item_cancel(self):
+        @op
+        def gen3(_signal):
+            yield {"i": 0}
+            yield {"i": 1}
+            yield {"i": 2}
+
+        @op
+        async def slow(i: int):
+            # Sleep long enough that the kicker's Interrupt lands while
+            # i=0 is still mid-await — this is the cancel-the-active-
+            # seq-item case we want to validate.
+            await asyncio.sleep(0.2)
+            return {"j": i}
+
+        @op
+        async def kicker(_signal):
+            # Wait long enough for gen to fan out and slow(i=0) to start
+            # its await. 0.05s is well under slow's 0.2s sleep.
+            await asyncio.sleep(0.05)
+            return Interrupt(ctx_to_cancel=("main", "[0]"), reason="b1b")
+
+        # `gen >> slow` is sequential by default — slow processes items
+        # one at a time. This is the routing where the bug bites.
+        with GraphOp(name="b1b") as g:
+            entry = gen3(_signal=PARENT["seed"])
+            s = slow(i=entry["i"])  # NO .parallel() — sequential edge.
+            k = kicker(_signal=PARENT["seed"])
+            START >> entry >> s >> END
+            START >> k >> END
+
+        engine = Operon(g)
+        h = engine.start(inputs={"seed": "x"})
+        # Wall-clock budget: with three sequential 0.2s items, worst
+        # legitimate case is ~0.6s. Anything beyond ~1s means slow(i=1)
+        # / slow(i=2) never dispatched (the bug).
+        await asyncio.wait_for(h.collect(), timeout=1.5)
+
+        slow_frames = [
+            data
+            for op_name, _ctx, data in h._frames
+            if op_name == "s" and isinstance(data, dict) and "j" in data
+        ]
+        produced_js = sorted(d["j"] for d in slow_frames)
+
+        # i=0 was cancelled mid-await → emits no frame.
+        # i=1 and i=2 should still complete after the seq queue advances.
+        assert produced_js == [1, 2], (
+            f"sequential edge stalled after Interrupt: produced_js={produced_js}; "
+            "expected [1, 2] (item 0 cancelled, items 1 & 2 advance)."
+        )
+        assert len(h.interrupts) == 1
+        assert h.interrupts[0].reason == "b1b"
+
+    @pytest.mark.asyncio
+    async def test_descendant_queued_items_dropped_on_subtree_sweep(self):
+        """A sweep at a parent ctx must drop queued descendants from
+        seq_queues — they're being cancelled too, no point dispatching.
+
+        Targets ``("main",)`` so every per-item ctx ``("main", "[i]")``
+        is a descendant. After the sweep, no slow frames should ever
+        appear, and the engine still terminates cleanly (no hang).
+        """
+
+        @op
+        def gen3(_signal):
+            yield {"i": 0}
+            yield {"i": 1}
+            yield {"i": 2}
+
+        @op
+        async def slow(i: int):
+            await asyncio.sleep(0.2)
+            return {"j": i}
+
+        @op
+        async def kicker(_signal):
+            await asyncio.sleep(0.05)
+            # Sweep the whole subtree — items 1 & 2 are queued at
+            # descendant ctxs and must be dropped, not dispatched.
+            return Interrupt(ctx_to_cancel=("main",), reason="b1c")
+
+        with GraphOp(name="b1c") as g:
+            entry = gen3(_signal=PARENT["seed"])
+            s = slow(i=entry["i"])  # sequential edge.
+            k = kicker(_signal=PARENT["seed"])
+            START >> entry >> s >> END
+            START >> k >> END
+
+        engine = Operon(g)
+        h = engine.start(inputs={"seed": "x"})
+        # Should terminate well under the would-be-serial 0.6s — sweep
+        # cancels in-flight + drops descendants without dispatching them.
+        await asyncio.wait_for(h.collect(), timeout=1.0)
+
+        slow_frames = [
+            data
+            for op_name, _ctx, data in h._frames
+            if op_name == "s" and isinstance(data, dict) and "j" in data
+        ]
+        assert slow_frames == [], (
+            f"subtree sweep should have dropped all queued items; got slow frames {slow_frames}"
+        )
+        assert len(h.interrupts) == 1
