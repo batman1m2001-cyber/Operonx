@@ -53,28 +53,36 @@ type SlotKey = (String, String, ContextId);
 /// Phase 7 will unify them; `MemoryState` is still empty of the concurrency
 /// layer today. This scheduler-local map is intentionally dumb — one lock
 /// wraps the whole thing; the per-op critical sections are tiny anyway.
-#[derive(Debug, Default)]
+/// Type of the per-call scratch space. Shared between the scheduler and
+/// the `ExecutionHandle` so users can read+write SCRATCH from outside the
+/// graph (between `engine.start()` and the next await, or post-run).
+pub type SharedScratch = Arc<Mutex<HashMap<String, Value>>>;
+
+#[derive(Debug)]
 struct RuntimeState {
     slots: HashMap<SlotKey, Value>,
     /// Per-call free-form scratch space. Mirrors Python's
-    /// `MemoryState._scratch`. Read by `InputResolver::Scratch` and
-    /// pre-seeded via `engine.start(scratch=...)`.
-    scratch: HashMap<String, Value>,
+    /// `MemoryState._scratch`. Read by `InputResolver::Scratch`, pre-seeded
+    /// via `engine.start(scratch=...)`, exposed to user code via
+    /// `ExecutionHandle::scratch()`. The shared `Arc<Mutex<>>` means the
+    /// handle and the scheduler see the same map. Lock-order rule: any code
+    /// path that holds the `RuntimeState` mutex may also lock `scratch`;
+    /// nothing locks `RuntimeState` *while holding* `scratch`. Single
+    /// direction → no deadlock risk.
+    scratch: SharedScratch,
 }
 
 impl RuntimeState {
-    #[allow(dead_code)]
-    fn new() -> Self {
-        Self::default()
-    }
-
     /// Pre-size the slot map to roughly fit the graph. Avoids the
     /// log(n) resize cycle that happens when ops `set()` slot keys
     /// during execution.
-    fn with_capacity(cap: usize) -> Self {
+    ///
+    /// `scratch` is shared with the `ExecutionHandle` — the caller (engine)
+    /// owns the `Arc` and pre-seeds it before this `RuntimeState` is built.
+    fn with_capacity(cap: usize, scratch: SharedScratch) -> Self {
         Self {
             slots: HashMap::with_capacity(cap),
-            scratch: HashMap::new(),
+            scratch,
         }
     }
 
@@ -103,8 +111,11 @@ impl RuntimeState {
 
     /// Read scratch value, returning `Value::Null` for missing keys
     /// (matches Python's `SCRATCH[k]` returning `None`).
+    ///
+    /// Briefly locks the shared scratch mutex; caller may already hold the
+    /// `RuntimeState` lock (acquisition order: RuntimeState → scratch).
     fn scratch_get(&self, key: &str) -> Value {
-        self.scratch.get(key).cloned().unwrap_or(Value::Null)
+        self.scratch.lock().get(key).cloned().unwrap_or(Value::Null)
     }
 }
 
@@ -168,6 +179,19 @@ fn is_descendant_or_equal(child: &ContextId, parent: &ContextId) -> bool {
 /// (skip the emitter via `exclude`), then brutal-idempotent post-cleanup
 /// for tasks that were aborted before their wrapper ran. Mirrors Python's
 /// `_sweep_ctx` (plan §4.3 + §4.3a).
+/// Sweep all bookkeeping at descendants of `ctx_prefix`.
+///
+/// Returns a list of `(dst_op_name, next_ctx)` that the caller must spawn —
+/// the sequential-edge advance-on-cancel fix needs to dispatch them outside
+/// the sweep function because spawn_op is a method on `GraphScheduler` and
+/// pulling `self` into a free function isn't worth the lifetime gymnastics.
+///
+/// Mirrors Python's 0.8.1 fix in `_sweep_ctx` (commit 6c7f58b): when a
+/// cancelled `(op, ctx)` was holding a `seq_active` slot, the cancelled
+/// pump emits no EOF so the normal advance path in `on_eof` never runs,
+/// and items queued behind it stall forever. We replicate the EOF advance
+/// inline: pop seq_origins → filter seq_queues to non-descendants of
+/// ctx_prefix → if any kept, advance the next; else reset seq_active=false.
 #[allow(clippy::too_many_arguments)]
 async fn sweep_ctx(
     ctx_prefix: &ContextId,
@@ -178,7 +202,10 @@ async fn sweep_ctx(
     inflight: &mut i32,
     ready: &mut HashMap<ContextId, HashMap<String, i32>>,
     seq_origins: &mut HashMap<(String, ContextId), (String, String)>,
+    seq_queues: &mut HashMap<(String, String), VecDeque<ContextId>>,
+    seq_active: &mut HashMap<(String, String), bool>,
     collect_bufs: &mut HashMap<(String, String), Vec<(ContextId, Map<String, Value>)>>,
+    to_dispatch: &mut Vec<(String, ContextId)>,
 ) {
     // 1. Drain all queued events. Drop those at descendants of ctx_prefix.
     //    Re-enqueue the rest. EOF events at descendants of ctx_prefix get
@@ -251,13 +278,49 @@ async fn sweep_ctx(
     for c in to_clear {
         ready.remove(&c);
     }
+    // Sequential edges: every cancelled (op_name, ctx) holding a seq_active
+    // slot must release it — otherwise the next item in seq_queues for the
+    // same edge stays stuck (cancelled pumps emit no EOF, so on_eof's
+    // advance never runs). Mirrors Python's 0.8.1 fix (commit 6c7f58b).
     let so_keys: Vec<(String, ContextId)> = seq_origins
         .keys()
         .filter(|(_op, c)| is_descendant_or_equal(c, ctx_prefix) && c != emitter_ctx)
         .cloned()
         .collect();
-    for k in so_keys {
-        seq_origins.remove(&k);
+    for key in so_keys {
+        // Pop the seq_origins entry — same as the trivial pre-fix behavior.
+        let Some(seq_key) = seq_origins.remove(&key) else {
+            continue;
+        };
+
+        // Find the queue for the cancelled (src, dst) edge.
+        let Some(q) = seq_queues.get_mut(&seq_key) else {
+            // No queue → no items waiting → release the active slot.
+            seq_active.insert(seq_key, false);
+            continue;
+        };
+
+        // Filter queued ctxs to siblings of (= non-descendants of) the
+        // swept prefix; descendants are being cancelled too, no point
+        // dispatching them.
+        let kept: VecDeque<ContextId> = q
+            .drain(..)
+            .filter(|c| !is_descendant_or_equal(c, ctx_prefix))
+            .collect();
+        if kept.is_empty() {
+            seq_queues.remove(&seq_key);
+            seq_active.insert(seq_key, false);
+            continue;
+        }
+
+        // Advance: pop the next sibling ctx, update bookkeeping, and tell
+        // the caller to spawn that op on that ctx.
+        let mut kept = kept;
+        let next_ctx = kept.pop_front().expect("kept non-empty");
+        *q = kept;
+        seq_origins.insert((seq_key.1.clone(), next_ctx.clone()), seq_key.clone());
+        *inflight += 1;
+        to_dispatch.push((seq_key.1.clone(), next_ctx));
     }
     let cb_keys: Vec<(String, String)> = collect_bufs
         .iter()
@@ -470,7 +533,14 @@ impl GraphScheduler {
         // `run` only emits external frames via `sender.send` for
         // PARENT-bound output ops (and the loop summary frame), so the
         // tap accumulates exactly what we want and nothing else.
-        Scheduler::run(self, inputs, ctx, sender, cancel, None).await?;
+        //
+        // Nested @graph dispatch uses a fresh scratch — the parent's
+        // SCRATCH writes shouldn't bleed into a child run. (Python's
+        // child._scheduler.run inherits scratch but it's a single Arc
+        // anyway; for Rust's run_collect path the parent isolation
+        // makes the model simpler and matches the tap-only invariant.)
+        let nested_scratch = Arc::new(Mutex::new(HashMap::new()));
+        Scheduler::run(self, inputs, ctx, sender, cancel, nested_scratch).await?;
 
         // Merge every captured frame's `data` map. Multiple output ops
         // each contribute their dst_var → value pairs; later frames
@@ -516,9 +586,15 @@ impl Scheduler for GraphScheduler {
         _context: MiddlewareContext,
         sender: FrameSender,
         cancel: CancellationToken,
-        scratch: Option<Map<String, Value>>,
+        scratch: SharedScratch,
     ) -> Result<(), OperonError> {
-        let state = Arc::new(Mutex::new(RuntimeState::with_capacity(self.slot_capacity)));
+        // RuntimeState holds the slot store + a clone of the caller-owned
+        // scratch Arc. Reads/writes from ops flow through this single Arc,
+        // visible to ExecutionHandle::scratch() externally.
+        let state = Arc::new(Mutex::new(RuntimeState::with_capacity(
+            self.slot_capacity,
+            scratch,
+        )));
 
         // Seed PARENT-level inputs at root context. Caller-provided `inputs`
         // override graph-declared literals (e.g. `GraphOp.loop(count=0)` is
@@ -540,13 +616,8 @@ impl Scheduler for GraphScheduler {
             for (k, v) in &inputs {
                 s.set(self.graph_key(), k, &root_ctx, v.clone());
             }
-            // Pre-seed scratch synchronously before any op dispatches —
-            // race-free, mirrors Python's engine.start(scratch=...).
-            if let Some(seed) = scratch {
-                for (k, v) in seed {
-                    s.scratch.insert(k, v);
-                }
-            }
+            // Scratch pre-seeding happens at the engine layer before run()
+            // is called — the Arc landed already populated.
         }
 
         // Drive the graph once (loop re-dispatch below).
@@ -731,7 +802,12 @@ impl GraphScheduler {
                             reason,
                         } => {
                             // Sweep target ctx subtree: drop queued events,
-                            // abort tasks (skip emitter), brutal cleanup.
+                            // abort tasks (skip emitter), brutal cleanup. The
+                            // sweep_ctx call may produce a list of seq-edge
+                            // siblings that should be dispatched now (0.8.1
+                            // fix — the cancelled active item won't emit EOF,
+                            // so we advance the queue inline).
+                            let mut to_dispatch: Vec<(String, ContextId)> = Vec::new();
                             sweep_ctx(
                                 &ctx_to_cancel,
                                 &(emit_op.clone(), emit_ctx.clone()),
@@ -741,9 +817,24 @@ impl GraphScheduler {
                                 &mut inflight,
                                 &mut ready,
                                 &mut seq_origins,
+                                &mut seq_queues,
+                                &mut seq_active,
                                 &mut collect_bufs,
+                                &mut to_dispatch,
                             )
                             .await;
+                            for (dst, next_ctx) in to_dispatch {
+                                self.spawn_op(
+                                    dst,
+                                    next_ctx,
+                                    state.clone(),
+                                    tx.clone(),
+                                    sem.clone(),
+                                    cancel.clone(),
+                                    tasks_by_ctx.clone(),
+                                )
+                                .await?;
+                            }
                             // Forward synthetic `__interrupt__` frame to the
                             // public sender so consumers can react.
                             let mut payload = Map::new();
@@ -2250,7 +2341,8 @@ mod tests {
 
     #[test]
     fn runtime_state_parent_walk_on_read() {
-        let mut s = RuntimeState::new();
+        let scratch = Arc::new(Mutex::new(HashMap::new()));
+        let mut s = RuntimeState::with_capacity(0, scratch);
         let root = default_context();
         s.set("op", "v", &root, Value::from(1));
 

@@ -6,7 +6,9 @@
 // Populated as each subsystem lands in Phase 1+.
 
 pub mod exceptions;
+pub mod handle_api;
 pub mod interrupt;
+pub mod interrupt_seq_cancel;
 pub mod macros;
 pub mod refs;
 pub mod resource_hub_setup;
