@@ -2117,6 +2117,15 @@ async fn execute_op(
             })?;
             child.run_collect(inputs).await
         }
+        OpType::Parser => {
+            // ParserOp reads `text`, `mode`, `schema`, `validators` from the
+            // resolved inputs map; the executor performs the parse +
+            // dot-path extract + type coerce + validator pass. Returns a
+            // success dict on success, or `{"error": "..."}` on failure
+            // (downstream ops can branch on it). Mirrors Python's
+            // `ParserOp._process` returning errors as output (not exception).
+            crate::core::ops::transform::parser_op::execute(inputs).await
+        }
         other => Err(OperonError::Runtime(format!(
             "op type {:?} not yet implemented for {}",
             other, op_cfg.full_name

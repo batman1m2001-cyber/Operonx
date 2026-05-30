@@ -1304,6 +1304,7 @@ dependencies = [
  "ort",
  "parking_lot",
  "prost",
+ "quick-xml",
  "rand 0.8.6",
  "rayon",
  "reqwest",
@@ -1495,6 +1496,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]
