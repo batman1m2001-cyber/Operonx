@@ -16,6 +16,17 @@ has not received any change since the 0.8.0 commit (`bcac42f`) — which itself
 landed only the SCRATCH primitive + Interrupt event mirrors. Tracing pipeline
 rewrite, sequential-edge cancel fix, and 0.8.2 logging perf are Python-only.
 
+### Per-commit audit since Rust 0.7.1 (`c5a839d..HEAD`)
+
+Excluding style/cargo-fmt/docs commits:
+
+| Commit | What | Rust got | Rust gap |
+|---|---|---|---|
+| `bcac42f` (0.8.0) | tracing pipeline + SCRATCH + Interrupt | SCRATCH (`scratch_ref.rs`, scheduler integration), Interrupt scheduler+test | Tracing pipeline (events/emitter/pipeline/processors/legacy/exporters/local_file) + Langfuse exporter 805 LOC + `current_op_var`/`current_emitter` + typed `Interrupt` export + `handle.scratch` + `handle.interrupts` + 0.8.0 BaseOp emitter integration |
+| `6c7f58b` (0.8.1) | `_sweep_ctx` advances seq_queues on cancel | nothing | Same scheduler architecture in Rust → same bug likely |
+| `7252ce3` (0.8.2) | loggings perf short-circuit ndarray/tensor | nothing | Per-language (Python ndarray formatter); not a parity issue |
+| `23667fe` | drop `[otel]` extra after tracing redesign | nothing | Rust still has `telemetry/backends/otel/` (empty). Drop to match intent. |
+
 ## Build
 
 ```

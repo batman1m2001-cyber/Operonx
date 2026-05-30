@@ -152,15 +152,29 @@ Each stage = one PR/commit batch. Each ends with: (a) green `cargo test --worksp
 - Internal tests: mirror [tests/internal/core/tracing/](../../../Operon/tests/internal/core/tracing/) (test_emitter, test_pipeline, test_processors, test_events, test_engine_wiring, test_legacy_adapter, test_local_file_exporter, test_cancellation) — 8 files
 - Shared fixtures `tests/spec/telemetry/tracing/{basic, with_processors, with_interrupt}` — both runtimes emit identical event sequences when fed identical graphs
 
-### Stage 5 — Sequential-edge cancel parity (1 day)
+### Stage 5 — Frame/Interrupt public API + sequential-edge cancel parity (2 days)
 
-**Why:** Python 0.8.1 ([commit 6c7f58b](../../../Operon/)) fixed `_sweep_ctx` to advance `seq_queues` on Interrupt cancel — without it, sequential edges silently pile up behind cancelled ops. The Rust scheduler has the same architecture and may have the same bug.
+**Why:** Frame + cancel parity has four sub-gaps. The 0.8.0 commit added SCRATCH + Interrupt scheduler mirror in Rust but skipped the user-facing API: typed `Interrupt`, `handle.scratch`, `handle.interrupts`. The 0.8.1 fix never landed on Rust at all.
+
+**Sub-gaps:**
+
+| # | Python ([engine.py:191](../../../Operon/operonx/core/engine.py#L191), [ops/_events.py](../../../Operon/operonx/core/ops/_events.py)) | Rust today | Fix |
+|---|---|---|---|
+| 5a | `from operonx.core import Interrupt; return Interrupt(ctx_to_cancel=..., reason=...)` | users hand-build `{"__interrupt__": {...}}` JSON | add `pub struct Interrupt` in `rust/operonx/src/core/ops/_events.rs` (new) w/ `Into<Value>` + lib.rs re-export |
+| 5b | `handle.scratch` returns per-call scratch dict ([engine.py:180](../../../Operon/operonx/core/engine.py#L180)) | no accessor — scratch is scheduler-internal `RuntimeState.scratch` | refactor scratch into shared `Arc<Mutex<HashMap<String, Value>>>` owned by `HandleInner`; scheduler holds a clone; expose `ExecutionHandle::scratch()` |
+| 5c | `handle.interrupts` returns `list[Interrupt]` ([engine.py:191](../../../Operon/operonx/core/engine.py#L191)) | missing | add `ExecutionHandle::interrupts() -> Vec<Interrupt>` — walks `inner.buffered`, filters `op == "__interrupt__"`, deserializes payload |
+| 5d | [0.8.1 fix](../../../Operon/): `_sweep_ctx` advances `seq_queues` on cancel | same architecture, same bug pattern likely | mirror Python regression tests; port fix if any fail |
 
 **Tasks:**
-- Read Python regression tests `TestB1bSequentialAdvanceAfterCancel.{test_siblings_dispatch_after_active_item_cancel, test_descendant_queued_items_dropped_on_subtree_sweep}` in [tests/internal/core/ops/graph/test_interrupt.py](../../../Operon/tests/internal/core/ops/graph/test_interrupt.py)
-- Mirror them in `rust/operonx/tests/internal/core/test_interrupt_seq_cancel.rs`
-- Run — if any fail: port the Python fix from `operonx/core/ops/graph/task_scheduler.py` to Rust scheduler's `sweep_ctx`. The Python fix advances `seq_queues` in the seq_origins cleanup loop, treating cancelled (op, ctx) as synthetic EOF
-- Re-run to confirm green
+- 5a — Create `rust/operonx/src/core/ops/_events.rs` mirroring [Python `_events.py`](../../../Operon/operonx/core/ops/_events.py). `pub struct Interrupt { op, ctx, ctx_to_cancel, reason }` + `From<Interrupt> for Value` producing canonical JSON. Update `parse_interrupt` in scheduler to use shared shape constants from this module.
+- 5b — Refactor `RuntimeState.scratch: HashMap<String, Value>` to `Arc<Mutex<HashMap<String, Value>>>` shared with `HandleInner`. Initial seed via `engine.start(scratch=...)` writes through the shared Arc. Add `ExecutionHandle::scratch(&self) -> std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<String, serde_json::Value>>>` accessor.
+- 5c — Add `ExecutionHandle::interrupts() -> Vec<Interrupt>` — implementation: walk `inner.buffered.lock()`, for each `FrameEvent` with `frame.op == "__interrupt__"`, deserialize `frame.data["__interrupt__"]` into `Interrupt`. Skip malformed entries silently (mirrors Python's `isinstance` filter).
+- 5d — Mirror Python `TestB1bSequentialAdvanceAfterCancel.{test_siblings_dispatch_after_active_item_cancel, test_descendant_queued_items_dropped_on_subtree_sweep}` from [tests/internal/core/ops/graph/test_interrupt.py](../../../Operon/tests/internal/core/ops/graph/test_interrupt.py). Run. If any fail: port fix from [commit 6c7f58b](../../../Operon/) — in `sweep_ctx`'s seq_origins cleanup loop, treat cancelled `(op, ctx)` as synthetic EOF (advance `seq_queues` + reset `seq_active` per Python's lines ~363-373).
+
+**Tests:**
+- Internal: `rust/operonx/tests/internal/core/test_interrupt_api.rs` — covers 5a-5c (typed `Interrupt::default()` builder, `handle.scratch()` round-trip, `handle.interrupts()` list)
+- Internal: `rust/operonx/tests/internal/core/test_interrupt_seq_cancel.rs` — covers 5d (regression tests)
+- Shared fixtures `tests/spec/core/interrupt/{return_typed_interrupt, mid_stream_cancel, nested_ctx_sweep, sequential_edge_advance}` — both runtimes produce identical frame sequences (synthetic `__interrupt__` frame at the same arrival index)
 
 ### Stage 6 — Langfuse exporter port (5 days)
 
