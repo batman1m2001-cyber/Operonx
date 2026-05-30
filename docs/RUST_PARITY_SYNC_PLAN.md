@@ -115,22 +115,32 @@ Each stage = one PR/commit batch. Each ends with: (a) green `cargo test --worksp
 - `rust/operonx/tests/internal/core/test_exceptions.rs` — pattern-match each variant
 - Shared fixtures `tests/spec/core/errors/{missing_input, parser_invalid_json, branch_no_match, condition_unbound}` — both runtimes emit the same `error_kind` field shape
 
-### Stage 3 — Ref evaluator small gaps (1 day)
+### Stage 3 — Ref evaluator gaps: getattr semantics + named unsupported errors (½ day)
 
-**Why:** Rust covers 27/30 Python ref transforms. Missing: `apply`, `call`, `matmul`, `rmatmul`. Bug: `getattr` aliased to `getitem` at [task_scheduler.rs:1430](../../../Operon/rust/operonx/src/core/ops/graph/task_scheduler.rs#L1430).
+**Why (revised after audit):** Rust already covers 27/30 Python ref transforms. Of the 3 "missing":
+
+- `apply` — Python [`_serialize_transforms`](../../../Operon/operonx/core/states/ref.py#L611) **explicitly refuses to serialize** a Python-callable arg to JSON for the Rust backend (raises ValueError pointing users at `@op(rust='...')`). Never reaches Rust. **No Rust impl needed.**
+- `call` — same problem: `ref(args)` requires a callable Value. JSON has no callable values. **No Rust impl needed.**
+- `matmul`/`rmatmul` — `@` operator. Requires ndarray-shaped values. Not used by callbot. Defer to a hypothetical ML-graph Phase.
+
+Real gap: `getattr` is aliased to `getitem` at [task_scheduler.rs:1430](../../../Operon/rust/operonx/src/core/ops/graph/task_scheduler.rs#L1430), which silently returns Null for non-Object values. Python's `getattr(value, name)` raises AttributeError for missing attrs / non-attr-able shapes. Architecture-parity requires the distinction.
+
+Additionally, when an `apply`/`call`/`matmul`/`rmatmul` transform **does** somehow appear in a graph.json (e.g. via Rust-native graph construction), the current `Unknown(name)` catch-all produces a generic error. A named variant per transform makes the failure mode explicit and the error actionable.
 
 **Tasks:**
-- Extend `TransformKind` enum w/ `Apply`, `Call`, `MatMul`, `RMatMul`, `GetAttr`
-- Implement evaluators in `eval_op`:
-  - `apply` → look up fn_name in OpRegistry, call with args
-  - `call` → invoke value as a fn (Rust: only meaningful for fn-typed values; emit clear error for non-callable)
-  - `matmul`/`rmatmul` → require ndarray-shaped inputs; emit clear error if not
-  - `getattr` → on `Value::Object`, return `value[attr]`; on other shapes, error matching Python's AttributeError
-- Wire `compile_op_kind` to map the new transform names
+- Split `TransformKind::GetItem` and `TransformKind::GetAttr` in `eval_op`. Route `"getitem"` → `GetItem`, `"getattr"` → `GetAttr` (currently both → GetItem at line 1430).
+- `GetAttr` impl: on `Value::Object`, return `value[name]`; on any other shape, error with `"AttributeError: '<type>' object has no attribute '<name>'"` matching Python's AttributeError text.
+- Add `TransformKind::{Apply, Call, MatMul, RMatMul}` variants that always error with a clear message naming the unsupported transform and pointing the user at `@op(rust='...')` (mirrors Python's serialization-time refusal at evaluation time).
 
 **Tests:**
-- `rust/operonx/tests/internal/core/test_refs.rs` — one test per transform variant
-- Shared fixtures `tests/spec/core/refs/{apply_user_fn, getattr_dict, comparison_chain}` — both runtimes evaluate to same Value
+- `rust/operonx/tests/internal/core/test_refs.rs` — coverage:
+  - `getitem` on Object/Array works (regression)
+  - `getattr` on Object works
+  - `getattr` on non-Object errors with AttributeError message
+  - `apply` errors with named message
+  - `call` errors with named message
+  - `matmul`/`rmatmul` error with named message
+- Shared fixtures `tests/spec/core/refs/{getattr_dict, getitem_array_index}` — both runtimes produce identical output for the supported cases
 
 ### Stage 4 — Tracing pipeline overhaul (5 days)
 
