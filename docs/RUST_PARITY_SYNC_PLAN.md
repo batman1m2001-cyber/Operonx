@@ -229,13 +229,20 @@ Phase 2. Then come back to Stage 4+6 for full architecture parity.
 - Internal: `rust/operonx/tests/internal/core/test_parser_op.rs` — one test per parser format + per extract pattern + malformed-input error parity
 - Shared fixtures `tests/spec/core/ops/{parser_xml_extract, parser_json_nested, parser_yaml_basic, parser_codefence_strip}`
 
-### Stage 8 — TritonOp gRPC client (5 days)
+### Stage 8 — TritonOp gRPC client (5 days) — BLOCKED on protoc
+
+**Status (2026-05-31): Wall hit.** `prost-build` requires `protoc` at build time; not installed on the host. Need one of:
+- `sudo apt install protobuf-compiler` (needs sudo)
+- Add `protobuf-src` build-dep to vendor protoc into the cargo build
+- Or vendor pre-generated Rust code from a separate `prost-build` host
+
+Tasks remain as documented but blocked on the protoc decision. Recommend revisiting after Stage 4 + Stage 6 (tracing pipeline + Langfuse exporter) which are independent of gRPC infrastructure.
 
 **Why:** [providers/ops/triton.rs:23](../../../Operon/rust/operonx/src/providers/ops/triton.rs#L23) is a stub. Callbot STT goes through this.
 
-**Tasks:**
-- Add `tonic = "0.12"` + `prost = "0.13"` + `prost-build` to `rust/operonx/Cargo.toml`
-- Vendor or generate Triton protos (`grpc_service.proto`)
+**Tasks (when unblocked):**
+- Resolve protoc availability (one of: apt install / `protobuf-src` / `protoc-bin-vendored`)
+- Vendor or generate Triton protos (`grpc_service.proto` from `triton-inference-server/common`)
 - Implement `TritonOp::execute`:
   - Connect via `tonic::transport::Channel`, shared/pooled per `TRITON_URL`
   - Build `ModelInferRequest`, await response, unpack output tensors
@@ -243,7 +250,7 @@ Phase 2. Then come back to Stage 4+6 for full architecture parity.
 - Optional warmup (`warmup()` hook)
 
 **Tests:**
-- Internal: `rust/operonx/tests/internal/providers/test_triton_op.rs` — use a wiremock-style gRPC stub or a real local Triton container in CI
+- Internal: `rust/operonx/tests/internal/providers/test_triton_op.rs` — use a `tonic`-based grpc test server or a real local Triton container in CI
 - Shared fixtures `tests/spec/providers/triton_stt` — both runtimes hit a mock Triton, get identical transcript
 
 ### Stage 9 — OpenAI streaming + ExecutionHandle wiring (4 days)
