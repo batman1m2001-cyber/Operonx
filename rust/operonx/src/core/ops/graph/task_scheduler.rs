@@ -142,7 +142,10 @@ enum SchedulerEvent {
 /// `op.run()` recognises an `Interrupt` instance via `isinstance` and
 /// forwards it onto the scheduler queue without `store_result`.
 fn parse_interrupt(value: &Value) -> Option<(ContextId, String)> {
-    let payload = value.as_object()?.get("__interrupt__")?.as_object()?;
+    let payload = value
+        .as_object()?
+        .get(crate::core::ops::events::INTERRUPT_KEY)?
+        .as_object()?;
     let ctx_arr = payload.get("ctx_to_cancel")?.as_array()?;
     let ctx: ContextId = ctx_arr
         .iter()

@@ -142,7 +142,18 @@ Additionally, when an `apply`/`call`/`matmul`/`rmatmul` transform **does** someh
   - `matmul`/`rmatmul` error with named message
 - Shared fixtures `tests/spec/core/refs/{getattr_dict, getitem_array_index}` — both runtimes produce identical output for the supported cases
 
-### Stage 4 — Tracing pipeline overhaul (5 days)
+### Note on stage ordering — Stage 4+6 deferred after 5/7/8/9
+
+Stage 4 (tracing pipeline) and Stage 6 (Langfuse exporter) are coupled (the
+exporter feeds the pipeline) and require deleting Rust's old `collector.rs`,
+`flush_worker.rs`, `labels.rs`, `local.rs`, `models.rs`, `tracers/{operon_eyes,
+otel}.rs`, and rewiring engine.rs + telemetry/tracers/langfuse.rs. ~2 weeks
+of focused work.
+
+Stages 5, 7, 8, 9 are independent and callbot-critical. Done first to unblock
+Phase 2. Then come back to Stage 4+6 for full architecture parity.
+
+### Stage 4 — Tracing pipeline overhaul (5 days) — DEFERRED until after 5/7/8/9
 
 **Why:** Python 0.8.0 ([commit bcac42f](../../../Operon/)) deleted `tracing/{collector, flush_worker, labels, local, _base, operon_eyes, otel}.py` and added `tracing/{events, emitter, pipeline, processors/{drop, group, redact, sample, truncate}, legacy, exporters/local_file}.py` (~2500 LOC). Rust got 0 mirror files.
 
