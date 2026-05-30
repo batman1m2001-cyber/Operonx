@@ -97,7 +97,7 @@ fn template_to_messages(
             .iter()
             .map(|item| format_value(item, vars, template))
             .collect(),
-        other => Err(OperonError::Op(OpError::Prompt(format!(
+        other => Err(OperonError::Op(OpError::prompt_msg(format!(
             "template must be null, string, object, or array — got {}",
             kind_name(other)
         )))),
@@ -183,11 +183,13 @@ fn format_string(
         }
     }
     if !missing.is_empty() {
-        return Err(OperonError::Op(OpError::Prompt(format!(
-            "missing template variable(s): {} (template={})",
-            missing.join(", "),
-            template
-        ))));
+        return Err(OperonError::Op(OpError::Prompt {
+            message: format!("missing template variable(s): {}", missing.join(", ")),
+            template_type: "str".into(),
+            template: template.to_string(),
+            missing_vars: missing.clone(),
+            original_error: None,
+        }));
     }
     Ok(out)
 }

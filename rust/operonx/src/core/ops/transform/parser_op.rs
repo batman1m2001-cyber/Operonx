@@ -54,9 +54,12 @@ impl BaseOp for ParserOp {
         // Phase 4: read input_text from `_inputs`, strip code fences if present,
         // parse via serde_json / quick-xml / serde_yaml per `self.parse_as`,
         // apply dot-path extraction per `self.extract_fields`, return map.
-        Err(OperonError::Op(OpError::Parser(format!(
-            "ParserOp::exec_core not yet implemented (phase 1 scaffold for {})",
-            self.meta.full_name
-        ))))
+        Err(OperonError::Op(OpError::parser_msg(
+            format!(
+                "ParserOp::exec_core not yet implemented (phase 1 scaffold for {})",
+                self.meta.full_name
+            ),
+            "unknown",
+        )))
     }
 }

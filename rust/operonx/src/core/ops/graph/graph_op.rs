@@ -75,9 +75,12 @@ impl BaseOp for GraphOp {
         _inputs: Map<String, Value>,
         _ctx: &OpContext<'_>,
     ) -> Result<Option<Value>, OperonError> {
-        Err(OperonError::Op(OpError::Code(format!(
-            "nested GraphOp::exec_core not yet implemented (Phase 4 scaffolding for '{}')",
-            self.meta.full_name
-        ))))
+        Err(OperonError::Op(OpError::code_msg(
+            format!(
+                "nested GraphOp::exec_core not yet implemented (Phase 4 scaffolding for '{}')",
+                self.meta.full_name
+            ),
+            self.meta.full_name.clone(),
+        )))
     }
 }
