@@ -1371,7 +1371,23 @@ enum TransformKind {
     Gt,
     Ge,
     Contains,
-    GetItem, // also handles `getattr`
+    GetItem,
+    /// Python `getattr(value, name)` semantics — distinct from `GetItem` for
+    /// parity with Python's AttributeError on non-attr-able shapes. Behaves
+    /// identically to `GetItem` for `Value::Object`, errors for non-objects.
+    GetAttr,
+    /// Python `Ref.apply(callable, *args, **kwargs)` — refused at Python's
+    /// `_serialize_transforms` because callables can't cross JSON. If this
+    /// variant somehow reaches Rust, error with a Python-aligned message.
+    Apply,
+    /// Python `ref(args, kwargs)` — same story as `Apply`; callables can't
+    /// be serialized.
+    Call,
+    /// Python `value @ other` (matrix multiply). Requires ndarray-shaped
+    /// values; not supported by the JSON `Value` runtime.
+    MatMul,
+    /// Reflected `other @ value`.
+    RMatMul,
     And,
     RAnd,
     Or,
@@ -1427,7 +1443,12 @@ fn compile_op(t: &RefTransform, graph_key: &str) -> CompiledOp {
         "gt" => TransformKind::Gt,
         "ge" => TransformKind::Ge,
         "contains" => TransformKind::Contains,
-        "getitem" | "getattr" => TransformKind::GetItem,
+        "getitem" => TransformKind::GetItem,
+        "getattr" => TransformKind::GetAttr,
+        "apply" => TransformKind::Apply,
+        "call" => TransformKind::Call,
+        "matmul" => TransformKind::MatMul,
+        "rmatmul" => TransformKind::RMatMul,
         "and_" => TransformKind::And,
         "rand_" => TransformKind::RAnd,
         "or_" => TransformKind::Or,
@@ -1521,6 +1542,31 @@ fn eval_op(
         Ge => cmp_op(&value, &arg0()?, |o| o.is_ge()),
         Contains => Ok(Value::Bool(value_contains(&value, &arg0()?))),
         GetItem => Ok(value_getitem(&value, &arg0()?)),
+        GetAttr => value_getattr(&value, &arg0()?),
+        Apply => Err(OperonError::Runtime(
+            "ref transform 'apply' is not supported in the Rust runtime — \
+             Python callables cannot cross the JSON wire format. \
+             Replace `Ref.apply(...)` with `@op(rust='...')` that does the same logic."
+                .into(),
+        )),
+        Call => Err(OperonError::Runtime(
+            "ref transform 'call' is not supported in the Rust runtime — \
+             callable values cannot be JSON-serialized. \
+             Replace `ref(...)` with a dedicated `@op(rust='...')`."
+                .into(),
+        )),
+        MatMul => Err(OperonError::Runtime(
+            "ref transform 'matmul' is not supported in the Rust runtime — \
+             matrix multiplication requires ndarray-shaped values not present \
+             in the JSON `Value` model."
+                .into(),
+        )),
+        RMatMul => Err(OperonError::Runtime(
+            "ref transform 'rmatmul' is not supported in the Rust runtime — \
+             matrix multiplication requires ndarray-shaped values not present \
+             in the JSON `Value` model."
+                .into(),
+        )),
         And => {
             if !value_truthy(&value) {
                 Ok(value)
@@ -1823,6 +1869,38 @@ fn value_contains(haystack: &Value, needle: &Value) -> bool {
             _ => false,
         },
         _ => false,
+    }
+}
+
+/// Python `getattr(value, name)` semantics. On `Value::Object`, returns
+/// the keyed entry (matching `getitem` for dicts). On any other shape,
+/// errors with a message mirroring Python's
+/// `AttributeError: '<type>' object has no attribute '<name>'` — the JSON
+/// `Value` model has no attribute concept outside of object keys.
+fn value_getattr(value: &Value, key: &Value) -> Result<Value, OperonError> {
+    let name = key
+        .as_str()
+        .ok_or_else(|| OperonError::Runtime(format!("getattr expects str name, got {:?}", key)))?;
+    match value {
+        Value::Object(map) => Ok(map.get(name).cloned().unwrap_or(Value::Null)),
+        other => Err(OperonError::Runtime(format!(
+            "AttributeError: '{}' object has no attribute '{}'",
+            json_type_name(other),
+            name
+        ))),
+    }
+}
+
+/// Python-style type name for `Value`, used in AttributeError-equivalent
+/// messages so the architecture-parity contract holds for getattr errors.
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "str",
+        Value::Array(_) => "list",
+        Value::Object(_) => "dict",
     }
 }
 

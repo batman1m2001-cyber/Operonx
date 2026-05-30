@@ -8,5 +8,6 @@
 pub mod exceptions;
 pub mod interrupt;
 pub mod macros;
+pub mod refs;
 pub mod resource_hub_setup;
 pub mod stream_policy;
