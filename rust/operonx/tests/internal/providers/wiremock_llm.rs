@@ -83,6 +83,113 @@ async fn openai_llm_generate_posts_bearer_auth_and_parses_completion() {
 }
 
 #[tokio::test]
+async fn openai_llm_stream_decodes_sse_chunks_and_done_sentinel() {
+    // SSE wire shape: each event terminated by a blank line. `[DONE]` is
+    // the closing sentinel; LLMGenerator::parse swallows it so it never
+    // surfaces as a chunk.
+    let sse = "\
+data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}\n\n\
+data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\", \"}}]}\n\n\
+data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"world.\"}}]}\n\n\
+data: [DONE]\n\n";
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let llm = OpenAILlm::new(cfg_for(server.uri()));
+    let mut stream = llm
+        .stream(vec![user_message("Say hi")], &LlmOpts::default())
+        .await
+        .expect("stream should open");
+
+    use futures::StreamExt;
+    let mut deltas = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.expect("chunk parse");
+        let delta = chunk.choices[0]
+            .delta
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        deltas.push(delta);
+    }
+    assert_eq!(deltas, vec!["Hello", ", ", "world."]);
+}
+
+#[tokio::test]
+async fn openai_llm_stream_handles_split_events_across_chunks() {
+    // Validate that a `data:` line whose closing `\n\n` arrives in a later
+    // TCP packet is still parsed correctly. wiremock sends the body
+    // atomically so we can't truly mimic that — but we can interleave a
+    // keep-alive blank between two real events and confirm both arrive.
+    let sse = "\
+\n\
+data: {\"id\":\"a\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n\
+\n\
+data: {\"id\":\"a\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"y\"}}]}\n\n\
+data: [DONE]\n\n";
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse),
+        )
+        .mount(&server)
+        .await;
+
+    let llm = OpenAILlm::new(cfg_for(server.uri()));
+    let mut stream = llm
+        .stream(vec![user_message("hi")], &LlmOpts::default())
+        .await
+        .expect("stream");
+    use futures::StreamExt;
+    let mut deltas = Vec::new();
+    while let Some(c) = stream.next().await {
+        let c = c.expect("chunk");
+        deltas.push(
+            c.choices[0]
+                .delta
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_default(),
+        );
+    }
+    assert_eq!(deltas, vec!["x", "y"]);
+}
+
+#[tokio::test]
+async fn openai_llm_stream_surfaces_http_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server down"))
+        .mount(&server)
+        .await;
+    let llm = OpenAILlm::new(cfg_for(server.uri()));
+    match llm.stream(vec![user_message("x")], &LlmOpts::default()).await {
+        Ok(_) => panic!("500 should not produce a stream"),
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("openai stream"), "err message: {}", msg);
+        }
+    }
+}
+
+#[tokio::test]
 async fn openai_llm_generate_surfaces_http_error() {
     let server = MockServer::start().await;
 

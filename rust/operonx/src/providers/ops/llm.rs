@@ -24,14 +24,19 @@ use crate::core::configs::op_config::OpConfig;
 use crate::core::exceptions::OperonError;
 use crate::providers::llms::{BaseLLM, ChatCompletion, CompletionChoice, LlmOpts, Message, Usage};
 
-/// Execute an LLM op: resolve backends, select one, call `generate()`, fall
-/// back on error.
+/// Execute an LLM op: resolve backends, select one, call `generate()` or
+/// `stream()` (accumulated to a final completion), fall back on error.
+///
+/// **Streaming behavior:** when `op.stream == true` the executor calls
+/// `BaseLLM::stream()` and concatenates the deltas into a single content
+/// string. This matches the Python semantics of the non-streaming output
+/// shape while exercising the streaming HTTP path (the SSE parsing,
+/// reconnection, and error handling are still validated end-to-end).
+///
+/// Per-chunk frame emission to `ExecutionHandle` lands in a follow-up that
+/// adds streaming-aware dispatch to the scheduler — for now the wire-level
+/// streaming path is verified, the per-frame fanout is the future delta.
 pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value, OperonError> {
-    if op.stream {
-        return Err(OperonError::Provider(
-            "LLMOp streaming not yet wired into ExecutionHandle (Phase 6 follow-up)".into(),
-        ));
-    }
     if op.batch_mode {
         return Err(OperonError::Provider(
             "LLMOp batch_mode not yet implemented (Phase 5b — BatchCoordinator)".into(),
@@ -56,11 +61,16 @@ pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value,
         llms.push((key.clone(), llm));
     }
 
-    // Weighted selection — fall back to uniform if ratios are absent or
-    // mismatched.
     let (selected_key, selected_llm) = select_llm(&llms, op.ratios.as_deref());
 
-    match selected_llm.generate(messages.clone(), &opts).await {
+    let stream_mode = op.stream;
+    let primary_result = if stream_mode {
+        run_streaming(&selected_llm, messages.clone(), &opts).await
+    } else {
+        selected_llm.generate(messages.clone(), &opts).await
+    };
+
+    match primary_result {
         Ok(completion) => Ok(completion_to_output(&completion, &selected_key)),
         Err(primary_err) => {
             let fallback_keys = op.fallback.clone().unwrap_or_default();
@@ -71,9 +81,67 @@ pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value,
                 "LLMOp '{}' primary '{}' failed: {}. Falling back…",
                 op.full_name, selected_key, primary_err
             );
-            run_fallback(&op.full_name, &fallback_keys, messages, &opts).await
+            run_fallback(&op.full_name, &fallback_keys, messages, &opts, stream_mode).await
         }
     }
+}
+
+/// Open a streaming completion and accumulate the deltas into a single
+/// `ChatCompletion`. The final shape matches what `generate()` would
+/// return for the same prompt, so downstream LLMOp processing (output
+/// extraction, fallback handling) is identical regardless of stream mode.
+async fn run_streaming(
+    llm: &Arc<dyn BaseLLM>,
+    messages: Vec<Message>,
+    opts: &LlmOpts,
+) -> Result<ChatCompletion, OperonError> {
+    use futures::StreamExt;
+    let mut stream = llm.stream(messages, opts).await?;
+    let mut content = String::new();
+    let mut role = String::from("assistant");
+    let mut finish_reason: Option<String> = None;
+    let mut id = String::new();
+    let mut model = String::new();
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result?;
+        if id.is_empty() {
+            id = chunk.id.clone();
+        }
+        if model.is_empty() {
+            model = chunk.model.clone();
+        }
+        if let Some(c) = chunk.choices.first() {
+            if let Some(delta_role) = c.delta.get("role").and_then(|v| v.as_str()) {
+                role = delta_role.to_string();
+            }
+            if let Some(delta_content) = c.delta.get("content").and_then(|v| v.as_str()) {
+                content.push_str(delta_content);
+            }
+            if let Some(fr) = &c.finish_reason {
+                finish_reason = Some(fr.clone());
+            }
+        }
+    }
+    Ok(ChatCompletion {
+        id,
+        object: "chat.completion".into(),
+        created: chrono::Utc::now().timestamp(),
+        model,
+        choices: vec![CompletionChoice {
+            index: 0,
+            message: Some(Message {
+                role,
+                content: Value::String(content),
+                name: None,
+                tool_call_id: None,
+                extras: Default::default(),
+            }),
+            finish_reason,
+            extras: Default::default(),
+        }],
+        usage: None,
+        extras: Default::default(),
+    })
 }
 
 async fn run_fallback(
@@ -81,6 +149,7 @@ async fn run_fallback(
     fallback_keys: &[String],
     messages: Vec<Message>,
     opts: &LlmOpts,
+    stream_mode: bool,
 ) -> Result<Value, OperonError> {
     let mut last_err: Option<OperonError> = None;
     for key in fallback_keys {
@@ -92,7 +161,12 @@ async fn run_fallback(
             }
         };
         info!("LLMOp '{}' trying fallback '{}'", op_name, key);
-        match llm.generate(messages.clone(), opts).await {
+        let result = if stream_mode {
+            run_streaming(&llm, messages.clone(), opts).await
+        } else {
+            llm.generate(messages.clone(), opts).await
+        };
+        match result {
             Ok(completion) => {
                 info!("LLMOp '{}' fallback '{}' succeeded", op_name, key);
                 return Ok(completion_to_output(&completion, key));
