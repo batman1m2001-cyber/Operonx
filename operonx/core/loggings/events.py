@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .formatters import _summarize_array_like
+
 # Load templates once at import time
 _TEMPLATES = json.loads((Path(__file__).parent / "log_templates.json").read_text())
 
@@ -114,6 +116,10 @@ def format_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
     if isinstance(data, bytes):
         return f"<bytes {len(data)}>"
 
+    arr = _summarize_array_like(data)
+    if arr is not None:
+        return arr
+
     if isinstance(data, dict):
         if not data:
             return "{}"
@@ -135,8 +141,12 @@ def format_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
             elif isinstance(v, (list, tuple)):
                 val = f"<{type(v).__name__} {len(v)}>"
             else:
-                s = str(v)
-                val = f"{s[:50]}..." if len(s) > 50 else s
+                arr_v = _summarize_array_like(v)
+                if arr_v is not None:
+                    val = arr_v
+                else:
+                    s = str(v)
+                    val = f"{s[:50]}..." if len(s) > 50 else s
             parts.append(f"{k}={val}")
         return "{" + ", ".join(parts) + "}"
 
@@ -153,8 +163,12 @@ def format_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
             elif isinstance(v, (bool, int, float)):
                 parts.append(str(v))
             else:
-                s = str(v)
-                parts.append(f"{s[:30]}..." if len(s) > 30 else s)
+                arr_v = _summarize_array_like(v)
+                if arr_v is not None:
+                    parts.append(arr_v)
+                else:
+                    s = str(v)
+                    parts.append(f"{s[:30]}..." if len(s) > 30 else s)
         bracket = "[]" if isinstance(data, list) else "()"
         return bracket[0] + ", ".join(parts) + bracket[1]
 

@@ -1,10 +1,28 @@
 """Các tiện ích format log."""
 
-from typing import Any
+from typing import Any, Optional
 
 # Indent cho log nhiều dòng
 # Rich tự động indent các dòng tiếp theo để căn chỉnh với phần đầu message
 LOG_INDENT = "  "  # Indent nhỏ để phân cấp trực quan
+
+
+def _summarize_array_like(v: Any) -> Optional[str]:
+    """Return a one-line summary for ndarray/tensor-like values.
+
+    Without this, the unknown-type fallback below calls `str(v)`, which for
+    a numpy/torch array triggers full element-by-element pretty-printing
+    (~1-3 ms for a 512-float audio chunk). Per-op INFO logs run tens of
+    times/sec/call, so on hot paths this single fallback can saturate the
+    asyncio event loop. Detect duck-typed arrays (`.shape` + `.dtype`) and
+    short-circuit to a fixed-cost summary — no numpy import required.
+    """
+    if hasattr(v, "shape") and hasattr(v, "dtype"):
+        try:
+            return f"<{type(v).__name__} shape={tuple(v.shape)} dtype={v.dtype}>"
+        except Exception:
+            return None
+    return None
 
 
 def log_break(text: str = "") -> str:
@@ -59,6 +77,10 @@ def format_log_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
     if isinstance(data, bytes):
         return f"[muted]<bytes {len(data)}>[/muted]"
 
+    arr = _summarize_array_like(data)
+    if arr is not None:
+        return f"[muted]{arr}[/muted]"
+
     if isinstance(data, dict):
         if not data:
             return "{}"
@@ -81,8 +103,12 @@ def format_log_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
             elif isinstance(v, (list, tuple)):
                 val = f"[muted]<{type(v).__name__} {len(v)}>[/muted]"
             else:
-                s = str(v)
-                val = f"[value]{s[:50]}...[/value]" if len(s) > 50 else f"[value]{s}[/value]"
+                arr_v = _summarize_array_like(v)
+                if arr_v is not None:
+                    val = f"[muted]{arr_v}[/muted]"
+                else:
+                    s = str(v)
+                    val = f"[value]{s[:50]}...[/value]" if len(s) > 50 else f"[value]{s}[/value]"
             parts.append(f"{k}={val}")
         return "{" + ", ".join(parts) + "}"
 
@@ -100,10 +126,14 @@ def format_log_data(data: Any, max_str: int = 80, max_items: int = 8) -> str:
             elif isinstance(v, (bool, int, float)):
                 parts.append(f"[value]{v}[/value]")
             else:
-                s = str(v)
-                parts.append(
-                    f"[value]{s[:30]}...[/value]" if len(s) > 30 else f"[value]{s}[/value]"
-                )
+                arr_v = _summarize_array_like(v)
+                if arr_v is not None:
+                    parts.append(f"[muted]{arr_v}[/muted]")
+                else:
+                    s = str(v)
+                    parts.append(
+                        f"[value]{s[:30]}...[/value]" if len(s) > 30 else f"[value]{s}[/value]"
+                    )
         bracket = "[]" if isinstance(data, list) else "()"
         return bracket[0] + ", ".join(parts) + bracket[1]
 
