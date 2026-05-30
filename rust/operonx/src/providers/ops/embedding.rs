@@ -22,12 +22,12 @@ pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value,
 
     match backend.run(texts.clone(), &opts).await {
         Ok(result) => Ok(json!({"embeddings": result.embeddings})),
-        Err(e) => Err(OperonError::Op(OpError::Embedding(format!(
-            "embedding backend '{}' failed for {} texts: {}",
-            key,
-            texts.len(),
-            e
-        )))),
+        Err(e) => Err(OperonError::Op(OpError::Embedding {
+            message: format!("embedding backend '{}' failed", key),
+            resource: key.to_string(),
+            text_count: texts.len(),
+            original_error: Some(e.to_string()),
+        })),
     }
 }
 

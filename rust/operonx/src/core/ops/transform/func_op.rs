@@ -50,9 +50,12 @@ impl BaseOp for FuncOp {
         // Phase 6 will implement: look up `self.func_name` in the `#[op]` registry
         // (built on `inventory`), deserialize inputs into the fn's typed signature
         // (via the `#[op]` wrapper), invoke, serialize return → Value.
-        Err(OperonError::Op(OpError::Code(format!(
-            "FuncOp::exec_core not yet implemented (phase 1 scaffold for func_name={:?})",
-            self.func_name
-        ))))
+        Err(OperonError::Op(OpError::code_msg(
+            format!(
+                "FuncOp::exec_core not yet implemented (phase 1 scaffold for func_name={:?})",
+                self.func_name
+            ),
+            self.func_name.clone(),
+        )))
     }
 }

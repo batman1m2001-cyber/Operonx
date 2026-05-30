@@ -53,9 +53,12 @@ impl BaseOp for BranchOp {
         // Phase 3/4 will implement: walk `self.branch.cases`, evaluate each
         // `condition` ref via the ref evaluator, return the first match's
         // target name in `{"__branch_target__": target, "matched": "..."}`.
-        Err(OperonError::Op(OpError::Branch(format!(
-            "BranchOp::exec_core not yet implemented (phase 1 scaffold for {})",
-            self.meta.full_name
-        ))))
+        Err(OperonError::Op(OpError::branch_msg(
+            format!(
+                "BranchOp::exec_core not yet implemented (phase 1 scaffold for {})",
+                self.meta.full_name
+            ),
+            "",
+        )))
     }
 }

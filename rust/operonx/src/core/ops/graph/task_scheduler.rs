@@ -1730,10 +1730,13 @@ fn resolve_inputs(
             InputResolver::Scratch(key) => state.lock().scratch_get(key),
             InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
             InputResolver::RequiredMissing => {
-                return Err(OperonError::Op(OpError::Code(format!(
-                    "op '{}': required input '{}' not provided",
-                    op_cfg.full_name, slot.var
-                ))));
+                return Err(OperonError::Op(OpError::code_msg(
+                    format!(
+                        "op '{}': required input '{}' not provided",
+                        op_cfg.full_name, slot.var
+                    ),
+                    op_cfg.full_name.clone(),
+                )));
             }
             InputResolver::Null => Value::Null,
         };
