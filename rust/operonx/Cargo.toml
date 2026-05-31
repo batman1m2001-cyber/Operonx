@@ -54,9 +54,13 @@ tokenizers                   = { workspace = true, optional = true }
 tonic                        = { workspace = true, optional = true }
 prost                        = { workspace = true, optional = true }
 
+[build-dependencies]
+tonic-build                  = { workspace = true }
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
+tokio-stream = { version = "0.1", features = ["net"] }
 
 # Each example under `examples/rust/<name>/` is now an independent crate
 # with its own `Cargo.toml` and `src/main.rs`. Run any example with
