@@ -61,3 +61,4 @@ tokenizers         = "0.20"
 # Triton
 tonic              = "0.12"
 prost              = "0.13"
+tonic-build        = "0.12"
