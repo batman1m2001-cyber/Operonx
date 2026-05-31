@@ -6,5 +6,6 @@
 
 pub mod iteration;
 pub mod ops;
+pub mod refs;
 pub mod scheduler;
 pub mod state;
