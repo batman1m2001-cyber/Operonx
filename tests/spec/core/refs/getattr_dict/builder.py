@@ -4,7 +4,7 @@ Locks Stage-3 architecture: Rust's GetAttr variant on Value::Object
 behaves like GetItem (returns the keyed entry).
 """
 
-from operonx.core import END, GraphOp, PARENT, START, op
+from operonx.core import END, PARENT, START, GraphOp, op
 
 
 @op

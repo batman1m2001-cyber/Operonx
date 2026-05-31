@@ -840,7 +840,13 @@ impl Operon {
         let task = tokio::spawn(async move {
             let sender_finish = sender.clone();
             let result = scheduler
-                .run(inputs, run_ctx.clone(), sender.clone(), cancel_run, scratch_arc)
+                .run(
+                    inputs,
+                    run_ctx.clone(),
+                    sender.clone(),
+                    cancel_run,
+                    scratch_arc,
+                )
                 .await;
             match &result {
                 Ok(()) => sender_finish.finish().await,

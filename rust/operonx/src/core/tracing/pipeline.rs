@@ -31,12 +31,7 @@ pub trait Exporter: Send + Sync {
     fn name(&self) -> &'static str {
         "unnamed"
     }
-    async fn export(
-        &self,
-        events: Vec<TraceEvent>,
-        request_id: String,
-        metadata: ExportMetadata,
-    );
+    async fn export(&self, events: Vec<TraceEvent>, request_id: String, metadata: ExportMetadata);
 }
 
 /// Decides whether to flush after each emitted event.
@@ -230,7 +225,9 @@ impl TracePipelineBuilder {
         TracePipeline {
             processors: self.processors,
             exporters: self.exporters,
-            flush_strategy: self.flush_strategy.unwrap_or_else(|| Arc::new(AtScheduledExit)),
+            flush_strategy: self
+                .flush_strategy
+                .unwrap_or_else(|| Arc::new(AtScheduledExit)),
             max_buffered_events: self.max_buffered_events.unwrap_or(100_000),
             buffer: Mutex::new(Vec::new()),
             overflow_warned: Mutex::new(false),

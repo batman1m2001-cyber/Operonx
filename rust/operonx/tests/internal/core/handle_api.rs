@@ -254,6 +254,5 @@ fn handle_scratch_type_is_hash_map_string_value() {
     // Smoke check that the exposed type is the documented `Arc<Mutex<HashMap>>`.
     use parking_lot::Mutex;
     use std::sync::Arc;
-    let _t: Arc<Mutex<HashMap<String, Value>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let _t: Arc<Mutex<HashMap<String, Value>>> = Arc::new(Mutex::new(HashMap::new()));
 }

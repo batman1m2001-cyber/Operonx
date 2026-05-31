@@ -272,8 +272,14 @@ impl OpError {
                 format_type,
                 ..
             } => vec![
-                ("format".into(), fmt_context_value(&ContextValue::Str(format_type.clone()))),
-                ("input".into(), fmt_context_value(&ContextValue::Str(input_text.clone()))),
+                (
+                    "format".into(),
+                    fmt_context_value(&ContextValue::Str(format_type.clone())),
+                ),
+                (
+                    "input".into(),
+                    fmt_context_value(&ContextValue::Str(input_text.clone())),
+                ),
             ],
             OpError::Code {
                 function_name,
@@ -286,9 +292,18 @@ impl OpError {
                     .map(|(k, v)| (k.clone(), ContextValue::Str(truncate(v, 100))))
                     .collect();
                 vec![
-                    ("function_name".into(), fmt_context_value(&ContextValue::Str(function_name.clone()))),
-                    ("source".into(), fmt_context_value(&ContextValue::Str(truncate(source, 300)))),
-                    ("inputs".into(), fmt_context_value(&ContextValue::Dict(inputs_map))),
+                    (
+                        "function_name".into(),
+                        fmt_context_value(&ContextValue::Str(function_name.clone())),
+                    ),
+                    (
+                        "source".into(),
+                        fmt_context_value(&ContextValue::Str(truncate(source, 300))),
+                    ),
+                    (
+                        "inputs".into(),
+                        fmt_context_value(&ContextValue::Dict(inputs_map)),
+                    ),
                 ]
             }
             OpError::Branch {
@@ -302,12 +317,21 @@ impl OpError {
                     .map(|(k, v)| (k.clone(), ContextValue::Str(truncate(v, 100))))
                     .collect();
                 vec![
-                    ("condition".into(), fmt_context_value(&ContextValue::Str(condition.clone()))),
-                    ("inputs".into(), fmt_context_value(&ContextValue::Dict(inputs_map))),
+                    (
+                        "condition".into(),
+                        fmt_context_value(&ContextValue::Str(condition.clone())),
+                    ),
+                    (
+                        "inputs".into(),
+                        fmt_context_value(&ContextValue::Dict(inputs_map)),
+                    ),
                     (
                         "candidates".into(),
                         fmt_context_value(&ContextValue::List(
-                            candidates.iter().map(|c| ContextValue::Str(c.clone())).collect(),
+                            candidates
+                                .iter()
+                                .map(|c| ContextValue::Str(c.clone()))
+                                .collect(),
                         )),
                     ),
                 ]
@@ -320,15 +344,24 @@ impl OpError {
                 ..
             } => {
                 let mut out = vec![
-                    ("condition".into(), fmt_context_value(&ContextValue::Str(condition.clone()))),
-                    ("phase".into(), fmt_context_value(&ContextValue::Str(phase.clone()))),
+                    (
+                        "condition".into(),
+                        fmt_context_value(&ContextValue::Str(condition.clone())),
+                    ),
+                    (
+                        "phase".into(),
+                        fmt_context_value(&ContextValue::Str(phase.clone())),
+                    ),
                 ];
                 if !inputs.is_empty() {
                     let inputs_map: BTreeMap<String, ContextValue> = inputs
                         .iter()
                         .map(|(k, v)| (k.clone(), ContextValue::Str(truncate(v, 100))))
                         .collect();
-                    out.push(("inputs".into(), fmt_context_value(&ContextValue::Dict(inputs_map))));
+                    out.push((
+                        "inputs".into(),
+                        fmt_context_value(&ContextValue::Dict(inputs_map)),
+                    ));
                 }
                 if let Some(i) = iteration {
                     out.push(("iteration".into(), i.to_string()));
@@ -350,7 +383,10 @@ impl OpError {
                         "iteration_index".into(),
                         format!("{}/{}", iteration_index, total_iterations),
                     ),
-                    ("loop_data".into(), fmt_context_value(&ContextValue::Dict(data_map))),
+                    (
+                        "loop_data".into(),
+                        fmt_context_value(&ContextValue::Dict(data_map)),
+                    ),
                 ]
             }
             OpError::Prompt {
@@ -373,7 +409,10 @@ impl OpError {
                     out.push((
                         "missing_vars".into(),
                         fmt_context_value(&ContextValue::List(
-                            missing_vars.iter().map(|v| ContextValue::Str(v.clone())).collect(),
+                            missing_vars
+                                .iter()
+                                .map(|v| ContextValue::Str(v.clone()))
+                                .collect(),
                         )),
                     ));
                 }
@@ -384,7 +423,10 @@ impl OpError {
                 text_count,
                 ..
             } => vec![
-                ("resource".into(), fmt_context_value(&ContextValue::Str(resource.clone()))),
+                (
+                    "resource".into(),
+                    fmt_context_value(&ContextValue::Str(resource.clone())),
+                ),
                 ("text_count".into(), text_count.to_string()),
             ],
             OpError::Rerank {
@@ -393,7 +435,10 @@ impl OpError {
                 document_count,
                 ..
             } => vec![
-                ("resource".into(), fmt_context_value(&ContextValue::Str(resource.clone()))),
+                (
+                    "resource".into(),
+                    fmt_context_value(&ContextValue::Str(resource.clone())),
+                ),
                 (
                     "query".into(),
                     fmt_context_value(&ContextValue::Str(truncate(query, 100))),

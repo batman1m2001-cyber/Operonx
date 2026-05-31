@@ -25,14 +25,8 @@ fn parser_only_graph(
     outputs: Vec<&str>,
 ) -> String {
     let mut inputs = Map::new();
-    inputs.insert(
-        "text".into(),
-        json!({"required": true, "literal": text}),
-    );
-    inputs.insert(
-        "mode".into(),
-        json!({"required": false, "literal": mode}),
-    );
+    inputs.insert("text".into(), json!({"required": true, "literal": text}));
+    inputs.insert("mode".into(), json!({"required": false, "literal": mode}));
     inputs.insert(
         "schema".into(),
         json!({"required": false, "literal": extract}),
@@ -192,13 +186,7 @@ async fn parser_dispatch_parse_error_returns_error_field() {
 
 #[tokio::test]
 async fn parser_dispatch_empty_text_returns_error_field() {
-    let graph = parser_only_graph(
-        "",
-        "json",
-        vec!["x: str".into()],
-        None,
-        vec!["error"],
-    );
+    let graph = parser_only_graph("", "json", vec!["x: str".into()], None, vec!["error"]);
     let out = run_parser(graph).await;
     assert_eq!(out["error"], json!("Empty input text"));
 }

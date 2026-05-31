@@ -51,7 +51,10 @@ impl GrpcInferenceService for CannedTriton {
             .expect("AUDIO_SIGNAL input present");
         assert_eq!(audio.datatype, "FP32");
         let contents = audio.contents.as_ref().expect("contents set");
-        assert!(!contents.fp32_contents.is_empty(), "FP32 contents populated");
+        assert!(
+            !contents.fp32_contents.is_empty(),
+            "FP32 contents populated"
+        );
 
         // Return canned outputs: TRANSCRIPT (BYTES, one string) +
         // EMBEDDING (FP32 array).
@@ -110,10 +113,10 @@ async fn start_mock() -> (String, tokio::task::JoinHandle<()>) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn triton_op_round_trips_through_grpc() {
-    use operonx::core::registry::ResourceHub;
+    use operonx::core::exceptions::OperonError;
     use operonx::core::registry::storage::ConfigDict;
     use operonx::core::registry::storage::ConfigStorage;
-    use operonx::core::exceptions::OperonError;
+    use operonx::core::registry::ResourceHub;
 
     // Minimal in-memory ConfigStorage so the test doesn't need an on-disk
     // resources.yaml. Mirrors the pattern in resource_hub.rs's unit tests.
@@ -124,9 +127,7 @@ async fn triton_op_round_trips_through_grpc() {
         fn load_one(&self, key: &str) -> Result<Option<ConfigDict>, OperonError> {
             Ok(self.data.lock().unwrap().get(key).cloned())
         }
-        fn load_all(
-            &self,
-        ) -> Result<std::collections::HashMap<String, ConfigDict>, OperonError> {
+        fn load_all(&self) -> Result<std::collections::HashMap<String, ConfigDict>, OperonError> {
             Ok(self.data.lock().unwrap().clone())
         }
         fn save(&self, k: &str, c: ConfigDict) -> Result<bool, OperonError> {
@@ -146,10 +147,7 @@ async fn triton_op_round_trips_through_grpc() {
     let mut entry = ConfigDict::new();
     entry.insert("url".into(), json!(host_port.clone()));
     entry.insert("model".into(), json!("fastconformer_asr"));
-    entry.insert(
-        "inputs_map".into(),
-        json!({"AUDIO_SIGNAL": "speech_audio"}),
-    );
+    entry.insert("inputs_map".into(), json!({"AUDIO_SIGNAL": "speech_audio"}));
     entry.insert(
         "outputs_map".into(),
         json!({"TRANSCRIPT": "transcript", "EMBEDDING": "embedding"}),
@@ -181,15 +179,23 @@ async fn triton_op_round_trips_through_grpc() {
 
     // Inputs map (provided at op runtime).
     let mut inputs = Map::new();
-    inputs.insert("speech_audio".into(), json!([0.0_f32, 0.1_f32, 0.2_f32, 0.3_f32]));
+    inputs.insert(
+        "speech_audio".into(),
+        json!([0.0_f32, 0.1_f32, 0.2_f32, 0.3_f32]),
+    );
 
     // Call execute directly — same entry point the scheduler uses.
-    let out =
-        operonx::providers::ops::triton::execute(&op_cfg, inputs)
-            .await
-            .expect("execute");
+    let out = operonx::providers::ops::triton::execute(&op_cfg, inputs)
+        .await
+        .expect("execute");
     let obj = out.as_object().expect("output is object");
-    assert_eq!(obj.get("transcript"), Some(&Value::String("hello world".into())));
-    let emb = obj.get("embedding").and_then(|v| v.as_array()).expect("embedding array");
+    assert_eq!(
+        obj.get("transcript"),
+        Some(&Value::String("hello world".into()))
+    );
+    let emb = obj
+        .get("embedding")
+        .and_then(|v| v.as_array())
+        .expect("embedding array");
     assert_eq!(emb.len(), 3);
 }

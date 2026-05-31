@@ -47,10 +47,7 @@ impl AnthropicLlm {
             HeaderValue::from_str(&self.config.anthropic_version)
                 .unwrap_or(HeaderValue::from_static("2023-06-01")),
         );
-        h.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        h.insert("content-type", HeaderValue::from_static("application/json"));
         h
     }
 }
@@ -288,7 +285,11 @@ fn map_stop_reason(reason: &str) -> &'static str {
 
 // ── Streaming SSE parsing ───────────────────────────────────────────────
 
-fn parse_sse_event(event: &str, model: &str, current_id: &mut String) -> Option<ChatCompletionChunk> {
+fn parse_sse_event(
+    event: &str,
+    model: &str,
+    current_id: &mut String,
+) -> Option<ChatCompletionChunk> {
     let mut data: Option<&str> = None;
     let mut kind: Option<&str> = None;
     for line in event.lines() {

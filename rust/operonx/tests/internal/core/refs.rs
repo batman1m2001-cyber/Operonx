@@ -123,7 +123,10 @@ async fn run_probe(transform: Value, producer_output: Value) -> Result<Value, St
     // negative-case tests.
     if let Some(err) = out.get("error") {
         if !err.is_null() {
-            return Err(err.as_str().map(String::from).unwrap_or_else(|| err.to_string()));
+            return Err(err
+                .as_str()
+                .map(String::from)
+                .unwrap_or_else(|| err.to_string()));
         }
     }
     Ok(out)
@@ -207,22 +210,16 @@ async fn getattr_on_int_errors_with_attribute_error_message() {
         err.contains("AttributeError"),
         "want AttributeError, got: {err}"
     );
-    assert!(
-        err.contains("'number'"),
-        "want 'number' type, got: {err}"
-    );
+    assert!(err.contains("'number'"), "want 'number' type, got: {err}");
 }
 
 // ── Unsupported transforms: apply / call / matmul / rmatmul ──────────
 
 #[tokio::test]
 async fn apply_errors_with_named_message() {
-    let err = run_probe(
-        json!(["apply", ["some_fn", [], {}]]),
-        json!({"k": "v"}),
-    )
-    .await
-    .unwrap_err();
+    let err = run_probe(json!(["apply", ["some_fn", [], {}]]), json!({"k": "v"}))
+        .await
+        .unwrap_err();
     assert!(
         err.contains("apply"),
         "want 'apply' transform name in error, got: {err}"
@@ -242,7 +239,10 @@ async fn call_errors_with_named_message() {
     let err = run_probe(json!(["call", [[], {}]]), json!({"k": "v"}))
         .await
         .unwrap_err();
-    assert!(err.contains("call"), "want 'call' transform name in error, got: {err}");
+    assert!(
+        err.contains("call"),
+        "want 'call' transform name in error, got: {err}"
+    );
     assert!(
         err.contains("not supported"),
         "want 'not supported' in error, got: {err}"

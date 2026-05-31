@@ -124,10 +124,7 @@ async fn b1b_siblings_dispatch_after_active_item_cancel() {
             // its sleep. 50ms < 200ms.
             tokio::time::sleep(Duration::from_millis(50)).await;
             // Target the first generator yield's context.
-            let irq = Interrupt::new(
-                vec!["main".to_string(), "yield_0".to_string()],
-                "b1b",
-            );
+            let irq = Interrupt::new(vec!["main".to_string(), "yield_0".to_string()], "b1b");
             Ok(irq.into())
         })
         .build()

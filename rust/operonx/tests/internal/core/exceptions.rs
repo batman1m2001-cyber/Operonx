@@ -74,7 +74,10 @@ fn op_error_parser_with_original_error_renders_error_line() {
         original_error: Some("Expecting value: line 1 column 12 (char 11)".into()),
     };
     let msg = err.to_string();
-    assert!(msg.contains("Error: Expecting value"), "want Error: line in: {msg}");
+    assert!(
+        msg.contains("Error: Expecting value"),
+        "want Error: line in: {msg}"
+    );
 }
 
 #[test]
@@ -127,7 +130,10 @@ fn op_error_code_display_includes_function_and_source() {
     assert!(msg.contains("[CODE]"), "want [CODE] in: {msg}");
     assert!(msg.contains("divide by zero"), "want body in: {msg}");
     assert!(msg.contains("calculate_total"), "want fn name in: {msg}");
-    assert!(msg.contains("Error: ZeroDivisionError"), "want Error: line in: {msg}");
+    assert!(
+        msg.contains("Error: ZeroDivisionError"),
+        "want Error: line in: {msg}"
+    );
 }
 
 #[test]
@@ -317,6 +323,9 @@ fn operon_error_from_op_error_preserves_variant() {
 fn operon_error_display_through_op_wrapper_shows_tag() {
     let err: OperonError = OpError::parser_msg("invalid", "json").into();
     let msg = err.to_string();
-    assert!(msg.contains("[PARSER]"), "want [PARSER] through OperonError: {msg}");
+    assert!(
+        msg.contains("[PARSER]"),
+        "want [PARSER] through OperonError: {msg}"
+    );
     assert!(msg.contains("invalid"));
 }

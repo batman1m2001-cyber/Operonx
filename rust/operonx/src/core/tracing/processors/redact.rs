@@ -66,7 +66,10 @@ mod tests {
     #[test]
     fn redacts_matching_keys_in_inputs() {
         let mut payload = BTreeMap::new();
-        payload.insert("inputs".into(), json!({"api_key": "sk-secret", "model": "gpt-4o"}));
+        payload.insert(
+            "inputs".into(),
+            json!({"api_key": "sk-secret", "model": "gpt-4o"}),
+        );
         let e = TraceEvent {
             event_id: "e".into(),
             request_id: "r".into(),
@@ -100,6 +103,9 @@ mod tests {
         };
         let p = RedactKeys::new(vec!["token"]).with_marker("***");
         let out = p.process(vec![e]);
-        assert_eq!(out[0].payload.get("outputs").unwrap().get("token"), Some(&json!("***")));
+        assert_eq!(
+            out[0].payload.get("outputs").unwrap().get("token"),
+            Some(&json!("***"))
+        );
     }
 }

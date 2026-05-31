@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 
 use operonx::core::tracing::events::{EventKind, TraceEvent};
 use operonx::core::tracing::pipeline::{ExportMetadata, Exporter};
-use operonx::telemetry::exporters::LangfuseExporter;
 use operonx::telemetry::backends::langfuse::config::LangfuseConfig;
+use operonx::telemetry::exporters::LangfuseExporter;
 
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -32,7 +32,12 @@ fn cfg_for(host: String, enabled: bool) -> LangfuseConfig {
     }
 }
 
-fn ev(kind: EventKind, op: &str, ctx: &[&str], payload: serde_json::Map<String, Value>) -> TraceEvent {
+fn ev(
+    kind: EventKind,
+    op: &str,
+    ctx: &[&str],
+    payload: serde_json::Map<String, Value>,
+) -> TraceEvent {
     let mut p = BTreeMap::new();
     for (k, v) in payload {
         p.insert(k, v);

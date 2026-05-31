@@ -157,12 +157,7 @@ impl Exporter for LangfuseExporter {
     fn name(&self) -> &'static str {
         "LangfuseExporter"
     }
-    async fn export(
-        &self,
-        events: Vec<TraceEvent>,
-        request_id: String,
-        metadata: ExportMetadata,
-    ) {
+    async fn export(&self, events: Vec<TraceEvent>, request_id: String, metadata: ExportMetadata) {
         if !self.config.enabled || events.is_empty() {
             return;
         }
@@ -290,8 +285,11 @@ fn gather_op_records(events: Vec<TraceEvent>) -> BTreeMap<(String, Vec<String>),
                 if let Some(status) = e.payload.get("status").and_then(|v| v.as_str()) {
                     rec.status = status.into();
                     if status == "error" {
-                        rec.status_message =
-                            e.payload.get("error").and_then(|v| v.as_str()).map(String::from);
+                        rec.status_message = e
+                            .payload
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
                     }
                 }
             }
@@ -393,7 +391,13 @@ mod tests {
     use crate::core::tracing::events::EventKind;
     use chrono::Utc;
 
-    fn make_ev(seq: u64, kind: EventKind, op_name: &str, ctx: &[&str], payload: serde_json::Map<String, Value>) -> TraceEvent {
+    fn make_ev(
+        seq: u64,
+        kind: EventKind,
+        op_name: &str,
+        ctx: &[&str],
+        payload: serde_json::Map<String, Value>,
+    ) -> TraceEvent {
         let mut p = BTreeMap::new();
         for (k, v) in payload {
             p.insert(k, v);
