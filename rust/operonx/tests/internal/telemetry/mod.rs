@@ -1,3 +1,4 @@
 //! Rust-internal integration tests for `telemetry`.
 
-// Populated as each subsystem lands in Phase 7.
+#[cfg(feature = "langfuse")]
+pub mod langfuse_export;

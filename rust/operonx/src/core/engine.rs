@@ -115,6 +115,11 @@ struct HandleInner {
     scheduler_task: Mutex<Option<JoinHandle<Result<(), OperonError>>>>,
     /// Per-run metadata (user_id / session_id / request_id).
     ctx: MiddlewareContext,
+    /// Per-call free-form scratch space. Shared with the scheduler — same
+    /// `Arc` lives inside `RuntimeState`. `ExecutionHandle::scratch()`
+    /// returns a clone of this so user code can read+write SCRATCH from
+    /// outside graph execution. Mirrors Python's `handle.scratch`.
+    scratch: crate::core::ops::graph::task_scheduler::SharedScratch,
 }
 
 /// Message type pushed onto the scheduler → handle channel.
@@ -239,6 +244,7 @@ impl ExecutionHandle {
             cancel,
             scheduler_task: Mutex::new(None),
             ctx,
+            scratch: Arc::new(Mutex::new(HashMap::new())),
         });
         let inner_clone = inner.clone();
         let pump = tokio::spawn(async move { pump_loop(rx, inner_clone).await });
@@ -270,6 +276,48 @@ impl ExecutionHandle {
     /// Frame count received so far.
     pub fn frame_count(&self) -> usize {
         self.inner.buffered.lock().len()
+    }
+
+    /// Per-call scratch space, shared with the scheduler.
+    ///
+    /// Returns a clone of the `Arc<Mutex<HashMap<String, Value>>>` that
+    /// backs the run's SCRATCH. Mirrors Python's `handle.scratch` property.
+    ///
+    /// Read or write at will — race-free with the scheduler when:
+    ///   - performed synchronously between `engine.start()` and the next
+    ///     `await` (no scheduler tick happens in that window), or
+    ///   - performed after the handle has completed (no more scheduler
+    ///     writes will arrive).
+    ///
+    /// For richer write semantics (e.g. coordinated mid-run updates) use
+    /// `SCRATCH[k] = v` inside an `#[op]` body instead.
+    pub fn scratch(&self) -> crate::core::ops::graph::task_scheduler::SharedScratch {
+        self.inner.scratch.clone()
+    }
+
+    /// Snapshot of all `Interrupt` events forwarded by the scheduler so
+    /// far.
+    ///
+    /// Walks the buffered frames, filters for the synthetic `__interrupt__`
+    /// op tag, and unwraps each payload back into a typed
+    /// [`Interrupt`](crate::core::ops::Interrupt). Mirrors Python's
+    /// `handle.interrupts` property.
+    pub fn interrupts(&self) -> Vec<crate::core::ops::Interrupt> {
+        use crate::core::ops::events::INTERRUPT_KEY;
+        let buf = self.inner.buffered.lock();
+        let mut out = Vec::new();
+        for frame in buf.iter() {
+            if frame.op != INTERRUPT_KEY {
+                continue;
+            }
+            // The synthetic frame's `data` is itself the `{INTERRUPT_KEY: {...}}`
+            // shape. Wrap as Value::Object and parse.
+            let v = Value::Object(frame.data.clone());
+            if let Some(irq) = crate::core::ops::Interrupt::from_frame_value(&v) {
+                out.push(irq);
+            }
+        }
+        out
     }
 
     /// `true` once the scheduler has emitted End or an error.
@@ -576,17 +624,19 @@ pub trait Scheduler: Send + Sync {
     /// Run the workflow: consume `inputs`, write frames to `sender`, then
     /// `sender.finish()` on success or `sender.fail(e)` on error.
     ///
-    /// `scratch` pre-seeds the per-call scratch space; it is applied
-    /// synchronously before the scheduler dispatches any op so entry ops
-    /// see seeded values race-free. Mirrors Python's
-    /// `engine.start(scratch={...})`.
+    /// `scratch` is the shared per-call scratch space. The caller (engine)
+    /// owns the `Arc` and pre-seeds it before invoking `run()`. The scheduler
+    /// reads from it for `InputResolver::Scratch` and writes to it when ops
+    /// mutate `SCRATCH` mid-run. The same `Arc` is held by `HandleInner` so
+    /// `ExecutionHandle::scratch()` sees the live map.
+    /// Mirrors Python's `engine.start(scratch={...})` plus `handle.scratch`.
     async fn run(
         &self,
         inputs: Map<String, Value>,
         context: MiddlewareContext,
         sender: FrameSender,
         cancel: CancellationToken,
-        scratch: Option<Map<String, Value>>,
+        scratch: crate::core::ops::graph::task_scheduler::SharedScratch,
     ) -> Result<(), OperonError>;
 }
 
@@ -602,7 +652,7 @@ impl Scheduler for NotImplementedScheduler {
         _context: MiddlewareContext,
         sender: FrameSender,
         _cancel: CancellationToken,
-        _scratch: Option<Map<String, Value>>,
+        _scratch: crate::core::ops::graph::task_scheduler::SharedScratch,
     ) -> Result<(), OperonError> {
         let err = OperonError::Runtime(
             "scheduler not yet implemented — lands in Phase 4 per MIGRATION_rust.md §11"
@@ -771,6 +821,17 @@ impl Operon {
         let (handle, sender) =
             ExecutionHandle::new_with_tap(cancel.clone(), ctx.clone(), tap.clone());
 
+        // Pre-seed the handle's scratch Arc synchronously. The scheduler
+        // receives a clone of this Arc and reads/writes through it; the
+        // user can also read it post-run via handle.scratch().
+        if let Some(seed) = scratch {
+            let mut s = handle.inner.scratch.lock();
+            for (k, v) in seed {
+                s.insert(k, v);
+            }
+        }
+        let scratch_arc = handle.inner.scratch.clone();
+
         let scheduler = self.scheduler.clone();
         let graph_name = self.name.clone();
         let request_id = ctx.request_id.clone();
@@ -779,7 +840,13 @@ impl Operon {
         let task = tokio::spawn(async move {
             let sender_finish = sender.clone();
             let result = scheduler
-                .run(inputs, run_ctx.clone(), sender.clone(), cancel_run, scratch)
+                .run(
+                    inputs,
+                    run_ctx.clone(),
+                    sender.clone(),
+                    cancel_run,
+                    scratch_arc,
+                )
                 .await;
             match &result {
                 Ok(()) => sender_finish.finish().await,

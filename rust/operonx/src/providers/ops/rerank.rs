@@ -64,13 +64,13 @@ pub async fn execute(op: &OpConfig, inputs: Map<String, Value>) -> Result<Value,
     {
         Ok(r) => r,
         Err(e) => {
-            return Err(OperonError::Op(OpError::Rerank(format!(
-                "rerank backend '{}' failed (query_len={}, docs={}): {}",
-                key,
-                query.len(),
-                docs_arr.len(),
-                e
-            ))));
+            return Err(OperonError::Op(OpError::Rerank {
+                message: format!("rerank backend '{}' failed", key),
+                resource: key.to_string(),
+                query: query.clone(),
+                document_count: docs_arr.len(),
+                original_error: Some(e.to_string()),
+            }));
         }
     };
 
@@ -112,7 +112,9 @@ fn extract_texts(docs: &[Value]) -> Result<(Vec<String>, bool), OperonError> {
             .collect();
         return Ok((texts, true));
     }
-    Err(OperonError::Op(OpError::Rerank(format!(
-        "RerankOp: documents must be all strings or all objects (with 'content' key); got mixed shapes"
-    ))))
+    Err(OperonError::Op(OpError::rerank_msg(
+        "RerankOp: documents must be all strings or all objects (with 'content' key); got mixed shapes",
+        "",
+        docs.len(),
+    )))
 }

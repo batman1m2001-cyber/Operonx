@@ -90,6 +90,10 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+exclude_docs: |
+  RUST_BASELINE_STATUS.md
+  RUST_PARITY_SYNC_PLAN.md
+
 nav:
   - Home: index.md
   - Guide:

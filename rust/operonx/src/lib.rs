@@ -33,6 +33,7 @@ pub use core::engine::{
 };
 pub use core::exceptions::{OperonError, SUPPORTED_SCHEMA_VERSION};
 pub use core::middleware::{Middleware, MiddlewareContext};
+pub use core::ops::{Interrupt, INTERRUPT_KEY};
 pub use core::registry::{
     bootstrap_env_paths, record_env_path, OpEntry, OpKind, ResourceEntry, ResourceHub,
 };

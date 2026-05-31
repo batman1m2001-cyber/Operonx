@@ -21,3 +21,18 @@ async fn classify_branch() {
 async fn wrap_user_message() {
     run_fixture("core/ops/wrap_user_message").await;
 }
+
+#[tokio::test]
+async fn parser_json_extract() {
+    run_fixture("core/ops/parser_json_extract").await;
+}
+
+#[tokio::test]
+async fn parser_xml_extract() {
+    run_fixture("core/ops/parser_xml_extract").await;
+}
+
+#[tokio::test]
+async fn parser_yaml_extract() {
+    run_fixture("core/ops/parser_yaml_extract").await;
+}
