@@ -1,0 +1,123 @@
+{
+  "type": "graph",
+  "full_name": "main",
+  "name": "main",
+  "func_name": null,
+  "is_async": false,
+  "is_generator": false,
+  "enabled": true,
+  "verbose": true,
+  "stream": false,
+  "bound": "sync",
+  "inputs": {},
+  "outputs": {
+    "got": {
+      "default": null,
+      "required": false,
+      "ref": null,
+      "scratch": null,
+      "literal": null
+    }
+  },
+  "ops": {
+    "src": {
+      "type": "code",
+      "full_name": "main.src",
+      "name": "src",
+      "func_name": "make_obj",
+      "is_async": false,
+      "is_generator": false,
+      "enabled": true,
+      "verbose": true,
+      "stream": false,
+      "bound": "sync",
+      "inputs": {},
+      "outputs": {
+        "obj": {
+          "default": null,
+          "required": false,
+          "ref": null,
+          "scratch": null,
+          "literal": null
+        }
+      }
+    },
+    "consumer": {
+      "type": "code",
+      "full_name": "main.consumer",
+      "name": "consumer",
+      "func_name": "echo",
+      "is_async": false,
+      "is_generator": false,
+      "enabled": true,
+      "verbose": true,
+      "stream": false,
+      "bound": "sync",
+      "inputs": {
+        "value": {
+          "default": null,
+          "required": true,
+          "ref": {
+            "source": "main.src",
+            "var": "obj",
+            "transforms": [
+              [
+                "getattr",
+                [
+                  "name"
+                ]
+              ]
+            ],
+            "is_output": false
+          },
+          "scratch": null,
+          "literal": null
+        }
+      },
+      "outputs": {
+        "got": {
+          "default": null,
+          "required": false,
+          "ref": {
+            "source": "main",
+            "var": "got",
+            "transforms": [],
+            "is_output": false
+          },
+          "scratch": null,
+          "literal": null
+        }
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "src",
+      "to": "consumer",
+      "soft": false
+    }
+  ],
+  "entries": [
+    "src"
+  ],
+  "exits": [
+    "consumer"
+  ],
+  "initial_ready_count": {
+    "src": 0,
+    "consumer": 1
+  },
+  "compiled_adj": {
+    "src": [
+      [
+        "consumer",
+        false
+      ]
+    ],
+    "consumer": []
+  },
+  "stream_initial_ready": {},
+  "loop_config": null,
+  "max_stream_concurrent": 64,
+  "schema_version": "1.0"
+}
