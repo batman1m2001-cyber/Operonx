@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-05-31
+
+Rust-side Phase-1 sync release. Python crate stays at 0.8.2 — the
+Rust crate version bumps to 0.8.3 to mark the merged sync work
+shipped on top of the 0.8.2 parity baseline. No Python API changes.
+
+### Added — Rust
+- **Structured exception hierarchy** (`core::exceptions`) mirroring
+  Python `OpError` / `ParserError` / `CodeError` / `BranchError` /
+  `ConditionError` / `IterationError` / `PromptError` /
+  `EmbeddingError` / `RerankError`, each carrying op_name + context +
+  original_error. 21 new internal tests.
+- **Ref evaluator gaps closed** — `Apply` / `Call` / `MatMul` /
+  `RMatMul` variants + a real `GetAttr` separate from `GetItem`.
+  AttributeError parity for missing keys. 11 new internal tests +
+  shared spec fixture `core/refs/getattr_dict`.
+- **Frame / Interrupt API parity** — typed `Interrupt` struct with
+  canonical JSON shape (`__interrupt__: { ctx_to_cancel, reason }`),
+  `ExecutionHandle::scratch()` + `ExecutionHandle::interrupts()`
+  accessors backed by a shared `Arc<Mutex<HashMap>>` SCRATCH.
+- **Sequential-edge cancel fix** — port of Python 0.8.1's
+  `_sweep_ctx` fix that advances `seq_queues` on Interrupt cancel.
+  Regression test included.
+- **Event-stream tracing pipeline** (`core::tracing::{events,
+  emitter, pipeline, processors, legacy, exporters::local_file}`) —
+  full port of Python 0.8.0's tracing redesign. Replaces the legacy
+  `collector` + `flush_worker` + `labels` modules (kept compiling
+  during the migration). Processors: drop / redact / sample /
+  truncate / group. Flush strategies: AtScheduledExit /
+  FlushOnSize. JSON file exporter writes
+  `~/.operonx/traces/<request_id>.json`.
+- **LangfuseExporter** (`telemetry::exporters::langfuse`) — full
+  port behind `langfuse` feature. trace-create + span-create batches,
+  generation-create on LlmUsage events, Basic-auth Langfuse public
+  ingestion endpoint, parent_observation_id walking via ctx tuple
+  longest-prefix-first.
+- **ParserOp** (`core::ops::transform::parser_op`) — port of
+  Python's parse_json / parse_xml / parse_yaml + ExtractField path
+  walker + @DEFAULT validators + convert_type coercion. quick-xml
+  state machine for XML. Scheduler dispatch routes `OpType::Parser`.
+  14 unit + 10 integration tests + 3 shared spec fixtures.
+- **TritonOp gRPC client** (`providers::ops::triton`) — full port
+  behind `triton` feature. tonic + vendored KServe v2 proto, pooled
+  `Channel` per `TRITON_URL`, FP32 / FP64 / INT32 / INT64 / BYTES
+  tensor codec, ResourceHub.get_config integration. End-to-end test
+  with in-process tonic mock server.
+- **OpenAI SSE streaming** (`providers::llms::openai::stream`) +
+  `LLMOp` stream-mode wiring through `ExecutionHandle`. Match Python
+  chunk schema.
+- **Anthropic Messages API** (`providers::llms::anthropic`) — full
+  port with SSE streaming, system-prompt split, stop_reason map,
+  cache_read / cache_creation token surface.
+- **Azure OpenAI** (`providers::llms::azure`) — reuses the OpenAI
+  body+parser, URL = `<base>/openai/deployments/<model>/chat/
+  completions?api-version=<v>`, api-key header auth.
+- **TEI embedder** (`providers::embeddings::tei`) — POST `/embed`
+  with `{inputs, truncate}` body.
+- **TEI / vLLM / Pinecone rerankers** — POST `/rerank` family with
+  Cohere-shape body, sorts desc + truncates, vendor-specific auth.
+- **Keycloak token provider** (`providers::auth::keycloak`) — OIDC
+  client_credentials grant, dot-path token extraction, background
+  refresh task (abort-on-drop), cached lazy-fetch on first call.
+
+### Test footprint
+136 → 254 tests across the workspace (with `--features triton`).
+13 → 16 shared spec fixtures consumed by both Python and Rust
+runners. Parity contract maintained — every new Rust feature ships
+with a fixture covering its user-visible behavior.
+
+### Deferred
+- Gemini LLM, OpenAI Batch coordinator, ONNX shared backend, and
+  Langfuse prompt-manager remain Phase-5b stubs. None are callbot
+  blockers; they error with a clear "not yet implemented" message.
+
 ## [0.7.1] - 2026-04-29
 
 Follow-up to v0.7.0 — bug fixes + perf precompute work, all Python ↔
