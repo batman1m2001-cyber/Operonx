@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 edition      = "2021"
 rust-version = "1.75"
-version      = "0.8.3"
+version      = "0.8.4"
 license      = "Apache-2.0"
 repository   = "https://github.com/batman1m2001-cyber/Operonx"
 

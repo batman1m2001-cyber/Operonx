@@ -1723,8 +1723,17 @@ fn eval_op(
 /// `Param` flags per frame.
 #[derive(Debug, Clone)]
 enum InputResolver {
-    /// Resolve from runtime state (with optional transforms).
-    Ref(CompiledRef),
+    /// Resolve from runtime state (with optional transforms). The optional
+    /// `fallback` is used when the ref's source op never produced a value
+    /// at the runtime ctx — required when the ref points at a conditional
+    /// branch sibling that didn't fire. Tracks whether the param is
+    /// required so a missing value with no fallback still errors when the
+    /// op authoritatively needs it.
+    Ref {
+        cref: CompiledRef,
+        fallback: Option<Value>,
+        required: bool,
+    },
     /// Resolve from per-call scratch space at `key`. Yields `Value::Null`
     /// when the key is missing — matches Python's `SCRATCH[k]` returning
     /// `None` for unset keys.
@@ -1757,7 +1766,23 @@ fn compile_input_plans(graph: &OpConfig, graph_key: &str) -> HashMap<String, Vec
         let mut slots = Vec::with_capacity(op_cfg.inputs.len());
         for (var, param) in &op_cfg.inputs {
             let plan = if let Some(rc) = &param.ref_config {
-                InputResolver::Ref(compile_ref(rc, graph_key))
+                // A ref'd input that's also got a default falls back to the
+                // default when the upstream op never fired (conditional
+                // branch sibling, optional pipeline stage). Optional refs
+                // without a default fall back to Null. Required refs without
+                // a default still error if the source produced nothing.
+                let fallback = param.default.clone().or_else(|| {
+                    if !param.required {
+                        Some(Value::Null)
+                    } else {
+                        None
+                    }
+                });
+                InputResolver::Ref {
+                    cref: compile_ref(rc, graph_key),
+                    fallback,
+                    required: param.required,
+                }
             } else if let Some(sr) = &param.scratch {
                 InputResolver::Scratch(sr.key.clone())
             } else if let Some(lit) = &param.literal {
@@ -1866,7 +1891,18 @@ fn resolve_inputs(
     let mut resolved = Map::with_capacity(plan.len());
     for slot in plan {
         let value = match &slot.plan {
-            InputResolver::Ref(cref) => eval_ref(cref, ctx, state)?,
+            InputResolver::Ref {
+                cref,
+                fallback,
+                required,
+            } => match eval_ref(cref, ctx, state) {
+                Ok(v) => v,
+                Err(e) => match fallback {
+                    Some(f) => f.clone(),
+                    None if *required => return Err(e),
+                    None => Value::Null,
+                },
+            },
             InputResolver::Scratch(key) => state.lock().scratch_get(key),
             InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
             InputResolver::RequiredMissing => {

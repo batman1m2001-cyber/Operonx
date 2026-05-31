@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-05-31
+
+Bug-fix release. No API changes; behavioural parity with Python tightened
+on conditional branch inputs.
+
+### Fixed — Rust
+- **Conditional-branch input refs now respect `default` fallback**
+  (`core/ops/graph/task_scheduler.rs::resolve_inputs`). When a graph
+  routes through a branch (`if_/else_`), downstream ops have refs that
+  point at BOTH branches' outputs; only the taken branch fires, the
+  other op's outputs are never set. Previously the resolver would error
+  out the moment it hit a missing ref on the untaken branch, dropping
+  the entire downstream chain. The resolver now falls back to `default`
+  (or `Null` for non-required inputs) when the ref's source op produced
+  no value at the runtime ctx — matching the Python parity behaviour
+  the educa_reminder callbot graph relies on for `picker.audio_text`
+  (asr branch) and every merge-style op (`merge_response`, `merge_turn`,
+  `merge_intent`, `merge_overlap`, `merge_pending`).
+
 ## [0.8.3] - 2026-05-31
 
 Rust-side Phase-1 sync release. Python crate stays at 0.8.2 — the
