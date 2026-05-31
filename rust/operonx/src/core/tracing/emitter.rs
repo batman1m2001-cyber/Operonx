@@ -93,7 +93,12 @@ impl EventEmitter {
             .start_times
             .lock()
             .insert((op_name.to_string(), ctx.clone()), Instant::now());
-        let event = self.build(EventKind::OpStart, Some(op_name), ctx, payload_one("inputs", inputs));
+        let event = self.build(
+            EventKind::OpStart,
+            Some(op_name),
+            ctx,
+            payload_one("inputs", inputs),
+        );
         self.emit(event);
     }
 
@@ -142,10 +147,7 @@ impl EventEmitter {
         }
         let mut payload = serde_json::Map::new();
         payload.insert("yielded".into(), yielded);
-        payload.insert(
-            "idx".into(),
-            Value::Number(serde_json::Number::from(idx)),
-        );
+        payload.insert("idx".into(), Value::Number(serde_json::Number::from(idx)));
         let event = self.build(EventKind::OpYield, Some(op_name), ctx, into_btree(payload));
         self.emit(event);
     }
@@ -165,7 +167,12 @@ impl EventEmitter {
         let mut payload = serde_json::Map::new();
         payload.insert("key".into(), Value::String(key.to_string()));
         payload.insert("value".into(), value);
-        let event = self.build(EventKind::Annotation, Some(&op_name), &ctx, into_btree(payload));
+        let event = self.build(
+            EventKind::Annotation,
+            Some(&op_name),
+            &ctx,
+            into_btree(payload),
+        );
         self.emit(event);
     }
 
@@ -185,7 +192,10 @@ impl EventEmitter {
         let mut payload = serde_json::Map::new();
         payload.insert("model".into(), Value::String(model.to_string()));
         payload.insert("prompt_tokens".into(), Value::Number(prompt_tokens.into()));
-        payload.insert("completion_tokens".into(), Value::Number(completion_tokens.into()));
+        payload.insert(
+            "completion_tokens".into(),
+            Value::Number(completion_tokens.into()),
+        );
         payload.insert("total_tokens".into(), Value::Number(total_tokens.into()));
         payload.insert(
             "cost_usd".into(),
@@ -223,7 +233,12 @@ impl EventEmitter {
         if self.is_active() {
             let mut payload = serde_json::Map::new();
             payload.insert("name".into(), Value::String(name.to_string()));
-            let event = self.build(EventKind::GroupStart, None, &Vec::new(), into_btree(payload));
+            let event = self.build(
+                EventKind::GroupStart,
+                None,
+                &Vec::new(),
+                into_btree(payload),
+            );
             self.emit(event);
         }
         GroupGuard {
@@ -281,7 +296,9 @@ impl Drop for GroupGuard<'_> {
         let mut payload = serde_json::Map::new();
         payload.insert("name".into(), Value::String(self.name.clone()));
         payload.insert("status".into(), Value::String("ok".into()));
-        let event = self.emitter.build(EventKind::GroupEnd, None, &Vec::new(), into_btree(payload));
+        let event = self
+            .emitter
+            .build(EventKind::GroupEnd, None, &Vec::new(), into_btree(payload));
         self.emitter.emit(event);
     }
 }
@@ -316,7 +333,14 @@ mod tests {
         let e = EventEmitter::null();
         assert!(!e.is_active());
         e.op_start("op", &vec!["main".into()], serde_json::json!({}));
-        e.op_end("op", &vec!["main".into()], serde_json::json!({}), "ok", None, 0);
+        e.op_end(
+            "op",
+            &vec!["main".into()],
+            serde_json::json!({}),
+            "ok",
+            None,
+            0,
+        );
     }
 
     #[test]
@@ -350,8 +374,22 @@ mod tests {
         let pipeline = Arc::new(TracePipeline::new());
         let emitter = EventEmitter::new(pipeline.clone(), "req-2");
         emitter.op_start("op", &vec!["main".into()], serde_json::json!({}));
-        emitter.op_end("op", &vec!["main".into()], serde_json::json!({}), "ok", None, 0);
-        emitter.op_end("op", &vec!["main".into()], serde_json::json!({}), "ok", None, 0);
+        emitter.op_end(
+            "op",
+            &vec!["main".into()],
+            serde_json::json!({}),
+            "ok",
+            None,
+            0,
+        );
+        emitter.op_end(
+            "op",
+            &vec!["main".into()],
+            serde_json::json!({}),
+            "ok",
+            None,
+            0,
+        );
         let events = pipeline.drain();
         // 1 OpStart + 1 OpEnd; the second OpEnd was silently dropped.
         assert_eq!(events.len(), 2);

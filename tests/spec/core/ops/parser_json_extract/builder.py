@@ -4,7 +4,7 @@ Locks down the Stage-7 architecture parity: both Python and Rust parse
 identical text, walk the same dot path, and emit identical typed values.
 """
 
-from operonx.core import END, GraphOp, PARENT, START
+from operonx.core import END, PARENT, START, GraphOp
 from operonx.core.ops import ParserOp
 
 

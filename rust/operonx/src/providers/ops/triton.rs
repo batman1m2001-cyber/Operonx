@@ -9,11 +9,11 @@
 //! need `protoc` on the host.
 
 #[cfg(not(feature = "triton"))]
-use serde_json::{Map, Value};
-#[cfg(not(feature = "triton"))]
 use crate::core::configs::op_config::OpConfig;
 #[cfg(not(feature = "triton"))]
 use crate::core::exceptions::OperonError;
+#[cfg(not(feature = "triton"))]
+use serde_json::{Map, Value};
 
 /// Execute a Triton inference op. Errors at runtime if the crate was built
 /// without `--features triton`.
@@ -99,8 +99,7 @@ mod triton_impl {
             let Some(value) = inputs.get(op_name) else {
                 continue;
             };
-            let (datatype, shape, contents) =
-                value_to_tensor(value, cfg.input_dtype(triton_name))?;
+            let (datatype, shape, contents) = value_to_tensor(value, cfg.input_dtype(triton_name))?;
             triton_inputs.push(InferInputTensor {
                 name: triton_name.clone(),
                 datatype,
@@ -206,12 +205,12 @@ mod triton_impl {
     }
 
     type ResolvedConfig = (
-        String,                    // url
-        String,                    // model_name
-        String,                    // model_version
-        Vec<(String, String)>,     // inputs_map
-        Vec<(String, String)>,     // outputs_map
-        HashMap<String, String>,   // input_dtypes (optional override)
+        String,                  // url
+        String,                  // model_name
+        String,                  // model_version
+        Vec<(String, String)>,   // inputs_map
+        Vec<(String, String)>,   // outputs_map
+        HashMap<String, String>, // input_dtypes (optional override)
     );
 
     fn resolve_from_hub(key: &str, op_name: &str) -> Result<ResolvedConfig, OperonError> {
@@ -242,7 +241,10 @@ mod triton_impl {
         resolve_inline(obj, op_name)
     }
 
-    fn resolve_inline(obj: &Map<String, Value>, op_name: &str) -> Result<ResolvedConfig, OperonError> {
+    fn resolve_inline(
+        obj: &Map<String, Value>,
+        op_name: &str,
+    ) -> Result<ResolvedConfig, OperonError> {
         let url = obj
             .get("url")
             .and_then(|v| v.as_str())
@@ -269,7 +271,14 @@ mod triton_impl {
         let inputs_map = read_string_map_pairs(obj.get("inputs_map"));
         let outputs_map = read_string_map_pairs(obj.get("outputs_map"));
         let input_dtypes = read_string_map(obj.get("input_dtypes"));
-        Ok((url, model_name, model_version, inputs_map, outputs_map, input_dtypes))
+        Ok((
+            url,
+            model_name,
+            model_version,
+            inputs_map,
+            outputs_map,
+            input_dtypes,
+        ))
     }
 
     fn read_string_map_pairs(v: Option<&Value>) -> Vec<(String, String)> {

@@ -1,6 +1,6 @@
 """Fixture: ParserOp extracts from XML with bool type coercion."""
 
-from operonx.core import END, GraphOp, PARENT, START
+from operonx.core import END, PARENT, START, GraphOp
 from operonx.core.ops import ParserOp
 
 

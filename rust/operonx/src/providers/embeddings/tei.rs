@@ -45,11 +45,7 @@ struct EmbedResponse(Vec<Vec<f32>>);
 
 #[async_trait]
 impl BaseEmbedder for TeiEmbedder {
-    async fn run(
-        &self,
-        texts: Vec<String>,
-        _opts: &EmbedOpts,
-    ) -> Result<EmbedResult, OperonError> {
+    async fn run(&self, texts: Vec<String>, _opts: &EmbedOpts) -> Result<EmbedResult, OperonError> {
         let body = EmbedBody {
             inputs: &texts,
             truncate: Some(true),

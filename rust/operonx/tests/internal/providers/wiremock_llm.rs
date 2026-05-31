@@ -180,7 +180,10 @@ async fn openai_llm_stream_surfaces_http_error() {
         .mount(&server)
         .await;
     let llm = OpenAILlm::new(cfg_for(server.uri()));
-    match llm.stream(vec![user_message("x")], &LlmOpts::default()).await {
+    match llm
+        .stream(vec![user_message("x")], &LlmOpts::default())
+        .await
+    {
         Ok(_) => panic!("500 should not produce a stream"),
         Err(e) => {
             let msg = e.to_string();

@@ -94,7 +94,14 @@ mod tests {
         };
         let p = TruncateIO::new(100);
         let out = p.process(vec![e]);
-        let prompt = out[0].payload.get("inputs").unwrap().get("prompt").unwrap().as_str().unwrap();
+        let prompt = out[0]
+            .payload
+            .get("inputs")
+            .unwrap()
+            .get("prompt")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert!(prompt.contains("...[truncated"));
         assert!(prompt.len() < 3000);
     }
@@ -115,6 +122,9 @@ mod tests {
         };
         let p = TruncateIO::new(100);
         let out = p.process(vec![e]);
-        assert_eq!(out[0].payload.get("inputs").unwrap().get("prompt"), Some(&json!("hi")));
+        assert_eq!(
+            out[0].payload.get("inputs").unwrap().get("prompt"),
+            Some(&json!("hi"))
+        );
     }
 }

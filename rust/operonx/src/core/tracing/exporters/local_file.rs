@@ -54,7 +54,9 @@ fn serialize(e: &TraceEvent) -> SerializedEvent<'_> {
         kind: e.kind.as_str(),
         op_name: e.op_name.as_deref(),
         ctx: &e.ctx,
-        timestamp: e.timestamp.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        timestamp: e
+            .timestamp
+            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
         seq: e.seq,
         payload: &e.payload,
     }
@@ -65,12 +67,7 @@ impl Exporter for JsonFileExporter {
     fn name(&self) -> &'static str {
         "JsonFileExporter"
     }
-    async fn export(
-        &self,
-        events: Vec<TraceEvent>,
-        request_id: String,
-        metadata: ExportMetadata,
-    ) {
+    async fn export(&self, events: Vec<TraceEvent>, request_id: String, metadata: ExportMetadata) {
         if events.is_empty() {
             return;
         }
@@ -191,7 +188,9 @@ mod tests {
         let exporter = JsonFileExporter::new(tmp.path());
         let mut meta = ExportMetadata::default();
         meta.partial = true;
-        exporter.export(vec![ev("r2", 0)], "r2".into(), meta.clone()).await;
+        exporter
+            .export(vec![ev("r2", 0)], "r2".into(), meta.clone())
+            .await;
         exporter.export(vec![ev("r2", 1)], "r2".into(), meta).await;
         let written = fs::read_to_string(tmp.path().join("r2.json")).unwrap();
         let lines: Vec<&str> = written.trim().lines().collect();

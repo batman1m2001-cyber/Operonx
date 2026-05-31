@@ -321,9 +321,11 @@ fn is_falsy(v: &Value) -> bool {
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::String(x), Value::String(y)) => x == y,
-        (Value::Number(x), Value::Number(y)) => {
-            x.as_f64().zip(y.as_f64()).map(|(a, b)| a == b).unwrap_or(x == y)
-        }
+        (Value::Number(x), Value::Number(y)) => x
+            .as_f64()
+            .zip(y.as_f64())
+            .map(|(a, b)| a == b)
+            .unwrap_or(x == y),
         _ => a == b,
     }
 }
@@ -546,7 +548,13 @@ fn parse_xml_inner(text: &str) -> Result<Value, String> {
             }
             Ok(Event::Eof) => break,
             Ok(_) => {} // skip CData / Comment / Decl / PI / DocType
-            Err(e) => return Err(format!("XML parse error at pos {}: {}", reader.error_position(), e)),
+            Err(e) => {
+                return Err(format!(
+                    "XML parse error at pos {}: {}",
+                    reader.error_position(),
+                    e
+                ))
+            }
         }
     }
 

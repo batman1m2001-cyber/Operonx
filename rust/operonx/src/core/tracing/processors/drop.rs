@@ -130,7 +130,11 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeMap;
 
-    fn ev(kind: EventKind, op_name: Option<&str>, payload: BTreeMap<String, serde_json::Value>) -> TraceEvent {
+    fn ev(
+        kind: EventKind,
+        op_name: Option<&str>,
+        payload: BTreeMap<String, serde_json::Value>,
+    ) -> TraceEvent {
         TraceEvent {
             event_id: "e".into(),
             request_id: "r".into(),

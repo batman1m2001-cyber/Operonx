@@ -1,6 +1,6 @@
 """Fixture: ParserOp extracts from YAML."""
 
-from operonx.core import END, GraphOp, PARENT, START
+from operonx.core import END, PARENT, START, GraphOp
 from operonx.core.ops import ParserOp
 
 

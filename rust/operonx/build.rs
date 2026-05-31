@@ -15,7 +15,7 @@ fn main() {
         tonic_build::configure()
             .build_client(true)
             .build_server(true) // emit the server trait too, for unit-test mocks
-            .compile(&["proto/triton/grpc_service.proto"], &["proto/triton"])
+            .compile_protos(&["proto/triton/grpc_service.proto"], &["proto/triton"])
             .expect("compile triton .proto");
     }
 }
