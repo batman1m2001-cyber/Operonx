@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-05-31
+
+Bug-fix release. Closes a SCRATCH-propagation bug in nested @graph
+dispatch that broke every workflow using subgraphs with SCRATCH-backed
+inputs (educa_reminder callbot, ahamove_hr, every agent that reads
+`current_state` / `intent_retry_counts` / `last_agent_response` inside
+its agent_turn subgraph).
+
+### Fixed — Rust
+- **Nested @graph dispatch now inherits parent's SCRATCH**
+  (`core/ops/graph/task_scheduler.rs::run_collect`). Previously the
+  child sub-scheduler was started with a fresh empty
+  `Arc<Mutex<HashMap>>` so every `SCRATCH[key]` read inside the subgraph
+  returned `Null`, breaking every educa_reminder-style agent whose
+  state machine inputs are SCRATCH refs at the subgraph level. The fix
+  threads the parent's SCRATCH Arc through `execute_op` →
+  `run_collect`, matching Python's `child._scheduler.run` shared-Arc
+  semantics. `run_collect` keeps a fresh-SCRATCH fallback for the
+  legacy standalone-test callers that pass `None`.
+
 ## [0.8.4] - 2026-05-31
 
 Bug-fix release. No API changes; behavioural parity with Python tightened
