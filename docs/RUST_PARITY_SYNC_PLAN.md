@@ -291,15 +291,21 @@ Tasks remain as documented but blocked on the protoc decision. Recommend revisit
 
 ### Stage 12 (optional, parallel with Phase 2) — Non-callbot stubs (2 weeks)
 
-- Anthropic, Azure OpenAI, Gemini LLM backends
-- OpenAI Batch API coordinator
-- vLLM/TEI/ONNX embeddings + rerankers
-- Pinecone reranker
-- Shared ONNX backend (`ort` crate)
-- Keycloak token refresh
-- Langfuse prompt manager
+**Completed in this sync:**
+- ✅ Anthropic LLM — `/v1/messages` + system-split + stop_reason→finish_reason map + cache_read/cache_creation token surface + SSE streaming
+- ✅ Azure OpenAI LLM — deployment-URL build + `api-key` auth + reuses OpenAI's body builder & SSE parser
+- ✅ TEI embedder — `/embed` POST + bare nested-array response
+- ✅ TEI reranker — `/rerank` POST + sort + top_k truncate
+- ✅ vLLM reranker — `/v1/rerank` POST + Cohere-style response shape
+- ✅ Pinecone reranker — Pinecone `/rerank` POST + `Api-Key` auth + dot-path response
+- ✅ Keycloak token refresh — OIDC `client_credentials` grant + dot-path token/expiry extraction
 
-Each gets a parity fixture under `tests/spec/providers/<name>/` and a micro-benchmark.
+**Deferred (require complex external deps, not in callbot's hot path):**
+- 🟡 Gemini LLM — needs Vertex AI service-account auth + `generateContent` envelope; defer until a callbot graph targets Vertex
+- 🟡 OpenAI Batch coordinator — multi-phase upload/poll cycle; defer until any graph sets `batch_mode=true`
+- 🟡 ONNX shared backend (and the embedder/reranker variants that depend on it) — needs `ort` crate session pool + tokenizer hookup; defer to a follow-up that pairs the backend port with end-to-end ONNX inference tests
+
+Each completed item ships with a unit test verifying URL construction and either a wiremock integration test or a parity unit test on the response→`ChatCompletion`/`EmbedResult`/`RerankResult` conversion. Where the conversion logic is shared with an already-implemented backend (Azure ⊆ OpenAI), the integration coverage from that backend's mock tests carries over.
 
 ---
 
