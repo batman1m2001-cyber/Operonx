@@ -5,9 +5,7 @@ import pytest
 from operonx.core.exceptions import (
     BranchError,
     CodeError,
-    ConditionError,
     EmbeddingError,
-    IterationError,
     OpError,
     ParserError,
     PromptError,
@@ -256,153 +254,6 @@ class TestBranchError:
 
 
 # ============================================================
-# Test ConditionError
-# ============================================================
-
-
-class TestConditionError:
-    """Test ConditionError for WhileOp condition failures."""
-
-    def test_compile_phase_error(self):
-        """Test condition error during compile phase."""
-        error = ConditionError(
-            message="Invalid until syntax",
-            condition="x >= = 5",  # Invalid syntax
-            phase="compile",
-        )
-        msg = str(error)
-        assert "[WHILE]" in msg
-        assert "phase:" in msg and "compile" in msg
-        assert "condition:" in msg and "x >= = 5" in msg
-
-    def test_eval_phase_error(self):
-        """Test condition error during eval phase."""
-        error = ConditionError(
-            message="Stop condition evaluation failed",
-            condition="counter >= 5",
-            inputs={"count": 3},  # Note: counter vs count mismatch
-            iteration=3,
-            phase="eval",
-        )
-        msg = str(error)
-        assert "[WHILE]" in msg
-        assert "phase:" in msg and "eval" in msg
-        assert "iteration:" in msg and "3" in msg
-        assert "inputs:" in msg
-
-    def test_with_name_error(self):
-        """Test condition error with NameError."""
-        try:
-            eval("undefined_var >= 5")
-        except NameError as e:
-            error = ConditionError(
-                message="Undefined variable in condition",
-                condition="undefined_var >= 5",
-                inputs={},
-                iteration=0,
-                phase="eval",
-                original_error=e,
-            )
-        msg = str(error)
-        assert "NameError" in msg or "not defined" in msg
-
-    def test_optional_fields(self):
-        """Test that inputs and iteration are optional."""
-        error = ConditionError(message="Syntax error", condition="x >>>", phase="compile")
-        msg = str(error)
-        assert "inputs:" not in msg
-        assert "iteration:" not in msg
-
-    def test_attributes_stored(self):
-        """Test that attributes are stored."""
-        error = ConditionError(
-            message="Test", condition="x >= 5", inputs={"x": 3}, iteration=2, phase="eval"
-        )
-        assert error.condition == "x >= 5"
-        assert error.inputs == {"x": 3}
-        assert error.iteration == 2
-        assert error.phase == "eval"
-
-
-# ============================================================
-# Test IterationError
-# ============================================================
-
-
-class TestIterationError:
-    """Test IterationError for ForLoop/MapOp iteration failures."""
-
-    def test_for_loop_error(self):
-        """Test iteration error for ForOp."""
-        error = IterationError(
-            message="Iteration 2 failed",
-            iteration_index=2,
-            loop_data={"item": {"id": 3, "name": "test"}},
-            total_iterations=10,
-            op_type="for",
-        )
-        msg = str(error)
-        assert "[FOR]" in msg
-        assert "iteration_index:" in msg and "2/10" in msg
-        assert "loop_data:" in msg
-
-    def test_map_op_error(self):
-        """Test iteration error for MapOp."""
-        error = IterationError(
-            message="Iteration 5 failed",
-            iteration_index=5,
-            loop_data={"x": 100},
-            total_iterations=20,
-            op_type="map",
-        )
-        msg = str(error)
-        assert "[MAP]" in msg
-        assert "iteration_index:" in msg and "5/20" in msg
-
-    def test_with_key_error(self):
-        """Test iteration error with KeyError."""
-        try:
-            data = {"a": 1}
-            _ = data["missing_key"]
-        except KeyError as e:
-            error = IterationError(
-                message="Iteration 3 failed",
-                iteration_index=3,
-                loop_data={"data": {"a": 1}},
-                total_iterations=5,
-                op_type="for",
-                original_error=e,
-            )
-        msg = str(error)
-        assert "KeyError" in msg or "missing_key" in msg
-
-    def test_long_loop_data_truncated(self):
-        """Test that long loop data values are truncated."""
-        error = IterationError(
-            message="Iteration failed",
-            iteration_index=0,
-            loop_data={"big_value": "x" * 200},
-            total_iterations=1,
-            op_type="for",
-        )
-        msg = str(error)
-        assert "..." in msg
-
-    def test_attributes_stored(self):
-        """Test that attributes are stored."""
-        error = IterationError(
-            message="Test",
-            iteration_index=5,
-            loop_data={"x": 1},
-            total_iterations=10,
-            op_type="map",
-        )
-        assert error.iteration_index == 5
-        assert error.loop_data == {"x": 1}
-        assert error.total_iterations == 10
-
-
-# ============================================================
 # Test PromptError
 # ============================================================
 
@@ -587,11 +438,6 @@ class TestErrorInheritance:
             (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
             (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
             (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (ConditionError, {"message": "test", "condition": "x"}),
-            (
-                IterationError,
-                {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
-            ),
             (PromptError, {"message": "test", "template": "x"}),
             (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
@@ -612,11 +458,6 @@ class TestErrorInheritance:
             (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
             (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
             (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (ConditionError, {"message": "test", "condition": "x"}),
-            (
-                IterationError,
-                {"message": "test", "iteration_index": 0, "loop_data": {}, "total_iterations": 1},
-            ),
             (PromptError, {"message": "test", "template": "x"}),
             (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
@@ -668,9 +509,6 @@ class TestErrorMessageFormat:
             ParserError("msg", "input", "json"),
             CodeError("msg", "fn", "src", {}),
             BranchError("msg", "cond", {}, []),
-            ConditionError("msg", "cond"),
-            IterationError("msg", 0, {}, 1, "for"),
-            IterationError("msg", 0, {}, 1, "map"),
             PromptError("msg", "template"),
             EmbeddingError("msg", "key", 1),
             RerankError("msg", "key", "query", 1),

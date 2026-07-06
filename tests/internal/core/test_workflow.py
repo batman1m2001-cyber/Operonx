@@ -225,25 +225,6 @@ class TestOperonStateAccess:
     """Test accessing state via $state key."""
 
     @pytest.mark.asyncio
-    async def test_state_iter_executed(self):
-        """Test iter_executed derives execution from start_time cells."""
-        with GraphOp(name="test") as graph:
-            a = FuncOp(name="step_a", code_fn=lambda: {"a": 1})
-            b = FuncOp(name="step_b", code_fn=lambda: {"b": 2})
-            START >> a >> b >> END
-
-        engine = Operon(graph)
-        result = await engine.run(inputs={})
-
-        state = result["$state"]
-
-        # Each op that ran should have start_time in state
-        executed_a = list(state.iter_executed("test.step_a"))
-        executed_b = list(state.iter_executed("test.step_b"))
-        assert len(executed_a) >= 1
-        assert len(executed_b) >= 1
-
-    @pytest.mark.asyncio
     async def test_state_metadata_contains_ids(self):
         """Test state metadata contains user/session/request IDs."""
         with GraphOp(name="test") as graph:

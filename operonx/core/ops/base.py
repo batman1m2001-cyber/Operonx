@@ -17,6 +17,7 @@ from operonx.core.ops._params import merge_params, normalize_params, resolve_val
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.states.ref import Ref
 from operonx.core.states.scratch_ref import ScratchRef
+from operonx.core.trace import _current_op_ctx
 from operonx.core.tracing.emitter import _current_op_var, current_emitter
 from operonx.core.utils.auto_name import auto_name, unique_name
 from operonx.core.utils.common import Param
@@ -125,14 +126,10 @@ class BaseOp(ABC):
         contain_generation: bool = False,
         verbose: bool = True,
         enabled: bool = True,
-        executor: Optional[str] = None,
         bound: Optional[str] = None,
         cache: Union[bool, str, None] = None,
         delay: float = 0,
     ):
-        # Backward compat: executor="thread" → bound="cpu"
-        if executor == "thread" and bound is None:
-            bound = "cpu"
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
                 f"bound must be 'sync', 'io', 'cpu', or None (auto-detect), got {bound!r}"
@@ -717,6 +714,7 @@ class BaseOp(ABC):
         # NullEmitter when no pipeline bound, so calls cost ~one method dispatch.
         emitter = current_emitter()
         op_var_token = None
+        op_ctx_token = None
         idx = 0
         op_started = False
         op_cancelled = False
@@ -746,6 +744,11 @@ class BaseOp(ABC):
             )
             op_started = True
             op_var_token = _current_op_var.set((self.full_name, ctx_for_end))
+            # V2 tracing: expose this op invocation's ctx so event()/span()
+            # can auto-inject it. Different invocations (loop iterations,
+            # streaming sub-contexts) get distinct ctx → distinct spans
+            # in the sink.
+            op_ctx_token = _current_op_ctx.set(ctx_for_end)
 
             # Cache check
             if self.cache is not None:
@@ -897,6 +900,8 @@ class BaseOp(ABC):
                 )
             if op_var_token is not None:
                 _current_op_var.reset(op_var_token)
+            if op_ctx_token is not None:
+                _current_op_ctx.reset(op_ctx_token)
 
             if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(

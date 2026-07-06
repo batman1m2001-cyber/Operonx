@@ -4,13 +4,7 @@ Covers ``trace_filter_to_processors`` mapping + ``LangfuseTracer.as_pipeline``
 migration helper. Mocked client; integration round-trip is the probe.
 """
 
-import pytest
-
-from operonx.core.tracing.events import EventKind
-from operonx.core.tracing.legacy import (
-    LegacyRewriter,
-    trace_filter_to_processors,
-)
+from operonx.core.tracing.legacy import trace_filter_to_processors
 from operonx.core.tracing.pipeline import TracePipeline
 from operonx.core.tracing.processors.drop import DropEmpty, DropOps, KeepOps
 from operonx.core.tracing.processors.truncate import TruncateIO
@@ -73,14 +67,14 @@ class TestTraceFilterToProcessors:
         out = trace_filter_to_processors(TraceFilter())
         assert out == []
 
-    def test_rewriters_warn_then_wrap(self):
+    def test_rewriters_dropped_silently(self):
+        # Rewriters expect a tree shape not present in the event stream;
+        # they are silently dropped rather than wrapped in a fake no-op.
         def my_rewriter(nodes):
             return nodes
 
-        with pytest.warns(DeprecationWarning, match="rewriter"):
-            out = trace_filter_to_processors(TraceFilter(rewriters=[my_rewriter]))
-        assert len(out) == 1
-        assert isinstance(out[0], LegacyRewriter)
+        out = trace_filter_to_processors(TraceFilter(rewriters=[my_rewriter]))
+        assert out == []
 
     def test_full_filter_compose_in_order(self):
         """Order: drop_ops → keep_ops → drop_empty → truncate."""
@@ -94,45 +88,6 @@ class TestTraceFilterToProcessors:
         # skip_empty, then truncate. Verify by type.
         types = [type(p).__name__ for p in out]
         assert types == ["DropOps", "DropEmpty", "TruncateIO"]
-
-
-# =============================================================================
-# LegacyRewriter — the no-op shim for old rewriter callbacks
-# =============================================================================
-
-
-class TestLegacyRewriter:
-    def test_passthrough(self):
-        called = []
-
-        def fn(nodes):
-            called.append(nodes)
-            return nodes
-
-        wrapped = LegacyRewriter(fn)
-        # Build a couple of fake events
-        from datetime import datetime, timezone
-
-        from operonx.core.tracing.events import TraceEvent
-
-        events = [
-            TraceEvent(
-                event_id="e-0",
-                request_id="r",
-                kind=EventKind.OP_START,
-                op_name="x",
-                ctx=(),
-                timestamp=datetime(2026, 5, 5, tzinfo=timezone.utc),
-                seq=0,
-                payload={},
-            ),
-        ]
-        out = list(wrapped(events))
-        # Events pass through unchanged — old rewriter was NOT called
-        # (incompatible signature; the wrapper only exists so the chain
-        # doesn't crash when a TraceFilter has rewriters).
-        assert out == events
-        assert called == []  # legacy fn not invoked
 
 
 # =============================================================================

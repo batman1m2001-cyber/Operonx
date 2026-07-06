@@ -67,7 +67,6 @@ def auto_name() -> Optional[str]:
 
     1. ``__init__`` methods (constructor chain)
     2. Functions registered via ``register_skip()``
-    3. Frames with local variable ``_skip_auto_name = True`` (backward compat)
 
     Then tries bytecode analysis first (no source needed, handles multi-line),
     falling back to AST source parsing.
@@ -102,9 +101,6 @@ def _should_skip(frame) -> bool:
         return True
     # Skip registered code objects (shorthand .of(), @op wrapper, etc.)
     if frame.f_code in _skip_code_objects:
-        return True
-    # Backward compat: skip frames with the legacy local variable marker
-    if frame.f_locals.get("_skip_auto_name"):
         return True
     return False
 

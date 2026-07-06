@@ -16,10 +16,6 @@ Example:
     state["node", "var"] = "value"
     value = state["node", "var"]
     state["node", "var", "[0]"] = "iteration value"
-
-    # Debug
-    schema.show()
-    state.show()
 """
 
 from operonx.core.states.cell import Cell

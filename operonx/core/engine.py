@@ -28,7 +28,6 @@ import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
 
 from operonx.core.loggings import LOGGER, format_event
-from operonx.core.middleware import Middleware
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.states import StateSchema
 
@@ -309,7 +308,7 @@ class Operon:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "_tracer"]
+    __slots__ = ["graph", "name", "_schema", "_collector", "_tracer"]
 
     def __init__(
         self,
@@ -348,7 +347,6 @@ class Operon:
         # Build graph and create schema immediately
         self.graph.build()
         self._schema = StateSchema(self.graph)
-        self._middleware: List[Middleware] = []
 
         # Eagerly init backends if a hub is already configured
         self._warmup_ops()
@@ -380,18 +378,6 @@ class Operon:
         """Access the workflow state schema."""
         return self._schema
 
-    def use(self, middleware: Middleware) -> "Operon":
-        """Add middleware to the engine. Returns self for chaining.
-
-        Args:
-            middleware: A Middleware instance to add.
-
-        Returns:
-            self, for fluent chaining: ``engine.use(m1).use(m2)``
-        """
-        self._middleware.append(middleware)
-        return self
-
     def start(
         self,
         inputs: Dict[str, Any],
@@ -400,6 +386,8 @@ class Operon:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        sink: Optional[Callable] = None,
+        trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
@@ -497,8 +485,21 @@ class Operon:
         graph_name = self.name
         queue: asyncio.Queue = asyncio.Queue()
 
+        # V2 tracing: install (trace_id, sink) into the task's context so
+        # any trace() call inside op bodies routes to this sink. Defaults
+        # trace_id to request_id — one call = one trace unless overridden.
+        v2_trace_ctx = None
+        if sink is not None:
+            from operonx.core.trace import _current as _v2_trace_current
+
+            v2_trace_ctx = (_v2_trace_current, (trace_id or request_id, sink))
+
         async def _run() -> None:
             emitter_token = _current_emitter_var.set(new_emitter)
+            v2_token = None
+            if v2_trace_ctx is not None:
+                v2_var, v2_value = v2_trace_ctx
+                v2_token = v2_var.set(v2_value)
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
             except Exception as e:
@@ -515,6 +516,8 @@ class Operon:
                         await primary.flush(partial=False)
                     except Exception:
                         LOGGER.exception("trace pipeline final flush failed")
+                if v2_token is not None:
+                    v2_trace_ctx[0].reset(v2_token)
                 _current_emitter_var.reset(emitter_token)
                 LOGGER.info(
                     format_event("workflow_done", request_id=request_id, graph_name=graph_name)
@@ -531,6 +534,8 @@ class Operon:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        sink: Optional[Callable] = None,
+        trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
@@ -561,37 +566,19 @@ class Operon:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        context: Dict[str, Any] = {
-            "user_id": user_id,
-            "session_id": session_id,
-            "request_id": request_id,
-        }
-
-        # Apply before_run middleware (in order)
-        for mw in self._middleware:
-            inputs = await mw.before_run(self.graph, inputs, context)
-
         handle = self.start(
             inputs,
             user_id=user_id,
             session_id=session_id,
             request_id=request_id,
             tracer=tracer,
+            sink=sink,
+            trace_id=trace_id,
             scratch=scratch,
         )
 
-        try:
-            result = await handle.collect(unwrap=True)
-        except Exception as e:
-            for mw in reversed(self._middleware):
-                await mw.on_error(self.graph, inputs, e, context)
-            raise
-
+        result = await handle.collect(unwrap=True)
         result["$state"] = handle.state
-
-        # Apply after_run middleware (in reverse order)
-        for mw in reversed(self._middleware):
-            result = await mw.after_run(self.graph, inputs, result, context)
 
         return result
 

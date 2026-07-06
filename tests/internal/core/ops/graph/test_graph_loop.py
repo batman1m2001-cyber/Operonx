@@ -236,41 +236,7 @@ class TestLoopWithBranch:
 
 
 # ============================================================
-# Test 8: @graph.loop() Decorator
-# ============================================================
-
-
-class TestGraphLoopDecorator:
-    """Test @graph.loop() decorator."""
-
-    @pytest.mark.asyncio
-    async def test_decorator(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        @graph.loop(until="count >= 5")
-        def counter_loop(count):
-            inc = increment(counter=count)
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> END
-
-        with GraphOp(name="main") as g:
-            loop = counter_loop(count=0)
-            START >> loop >> END
-
-        g.build()
-        schema = StateSchema(g)
-        state = schema.create_state()
-
-        result = {}
-        async for _, result in g.run(state):
-            pass
-        assert result["count"] == 5
-
-
-# ============================================================
-# Test 9: Loop with Initial from Upstream
+# Test 8: Loop with Initial from Upstream
 # ============================================================
 
 

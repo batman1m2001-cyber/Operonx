@@ -40,7 +40,6 @@ from operonx.core import (
     FuncOp,
     GraphOp,
     Interrupt,
-    Middleware,
     Operon,
     ParserOp,
     graph,
@@ -49,6 +48,12 @@ from operonx.core import (
 from operonx.core.registry import (
     BOOTSTRAP_ENV_PATHS,
     ResourceHub,
+)
+from operonx.core.trace import (
+    TraceEvent,
+    TraceRecorder,
+    event,
+    span,
 )
 
 try:
@@ -113,7 +118,6 @@ def _load_env_into_bootstrap() -> None:
 __all__ = [
     # Engine
     "Operon",
-    "Middleware",
     # Core op types
     "GraphOp",
     "BranchOp",
@@ -135,6 +139,11 @@ __all__ = [
     # Setup
     "bootstrap",
     "ResourceHub",
+    # Tracing (V2)
+    "event",
+    "span",
+    "TraceEvent",
+    "TraceRecorder",
     # Version
     "__version__",
 ]

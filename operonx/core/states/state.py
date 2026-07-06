@@ -162,62 +162,6 @@ class MemoryState:
         """Get value with explicit parameters."""
         return self[op, var, ctx]
 
-    def get_cell(self, op: str, var: str) -> Cell:
-        """Get the Cell object for a variable."""
-        idx = self.schema.get_index(op, var)
-        if idx < 0:
-            raise KeyError(f"({op}, {var}) not found in schema")
-        return self._cells[idx]
-
-    def has(self, op: str, var: str, ctx=None) -> bool:
-        """Check if value exists (without resolving ref)."""
-        idx = self.schema.get_index(op, var)
-        if idx < 0:
-            return False
-        if ctx is None:
-            ctx_key = DEFAULT_CONTEXT
-        elif isinstance(ctx, str):
-            ctx_key = (ctx,)
-        else:
-            ctx_key = ctx
-        return ctx_key in self._cells[idx]
-
-    # =========================================================================
-    # Index-based Access (O(1)) - Raw access without ref resolution
-    # =========================================================================
-
-    def get_by_index(self, idx: int, ctx: Optional[str] = None) -> Any:
-        """Direct cell access by index (no ref resolution)."""
-        if 0 <= idx < len(self._cells):
-            return self._cells[idx][ctx]
-        raise IndexError(f"Index {idx} out of range")
-
-    def set_by_index(self, idx: int, value: Any, ctx: Optional[str] = None) -> None:
-        """Direct cell assignment by index (no ref push)."""
-        if 0 <= idx < len(self._cells):
-            self._cells[idx][ctx] = value
-        else:
-            raise IndexError(f"Index {idx} out of range")
-
-    # =========================================================================
-    # Tracing Support
-    # =========================================================================
-
-    def iter_executed(self, op_name: str):
-        """Yield (context_id, start_time) for each execution of op_name.
-
-        Uses duration_ms as the execution marker (always set), then looks up
-        start_time for context. start_time may be None when tracing is off.
-        """
-        dur_idx = self.schema.get_index(op_name, "duration_ms")
-        if dur_idx < 0:
-            return
-        st_idx = self.schema.get_index(op_name, "start_time")
-        for ctx, dur in self._cells[dur_idx].items():
-            if dur is not None:
-                start = self._cells[st_idx][ctx] if st_idx >= 0 else None
-                yield ctx, start
-
     # =========================================================================
     # Properties
     # =========================================================================
@@ -319,27 +263,3 @@ class MemoryState:
             return False
         return self._request_id == other._request_id
 
-    def show(self) -> None:
-        """Display debug view of current state values."""
-        print(f"\n=== {self.__class__.__name__}: {self.name} ===")
-
-        for op, var in self.schema:
-            idx = self.schema.get_index(op, var)
-            cell = self._cells[idx]
-            pull_ref = self.schema._pull_refs[idx]
-
-            if not cell.contexts:
-                if pull_ref:
-                    print(f"{op}.{var} -> pull_ref[{pull_ref.idx}] (no value yet)")
-                else:
-                    print(f"{op}.{var} -> {cell.default_value}")
-            elif len(cell.contexts) == 1:
-                ctx = next(iter(cell.contexts))
-                value = cell.contexts[ctx]
-                value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)
-                print(f"{op}.{var} [{ctx}] = {value_str}")
-            else:
-                print(f"{op}.{var}:")
-                for ctx, value in cell.contexts.items():
-                    value_str = repr(value)[:50] + "..." if len(repr(value)) > 50 else repr(value)
-                    print(f"  [{ctx}] = {value_str}")

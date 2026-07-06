@@ -192,24 +192,3 @@ def graph(fn=None, *, bound: "str | None" = None):
         return _make_graph_wrapper(fn, bound)
     # @graph(bound="io") with parentheses
     return lambda f: _make_graph_wrapper(f, bound)
-
-
-# Backward compat: @graph.loop still works
-def _graph_loop(until=None, max_iterations=100):
-    """Deprecated: use @graph with until= kwarg instead."""
-
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(**kwargs):
-            kwargs["until"] = until
-            kwargs["max_iterations"] = max_iterations
-            return graph(fn)(**kwargs)
-
-        register_skip(wrapper)
-        wrapper.__wrapped__ = fn
-        return wrapper
-
-    return decorator
-
-
-graph.loop = _graph_loop

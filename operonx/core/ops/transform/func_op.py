@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 def op(
     func: Optional[Callable] = None,
     *,
-    executor: Optional[str] = None,
     bound: Optional[str] = None,
     cache=None,
     delay: float = 0,
@@ -48,11 +47,7 @@ def op(
             ``"sync"``  — inline dispatch, no asyncio task (fastest).
             ``"io"``    — asyncio task, for network/disk I/O.
             ``"cpu"``   — asyncio.to_thread(), for heavy compute (C extensions release GIL).
-        executor: Deprecated — use ``bound="cpu"`` instead of ``executor="thread"``.
     """
-    # Backward compat: executor="thread" → bound="cpu"
-    if executor == "thread" and bound is None:
-        bound = "cpu"
 
     def decorator(fn):
         module = fn.__module__ or ""
@@ -81,10 +76,6 @@ def op(
         def wrapper(**kwargs):
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
             op_bound = init_kwargs.pop("bound", bound)
-            # Backward compat: call-time executor="thread" → bound="cpu"
-            op_executor = init_kwargs.pop("executor", None)
-            if op_executor == "thread" and op_bound is None:
-                op_bound = "cpu"
             op_delay = init_kwargs.pop("delay", delay)
             return FuncOp(
                 code_fn=fn,

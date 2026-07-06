@@ -96,25 +96,3 @@ class TEIReranker(BaseReranker):
             raise ConnectionError("Request timed out") from e
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             raise ValueError(f"Invalid response format: {str(e)}") from e
-
-
-if __name__ == "__main__":
-    # Example usage
-    async def main():
-        import time
-
-        reranker = TEIReranker(RerankingConfig.default())
-
-        query = "Thời gian xử lý và cung cấp giấy báo có cho giao dịch chuyển tiền nhanh 247 qua Napas là bao lâu?"
-
-        start_time = time.time()
-
-        results = await reranker.run(query=query, texts=[], top_k=20, threshold=0.0)
-
-        for r in results:
-            print(r)
-
-        execution_time = time.time() - start_time
-        print(f"\nExecution time: {execution_time:.4f} seconds")
-
-    asyncio.run(main())

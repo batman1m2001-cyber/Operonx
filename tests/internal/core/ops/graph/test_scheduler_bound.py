@@ -181,7 +181,7 @@ class TestIOBound:
 
 
 # ============================================================
-# Test 6: CPU-bound (executor="thread") runs in thread pool
+# Test 6: CPU-bound (bound="cpu") runs in thread pool
 # ============================================================
 
 

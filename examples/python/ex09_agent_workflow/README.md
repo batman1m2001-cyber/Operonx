@@ -1,8 +1,8 @@
 # 09 — Agent Workflow (Python)
 
-Tool-calling agent built on `@graph.loop`. The loop body sends the
-conversation to the LLM, runs any tool calls, and stops when the LLM
-stops calling tools.
+Tool-calling agent built on `@graph` with a call-time `until=` loop.
+The loop body sends the conversation to the LLM, runs any tool calls,
+and stops when the LLM stops calling tools.
 
 | Scenario   | Example query                                                     |
 |------------|-------------------------------------------------------------------|
@@ -18,7 +18,7 @@ ex09_agent_workflow/
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY
 ├── resources.yaml      # llm:gpt-4o-mini
-└── main.py             # tools + ops + @graph.loop body + outer @graph
+└── main.py             # tools + ops + inner @graph loop + outer @graph
 ```
 
 ## Run
