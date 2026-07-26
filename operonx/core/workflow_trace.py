@@ -212,11 +212,7 @@ def all_edges(
     that no separate `edges.jsonl` is needed — everything's inline on
     the nodes.
     """
-    return [
-        (u.from_op_id, u.from_key, n.op_id, u.to_key)
-        for n in nodes
-        for u in n.upstreams
-    ]
+    return [(u.from_op_id, u.from_key, n.op_id, u.to_key) for n in nodes for u in n.upstreams]
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +223,8 @@ def all_edges(
 # reads it to append `OpExecution` records as ops complete. `None` means
 # no tracing installed → recording is a cheap no-op guard.
 _current_trace: ContextVar[Optional[WorkflowTrace]] = ContextVar(
-    "operonx_workflow_trace", default=None,
+    "operonx_workflow_trace",
+    default=None,
 )
 
 # Per-op-invocation ctx — set by `BaseOp.run()` to the scheduler's
@@ -236,5 +233,6 @@ _current_trace: ContextVar[Optional[WorkflowTrace]] = ContextVar(
 # ContextVar so downstream tooling can inspect the caller's ctx if
 # needed. Author code never touches this — the engine writes and clears.
 _current_op_ctx: ContextVar[Optional[tuple]] = ContextVar(
-    "operonx_op_ctx", default=None,
+    "operonx_op_ctx",
+    default=None,
 )

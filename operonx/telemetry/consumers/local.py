@@ -55,6 +55,7 @@ def _upstream_to_dict(u: UpstreamRef) -> Dict[str, str]:
         "to_key": u.to_key,
     }
 
+
 __all__ = ["LocalConsumer", "FORMATTERS", "default_arrow"]
 
 
@@ -122,9 +123,7 @@ class LocalConsumer(Consumer):
         media_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. meta.json
-        (tmp / "meta.json").write_text(
-            json.dumps(self._meta_dict(trace), indent=2, default=str)
-        )
+        (tmp / "meta.json").write_text(json.dumps(self._meta_dict(trace), indent=2, default=str))
 
         # 2. nodes.jsonl — sanitize + media offload per row.
         # Hand-build the row instead of `asdict(node)` because asdict()
@@ -136,10 +135,14 @@ class LocalConsumer(Consumer):
         with (tmp / "nodes.jsonl").open("w") as f:
             for node in trace.nodes:
                 clean_in = self.offload_media(
-                    self.sanitize(node.inputs), media_dir, cfg["media_threshold"],
+                    self.sanitize(node.inputs),
+                    media_dir,
+                    cfg["media_threshold"],
                 )
                 clean_out = self.offload_media(
-                    self.sanitize(node.outputs), media_dir, cfg["media_threshold"],
+                    self.sanitize(node.outputs),
+                    media_dir,
+                    cfg["media_threshold"],
                 )
                 row = {
                     "op_id": node.op_id,
@@ -160,9 +163,7 @@ class LocalConsumer(Consumer):
         # 3. view.txt — human-readable render (subclasses override
         # `_render_view` for domain-specific structure).
         if cfg["write_view_txt"]:
-            (tmp / "view.txt").write_text(
-                self._render_view(trace, cfg["arrow_formatters"])
-            )
+            (tmp / "view.txt").write_text(self._render_view(trace, cfg["arrow_formatters"]))
 
         # 4. atomic-ish rename + latest symlink
         if final.exists():
@@ -277,12 +278,7 @@ class LocalConsumer(Consumer):
 
     def _render_summary(self, trace: WorkflowTrace) -> str:
         errors = [n for n in trace.nodes if n.status == "error"]
-        return (
-            f"{'=' * 72}\n"
-            f"SUMMARY  nodes={len(trace.nodes)}  "
-            f"errors={len(errors)}\n"
-            f"{'=' * 72}"
-        )
+        return f"{'=' * 72}\nSUMMARY  nodes={len(trace.nodes)}  errors={len(errors)}\n{'=' * 72}"
 
     def _meta_dict(self, trace: WorkflowTrace) -> Dict[str, Any]:
         return {
@@ -342,9 +338,11 @@ class LocalConsumerConfig(YamlModel):
 
 
 def _create_local_consumer(cfg: LocalConsumerConfig) -> LocalConsumer:
-    return LocalConsumer(config={
-        "root": cfg.root,
-        "media_threshold": cfg.media_threshold,
-        "write_view_txt": cfg.write_view_txt,
-        "show_io": cfg.show_io,
-    })
+    return LocalConsumer(
+        config={
+            "root": cfg.root,
+            "media_threshold": cfg.media_threshold,
+            "write_view_txt": cfg.write_view_txt,
+            "show_io": cfg.show_io,
+        }
+    )

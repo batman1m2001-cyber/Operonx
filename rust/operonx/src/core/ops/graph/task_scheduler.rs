@@ -553,8 +553,7 @@ impl GraphScheduler {
         // outside the graph runtime — e.g. tests, the top-level engine
         // path that built run_collect for a standalone subgraph — can
         // pass `None` to get a fresh isolated SCRATCH.
-        let nested_scratch = parent_scratch
-            .unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
+        let nested_scratch = parent_scratch.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
         Scheduler::run(self, inputs, ctx, sender, cancel, nested_scratch).await?;
 
         // Merge every captured frame's `data` map. Multiple output ops
@@ -977,7 +976,7 @@ impl GraphScheduler {
                                 &self.child_schedulers,
                                 parent_scratch,
                             )
-                                .await
+                            .await
                             {
                                 Ok(value) => {
                                     // Detect Interrupt return — emit a

@@ -58,6 +58,7 @@ class TestSanitize:
     def test_function_object_stripped(self, consumer):
         def cb():
             return 1
+
         out = consumer.sanitize({"fn": cb})
         assert out["fn"]["$unserializable"] == "function"
 
@@ -127,9 +128,9 @@ class TestOffloadMedia:
     def test_list_walk(self, consumer, tmp_path):
         payload = {"chunks": [b"Y" * 4096, b"tiny", b"Z" * 4096]}
         out = consumer.offload_media(payload, tmp_path, threshold=1024)
-        assert isinstance(out["chunks"][0], dict)   # offloaded
-        assert out["chunks"][1] == b"tiny"          # inline
-        assert isinstance(out["chunks"][2], dict)   # offloaded
+        assert isinstance(out["chunks"][0], dict)  # offloaded
+        assert out["chunks"][1] == b"tiny"  # inline
+        assert isinstance(out["chunks"][2], dict)  # offloaded
 
 
 # ============================================================

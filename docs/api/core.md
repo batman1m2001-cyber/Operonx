@@ -44,13 +44,6 @@ sentinels the graph builder recognises.
 | `PARENT` | Reference root for inputs from `engine.run(inputs={...})` or the parent graph in nested contexts. Used as `PARENT["key"]`. |
 | `PENDING` | Sentinel returned by ops that absorb input without producing output. |
 
-## Middleware
-
-Hook into engine lifecycle events — see [Tracing](../guide/07-tracing.md)
-for built-in tracers and middleware patterns.
-
-::: operonx.core.middleware.Middleware
-
 ## Top-level convenience
 
 ::: operonx.bootstrap

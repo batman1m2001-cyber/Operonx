@@ -24,7 +24,6 @@ from operonx.core.registry import ResourceHub
 from operonx.core.workflow_trace import WorkflowTrace
 from operonx.telemetry.consumer import Consumer
 
-
 # ---------------------------------------------------------------------------
 # Fixture ops + graph
 # ---------------------------------------------------------------------------
@@ -120,6 +119,7 @@ class TestTraceParamResourceKey:
         # Resource resolved eagerly at __init__.
         assert len(engine._trace_consumers) == 1
         from operonx.telemetry.consumers.local import LocalConsumer
+
         assert isinstance(engine._trace_consumers[0], LocalConsumer)
 
         handle = engine.start(inputs={"a": 5, "b": 6}, request_id="t-str")

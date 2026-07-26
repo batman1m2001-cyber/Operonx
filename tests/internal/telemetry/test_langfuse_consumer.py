@@ -21,7 +21,6 @@ from operonx.core.workflow_trace import (
 )
 from operonx.telemetry.consumers.langfuse import LangfuseConsumer
 
-
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
@@ -41,14 +40,30 @@ class FakeLangfuseClient:
         return f"https://langfuse.test/trace/{trace_id}"
 
 
-def _mkexec(op_id, op_name, start, end, ctx=("main",),
-            inputs=None, outputs=None, upstreams=None, status=STATUS_OK,
-            error=None):
+def _mkexec(
+    op_id,
+    op_name,
+    start,
+    end,
+    ctx=("main",),
+    inputs=None,
+    outputs=None,
+    upstreams=None,
+    status=STATUS_OK,
+    error=None,
+):
     return OpExecution(
-        op_id=op_id, op_name=op_name, op_full_name=f"engine.{op_name}",
-        ctx=ctx, start_time=start, end_time=end,
-        inputs=inputs or {}, outputs=outputs or {},
-        upstreams=upstreams or [], status=status, error=error,
+        op_id=op_id,
+        op_name=op_name,
+        op_full_name=f"engine.{op_name}",
+        ctx=ctx,
+        start_time=start,
+        end_time=end,
+        inputs=inputs or {},
+        outputs=outputs or {},
+        upstreams=upstreams or [],
+        status=status,
+        error=error,
     )
 
 
@@ -66,8 +81,10 @@ def _u(from_op_id, from_name="src", from_key="out", to_key="in"):
 def linear_trace():
     """A → B → C (each op depends on the previous)."""
     return WorkflowTrace(
-        trace_id="t-lin", workflow_name="w",
-        started_at=100.0, ended_at=100.3,
+        trace_id="t-lin",
+        workflow_name="w",
+        started_at=100.0,
+        ended_at=100.3,
         nodes=[
             _mkexec("A", "a", 100.00, 100.10),
             _mkexec("B", "b", 100.10, 100.20, upstreams=[_u("A", "a")]),
@@ -96,7 +113,9 @@ class TestBatchShape:
         assert types == ["trace-create", "span-create", "span-create", "span-create"]
 
     def test_trace_create_carries_metadata_and_name(self, linear_trace, client):
-        LangfuseConsumer(config={"client": client, "workflow_name": "callbot"}).consume(linear_trace)
+        LangfuseConsumer(config={"client": client, "workflow_name": "callbot"}).consume(
+            linear_trace
+        )
         trace_ev = client.calls[0][0]
         body = trace_ev["body"]
         assert body["id"] == "t-lin"
@@ -105,9 +124,15 @@ class TestBatchShape:
         assert body["sessionId"] == "s-1"
 
     def test_span_body_has_input_output_ctx(self, client):
-        node = _mkexec("A", "classify", 1.0, 1.2,
-                       ctx=("main", "[1]"),
-                       inputs={"state": "MAIN"}, outputs={"intent": "affirm"})
+        node = _mkexec(
+            "A",
+            "classify",
+            1.0,
+            1.2,
+            ctx=("main", "[1]"),
+            inputs={"state": "MAIN"},
+            outputs={"intent": "affirm"},
+        )
         trace = WorkflowTrace("t", "w", 0.0, 1.0, nodes=[node])
         LangfuseConsumer(config={"client": client}).consume(trace)
         span_body = client.calls[0][1]["body"]
@@ -130,26 +155,27 @@ class TestParentStrategies:
         assert parents == {"A": None, "B": "A", "C": "B"}
 
     def test_root_only(self, linear_trace, client):
-        LangfuseConsumer(
-            config={"client": client, "parent_strategy": "root_only"}
-        ).consume(linear_trace)
+        LangfuseConsumer(config={"client": client, "parent_strategy": "root_only"}).consume(
+            linear_trace
+        )
         spans = [e for e in client.calls[0] if e["type"] == "span-create"]
         assert all(s["body"]["parentObservationId"] is None for s in spans)
 
     def test_sequential(self, client):
         # Nodes deliberately in ctx-fan-out order but distinct start_times.
         trace = WorkflowTrace(
-            "t", "w", 0.0, 1.0,
+            "t",
+            "w",
+            0.0,
+            1.0,
             nodes=[
                 _mkexec("A", "a", 0.10, 0.11),
                 _mkexec("B", "b", 0.20, 0.21),  # No upstream, but should
-                                                # attach to A via sequential
+                # attach to A via sequential
                 _mkexec("C", "c", 0.30, 0.31),
             ],
         )
-        LangfuseConsumer(
-            config={"client": client, "parent_strategy": "sequential"}
-        ).consume(trace)
+        LangfuseConsumer(config={"client": client, "parent_strategy": "sequential"}).consume(trace)
         spans = [e for e in client.calls[0] if e["type"] == "span-create"]
         parents = {s["body"]["id"]: s["body"]["parentObservationId"] for s in spans}
         assert parents == {"A": None, "B": "A", "C": "B"}
@@ -163,13 +189,10 @@ class TestParentStrategies:
 class TestEdgeCases:
     def test_missing_client_raises(self):
         with pytest.raises(ValueError, match="requires a `client`"):
-            LangfuseConsumer(config={}).consume(
-                WorkflowTrace("t", "w", 0.0, 0.0)
-            )
+            LangfuseConsumer(config={}).consume(WorkflowTrace("t", "w", 0.0, 0.0))
 
     def test_errored_op_gets_error_level(self, client):
-        node = _mkexec("X", "boom", 0.0, 0.1,
-                       status=STATUS_ERROR, error="RuntimeError: kaput")
+        node = _mkexec("X", "boom", 0.0, 0.1, status=STATUS_ERROR, error="RuntimeError: kaput")
         trace = WorkflowTrace("t", "w", 0.0, 0.1, nodes=[node])
         LangfuseConsumer(config={"client": client}).consume(trace)
         span_body = client.calls[0][1]["body"]

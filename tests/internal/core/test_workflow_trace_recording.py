@@ -26,7 +26,6 @@ from operonx.core.workflow_trace import (
     make_op_id,
 )
 
-
 # ---------------------------------------------------------------------------
 # Ops used across cases
 # ---------------------------------------------------------------------------
@@ -102,6 +101,7 @@ class TestBatchOps:
     async def test_upstreams_link_producer_to_consumer(self):
         """`double` has one upstream: `add_one.y → double.y`. The
         upstream's `from_op_id` matches `add_one`'s `OpExecution.op_id`."""
+
         @graph
         def wf(x: int):
             a = add_one(x=PARENT["x"])
@@ -183,9 +183,7 @@ class TestMultiUpstream:
         handle = engine.start(inputs={"x": 3, "y": 4})
         await handle.collect()
 
-        combine_exec = next(
-            n for n in handle.trace.nodes if n.op_name == "c"
-        )
+        combine_exec = next(n for n in handle.trace.nodes if n.op_name == "c")
         assert len(combine_exec.upstreams) == 2
         # Both upstreams point at the two `add_one` invocations we
         # assigned to graph vars `a` and `b`.
@@ -263,7 +261,9 @@ class TestTraceMetadata:
         engine = Operon(wf, params={"x": 0})
         handle = engine.start(
             inputs={"x": 1},
-            user_id="u-1", session_id="s-1", request_id="req-1",
+            user_id="u-1",
+            session_id="s-1",
+            request_id="req-1",
         )
         await handle.collect()
 
@@ -282,7 +282,7 @@ class TestTraceMetadata:
 
         engine = Operon(wf, params={"x": 0})
         handle = engine.start(inputs={"x": 1})
-        assert handle.trace.ended_at == 0.0    # not yet finished
+        assert handle.trace.ended_at == 0.0  # not yet finished
         await handle.collect()
         assert handle.trace.ended_at > handle.trace.started_at
         assert handle.trace.duration_ms > 0

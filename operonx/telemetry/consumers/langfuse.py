@@ -29,8 +29,8 @@ Then hand the resource key to :class:`Operon`::
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar, Dict, List, Optional
 from pathlib import Path
+from typing import Any, ClassVar, Dict, List, Optional
 
 from operonx.core.utils.yaml_model import YamlModel
 from operonx.core.workflow_trace import (
@@ -93,10 +93,15 @@ class LangfuseConsumer(Consumer):
         batch.append(self._trace_create(trace, wf_name))
         # 2. span-create per OpExecution
         for node in trace.nodes:
-            batch.append(self._span_create(
-                node, trace.trace_id, parent_of.get(node.op_id),
-                media_dir, cfg["media_threshold"],
-            ))
+            batch.append(
+                self._span_create(
+                    node,
+                    trace.trace_id,
+                    parent_of.get(node.op_id),
+                    media_dir,
+                    cfg["media_threshold"],
+                )
+            )
 
         client.ingest(batch)
         return client.trace_url(trace.trace_id)
@@ -164,7 +169,9 @@ class LangfuseConsumer(Consumer):
     # ------------------------------------------------------------------
 
     def _pick_parents(
-        self, trace: WorkflowTrace, strategy: str,
+        self,
+        trace: WorkflowTrace,
+        strategy: str,
     ) -> Dict[str, Optional[str]]:
         if strategy == "root_only":
             return {n.op_id: None for n in trace.nodes}
@@ -175,8 +182,7 @@ class LangfuseConsumer(Consumer):
                 for i, n in enumerate(sorted_nodes)
             }
         # default: first_upstream
-        return {n.op_id: (n.upstreams[0].from_op_id if n.upstreams else None)
-                for n in trace.nodes}
+        return {n.op_id: (n.upstreams[0].from_op_id if n.upstreams else None) for n in trace.nodes}
 
     # ------------------------------------------------------------------
     # Small helpers
@@ -196,6 +202,7 @@ class LangfuseConsumer(Consumer):
         # needed, callers should pass `started_at`/`ended_at` as
         # time.time() rather than time.perf_counter().
         import datetime
+
         # Assume perf timestamps are already close enough to unix time
         # for a first pass; adjust in a follow-up if drift is noticed.
         return datetime.datetime.utcfromtimestamp(perf).isoformat() + "Z"
@@ -203,6 +210,7 @@ class LangfuseConsumer(Consumer):
     @staticmethod
     def _event_id() -> str:
         import uuid
+
         return uuid.uuid4().hex
 
 
@@ -230,9 +238,9 @@ class LangfuseConsumerConfig(YamlModel):
 
     _category: ClassVar[str] = "trace_langfuse"
 
-    client_resource: str                      # e.g. "langfuse:edupia"
+    client_resource: str  # e.g. "langfuse:edupia"
     workflow_name: Optional[str] = None
-    parent_strategy: str = "first_upstream"   # first_upstream|root_only|sequential
+    parent_strategy: str = "first_upstream"  # first_upstream|root_only|sequential
     media_threshold: int = 1024
     media_dir: Optional[str] = None
 
@@ -241,10 +249,12 @@ def _create_langfuse_consumer(cfg: LangfuseConsumerConfig) -> LangfuseConsumer:
     from operonx.core.registry import ResourceHub
 
     client = ResourceHub.instance().get(cfg.client_resource)
-    return LangfuseConsumer(config={
-        "client": client,
-        "workflow_name": cfg.workflow_name,
-        "parent_strategy": cfg.parent_strategy,
-        "media_threshold": cfg.media_threshold,
-        "media_dir": cfg.media_dir,
-    })
+    return LangfuseConsumer(
+        config={
+            "client": client,
+            "workflow_name": cfg.workflow_name,
+            "parent_strategy": cfg.parent_strategy,
+            "media_threshold": cfg.media_threshold,
+            "media_dir": cfg.media_dir,
+        }
+    )

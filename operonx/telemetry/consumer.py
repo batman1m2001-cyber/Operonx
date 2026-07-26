@@ -212,7 +212,9 @@ def _serialise_media(v: Any) -> tuple:
         return None, ""
     if _is_ndarray(v):
         import io
+
         import numpy as np
+
         buf = io.BytesIO()
         np.save(buf, v, allow_pickle=False)
         return buf.getvalue(), "npy"

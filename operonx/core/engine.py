@@ -398,8 +398,8 @@ class Operon:
         """
         # Late import: `Consumer` lives in a subpackage that imports
         # engine machinery — avoid the circular by resolving here.
-        from operonx.telemetry.consumer import Consumer
         from operonx.core.registry import ResourceHub
+        from operonx.telemetry.consumer import Consumer
 
         if trace is None:
             return []
@@ -501,7 +501,8 @@ class Operon:
         # Always created — consumers read `handle.trace` after the run.
         # Ops append `OpExecution` records automatically via the
         # `BaseOp.run()` recording hook — no author code required.
-        from operonx.core.workflow_trace import WorkflowTrace, _current_trace as _v3_trace_var
+        from operonx.core.workflow_trace import WorkflowTrace
+        from operonx.core.workflow_trace import _current_trace as _v3_trace_var
 
         _wf_trace = WorkflowTrace(
             trace_id=trace_id or request_id,
@@ -538,7 +539,8 @@ class Operon:
                     except Exception:
                         LOGGER.exception(
                             "trace consumer %r failed on trace %s",
-                            type(_consumer).__name__, _wf_trace.trace_id,
+                            type(_consumer).__name__,
+                            _wf_trace.trace_id,
                         )
                 LOGGER.info(
                     format_event("workflow_done", request_id=request_id, graph_name=graph_name)

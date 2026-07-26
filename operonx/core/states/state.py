@@ -262,4 +262,3 @@ class MemoryState:
         if not isinstance(other, MemoryState):
             return False
         return self._request_id == other._request_id
-

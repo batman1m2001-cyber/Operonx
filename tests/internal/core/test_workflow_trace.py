@@ -22,8 +22,7 @@ from operonx.core.workflow_trace import (
 )
 
 
-def _u(from_op="op-01", from_name="src", from_full="engine.src",
-       from_key="out", to_key="in"):
+def _u(from_op="op-01", from_name="src", from_full="engine.src", from_key="out", to_key="in"):
     """Terse UpstreamRef factory — keyword-friendly."""
     return UpstreamRef(
         from_op_id=from_op,
@@ -34,15 +33,16 @@ def _u(from_op="op-01", from_name="src", from_full="engine.src",
     )
 
 
-def _mkexec(op_id, op_name, ctx=("main",), upstreams=None,
-            start=0.0, end=0.0, op_full_name=None):
+def _mkexec(op_id, op_name, ctx=("main",), upstreams=None, start=0.0, end=0.0, op_full_name=None):
     return OpExecution(
         op_id=op_id,
         op_name=op_name,
         op_full_name=op_full_name or f"engine.{op_name}",
         ctx=ctx,
-        start_time=start, end_time=end,
-        inputs={}, outputs={},
+        start_time=start,
+        end_time=end,
+        inputs={},
+        outputs={},
         upstreams=upstreams or [],
     )
 
@@ -102,8 +102,10 @@ class TestOpExecution:
             op_name="classify",
             op_full_name="engine.classify",
             ctx=("main", "[1]"),
-            start_time=1.0, end_time=1.2,
-            inputs={"state": "MAIN"}, outputs={"intent": "affirm"},
+            start_time=1.0,
+            end_time=1.2,
+            inputs={"state": "MAIN"},
+            outputs={"intent": "affirm"},
         )
         assert e.upstreams == []
         assert e.status == STATUS_OK
@@ -120,9 +122,14 @@ class TestOpExecution:
 
     def test_error_status_carries_traceback(self):
         e = OpExecution(
-            op_id="x", op_name="x", op_full_name="engine.x",
-            ctx=("main",), start_time=0.0, end_time=0.1,
-            inputs={}, outputs={},
+            op_id="x",
+            op_name="x",
+            op_full_name="engine.x",
+            ctx=("main",),
+            start_time=0.0,
+            end_time=0.1,
+            inputs={},
+            outputs={},
             status=STATUS_ERROR,
             error="RuntimeError: boom\n  at foo.py:10",
         )
@@ -133,14 +140,22 @@ class TestOpExecution:
         """Serializes cleanly — required for JSONL / Langfuse consumers."""
         e = OpExecution(
             op_id="engine.stt#main.[1]",
-            op_name="stt", op_full_name="engine.stt",
+            op_name="stt",
+            op_full_name="engine.stt",
             ctx=("main", "[1]"),
-            start_time=4.064, end_time=4.175,
+            start_time=4.064,
+            end_time=4.175,
             inputs={"AUDIO_SIGNAL": [0.1, 0.2]},
             outputs={"TRANSCRIPT": "hello"},
-            upstreams=[_u(from_op="engine.prepare#main.[1]",
-                          from_name="prepare", from_full="engine.prepare",
-                          from_key="speech_audio", to_key="AUDIO_SIGNAL")],
+            upstreams=[
+                _u(
+                    from_op="engine.prepare#main.[1]",
+                    from_name="prepare",
+                    from_full="engine.prepare",
+                    from_key="speech_audio",
+                    to_key="AUDIO_SIGNAL",
+                )
+            ],
         )
         d = asdict(e)
         assert d["op_name"] == "stt"
@@ -157,8 +172,10 @@ class TestOpExecution:
 class TestWorkflowTrace:
     def test_empty_defaults(self):
         t = WorkflowTrace(
-            trace_id="t1", workflow_name="callbot",
-            started_at=0.0, ended_at=1.0,
+            trace_id="t1",
+            workflow_name="callbot",
+            started_at=0.0,
+            ended_at=1.0,
         )
         assert t.nodes == []
         assert t.metadata == {}
@@ -166,12 +183,14 @@ class TestWorkflowTrace:
 
     def test_by_op_filters_by_name(self):
         t = WorkflowTrace(
-            trace_id="t1", workflow_name="w",
-            started_at=0.0, ended_at=1.0,
+            trace_id="t1",
+            workflow_name="w",
+            started_at=0.0,
+            ended_at=1.0,
             nodes=[
                 _mkexec("op-01", "stt"),
                 _mkexec("op-02", "classify"),
-                _mkexec("op-03", "stt"),   # second stt (streaming)
+                _mkexec("op-03", "stt"),  # second stt (streaming)
             ],
         )
         stt_execs = t.by_op("stt")
@@ -180,11 +199,13 @@ class TestWorkflowTrace:
 
     def test_roots_have_no_upstreams(self):
         n1 = _mkexec("op-01", "src")
-        n2 = _mkexec("op-02", "downstream",
-                     upstreams=[_u(from_op="op-01", from_name="src")])
+        n2 = _mkexec("op-02", "downstream", upstreams=[_u(from_op="op-01", from_name="src")])
         t = WorkflowTrace(
-            trace_id="t", workflow_name="w",
-            started_at=0.0, ended_at=1.0, nodes=[n1, n2],
+            trace_id="t",
+            workflow_name="w",
+            started_at=0.0,
+            ended_at=1.0,
+            nodes=[n1, n2],
         )
         assert [n.op_id for n in t.roots()] == ["op-01"]
 
@@ -194,8 +215,11 @@ class TestWorkflowTrace:
         b = _mkexec("op-B", "B", upstreams=[_u(from_op="op-A", from_name="A")])
         c = _mkexec("op-C", "C", upstreams=[_u(from_op="op-B", from_name="B")])
         t = WorkflowTrace(
-            trace_id="t", workflow_name="w",
-            started_at=0.0, ended_at=1.0, nodes=[a, b, c],
+            trace_id="t",
+            workflow_name="w",
+            started_at=0.0,
+            ended_at=1.0,
+            nodes=[a, b, c],
         )
         assert [n.op_id for n in t.leaves()] == ["op-C"]
 
@@ -206,8 +230,11 @@ class TestWorkflowTrace:
         b = _mkexec("op-B", "B", upstreams=[_u(from_op="op-A", from_name="A")])
         c = _mkexec("op-C", "C", upstreams=[_u(from_op="op-A", from_name="A")])
         t = WorkflowTrace(
-            trace_id="t", workflow_name="w",
-            started_at=0.0, ended_at=1.0, nodes=[a, b, c],
+            trace_id="t",
+            workflow_name="w",
+            started_at=0.0,
+            ended_at=1.0,
+            nodes=[a, b, c],
         )
         assert sorted(n.op_id for n in t.leaves()) == ["op-B", "op-C"]
 
@@ -226,7 +253,8 @@ class TestAllEdges:
         # A ──> B (2 inputs into B, both from A)
         a = _mkexec("op-A", "A")
         b = _mkexec(
-            "op-B", "B",
+            "op-B",
+            "B",
             upstreams=[
                 _u(from_op="op-A", from_name="A", from_key="out1", to_key="in1"),
                 _u(from_op="op-A", from_name="A", from_key="out2", to_key="in2"),
@@ -244,14 +272,17 @@ class TestAllEdges:
         u2 = _mkexec("op-stt", "stt")
         u3 = _mkexec("op-noop", "noop_stt")
         picker = _mkexec(
-            "op-pick", "pick_transcript",
+            "op-pick",
+            "pick_transcript",
             upstreams=[
-                _u(from_op="op-src",  from_name="frame_source",
-                   from_key="kind",           to_key="kind"),
-                _u(from_op="op-stt",  from_name="stt",
-                   from_key="TRANSCRIPT",     to_key="audio_text"),
-                _u(from_op="op-noop", from_name="noop_stt",
-                   from_key="skip_transcript", to_key="skip_text"),
+                _u(from_op="op-src", from_name="frame_source", from_key="kind", to_key="kind"),
+                _u(from_op="op-stt", from_name="stt", from_key="TRANSCRIPT", to_key="audio_text"),
+                _u(
+                    from_op="op-noop",
+                    from_name="noop_stt",
+                    from_key="skip_transcript",
+                    to_key="skip_text",
+                ),
             ],
         )
         edges = all_edges([u1, u2, u3, picker])

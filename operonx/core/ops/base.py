@@ -17,6 +17,9 @@ from operonx.core.ops._params import merge_params, normalize_params, resolve_val
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.states.ref import Ref
 from operonx.core.states.scratch_ref import ScratchRef
+from operonx.core.utils.auto_name import auto_name, unique_name
+from operonx.core.utils.common import Param
+from operonx.core.utils.context import get_current
 from operonx.core.workflow_trace import (
     STATUS_CANCELLED,
     STATUS_ERROR,
@@ -27,9 +30,6 @@ from operonx.core.workflow_trace import (
     _current_trace,
     make_op_id,
 )
-from operonx.core.utils.auto_name import auto_name, unique_name
-from operonx.core.utils.common import Param
-from operonx.core.utils.context import get_current
 
 if TYPE_CHECKING:
     from operonx.core.states import MemoryState
@@ -683,7 +683,9 @@ class BaseOp(ABC):
             yield await core_fn(**inputs)
 
     def _v3_infer_upstreams(
-        self, state: "MemoryState", context_id: Optional[tuple],
+        self,
+        state: "MemoryState",
+        context_id: Optional[tuple],
     ) -> List[UpstreamRef]:
         """Build the `upstreams` list for this op invocation's `OpExecution`.
 
@@ -730,13 +732,15 @@ class BaseOp(ABC):
             # display cleanly OR match uniqueness.
             producer_full = ref.source
             producer_local = producer_full.rsplit(".", 1)[-1]
-            out.append(UpstreamRef(
-                from_op_id=make_op_id(producer_full, producer_ctx),
-                from_op_name=producer_local,
-                from_op_full_name=producer_full,
-                from_key=ref.var,
-                to_key=var_name,
-            ))
+            out.append(
+                UpstreamRef(
+                    from_op_id=make_op_id(producer_full, producer_ctx),
+                    from_op_name=producer_local,
+                    from_op_full_name=producer_full,
+                    from_key=ref.var,
+                    to_key=var_name,
+                )
+            )
         return out
 
     async def run(
@@ -858,18 +862,20 @@ class BaseOp(ABC):
                 # so op_id is unique per yield → downstream consumers of
                 # yield i produce matching UpstreamRef.from_op_id.
                 if _wf_trace is not None and self.is_gen:
-                    _wf_trace.nodes.append(OpExecution(
-                        op_id=make_op_id(self.full_name, ctx),
-                        op_name=self.name,
-                        op_full_name=self.full_name,
-                        ctx=ctx,
-                        start_time=_yield_start,
-                        end_time=perf_counter(),
-                        inputs=dict(_inputs),   # shallow copy — op may reuse dict
-                        outputs=dict(result) if isinstance(result, dict) else {"_": result},
-                        upstreams=_v3_upstreams,
-                        status=STATUS_OK,
-                    ))
+                    _wf_trace.nodes.append(
+                        OpExecution(
+                            op_id=make_op_id(self.full_name, ctx),
+                            op_name=self.name,
+                            op_full_name=self.full_name,
+                            ctx=ctx,
+                            start_time=_yield_start,
+                            end_time=perf_counter(),
+                            inputs=dict(_inputs),  # shallow copy — op may reuse dict
+                            outputs=dict(result) if isinstance(result, dict) else {"_": result},
+                            upstreams=_v3_upstreams,
+                            status=STATUS_OK,
+                        )
+                    )
                 yield ctx, result
                 idx += 1
                 _yield_start = perf_counter()
@@ -951,24 +957,27 @@ class BaseOp(ABC):
                 #     the trace shows the failure attempt
                 if _wf_trace is not None:
                     v3_status = (
-                        STATUS_CANCELLED if op_cancelled
+                        STATUS_CANCELLED
+                        if op_cancelled
                         else (STATUS_ERROR if error_msg is not None else STATUS_OK)
                     )
                     should_emit = (not self.is_gen) or v3_status != STATUS_OK
                     if should_emit:
-                        _wf_trace.nodes.append(OpExecution(
-                            op_id=make_op_id(self.full_name, ctx_for_end),
-                            op_name=self.name,
-                            op_full_name=self.full_name,
-                            ctx=ctx_for_end,
-                            start_time=perf_start,
-                            end_time=perf_start + duration_ms / 1000.0,
-                            inputs=dict(_inputs),
-                            outputs=dict(_outputs) if isinstance(_outputs, dict) else {},
-                            upstreams=_v3_upstreams,
-                            status=v3_status,
-                            error=error_msg,
-                        ))
+                        _wf_trace.nodes.append(
+                            OpExecution(
+                                op_id=make_op_id(self.full_name, ctx_for_end),
+                                op_name=self.name,
+                                op_full_name=self.full_name,
+                                ctx=ctx_for_end,
+                                start_time=perf_start,
+                                end_time=perf_start + duration_ms / 1000.0,
+                                inputs=dict(_inputs),
+                                outputs=dict(_outputs) if isinstance(_outputs, dict) else {},
+                                upstreams=_v3_upstreams,
+                                status=v3_status,
+                                error=error_msg,
+                            )
+                        )
             if op_ctx_token is not None:
                 _current_op_ctx.reset(op_ctx_token)
 
