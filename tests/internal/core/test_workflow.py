@@ -141,12 +141,11 @@ class TestOperonRun:
         assert result["sum"] == 15
 
 
-class TestOperonWithTracer:
-    """Test Operon with tracer integration."""
+class TestOperonNoTracing:
+    """Baseline: Operon runs cleanly with no `trace=` set."""
 
     @pytest.mark.asyncio
-    async def test_run_with_none_tracer(self):
-        """Test run with tracer=None works."""
+    async def test_run_without_trace_param(self):
         with GraphOp(name="test") as graph:
             node = FuncOp(name="node", code_fn=lambda: {"ok": True})
             START >> node >> END
@@ -155,54 +154,6 @@ class TestOperonWithTracer:
         result = await engine.run(inputs={})
 
         assert "$state" in result
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_run_with_langfuse_tracer(self):
-        """Test running workflow with Langfuse tracer.
-
-        This test pushes traces to Langfuse cloud.
-        Run with: pytest -m integration
-        """
-        import time
-
-        try:
-            from operonx.telemetry import LangfuseTracer
-        except ImportError:
-            pytest.skip("operonx-telemetry not installed")
-
-        tracer = LangfuseTracer(resource="langfuse:default")
-
-        # Create a multi-step workflow
-        with GraphOp(name="operonx-integration-test") as graph:
-            step1 = FuncOp(
-                name="process_input",
-                code_fn=lambda: {"processed": "Hello from Operon!"},
-                outputs={"processed": PARENT},
-            )
-            step2 = FuncOp(
-                name="transform",
-                code_fn=lambda: {"transformed": "Data transformed"},
-            )
-            step3 = FuncOp(
-                name="finalize",
-                code_fn=lambda: {"result": "Workflow complete!"},
-                outputs={"result": PARENT},
-            )
-            START >> step1 >> step2 >> step3 >> END
-
-        engine = Operon(graph)
-
-        result = await engine.run(
-            inputs={}, tracer=tracer, user_id="test-user", session_id="test-session"
-        )
-
-        # Wait for background flush to complete
-        time.sleep(2)
-
-        assert result["processed"] == "Hello from Operon!"
-        assert result["result"] == "Workflow complete!"
-        print("\nTrace pushed to Langfuse: https://cloud.langfuse.com")
 
 
 class TestOperonShow:

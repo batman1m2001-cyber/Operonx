@@ -17,8 +17,16 @@ from operonx.core.ops._params import merge_params, normalize_params, resolve_val
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.states.ref import Ref
 from operonx.core.states.scratch_ref import ScratchRef
-from operonx.core.trace import _current_op_ctx
-from operonx.core.tracing.emitter import _current_op_var, current_emitter
+from operonx.core.workflow_trace import (
+    STATUS_CANCELLED,
+    STATUS_ERROR,
+    STATUS_OK,
+    OpExecution,
+    UpstreamRef,
+    _current_op_ctx,
+    _current_trace,
+    make_op_id,
+)
 from operonx.core.utils.auto_name import auto_name, unique_name
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import get_current
@@ -674,6 +682,63 @@ class BaseOp(ABC):
         else:
             yield await core_fn(**inputs)
 
+    def _v3_infer_upstreams(
+        self, state: "MemoryState", context_id: Optional[tuple],
+    ) -> List[UpstreamRef]:
+        """Build the `upstreams` list for this op invocation's `OpExecution`.
+
+        For each declared input, if a `_pull_refs[input_idx]` exists (i.e.
+        the input is wired to another op's output), emit one `UpstreamRef`
+        pointing at the producer. The producer's ctx is discovered by
+        walking `Cell.contexts` the same way `Cell.__getitem__` does —
+        that guarantees `from_op_id` matches the producer's actual
+        `OpExecution.op_id`, which is `make_op_id(producer_full_name,
+        producer_ctx)`.
+
+        Inputs from graph root (no upstream — value came from
+        `engine.run(inputs=…)`) get no `UpstreamRef` — they're
+        represented as no-upstream leaves in the trace's roots().
+        """
+        reader_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
+        pull_refs = state.schema._pull_refs
+        cells = state._cells
+        out: List[UpstreamRef] = []
+        for var_name in self.inputs:
+            idx = state.schema.get_index(self.full_name, var_name)
+            if idx < 0 or idx >= len(pull_refs):
+                continue
+            ref = pull_refs[idx]
+            if ref is None or ref.is_output or ref.idx < 0:
+                continue
+            # Find producer's ctx by mirroring Cell's ctx-walk — deepest
+            # ancestor of reader_ctx that has an entry in the producer
+            # cell's `contexts` dict.
+            producer_cell = cells[ref.idx]
+            walker = reader_ctx
+            producer_ctx = None
+            while walker:
+                if walker in producer_cell.contexts:
+                    producer_ctx = walker
+                    break
+                walker = walker[:-1]
+            if producer_ctx is None:
+                # Value came from the cell's default_value — no runtime
+                # producer to attribute this to. Skip.
+                continue
+            # `ref.source` returns the producer's full_name (see Ref.source).
+            # Local name = last dot-segment. Both stored so consumers can
+            # display cleanly OR match uniqueness.
+            producer_full = ref.source
+            producer_local = producer_full.rsplit(".", 1)[-1]
+            out.append(UpstreamRef(
+                from_op_id=make_op_id(producer_full, producer_ctx),
+                from_op_name=producer_local,
+                from_op_full_name=producer_full,
+                from_key=ref.var,
+                to_key=var_name,
+            ))
+        return out
+
     async def run(
         self,
         state: "MemoryState",
@@ -709,16 +774,20 @@ class BaseOp(ABC):
         _outputs = {}
         error_msg = None
 
-        # New event-stream tracing: emit hooks alongside legacy state-cell writes.
-        # Lookup is one ContextVar.get — cached as local to keep emit O(1).
-        # NullEmitter when no pipeline bound, so calls cost ~one method dispatch.
-        emitter = current_emitter()
-        op_var_token = None
         op_ctx_token = None
         idx = 0
         op_started = False
         op_cancelled = False
         ctx_for_end = context_id if context_id is not None else DEFAULT_CONTEXT
+
+        # V3 tracing: `_wf_trace` is None when no consumer is attached
+        # (i.e. Operon.start() didn't install a WorkflowTrace). All V3
+        # code paths guard on `_wf_trace is not None` so the no-tracing
+        # case pays only one ContextVar.get. `_v3_upstreams` is computed
+        # once at entry and shared across every OpExecution this op emits
+        # (streaming ops keep the same upstreams for all yields).
+        _wf_trace = _current_trace.get()
+        _v3_upstreams: List[UpstreamRef] = []
 
         try:
             if self.delay > 0:
@@ -726,28 +795,20 @@ class BaseOp(ABC):
 
             _inputs = self.get_inputs(state, context_id)
 
+            # V3 tracing: upstreams are stable across the op's lifetime,
+            # so compute once at entry. Cheap when disabled.
+            if _wf_trace is not None:
+                _v3_upstreams = self._v3_infer_upstreams(state, context_id)
+
             # Record timing AFTER inputs resolved — measures actual processing,
             # not time spent waiting for upstream ops in the scheduler queue.
             start_time = datetime.now(timezone.utc) if _tracing else None
             perf_start = perf_counter()
 
-            # New tracing: OP_START fires after inputs resolve, before exec.
-            # Tracks start_time on the emitter for cancel-emit duration calc (Rule 3).
-            # Media extraction: walk inputs once, replace Media instances with
-            # placeholder strings + accumulate refs for the exporter to upload.
-            _trace_inputs, _input_media = self._extract_trace_io(_inputs, root="inputs")
-            emitter.op_start(
-                self.full_name,
-                ctx_for_end,
-                _trace_inputs,
-                media_refs=_input_media,
-            )
             op_started = True
-            op_var_token = _current_op_var.set((self.full_name, ctx_for_end))
-            # V2 tracing: expose this op invocation's ctx so event()/span()
-            # can auto-inject it. Different invocations (loop iterations,
-            # streaming sub-contexts) get distinct ctx → distinct spans
-            # in the sink.
+            # V3 tracing: expose this op invocation's ctx via ContextVar
+            # so overlap_classifier + any other reader can access the
+            # scheduler's ctx tuple without threading it through inputs.
             op_ctx_token = _current_op_ctx.set(ctx_for_end)
 
             # Cache check
@@ -792,23 +853,23 @@ class BaseOp(ABC):
                     duration_ms = (_batch_end - perf_start) * 1000
                 if not self.is_gen and self.cache is not None:
                     _cache_store[_cache_key] = result
-                # New tracing: per-yield event for generator ops only.
-                # Threshold (`@op(emit_yields=N)`) is a T2 task — for now N=1.
-                # Strip Media off the yielded dict so raw bytes don't sit in
-                # the buffer; the parent observation's outputs (last yielded)
-                # gets media uploaded via the OP_END path instead.
-                if self.is_gen:
-                    _trace_yielded, _yield_media = self._extract_trace_io(
-                        result,
-                        root="outputs",
-                    )
-                    emitter.op_yield(
-                        self.full_name,
-                        ctx,
-                        _trace_yielded,
-                        idx,
-                        media_refs=_yield_media,
-                    )
+                # V3 tracing: one OpExecution per yield for generator ops.
+                # ctx already carries the yield sub-index (`("main","[T]","[i]")`),
+                # so op_id is unique per yield → downstream consumers of
+                # yield i produce matching UpstreamRef.from_op_id.
+                if _wf_trace is not None and self.is_gen:
+                    _wf_trace.nodes.append(OpExecution(
+                        op_id=make_op_id(self.full_name, ctx),
+                        op_name=self.name,
+                        op_full_name=self.full_name,
+                        ctx=ctx,
+                        start_time=_yield_start,
+                        end_time=perf_counter(),
+                        inputs=dict(_inputs),   # shallow copy — op may reuse dict
+                        outputs=dict(result) if isinstance(result, dict) else {"_": result},
+                        upstreams=_v3_upstreams,
+                        status=STATUS_OK,
+                    ))
                 yield ctx, result
                 idx += 1
                 _yield_start = perf_counter()
@@ -882,24 +943,32 @@ class BaseOp(ABC):
                     status = "error"
                 else:
                     status = "ok"
-                if status == "ok":
-                    _trace_outputs, _output_media = self._extract_trace_io(
-                        _outputs,
-                        root="outputs",
+                # V3 tracing:
+                #   - batch ops: emit one OpExecution here (per-yield emit
+                #     inside the loop only fires for generators)
+                #   - streaming ops: yields already recorded; append one
+                #     final OpExecution only for cancelled/errored runs so
+                #     the trace shows the failure attempt
+                if _wf_trace is not None:
+                    v3_status = (
+                        STATUS_CANCELLED if op_cancelled
+                        else (STATUS_ERROR if error_msg is not None else STATUS_OK)
                     )
-                else:
-                    _trace_outputs, _output_media = {}, []
-                emitter.op_end(
-                    self.full_name,
-                    ctx_for_end,
-                    outputs=_trace_outputs,
-                    status=status,
-                    duration_ms=duration_ms,
-                    yield_count=idx,
-                    media_refs=_output_media,
-                )
-            if op_var_token is not None:
-                _current_op_var.reset(op_var_token)
+                    should_emit = (not self.is_gen) or v3_status != STATUS_OK
+                    if should_emit:
+                        _wf_trace.nodes.append(OpExecution(
+                            op_id=make_op_id(self.full_name, ctx_for_end),
+                            op_name=self.name,
+                            op_full_name=self.full_name,
+                            ctx=ctx_for_end,
+                            start_time=perf_start,
+                            end_time=perf_start + duration_ms / 1000.0,
+                            inputs=dict(_inputs),
+                            outputs=dict(_outputs) if isinstance(_outputs, dict) else {},
+                            upstreams=_v3_upstreams,
+                            status=v3_status,
+                            error=error_msg,
+                        ))
             if op_ctx_token is not None:
                 _current_op_ctx.reset(op_ctx_token)
 

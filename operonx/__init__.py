@@ -49,12 +49,6 @@ from operonx.core.registry import (
     BOOTSTRAP_ENV_PATHS,
     ResourceHub,
 )
-from operonx.core.trace import (
-    TraceEvent,
-    TraceRecorder,
-    event,
-    span,
-)
 
 try:
     __version__ = version("operonx")
@@ -139,11 +133,6 @@ __all__ = [
     # Setup
     "bootstrap",
     "ResourceHub",
-    # Tracing (V2)
-    "event",
-    "span",
-    "TraceEvent",
-    "TraceRecorder",
     # Version
     "__version__",
 ]

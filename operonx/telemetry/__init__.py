@@ -1,28 +1,36 @@
-"""Operon telemetry — Langfuse exporter + backwards-compat shims.
+"""Operon telemetry — V3 Consumer surface + Langfuse backend clients.
 
-The new event-stream pipeline lives in ``operonx.core.tracing``. Heavier
-exporters (Langfuse) live here under ``operonx.telemetry.exporters``;
-their HTTP clients live under ``operonx.telemetry.backends``.
+V3 tracing (the current design) records every op invocation into a
+`WorkflowTrace` on the handle. `Consumer` subclasses read the trace
+after the run — see :mod:`operonx.telemetry.consumers` for `Local` and
+`Langfuse` implementations.
 
-Example — explicit pipeline (recommended for new code)::
+The Langfuse backend (`LangfuseClient`, `LangfuseConfig`,
+`LangfusePromptManager`) is kept here so prompt management + the HTTP
+client are usable independently of the trace pipeline. `LangfuseConsumer`
+consumes a `LangfuseClient` via a `client_resource:` reference in
+``resources.yaml``.
 
-    from operonx import Operon
-    from operonx.core.tracing import TracePipeline
-    from operonx.telemetry.exporters import LangfuseTreeExporter
+Example — wire a Local consumer via ResourceHub::
 
-    pipeline = TracePipeline(exporters=[
-        LangfuseTreeExporter(resource="langfuse:default"),
+    # resources.yaml
+    trace_local:
+      default:
+        root: /tmp/operonx_traces
+
+    # your code
+    from operonx import Operon, bootstrap
+    bootstrap(resources="resources.yaml")
+    engine = Operon(graph, trace="trace_local:default")
+
+Example — mix ResourceHub keys + direct instances::
+
+    engine = Operon(graph, trace=[
+        "trace_langfuse:default",
+        MyDebugConsumer(),
     ])
-    engine = Operon(graph, tracer=pipeline)
 
-Example — legacy constructor (kept for back-compat)::
-
-    from operonx.telemetry import LangfuseTracer
-
-    tracer = LangfuseTracer(resource="langfuse:default")  # IS a TracePipeline
-    engine = Operon(graph, tracer=tracer)
-
-Prompt management (requires the Langfuse SDK)::
+Prompt management (uses the Langfuse SDK directly)::
 
     from operonx.telemetry import LangfuseConfig, LangfusePromptManager
 
@@ -30,17 +38,22 @@ Prompt management (requires the Langfuse SDK)::
     prompt = pm["my-prompt"]
 """
 
-# Auto-register backends to ResourceHub on import
-import operonx.telemetry.plugin  # noqa: F401
+# Import consumers first so their config types register with REGISTRY
+# before anything else reads it.
+import operonx.telemetry.consumers  # noqa: F401
+from operonx.core.registry import REGISTRY
 from operonx.telemetry.backends import (
     LangfuseClient,
     LangfuseConfig,
     LangfusePromptManager,
 )
-from operonx.telemetry.tracers import LangfuseTracer
+
+# Register the Langfuse client config for ResourceHub — used to be in
+# the deleted `operonx.telemetry.plugin` module.
+REGISTRY.register(LangfuseConfig, lambda c: LangfuseClient(c))
+
 
 __all__ = [
-    "LangfuseTracer",
     "LangfuseConfig",
     "LangfuseClient",
     "LangfusePromptManager",
