@@ -1,0 +1,24 @@
+========================================================================
+callbot   trace_id=t-123   dur=1600ms   nodes=4
+request_id=t-123  user_id=cust-1  session_id=0912345678
+========================================================================
+
+TIMELINE  (chronological)
+
+    0.001s  greet                   [main.[0]]       4ms  ['text']→['audio_len']
+              in  text='hello'
+              out audio_len=128
+
+    1.000s  stt                     [main.[1]]     100ms  ['audio_ms']→['text']
+              in  audio_ms=2140.0
+              out text='alo em nghe'
+    1.100s  classify                [main.[1]]     200ms  ['state', 'text']→['intent']
+              in  state='MAIN' text='alo em nghe'
+              out intent='affirm'
+    1.310s  tts                     [main.[1]]     250ms  ['text']→['duration_ms']
+              in  text='Dạ vâng ạ'
+              out duration_ms=850
+
+========================================================================
+SUMMARY  nodes=4  errors=0
+========================================================================

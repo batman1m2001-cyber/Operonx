@@ -159,25 +159,3 @@ def cosine_similarity_search(
     results.sort(key=lambda x: x[1], reverse=True)
 
     return results
-
-
-async def main() -> None:
-    """Main function for testing and demonstration."""
-    import time
-
-    start_time = time.time()
-    print("Starting embedding generation...")
-
-    vllm_embed = VLLMEmbedding(EmbeddingConfig.default())
-
-    text1 = """machine learning and deep learning"""
-    text2 = """natural language processing"""
-
-    embs = await vllm_embed.run(texts=[text1, text2])
-
-    print(f"Generated embeddings: {embs}")
-    print(f"Completed in {time.time() - start_time:.2f}s")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -86,6 +86,15 @@ impl RuntimeState {
         }
     }
 
+    /// Borrow the shared scratch `Arc` — needed when a nested
+    /// `OpType::Graph` op dispatches a sub-scheduler that must inherit
+    /// the parent's SCRATCH (so `current_state`, `intent_retry_counts`,
+    /// `last_agent_response`, etc. seeded by the engine are visible
+    /// inside the subgraph).
+    fn scratch_arc(&self) -> SharedScratch {
+        self.scratch.clone()
+    }
+
     /// Store a value at `(op, var, ctx)`.
     fn set(&mut self, op: &str, var: &str, ctx: &ContextId, value: Value) {
         self.slots
@@ -522,7 +531,11 @@ impl GraphScheduler {
     ///
     /// This is what `OpType::Graph` calls in `execute_op` instead of
     /// the heavy `Operon::run_json_async` round-trip.
-    pub async fn run_collect(&self, inputs: Map<String, Value>) -> Result<Value, OperonError> {
+    pub async fn run_collect(
+        &self,
+        inputs: Map<String, Value>,
+        parent_scratch: Option<SharedScratch>,
+    ) -> Result<Value, OperonError> {
         use crate::core::engine::{FrameSender, TraceTap};
 
         let tap: TraceTap = Arc::new(Mutex::new(Vec::new()));
@@ -534,12 +547,13 @@ impl GraphScheduler {
         // PARENT-bound output ops (and the loop summary frame), so the
         // tap accumulates exactly what we want and nothing else.
         //
-        // Nested @graph dispatch uses a fresh scratch — the parent's
-        // SCRATCH writes shouldn't bleed into a child run. (Python's
-        // child._scheduler.run inherits scratch but it's a single Arc
-        // anyway; for Rust's run_collect path the parent isolation
-        // makes the model simpler and matches the tap-only invariant.)
-        let nested_scratch = Arc::new(Mutex::new(HashMap::new()));
+        // Nested @graph dispatch inherits the parent's SCRATCH Arc so
+        // SCRATCH writes are visible up and down the tree (matches Python
+        // `child._scheduler.run` which shares the parent Arc). Callers
+        // outside the graph runtime — e.g. tests, the top-level engine
+        // path that built run_collect for a standalone subgraph — can
+        // pass `None` to get a fresh isolated SCRATCH.
+        let nested_scratch = parent_scratch.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
         Scheduler::run(self, inputs, ctx, sender, cancel, nested_scratch).await?;
 
         // Merge every captured frame's `data` map. Multiple output ops
@@ -954,8 +968,15 @@ impl GraphScheduler {
                     match resolve_inputs(&op_cfg, plan_slice, &ctx, &state) {
                         Err(e) => vec![(ctx.clone(), error_frame(&e))],
                         Ok(inputs) => {
-                            match execute_op(&op_cfg, &registry, inputs, &self.child_schedulers)
-                                .await
+                            let parent_scratch = Some(state.lock().scratch_arc());
+                            match execute_op(
+                                &op_cfg,
+                                &registry,
+                                inputs,
+                                &self.child_schedulers,
+                                parent_scratch,
+                            )
+                            .await
                             {
                                 Ok(value) => {
                                     // Detect Interrupt return — emit a
@@ -1058,7 +1079,15 @@ impl GraphScheduler {
                 }
             };
 
-            let exec_result = execute_op(&op_cfg, &registry, inputs, &child_schedulers).await;
+            let parent_scratch = Some(state.lock().scratch_arc());
+            let exec_result = execute_op(
+                &op_cfg,
+                &registry,
+                inputs,
+                &child_schedulers,
+                parent_scratch,
+            )
+            .await;
 
             match exec_result {
                 Ok(value) => {
@@ -1723,8 +1752,17 @@ fn eval_op(
 /// `Param` flags per frame.
 #[derive(Debug, Clone)]
 enum InputResolver {
-    /// Resolve from runtime state (with optional transforms).
-    Ref(CompiledRef),
+    /// Resolve from runtime state (with optional transforms). The optional
+    /// `fallback` is used when the ref's source op never produced a value
+    /// at the runtime ctx — required when the ref points at a conditional
+    /// branch sibling that didn't fire. Tracks whether the param is
+    /// required so a missing value with no fallback still errors when the
+    /// op authoritatively needs it.
+    Ref {
+        cref: CompiledRef,
+        fallback: Option<Value>,
+        required: bool,
+    },
     /// Resolve from per-call scratch space at `key`. Yields `Value::Null`
     /// when the key is missing — matches Python's `SCRATCH[k]` returning
     /// `None` for unset keys.
@@ -1757,7 +1795,23 @@ fn compile_input_plans(graph: &OpConfig, graph_key: &str) -> HashMap<String, Vec
         let mut slots = Vec::with_capacity(op_cfg.inputs.len());
         for (var, param) in &op_cfg.inputs {
             let plan = if let Some(rc) = &param.ref_config {
-                InputResolver::Ref(compile_ref(rc, graph_key))
+                // A ref'd input that's also got a default falls back to the
+                // default when the upstream op never fired (conditional
+                // branch sibling, optional pipeline stage). Optional refs
+                // without a default fall back to Null. Required refs without
+                // a default still error if the source produced nothing.
+                let fallback = param.default.clone().or_else(|| {
+                    if !param.required {
+                        Some(Value::Null)
+                    } else {
+                        None
+                    }
+                });
+                InputResolver::Ref {
+                    cref: compile_ref(rc, graph_key),
+                    fallback,
+                    required: param.required,
+                }
             } else if let Some(sr) = &param.scratch {
                 InputResolver::Scratch(sr.key.clone())
             } else if let Some(lit) = &param.literal {
@@ -1866,7 +1920,18 @@ fn resolve_inputs(
     let mut resolved = Map::with_capacity(plan.len());
     for slot in plan {
         let value = match &slot.plan {
-            InputResolver::Ref(cref) => eval_ref(cref, ctx, state)?,
+            InputResolver::Ref {
+                cref,
+                fallback,
+                required,
+            } => match eval_ref(cref, ctx, state) {
+                Ok(v) => v,
+                Err(e) => match fallback {
+                    Some(f) => f.clone(),
+                    None if *required => return Err(e),
+                    None => Value::Null,
+                },
+            },
             InputResolver::Scratch(key) => state.lock().scratch_get(key),
             InputResolver::Lit(v) | InputResolver::Default(v) => v.clone(),
             InputResolver::RequiredMissing => {
@@ -2069,6 +2134,7 @@ async fn execute_op(
     registry: &Arc<dyn OpRegistry>,
     inputs: Map<String, Value>,
     child_schedulers: &Arc<HashMap<String, Arc<GraphScheduler>>>,
+    parent_scratch: Option<SharedScratch>,
 ) -> Result<Value, OperonError> {
     use crate::providers::ops::{execute_provider_op, is_provider_kind};
 
@@ -2115,7 +2181,7 @@ async fn execute_op(
                     op_cfg.full_name
                 ))
             })?;
-            child.run_collect(inputs).await
+            child.run_collect(inputs, parent_scratch).await
         }
         OpType::Parser => {
             // ParserOp reads `text`, `mode`, `schema`, `validators` from the

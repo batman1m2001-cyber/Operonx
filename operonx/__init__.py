@@ -40,7 +40,6 @@ from operonx.core import (
     FuncOp,
     GraphOp,
     Interrupt,
-    Middleware,
     Operon,
     ParserOp,
     graph,
@@ -113,7 +112,6 @@ def _load_env_into_bootstrap() -> None:
 __all__ = [
     # Engine
     "Operon",
-    "Middleware",
     # Core op types
     "GraphOp",
     "BranchOp",

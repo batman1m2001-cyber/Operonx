@@ -104,25 +104,6 @@ class TestCallTimeBoundOverride:
         assert result["tid"] != main_tid
 
 
-class TestBackwardCompatExecutor:
-    """executor='thread' still works, mapped to bound='cpu'."""
-
-    async def test_executor_thread_maps_to_cpu(self):
-        @op(executor="thread")
-        def legacy_op(x: int):
-            return {"result": x * 4, "tid": threading.current_thread().ident}
-
-        main_tid = threading.current_thread().ident
-
-        with GraphOp(name="g") as graph:
-            step = legacy_op(x=PARENT["x"])
-            START >> step >> END
-
-        result = await Operon(graph).run(inputs={"x": 2})
-        assert result["result"] == 8
-        assert result["tid"] != main_tid
-
-
 class TestInvalidBound:
     """Invalid bound values raise ValueError."""
 

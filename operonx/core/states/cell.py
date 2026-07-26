@@ -59,21 +59,6 @@ class Cell:
             ctx = ctx[:-1]
         return self.default_value
 
-    def pop_context(self, context_id: str) -> Any:
-        """Remove a context and return its value.
-
-        Args:
-            context_id: Context ID to remove
-
-        Returns:
-            Value of removed context or default_value if it didn't exist
-        """
-        return self.contexts.pop(context_id, self.default_value)
-
-    def __delitem__(self, context_id: str) -> None:
-        """Remove context: del cell['context_id']"""
-        self.pop_context(context_id)
-
     def items(self):
         """Iterate (context_id, value) pairs."""
         return self.contexts.items()

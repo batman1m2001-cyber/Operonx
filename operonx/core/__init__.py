@@ -23,7 +23,6 @@ from operonx.core.configs import EdgeConfig, EdgeType
 from operonx.core.engine import ExecutionHandle, Operon
 from operonx.core.loggings import LOGGER
 from operonx.core.media import Media
-from operonx.core.middleware import Middleware
 from operonx.core.ops import (
     END,
     PARENT,
@@ -60,7 +59,6 @@ __all__ = [
     # Engine
     "Operon",
     "ExecutionHandle",
-    "Middleware",
     # Op base / markers
     "BaseOp",
     "DummyOp",

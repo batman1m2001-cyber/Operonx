@@ -25,16 +25,16 @@ import asyncio
 import json
 import sys
 import uuid
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
 
 from operonx.core.loggings import LOGGER, format_event
-from operonx.core.middleware import Middleware
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.states import StateSchema
 
 if TYPE_CHECKING:
     from operonx.core.ops.base import BaseOp
-    from operonx.core.tracing import Tracer
+    from operonx.telemetry.consumer import Consumer
 
 
 _MISSING = object()
@@ -64,10 +64,20 @@ class ExecutionHandle:
         frames = await handle.collect("flat")
     """
 
-    def __init__(self, queue: asyncio.Queue, task: asyncio.Task, state: Any = None) -> None:
+    def __init__(
+        self,
+        queue: asyncio.Queue,
+        task: asyncio.Task,
+        state: Any = None,
+        trace: Any = None,
+    ) -> None:
         self._queue = queue  # fed by root Scheduler
         self._scheduler_task = task  # task running the workflow
         self.state = state  # MemoryState for this execution (tracing access)
+        # V3 tracing: WorkflowTrace populated live by BaseOp.run wrappers.
+        # `None` when V3 tracing is disabled at import time (rare — kept
+        # as an escape hatch for tests that don't want the buffer).
+        self.trace = trace
         self._frames: list[tuple[str, Any, dict[str, Any]]] = []
         self._idx: int = 0  # index for __anext__, tracks how many frames have been consumed
         self._done: bool = False  # becomes True when the execution is complete
@@ -309,14 +319,14 @@ class Operon:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_middleware", "_tracer"]
+    __slots__ = ["graph", "name", "_schema", "_collector", "_trace_consumers"]
 
     def __init__(
         self,
         graph: Union[GraphOp, Callable[..., GraphOp]],
         *,
         params: Optional[Dict[str, Any]] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        trace: Optional[Union[str, "Consumer", List[Union[str, "Consumer"]]]] = None,
     ):
         """Initialize Operon engine with a GraphOp or a graph factory.
 
@@ -332,23 +342,35 @@ class Operon:
                    factory needs the hub.
             params: Keyword arguments passed to the graph factory. Ignored
                     when *graph* is already a GraphOp. Defaults to ``{}``.
-            tracer: Default tracer(s) for all run() calls. Can be overridden per-run.
+            trace: V3 tracing. Accepts a ResourceHub key (str),
+                   a :class:`Consumer` instance, or a list of either.
+                   Each consumer gets ``handle.trace`` at the end of
+                   every run and writes its own view (disk, Langfuse,
+                   report, …). Failures are caught + logged per-consumer
+                   so one bad backend never affects the call. Requires
+                   :func:`operonx.bootstrap` when using string keys.
+                   Examples::
+
+                       trace="trace_local:default"
+                       trace=CallbotLocalConsumer(config={"root": "/tmp/x"})
+                       trace=["trace_langfuse:edupia", MyDebugConsumer()]
 
         Raises:
             RuntimeError: If a provider op needs the hub but none has been
                 installed. The message points at ``operonx.bootstrap()``.
+            TypeError: If a ``trace=`` item is neither a str nor a
+                Consumer instance.
         """
         if callable(graph) and not isinstance(graph, GraphOp):
             graph = graph(**(params or {}))
 
         self.graph = graph
         self.name = graph.name
-        self._tracer = tracer
+        self._trace_consumers = self._resolve_trace_consumers(trace)
 
         # Build graph and create schema immediately
         self.graph.build()
         self._schema = StateSchema(self.graph)
-        self._middleware: List[Middleware] = []
 
         # Eagerly init backends if a hub is already configured
         self._warmup_ops()
@@ -357,6 +379,43 @@ class Operon:
             "Operon engine initialized for workflow [highlight]%s[/highlight]",
             self.name,
         )
+
+    @staticmethod
+    def _resolve_trace_consumers(trace: Any) -> List[Any]:
+        """Resolve `trace=` argument → list of Consumer instances.
+
+        Accepts three call styles for flexibility:
+
+        * ``None`` → returns ``[]`` (tracing off).
+        * ``str`` → ResourceHub key, resolved to a shared Consumer
+          instance (typical production wiring via ``resources.yaml``).
+        * :class:`Consumer` instance → used as-is (ad-hoc, testing,
+          per-graph one-offs — no YAML round-trip needed).
+        * ``list`` of any of the above — mixed is fine.
+
+        Resolution happens once in ``__init__``; every ``start()`` reuses
+        the same list, no per-call hub lookup.
+        """
+        # Late import: `Consumer` lives in a subpackage that imports
+        # engine machinery — avoid the circular by resolving here.
+        from operonx.core.registry import ResourceHub
+        from operonx.telemetry.consumer import Consumer
+
+        if trace is None:
+            return []
+        items = trace if isinstance(trace, list) else [trace]
+        resolved: List[Any] = []
+        for item in items:
+            if isinstance(item, str):
+                resolved.append(ResourceHub.instance().get(item))
+            elif isinstance(item, Consumer):
+                resolved.append(item)
+            else:
+                raise TypeError(
+                    f"`trace=` item must be a str (ResourceHub key) or a "
+                    f"Consumer instance; got {type(item).__name__}."
+                )
+        return resolved
 
     def _warmup_ops(self) -> None:
         """Eagerly initialize all provider ops now that the hub is loaded.
@@ -380,18 +439,6 @@ class Operon:
         """Access the workflow state schema."""
         return self._schema
 
-    def use(self, middleware: Middleware) -> "Operon":
-        """Add middleware to the engine. Returns self for chaining.
-
-        Args:
-            middleware: A Middleware instance to add.
-
-        Returns:
-            self, for fluent chaining: ``engine.use(m1).use(m2)``
-        """
-        self._middleware.append(middleware)
-        return self
-
     def start(
         self,
         inputs: Dict[str, Any],
@@ -399,7 +446,7 @@ class Operon:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
@@ -407,15 +454,15 @@ class Operon:
         Does not block — the graph runs in the background. Use the handle to
         stream frames, await specific outputs, or collect the final result.
 
-        Tracer flush happens automatically when the scheduler completes — no
-        explicit finalize step needed.
+        V3 trace consumers (declared via ``Operon(..., trace=...)``) fire
+        automatically once the scheduler completes — no explicit finalize
+        needed.
 
         Args:
             inputs: Input data for the workflow
             user_id: Optional user identifier (auto-generated if not provided)
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
-            tracer: Optional tracer(s) — overrides engine default for this execution.
             scratch: Optional initial values for per-call scratch space. Applied
                 synchronously before the scheduler task is created — race-free.
                 Equivalent to writing ``handle.scratch[k] = v`` before the first
@@ -429,27 +476,6 @@ class Operon:
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
-
-        # Resolve tracer: per-call overrides engine default. The only
-        # tracer shape supported now is ``TracePipeline`` (or a subclass —
-        # ``LangfuseTracer`` is one). Legacy Tracer subclasses were retired
-        # in T2.13.
-        effective = tracer if tracer is not None else self._tracer
-        tracers_raw = (
-            effective if isinstance(effective, list) else ([effective] if effective else [])
-        )
-
-        from operonx.core.tracing.pipeline import TracePipeline as _TracePipeline
-
-        pipelines = [t for t in tracers_raw if isinstance(t, _TracePipeline)]
-        invalid = [t for t in tracers_raw if not isinstance(t, _TracePipeline)]
-        if invalid:
-            raise TypeError(
-                f"Engine accepts only TracePipeline instances as `tracer=`; "
-                f"got {[type(t).__name__ for t in invalid]}. The legacy Tracer "
-                "API was removed in T2.13 — use ``LangfuseTracer`` (a "
-                "TracePipeline subclass) or build a ``TracePipeline`` directly."
-            )
 
         state = self._schema.create_state(
             inputs=inputs,
@@ -466,39 +492,33 @@ class Operon:
         if scratch:
             state._scratch.update(scratch)
 
-        # Bind emitter for the event-stream pipeline. NullEmitter when no
-        # pipeline configured — keeps op code's ``current_emitter().emit_*``
-        # calls cheap (one method-table dispatch).
-        from operonx.core.tracing.emitter import (
-            NullEmitter as _NullEmitter,
-        )
-        from operonx.core.tracing.emitter import (
-            _current_emitter_var,
-        )
-
-        if pipelines:
-            # First pipeline drives the emitter; secondary pipelines (rare)
-            # could subscribe via _push fanout if needed in the future.
-            primary = pipelines[0]
-            primary_state_tags = list(state.tags) if getattr(state, "tags", None) else []
-            new_emitter = primary.emitter(
-                request_id=request_id,
-                workflow_name=self.name,
-                user_id=user_id,
-                session_id=session_id,
-                tags=primary_state_tags,
-            )
-        else:
-            primary = None
-            new_emitter = _NullEmitter()
-
         LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 
         graph_name = self.name
         queue: asyncio.Queue = asyncio.Queue()
 
+        # V3 tracing: per-run WorkflowTrace buffer, ContextVar-scoped.
+        # Always created — consumers read `handle.trace` after the run.
+        # Ops append `OpExecution` records automatically via the
+        # `BaseOp.run()` recording hook — no author code required.
+        from operonx.core.workflow_trace import WorkflowTrace
+        from operonx.core.workflow_trace import _current_trace as _v3_trace_var
+
+        _wf_trace = WorkflowTrace(
+            trace_id=trace_id or request_id,
+            workflow_name=self.name,
+            started_at=perf_counter(),
+            ended_at=0.0,
+            metadata={
+                "request_id": request_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                **({"tags": list(state.tags)} if getattr(state, "tags", None) else {}),
+            },
+        )
+
         async def _run() -> None:
-            emitter_token = _current_emitter_var.set(new_emitter)
+            v3_token = _v3_trace_var.set(_wf_trace)
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
             except Exception as e:
@@ -507,21 +527,27 @@ class Operon:
                 queue.put_nowait(None)
                 raise
             finally:
-                # Pipeline final flush — drains buffered events through
-                # processors + exporters. Awaited inline so engine.run()
-                # returns only after every exporter has finished posting.
-                if primary is not None:
+                _v3_trace_var.reset(v3_token)
+                _wf_trace.ended_at = perf_counter()
+                # V3 consumers — auto-invoke on the completed trace.
+                # `asyncio.to_thread` so a slow HTTP consumer (Langfuse)
+                # doesn't block the event loop; per-consumer try/except
+                # so one broken backend never affects the call.
+                for _consumer in self._trace_consumers:
                     try:
-                        await primary.flush(partial=False)
+                        await asyncio.to_thread(_consumer.consume, _wf_trace)
                     except Exception:
-                        LOGGER.exception("trace pipeline final flush failed")
-                _current_emitter_var.reset(emitter_token)
+                        LOGGER.exception(
+                            "trace consumer %r failed on trace %s",
+                            type(_consumer).__name__,
+                            _wf_trace.trace_id,
+                        )
                 LOGGER.info(
                     format_event("workflow_done", request_id=request_id, graph_name=graph_name)
                 )
 
         scheduler_task = asyncio.create_task(_run())
-        return ExecutionHandle(queue, scheduler_task, state)
+        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace)
 
     async def run(
         self,
@@ -530,7 +556,7 @@ class Operon:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        tracer: Optional[Union["Tracer", List["Tracer"]]] = None,
+        trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
@@ -538,19 +564,18 @@ class Operon:
         Each call creates a fresh state, so the same engine can be
         used for multiple independent executions.  Equivalent to::
 
-            handle = engine.start(inputs, tracer=tracer, ...)
+            handle = engine.start(inputs, ...)
             result = await handle.collect(unwrap=True)
 
-        Tracer flush happens automatically inside ``start()`` when the
-        scheduler completes.
+        V3 trace consumers (declared via ``Operon(..., trace=...)``)
+        fire automatically inside ``start()`` when the scheduler
+        completes.
 
         Args:
             inputs: Input data for the workflow
             user_id: Optional user identifier (auto-generated if not provided)
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
-            tracer: Optional tracer or list of tracers for observability.
-                    Overrides the default tracer set in ``Operon(..., tracer=...)``.
             scratch: Optional initial values for per-call scratch space.
 
         Returns:
@@ -561,37 +586,17 @@ class Operon:
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
 
-        context: Dict[str, Any] = {
-            "user_id": user_id,
-            "session_id": session_id,
-            "request_id": request_id,
-        }
-
-        # Apply before_run middleware (in order)
-        for mw in self._middleware:
-            inputs = await mw.before_run(self.graph, inputs, context)
-
         handle = self.start(
             inputs,
             user_id=user_id,
             session_id=session_id,
             request_id=request_id,
-            tracer=tracer,
+            trace_id=trace_id,
             scratch=scratch,
         )
 
-        try:
-            result = await handle.collect(unwrap=True)
-        except Exception as e:
-            for mw in reversed(self._middleware):
-                await mw.on_error(self.graph, inputs, e, context)
-            raise
-
+        result = await handle.collect(unwrap=True)
         result["$state"] = handle.state
-
-        # Apply after_run middleware (in reverse order)
-        for mw in reversed(self._middleware):
-            result = await mw.after_run(self.graph, inputs, result, context)
 
         return result
 
@@ -641,7 +646,7 @@ class Operon:
                 "operonx-serve is required for engine.serve(). Install it with: pip install operonx-serve"
             ) from None
 
-        app = OperonApp(tracer=self._tracer)
+        app = OperonApp()
         app.endpoint(path, graph=self.graph, stream=stream, websocket=websocket)
         app.serve(host=host, port=port, backend=backend, **kwargs)
 

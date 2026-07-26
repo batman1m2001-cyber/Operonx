@@ -1,11 +1,10 @@
 """LLM providers for operonx workflows.
 
-Light symbols (config classes, ``BaseLLM``, ``create_llm``,
-``LLMGenerator``) are eager. Backend classes are lazy-loaded via
-module-level ``__getattr__`` so this package can be imported with only
-core dependencies — Gemini's ``google-cloud-aiplatform``, Anthropic's
-``httpx``, etc. are only required when their backend is actually
-accessed.
+Light symbols (config classes, ``BaseLLM``, ``create_llm``) are eager.
+Backend classes are lazy-loaded via module-level ``__getattr__`` so
+this package can be imported with only core dependencies — Gemini's
+``google-cloud-aiplatform``, Anthropic's ``httpx``, etc. are only
+required when their backend is actually accessed.
 """
 
 from operonx.providers.llms.base import BaseLLM
@@ -18,7 +17,6 @@ from operonx.providers.llms.config import (
     OpenAIConfig,
 )
 from operonx.providers.llms.factory import create_llm
-from operonx.providers.llms.response import LLMGenerator
 
 _LAZY_BACKENDS = {
     "OpenAISDKModel": ("operonx.providers.llms.openai", "providers"),
@@ -57,7 +55,6 @@ __all__ = [
     "AnthropicConfig",
     "AnthropicModel",
     "create_llm",
-    "LLMGenerator",
     "OpenAISDKModel",
     "AzureSDKModel",
     "GeminiOpenAISDKModel",

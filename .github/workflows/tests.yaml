@@ -83,7 +83,7 @@ jobs:
           if extra == "anthropic":
               from operonx.providers.llms.anthropic import AnthropicModel  # noqa: F401
           elif extra == "langfuse":
-              from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
+              from operonx.telemetry.consumers import LangfuseConsumer  # noqa: F401
           elif extra == "onnx":
               import onnxruntime  # noqa: F401
               import tokenizers  # noqa: F401
@@ -92,7 +92,7 @@ jobs:
               import uvicorn  # noqa: F401
           elif extra in ("standard", "all"):
               from operonx.providers.llms.openai import OpenAISDKModel  # noqa: F401
-              from operonx.telemetry.tracers.langfuse import LangfuseTracer  # noqa: F401
+              from operonx.telemetry.consumers import LangfuseConsumer  # noqa: F401
           PY
 
   # ── Coverage upload to Codecov ──────────────────────────────────────────

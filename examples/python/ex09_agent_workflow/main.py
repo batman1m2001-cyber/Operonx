@@ -1,4 +1,4 @@
-"""09 Agent Workflow — tool-calling agent built on @graph.loop.
+"""09 Agent Workflow — tool-calling agent built on @graph with until= loop.
 
 Requires ``OPENAI_API_KEY`` in ``.env`` and ``llm:gpt-4o-mini`` in
 ``resources.yaml``. Run from this directory:
@@ -123,7 +123,7 @@ def process_response(content, tool_calls, messages):
 # ── Loop body + outer graph ─────────────────────────────────────────────
 
 
-@graph.loop(until="done == True", max_iterations=10)
+@graph
 def agent_loop(messages, done, answer):
     """Repeat LLM → process until `done` is True."""
     llm = LLMOp.of(
@@ -150,6 +150,8 @@ def agent(query):
         messages=init["messages"],
         done=init["done"],
         answer=init["answer"],
+        until="done == True",
+        max_iterations=10,
     )
     loop["answer"] >> PARENT["answer"]
     START >> init >> loop >> END

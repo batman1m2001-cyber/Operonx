@@ -70,58 +70,7 @@ class TestContextStorage:
 
 
 # ============================================================
-# Test 3: Pop Context
-# ============================================================
-
-
-class TestPopContext:
-    """Test pop_context() method."""
-
-    def test_pop_context_removes_and_returns_value(self):
-        """Test that pop_context removes context and returns its value."""
-        cell = Cell(default_value=0)
-
-        cell["ctx1"] = 10
-        cell["ctx2"] = 20
-
-        value = cell.pop_context("ctx1")
-
-        assert value == 10
-        assert "ctx1" not in cell
-        assert "ctx2" in cell
-
-    def test_pop_context_missing_returns_default(self):
-        """Test pop_context returns default for missing context."""
-        cell = Cell(default_value=42)
-
-        value = cell.pop_context("nonexistent")
-
-        assert value == 42
-
-
-# ============================================================
-# Test 4: Delete Item
-# ============================================================
-
-
-class TestDeleteItem:
-    """Test __delitem__ method."""
-
-    def test_delitem_removes_context(self):
-        """Test del cell['context'] removes the context."""
-        cell = Cell()
-
-        cell["ctx1"] = 10
-        cell["ctx2"] = 20
-
-        del cell["ctx1"]
-
-        assert "ctx1" not in cell
-        assert "ctx2" in cell
-
-
-# ============================================================
-# Test 5: Contains
+# Test 3: Contains
 # ============================================================
 
 
@@ -143,7 +92,7 @@ class TestContains:
 
 
 # ============================================================
-# Test 6: Repr
+# Test 4: Repr
 # ============================================================
 
 
