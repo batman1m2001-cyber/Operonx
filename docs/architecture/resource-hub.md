@@ -245,25 +245,6 @@ and a mechanical migration:
 The branch (1) message names the exact fix, so the migration cost for
 downstream code is one error → one line change.
 
-## Rust mirror
-
-The Rust crate has the equivalent setup model. `Operon::new(graph_json)`
-no longer auto-loads `.env` or `resources.yaml`. `OperonError::EnvVarUnset`
-is the typed error variant for branch (4); `tracing::warn!` is the channel
-for W1 / W2 (the Rust analogue of Python's `warnings` module).
-
-Parity invariants the Rust runtime preserves:
-
-- `Operon::new(graph_json)` works for pure-compute graphs with no
-  `resources.yaml` and no `.env` anywhere — no error, no panic, at most
-  one `tracing::warn!`.
-- A pre-installed hub via `ResourceHub::set_instance(...)` is **not**
-  clobbered by subsequent `Operon::new` / `OperonBuilder::build` calls.
-- The five error branches and two warnings have the same semantics as
-  Python; only the error type and warning channel differ.
-
-See [Rust and Python](rust-python.md) for the broader parity story.
-
 ## API reference
 
 - [`operonx.bootstrap`](../api/core.md#operonx.bootstrap) — top-level setup.

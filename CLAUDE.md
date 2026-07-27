@@ -4,7 +4,9 @@ Operonx is a high-performance workflow engine that runs anything as a workflow �
 
 ## Repository Structure
 
-Single Python package + single Rust crate. No per-component subpackages.
+Single Python package. The Rust execution backend lives in a sibling repo,
+[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs); this repo
+is Python-only.
 
 ```
 Operonx/
@@ -13,9 +15,8 @@ Operonx/
 │   │   ├── engine.py              # Operon class (pure orchestrator)
 │   │   ├── ops/                   # Op base classes, flow, transform, graph
 │   │   ├── states/                # State containers, schema
-│   │   ├── tracing/               # Local file tracer + span context
+│   │   ├── workflow_trace.py      # V3 WorkflowTrace + OpExecution
 │   │   ├── registry/              # ResourceHub, storage, plugin registry
-│   │   ├── middleware.py          # Middleware base class
 │   │   ├── configs/               # Pydantic config models
 │   │   └── exceptions.py          # OpError hierarchy
 │   ├── providers/                 # LLM, embedding, reranker, ONNX backends
@@ -25,22 +26,14 @@ Operonx/
 │   │   ├── rerankers/             # vLLM, TEI, HuggingFace, ONNX, Pinecone
 │   │   ├── auth/                  # Keycloak token provider
 │   │   └── registry/              # Plugin registrations to core ResourceHub
-│   └── telemetry/                 # Tracing backends — Langfuse, OTEL
-│       ├── tracers/               # LangfuseTracer, OTelTracer
-│       └── backends/              # Backend-specific glue
-├── rust/                          # Rust workspace
-│   ├── operonx/                   # Engine + providers + telemetry (single crate)
-│   └── operonx-macros/            # Proc-macros (#[op], #[model], #[resource])
+│   └── telemetry/                 # V3 Consumers — local, Langfuse, OTEL
+│       └── consumers/             # LocalConsumer, LangfuseConsumer
 ├── examples/python/               # Runnable examples (ex01..ex15)
 ├── tests/
 │   ├── internal/                  # Backend-specific unit tests
-│   └── spec/                      # JSON-fixture tests shared with Rust
+│   └── spec/                      # JSON-fixture tests (mirrored in operonx-rs)
 ├── docs/                          # mkdocs site
-│   ├── index.md                   # Landing
-│   ├── guide/                     # 00-installation through 08-deployment
-│   ├── architecture/              # Overview, execution flow, state model, streaming, rust-python, resource-hub
-│   └── api/                       # mkdocstrings stubs (auto-generated reference)
-├── pyproject.toml                 # Single Python package definition
+├── pyproject.toml                 # Python package definition
 ├── mkdocs.yml                     # Material theme + mkdocstrings
 ├── env.example                    # Environment variables template
 ├── resources.yaml                 # Resource configuration template (optional)
@@ -54,7 +47,7 @@ Operonx/
 
 | Layer | Location | Purpose |
 |-------|----------|---------|
-| docs/architecture/ | mkdocs site | Internals: execution flow, state model, streaming, rust-python, resource-hub |
+| docs/architecture/ | mkdocs site | Internals: execution flow, state model, streaming, resource-hub |
 | docs/guide/ | mkdocs site | User-facing tutorial — installation through deployment |
 | docs/api/ | Auto-generated | API reference from docstrings (mkdocstrings) |
 | examples/python/ | Runnable Python | Learning by example (ex01..ex15) |
@@ -70,20 +63,19 @@ operonx.providers         (depends on operonx.core)
 operonx.telemetry         (depends on operonx.core)
 ```
 
-Rust mirrors the same shape inside the single `operonx` crate; `operonx-macros` is consumed only via re-exports.
+Rust runtime code lives in the sibling repo
+[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) and is not
+touched from this repo.
 
 ## When to Modify Which Area
 
 | Task | Location |
 |------|----------|
 | New op type | [operonx/core/ops/](operonx/core/ops/) |
-| New LLM/embedding/reranker provider (Python) | [operonx/providers/](operonx/providers/) |
-| New LLM/embedding/reranker provider (Rust) | [rust/operonx/src/providers/](rust/operonx/src/providers/) |
-| New tracing backend | [operonx/telemetry/](operonx/telemetry/) |
-| Rust execution backend | [rust/operonx/src/core/](rust/operonx/src/core/) |
-| HTTP API server (Python) | `operonx[serve]` — FastAPI module under [operonx/serve/](operonx/serve/) |
-| HTTP API server (Rust) | [rust/operonx/src/serve/](rust/operonx/src/serve/) (deferred) |
-| Rust plugin op (cdylib) | User crate referencing `operonx-plugin` — see [Rust plugin ops](#rust-plugin-ops-cdylib) |
+| New LLM/embedding/reranker provider | [operonx/providers/](operonx/providers/) |
+| New tracing consumer | [operonx/telemetry/consumers/](operonx/telemetry/consumers/) |
+| HTTP API server | `operonx[serve]` — FastAPI module under [operonx/serve/](operonx/serve/) |
+| Rust runtime work | [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) (separate repo) |
 | Documentation | [docs/](docs/) — guide + architecture + api |
 | Examples | [examples/python/](examples/python/) |
 
@@ -98,42 +90,9 @@ Rust mirrors the same shape inside the single `operonx` crate; `operonx-macros` 
 - **Type hints**: Use typing module, Pydantic for validation
 - **Testing**: pytest + pytest-asyncio, `asyncio_mode = "auto"`
 
-### Rust
-
-- **rust/operonx**: Single crate covering engine + providers + telemetry. Built via `cd rust && cargo build --release`.
-  - DashMap for concurrent state, rayon for parallel execution, tokio for async I/O
-  - Standalone engine: `Operon::new(json_str)` + `Operon::run_json(inputs)`
-  - Native HTTP providers (OpenAI, Azure, Gemini, Cohere, Pinecone, vLLM)
-  - ONNX inference via `ort` crate
-- **rust/operonx-macros**: Proc-macros (`#[op]`, `#[model]`, `#[resource]`). Consumed only via the `operonx::*` re-exports — users do not depend on it directly.
-
-### Rust Plugin Ops
-
-Custom Rust ops are registered via the `#[op]` attribute macro from `operonx-macros`. The macro emits an `inventory::submit!` so the op is auto-discovered at startup. Cdylib runtime plugin loading is **not currently implemented** — plugin ops must be compiled into the consuming binary.
-
-```rust
-use operonx::op;
-use serde_json::Value;
-
-#[op(name = "double")]
-fn double(input: &Value) -> Value {
-    let x = input["x"].as_i64().unwrap_or(0);
-    serde_json::json!({ "result": x * 2 })
-}
-```
-
-From Python, reference the registered op by name (Python fallback runs when the Rust runtime is not used):
-
-```python
-@op(rust="double")
-def double(x: int):
-    return {"result": x * 2}
-```
-
 ### Naming Conventions
 
 - **Python package**: single `operonx` namespace.
-- **Rust crate**: single `operonx` crate; `operonx-macros` for proc-macros only.
 - **PyPI extras**: `operonx[anthropic]`, `operonx[onnx]`, `operonx[langfuse]`, `operonx[otel]`, `operonx[serve]`, `operonx[standard]`, `operonx[all]`.
 
 ### Code Style
@@ -158,10 +117,6 @@ uv run pytest tests/ -m "not integration"
 
 # Python with coverage
 uv run pytest tests/ --cov=operonx --cov-report=xml -m "not integration"
-
-# Rust — single workspace
-cd rust && cargo test --workspace
-cd rust && cargo build --workspace --release
 
 # Docs
 uv run mkdocs serve            # local preview
@@ -202,10 +157,8 @@ Workflows run automatically on every PR:
 | Format & Lint | [.github/workflows/format.yaml](.github/workflows/format.yaml) | Ruff format/lint check |
 | Tests | [.github/workflows/tests.yaml](.github/workflows/tests.yaml) | Pytest + extras-smoke matrix + example smoke tests |
 | Python Compatibility | [.github/workflows/python-compatibility.yaml](.github/workflows/python-compatibility.yaml) | Python 3.10/3.11/3.12 matrix |
-| Rust Runtime | [.github/workflows/rust-runtime.yaml](.github/workflows/rust-runtime.yaml) | Rust workspace build + tests |
-| Parity | [.github/workflows/parity.yaml](.github/workflows/parity.yaml) | Python ↔ Rust output parity on shared fixtures |
 | Docs | [.github/workflows/docs.yaml](.github/workflows/docs.yaml) | mkdocs build --strict + deploy to GitHub Pages |
-| Publish | [.github/workflows/publish.yaml](.github/workflows/publish.yaml) | PyPI + crates.io (on version bump) |
+| Publish | [.github/workflows/publish.yaml](.github/workflows/publish.yaml) | PyPI (on version bump) |
 
 ### Git Commits
 
@@ -439,7 +392,6 @@ Resource-hub errors live in [operonx/core/registry/](operonx/core/registry/):
 | Execution flow | [docs/architecture/execution-flow.md](docs/architecture/execution-flow.md) |
 | State model | [docs/architecture/state-model.md](docs/architecture/state-model.md) |
 | Streaming | [docs/architecture/streaming.md](docs/architecture/streaming.md) |
-| Rust ↔ Python | [docs/architecture/rust-python.md](docs/architecture/rust-python.md) |
 | Resource hub | [docs/architecture/resource-hub.md](docs/architecture/resource-hub.md) |
 | Guide (Installation → Deployment) | [docs/guide/](docs/guide/) |
 

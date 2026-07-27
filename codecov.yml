@@ -23,5 +23,4 @@ comment:
 ignore:
   - "tests/"
   - "examples/"
-  - "rust/"
   - "operonx/__init__.py"

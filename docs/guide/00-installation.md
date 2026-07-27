@@ -28,18 +28,8 @@ pip install "operonx[all]"             # All providers + tracers (excludes huggi
 
 Extras compose: `pip install "operonx[anthropic,langfuse]"`.
 
-## Rust users
-
-```bash
-cargo add operonx
-```
-
-Or add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-operonx = "0.6"
-```
+The Rust execution backend lives in a separate repo:
+[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs).
 
 ## Python version support
 

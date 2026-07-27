@@ -1,7 +1,0 @@
-# Dev-mode override: when running examples from inside the Operonx checkout,
-# resolve `operonx` and `operonx-macros` to the workspace crates rather than
-# the crates.io release. Users copying an example dir out of the repo drop
-# this file (or the parent `.cargo/`) and the published versions take over.
-[patch.crates-io]
-operonx = { path = "../../rust/operonx" }
-operonx-macros = { path = "../../rust/operonx-macros" }

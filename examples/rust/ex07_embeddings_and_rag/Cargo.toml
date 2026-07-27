@@ -1,9 +1,0 @@
-[package]
-name = "operonx-ex07-embeddings-and-rag"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-operonx = "0.7.0"
-serde_json = "1"

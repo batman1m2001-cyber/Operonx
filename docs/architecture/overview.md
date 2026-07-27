@@ -1,8 +1,13 @@
 # Architecture overview
 
-Operonx ships as a **single Python package** with optional extras and a
-**single Rust crate**. Both backends share the same workflow contract — a
-graph defined once, runnable on either runtime.
+Operonx ships as a **single Python package** with optional extras.
+
+> The Rust execution backend lives in the
+> [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) repo and
+> ships as its own crate. It reads the same JSON graph spec produced by
+> `graph.serialize()`, so a workflow authored in Python remains portable to
+> the Rust runtime — the two projects are decoupled at the release level
+> but share the JSON contract and fixture tree.
 
 ## Component map
 
@@ -16,7 +21,7 @@ flowchart TB
         Op["Op (FuncOp / BranchOp / GraphOp)"]
         State["MemoryState<br/>(PARENT / op refs)"]
         ResourceHub["ResourceHub<br/>(resources.yaml)"]
-        Tracers["Tracers<br/>(local, Langfuse, OTEL)"]
+        Consumers["Consumers<br/>(local, Langfuse, OTEL)"]
     end
 
     subgraph PROV["operonx.providers"]
@@ -25,37 +30,20 @@ flowchart TB
         RerankOp["RerankOp"]
     end
 
-    subgraph RUST["rust/operonx"]
-        OperonRs["Operon (Rust)"]
-        Scheduler["GraphScheduler<br/>(+ child schedulers)"]
-        Inventory["#[op] inventory"]
-    end
-
     User -->|builds| GraphOp
     GraphOp -->|owns| Op
     Op -.->|reads/writes| State
     User -->|constructs| Operon
     Operon -->|drives| GraphOp
-    Operon -.->|emits frames| Tracers
+    Operon -.->|emits WorkflowTrace| Consumers
     Op -.->|resolves resource:name| ResourceHub
     LLMOp & EmbeddingOp & RerankOp -.->|are kinds of| Op
 
-    GraphOp ==>|graph.serialize()<br/>JSON spec| OperonRs
-    OperonRs --> Scheduler
-    Scheduler -.->|looks up #[op] funcs| Inventory
-
     classDef core fill:#ede7f6,stroke:#5e35b1,color:#311b92
     classDef prov fill:#e0f2f1,stroke:#00897b,color:#004d40
-    classDef rust fill:#fff3e0,stroke:#f57c00,color:#e65100
-    class Operon,GraphOp,Op,State,ResourceHub,Tracers core
+    class Operon,GraphOp,Op,State,ResourceHub,Consumers core
     class LLMOp,EmbeddingOp,RerankOp prov
-    class OperonRs,Scheduler,Inventory rust
 ```
-
-The thick arrow from `GraphOp` to the Rust `Operon` is the JSON
-hand-off: `graph.serialize()` produces a portable spec the Rust
-runtime loads and runs against the same op semantics. See
-[Rust and Python](rust-python.md) for the parity contract.
 
 ## Source layout
 
@@ -64,14 +52,11 @@ Operonx/
 ├── operonx/                    # Python package
 │   ├── core/                   # Engine, ops, state, tracing, registry
 │   ├── providers/              # LLM, embedding, reranker, ONNX backends
-│   └── telemetry/              # Langfuse, OTEL, local tracers
-├── rust/                       # Rust workspace
-│   ├── operonx/                # Engine + providers + telemetry
-│   └── operonx-macros/         # Proc-macros (#[op], #[model], #[resource])
+│   └── telemetry/              # Consumers: local, Langfuse, OTEL
 ├── examples/python/            # Runnable examples
 ├── tests/
-│   ├── internal/               # Backend-specific unit tests
-│   └── spec/                   # JSON-fixture tests shared with Rust
+│   ├── internal/               # Unit tests
+│   └── spec/                   # JSON-fixture tests (shared with operonx-rs)
 └── docs/                       # This site
 ```
 
@@ -79,7 +64,7 @@ Operonx/
 
 | Term | Meaning |
 |---|---|
-| **Engine** (`Operon`) | Pure orchestrator. Takes a graph, runs it, emits frames. |
+| **Engine** (`Operon`) | Pure orchestrator. Takes a graph, runs it, emits `WorkflowTrace`. |
 | **Graph** (`GraphOp`) | A DAG of ops. Built with `with GraphOp(...) as g:` + `>>` edges. |
 | **Op** | A node in the graph. Created via `@op`, `LLMOp.of(...)`, etc. |
 | **Edge** | `>>` (hard) or `>>~` (soft, branch-conditional). |
@@ -113,13 +98,9 @@ operonx.providers         (depends on core)
 operonx.telemetry         (depends on core)
 ```
 
-Rust mirrors the same shape inside the `operonx` crate; `operonx-macros` is a
-proc-macro crate consumed only via re-exports.
-
 ## Where to read next
 
 - [Execution flow](execution-flow.md) — engine init, warmup, run loop.
 - [State model](state-model.md) — `PARENT`, `op[key]`, output mapping.
 - [Streaming](streaming.md) — generator ops and frame iteration.
-- [Rust and Python](rust-python.md) — choosing a backend, parity guarantees.
 - [Resource hub](resource-hub.md) — the full setup model.

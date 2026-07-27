@@ -2,13 +2,14 @@
 
 **Operonx** is a workflow engine that runs anything as a workflow — from
 IO-bound AI tasks (LLMs, agents, RAG) to CPU-bound workloads needing native
-performance. Define complex pipelines as DAGs with async execution, built-in
-tracing, and a dual Python/Rust backend.
+performance. Define complex pipelines as DAGs with async execution and
+built-in tracing.
 
 ## Why Operonx
 
 - **DAG-based workflows** — nodes and edges, inspired by Airflow operators.
-- **Dual backend** — Python for flexibility, Rust for raw speed.
+- **Yield-based streaming** — the same engine handles batch jobs and
+  event-driven pipelines (VAD → STT → LLM → TTS).
 - **Built-in tracing** — Langfuse + OpenTelemetry, plus a local viewer.
 - **Provider agnostic** — OpenAI, Azure, Gemini, Anthropic, vLLM, ONNX —
   swap with one line.
