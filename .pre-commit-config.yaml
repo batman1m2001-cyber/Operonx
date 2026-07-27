@@ -11,15 +11,3 @@ repos:
         files: ^(operonx|tests|examples/python)/
       - id: ruff-format
         files: ^(operonx|tests|examples/python)/
-
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-        args: [--manifest-path=rust/Cargo.toml, --]
-      # Clippy runs in advisory mode for now — `-D warnings` is intentionally
-      # omitted to match the CI policy in .github/workflows/format.yaml. Flip
-      # to `[..., --, -D, warnings]` once the ~25 outstanding lint debts from
-      # the original Hush->Operonx port are cleared.
-      - id: clippy
-        args: [--manifest-path=rust/Cargo.toml, --workspace]

@@ -1,9 +1,6 @@
 # Deployment
 
-Operonx ships two HTTP servers — a Python FastAPI server (`operonx[serve]`)
-and a Rust Axum server (`operonx-serve` binary). Both expose the same
-endpoints over the same JSON contract; pick whichever matches your
-operational profile.
+Operonx ships a Python FastAPI server (`operonx[serve]`).
 
 ## Python: `operonx[serve]`
 
@@ -30,24 +27,18 @@ Endpoints:
 - `POST /stream` — server-sent events stream of frames.
 - `GET  /healthz` — readiness probe.
 
-## Rust: `operonx-serve` binary
-
-```bash
-cargo install operonx-serve
-operonx-serve --graph ./graph.json --host 0.0.0.0 --port 8000
-```
-
-The Rust server is a single static binary — useful for edge deployment
-and containers without a Python runtime. Same endpoints, same JSON
-contract; graphs portable between the two via the shared schema.
+For a static-binary edge deployment, the
+[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) crate ships
+an equivalent Axum server (`operonx-serve` binary) that reads the same
+`graph.json` and `resources.yaml`.
 
 ## Configuration
 
-Both servers honour the standard Operonx setup:
+The server honours the standard Operonx setup:
 
 - `.env` for credentials.
-- `resources.yaml` for model and tracer configs.
-- `bootstrap()` (Python) / equivalent Rust call at startup.
+- `resources.yaml` for model and consumer configs.
+- `bootstrap()` at startup.
 
 For Kubernetes / containerised deployments, mount `resources.yaml` and
 provide credentials through the platform's secret store rather than a
@@ -55,10 +46,9 @@ file-based `.env`.
 
 ## Production checklist
 
-- Set `OPERON_TRACES_DIR` to a persistent volume (or skip the local
-  tracer and use Langfuse / OTEL).
-- Cap concurrent requests via uvicorn `--limit-concurrency` (Python) or
-  the Rust server's `--max-concurrent` flag.
+- Configure a persistent path for the local trace consumer (or skip it
+  and use Langfuse / OTEL).
+- Cap concurrent requests via uvicorn `--limit-concurrency`.
 - Wire health checks: `/healthz` returns 200 once the engine is built and
   the resource hub is loaded.
 - Pin model versions in `resources.yaml` — never reference `latest`.
@@ -68,4 +58,3 @@ file-based `.env`.
 ## Where to go next
 
 - [Architecture overview](../architecture/overview.md) — internals.
-- [Rust and Python](../architecture/rust-python.md) — backend choice.

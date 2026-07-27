@@ -1,7 +1,0 @@
-{
-  "basic": {"val": 5},
-  "chained": {"val": 3},
-  "renamed": {"val": 7},
-  "multi_params": {"x": 3, "y": 7},
-  "nested": {"val": 5}
-}

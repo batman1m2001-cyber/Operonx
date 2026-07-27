@@ -60,6 +60,9 @@ When using Operonx in production:
 This security policy applies to:
 
 - The `operonx` Python package on PyPI (and all its extras: `[standard]`, `[anthropic]`, `[onnx]`, etc.)
-- The `operonx` and `operonx-macros` Rust crates on crates.io
 
-Third-party provider SDKs (OpenAI, Anthropic, etc.) have their own security policies — vulnerabilities specific to those SDKs should be reported upstream.
+The Rust runtime lives in
+[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) and has its
+own policy. Third-party provider SDKs (OpenAI, Anthropic, etc.) have their
+own security policies — vulnerabilities specific to those SDKs should be
+reported upstream.

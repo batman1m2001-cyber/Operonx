@@ -1,5 +1,5 @@
 site_name: Operonx
-site_description: A high-performance workflow engine — Python + Rust
+site_description: A high-performance async workflow engine for AI applications
 site_url: https://batman1m2001-cyber.github.io/Operonx/
 repo_url: https://github.com/batman1m2001-cyber/Operonx
 repo_name: batman1m2001-cyber/Operonx
@@ -90,10 +90,6 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
-exclude_docs: |
-  RUST_BASELINE_STATUS.md
-  RUST_PARITY_SYNC_PLAN.md
-
 nav:
   - Home: index.md
   - Guide:
@@ -112,7 +108,6 @@ nav:
       - Execution flow: architecture/execution-flow.md
       - State model: architecture/state-model.md
       - Streaming: architecture/streaming.md
-      - Rust and Python: architecture/rust-python.md
       - Resource hub: architecture/resource-hub.md
   - API reference:
       - operonx.core: api/core.md

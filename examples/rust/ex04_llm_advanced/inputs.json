@@ -1,5 +1,0 @@
-{
-  "structured": {"text": "Sản phẩm tuyệt vời, rất hài lòng!"},
-  "tool": {"query": "Tính 25 * 4 + 100"},
-  "multi_turn": {"message": "Xin chào! Tên tôi là An.", "history": []}
-}

@@ -2,13 +2,16 @@
 
 Thank you for your interest in contributing to Operonx! This guide gets you set up and shipping.
 
+> Working on the Rust runtime? See
+> [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs). This repo
+> hosts only the Python side.
+
 ## Development Setup
 
 ### Prerequisites
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package manager
-- Rust toolchain (only if you touch the `rust/` tree) — install via [rustup](https://rustup.rs/)
 
 ### Clone and Install
 
@@ -22,7 +25,7 @@ This installs `operonx` and every optional extra (`anthropic`, `langfuse`, `otel
 
 ### Pre-commit Hooks
 
-Pre-commit runs ruff (Python) + cargo fmt/clippy (Rust) on every commit:
+Pre-commit runs ruff on every commit:
 
 ```bash
 uv tool install pre-commit
@@ -52,12 +55,6 @@ uv run ruff format operonx/ tests/ examples/python/
 uv run ruff check --fix operonx/ tests/ examples/python/
 ```
 
-Rust:
-
-```bash
-cd rust && cargo fmt --all && cargo clippy --workspace
-```
-
 ## Testing
 
 ```bash
@@ -69,9 +66,6 @@ uv run pytest tests/
 
 # With coverage
 uv run pytest tests/ --cov=operonx --cov-report=term-missing -m "not integration"
-
-# Rust
-cd rust && cargo test --workspace
 ```
 
 Tests under `tests/internal/providers/` are auto-marked `integration` (they hit real APIs or need a configured `ResourceHub`); they're excluded by default and only run when API credentials are present.
@@ -87,7 +81,6 @@ Tests under `tests/internal/providers/` are auto-marked `integration` (they hit 
 4. **Verify locally**:
    - `pre-commit run --all-files`
    - `uv run pytest tests/ -m "not integration"`
-   - `cd rust && cargo test --workspace` (if Rust touched)
 5. **Open PR** against `dev`. CI runs the full matrix; review starts when it's green.
 
 ### PR Checklist
@@ -110,20 +103,23 @@ Operonx/
 ├── operonx/              # Python package (single package, optional extras)
 │   ├── core/             # Engine, ops, state, registry, telemetry hooks
 │   ├── providers/        # LLM, embedding, reranking, auth integrations
-│   └── telemetry/        # Tracer backends (Langfuse, OTEL)
-├── rust/
-│   ├── operonx/          # Pure Rust engine + native providers
-│   └── operonx-macros/   # Proc macros (#[op], #[model], #[resource])
+│   └── telemetry/        # Consumers: local, Langfuse, OTEL
 ├── examples/python/      # Runnable examples
 ├── tests/
 │   ├── internal/         # Engine + provider tests
-│   └── spec/             # Python ↔ Rust parity fixtures
+│   └── spec/             # JSON-fixture tests (mirrored in operonx-rs)
 ├── docs/
 │   ├── architecture/     # Internals + design docs
-│   ├── guide/            # User guide (Vietnamese)
+│   ├── guide/            # User guide
 │   └── api/              # Auto-generated API reference (mkdocstrings)
 └── .github/workflows/    # CI/CD
 ```
+
+## Cross-repo work
+
+The `tests/spec/` JSON fixtures are duplicated in
+[operonx-rs/tests/spec/](https://github.com/batman1m2001-cyber/operonx-rs/tree/main/tests/spec).
+When adding or changing a fixture, land the same change in both repos.
 
 ## Documentation
 
@@ -131,7 +127,7 @@ Operonx/
 |-------------|--------|
 | New op type | `operonx/core/ops/` + relevant guide chapter |
 | New provider | `operonx/providers/` + `docs/architecture/` if non-trivial |
-| New tracer | `operonx/telemetry/tracers/` |
+| New consumer | `operonx/telemetry/consumers/` |
 | Public API change | Update docstring + CHANGELOG; mkdocstrings re-renders the API page |
 | Architectural change | Add/update a page in `docs/architecture/` |
 
