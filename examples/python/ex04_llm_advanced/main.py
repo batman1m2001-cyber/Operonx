@@ -15,7 +15,7 @@ import json
 
 import operonx
 from operonx.core import END, START, Operon, graph, op
-from operonx.providers import LLMOp, PromptOp
+from operonx.providers import LLMOp
 
 # ── Tool-calling helpers ────────────────────────────────────────────────
 
@@ -61,6 +61,22 @@ def process_response(content, tool_calls):
 
 
 @op
+def build_messages(history: list, message: str) -> dict:
+    """Assemble the full messages list: system + history + new user turn.
+
+    Prompt-formatting inside LLMOp only handles `{var}` substitution — any
+    history-injection lives in caller code.
+    """
+    return {
+        "messages": [
+            {"role": "system", "content": "Bạn là assistant hữu ích. Trả lời ngắn gọn."},
+            *history,
+            {"role": "user", "content": message},
+        ]
+    }
+
+
+@op
 def update_history(history, message, response):
     return {
         "new_history": history
@@ -77,16 +93,13 @@ def update_history(history, message, response):
 @graph
 def structured_output(text):
     """Force the LLM to return JSON matching a schema (sentiment analysis)."""
-    p = PromptOp.of(
-        template={
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Phân tích sentiment của văn bản. Trả về JSON.",
             "user": "{text}",
         },
         text=text,
-    )
-    llm = LLMOp.of(
-        resource="gpt-4o-mini",
-        messages=p["messages"],
         response_format={
             "type": "json_schema",
             "json_schema": {
@@ -106,48 +119,38 @@ def structured_output(text):
             },
         },
     )
-    START >> p >> llm >> END
+    START >> llm >> END
 
 
 @graph
 def tool_calling(query):
     """LLM uses a `calculate` function tool."""
-    p = PromptOp.of(
-        template={
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Bạn có thể tính toán. Dùng tool calculate khi cần.",
             "user": "{query}",
         },
         query=query,
-    )
-    llm = LLMOp.of(
-        resource="gpt-4o-mini",
-        messages=p["messages"],
         tools=CALC_TOOLS,
         tool_choice="auto",
     )
     proc = process_response(content=llm["content"], tool_calls=llm["tool_calls"])
-    START >> p >> llm >> proc >> END
+    START >> llm >> proc >> END
 
 
 @graph
 def multi_turn(history, message):
-    """Multi-turn conversation that updates the history."""
-    p = PromptOp.of(
-        template={
-            "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
-            "user": "{message}",
-        },
-        conversation_history=history,
-        message=message,
-    )
+    """Multi-turn conversation — caller assembles history + user turn."""
+    msgs = build_messages(history=history, message=message)
     llm = LLMOp.of(
         resource="gpt-4o-mini",
-        messages=p["messages"],
+        prompt=msgs["messages"],
         temperature=0.7,
         max_tokens=200,
     )
     upd = update_history(history=history, message=message, response=llm["content"])
-    START >> p >> llm >> upd >> END
+    START >> msgs >> llm >> upd >> END
 
 
 async def main() -> None:

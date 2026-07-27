@@ -38,7 +38,7 @@ llms:
 import asyncio
 import operonx
 from operonx.core import Operon, GraphOp, op, START, END, PARENT
-from operonx.providers import EmbeddingOp, RerankOp, chat
+from operonx.providers import EmbeddingOp, LLMOp, RerankOp
 
 @op
 async def fetch_candidates(query_vec: list[float]):
@@ -58,9 +58,9 @@ async def main():
             documents=fetch["docs"],
             top_k=5,
         )
-        answer = chat(
+        answer = LLMOp.of(
             resource="gpt-4o",
-            template={
+            prompt={
                 "system": "Answer using only the provided context.",
                 "user": "Question: {question}\n\nContext:\n{context}",
             },

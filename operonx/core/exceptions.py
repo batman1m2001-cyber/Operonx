@@ -185,17 +185,17 @@ class BranchError(OpError):
 
 
 class PromptError(OpError):
-    """Exception khi PromptOp format template thất bại.
+    """Exception khi LLMOp format prompt thất bại.
 
     Context tự động bao gồm:
-    - template_type: Loại template (str/dict/list)
-    - template: Preview của template (truncated)
+    - prompt_type: Loại prompt (str/dict/list)
+    - prompt: Preview của prompt (truncated)
     - missing_vars: List các biến bị thiếu (nếu có)
 
     Example:
         raise PromptError(
             message="Missing template variable",
-            template="Hello {name}, your order {order_id}",
+            prompt="Hello {name}, your order {order_id}",
             missing_vars=["order_id"],
             original_error=key_error
         )
@@ -204,16 +204,16 @@ class PromptError(OpError):
     def __init__(
         self,
         message: str,
-        template: Any,
+        prompt: Any,
         missing_vars: Optional[List[str]] = None,
         original_error: Optional[Exception] = None,
     ):
-        self.template = template
+        self.prompt = prompt
         self.missing_vars = missing_vars or []
 
         context = {
-            "template_type": type(template).__name__,
-            "template": _truncate(repr(template), 300),
+            "prompt_type": type(prompt).__name__,
+            "prompt": _truncate(repr(prompt), 300),
         }
         if missing_vars:
             context["missing_vars"] = missing_vars

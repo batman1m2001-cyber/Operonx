@@ -6,8 +6,8 @@ results through a reranker.
 | Scenario | Ops                                                       | Notes                                      |
 |----------|-----------------------------------------------------------|--------------------------------------------|
 | `embed`  | `EmbeddingOp`                                             | Plain embedding of two short texts         |
-| `rag`    | `EmbeddingOp → retrieve → PromptOp → LLMOp`               | Cosine search against pre-embedded docs    |
-| `rerank` | `RerankOp → PromptOp → LLMOp`                             | Uses a `bge-m3` reranker resource          |
+| `rag`    | `EmbeddingOp → retrieve → LLMOp`                          | Cosine search against pre-embedded docs    |
+| `rerank` | `RerankOp → LLMOp`                                        | Uses a `bge-m3` reranker resource          |
 
 The `rerank` scenario gracefully skips if `reranker:bge-m3` isn't
 configured in `resources.yaml`.

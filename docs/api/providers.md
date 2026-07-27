@@ -1,7 +1,7 @@
 # operonx.providers
 
-LLM, embedding, reranker, and ONNX provider ops — plus the `chat()` /
-`ask()` shorthand helpers. Provider backends are loaded lazily — a
+LLM, embedding, reranker, and ONNX provider ops — plus the `ask()`
+structured-output helper. Provider backends are loaded lazily — a
 tier-1 install (`pip install operonx`) can `import operonx.providers`
 without pulling `openai` / `httpx` / `numpy` / `torch`. Missing-dep
 errors surface only when the corresponding backend is actually
@@ -19,15 +19,12 @@ that's the recommended style.
 ::: operonx.providers.ops.LLMOp
 ::: operonx.providers.ops.EmbeddingOp
 ::: operonx.providers.ops.RerankOp
-::: operonx.providers.ops.PromptOp
 
 ## High-level helpers
 
-`chat()` glues a `PromptOp` and `LLMOp` into one op call (most
-LLM-using examples use this). `ask()` is the structured-output
-variant that pairs `chat` with a parser.
+`ask()` is the structured-output variant that pairs `LLMOp` with a
+parser and (optionally) a validator-driven retry loop.
 
-::: operonx.providers.ops.chat
 ::: operonx.providers.ops.ask
 
 ## Resource resolution
@@ -53,7 +50,7 @@ embedding:openai:
 Then reference by key in your op definitions:
 
 ```python
-llm = LLMOp.of(resource="gpt-4o-mini", messages=PARENT["msgs"])
+llm = LLMOp.of(resource="gpt-4o-mini", prompt=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="openai", texts=PARENT["docs"])
 ```
 

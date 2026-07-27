@@ -58,7 +58,7 @@ def make_mock_hub(responses):
 @pytest.mark.asyncio
 async def test_extract_basic():
     """ask() parses LLM output into structured fields."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
@@ -69,7 +69,7 @@ async def test_extract_basic():
         def wf():
             e = ask(
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["intent: str"],
                 parser="xml",
                 text="vâng đúng rồi",
@@ -87,7 +87,7 @@ async def test_extract_basic():
 @pytest.mark.asyncio
 async def test_extract_with_validators():
     """ask() with validators — @-prefixed = default on validation fail."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"])
 
@@ -98,7 +98,7 @@ async def test_extract_with_validators():
         def wf():
             e = ask(
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
                 validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
@@ -117,7 +117,7 @@ async def test_extract_with_validators():
 @pytest.mark.asyncio
 async def test_extract_multiple_fields():
     """ask() extracts multiple fields from XML."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>DENY</intent><confidence>0.95</confidence>"])
 
@@ -128,7 +128,7 @@ async def test_extract_multiple_fields():
         def wf():
             e = ask(
                 resource="mock",
-                template="Analyze: {text}",
+                prompt="Analyze: {text}",
                 fields=["intent: str", "confidence: float"],
                 parser="xml",
                 text="không",
@@ -151,7 +151,7 @@ async def test_extract_multiple_fields():
 @pytest.mark.asyncio
 async def test_extract_retry_validator_reject_uses_default():
     """LLM always returns wrong value → validator rejects → @-default applied."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["<result>UNKNOWN</result>"] * 3)
 
@@ -163,7 +163,7 @@ async def test_extract_retry_validator_reject_uses_default():
                 until="error == None",
                 error="init",
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
                 max_iterations=3,
@@ -185,7 +185,7 @@ async def test_extract_retry_validator_reject_uses_default():
 @pytest.mark.asyncio
 async def test_extract_retry_parse_fail_then_success():
     """First call returns garbage → retry → second call returns valid XML."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -202,7 +202,7 @@ async def test_extract_retry_parse_fail_then_success():
                 until="error == None",
                 error="init",
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
                 max_iterations=2,
@@ -222,7 +222,7 @@ async def test_extract_retry_parse_fail_then_success():
 @pytest.mark.asyncio
 async def test_extract_retry_no_retry_default_on_fail():
     """retry=0 → only 1 attempt. Parse fail → @-default applied."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["garbage output"])
 
@@ -234,7 +234,7 @@ async def test_extract_retry_no_retry_default_on_fail():
                 until="error == None",
                 error="init",
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
                 max_iterations=1,
@@ -254,7 +254,7 @@ async def test_extract_retry_no_retry_default_on_fail():
 @pytest.mark.asyncio
 async def test_extract_retry_success_first_try():
     """LLM returns valid output on first try → no retry triggered."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(["<intent>CONFIRM</intent>"])
 
@@ -266,7 +266,7 @@ async def test_extract_retry_success_first_try():
                 until="error == None",
                 error="init",
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["intent: str"],
                 parser="xml",
                 max_iterations=3,
@@ -286,7 +286,7 @@ async def test_extract_retry_success_first_try():
 @pytest.mark.asyncio
 async def test_extract_retry_twice_then_success():
     """LLM fails 2 times, succeeds on 3rd attempt."""
-    from operonx.providers.ops.chain import ask
+    from operonx.providers.ops.ask import ask
 
     mock_hub, call_count = make_mock_hub(
         [
@@ -304,7 +304,7 @@ async def test_extract_retry_twice_then_success():
                 until="error == None",
                 error="init",
                 resource="mock",
-                template="Classify: {text}",
+                prompt="Classify: {text}",
                 fields=["result: str"],
                 parser="xml",
                 max_iterations=3,

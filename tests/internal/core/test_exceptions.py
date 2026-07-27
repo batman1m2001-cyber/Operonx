@@ -265,12 +265,12 @@ class TestPromptError:
         """Test prompt error with missing template variable."""
         error = PromptError(
             message="Missing template variable(s)",
-            template="Hello {name}, your order {order_id} is ready",
+            prompt="Hello {name}, your order {order_id} is ready",
             missing_vars=["order_id"],
         )
         msg = str(error)
         assert "[PROMPT]" in msg
-        assert "template_type:" in msg and "str" in msg
+        assert "prompt_type:" in msg and "str" in msg
         assert "missing_vars:" in msg
         assert "order_id" in msg
 
@@ -278,7 +278,7 @@ class TestPromptError:
         """Test prompt error with multiple missing variables."""
         error = PromptError(
             message="Missing template variable(s)",
-            template="Hello {name}, order {order_id} at {location}",
+            prompt="Hello {name}, order {order_id} at {location}",
             missing_vars=["order_id", "location"],
         )
         msg = str(error)
@@ -289,50 +289,50 @@ class TestPromptError:
         """Test prompt error for invalid template type."""
         error = PromptError(
             message="Invalid template type",
-            template=12345,  # Should be str/dict/list
+            prompt=12345,  # Should be str/dict/list
             original_error=TypeError("Expected str, dict, or list"),
         )
         msg = str(error)
         assert "[PROMPT]" in msg
-        assert "template_type:" in msg and "int" in msg
+        assert "prompt_type:" in msg and "int" in msg
 
     def test_dict_template(self):
         """Test prompt error with dict template."""
         error = PromptError(
             message="Missing variable in system prompt",
-            template={"system": "You are {role}", "user": "{query}"},
+            prompt={"system": "You are {role}", "user": "{query}"},
             missing_vars=["role"],
         )
         msg = str(error)
-        assert "template_type:" in msg and "dict" in msg
+        assert "prompt_type:" in msg and "dict" in msg
 
     def test_list_template(self):
         """Test prompt error with list template."""
         error = PromptError(
             message="Missing variable",
-            template=[{"role": "user", "content": "Hello {name}"}],
+            prompt=[{"role": "user", "content": "Hello {name}"}],
             missing_vars=["name"],
         )
         msg = str(error)
-        assert "template_type:" in msg and "list" in msg
+        assert "prompt_type:" in msg and "list" in msg
 
     def test_long_template_truncated(self):
         """Test that long template is truncated."""
         long_template = "Hello {name}, " + "x" * 500
-        error = PromptError(message="Error", template=long_template, missing_vars=["name"])
+        error = PromptError(message="Error", prompt=long_template, missing_vars=["name"])
         msg = str(error)
         assert "..." in msg
 
     def test_no_missing_vars(self):
         """Test that missing_vars is optional."""
-        error = PromptError(message="Invalid template", template=None)
+        error = PromptError(message="Invalid template", prompt=None)
         msg = str(error)
         assert "missing_vars:" not in msg
 
     def test_attributes_stored(self):
         """Test that attributes are stored."""
-        error = PromptError(message="Test", template="Hello {name}", missing_vars=["name"])
-        assert error.template == "Hello {name}"
+        error = PromptError(message="Test", prompt="Hello {name}", missing_vars=["name"])
+        assert error.prompt == "Hello {name}"
         assert error.missing_vars == ["name"]
 
 
@@ -438,7 +438,7 @@ class TestErrorInheritance:
             (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
             (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
             (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (PromptError, {"message": "test", "template": "x"}),
+            (PromptError, {"message": "test", "prompt": "x"}),
             (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
                 RerankError,
@@ -458,7 +458,7 @@ class TestErrorInheritance:
             (ParserError, {"message": "test", "input_text": "x", "format_type": "json"}),
             (CodeError, {"message": "test", "function_name": "f", "source": "x", "inputs": {}}),
             (BranchError, {"message": "test", "condition": "x", "inputs": {}, "candidates": []}),
-            (PromptError, {"message": "test", "template": "x"}),
+            (PromptError, {"message": "test", "prompt": "x"}),
             (EmbeddingError, {"message": "test", "resource": "k", "text_count": 1}),
             (
                 RerankError,

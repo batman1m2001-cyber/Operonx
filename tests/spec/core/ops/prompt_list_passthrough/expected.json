@@ -1,6 +1,0 @@
-{
-    "messages": [
-        {"role": "system", "content": "You are terse."},
-        {"role": "user", "content": "Summarize."}
-    ]
-}

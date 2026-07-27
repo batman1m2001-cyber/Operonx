@@ -37,7 +37,7 @@ async def main():
     operonx.bootstrap()
 
     with GraphOp.loop(until="done == True", messages=[], done=False) as loop:
-        llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
+        llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["messages"])
         parsed = parse_action(content=llm["content"])
         executed = execute_action(action=parsed["action"])
         appended = append_messages(

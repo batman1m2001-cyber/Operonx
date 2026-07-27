@@ -24,7 +24,7 @@ class TestLLMOpNormalizeTraceIO:
 
         node = LLMOp(name="vision_test", resource="gpt-4o")
         inputs = {
-            "messages": [
+            "prompt": [
                 {
                     "role": "user",
                     "content": [
@@ -41,7 +41,7 @@ class TestLLMOpNormalizeTraceIO:
         normalized_in, normalized_out = node.normalize_trace_io(inputs, {})
         assert normalized_out == {}
         # Original untouched
-        assert isinstance(inputs["messages"][0]["content"][1]["image_url"]["url"], str)
+        assert isinstance(inputs["prompt"][0]["content"][1]["image_url"]["url"], str)
 
         wrapped = normalized_in["messages"][0]["content"][1]["image_url"]["url"]
         assert isinstance(wrapped, Media)
@@ -53,7 +53,7 @@ class TestLLMOpNormalizeTraceIO:
 
         node = LLMOp(name="audio_test", resource="gpt-4o")
         inputs = {
-            "messages": [
+            "prompt": [
                 {
                     "role": "user",
                     "content": [
@@ -75,9 +75,12 @@ class TestLLMOpNormalizeTraceIO:
         from operonx.providers.ops import LLMOp
 
         node = LLMOp(name="text_test", resource="gpt-4o")
-        inputs = {"messages": [{"role": "user", "content": "hello"}]}
+        inputs = {"prompt": [{"role": "user", "content": "hello"}]}
         out_in, _ = node.normalize_trace_io(inputs, {})
-        assert out_in is inputs  # cheap identity check — no copy
+        # Prompt-formatting path always builds a fresh messages list, so
+        # the returned dict is a shallow copy — but content is unchanged
+        # (no multimodal blocks means _wrap_openai_media_blocks is a no-op).
+        assert out_in["messages"] == inputs["prompt"]
 
 
 # ---------------------------------------------------------------------------

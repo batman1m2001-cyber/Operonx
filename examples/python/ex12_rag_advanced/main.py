@@ -19,7 +19,7 @@ import numpy as np
 
 import operonx
 from operonx.core import END, PARENT, START, Operon, graph, op
-from operonx.providers import EmbeddingOp, LLMOp, PromptOp
+from operonx.providers import EmbeddingOp, LLMOp
 
 DOCUMENTS = [
     "Hà Nội là thủ đô của Việt Nam, nằm ở miền Bắc, có hơn 1000 năm lịch sử.",
@@ -106,24 +106,24 @@ def keyword_rrf(query, documents):
 
 @graph
 def hybrid_rag(query, documents, doc_vectors):
-    """Keyword + vector search → RRF → prompt → LLM."""
+    """Keyword + vector search → RRF → LLM."""
     kw = kw_search_fn(query=query, docs=documents)
     embed_q = EmbeddingOp.of(resource="openai", texts=query)
     vec = vec_search_fn(qv=embed_q["embeddings"], docs=documents, dvs=doc_vectors)
     mrg = merge_results(kw=kw["results"], vec=vec["results"])
-    p = PromptOp.of(
-        template={
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Trả lời câu hỏi dựa trên context.\nContext:\n{context}",
             "user": "{query}",
         },
         context=mrg["context_docs"],
         query=query,
     )
-    llm = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
     mrg["context_docs"] >> PARENT["sources"]
     START >> [kw, embed_q]
     embed_q >> vec
-    [kw, vec] >> mrg >> p >> llm >> END
+    [kw, vec] >> mrg >> llm >> END
 
 
 @graph

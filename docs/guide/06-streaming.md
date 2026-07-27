@@ -24,7 +24,7 @@ LLM ops support streaming via `stream=True`:
 ```python
 from operonx.providers import LLMOp
 
-llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"], stream=True)
+llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["messages"], stream=True)
 ```
 
 With streaming on, `llm["content"]` is a stream of token chunks rather

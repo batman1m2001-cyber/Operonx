@@ -23,7 +23,7 @@ before `uv run`.
 |---|---------|---------|-----------------|
 | 01 | `ex01_hello_world` | `operonx` (tier 1) | `@op`, `@graph`, `>>`, `START` / `END` |
 | 02 | `ex02_data_pipeline` | `operonx` (tier 1) | Linear pipelines |
-| 03 | `ex03_llm_chat` | `operonx[openai]` | `PromptOp` / `LLMOp` / `chat()` |
+| 03 | `ex03_llm_chat` | `operonx[openai]` | `LLMOp` (unified prompt + call) |
 | 04 | `ex04_llm_advanced` | `operonx[openai]` | Structured output, tool calling, multi-turn |
 | 05 | `ex05_loops_and_branches` | `operonx` (tier 1) | Generator ops + `if_()` routing |
 | 07 | `ex07_embeddings_and_rag` | `operonx[providers]` | `EmbeddingOp` + cosine RAG + optional reranker |

@@ -86,16 +86,20 @@ pip install "operonx[standard]"
 import asyncio
 import operonx
 from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import chat
+from operonx.providers import LLMOp
 
 async def main():
     operonx.bootstrap()  # loads ./.env + ./resources.yaml
 
     with GraphOp(name="qa") as graph:
-        c = chat(
+        c = LLMOp(
+            name="llm",
             resource="gpt-4o-mini",
-            template={"system": "You are a helpful assistant.", "user": "{question}"},
-            question=PARENT["question"],
+            inputs={
+                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
+                "*": PARENT,
+            },
+            outputs={"*": PARENT},
         )
         START >> c >> END
 
@@ -105,7 +109,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`chat()` is a `@graph` factory that wires `PromptOp → LLMOp` and forwards every output. For lower-level control use `LLMOp.of(resource=..., messages=...)` directly.
+`LLMOp.prompt` accepts a string, `{"system": ..., "user": ...}` dict, or a full messages list — every non-reserved kwarg becomes a `{var}` substitution.
 
 ### Multi-model load balancing + fallback
 

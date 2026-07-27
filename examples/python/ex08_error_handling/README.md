@@ -7,7 +7,7 @@ Capture, route, retry+fallback, and LLM fallback chains.
 | `capture`      | `failing`                                            | No               |
 | `routing`      | `safe_divide → if_ → handle_success / handle_error`  | No               |
 | `retry`        | `retry_with_backoff → with_fallback`                 | No               |
-| `llm_fallback` | `PromptOp → LLMOp(gpt-4o, fallback=[gpt-4o-mini])`   | `OPENAI_API_KEY` |
+| `llm_fallback` | `LLMOp(gpt-4o, fallback=[gpt-4o-mini])`              | `OPENAI_API_KEY` |
 
 The `llm_fallback` scenario gracefully skips if no API key is set.
 
