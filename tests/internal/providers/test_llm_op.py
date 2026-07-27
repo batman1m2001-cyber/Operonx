@@ -811,9 +811,7 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
-                    {"role": "user", "content": "Write a very long story about a dragon."}
-                ],
+                "prompt": [{"role": "user", "content": "Write a very long story about a dragon."}],
                 "max_tokens": 20,
             },
         )
@@ -845,9 +843,7 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
-                    {"role": "user", "content": "Count from 1 to 10, one number per line."}
-                ],
+                "prompt": [{"role": "user", "content": "Count from 1 to 10, one number per line."}],
                 "stop": ["5"],
             },
         )

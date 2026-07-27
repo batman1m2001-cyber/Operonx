@@ -33,8 +33,8 @@ OPENAI_API_KEY=sk-...
 ## Use `LLMOp.of` for a one-shot prompt
 
 `LLMOp` formats a prompt template and calls the model in one step. Use
-`ask` (see [Structured extraction](03-structured.md)) when you also want
-to parse structured fields out of the reply.
+`ask` (from `operonx.providers`) when you also want to parse structured
+fields out of the reply and optionally retry on validation failure.
 
 ```python
 import asyncio
