@@ -14,61 +14,32 @@ class TestNodeIntegration:
         from operonx.providers import (
             EmbeddingOp,
             LLMOp,
-            PromptOp,
             RerankOp,
             ask,
-            chat,
         )
 
         assert LLMOp is not None
         assert EmbeddingOp is not None
         assert RerankOp is not None
-        assert PromptOp is not None
-        assert chat is not None
         assert ask is not None
 
-    def test_prompt_node_with_parent_outputs(self):
-        """Test PromptOp with PARENT reference for outputs."""
-        from operonx.providers.ops import PromptOp
+    def test_llm_node_with_parent_outputs(self):
+        """Test LLMOp with PARENT reference for outputs."""
+        from operonx.providers.ops import LLMOp
 
         with GraphOp(name="test_graph") as graph:
-            prompt = PromptOp(
-                name="prompt",
-                inputs={
-                    "template": "Hello world",
-                },
+            llm = LLMOp(
+                name="llm",
+                resource="gpt-4o-mini",
+                inputs={"prompt": "Hello world"},
                 outputs={"*": PARENT},
             )
-            START >> prompt >> END
+            START >> llm >> END
 
         graph.build()
 
-        # PARENT outputs should be resolved - messages is forwarded
-        assert "messages" in graph.outputs
-
-    @pytest.mark.asyncio
-    async def test_prompt_node_execution(self):
-        """Test PromptOp standalone execution."""
-        from operonx.providers.ops import PromptOp
-
-        prompt = PromptOp(
-            name="prompt",
-            inputs={
-                "template": {"system": "You are helpful.", "user": "Task: {task}"},
-                "task": "write code",
-            },
-        )
-
-        schema = StateSchema(op=prompt)
-        state = MemoryState(schema)
-
-        result = {}
-
-        async for _, result in prompt.run(state):
-            pass
-        assert "messages" in result
-        assert len(result["messages"]) == 2
-        assert result["messages"][1]["content"] == "Task: write code"
+        # PARENT outputs should include LLMOp's standard outputs
+        assert "content" in graph.outputs
 
 
 class TestPluginAutoRegistration:
@@ -86,8 +57,6 @@ class TestPluginAutoRegistration:
         """Test that config classes are registered in REGISTRY."""
         from operonx.core.registry import REGISTRY
 
-        # Import plugins to trigger registration
-
         # Check configs are registered by category
         assert REGISTRY.get_class("llm") is not None
         assert REGISTRY.get_class("embedding") is not None
@@ -99,7 +68,6 @@ class TestResourceHubIntegration:
 
     def test_hub_loads_from_yaml(self, hub):
         """Test ResourceHub loads configs from YAML."""
-        # Hub should have some keys
         keys = hub.keys()
         print(f"Available resources: {keys}")
 
@@ -129,35 +97,27 @@ class TestEndToEndPipeline:
     """End-to-end pipeline tests."""
 
     @pytest.mark.asyncio
-    async def test_prompt_to_llm_pipeline(self, hub):
-        """Test a pipeline from PromptOp to LLMOp."""
-        from operonx.providers.ops import LLMOp, PromptOp
+    async def test_llm_pipeline(self, hub):
+        """Test a single LLMOp pipeline with a real model."""
+        from operonx.providers.ops import LLMOp
 
         if not hub.has("llm:gpt-4o-mini"):
             pytest.skip("llm:gpt-4o-mini not configured")
 
-        # Create a graph with Prompt -> LLM
         with GraphOp(name="chat_pipeline") as pipeline:
-            prompt = PromptOp(
-                name="prompt",
+            llm = LLMOp(
+                name="llm",
+                resource="gpt-4o-mini",
                 inputs={
-                    "template": {
+                    "prompt": {
                         "system": "You are a helpful assistant.",
                         "user": "Answer briefly: {question}",
                     },
                     "*": PARENT,
                 },
-                outputs={"messages": PARENT["messages"]},
-            )
-
-            llm = LLMOp(
-                name="llm",
-                resource="gpt-4o-mini",
-                inputs={"messages": prompt["messages"]},
                 outputs={"*": PARENT},
             )
-
-            START >> prompt >> llm >> END
+            START >> llm >> END
 
         pipeline.build()
 
@@ -165,7 +125,6 @@ class TestEndToEndPipeline:
         state = MemoryState(schema, inputs={"question": "What is 2+2?"})
 
         result = {}
-
         async for _, result in pipeline.run(state):
             pass
         assert "content" in result

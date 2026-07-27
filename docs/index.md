@@ -52,16 +52,20 @@ Configure resources in `resources.yaml`, credentials in `.env`, then:
 import asyncio
 import operonx
 from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import chat
+from operonx.providers import LLMOp
 
 async def main():
     operonx.bootstrap()  # loads ./.env + ./resources.yaml
 
     with GraphOp(name="chat") as graph:
-        c = chat(
+        c = LLMOp(
+            name="llm",
             resource="gpt-4o",
-            template={"system": "You are a helpful assistant.", "user": "{question}"},
-            question=PARENT["question"],
+            inputs={
+                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
+                "*": PARENT,
+            },
+            outputs={"*": PARENT},
         )
         START >> c >> END
 

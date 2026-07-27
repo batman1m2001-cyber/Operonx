@@ -1,13 +1,12 @@
 # 03 — LLM Chat (Python)
 
-Three LLM chat graphs showing the basic authoring shortcuts. Tier-2
-install — depends on `operonx[openai]`.
+Two LLM chat graphs showing the unified `LLMOp` surface. Tier-2 install —
+depends on `operonx[openai]`.
 
-| Scenario    | Ops                                  | Notes                            |
-|-------------|--------------------------------------|----------------------------------|
-| `basic`     | `PromptOp → LLMOp`                   | Explicit two-op form             |
-| `chain`     | `chat()`                             | Single-op all-in-one helper      |
-| `summarize` | `clean_text → PromptOp → LLMOp`      | Pre-processing + summarization   |
+| Scenario    | Ops                              | Notes                            |
+|-------------|----------------------------------|----------------------------------|
+| `basic`     | `LLMOp`                          | Prompt template + call in one op |
+| `summarize` | `clean_text → LLMOp`             | Pre-processing + summarization   |
 
 ## Project layout
 
@@ -17,7 +16,7 @@ ex03_llm_chat/
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY
 ├── resources.yaml      # llm:gpt-4o-mini
-└── main.py             # @graph factories + chat() / LLMOp / PromptOp
+└── main.py             # @graph factories + LLMOp.of
 ```
 
 ## Run

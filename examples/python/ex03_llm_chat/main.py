@@ -1,4 +1,4 @@
-"""03 LLM Chat — three LLM chat graphs.
+"""03 LLM Chat — two LLM chat graphs.
 
 Requires ``OPENAI_API_KEY`` in ``.env`` and ``llm:gpt-4o-mini`` in
 ``resources.yaml``. Run from this directory:
@@ -14,7 +14,7 @@ import asyncio
 
 import operonx
 from operonx.core import END, START, Operon, graph, op
-from operonx.providers import LLMOp, PromptOp, chat
+from operonx.providers import LLMOp
 
 
 @op
@@ -24,45 +24,31 @@ def clean_text(text: str):
 
 @graph
 def basic_chat(question):
-    """Two-op explicit form: PromptOp → LLMOp."""
-    p = PromptOp.of(
-        template={
+    """Single-op form: LLMOp formats the prompt and calls the model."""
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Bạn là trợ lý AI thân thiện. Trả lời ngắn gọn.",
             "user": "{question}",
         },
         question=question,
     )
-    llm = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
-    START >> p >> llm >> END
-
-
-@graph
-def chain_chat(query):
-    """Single-op all-in-one: chat() bundles the prompt + LLM."""
-    c = chat(
-        resource="gpt-4o-mini",
-        template={
-            "system": "Bạn là assistant hữu ích. Trả lời ngắn gọn.",
-            "user": "{query}",
-        },
-        query=query,
-    )
-    START >> c >> END
+    START >> llm >> END
 
 
 @graph
 def summarize_pipeline(text):
-    """Pre-process → prompt → LLM."""
+    """Pre-process → LLMOp with template."""
     pre = clean_text(text=text)
-    p = PromptOp.of(
-        template={
+    summarize = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Bạn là chuyên gia tóm tắt văn bản. Tóm tắt ngắn gọn trong 1-2 câu.",
             "user": "Tóm tắt:\n\n{text}",
         },
         text=pre["cleaned_text"],
     )
-    summarize = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
-    START >> pre >> p >> summarize >> END
+    START >> pre >> summarize >> END
 
 
 SAMPLE_TEXT = (
@@ -80,7 +66,6 @@ async def main() -> None:
 
     runs = [
         ("basic", basic_chat(question="Python là gì? Trả lời trong 1 câu.")),
-        ("chain", chain_chat(query="Operon workflow engine là gì?")),
         ("summarize", summarize_pipeline(text=SAMPLE_TEXT)),
     ]
     for label, g in runs:

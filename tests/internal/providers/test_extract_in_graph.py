@@ -46,7 +46,7 @@ class TestExtractAfterBranch:
                 d = detect(text=text)
                 e = ask(
                     resource="mock",
-                    template={"user": "{text}"},
+                    prompt={"user": "{text}"},
                     fields=["result: str"],
                     parser="xml",
                     text=text,
@@ -105,7 +105,7 @@ class TestExtractAfterBranch:
                 d = detect(text=text)
                 e = ask(
                     resource="mock",
-                    template={"user": "{text}"},
+                    prompt={"user": "{text}"},
                     fields=["result: str"],
                     parser="xml",
                     validators={"result": ["confirm", "deny", "@fallback"]},
@@ -149,7 +149,7 @@ class TestExtractAfterBranch:
                 d = detect(text=text)
                 e = ask(
                     resource="mock",
-                    template={"user": "{text}"},
+                    prompt={"user": "{text}"},
                     fields=["result: str"],
                     parser="xml",
                     validators={"result": ["confirm", "deny", "@fallback"]},

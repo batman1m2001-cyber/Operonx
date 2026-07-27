@@ -1,14 +1,18 @@
-"""LLMOp — language-model op for operonx-providers.
+"""LLMOp — unified prompt-formatting + language-model op for operonx-providers.
 
-Uses ResourceHub to access LLM resources. Supports streaming, load balancing,
-fallback chains, and OpenAI Batch API mode.
+Accepts a polymorphic ``prompt=`` input (str / dict / list of messages) plus
+template variables via ``**kwargs``. Formats messages internally, then calls
+the LLM via ResourceHub. Supports streaming, load balancing, fallback chains,
+and OpenAI Batch API mode.
 """
 
 import random
+import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from operonx.core import LOGGER
 from operonx.core.configs import OpType
+from operonx.core.exceptions import PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
@@ -17,6 +21,27 @@ from operonx.providers.ops._utils import resolve_hub
 
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
+
+
+# LLM knobs — never treated as template variables.
+_LLM_PARAM_KEYS = (
+    "prompt",
+    "temperature",
+    "max_tokens",
+    "tools",
+    "tool_choice",
+    "response_format",
+    "top_p",
+    "stop",
+    "frequency_penalty",
+    "presence_penalty",
+    "seed",
+    "logprobs",
+    "top_logprobs",
+    "n",
+    "user",
+)
+RESERVED_KEYS = frozenset(_LLM_PARAM_KEYS)
 
 
 def _mime_from_data_url(url: str) -> Optional[str]:
@@ -30,35 +55,43 @@ def _mime_from_data_url(url: str) -> Optional[str]:
 
 
 class LLMOp(BaseOp):
-    """Op that calls a language model via ResourceHub.
+    """Op that formats a prompt and calls a language model via ResourceHub.
 
-    Supports streaming, weighted load balancing across multiple models,
-    fallback chains with retry, and OpenAI Batch API mode (50 % cheaper).
+    The ``prompt=`` input accepts three shapes:
+
+    * **str** — becomes a single user message: ``"Hello {name}"``.
+    * **dict** with ``system`` / ``user`` keys — 1-2 messages with ``{var}``
+      placeholders.
+    * **list** — full OpenAI messages array (may contain multimodal blocks).
+
+    All non-reserved kwargs are template variables — every string leaf inside
+    ``prompt`` gets ``str.format_map``-substituted with them.
 
     Inputs:
-        messages (list): Chat messages in OpenAI format. Required.
+        prompt (str | dict | list): Message template. Required.
         temperature (float): Sampling temperature. Default: 0.0.
-        max_tokens (int): Max output tokens. Default: None (model default).
+        max_tokens (int): Max output tokens. Default: None.
         tools (list): Tool/function definitions. Default: None.
         tool_choice (str | dict): Tool selection strategy. Default: None.
         response_format (dict): Structured output format. Default: None.
+        <var> (any): Template variables (``{var}`` placeholders).
 
     Outputs:
         content (str): Generated text.
         role (str): Message role (usually ``"assistant"``).
-        finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, etc.).
+        finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, ...).
         model_used (str): Actual model that served the request.
         tool_calls (list): Tool-call objects (empty list when absent).
-        usage (dict): Flat token-cost metrics with keys
-            ``prompt_tokens``, ``completion_tokens``, ``total_tokens``,
-            ``cached_tokens`` (cache hit), ``cache_write_tokens``
-            (Anthropic cache write), ``reasoning_tokens``.
-        extras (dict): Bag of uncommon fields — ``thinking_content``,
-            ``refusal``, ``logprobs``. Values are ``None`` when absent.
+        usage (dict): Flat token-cost metrics.
+        extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``).
 
     Example::
 
-        llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
+        llm = LLMOp.of(
+            resource="gpt-4o",
+            prompt={"system": "You are {role}.", "user": "{query}"},
+            role="helpful", query=PARENT["query"],
+        )
     """
 
     __slots__ = [
@@ -93,14 +126,12 @@ class LLMOp(BaseOp):
                 - Single string: "gpt-4"
                 - List for load balancing: ["gpt-4", "claude-3"]
             ratios: Weight ratios for load balancing. Must sum to 1.0.
-                Only used when resource is a list.
-            fallback: Fallback resource key(s) to use when primary model fails.
-                List of resource keys from ResourceHub, tried in order.
-            batch_mode: Whether to use OpenAI Batch API (50% cheaper, async processing)
-            seed: Optional seed for load balancing RNG. Provides reproducible selection.
-            inputs: Input variable mappings
-            outputs: Output variable mappings
-            **kwargs: Additional keyword arguments for BaseOp
+            fallback: Fallback resource keys tried in order on failure.
+            batch_mode: Use OpenAI Batch API (50% cheaper).
+            seed: Optional seed for load balancing RNG.
+            inputs: Input variable mappings.
+            outputs: Output variable mappings.
+            **kwargs: Additional keyword arguments for BaseOp.
         """
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
@@ -125,9 +156,9 @@ class LLMOp(BaseOp):
             self.resource = resource
             self.ratios = [1.0] if resource else None
 
-        # I/O schema
+        # Fixed LLM knobs
         input_schema = {
-            "messages": Param(type=list, required=True),
+            "prompt": Param(type=(str, dict, list), required=True),
             "temperature": Param(type=float, default=0.0),
             "max_tokens": Param(type=int, default=None),
             "tools": Param(type=list, default=None),
@@ -156,6 +187,19 @@ class LLMOp(BaseOp):
 
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
+
+        # Wildcard PARENT inference: pull template var names from a static prompt
+        if "__FORWARD_WILDCARD__" in normalized_inputs:
+            for var in self._infer_wildcard_vars(normalized_inputs["__FORWARD_WILDCARD__"]):
+                if var not in input_schema:
+                    input_schema[var] = Param(type=Any, required=False, default=None)
+
+        # Non-reserved user inputs are template variables
+        for key in normalized_inputs:
+            if key not in RESERVED_KEYS and key != "__FORWARD_WILDCARD__":
+                if key not in input_schema:
+                    input_schema[key] = Param(type=Any, required=False, default=None)
+
         self.inputs = self._merge_params(input_schema, normalized_inputs)
         self.outputs = self._merge_params(output_schema, normalized_outputs)
 
@@ -170,6 +214,88 @@ class LLMOp(BaseOp):
             self._set_core(self._stream_core)
         else:
             self._set_core(self._generate_core)
+
+    # =========================================================================
+    # Prompt formatting (absorbed from PromptOp)
+    # =========================================================================
+
+    def _resolve_wildcard_source(self, wildcard_source):
+        """Resolve PARENT sentinel to actual parent op."""
+        if hasattr(wildcard_source, "name") and wildcard_source.name == "__PARENT__":
+            return self.parent
+        return wildcard_source
+
+    def _infer_wildcard_vars(self, wildcard_source) -> set:
+        """Infer template variable names from a wildcard source op.
+
+        Strategy:
+          1. If source has a static prompt → parse ``{var}`` placeholders.
+          2. Otherwise (Ref or missing) → use source's non-reserved input keys.
+        """
+        from operonx.core.states.ref import Ref
+
+        source = self._resolve_wildcard_source(wildcard_source)
+        if source is None or not hasattr(source, "inputs"):
+            return set()
+
+        if "prompt" in source.inputs:
+            param = source.inputs["prompt"]
+            value = param.value if hasattr(param, "value") else param
+            if value is not None and not isinstance(value, Ref):
+                return _extract_template_variables(value) - RESERVED_KEYS
+
+        return set(source.inputs) - RESERVED_KEYS
+
+    def _build_messages(self, prompt: Any, vars: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Turn a prompt (str / dict / list) into an OpenAI messages array.
+
+        Every string leaf inside ``prompt`` is ``str.format_map``-substituted
+        with ``vars``. Raises ``PromptError`` on missing variable.
+        """
+        if isinstance(prompt, str):
+            content = _format_value(prompt, vars, prompt)
+            return [{"role": "user", "content": content}]
+
+        if isinstance(prompt, dict):
+            messages = []
+            if "system" in prompt:
+                messages.append(
+                    {"role": "system", "content": _format_value(prompt["system"], vars, prompt)}
+                )
+            if "user" in prompt:
+                messages.append(
+                    {"role": "user", "content": _format_value(prompt["user"], vars, prompt)}
+                )
+            if messages:
+                return messages
+            raise PromptError(
+                message="Prompt dict must contain 'system' and/or 'user' keys",
+                prompt=prompt,
+                original_error=ValueError(f"Got keys: {list(prompt)}"),
+            )
+
+        if isinstance(prompt, list):
+            return [_format_value(msg, vars, prompt) for msg in prompt]
+
+        raise PromptError(
+            message="Invalid prompt type",
+            prompt=prompt,
+            original_error=TypeError(f"Expected str, dict, or list, got {type(prompt).__name__}"),
+        )
+
+    def _extract_prompt_and_vars(self, kwargs: Dict[str, Any]) -> tuple:
+        """Split kwargs into (prompt, template_vars, llm_knobs)."""
+        prompt = kwargs.pop("prompt", None)
+        llm_knobs = {}
+        for key in _LLM_PARAM_KEYS:
+            if key == "prompt":
+                continue
+            if key in kwargs:
+                val = kwargs.pop(key)
+                if val is not None:
+                    llm_knobs[key] = val
+        # Anything left over is a template variable
+        return prompt, kwargs, llm_knobs
 
     # =========================================================================
     # Lazy init
@@ -238,7 +364,7 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     async def _generate_core(self, **kwargs):
-        """Select LLM → generate → fallback on error. Returns output dict."""
+        """Format prompt → select LLM → generate → fallback on error."""
         llm_params = self._build_llm_params(kwargs)
 
         if self.batch_mode:
@@ -278,7 +404,7 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     async def _stream_core(self, **kwargs):
-        """Select LLM → stream → fallback on error. Yields per-token dicts."""
+        """Format prompt → select LLM → stream → fallback on error."""
         llm_params = self._build_llm_params(kwargs)
         selected = self._select_llm()
         resource = self._get_resource_key(selected)
@@ -341,25 +467,19 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract LLM-relevant params from inputs, dropping None values."""
-        llm_param_keys = [
-            "messages",
-            "temperature",
-            "max_tokens",
-            "tools",
-            "tool_choice",
-            "response_format",
-            "top_p",
-            "stop",
-            "frequency_penalty",
-            "presence_penalty",
-            "seed",
-            "logprobs",
-            "top_logprobs",
-            "n",
-            "user",
-        ]
-        return {k: v for k in llm_param_keys if (v := _inputs.get(k)) is not None}
+        """Format prompt into messages and return LLM-ready params dict."""
+        inputs_copy = dict(_inputs)
+        prompt, template_vars, llm_knobs = self._extract_prompt_and_vars(inputs_copy)
+
+        if prompt is None:
+            raise PromptError(
+                message="prompt is required",
+                prompt=None,
+                original_error=ValueError("LLMOp received prompt=None"),
+            )
+
+        messages = self._build_messages(prompt, template_vars)
+        return {"messages": messages, **llm_knobs}
 
     def _extract_completion(self, completion: Any, resource: str) -> Dict[str, Any]:
         """Extract structured output dict from a ChatCompletion response."""
@@ -407,31 +527,25 @@ class LLMOp(BaseOp):
     def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
         """Wrap OpenAI chat-format multimodal blocks as ``Media`` for tracing.
 
-        Runs inside the tracing collector — returns a shallow-copied inputs
-        dict with ``messages`` rewritten so ``image_url`` / ``input_audio``
-        blocks become ``Media`` instances. Real state is untouched; this is
-        only the trace-time view.
+        Prompt is formatted to messages first (using the current template vars),
+        then multimodal image/audio blocks are wrapped in ``Media`` for the
+        trace-time view. Real op state is untouched.
         """
-        msgs = inputs.get("messages")
-        if msgs:
-            wrapped = self._wrap_openai_media_blocks(msgs)
-            if wrapped is not msgs:
+        prompt = inputs.get("prompt")
+        if prompt is not None:
+            try:
+                vars = {k: v for k, v in inputs.items() if k not in RESERVED_KEYS}
+                messages = self._build_messages(prompt, vars)
+                wrapped = self._wrap_openai_media_blocks(messages)
                 inputs = {**inputs, "messages": wrapped}
+            except Exception:
+                # Tracing must never break execution — swallow formatting errors
+                pass
         return inputs, outputs
 
     @staticmethod
     def _wrap_openai_media_blocks(messages: Any) -> Any:
-        """Walk messages and convert multimodal blocks to ``Media`` wrappers.
-
-        Recognizes:
-          - ``{"type": "image_url", "image_url": {"url": "data:image/..."}}``
-            → ``Media(data_url, mime_from_header)``
-          - ``{"type": "input_audio", "input_audio": {"data": "...", "format": "wav"}}``
-            → ``Media(b64_data, "audio/<format>")``
-
-        Returns a new list when any wrapping happened, else the original
-        reference so the collector can detect "no change" cheaply.
-        """
+        """Walk messages and convert multimodal blocks to ``Media`` wrappers."""
         if not isinstance(messages, list):
             return messages
 
@@ -495,12 +609,7 @@ class LLMOp(BaseOp):
 
     @staticmethod
     def _normalize_usage(raw: Dict[str, Any]) -> Dict[str, int]:
-        """Flatten a Pydantic CompletionUsage dump into named cost metrics.
-
-        Works for OpenAI/Azure/Gemini (cached_tokens nested under
-        prompt_tokens_details) and for Anthropic (cache_write_tokens
-        stashed as a Pydantic model_extra on usage).
-        """
+        """Flatten a Pydantic CompletionUsage dump into named cost metrics."""
         if not raw:
             return {
                 "prompt_tokens": 0,
@@ -583,16 +692,31 @@ class LLMOp(BaseOp):
 
     @shorthand
     def of(
-        cls, resource=None, *, ratios=None, fallback=None, batch_mode=False, seed=None, **kwargs
+        cls,
+        resource=None,
+        *,
+        ratios=None,
+        fallback=None,
+        batch_mode=False,
+        seed=None,
+        prompt=None,
+        **kwargs,
     ) -> "LLMOp":
         """Create an LLMOp with flat kwargs.
 
         Example::
 
-            llm = LLMOp.of(resource="gpt-4", messages=PARENT["messages"], outputs={"*": PARENT})
-            llm = LLMOp.of(resource=["gpt-4", "claude-3"], ratios=[0.7, 0.3], messages=PARENT["messages"])
+            llm = LLMOp.of(resource="gpt-4", prompt="Hello {name}", name="Alice")
+            llm = LLMOp.of(
+                resource=["gpt-4", "claude-3"],
+                ratios=[0.7, 0.3],
+                prompt={"system": "You are {role}.", "user": "{q}"},
+                role="helper", q=PARENT["q"],
+            )
         """
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+        if prompt is not None:
+            input_mappings["prompt"] = prompt
         return cls(
             resource=resource,
             ratios=ratios,
@@ -635,7 +759,7 @@ class LLMOp(BaseOp):
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:
-        """Return LLM-specific metadata dictionary."""
+        """Return LLM + prompt metadata dictionary."""
         metadata = {
             "model": self.resource,
             "batch_mode": self.batch_mode,
@@ -645,4 +769,60 @@ class LLMOp(BaseOp):
             metadata["ratios"] = self.ratios
         if self.fallback:
             metadata["fallback"] = self.fallback
+
+        if "prompt" in self.inputs:
+            val = self.inputs["prompt"].value
+            if val is not None:
+                # Ref → repr for pickle safety (background trace process)
+                from operonx.core.states.ref import Ref
+
+                metadata["prompt"] = repr(val) if isinstance(val, Ref) else val
+
         return metadata
+
+
+# =============================================================================
+# Module-level template helpers (kept out of the class to make them cheap to
+# reuse from _infer_wildcard_vars without carrying self).
+# =============================================================================
+
+
+def _extract_template_variables(template: Any) -> set:
+    """Find all ``{variable}`` names in a template (str, dict, or list)."""
+    if isinstance(template, str):
+        return set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", template))
+    if isinstance(template, dict):
+        result = set()
+        for v in template.values():
+            result |= _extract_template_variables(v)
+        return result
+    if isinstance(template, list):
+        result = set()
+        for item in template:
+            result |= _extract_template_variables(item)
+        return result
+    return set()
+
+
+def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any:
+    """Recursively format template variables in a value.
+
+    Raises ``PromptError`` on missing var, with the full list of missing names.
+    """
+    if isinstance(value, str):
+        try:
+            return value.format_map(vars) if "{" in value else value
+        except KeyError as e:
+            required = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))
+            missing = [v for v in required if v not in vars]
+            raise PromptError(
+                message="Missing template variable(s)",
+                prompt=template if template is not None else value,
+                missing_vars=missing,
+                original_error=e,
+            ) from e
+    elif isinstance(value, dict):
+        return {k: _format_value(v, vars, template) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_format_value(item, vars, template) for item in value]
+    return value

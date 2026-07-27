@@ -20,7 +20,7 @@ import numpy as np
 
 import operonx
 from operonx.core import END, PARENT, START, Operon, graph, op
-from operonx.providers import EmbeddingOp, LLMOp, PromptOp, RerankOp
+from operonx.providers import EmbeddingOp, LLMOp, RerankOp
 
 DOCUMENTS = [
     "Hà Nội là thủ đô của Việt Nam, nằm ở miền Bắc, có hơn 1000 năm lịch sử.",
@@ -62,15 +62,16 @@ def basic_embedding(texts):
 
 @graph
 def simple_rag(query, documents, doc_vectors):
-    """Embed query → cosine search → prompt → LLM."""
+    """Embed query → cosine search → LLM."""
     embed_query = EmbeddingOp.of(resource="openai", texts=query)
     ret = retrieve(
         query_vec=embed_query["embeddings"],
         doc_vectors=doc_vectors,
         documents=documents,
     )
-    p = PromptOp.of(
-        template={
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": (
                 "Trả lời câu hỏi dựa trên context được cung cấp.\n"
                 "Nếu không tìm thấy câu trả lời, nói 'Không tìm thấy thông tin.'\n\n"
@@ -81,8 +82,7 @@ def simple_rag(query, documents, doc_vectors):
         context=ret["context_docs"],
         query=query,
     )
-    llm = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
-    START >> embed_query >> ret >> p >> llm >> END
+    START >> embed_query >> ret >> llm >> END
 
 
 @graph
@@ -94,16 +94,16 @@ def rag_with_rerank(query, documents):
         documents=documents,
         top_k=3,
     )
-    p = PromptOp.of(
-        template={
+    llm = LLMOp.of(
+        resource="gpt-4o-mini",
+        prompt={
             "system": "Trả lời dựa trên context:\n\n{context}",
             "user": "{query}",
         },
         context=rr["reranks"],
         query=query,
     )
-    llm = LLMOp.of(resource="gpt-4o-mini", messages=p["messages"])
-    START >> rr >> p >> llm >> END
+    START >> rr >> llm >> END
 
 
 async def main() -> None:

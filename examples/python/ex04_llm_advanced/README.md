@@ -5,9 +5,9 @@ install — depends on `operonx[openai]`.
 
 | Scenario     | Ops                              | Notes                                        |
 |--------------|----------------------------------|----------------------------------------------|
-| `structured` | `PromptOp → LLMOp`               | Forces JSON-schema response                  |
-| `tool`       | `PromptOp → LLMOp → process`     | Calculator tool; `process_response` runs it  |
-| `multi_turn` | `PromptOp → LLMOp → update`      | Appends user+assistant to history            |
+| `structured` | `LLMOp`                          | Forces JSON-schema response                  |
+| `tool`       | `LLMOp → process`                | Calculator tool; `process_response` runs it  |
+| `multi_turn` | `build_messages → LLMOp → update`| Caller builds history + user turn, then calls the model |
 
 ## Project layout
 

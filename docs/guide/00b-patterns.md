@@ -81,16 +81,16 @@ For framework-provided ops (`LLMOp`, `EmbeddingOp`, `RerankOp`, etc.),
 prefer the `.of()` classmethod with explicit keyword arguments:
 
 ```python
-from operonx.providers import LLMOp, EmbeddingOp, chat
+from operonx.providers import LLMOp, EmbeddingOp
 
 # Provider ops with .of()
-llm = LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])
+llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
-# Prompt + LLM combo via chat()
-c = chat(
+# Prompt template + LLM in one op — prompt accepts str / dict / list
+c = LLMOp.of(
     resource="gpt-4o",
-    template={"system": "...", "user": "{q}"},
+    prompt={"system": "...", "user": "{q}"},
     q=PARENT["q"],
 )
 ```
@@ -306,7 +306,7 @@ with GraphOp(name="batch") as main:
 state references — together they cover the bulk of real workflows.
 The rest of the guide drills into specific scenarios:
 
-- [LLM chat](02-llm-chat.md) — `LLMOp.of()`, `chat()`, `PromptOp`.
+- [LLM chat](02-llm-chat.md) — `LLMOp.of()`, `prompt=` template shapes.
 - [Loops and branches](03-loops-and-branches.md) — `@graph.loop`, generator ops, `if_()` routing.
 - [RAG](04-rag.md) — `EmbeddingOp` + retrieval + `RerankOp`.
 - [Agents](05-agents.md) — tool-calling on `@graph.loop`.

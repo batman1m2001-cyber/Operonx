@@ -30,25 +30,25 @@ llms:
 OPENAI_API_KEY=sk-...
 ```
 
-## Use `chat` for a one-shot prompt
+## Use `LLMOp.of` for a one-shot prompt
 
-`chat` is a shorthand that combines a prompt template with an LLM call.
-Use `ask` when you want a single-string answer instead of a structured
-chat response.
+`LLMOp` formats a prompt template and calls the model in one step. Use
+`ask` (see [Structured extraction](03-structured.md)) when you also want
+to parse structured fields out of the reply.
 
 ```python
 import asyncio
 import operonx
 from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import chat
+from operonx.providers import LLMOp
 
 async def main():
     operonx.bootstrap()  # loads .env + resources.yaml
 
     with GraphOp(name="chat") as graph:
-        c = chat(
+        c = LLMOp.of(
             resource="gpt-4o",
-            template={
+            prompt={
                 "system": "You are a concise assistant.",
                 "user": "{question}",
             },
@@ -63,32 +63,37 @@ async def main():
 asyncio.run(main())
 ```
 
-`chat` always uses keyword arguments — never positional. The output
-key is `content` by default. Map it explicitly with `outputs={...}` if
-you want a different name.
+`prompt=` accepts three shapes:
 
-## Use `LLMOp.of` for structured calls
+* **str** — becomes a single user message.
+* **dict** with `system` / `user` keys — 1-2 messages with `{var}` placeholders.
+* **list** — a full OpenAI messages array (multimodal blocks supported).
+
+Every non-reserved kwarg is a template variable substituted into any
+`{var}` placeholder inside `prompt`. The output key is `content` by default.
+
+## Passing a pre-built messages list
 
 When you already have a list of messages (e.g. multi-turn conversation),
-use `LLMOp.of` directly:
+pass it as `prompt=`:
 
 ```python
-from operonx.providers import LLMOp
-
-llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
+llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["messages"])
 START >> llm >> END
 ```
 
-`messages` is a list of `{"role": "system" | "user" | "assistant", "content": ...}`
-dicts.
-
 ## Streaming a response
 
-`LLMOp` and `chat` both support streaming. The op yields one frame per
-token chunk; downstream ops consume them as they arrive.
+`LLMOp` supports streaming. The op yields one frame per token chunk;
+downstream ops consume them as they arrive.
 
 ```python
-c = chat(resource="gpt-4o", template={...}, stream=True, question=PARENT["q"])
+c = LLMOp.of(
+    resource="gpt-4o",
+    stream=True,
+    prompt={"system": "...", "user": "{q}"},
+    q=PARENT["q"],
+)
 ```
 
 See [Streaming](06-streaming.md) for the consumption side.

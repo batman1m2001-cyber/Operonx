@@ -18,7 +18,7 @@ import asyncio
 import operonx
 from operonx.core import END, PARENT, START, Operon, graph, op
 from operonx.core.ops.flow.branch_op import if_
-from operonx.providers import LLMOp, PromptOp
+from operonx.providers import LLMOp
 
 # ── Pure-compute ops ────────────────────────────────────────────────────
 
@@ -102,16 +102,13 @@ def retry_fallback(query):
 @graph
 def llm_fallback(query):
     """LLM call with fallback chain — gpt-4o → gpt-4o-mini."""
-    p = PromptOp.of(
-        template={"system": "Answer briefly.", "user": "{query}"},
-        query=query,
-    )
     llm = LLMOp.of(
         resource="gpt-4o",
         fallback=["gpt-4o-mini"],
-        messages=p["messages"],
+        prompt={"system": "Answer briefly.", "user": "{query}"},
+        query=query,
     )
-    START >> p >> llm >> END
+    START >> llm >> END
 
 
 async def main() -> None:

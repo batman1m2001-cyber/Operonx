@@ -302,9 +302,8 @@ class Operon:
         ```python
         # Define graph
         with GraphOp(name="chatbot") as graph:
-            prompt = PromptOp(name="prompt", ...)
-            llm = LLMOp(name="llm", ...)
-            START >> prompt >> llm >> END
+            llm = LLMOp(name="llm", resource="gpt-4o", inputs={"prompt": ...})
+            START >> llm >> END
 
         # Create engine (builds automatically)
         engine = Operon(graph)

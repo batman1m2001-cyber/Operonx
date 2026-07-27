@@ -109,7 +109,7 @@ class TestStreamCoreYields:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
+        async for item in op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         # 2 token yields + 1 final metadata yield
@@ -144,7 +144,7 @@ class TestStreamCoreYields:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
+        async for item in op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         assert len(results) == 1
@@ -180,7 +180,7 @@ class TestStreamingLLMInGraph:
                 name="llm",
                 resource="gpt-4o",
                 stream=True,
-                inputs={"messages": PARENT["messages"]},
+                inputs={"prompt": PARENT["prompt"]},
             )
             START >> llm >> END
 
@@ -190,7 +190,7 @@ class TestStreamingLLMInGraph:
         llm._initialized = True
 
         engine = Operon(g)
-        handle = engine.start(inputs={"messages": [{"role": "user", "content": "hi"}]})
+        handle = engine.start(inputs={"prompt": [{"role": "user", "content": "hi"}]})
         frames = []
         async for op, ctx, data in handle:
             frames.append((op, ctx, data))
@@ -231,7 +231,7 @@ class TestStreamingLLMInGraph:
                 name="llm",
                 resource="gpt-4o",
                 stream=True,
-                inputs={"messages": PARENT["messages"]},
+                inputs={"prompt": PARENT["prompt"]},
             )
             START >> llm >> END
 
@@ -240,7 +240,7 @@ class TestStreamingLLMInGraph:
         llm._initialized = True
 
         engine = Operon(g)
-        result = await engine.run(inputs={"messages": [{"role": "user", "content": "hi"}]})
+        result = await engine.run(inputs={"prompt": [{"role": "user", "content": "hi"}]})
 
         # run() collects all yields — last yield (final metadata) is the output
         # The streaming op yields multiple times; final result contains accumulated content
@@ -273,7 +273,7 @@ class TestStreamingWithThinking:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(messages=[{"role": "user", "content": "think"}]):
+        async for item in op._stream_core(prompt=[{"role": "user", "content": "think"}]):
             results.append(item)
 
         # 1 content token + 1 final
@@ -323,7 +323,7 @@ class TestStreamingFallback:
         llm_op._initialized = True
 
         results = []
-        async for item in llm_op._stream_core(messages=[{"role": "user", "content": "hi"}]):
+        async for item in llm_op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         # Should get fallback response
