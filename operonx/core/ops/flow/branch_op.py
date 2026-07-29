@@ -7,8 +7,9 @@ from operonx.core.exceptions import BranchError
 from operonx.core.loggings import LOGGER
 from operonx.core.ops.base import BaseOp
 from operonx.core.states.ref import Ref
-from operonx.core.utils.auto_name import register_skip
+from operonx.core.utils.auto_name import auto_name, register_skip
 from operonx.core.utils.common import Param
+from operonx.core.utils.context import get_current
 
 if TYPE_CHECKING:
     from operonx.core.states import MemoryState
@@ -198,11 +199,34 @@ class BranchOp(BaseOp):
 class Branch:
     """Fluent builder for creating a BranchOp.
 
-    Example::
+    Two usage flavors — both supported, both idiomatic:
+
+    **Inline form (recommended for common if/else)** — pass op *instances* as
+    targets. The Branch auto-wires ``branch >> target`` edges at build time
+    so you never write them yourself, and the branch can drop right into a
+    ``>>`` chain::
+
+        START >> source >> if_(source["kind"] == "audio", asr).else_(skip_stt)
+        asr >> denoise >> picker
+        skip_stt >> picker
+
+    Auto-name resolves to the LHS if there is one (``stt_route = if_(...)``)
+    or falls back to a semantic ``"branch_<target>_or_<default>"`` name.
+
+    **Named form (for forward refs or a shared branch node)** — pass op
+    *names* as strings. No auto-wiring; you wire ``branch >> target``
+    yourself as before::
 
         router = (if_(PARENT["score"] >= 90, "excellent")
                   .if_(PARENT["score"] >= 70, "good")
                   .else_("fail"))
+        # ...
+        router >> excellent >> merge
+        router >> good      >> merge
+        router >> fail      >> merge
+
+    Mixed is allowed — string targets skip auto-wiring, op-instance targets
+    get auto-wired.
     """
 
     __slots__ = ("_name", "_cases", "_default", "_inputs", "_kwargs")
@@ -215,8 +239,10 @@ class Branch:
             name: Op name. If None, auto-inferred from the variable name.
         """
         self._name = name
-        self._cases: List[Tuple[Ref, str]] = []
-        self._default: Optional[str] = None
+        # cases stores the ORIGINAL target (op instance or string), not just
+        # the name, so ``_build()`` can auto-wire op-instance targets.
+        self._cases: List[Tuple[Ref, Any]] = []
+        self._default: Any = None
         self._inputs: Dict[str, Any] = {}
         self._kwargs = kwargs
 
@@ -225,13 +251,12 @@ class Branch:
 
         Args:
             condition: Ref with comparison (e.g., ``PARENT["score"] >= 90``).
-            target: Target op or op name.
+            target: Target op instance (enables auto-wiring) or op name string.
 
         Returns:
             self for chaining.
         """
-        target_name = target.name if hasattr(target, "name") else target
-        self._cases.append((condition, target_name))
+        self._cases.append((condition, target))
         return self
 
     @register_skip
@@ -239,12 +264,12 @@ class Branch:
         """Set default target and build the BranchOp.
 
         Args:
-            target: Fallback target when no condition matches.
+            target: Fallback op instance or name string.
 
         Returns:
             The constructed BranchOp.
         """
-        self._default = target.name if hasattr(target, "name") else target
+        self._default = target
         return self._build()
 
     @register_skip
@@ -258,29 +283,85 @@ class Branch:
 
     @register_skip
     def _build(self) -> "BranchOp":
-        """Internal build method."""
-        all_inputs = {}
+        """Internal build method.
 
-        for condition_ref, target in self._cases:
+        Resolves the branch's own name (LHS via auto_name → semantic
+        fallback), constructs the BranchOp with string-name cases, then
+        auto-wires ``branch >> target`` for every op-instance target found
+        in cases/default (skipped for string targets — those are forward
+        references the user wires manually).
+        """
+        # Resolve target names for BranchOp constructor (accepts strings only).
+        case_names: List[Tuple[Ref, str]] = [
+            (cond, t.name if isinstance(t, BaseOp) else t) for cond, t in self._cases
+        ]
+        default_name: Optional[str] = None
+        if self._default is not None:
+            default_name = (
+                self._default.name if isinstance(self._default, BaseOp) else self._default
+            )
+
+        # Name resolution: explicit > LHS auto-name > semantic fallback.
+        # auto_name() walks the stack past register_skip'd frames — catches
+        # ``stt_route = if_(...).else_(...)`` (returns "stt_route"). If we're
+        # inline (``source >> if_(...).else_(...)`` with no LHS), the source
+        # parser may fall back onto a *nearby* line's assignment (e.g. picking
+        # up ``m = _mk(...)`` from 3 lines above). Guard against that by
+        # rejecting a detected name that already exists as an op in the
+        # current graph — that's a source-parser false positive, not our LHS.
+        # Then fall through to a stable per-graph counter like ``route_1``.
+        name = self._name
+        if not name:
+            g = get_current()
+            detected = auto_name()
+            if detected and (g is None or detected not in g._ops):
+                name = detected
+            else:
+                n = 1
+                if g is not None:
+                    n += sum(1 for op in g._ops.values() if op.type == "branch")
+                name = f"route_{n}"
+
+        all_inputs = {}
+        for condition_ref, _ in self._cases:
             var_name = condition_ref.var
             if var_name not in all_inputs:
                 base_ref = Ref(condition_ref.raw_source, var_name)
                 all_inputs[var_name] = base_ref
 
-        return BranchOp(
-            name=self._name,
-            cases=self._cases,
-            default=self._default,
+        branch = BranchOp(
+            name=name,
+            cases=case_names,
+            default=default_name,
             inputs=all_inputs,
             **self._kwargs,
         )
+
+        # Auto-wire outgoing edges for op-instance targets. String targets are
+        # forward refs — user still writes ``branch >> target`` manually for
+        # those. This is the whole point of the inline form.
+        current_graph = get_current()
+        if current_graph is not None and hasattr(current_graph, "add_edge"):
+            for _cond, target in self._cases:
+                if isinstance(target, BaseOp):
+                    current_graph.add_edge(branch.name, target.name, type="condition")
+            if isinstance(self._default, BaseOp):
+                current_graph.add_edge(branch.name, self._default.name, type="condition")
+
+        return branch
 
 
 def if_(condition: Ref, target: Union[str, BaseOp]) -> Branch:
     """Start a branch declaration with the first condition.
 
-    Example::
+    Example (inline, auto-wired)::
+
+        START >> source >> if_(cond, asr).else_(skip_stt)
+
+    Example (named, string targets, wire manually)::
 
         router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
+        router >> excellent >> merge
+        router >> fail      >> merge
     """
     return Branch().if_(condition, target)
