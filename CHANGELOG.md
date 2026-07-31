@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-30
+
+Branch-graph ergonomics release. Two additive, non-breaking features
+that eliminate a class of silent-deadlock bugs and a class of
+target-named-twice boilerplate at every branch-fan-in site in real
+callbot / agent-workflow graphs. Both compose cleanly with the existing
+`if_/else_` primitive and require zero migration for existing code.
+
+### Added
+- **Auto-soften branch-merge edges** at `GraphOp.build()`. When two
+  predecessors of a merge op trace back to a common `BranchOp` ancestor
+  via disjoint first-hop children, the incoming edges are automatically
+  flipped to `soft` — the runtime pattern users had to remember to write
+  with `~` on every branch fan-in (e.g. `denoise >> ~picker`,
+  `skip_stt >> ~picker`) is now inferred from graph shape. Missing the
+  `~` used to cause a silent deadlock at runtime; the build-time pass
+  kills that whole bug class. Escape hatches: `GraphOp(auto_soft=False)`
+  per-graph, `graph.add_edge(src, dst, hard=True)` per-edge. See
+  [`docs/design/AUTO_SOFT_BRANCH_MERGE.md`](docs/design/AUTO_SOFT_BRANCH_MERGE.md).
+
+- **Inline `if_/else_` branch API** — branch declarations can now drop
+  directly into `>>` chains with op-instance targets, and the framework
+  auto-adds the `branch → target` condition edges. The old `route = if_(cond, "name")`
+  standalone form still works for forward-reference and named-branch
+  cases. Auto-name resolves via `auto_name()` LHS → `route_N` per-graph
+  counter fallback (with a source-parser false-positive guard to prevent
+  a nearby `m = _mk(...)` line from being incorrectly captured). Example:
+  ```python
+  # Before
+  stt_route = if_(cond, asr).else_(skip_stt)
+  START >> source >> stt_route
+  stt_route >> asr >> denoise >> picker
+  stt_route >> skip_stt >> picker
+
+  # After
+  START >> source >> if_(cond, asr).else_(skip_stt)
+  asr >> denoise >> picker
+  skip_stt >> picker
+  ```
+  Combined with auto-soften above, the callbot's branch/merge wiring
+  block dropped by 18 lines with zero behavioural change. See
+  [`docs/design/BRANCH_INLINE_API.md`](docs/design/BRANCH_INLINE_API.md).
+
+- **`EdgeConfig.auto_soft` and `EdgeConfig.pinned_hard`** — Python-side
+  debug fields on edges. Not serialized to Rust; useful for tooling and
+  build-time log analysis.
+
+### Docs
+- `docs/design/AUTO_SOFT_BRANCH_MERGE.md` — full spec, algorithm,
+  limitations, empirical validation on the callbot.
+- `docs/design/BRANCH_INLINE_API.md` — full spec, name-resolution rules,
+  backward-compat guarantees.
+- `AGENT_EXTENSION_PLAN.md` — op-native design for extending operonx
+  into a full agent framework, grounded in a deep inspection of
+  hermes-agent, opencode, agent-harness, smolagents, openclaw.
+
+### Notes
+- Zero Rust runtime changes. `EdgeConfig.soft` is serialized verbatim
+  after the auto-soften pass mutates it; auto-added branch edges look
+  identical to user-authored ones in the exported graph JSON.
+- Backward compatibility: all 971 pre-existing tests pass. All existing
+  manual `~` marks continue to work (the pass skips already-soft edges).
+  All string-target `if_(cond, "name")` call sites work unchanged.
+- Callbot dev branch verifies end-to-end: all 5 manual `~` marks
+  removed, all 4 branch declarations inlined, 204 tests still pass.
+
 ## [0.8.5] - 2026-05-31
 
 Bug-fix release. Closes a SCRATCH-propagation bug in nested @graph
