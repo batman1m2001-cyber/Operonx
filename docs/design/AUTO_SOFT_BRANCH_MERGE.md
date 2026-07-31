@@ -1,11 +1,11 @@
 # Auto-soft branch-merge edges
 
-**Status:** implemented (see [`_auto_soften_edges`](../../operonx/core/ops/graph/graph_op.py#L294) in `graph_op.py`).
+**Status:** implemented (see `_auto_soften_edges` in `graph_op.py`).
 **Feature flag:** `GraphOp(auto_soft=True)` (default). Per-edge opt-out: `add_edge(..., hard=True)`.
 
 ## Problem
 
-`BranchOp` routes execution to exactly one of N outgoing branches at runtime. Downstream ops on the branches that were **not** selected never fire — the scheduler simply skips them ([`task_scheduler.py:302-313`](../../operonx/core/ops/graph/task_scheduler.py#L302)).
+`BranchOp` routes execution to exactly one of N outgoing branches at runtime. Downstream ops on the branches that were **not** selected never fire — the scheduler simply skips them (`task_scheduler.py:302-313`).
 
 If two of those branch chains fan back into a common merge op M, and the edges into M are the default **hard** kind, M's ready-count never reaches zero — it deadlocks waiting for the branch that never ran. To make M fire on either branch's completion, users must manually mark the incoming edges as soft:
 
@@ -44,12 +44,12 @@ flip P→M to soft. (Both P→M and Q→M end up soft in a symmetric run over th
 
 | Concern | Impact |
 |---|---|
-| Ready counting ([`_build`](../../operonx/core/ops/graph/graph_op.py#L406)) | Reads `edge.soft` after our pass — no change to `_build` itself |
+| Ready counting (`_build`) | Reads `edge.soft` after our pass — no change to `_build` itself |
 | Scheduler dispatch | Unchanged — reads `edge.soft` at runtime the same way |
 | Nested subgraphs | Analysis is per-graph. Each `GraphOp` runs its own pass via the existing `child.build()` recursion. PARENT refs cross graph boundaries; edges do not. |
 | Loops (`GraphOp.loop`) | Static build-time analysis. Same soft flags apply to every iteration; no per-iteration work. |
 | Generator ops / streaming | `.parallel()` / `.collect()` are per-var policies on `Ref`, not edges. Streaming edges have one source; `len(preds) < 2` skips them. |
-| Rust runtime interop | `EdgeConfig.soft` is serialized verbatim ([`graph_op.py:670`](../../operonx/core/ops/graph/graph_op.py#L670)). Our pass mutates `soft` **before** serialization — Rust sees the post-transform value. **Zero Rust-side change.** |
+| Rust runtime interop | `EdgeConfig.soft` is serialized verbatim (`graph_op.py:670`). Our pass mutates `soft` **before** serialization — Rust sees the post-transform value. **Zero Rust-side change.** |
 | Backward compatibility | Grep of `tests/` + `examples/` + callbot: **zero cases** of hard-fan-in from branch alternatives (would already deadlock today). Manual `~` continues to work — the pass skips already-soft edges. |
 
 ## API additions
@@ -81,11 +81,11 @@ flip P→M to soft. (Both P→M and Q→M end up soft in a symmetric run over th
 
 2. **Type-carrying edges** (`type == "condition"` from BranchOp) are treated as normal edges for softening purposes — the `type` field is scheduler-informational only. Confirmed safe: `_route` treats them uniformly.
 
-3. **Anchor override in BranchOp** ([`branch_op.py:120-122`](../../operonx/core/ops/flow/branch_op.py#L120)) can force any target at runtime. Auto-softening still holds — the runtime picks one target, others get skipped, downstream soft-merge fires correctly regardless.
+3. **Anchor override in BranchOp** (`branch_op.py:120-122`) can force any target at runtime. Auto-softening still holds — the runtime picks one target, others get skipped, downstream soft-merge fires correctly regardless.
 
 ## Empirical validation
 
-- **Unit tests** — 9 shapes covered in [`test_auto_soft_edge.py`](../../tests/internal/core/ops/graph/test_auto_soft_edge.py):
+- **Unit tests** — 9 shapes covered in `test_auto_soft_edge.py`:
   1. 2-way branch, both tails softened
   2. 2 branch preds + external hard pred (external stays hard)
   3. Manual `~` + auto-soft coexist (no double-flip)
@@ -98,7 +98,7 @@ flip P→M to soft. (Both P→M and Q→M end up soft in a symmetric run over th
 
 - **Regression** — 971 passed, 23 skipped, 1 pre-existing deselect (unrelated `test_audio_input` 404). Zero regressions.
 
-- **End-to-end on callbot** — deleted **all 5 manual `~` marks** from [`src/callbot/graph.py:424-437`](../../../educa-reminder-agent/src/callbot/graph.py#L424) (which drive the STT / workflow / oc / turn / spoken merge points). 204 callbot tests pass. The auto-soft pass restored every softening the pipeline needs, silently.
+- **End-to-end on callbot** — deleted **all 5 manual `~` marks** from `src/callbot/graph.py:424-437` (which drive the STT / workflow / oc / turn / spoken merge points). 204 callbot tests pass. The auto-soft pass restored every softening the pipeline needs, silently.
 
 ## Implementation surface
 

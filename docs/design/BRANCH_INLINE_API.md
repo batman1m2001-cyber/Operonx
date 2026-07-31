@@ -1,6 +1,6 @@
 # Inline `if_/else_` branch API
 
-**Status:** implemented (see [`Branch._build`](../../operonx/core/ops/flow/branch_op.py#L294) in `branch_op.py`).
+**Status:** implemented (see `Branch._build` in `branch_op.py`).
 **Feature flag:** none — additive; string-target form still supported for forward references.
 
 ## Problem
@@ -100,7 +100,7 @@ Step 3 is the fix for a real bug: `auto_name()`'s source parser walks back 6 lin
 
 ## Empirical validation
 
-- **Unit tests** — 9 shapes in [`test_branch_inline.py`](../../tests/internal/core/ops/flow/test_branch_inline.py):
+- **Unit tests** — 9 shapes in `test_branch_inline.py`:
   1. Inline op-instance targets auto-wire branch→target
   2. LHS assignment uses the variable name (`route`)
   3. Inline no-LHS falls back to `route_1`
@@ -113,7 +113,7 @@ Step 3 is the fix for a real bug: `auto_name()`'s source parser walks back 6 lin
 
 - **Regression** — 980 passed (971 previous + 9 new), 23 skipped, 1 pre-existing deselect. Zero regressions.
 
-- **End-to-end on callbot** — all 4 branches in [`callbot/graph.py`](../../../educa-reminder-agent/src/callbot/graph.py) inlined:
+- **End-to-end on callbot** — all 4 branches in `callbot/graph.py` inlined:
   - `stt_route` — gone; inline `if_(source["kind"] == "audio", asr).else_(skip_stt)`
   - `oc_route` — gone; inline `if_(oc_should["should_classify"] == True, oc_ctx).else_(oc_skip)`
   - `turn_route` — gone; inline `if_(stashed["transcript"] != "", agent_turn).else_(skip_turn)`

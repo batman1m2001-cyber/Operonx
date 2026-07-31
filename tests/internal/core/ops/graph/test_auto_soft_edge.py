@@ -113,9 +113,7 @@ def test_shape3_manual_soft_and_auto_soft_coexist():
 def test_shape4_three_way_branch_all_softened():
     with GraphOp(name="s4") as g:
         seed = _mk("seed", out_key="score")
-        router = (
-            if_(seed["score"] >= 90, "a").if_(seed["score"] >= 70, "b").else_("c")
-        )
+        router = if_(seed["score"] >= 90, "a").if_(seed["score"] >= 70, "b").else_("c")
         a = _mk("a", out_key="y", score=router["target"])
         b = _mk("b", out_key="y", score=router["target"])
         c = _mk("c", out_key="y", score=router["target"])

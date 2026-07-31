@@ -29,9 +29,7 @@ def _passthrough(name, in_key="score", out_key="y", **kwargs):
 
 
 def _edges_from(graph, src):
-    return sorted(
-        e.to_node for e in graph._edges.values() if e.from_node == src
-    )
+    return sorted(e.to_node for e in graph._edges.values() if e.from_node == src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,9 +199,7 @@ def test_inline_three_way_branch():
         c = _passthrough("c", in_key="score", score=seed["score"])
         m = _passthrough("m", in_key="y", y=a["y"])
 
-        START >> seed >> (
-            if_(seed["score"] >= 90, a).if_(seed["score"] >= 70, b).else_(c)
-        )
+        START >> seed >> (if_(seed["score"] >= 90, a).if_(seed["score"] >= 70, b).else_(c))
         a >> m
         b >> m
         c >> m

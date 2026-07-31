@@ -368,9 +368,7 @@ class GraphOp(BaseOp):
             """{branch_name: {first_hop_child_of_branch that can reach target_op}}."""
             sig: Dict[str, set] = {}
             for b, succ_reach in successor_reachable.items():
-                first_hops = {
-                    succ for succ, reach in succ_reach.items() if target_op in reach
-                }
+                first_hops = {succ for succ, reach in succ_reach.items() if target_op in reach}
                 if first_hops:
                     sig[b] = first_hops
             return sig
