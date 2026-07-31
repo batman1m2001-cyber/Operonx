@@ -87,6 +87,7 @@ class GraphOp(BaseOp):
         "_stream_initial_ready",
         "_scheduler",
         "_out_vars",
+        "_auto_soft",
     ]
 
     type: OpType = "graph"
@@ -95,7 +96,7 @@ class GraphOp(BaseOp):
     # 1. DEFINE — build the graph structure
     # ═══════════════════════════════════════════════════════════════════
 
-    def __init__(self, concurrency: int = 64, **kwargs):
+    def __init__(self, concurrency: int = 64, auto_soft: bool = True, **kwargs):
         super().__init__(**kwargs)
         self._token = None
         self._is_building = True
@@ -115,6 +116,7 @@ class GraphOp(BaseOp):
         self._out_vars: Dict[
             str, dict
         ] = {}  # {op_name: {src_var: dest_var}} — vars mapped to PARENT output
+        self._auto_soft = auto_soft  # auto-soften branch-merge edges at build time
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -209,7 +211,14 @@ class GraphOp(BaseOp):
 
         return op
 
-    def add_edge(self, source: str, target: str, type: EdgeType = "normal", soft: bool = False):
+    def add_edge(
+        self,
+        source: str,
+        target: str,
+        type: EdgeType = "normal",
+        soft: bool = False,
+        hard: bool = False,
+    ):
         """Add an edge between two ops.
 
         Args:
@@ -218,6 +227,9 @@ class GraphOp(BaseOp):
             type: Edge type (normal, lookback, condition).
             soft: If True, edge does not count toward ready_count.
                   Used for branch outputs when only one branch executes.
+            hard: If True, opt this edge out of auto-softening at build time.
+                  Use for the rare case where a branch-descended pred must
+                  still be waited on as a hard dependency.
         """
         if not self._is_building:
             raise RuntimeError("Cannot add edge after graph has been built!")
@@ -254,7 +266,9 @@ class GraphOp(BaseOp):
         if target not in self._ops:
             raise ValueError(f"Target op '{target}' not found")
 
-        new_edge = EdgeConfig(from_node=source, to_node=target, type=type, soft=soft)
+        new_edge = EdgeConfig(
+            from_node=source, to_node=target, type=type, soft=soft, pinned_hard=hard
+        )
         if (source, target) not in self._edges:
             self._edges[source, target] = new_edge
             self.nexts[source].append(target)
@@ -276,6 +290,8 @@ class GraphOp(BaseOp):
         result = self.validate()
         result.raise_if_errors()
 
+        self._auto_soften_edges()
+
         self._build()
 
         self._scheduler = Scheduler(self)
@@ -290,6 +306,122 @@ class GraphOp(BaseOp):
                 self.bound = "sync"
             else:
                 self.bound = "io"
+
+    def _auto_soften_edges(self):
+        """Auto-soften edges from mutually-exclusive branch predecessors.
+
+        For every op M with 2+ predecessors, if two predecessors trace back to
+        a common ``BranchOp`` ancestor via *disjoint first-hop children*, they
+        are mutually exclusive at runtime — only one fires per execution. This
+        pass flips the incoming edges to ``soft`` so ``M``'s ready-count does
+        not deadlock waiting for the branch that never ran.
+
+        Without this pass, users have to manually mark those edges with ``~``
+        (e.g., ``denoise >> ~picker``). Missing the ``~`` silently deadlocks
+        at runtime, which is a common bug.
+
+        Semantics:
+        - Skipped for edges already marked ``soft=True`` (user's manual ``~``
+          or ``>``).
+        - Skipped for edges added via ``add_edge(..., hard=True)``.
+        - Skipped entirely when the graph was constructed with
+          ``auto_soft=False``.
+        - Ancestor walk crosses both hard AND soft edges (branch ancestry is a
+          topological fact; a soft edge upstream doesn't change which branch
+          decides a downstream node).
+        - Signatures are computed against the *original* edge structure BEFORE
+          any softening is applied — flipping edges mid-analysis would erase
+          branch attributions for downstream merges.
+
+        Known limitation: does not detect "sneak paths" (a predecessor
+        reachable from a non-branch root that bypasses ``B`` entirely). In
+        that case, the two predecessors may not truly be mutually exclusive
+        and this pass over-softens. Use ``hard=True`` on the specific edge or
+        ``auto_soft=False`` on the whole graph to opt out.
+        """
+        if not self._auto_soft:
+            return
+
+        # For each branch op B, precompute the set of ops each of B's direct
+        # successors can reach (forward via all edges). This gives us, for any
+        # op p, the set of B's first-hop children through which p is reachable.
+        branch_names = [n for n, op in self._ops.items() if op.type == "branch"]
+        if not branch_names:
+            return
+
+        # successor_reachable[branch][successor] = set of ops reachable from successor
+        successor_reachable: Dict[str, Dict[str, set]] = {}
+        for b in branch_names:
+            successor_reachable[b] = {}
+            for succ in self.nexts.get(b, []):
+                seen = {succ}
+                stack = [succ]
+                while stack:
+                    n = stack.pop()
+                    for nxt in self.nexts.get(n, []):
+                        if nxt not in seen:
+                            seen.add(nxt)
+                            stack.append(nxt)
+                successor_reachable[b][succ] = seen
+
+        def branch_sig(target_op: str) -> Dict[str, set]:
+            """{branch_name: {first_hop_child_of_branch that can reach target_op}}."""
+            sig: Dict[str, set] = {}
+            for b, succ_reach in successor_reachable.items():
+                first_hops = {succ for succ, reach in succ_reach.items() if target_op in reach}
+                if first_hops:
+                    sig[b] = first_hops
+            return sig
+
+        audit_log = []
+
+        for merge_name in list(self._ops.keys()):
+            preds = self.prevs.get(merge_name, [])
+            if len(preds) < 2:
+                continue
+
+            # Signatures per pred (computed against original edge structure).
+            sigs = {p: branch_sig(p) for p in preds}
+
+            for p in preds:
+                edge = self._edges.get((p, merge_name))
+                if edge is None or edge.soft or edge.pinned_hard:
+                    continue
+                witness = None
+                for q in preds:
+                    if q == p:
+                        continue
+                    for b in sigs[p].keys() & sigs[q].keys():
+                        if sigs[p][b].isdisjoint(sigs[q][b]):
+                            witness = (b, q)
+                            break
+                    if witness:
+                        break
+                if witness:
+                    edge.soft = True
+                    edge.auto_soft = True
+                    audit_log.append((merge_name, p, witness[1], witness[0]))
+
+        for merge_name, p, q, b in audit_log:
+            LOGGER.debug(
+                "Graph [highlight]%s[/highlight]: auto-soft [highlight]%s→%s[/highlight] "
+                "(branch ancestor: [highlight]%s[/highlight], "
+                "sibling pred: [highlight]%s[/highlight])",
+                self.name,
+                p,
+                merge_name,
+                b,
+                q,
+            )
+        if audit_log:
+            merge_points = {m for m, _, _, _ in audit_log}
+            LOGGER.info(
+                "Graph [highlight]%s[/highlight]: auto-softened "
+                "[highlight]%d[/highlight] edges across [highlight]%d[/highlight] merge points",
+                self.name,
+                len(audit_log),
+                len(merge_points),
+            )
 
     def _build(self):
         """Compile adjacency list, batch ready counts, and per-generator stream ready counts."""

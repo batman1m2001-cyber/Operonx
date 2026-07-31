@@ -17,9 +17,16 @@ class EdgeConfig(BaseModel):
         soft: Nếu True, edge này không được tính vào ready_count.
               Dùng cho các đầu ra nhánh khi chỉ một nhánh được thực thi.
               Được tạo bằng toán tử > thay vì >>
+        auto_soft: Debug flag — True nếu edge được auto-softened bởi
+                   _auto_soften_edges (không phải user viết ``~`` hay ``>``).
+                   Không được serialize sang Rust.
+        pinned_hard: True nếu user gọi ``add_edge(..., hard=True)`` để opt out
+                     của auto-softening. Không serialize sang Rust.
     """
 
     from_node: str
     to_node: str
     type: EdgeType = "normal"
     soft: bool = False
+    auto_soft: bool = False
+    pinned_hard: bool = False
