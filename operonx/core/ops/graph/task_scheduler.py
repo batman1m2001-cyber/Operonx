@@ -86,7 +86,12 @@ class Scheduler:
         outputs, item_ctxs = await self._run_once(state, context_id, output_queue)
 
         # Top-level loop re-dispatch (GraphOp.loop() sets _loop_config on g).
-        if g._loop_config:
+        # Synthetic loops (Phase 3 rewrite) skip this path — their outer
+        # scheduler's _on_eof handles re-dispatch via back-edge activation.
+        # Running the classic re-dispatch here would double-loop (outer + inner
+        # both firing) and, since synthetic loops carry until=None, iterate to
+        # max_iterations regardless of what the user's if_ branch chose.
+        if g._loop_config and getattr(g, "_loop_mode", None) != "synthetic":
             n_iters = 0
             current_ctx = context_id
             # The initial _run_once above counts as iteration 1,
@@ -377,9 +382,43 @@ class Scheduler:
             if op and hasattr(op, "_loop_config") and op._loop_config:
                 outputs = op.get_outputs(state, event.ctx)
                 cfg = op._loop_config
-                n = loop_iters.get(event.ctx, 0)
-                if not _evaluate_until(cfg, outputs) and n < cfg.max_iterations - 1:
-                    loop_iters[event.ctx] = n + 1
+
+                # Derive iteration index from the ctx tail so nested loops and
+                # multi-iter re-dispatch don't get confused. First iter's ctx
+                # has no "loop_N" suffix → n=0; second → tail="loop_1", n=1;
+                # etc. This replaces a previous ctx-keyed counter that reset
+                # on every new ctx and produced ever-deeper nesting
+                # (("main","loop_1","loop_1","loop_1",...)).
+                tail = event.ctx[-1] if event.ctx else None
+                if isinstance(tail, str) and tail.startswith("loop_"):
+                    try:
+                        n = int(tail[5:])
+                    except ValueError:
+                        n = 0
+                else:
+                    n = 0
+
+                if getattr(op, "_loop_mode", None) == "synthetic":
+                    # Phase 3 rewritten loop: iterate iff any back-edge source
+                    # op fired during this iteration. Detected via end_time
+                    # metric at event.ctx (every op writes end_time on
+                    # completion; missing entry = didn't fire).
+                    fired = False
+                    for u_name in op._back_edge_sources:
+                        u_op = op._ops.get(u_name)
+                        if u_op is None:
+                            continue
+                        idx = state.schema.get_index(u_op.full_name, "end_time")
+                        if idx >= 0 and event.ctx in state._cells[idx]:
+                            fired = True
+                            break
+                    should_continue = fired
+                else:
+                    # Classic GraphOp.loop(until=...) path — evaluate the
+                    # user-supplied stop condition.
+                    should_continue = not _evaluate_until(cfg, outputs)
+
+                if should_continue and n < cfg.max_iterations - 1:
                     next_ctx = (
                         event.ctx + ("loop_1",) if n == 0 else event.ctx[:-1] + (f"loop_{n + 1}",)
                     )

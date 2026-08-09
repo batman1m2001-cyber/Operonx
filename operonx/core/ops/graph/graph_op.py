@@ -89,6 +89,12 @@ class GraphOp(BaseOp):
         "_scheduler",
         "_out_vars",
         "_auto_soft",
+        # Phase 3 cycle-rewrite plumbing
+        "_strict_dag",
+        "_synthetic",
+        "_loop_mode",
+        "_back_edge_sources",
+        "_rewritten_from",
     ]
 
     type: OpType = "graph"
@@ -97,7 +103,13 @@ class GraphOp(BaseOp):
     # 1. DEFINE — build the graph structure
     # ═══════════════════════════════════════════════════════════════════
 
-    def __init__(self, concurrency: int = 64, auto_soft: bool = True, **kwargs):
+    def __init__(
+        self,
+        concurrency: int = 64,
+        auto_soft: bool = True,
+        strict_dag: bool = False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._token = None
         self._is_building = True
@@ -119,6 +131,14 @@ class GraphOp(BaseOp):
             str, dict
         ] = {}  # {op_name: {src_var: dest_var}} — vars mapped to PARENT output
         self._auto_soft = auto_soft  # auto-soften branch-merge edges at build time
+        # Phase 3: opt-out for the Level-2 cycle→loop rewrite. When True, back-edges
+        # remain as-is and hit the classic validate() warning path.
+        self._strict_dag = strict_dag
+        # Phase 3: hidden loops created by the cycle rewrite carry these markers.
+        self._synthetic = False
+        self._loop_mode = None  # None (classic), "synthetic" (rewritten hidden loop)
+        self._back_edge_sources: set = set()
+        self._rewritten_from = None  # audit dict populated by rewrite_cycles_to_loops
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -139,11 +159,24 @@ class GraphOp(BaseOp):
         max_iterations: int = 100,
         **initial_state: Any,
     ):
-        """Create a GraphOp configured for feedback-loop execution.
+        """DEPRECATED (Phase 3): construct a GraphOp configured for feedback-loop
+        execution.
+
+        Prefer writing the loop directly with a back-edge — the Phase 3 build-time
+        rewrite pass synthesizes an equivalent hidden loop for you::
+
+            @graph
+            def counter():
+                inc = increment(counter=PARENT["count"])
+                inc["counter"] >> PARENT["count"]
+                START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
 
         Each iteration re-runs the graph's scheduler, carrying forward outputs
         as the next iteration's inputs. Stops when ``until`` evaluates to True
         or ``max_iterations`` is reached.
+
+        This constructor still works but emits a :class:`DeprecationWarning`. The
+        rewrite pass calls this internally via ``_internal=True`` to avoid noise.
 
         Args:
             name: Graph name.
@@ -151,14 +184,16 @@ class GraphOp(BaseOp):
                    or a callable ``(outputs_dict) -> bool``.
             max_iterations: Safety cap on iterations (default 100).
             **initial_state: Initial values for loop variables, injected as inputs.
-
-        Example::
-
-            with GraphOp.loop(name="counter", until="count >= 5", count=0) as g:
-                inc = increment(counter=PARENT["count"])
-                inc["counter"] >> PARENT["count"]
-                START >> inc >> END
         """
+        if not initial_state.pop("_internal", False):
+            import warnings
+
+            warnings.warn(
+                "GraphOp.loop() is deprecated; write the loop with a back-edge inside "
+                "@graph and let the Phase 3 rewrite pass synthesize the loop.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         g = cls(name=name, inputs=initial_state or None)
         g._loop_config = LoopConfig(
             until=until,
@@ -281,7 +316,19 @@ class GraphOp(BaseOp):
     # ═══════════════════════════════════════════════════════════════════
 
     def build(self):
-        """Build graph: children first, then schema → endpoints → topology → validation."""
+        """Build graph: cycle-rewrite → children → schema → endpoints → validation → topology.
+
+        The cycle-rewrite pass (Phase 3 Level-2) runs FIRST so that any
+        synthetic hidden ``GraphOp.loop`` children it creates are then built
+        alongside the user's own children. Ordering matters — validate() and
+        auto_soft assume a DAG and would produce wrong results on cyclic input.
+        """
+        # Phase 3: rewrite user-authored back-edges into hidden loop nodes
+        # BEFORE building children (so the hidden loop children get built too).
+        from operonx.core.ops.graph.cycle_rewrite import rewrite_cycles_to_loops
+
+        rewrite_cycles_to_loops(self)
+
         for child in self._ops.values():
             if hasattr(child, "build"):
                 child.build()
@@ -546,30 +593,47 @@ class GraphOp(BaseOp):
             raise ValueError("Graph must have at least one exit op.")
 
     def _validate_ref_scope(self):
-        """Validate that all Ref inputs in child ops point to ops inside this graph or PARENT.
+        """Validate that all Ref inputs in child ops point to ops inside this graph,
+        PARENT, or (for synthetic hidden loops from Phase 3 rewrite) any ancestor
+        GraphOp in the parent chain.
 
-        A Ref pointing to an op in a parent/outer graph will not resolve at runtime
-        because the child graph runs in its own isolated state. This catches a common
-        mistake when nesting subgraphs (e.g., extract() inside @graph).
+        A Ref pointing to an op in a *sibling* subgraph (a graph elsewhere in the
+        tree that isn't an ancestor) won't resolve at runtime because the child
+        graph runs in its own isolated state — those still error.
+
+        Ancestor refs are legal because state and PARENT refs resolve through the
+        actual runtime state which is shared across the ancestor chain.
 
         Raises:
-            ValueError: If a Ref points to an op outside this graph's scope.
+            ValueError: If a Ref points to an op outside this graph's ancestor chain.
         """
         valid_sources = set(self._ops.keys())
+
+        # Walk the parent chain to collect ancestor GraphOps (identity-based).
+        ancestors: set = set()
+        cur = self.parent
+        while cur is not None and hasattr(cur, "_ops"):
+            ancestors.add(id(cur))
+            cur = getattr(cur, "parent", None)
 
         for child_name, child in self._ops.items():
             for var, param in child.inputs.items():
                 if not isinstance(param.value, Ref):
                     continue
                 ref: Ref = param.value
-                # PARENT refs are OK — they resolve from graph inputs
+                # PARENT refs pointing to self are OK — resolve from graph inputs
                 if ref.raw_source is self:
                     continue
                 # Refs to ops inside this graph are OK
                 source_name = getattr(ref.raw_source, "name", None)
                 if source_name in valid_sources:
                     continue
-                # Ref points to an op outside this graph → error
+                # Refs to any ancestor GraphOp are OK (Phase 3: SCC ops moved
+                # into a synthetic loop keep their original outer PARENT refs).
+                if id(ref.raw_source) in ancestors:
+                    continue
+                # Ref points to an op outside this graph and outside the ancestor
+                # chain → error.
                 source_repr = source_name or repr(ref.raw_source)
                 raise ValueError(
                     f"Graph '{self.name}': op '{child_name}' input '{var}' references "
@@ -696,6 +760,14 @@ class GraphOp(BaseOp):
 
     def validate(self) -> ValidationResult:
         """Run all validations and return result."""
+        # Collect ancestor GraphOp names so _validate_refs allows moved-SCC
+        # ops to keep their outer PARENT refs after Phase 3 rewrite.
+        ancestor_names: set = set()
+        cur = self.parent
+        while cur is not None and hasattr(cur, "_ops"):
+            if getattr(cur, "name", None):
+                ancestor_names.add(cur.name)
+            cur = getattr(cur, "parent", None)
         return validate_graph(
             self.name,
             self._ops,
@@ -704,6 +776,7 @@ class GraphOp(BaseOp):
             self.nexts,
             self.entries,
             self.exits,
+            ancestor_names=ancestor_names,
         )
 
     def show(self, indent=0):

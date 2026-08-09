@@ -131,13 +131,21 @@ def validate_graph(
     nexts: dict,
     entries: list,
     exits: list,
+    ancestor_names: set = None,
 ) -> ValidationResult:
-    """Run all validations on a graph and return result."""
+    """Run all validations on a graph and return result.
+
+    Args:
+        ancestor_names: names of ancestor GraphOps in the parent chain.
+            Refs pointing to any of these are considered valid (Phase 3: SCC
+            ops moved into a synthetic loop keep their original outer PARENT
+            refs, so the moved op sees the outer graph name).
+    """
     result = ValidationResult(graph_name=name)
     result.issues.extend(_validate_branch_targets(ops))
     result.issues.extend(_validate_cycles(ops, edges))
     result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
-    result.issues.extend(_validate_refs(ops, name))
+    result.issues.extend(_validate_refs(ops, name, ancestor_names or set()))
 
     for issue in result.warnings:
         LOGGER.warning("Graph '%s': %s", name, issue.message)
@@ -284,9 +292,20 @@ def _validate_reachability(
     return issues
 
 
-def _validate_refs(ops: Dict[str, "BaseOp"], graph_name: str) -> List[ValidationIssue]:
-    """Validate all Ref references point to existing ops."""
+def _validate_refs(
+    ops: Dict[str, "BaseOp"],
+    graph_name: str,
+    ancestor_names: set = None,
+) -> List[ValidationIssue]:
+    """Validate all Ref references point to existing ops.
+
+    Args:
+        ancestor_names: set of ancestor GraphOp names. Refs pointing to any of
+            these are considered valid (Phase 3 rewrite moves SCC ops into a
+            hidden loop; their PARENT refs still target the outer graph).
+    """
     issues = []
+    ancestor_names = ancestor_names or set()
 
     for op_name, child in ops.items():
         for var, param in child.inputs.items():
@@ -298,7 +317,11 @@ def _validate_refs(ops: Dict[str, "BaseOp"], graph_name: str) -> List[Validation
                 continue
             if hasattr(ref_source, "name"):
                 ref_op_name = ref_source.name
-                if ref_op_name not in ops and ref_op_name != graph_name:
+                if (
+                    ref_op_name not in ops
+                    and ref_op_name != graph_name
+                    and ref_op_name not in ancestor_names
+                ):
                     issues.append(
                         ValidationIssue(
                             level=ValidationLevel.ERROR,
