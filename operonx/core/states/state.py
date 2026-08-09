@@ -60,6 +60,10 @@ class MemoryState:
         "tracing",
         "_scratch",
         "_observers",
+        "_custom_observers",
+        "_interrupt_observers",
+        "_interrupt_responses",
+        "_current_step",
     )
 
     def __init__(
@@ -103,6 +107,26 @@ class MemoryState:
         # Kept empty (fast path) when no observer needs the stream.
         self._observers: List[Any] = []
 
+        # Observers subscribed to EmitOp events. Signature: (op, ctx, channel, payload).
+        # Fed via _notify_custom(); fast path when list is empty.
+        self._custom_observers: List[Any] = []
+
+        # Observers subscribed to InterruptOp events. Signature:
+        # (op, ctx, payload, interrupt_id) → observer must arrange for
+        # resume via state._resume_interrupt(interrupt_id, value).
+        self._interrupt_observers: List[Any] = []
+
+        # Response bus for InterruptOp — {interrupt_id: asyncio.Future}.
+        # Lazily created via _register_interrupt_bus() on first suspend.
+        self._interrupt_responses: Dict[str, Any] = None
+
+        # Monotonic step counter for the checkpointer / tracer. Bumps once per
+        # op invocation via ``advance_step()`` called from BaseOp.store_result
+        # after that op's outputs have committed. All cell writes belonging to
+        # the same op invocation share the same step_id — matches the plan's
+        # "step_id per write batch" semantic (STATE_LOOP_REFACTOR_PLAN.md §Phase 2).
+        self._current_step: int = 0
+
         # Apply initial inputs
         if inputs:
             for var, value in inputs.items():
@@ -145,6 +169,99 @@ class MemoryState:
             self._observers.remove(callback)
         except ValueError:
             pass
+
+    # ------------------------------------------------------------------
+    # Custom event bus (EmitOp)
+    # ------------------------------------------------------------------
+
+    def subscribe_custom(self, callback) -> None:
+        """Register a callback for :class:`~operonx.EmitOp` events.
+
+        Callback signature: ``(op_full_name, ctx, channel, payload) -> None``.
+        Called synchronously from ``_notify_custom``; observers must not
+        block. If no observer registers, EmitOp is a no-op (fire-and-forget
+        drop, no back-pressure).
+        """
+        self._custom_observers.append(callback)
+
+    def unsubscribe_custom(self, callback) -> None:
+        """Remove a custom-event observer. No-op if not registered."""
+        try:
+            self._custom_observers.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_custom(self, op, ctx, channel, payload) -> None:
+        """Fire a CustomEvent to every subscribed observer. Fast path when none."""
+        if not self._custom_observers:
+            return
+        for obs in self._custom_observers:
+            obs(op, ctx, channel, payload)
+
+    # ------------------------------------------------------------------
+    # Interrupt bus (InterruptOp)
+    # ------------------------------------------------------------------
+
+    def subscribe_interrupt(self, callback) -> None:
+        """Register a callback for :class:`~operonx.InterruptOp` events.
+
+        Callback signature: ``(op_full_name, ctx, payload, interrupt_id) -> None``.
+        Observer is responsible for arranging the resume value via
+        ``state._interrupt_responses[interrupt_id] = value`` before the
+        InterruptOp's core awaits it.
+        """
+        self._interrupt_observers.append(callback)
+
+    def unsubscribe_interrupt(self, callback) -> None:
+        """Remove an interrupt observer. No-op if not registered."""
+        try:
+            self._interrupt_observers.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_interrupt(self, op, ctx, payload, interrupt_id) -> None:
+        """Fire an InterruptEvent to every subscribed observer."""
+        if not self._interrupt_observers:
+            return
+        for obs in self._interrupt_observers:
+            obs(op, ctx, payload, interrupt_id)
+
+    def _register_interrupt_bus(self) -> None:
+        """Lazy-create the ``_interrupt_responses`` dict on first suspend."""
+        if self._interrupt_responses is None:
+            self._interrupt_responses = {}
+
+    # ------------------------------------------------------------------
+    # Step counter (checkpointer + tracer)
+    # ------------------------------------------------------------------
+
+    def advance_step(self) -> int:
+        """Bump the monotonic step counter and return the new value.
+
+        Called by ``BaseOp.store_result`` after an op's outputs have
+        committed. Every cell write before this call shares the pre-bump
+        step_id; subsequent writes see the new value.
+        """
+        self._current_step += 1
+        return self._current_step
+
+    def resume_interrupt(self, interrupt_id: str, value: Any) -> bool:
+        """Resolve a pending InterruptOp with ``value``.
+
+        Args:
+            interrupt_id: id emitted with the InterruptEvent
+            value: response the InterruptOp will surface as its ``response`` output
+
+        Returns:
+            True if a matching pending interrupt was resolved, False if unknown.
+        """
+        if self._interrupt_responses is None:
+            return False
+        fut = self._interrupt_responses.get(interrupt_id)
+        if fut is None or fut.done():
+            return False
+        fut.set_result(value)
+        return True
 
     def _write_cell(self, idx: int, ctx_key: tuple, value: Any) -> None:
         """Single funnel for all cell writes.

@@ -25,10 +25,21 @@ Typical wiring inside the engine::
 
 from typing import Callable, Dict, Optional, Tuple
 
-from operonx.checkpoint.base import CellWriteEvent, Checkpointer, ObserveBudgetExceeded
+from operonx.checkpoint.base import (
+    CellWriteEvent,
+    Checkpointer,
+    CustomEvent,
+    InterruptEvent,
+    ObserveBudgetExceeded,
+)
 from operonx.core.states.state import MemoryState
 
-__all__ = ["bind_checkpointer", "should_emit_for_channel"]
+__all__ = [
+    "bind_checkpointer",
+    "should_emit_for_channel",
+    "bind_custom_bus",
+    "bind_interrupt_bus",
+]
 
 
 def should_emit_for_channel(op, var: str, channel: str) -> bool:
@@ -72,7 +83,7 @@ def should_emit_for_channel(op, var: str, channel: str) -> bool:
 def bind_checkpointer(
     state: MemoryState,
     checkpointer: Checkpointer,
-    step_id_getter: Callable[[], int],
+    step_id_getter: Optional[Callable[[], int]] = None,
     op_registry: Optional[Dict[str, object]] = None,
 ) -> Callable[[], None]:
     """Subscribe ``checkpointer`` to every cell write on ``state``.
@@ -96,6 +107,10 @@ def bind_checkpointer(
     idx_to_key: dict[int, Tuple[str, str]] = {}
     for (op, var), idx in state.schema._var_to_idx.items():
         idx_to_key[idx] = (op, var)
+
+    # Default step_id: read the state's monotonic counter directly.
+    if step_id_getter is None:
+        step_id_getter = lambda: state._current_step
 
     op_registry = op_registry or {}
     # Per-op emit counter for observe_max circuit breaker.
@@ -133,3 +148,65 @@ def bind_checkpointer(
         state.unsubscribe_writes(_observer)
 
     return _unsubscribe
+
+
+def bind_custom_bus(
+    state: MemoryState,
+    sink: Callable[[CustomEvent], None],
+    step_id_getter: Optional[Callable[[], int]] = None,
+    op_registry: Optional[Dict[str, object]] = None,
+) -> Callable[[], None]:
+    """Subscribe ``sink`` to ``EmitOp`` events on ``state``.
+
+    The sink receives fully-formed :class:`CustomEvent` instances; step_id
+    is filled from ``state._current_step`` unless overridden. Per-op
+    ``exclude``/``include`` filter for the ``"trace"`` channel does not
+    apply — EmitOp uses its own ``channel`` field for consumer routing.
+
+    Returns an ``unsubscribe`` callable.
+    """
+    if step_id_getter is None:
+        step_id_getter = lambda: state._current_step
+
+    def _observer(op: str, ctx: tuple, channel: str, payload) -> None:
+        sink(
+            CustomEvent(
+                step_id=step_id_getter(),
+                op=op,
+                ctx=ctx,
+                channel=channel,
+                payload=payload,
+            )
+        )
+
+    state.subscribe_custom(_observer)
+    return lambda: state.unsubscribe_custom(_observer)
+
+
+def bind_interrupt_bus(
+    state: MemoryState,
+    sink: Callable[[InterruptEvent], None],
+    step_id_getter: Optional[Callable[[], int]] = None,
+) -> Callable[[], None]:
+    """Subscribe ``sink`` to ``InterruptOp`` events on ``state``.
+
+    Sink receives fully-formed :class:`InterruptEvent` instances. Caller
+    is responsible for arranging the resume value via
+    ``state.resume_interrupt(interrupt_id, value)``.
+    """
+    if step_id_getter is None:
+        step_id_getter = lambda: state._current_step
+
+    def _observer(op: str, ctx: tuple, payload, interrupt_id: str) -> None:
+        sink(
+            InterruptEvent(
+                step_id=step_id_getter(),
+                op=op,
+                ctx=ctx,
+                payload=payload,
+                interrupt_id=interrupt_id,
+            )
+        )
+
+    state.subscribe_interrupt(_observer)
+    return lambda: state.unsubscribe_interrupt(_observer)

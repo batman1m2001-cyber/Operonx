@@ -550,7 +550,9 @@ class BaseOp(ABC):
         """Store result dict into state.
 
         Uses state[op, var, ctx] = value for O(1) index-based storage.
-        Extracts $tags special key for dynamic tagging.
+        Extracts $tags special key for dynamic tagging. After all writes
+        commit, calls ``state.advance_step()`` so the checkpointer /
+        tracer see a fresh ``step_id`` for the next op's writes.
         """
         if not result:
             return
@@ -562,6 +564,9 @@ class BaseOp(ABC):
 
         for key, value in result.items():
             state[self.full_name, key, context_id] = value
+
+        # Phase 2: bump step_id after this op's outputs commit.
+        state.advance_step()
 
     # =========================================================================
     # 3b. OP-LEVEL CACHE
@@ -948,6 +953,10 @@ class BaseOp(ABC):
             op_cancelled = True
             raise
         except Exception:
+            # ObserveBudgetExceeded is a BaseException subclass and skips
+            # this handler by design — the circuit-breaker propagates up
+            # to the scheduler and halts the run.
+
             import sys
 
             error_msg = (

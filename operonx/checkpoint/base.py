@@ -176,13 +176,16 @@ class StepNotFound(KeyError):
         self.max_step = max_step
 
 
-class ObserveBudgetExceeded(RuntimeError):
+class ObserveBudgetExceeded(BaseException):
     """Raised when an op emits more events than its ``observe_max`` cap.
 
     Circuit breaker for runaway generator ops (e.g. ``frame_source`` yielding
     faster than expected). Silent sampling would hide the runaway bug; loud
     failure forces users to either raise the cap, add ``exclude=[...]`` for
     the noisy vars, or fix the underlying issue.
+
+    Inherits from ``BaseException`` (like ``KeyboardInterrupt``) so op-level
+    ``except Exception:`` blocks do NOT swallow it — the run halts.
 
     Attributes:
         op: full name of the op that exceeded its budget
