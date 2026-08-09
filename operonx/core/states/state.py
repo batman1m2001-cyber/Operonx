@@ -59,6 +59,7 @@ class MemoryState:
         "_tags",
         "tracing",
         "_scratch",
+        "_observers",
     )
 
     def __init__(
@@ -96,6 +97,12 @@ class MemoryState:
         # to this dict via the `_current_state_var` ContextVar.
         self._scratch: Dict[str, Any] = {}
 
+        # Observers subscribed to cell writes. Signature: (idx, ctx_key, value).
+        # Called after each successful _write_cell — post-reducer, cell-committed.
+        # Registered by engine.start() when a checkpointer/tracer is bound.
+        # Kept empty (fast path) when no observer needs the stream.
+        self._observers: List[Any] = []
+
         # Apply initial inputs
         if inputs:
             for var, value in inputs.items():
@@ -119,6 +126,25 @@ class MemoryState:
         if isinstance(ctx, str):
             return op, var, (ctx,)
         return op, var, ctx
+
+    def subscribe_writes(self, callback) -> None:
+        """Register an observer to receive every cell write.
+
+        The callback is invoked with ``(idx, ctx_key, value)`` after each
+        successful write commits (post-reducer). Order is deterministic
+        — observers fire in registration order.
+
+        Args:
+            callback: callable ``(idx, ctx_key, value) -> None``
+        """
+        self._observers.append(callback)
+
+    def unsubscribe_writes(self, callback) -> None:
+        """Remove a previously-registered observer. No-op if not registered."""
+        try:
+            self._observers.remove(callback)
+        except ValueError:
+            pass
 
     def _write_cell(self, idx: int, ctx_key: tuple, value: Any) -> None:
         """Single funnel for all cell writes.
@@ -146,6 +172,11 @@ class MemoryState:
             except Exception as e:  # noqa: BLE001 — re-raise wrapped
                 raise ReducerError(idx=idx, old=old, new=value, cause=e) from e
         self._cells[idx][ctx_key] = value
+
+        # Notify observers post-commit. Fast path (99% of runs): no observers.
+        if self._observers:
+            for obs in self._observers:
+                obs(idx, ctx_key, value)
 
     def __setitem__(
         self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any

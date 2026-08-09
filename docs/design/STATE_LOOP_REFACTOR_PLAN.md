@@ -14,7 +14,7 @@ Three coupled changes that turn operonx's shared-state + loop model into somethi
 | # | Change | LOC | Kills |
 |---|---|---|---|
 | 1 ✅ | `PARENT.declare(**vars, reducers=...)` + reducers on shared-cell writes | ~180 shipped | Forgettable `.shared()` name + silent data loss on fan-in |
-| 2 | Unified `_write_cell` funnel + `Checkpointer` + `step_id` + `InterruptOp`/`EmitOp` + 4 stream modes + `@op(exclude/include/observe_max)` filter | ~770 | No inspect / replay / HITL / streaming / observability control for iterations |
+| 2 | Unified `_write_cell` funnel + `Checkpointer` + `step_id` + `InterruptOp` + `EmitOp` + `engine.stream(mode=updates|values|frames|custom)` + `@op(exclude/include/observe_max)` filter | ~795 | No inspect / replay / HITL / streaming / observability control / custom events for iterations |
 | 3 | Cyclic edges (Level 2 rewrite via Tarjan SCC) | ~340 | `with GraphOp.loop(...)` weirdness |
 | | **Total** | **~1020** | |
 
@@ -99,7 +99,7 @@ Same semantics. **10 lines → 8.** No `GraphOp.loop` wrapper, no `until=` strin
 │      → Tracer enriches op span                  (existing) │
 │    - step_id: monotonic counter per write batch  ← Phase 2 │
 │    - InterruptOp suspends; resume via run.resume ← P2      │
-│    - EmitOp pushes to custom stream channel      ← P2      │
+│    - engine.stream(mode=updates|values|frames)   ← P2      │
 │    - Stream modes: values / updates / frames / custom ← P2 │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -207,7 +207,7 @@ self._cells[push_ref.idx][ctx_key] = push_ref._fn(value)   # bypasses __setitem_
 
 ---
 
-## Phase 2 — Unified write funnel + Checkpointer + step_id + InterruptOp/EmitOp + streams
+## Phase 2 — Unified write funnel + Checkpointer + step_id + InterruptOp + EmitOp + engine.stream()
 
 ### Concept
 
@@ -233,10 +233,30 @@ Consequences:
 - **Reducers apply BEFORE capture** — checkpoint records the post-merge value, matching what readers see.
 - **No `put_writes` needed** — since every write is captured atomically, crash-safety is built-in (log survives up to last committed write).
 
-Two new first-class ops surface HITL and custom telemetry:
+Two new first-class ops:
 
 - **`InterruptOp`** — an op that suspends the scheduler at its dispatch, emits its payload to the caller, waits for `run.resume(value)`, completes with the answer as its output. Visible node in the graph.
-- **`EmitOp`** — an op that pushes a payload to the caller's `mode="custom"` stream, then completes. Visible node, not a hidden side-effect.
+- **`EmitOp`** — an op that pushes an event payload to any subscriber of `mode="custom"` stream, then completes immediately (fire-and-forget). Visible node — UI progress, external event-bus integration, milestone signals, developer debug taps, test hooks all route through this instead of hidden `emit()` callables in op bodies.
+
+Engine-level API adds LangGraph-familiar entry points (thin sugar over the existing `ExecutionHandle`):
+
+```python
+# Batch — new alias for LangGraph parity
+result = await engine.invoke(inputs)         # alias for engine.run(inputs)
+
+# Streaming — four modes over the existing frame queue + checkpointer + emit bus
+async for chunk in engine.stream(inputs, mode="updates"):
+    # per op-complete: {op_name: {var: value, ...}} — matches LangGraph's "updates"
+async for chunk in engine.stream(inputs, mode="values"):
+    # per step: full state snapshot from checkpointer replay
+async for chunk in engine.stream(inputs, mode="frames"):
+    # per yield: (op, ctx, data) — operonx-native, for streaming ops
+async for evt in engine.stream(inputs, mode="custom", channels=["ui"]):
+    # per EmitOp dispatch: {"step_id": N, "op": ..., "ctx": ..., "channel": ..., "payload": ...}
+    # optional `channels=` filter narrows to specific channels
+```
+
+Power-user surface (`engine.start()` → `ExecutionHandle`) is unchanged — kept for `cancel()`, point-query `handle[op, var]`, scratch access, interrupt inspection.
 
 ### Step boundary — per write batch, not per wave
 
@@ -255,7 +275,7 @@ Alternative rejected: per-write step (too fine — 5-10× more steps than needed
 
 ```python
 from operonx.checkpoint import InMemoryCheckpointer, SqliteCheckpointer
-from operonx import InterruptOp, EmitOp
+from operonx import InterruptOp
 
 cp = InMemoryCheckpointer()      # captures every emitted cell write + scratch write
 run = graph.run(inputs={...}, checkpointer=cp)
@@ -299,7 +319,6 @@ run = graph.run(inputs=..., observe_max=100_000)   # applied to any op without i
 run.stream(mode="values")    # full state each step
 run.stream(mode="updates")   # delta each step
 run.stream(mode="frames")    # per-yield frames from generator ops (LLM tokens, streaming audio)
-run.stream(mode="custom")    # events emitted by EmitOp instances in the graph
 
 # HITL — a first-class node in the graph, not a hidden callable
 @graph
@@ -316,8 +335,6 @@ for evt in run.stream(mode="updates"):
         answer = ask_human(evt.payload)
         run.resume(answer)
 
-# Custom telemetry — also a first-class node, not a hidden emit() call
-tell_ui = EmitOp(payload=call["progress"], channel="ui")
 ```
 
 ### Design constraints
@@ -344,7 +361,6 @@ tell_ui = EmitOp(payload=call["progress"], channel="ui")
 | E2 | Checkpointer raises during put | Warn + drop that snapshot, run continues |
 | E3 | Multiple `InterruptOp` nodes fire in same wave (parallel branches) | Each emits its own `InterruptEvent`; caller resumes each independently by `interrupt_id` |
 | E4 | `resume()` without any pending `InterruptOp` | `NoActiveInterrupt` error |
-| E8 | `EmitOp` called with no `mode="custom"` subscriber | Payload dropped silently (no back-pressure — telemetry is best-effort) |
 | E5 | Non-JSON-serializable value in Sqlite backend | Build-time check on `.declare()` types when Sqlite is bound; runtime `CheckpointSerializationError` else |
 | E6 | Cancelled ctx that already committed to checkpointer | `on_cancel(ctx)` emits an inverse delta at current step; prior snapshots untouched (audit trail preserved) |
 | E7 | Concurrent `run()`s share a checkpointer | Isolate by `thread_id` (LangGraph parity); default `thread_id="default"` for single-run use |
@@ -360,12 +376,13 @@ tell_ui = EmitOp(payload=call["progress"], channel="ui")
 - `operonx/core/states/state.py` — funnel-level filter check per observer key; observe-count tracking + `ObserveBudgetExceeded` raise (~40 LOC)
 - `operonx/checkpoint/base.py` — `ObserveBudgetExceeded` exception (~5 LOC)
 - `operonx/core/ops/flow/interrupt_op.py` — `InterruptOp` node + scheduler-side suspend/resume hook (~70 LOC)
-- `operonx/core/ops/flow/emit_op.py` — `EmitOp` node + custom-stream push (~30 LOC)
+- `operonx/core/ops/flow/emit_op.py` — `EmitOp` node + custom-stream dispatch (~35 LOC)
 - `operonx/core/ops/graph/task_scheduler.py` — step_id emission per write batch, checkpointer hooks, `on_cancel`, InterruptOp suspend, EmitOp dispatch (~120 LOC)
+- `operonx/core/engine.py` — `engine.invoke()` alias + `engine.stream(mode="updates"|"values"|"frames"|"custom", channels=[...])` wrapper over `ExecutionHandle` (~65 LOC)
 - `operonx/core/runtime/dispatcher.py` — stream modes (`values`, `updates`, `frames`, `custom`), plumb through `run()` and `resume()` (~80 LOC)
-- Tests (~90 LOC — including HITL flow, cancel handling, multi-mode stream, EmitOp fan-out, filter presets)
+- Tests (~130 LOC — HITL flow, cancel handling, multi-mode stream, filter presets, engine.stream mode parity, EmitOp per-channel filter + no-subscriber no-op)
 
-**~770 LOC** in 0.13.0 (unified funnel + checkpointer + interrupt + streams + `@op(exclude=/include=)` filter + `observe_max` circuit breaker), **+120 LOC** in 0.13.1 (Sqlite backend).
+**~795 LOC** in 0.13.0 (unified funnel + checkpointer + `InterruptOp` + `EmitOp` + `engine.invoke/stream(4 modes)` + `@op(exclude=/include=)` + `observe_max`), **+120 LOC** in 0.13.1 (Sqlite backend).
 
 Cost is real but pays for itself: one mutation path serves runtime + reducer + checkpointer + tracer + any future observer. No dual code paths, no partial-capture gaps.
 
@@ -588,7 +605,7 @@ Callbot / consumers upgrade at their own pace. Nothing forces a rewrite until 1.
 Canonical LangGraph ReAct agent, in post-refactor operonx:
 
 ```python
-from operonx import graph, op, PARENT, if_, START, END, InterruptOp, EmitOp, Command
+from operonx import graph, op, PARENT, if_, START, END, InterruptOp
 from operonx.reducers import add_messages
 from operonx.checkpoint import InMemoryCheckpointer
 
@@ -612,7 +629,6 @@ def react_agent():
 
     call    = call_model(messages=PARENT["messages"])
     approve = InterruptOp(payload=call["tool_calls"])       # HITL — visible node
-    telem   = EmitOp(payload=call["tool_calls"], channel="tool_plan")   # custom telemetry
     tools   = run_tools(tool_calls=approve["response"])
 
     call["messages"]  >> PARENT["messages"]
@@ -620,8 +636,7 @@ def react_agent():
 
     START >> call >> if_(
         call["tool_calls"] == None, END
-    ).else_(telem)                          # emit telemetry first
-    telem >> approve                        # then wait for human
+    ).else_(approve)                         # wait for human
     approve >> if_(
         approve["response"] == True, tools
     ).else_(END)
@@ -659,7 +674,7 @@ Every data path visible in the graph body. Every state cell declared once. Every
 | Phase | Rollback if regressions surface |
 |---|---|
 | 1 | Revert `_write_cell` reducer branch; `.declare()` becomes alias for `.shared()` |
-| 2 | Default `checkpointer=None`; scheduler emits step_id as no-op; `InterruptOp` raises `NotImplementedError` unless checkpointer bound; `EmitOp` drops payload if no subscriber |
+| 2 | Default `checkpointer=None`; scheduler emits step_id as no-op; `InterruptOp` raises `NotImplementedError` unless checkpointer bound; `engine.stream()` falls back to existing frame iteration if no checkpointer |
 | 3 | Feature-flag: `@graph` decorator defaults to `strict_dag=True` (disables rewrite pass — today's behavior) |
 
 All three have a clean off-switch.
@@ -704,7 +719,7 @@ Each proposed and dropped during design review:
 
 10. **`interrupt()` callable inside op body** (LangGraph-style). Same class of magic as `STATE["k"]` — hidden control flow inside the body. Replaced by `InterruptOp` as a visible graph node.
 
-11. **`emit(event)` callable inside op body** for `mode="custom"` streaming. Same reason. Replaced by `EmitOp` as a visible graph node.
+11. **`emit(event)` callable inside op body** for `mode="custom"` streaming. Same reason (body-magic). Replaced by `EmitOp` as a visible graph node.
 
 12. **`Command(goto="node_X", update={...})` dynamic routing return-value.** Op decides its downstream target at runtime — hides control flow. Use `if_/else_` on visible conditions instead. (Static `Command(resume=...)` is fine — it's a caller-side resume payload, not an op-body magic.)
 
@@ -729,10 +744,10 @@ Each proposed and dropped during design review:
 | Phase | LOC | Ships in | Depends on |
 |---|---|---|---|
 | 1 · `.declare()` + reducers + reducer library | ~210 | 0.12.0 | — |
-| 2a · Unified `_write_cell` funnel + Checkpointer + step_id + InterruptOp + EmitOp + 4 stream modes + `@op(exclude/include/observe_max)` filter | ~770 | 0.13.0 | Phase 1 (recommended) |
+| 2a · Unified `_write_cell` funnel + Checkpointer + step_id + InterruptOp + EmitOp + `engine.invoke/stream(mode=updates|values|frames|custom)` + `@op(exclude/include/observe_max)` filter | ~795 | 0.13.0 | Phase 1 (recommended) |
 | 2b · SqliteCheckpointer | ~120 | 0.13.1 | 2a |
 | 3 · Cyclic edges (Tarjan SCC + full_name recache) | ~340 | 0.14.0 | **Phase 1 (required — reducers enable iter accumulation)** |
-| **Total** | **~1440** | **4 minor versions** | |
+| **Total** | **~1465** | **4 minor versions** | |
 
 (v2 estimate was 550 LOC — corrected upward after adversarial review found underestimated scope in Phase 2 wave abstraction, missing Tarjan in Phase 3, and dropped Phase 2 features required for HITL story.)
 
@@ -871,3 +886,23 @@ Concepts adopted from LangGraph that DO fit:
   - Motivated by callbot's `frame_source` (100Hz generator); silent sampling would hide the runaway bug. Loud failure forces explicit handling.
   - Default: `None` (disabled). Per-op override + global run-level default.
 - **Scope**: Phase 2 up from ~685 → ~770 LOC (+85 for polymorphic filter + circuit breaker). Total plan: ~1335 → ~1440 LOC.
+
+## Change log vs v3.3.2 (this patch — v3.3.3)
+
+- **Dropped `EmitOp` node and `mode="custom"` stream mode** — YAGNI; callbot has no custom-event requirement, observability goes through V3 tracing → Langfuse. Additive change if a real need surfaces later.
+- **Added engine-level LangGraph-familiar entry points**: `engine.invoke(inputs)` alias for `engine.run()`, plus `engine.stream(inputs, mode="updates"|"values"|"frames")` — thin sugar over the existing `ExecutionHandle`.
+  - Rationale: at the outermost API surface, LangGraph naming is low-cost onboarding win; internals (`ExecutionHandle`, cell model, refs, InterruptOp) stay operonx-native where model differences matter.
+  - `ExecutionHandle` kept for power users (cancel, point query, scratch, interrupts).
+- **Scope**: Phase 2 down from ~770 → ~700 LOC (−30 for EmitOp/custom, +50 for engine.stream wrapper, −90 net after tests). Total plan: ~1440 → ~1370 LOC.
+
+## Change log vs v3.3.3 (this patch — v3.3.4)
+
+- **Revived `EmitOp` node and `mode="custom"` stream mode** — reconsidered from broader engine perspective (not just callbot). Custom event emission is foundational for general workflow use: UI progress, external event bus, milestone signals, developer debug taps, test hooks. Every serious workflow engine (Temporal, Airflow, Prefect, LangGraph) has this pattern.
+- **Design pins**:
+  - `EmitOp(payload=..., channel="...")` — visible node, payload wired via ref
+  - Fire-and-forget semantics (no wait like `InterruptOp`)
+  - Event shape: `{"step_id", "op", "ctx", "channel", "payload"}`
+  - `mode="custom"` supports optional `channels=["ui", ...]` filter
+  - No-subscriber = no-op (payload dropped, no back-pressure)
+- **Scope**: Phase 2 back up ~700 → ~795 LOC (+95 for EmitOp + custom mode + channel filter + tests). Total plan: ~1370 → ~1465 LOC.
+- **§Rejected #13 removed** — the argument for dropping was callbot-specific YAGNI, which doesn't apply once we frame operonx as a general engine.
