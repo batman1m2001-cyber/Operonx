@@ -5,28 +5,75 @@ checkpointer wants ``CellWriteEvent(step_id, op, var, ctx, value)``. The
 bridge translates one to the other, resolving op/var names from the
 schema and consulting a scheduler-provided ``step_id_getter``.
 
+The bridge also honours per-op :func:`@op(exclude=/include=/observe_max=)
+<operonx.core.ops.transform.func_op.op>` filters when an ``op_registry``
+mapping is provided — the channel filter here is fixed to
+``"checkpoint"``. See :class:`ObserveBudgetExceeded` for the runaway-op
+circuit breaker.
+
 Typical wiring inside the engine::
 
     def _step_id_getter():
         return scheduler.current_step
 
-    unsubscribe = bind_checkpointer(state, checkpointer, _step_id_getter)
+    unsubscribe = bind_checkpointer(
+        state, checkpointer, _step_id_getter, op_registry=graph._all_ops
+    )
     ...  # run
     unsubscribe()
 """
 
-from typing import Callable, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
-from operonx.checkpoint.base import CellWriteEvent, Checkpointer
+from operonx.checkpoint.base import CellWriteEvent, Checkpointer, ObserveBudgetExceeded
 from operonx.core.states.state import MemoryState
 
-__all__ = ["bind_checkpointer"]
+__all__ = ["bind_checkpointer", "should_emit_for_channel"]
+
+
+def should_emit_for_channel(op, var: str, channel: str) -> bool:
+    """Return True iff an event for ``op.var`` should be emitted on ``channel``.
+
+    Resolves the per-op ``exclude``/``include`` config (both list form and
+    dict-per-channel form). Fast path when the op has no filter set at all
+    (bare ``@op`` decoration).
+
+    Args:
+        op: an op instance with ``_obs_exclude`` / ``_obs_include`` attrs, or
+            ``None`` (treated as no filter)
+        var: variable name being written
+        channel: ``"trace"`` or ``"checkpoint"``
+
+    Returns:
+        True → emit event; False → filter out.
+    """
+    if op is None:
+        return True
+
+    include = getattr(op, "_obs_include", None) or {}
+    if include:
+        # Allowlist mode: emit iff var is listed for this channel or wildcard.
+        allowed = set(include.get(channel, ())) | set(include.get("*", ()))
+        # If neither channel-specific nor wildcard bucket exists at all, the
+        # op only restricts the OTHER channel — this channel sees everything.
+        if channel not in include and "*" not in include:
+            return True
+        return var in allowed
+
+    exclude = getattr(op, "_obs_exclude", None) or {}
+    if exclude:
+        # Blocklist mode: skip if var is listed for this channel or wildcard.
+        blocked = set(exclude.get(channel, ())) | set(exclude.get("*", ()))
+        return var not in blocked
+
+    return True
 
 
 def bind_checkpointer(
     state: MemoryState,
     checkpointer: Checkpointer,
     step_id_getter: Callable[[], int],
+    op_registry: Optional[Dict[str, object]] = None,
 ) -> Callable[[], None]:
     """Subscribe ``checkpointer`` to every cell write on ``state``.
 
@@ -38,6 +85,9 @@ def bind_checkpointer(
         checkpointer: any object satisfying the :class:`Checkpointer` protocol
         step_id_getter: zero-arg function returning the current ``step_id``.
             Typically bound to the scheduler's monotonic step counter.
+        op_registry: optional ``{full_name: op_instance}`` map so the bridge
+            can honour per-op ``exclude``/``include``/``observe_max`` filters.
+            Without it, every write is captured unconditionally.
 
     Returns:
         A no-arg ``unsubscribe()`` function.
@@ -47,12 +97,30 @@ def bind_checkpointer(
     for (op, var), idx in state.schema._var_to_idx.items():
         idx_to_key[idx] = (op, var)
 
+    op_registry = op_registry or {}
+    # Per-op emit counter for observe_max circuit breaker.
+    op_emit_counts: Dict[str, int] = {}
+
     def _observer(idx: int, ctx_key: tuple, value) -> None:
-        op, var = idx_to_key.get(idx, ("?", "?"))
+        op_name, var = idx_to_key.get(idx, ("?", "?"))
+        op_instance = op_registry.get(op_name)
+
+        if not should_emit_for_channel(op_instance, var, "checkpoint"):
+            return
+
+        # observe_max circuit breaker
+        if op_instance is not None:
+            limit = getattr(op_instance, "observe_max", None)
+            if limit is not None:
+                count = op_emit_counts.get(op_name, 0) + 1
+                op_emit_counts[op_name] = count
+                if count > limit:
+                    raise ObserveBudgetExceeded(op=op_name, count=count, limit=limit)
+
         checkpointer.on_cell_write(
             CellWriteEvent(
                 step_id=step_id_getter(),
-                op=op,
+                op=op_name,
                 var=var,
                 ctx=ctx_key,
                 value=value,

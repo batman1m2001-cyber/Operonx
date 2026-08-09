@@ -24,6 +24,9 @@ def op(
     bound: Optional[str] = None,
     cache=None,
     delay: float = 0,
+    exclude=None,
+    include=None,
+    observe_max: Optional[int] = None,
 ):
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -41,13 +44,33 @@ def op(
         async def call_api(url: str):
             return {"data": await fetch(url)}
 
+        # Phase 2 observability filter (Checkpointer + Tracer both respect these):
+        @op(exclude=["tokens"])              # skip these vars in both observers
+        @op(include=[])                      # silence entire op (allowlist of nothing)
+        @op(exclude={"trace": ["pii"]})      # per-observer split (dict form)
+        @op(observe_max=10_000)              # circuit breaker: raise if op emits > N events
+
     Args:
         bound: Execution bound hint for the scheduler.
             ``None`` (default) auto-detects: async → ``"io"``, sync → ``"sync"``.
             ``"sync"``  — inline dispatch, no asyncio task (fastest).
             ``"io"``    — asyncio task, for network/disk I/O.
             ``"cpu"``   — asyncio.to_thread(), for heavy compute (C extensions release GIL).
+        exclude: Vars to hide from observers. ``list[str]`` applies to both trace and
+            checkpoint; ``{"trace": [...], "checkpoint": [...]}`` splits per observer.
+            Mutually exclusive with ``include=``.
+        include: Vars to expose to observers (allowlist). Same shapes as ``exclude``.
+            ``include=[]`` silences the op entirely.
+        observe_max: Per-op circuit breaker. If the op emits more than this many
+            events in a single run, :class:`ObserveBudgetExceeded` is raised so
+            runaway generators (e.g. streaming frame sources) fail loudly instead
+            of quietly bloating the checkpointer.
     """
+    # Validate observability config at decoration time so the raise
+    # surfaces where the op is declared, not where it runs.
+    from operonx.core.ops.base import _normalise_observability
+
+    _decl_exclude, _decl_include = _normalise_observability(exclude, include)
 
     def decorator(fn):
         module = fn.__module__ or ""
@@ -77,10 +100,19 @@ def op(
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
             op_bound = init_kwargs.pop("bound", bound)
             op_delay = init_kwargs.pop("delay", delay)
+            # Per-call kwargs override the @op-decoration filter, if provided.
+            call_exclude = init_kwargs.pop("exclude", None)
+            call_include = init_kwargs.pop("include", None)
+            call_observe_max = init_kwargs.pop("observe_max", observe_max)
+            eff_exclude = call_exclude if call_exclude is not None else exclude
+            eff_include = call_include if call_include is not None else include
             return FuncOp(
                 code_fn=fn,
                 bound=op_bound,
                 delay=op_delay,
+                exclude=eff_exclude,
+                include=eff_include,
+                observe_max=call_observe_max,
                 _mappings=mappings or None,
                 **init_kwargs,
             )
