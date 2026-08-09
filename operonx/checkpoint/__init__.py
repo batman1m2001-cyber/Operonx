@@ -20,20 +20,28 @@ from operonx.checkpoint.base import (
     CustomEvent,
     InterruptEvent,
     ObserveBudgetExceeded,
+    ScratchWriteEvent,
     StepEvent,
     StepNotFound,
 )
-from operonx.checkpoint.bridge import bind_checkpointer
+from operonx.checkpoint.bridge import (
+    bind_checkpointer,
+    bind_custom_bus,
+    bind_interrupt_bus,
+)
 from operonx.checkpoint.memory import InMemoryCheckpointer
 
 __all__ = [
     "Checkpointer",
     "InMemoryCheckpointer",
     "CellWriteEvent",
+    "ScratchWriteEvent",
     "StepEvent",
     "InterruptEvent",
     "CustomEvent",
     "StepNotFound",
     "ObserveBudgetExceeded",
     "bind_checkpointer",
+    "bind_custom_bus",
+    "bind_interrupt_bus",
 ]

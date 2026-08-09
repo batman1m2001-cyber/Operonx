@@ -31,6 +31,7 @@ from operonx.checkpoint.base import (
     CustomEvent,
     InterruptEvent,
     ObserveBudgetExceeded,
+    ScratchWriteEvent,
 )
 from operonx.core.states.state import MemoryState
 
@@ -144,8 +145,26 @@ def bind_checkpointer(
 
     state.subscribe_writes(_observer)
 
+    # Phase 2b3 B1: also route SCRATCH mutations through the checkpointer.
+    # The checkpointer records them under the synthetic key
+    # ("__scratch__", key, DEFAULT_CONTEXT) so replay/inspection is uniform
+    # with cell writes.
+    def _scratch_observer(key: str, value) -> None:
+        checkpointer.on_cell_write(
+            CellWriteEvent(
+                step_id=step_id_getter(),
+                op="__scratch__",
+                var=key,
+                ctx=("main",),
+                value=value,
+            )
+        )
+
+    state.subscribe_scratch(_scratch_observer)
+
     def _unsubscribe() -> None:
         state.unsubscribe_writes(_observer)
+        state.unsubscribe_scratch(_scratch_observer)
 
     return _unsubscribe
 
@@ -155,26 +174,38 @@ def bind_custom_bus(
     sink: Callable[[CustomEvent], None],
     step_id_getter: Optional[Callable[[], int]] = None,
     op_registry: Optional[Dict[str, object]] = None,
+    channel: str = "custom",
 ) -> Callable[[], None]:
     """Subscribe ``sink`` to ``EmitOp`` events on ``state``.
 
     The sink receives fully-formed :class:`CustomEvent` instances; step_id
-    is filled from ``state._current_step`` unless overridden. Per-op
-    ``exclude``/``include`` filter for the ``"trace"`` channel does not
-    apply — EmitOp uses its own ``channel`` field for consumer routing.
+    is filled from ``state._current_step`` unless overridden.
+
+    When ``op_registry`` is supplied, per-op ``@op(exclude=..., include=...)``
+    filters are honoured against the ``channel`` argument (default
+    ``"custom"``) — so an op declared with ``include={"trace": ["x"]}``
+    can silence its EmitOp payloads from custom-mode subscribers. This
+    closes the T7 gap from the Phase 2b3 review.
 
     Returns an ``unsubscribe`` callable.
     """
     if step_id_getter is None:
         step_id_getter = lambda: state._current_step
+    op_registry = op_registry or {}
 
-    def _observer(op: str, ctx: tuple, channel: str, payload) -> None:
+    def _observer(op_name: str, ctx: tuple, evt_channel: str, payload) -> None:
+        op_instance = op_registry.get(op_name)
+        # For EmitOp we filter on the EMITTED channel name, not var name —
+        # match against `channel` (the observer's channel kind) using the
+        # per-op filter's ``payload`` bucket.
+        if not should_emit_for_channel(op_instance, "payload", channel):
+            return
         sink(
             CustomEvent(
                 step_id=step_id_getter(),
-                op=op,
+                op=op_name,
                 ctx=ctx,
-                channel=channel,
+                channel=evt_channel,
                 payload=payload,
             )
         )
@@ -187,21 +218,32 @@ def bind_interrupt_bus(
     state: MemoryState,
     sink: Callable[[InterruptEvent], None],
     step_id_getter: Optional[Callable[[], int]] = None,
+    op_registry: Optional[Dict[str, object]] = None,
+    channel: str = "trace",
 ) -> Callable[[], None]:
     """Subscribe ``sink`` to ``InterruptOp`` events on ``state``.
 
     Sink receives fully-formed :class:`InterruptEvent` instances. Caller
     is responsible for arranging the resume value via
     ``state.resume_interrupt(interrupt_id, value)``.
+
+    When ``op_registry`` is supplied, per-op filters are honoured against
+    the ``channel`` argument (default ``"trace"``). An InterruptOp declared
+    with ``include=[]`` will not surface its InterruptEvents at all — the
+    caller-side HITL flow becomes a no-op for that op.
     """
     if step_id_getter is None:
         step_id_getter = lambda: state._current_step
+    op_registry = op_registry or {}
 
-    def _observer(op: str, ctx: tuple, payload, interrupt_id: str) -> None:
+    def _observer(op_name: str, ctx: tuple, payload, interrupt_id: str) -> None:
+        op_instance = op_registry.get(op_name)
+        if not should_emit_for_channel(op_instance, "payload", channel):
+            return
         sink(
             InterruptEvent(
                 step_id=step_id_getter(),
-                op=op,
+                op=op_name,
                 ctx=ctx,
                 payload=payload,
                 interrupt_id=interrupt_id,

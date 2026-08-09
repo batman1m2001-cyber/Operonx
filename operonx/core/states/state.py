@@ -60,6 +60,7 @@ class MemoryState:
         "tracing",
         "_scratch",
         "_observers",
+        "_scratch_observers",
         "_custom_observers",
         "_interrupt_observers",
         "_interrupt_responses",
@@ -106,6 +107,11 @@ class MemoryState:
         # Registered by engine.start() when a checkpointer/tracer is bound.
         # Kept empty (fast path) when no observer needs the stream.
         self._observers: List[Any] = []
+
+        # Observers subscribed to SCRATCH writes. Signature: (key, value).
+        # Called after each ``SCRATCH[key] = value`` mutation via
+        # ``_notify_scratch``. Fast path when list is empty (B1 fix).
+        self._scratch_observers: List[Any] = []
 
         # Observers subscribed to EmitOp events. Signature: (op, ctx, channel, payload).
         # Fed via _notify_custom(); fast path when list is empty.
@@ -169,6 +175,46 @@ class MemoryState:
             self._observers.remove(callback)
         except ValueError:
             pass
+
+    # ------------------------------------------------------------------
+    # Scratch bus (SCRATCH[k] = v)
+    # ------------------------------------------------------------------
+
+    def subscribe_scratch(self, callback) -> None:
+        """Register a callback for SCRATCH mutations.
+
+        Callback signature: ``(key, value) -> None``. Called after
+        ``SCRATCH[key] = value`` commits inside an active run. Same
+        exception-guard shape as cell-write observers: peer callbacks
+        keep firing; the first BaseException is re-raised after all
+        observers have run.
+        """
+        self._scratch_observers.append(callback)
+
+    def unsubscribe_scratch(self, callback) -> None:
+        """Remove a SCRATCH observer. No-op if not registered."""
+        try:
+            self._scratch_observers.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_scratch(self, key, value) -> None:
+        """Fire a ScratchWriteEvent to every subscribed observer."""
+        if not self._scratch_observers:
+            return
+        from operonx.core.loggings import LOGGER as _L
+
+        _first_error = None
+        for obs in self._scratch_observers:
+            try:
+                obs(key, value)
+            except BaseException as _e:  # noqa: BLE001
+                if _first_error is None:
+                    _first_error = _e
+                else:
+                    _L.exception("scratch observer raised (ignored): %r", obs)
+        if _first_error is not None:
+            raise _first_error
 
     # ------------------------------------------------------------------
     # Custom event bus (EmitOp)
@@ -290,10 +336,22 @@ class MemoryState:
                 raise ReducerError(idx=idx, old=old, new=value, cause=e) from e
         self._cells[idx][ctx_key] = value
 
-        # Notify observers post-commit. Fast path (99% of runs): no observers.
+        # Notify observers post-commit. Fast path when nothing subscribed.
+        # Every observer is invoked even if a peer raises (B2 fix — before,
+        # the first raise short-circuited the loop and later observers saw
+        # nothing). The first BaseException collected is re-raised after
+        # all observers have had a turn so that circuit breakers like
+        # ObserveBudgetExceeded still halt the run.
         if self._observers:
+            _first_error = None
             for obs in self._observers:
-                obs(idx, ctx_key, value)
+                try:
+                    obs(idx, ctx_key, value)
+                except BaseException as _e:  # noqa: BLE001 — deliberate broad catch
+                    if _first_error is None:
+                        _first_error = _e
+            if _first_error is not None:
+                raise _first_error
 
     def __setitem__(
         self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any
@@ -312,10 +370,15 @@ class MemoryState:
         self._write_cell(idx, ctx_key, value)
 
         # Push ref? Push 1 hop to target — route through _write_cell so
-        # reducers apply on shared-cell targets too.
+        # reducers apply on shared-cell targets too. Feed the target the
+        # SOURCE's post-reducer stored value (Phase 2b3 H1 fix), not the
+        # raw incoming ``value`` — matters only when the source cell has
+        # its own reducer; identical to the pre-fix behaviour when it
+        # doesn't (which is the canonical local→shared case).
         push_ref = self.schema._push_refs[idx]
         if push_ref and push_ref.idx >= 0:
-            self._write_cell(push_ref.idx, ctx_key, push_ref._fn(value))
+            stored = self._cells[idx][ctx_key]
+            self._write_cell(push_ref.idx, ctx_key, push_ref._fn(stored))
 
     def __getitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]]) -> Any:
         """Get value. Pull from source if pull_ref exists (1 hop only).

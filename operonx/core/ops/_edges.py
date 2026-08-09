@@ -259,6 +259,9 @@ class ScratchAccessor:
                 "engine.start(scratch={...})."
             ) from e
         state._scratch[key] = value
+        # Phase 2b3 B1: fire the scratch bus so checkpointers/tracers see
+        # SCRATCH mutations too. Fast path when no observer subscribed.
+        state._notify_scratch(key, value)
 
     def __delitem__(self, key: str) -> None:
         try:

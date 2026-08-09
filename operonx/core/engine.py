@@ -567,6 +567,13 @@ class Operon:
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
             except asyncio.CancelledError:
+                # Phase 2b3 T5: notify the checkpointer of run-level cancel so
+                # audit trails and speculative-chain teardown observers hear it.
+                if checkpointer is not None:
+                    try:
+                        checkpointer.on_cancel(("main",))
+                    except Exception:
+                        LOGGER.exception("checkpointer.on_cancel failed")
                 queue.put_nowait(None)
                 raise
             except BaseException as e:  # includes ObserveBudgetExceeded (Phase 2)
@@ -583,6 +590,13 @@ class Operon:
                         _cp_unsubscribe()
                     except Exception:
                         LOGGER.exception("checkpointer unsubscribe failed")
+                # Phase 2b3 H3: drain any pending InterruptOp futures so the
+                # state's response bus doesn't leak entries after the run.
+                if state._interrupt_responses:
+                    for _iid, _fut in list(state._interrupt_responses.items()):
+                        if not _fut.done():
+                            _fut.cancel()
+                    state._interrupt_responses.clear()
                 # V3 consumers — auto-invoke on the completed trace.
                 # `asyncio.to_thread` so a slow HTTP consumer (Langfuse)
                 # doesn't block the event loop; per-consumer try/except
@@ -721,7 +735,10 @@ class Operon:
                     queue.put_nowait(evt)
 
             handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
-            _unbind = bind_custom_bus(handle.state, _sink)
+            op_registry = self._all_ops_registry()
+            _unbind = bind_custom_bus(handle.state, _sink, op_registry=op_registry)
+            drainer = None
+            getter = None
             try:
                 # Drain the frame queue in the background so scheduler can
                 # progress; we ignore frames here — only custom events.
@@ -746,6 +763,14 @@ class Operon:
                         break
             finally:
                 _unbind()
+                # Phase 2b3 B3: cancel the scheduler on caller break/error so
+                # long-running ops (LLM calls, DB writes) don't keep burning
+                # resources with no consumer.
+                handle.cancel()
+                if drainer and not drainer.done():
+                    drainer.cancel()
+                if getter and not getter.done():
+                    getter.cancel()
             return
 
         # For "updates" and "values" we need per-op-completion granularity,
@@ -809,13 +834,20 @@ class Operon:
                                 pass
             finally:
                 state.unsubscribe_writes(_record)
+                # Phase 2b3 B3: cancel scheduler on caller break so a partial
+                # consume doesn't leave the graph running with no listener.
+                handle.cancel()
             return
 
         handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
 
         if mode == "frames":
-            async for frame in handle:
-                yield frame
+            try:
+                async for frame in handle:
+                    yield frame
+            finally:
+                # Phase 2b3 B3: cancel on caller break/error.
+                handle.cancel()
             return
 
         raise ValueError(

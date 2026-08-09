@@ -11,10 +11,16 @@ deltas, and exposes replay/inspection APIs. See
 
 Design invariants (see docs/design/STATE_LOOP_REFACTOR_PLAN.md §Phase 2):
     - opt-in: no checkpointer bound → zero overhead on the write path
-    - captures every emitted cell write (filter is at emission source via
-      ``@op(exclude=..., include=...)``, not at the checkpointer)
+    - captures every emitted cell write AND every SCRATCH mutation (both
+      route through the state observer buses; filter is at emission source
+      via ``@op(exclude=..., include=...)``, not at the checkpointer)
     - delta storage, not full snapshots — replay folds deltas
-    - step_id is monotonic per write batch (batch = one op invocation)
+    - step_id is monotonic and bumps once per ``state.advance_step()`` call,
+      which BaseOp.store_result triggers after every ``result`` dict commit.
+      For batch ops this is once per invocation; for streaming generator
+      ops this is once per yielded frame (each yield's dict is a distinct
+      write batch). The plan phrase "per op invocation" is accurate for
+      batch ops only; per-yield for generators is by design.
     - reducers apply BEFORE checkpoint capture (post-merge value recorded)
 """
 
@@ -24,6 +30,7 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 __all__ = [
     "Checkpointer",
     "CellWriteEvent",
+    "ScratchWriteEvent",
     "StepEvent",
     "InterruptEvent",
     "CustomEvent",
@@ -53,6 +60,26 @@ class CellWriteEvent:
     op: str
     var: str
     ctx: Tuple[str, ...]
+    value: Any
+
+
+@dataclass(frozen=True)
+class ScratchWriteEvent:
+    """A single SCRATCH dict mutation, captured for observability parity.
+
+    Emitted when ``SCRATCH[key] = value`` fires inside an active run. Runs
+    through the same funnel as :class:`CellWriteEvent` so checkpointers,
+    tracers, and stream consumers see SCRATCH mutations the same way they
+    see cell writes (B1 fix from Phase 2b3 review).
+
+    Attributes:
+        step_id: monotonic step counter at the moment of the write
+        key: the SCRATCH dict key mutated
+        value: value just committed to ``state._scratch[key]``
+    """
+
+    step_id: int
+    key: str
     value: Any
 
 
