@@ -269,11 +269,16 @@ class TestSyntheticLoopTermination:
         assert state._cells[count_idx][("main",)] == 3
 
         # Verify context tuples: 3 iters, no runaway nesting.
+        # Synthetic loops encode ctx segments as ``{op.full_name}#{n}`` so
+        # nested synthetic loops don't collide (Phase 3 hardening).
         hidden = next(o for n, o in g._ops.items() if n.startswith("__loop_"))
         tick_idx = state.schema.get_index(f"{g.full_name}.{hidden.name}.tick", "end_time")
         assert len(state._cells[tick_idx].contexts) == 3
+        loop_prefix = hidden.full_name
         assert set(state._cells[tick_idx].contexts) == {
-            ("main",), ("main", "loop_1"), ("main", "loop_2")
+            ("main",),
+            ("main", f"{loop_prefix}#1"),
+            ("main", f"{loop_prefix}#2"),
         }
 
         # check ran only on iters where branch chose it (first 2, not iter 3).

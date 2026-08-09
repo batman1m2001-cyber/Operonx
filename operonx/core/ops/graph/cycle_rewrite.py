@@ -163,8 +163,11 @@ def _scc_entry_and_back_edges(
     """Identify the loop entry op and the back-edges relevant to this SCC.
 
     The entry is the unique node in the SCC that has predecessors outside
-    the SCC (typically ``START`` upstream). If more than one node has
-    outside-SCC predecessors → E2 (multiple entries).
+    the SCC (typically ``START`` upstream). Additionally, per E8 in the
+    plan's E-table, if the SCC's back-edges TARGET distinct nodes, that
+    also counts as "multiple entries" and must be user-resolved via a merge
+    node — otherwise the rewrite would silently pick one target and drop
+    the others' iteration paths.
     """
     outside_preds: Dict[str, List[str]] = {n: [] for n in scc}
     for (src, dst), edge in graph._edges.items():
@@ -182,6 +185,14 @@ def _scc_entry_and_back_edges(
         entries = [n for n in scc if graph._ops[n].start]
 
     scc_back = [(u, v) for (u, v) in all_back_edges if u in scc and v in scc]
+
+    # E8: if back-edges target multiple distinct nodes in the SCC, each is
+    # implicitly a separate iteration entry — merge upstream so the loop has
+    # one entry.
+    back_targets = {v for _u, v in scc_back}
+    if len(back_targets) > 1:
+        # Union entries with back-targets so E2 error message enumerates them.
+        entries = sorted(set(entries) | back_targets)
 
     return (entries[0] if entries else None, entries, scc_back)
 
@@ -255,14 +266,29 @@ def rewrite_cycles_to_loops(graph: "GraphOp") -> bool:
     loop_idx = 0
 
     for scc_list in cyclic_sccs:
-        scc = set(scc_list)
-        entry_first, entries, scc_back = _scc_entry_and_back_edges(graph, scc, back_edges)
+        # Preserve Tarjan's node order (list, not set) so hidden._ops
+        # insertion is deterministic across runs — set iteration is hash-
+        # order dependent (Phase 3 review HAZARD: nondet iteration).
+        scc_seq: List[str] = list(scc_list)
+        scc: Set[str] = set(scc_seq)
+        entry_first, entries, scc_back = _scc_entry_and_back_edges(
+            graph, scc, back_edges
+        )
 
-        # E2: multiple entries into the SCC.
+        # E2 (+ E8): multiple entries into the SCC — either from outside
+        # preds or from back-edges targeting distinct nodes.
         if len(entries) > 1:
             raise ValueError(
                 f"Graph '{graph.name}': cycle body {sorted(scc)} has {len(entries)} entries "
                 f"({sorted(entries)}); extract entry into a merge node."
+            )
+        # E1 stricter surface: no entry could be determined (HAZARD from
+        # Phase 3 review: previously raised a raw KeyError deep in
+        # _synthesize_loop when we tried to mark None as .start).
+        if entry_first is None:
+            raise ValueError(
+                f"Graph '{graph.name}': cannot determine loop entry for cycle body "
+                f"{sorted(scc)} — no outside predecessor and no op with start=True."
             )
 
         if not scc_back:
@@ -279,7 +305,7 @@ def rewrite_cycles_to_loops(graph: "GraphOp") -> bool:
         # E4: back-edge crossing subgraph boundary — the SCC includes nodes
         # from a nested graph. Detect by finding an op whose .parent isn't
         # this graph.
-        for n in scc:
+        for n in scc_seq:
             if graph._ops[n].parent is not graph:
                 raise ValueError(
                     f"Graph '{graph.name}': cyclic edge involving '{n}' crosses "
@@ -292,6 +318,7 @@ def rewrite_cycles_to_loops(graph: "GraphOp") -> bool:
         hidden = _synthesize_loop(
             outer=graph,
             loop_name=loop_name,
+            scc_seq=scc_seq,
             scc=scc,
             entry=entry_first,
             scc_back_edges=scc_back,
@@ -334,6 +361,7 @@ def _fresh_loop_name(graph: "GraphOp", idx: int) -> str:
 def _synthesize_loop(
     outer: "GraphOp",
     loop_name: str,
+    scc_seq: List[str],
     scc: Set[str],
     entry: str,
     scc_back_edges: List[Tuple[str, str]],
@@ -363,15 +391,24 @@ def _synthesize_loop(
     hidden = GraphOp(name=loop_name)
     hidden._synthetic = True
     hidden._loop_mode = "synthetic"
-    hidden._back_edge_sources = {u for (u, _v) in scc_back_edges}
-    # Configure loop-config in synthetic mode: no _evaluate_until (scheduler
-    # uses _back_edge_sources), high default max_iterations.
+    # Preserve source AND target of each back-edge, not just the source, so
+    # the scheduler can decide "would this back-edge have fired" per iter
+    # correctly for the (source-is-branch) case (BUG 1 from Phase 3 review):
+    # branch ops write end_time regardless of which target they picked, so
+    # source-fired alone is always True. Termination consults the branch's
+    # __branch_target__ output when the source is a branch op.
+    hidden._back_edges = list(scc_back_edges)
+    hidden._back_edge_sources = {u for (u, _v) in scc_back_edges}  # kept for audit
     from operonx.core.ops.graph.task_scheduler import LoopConfig
 
     hidden._loop_config = LoopConfig(until=None, max_iterations=1000)
 
     # --- Move SCC ops into hidden ------------------------------------------------
-    for n in scc:
+    # Iterate over scc_seq (list) not scc (set) so hidden._ops insertion is
+    # deterministic across runs (Phase 3 review HAZARD: nondet iteration).
+    entry_was_outer_entry = False
+    entry_was_outer_exit = False
+    for n in scc_seq:
         child = outer._ops.pop(n)
         child.parent = hidden
         # Reset start/end; we'll re-mark below based on the extracted structure.
@@ -380,11 +417,19 @@ def _synthesize_loop(
         child._full_name = None
         hidden._ops[n] = child
         # Purge outer entry/exit references to the moved op — they now live
-        # in the hidden loop only.
+        # in the hidden loop only. Remember whether the entry itself was an
+        # outer entry/exit so we can promote the hidden loop node to fill
+        # the same role (HAZARD from Phase 3 review: outer.entries/exits
+        # lost the loop op when other unrelated entries/exits remained,
+        # skipping _setup_endpoints's fallback path).
         if n in outer.entries:
             outer.entries.remove(n)
+            if n == entry:
+                entry_was_outer_entry = True
         if n in outer.exits:
             outer.exits.remove(n)
+            if n == entry:
+                entry_was_outer_exit = True
 
     # --- Move SCC-internal edges (minus back-edges) into hidden ------------------
     back_set = set(scc_back_edges)
@@ -396,7 +441,7 @@ def _synthesize_loop(
             outer.prevs[dst].remove(src)
             if (src, dst) in back_set:
                 # Back-edge dropped entirely — the scheduler infers the
-                # iteration signal from _back_edge_sources activation.
+                # iteration signal from _back_edges activation.
                 continue
             hidden._edges[key] = EdgeConfig(
                 from_node=src, to_node=dst, type=edge.type, soft=edge.soft,
@@ -405,12 +450,34 @@ def _synthesize_loop(
             hidden.nexts[src].append(dst)
             hidden.prevs[dst].append(src)
 
+    # --- Rewire SCC→outer edges (any type, including lookback) ------------------
+    # BUG 5 fix: pre-hardening, lookback edges from an SCC node to an outer
+    # node were silently left in outer._edges after the src had been moved
+    # into the hidden loop — a dangling edge whose src key no longer exists.
+    # Move ALL non-internal SCC-src edges through the loop, preserving type.
+    for key in list(outer._edges):
+        src, dst = key
+        if src not in scc or dst in scc:
+            continue
+        edge = outer._edges.pop(key)
+        outer.nexts[src].remove(dst)
+        outer.prevs[dst].remove(src)
+        new_key = (loop_name, dst)
+        if new_key not in outer._edges:
+            outer._edges[new_key] = EdgeConfig(
+                from_node=loop_name, to_node=dst, type=edge.type,
+                soft=edge.soft, pinned_hard=edge.pinned_hard,
+            )
+            outer.nexts[loop_name].append(dst)
+            outer.prevs[dst].append(loop_name)
+
     # --- Mark loop entry --------------------------------------------------------
     hidden._ops[entry].start = True
     if entry not in hidden.entries:
         hidden.entries.append(entry)
 
     # --- Rewire incoming outer edges to the hidden loop -------------------------
+    entry_had_start_marker = False
     for key in list(outer._edges):
         src, dst = key
         if dst not in scc:
@@ -419,6 +486,8 @@ def _synthesize_loop(
         edge = outer._edges.pop(key)
         outer.nexts[src].remove(dst)
         outer.prevs[dst].remove(src)
+        if src == "__START__":
+            entry_had_start_marker = True
         # Point at the hidden loop's name instead.
         new_key = (src, loop_name)
         if new_key not in outer._edges:
@@ -429,38 +498,38 @@ def _synthesize_loop(
             outer.nexts[src].append(loop_name)
             outer.prevs[loop_name].append(src)
 
-    # Handle START markers: an SCC entry that was start=True in outer means
-    # the outer graph's START >> entry should now be START >> hidden.
-    # (start marker moved when we reset child.start above, so re-mark hidden.)
-    if entry in outer.entries:
-        outer.entries.remove(entry)
-    # Outer entry updates for cases where entry was declared via START marker
-    # only (no explicit edge). The plan considers this rare — but we cover it
-    # by inspecting the outer graph's initial entries.
+    # Promote the hidden loop into outer.entries when the SCC entry was
+    # itself an outer entry (marked by START >> entry). This is either
+    # detected during the SCC-op move above OR from the START-src edge check
+    # in the incoming-rewire block (some START connections travel through
+    # the edge list too depending on how they were declared).
+    if (entry_was_outer_entry or entry_had_start_marker) and loop_name not in outer.entries:
+        outer.entries.append(loop_name)
 
-    # --- Rewire outgoing edges to non-END outside targets -----------------------
+    # --- Mark loop-body internal ends + cover branch string candidates ----------
+    # By this point, the "Rewire SCC→outer edges" block has moved every real
+    # outer edge from an SCC node to (loop_name → dst). We still need to:
+    #   1. Mark ops inside the loop that terminate the DAG portion as .end=True
+    #      (their EOF triggers the outer loop iteration check).
+    #   2. Ensure outer._edges (loop_name → dst) exists for every exit —
+    #      including branch string-name candidates that had no auto-added
+    #      edge to begin with (HAZARD from Phase 3 review: named-string
+    #      branch candidates skipped by rewire).
     hidden_ends: Set[str] = set()  # nodes inside hidden that carry .end=True
     for (src_in_scc, dst) in exits:
         if dst == "__END__":
             hidden._ops[src_in_scc].end = True
             hidden_ends.add(src_in_scc)
             continue
-        # Move outer edge (src_in_scc → dst) to (loop_name → dst).
-        key = (src_in_scc, dst)
-        if key in outer._edges:
-            edge = outer._edges.pop(key)
-            outer.nexts[src_in_scc].remove(dst)
-            outer.prevs[dst].remove(src_in_scc)
-            new_key = (loop_name, dst)
-            if new_key not in outer._edges:
-                outer._edges[new_key] = EdgeConfig(
-                    from_node=loop_name, to_node=dst, type=edge.type,
-                    soft=edge.soft, pinned_hard=edge.pinned_hard,
-                )
-                outer.nexts[loop_name].append(dst)
-                outer.prevs[dst].append(loop_name)
-        # Inside the loop, mark src_in_scc as an internal end (it terminates
-        # the DAG portion of the iteration).
+        # Synthesize the outer edge if the SCC→outer rewire pass didn't
+        # already produce it (covers string-name branch candidates).
+        new_key = (loop_name, dst)
+        if new_key not in outer._edges and dst in outer._ops:
+            outer._edges[new_key] = EdgeConfig(
+                from_node=loop_name, to_node=dst,
+            )
+            outer.nexts[loop_name].append(dst)
+            outer.prevs[dst].append(loop_name)
         hidden._ops[src_in_scc].end = True
         hidden_ends.add(src_in_scc)
 

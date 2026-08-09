@@ -65,6 +65,11 @@ class MemoryState:
         "_interrupt_observers",
         "_interrupt_responses",
         "_current_step",
+        # Phase 3 BUG 7 fix: nested schedulers (running inside synthetic
+        # loops) read this to forward frames to the top-level engine.stream()
+        # output_queue. Set by the top-level scheduler at run start; None
+        # otherwise. Not persisted, not serialized.
+        "_stream_output_queue",
     )
 
     def __init__(
@@ -132,6 +137,12 @@ class MemoryState:
         # the same op invocation share the same step_id — matches the plan's
         # "step_id per write batch" semantic (STATE_LOOP_REFACTOR_PLAN.md §Phase 2).
         self._current_step: int = 0
+
+        # Phase 3 BUG 7 fix: nested schedulers read this to forward per-op
+        # frames from ops moved into synthetic hidden loops to the top-level
+        # engine.stream() output_queue. Left None when the run wasn't started
+        # via engine.stream(); nested schedulers then behave as before.
+        self._stream_output_queue = None
 
         # Apply initial inputs
         if inputs:

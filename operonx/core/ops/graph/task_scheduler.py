@@ -83,7 +83,22 @@ class Scheduler:
             item_ctxs   - list of per-item context tuples produced by generators.
         """
         g = self.graph
-        outputs, item_ctxs = await self._run_once(state, context_id, output_queue)
+        # BUG 7 fix (Phase 3): the top-level scheduler surfaces its
+        # output_queue on state so *synthetic hidden loops* can forward
+        # frames from their moved SCC ops to the same engine.stream()
+        # consumer. Restricted to synthetic loops on the nested-pickup path
+        # — regular subgraphs get their frames forwarded by the outer
+        # scheduler's own _on_frame (via ``_out_vars``), so having them ALSO
+        # forward would double-emit. Cleared after the run so the attribute
+        # doesn't leak.
+        top_level_stream = False
+        if output_queue is not None and getattr(state, "_stream_output_queue", None) is None:
+            state._stream_output_queue = output_queue
+            top_level_stream = True
+        effective_queue = output_queue
+        if effective_queue is None and getattr(g, "_loop_mode", None) == "synthetic":
+            effective_queue = getattr(state, "_stream_output_queue", None)
+        outputs, item_ctxs = await self._run_once(state, context_id, effective_queue)
 
         # Top-level loop re-dispatch (GraphOp.loop() sets _loop_config on g).
         # Synthetic loops (Phase 3 rewrite) skip this path — their outer
@@ -114,9 +129,14 @@ class Scheduler:
             if output_queue is not None and n_iters > 0:
                 output_queue.put_nowait((g.name, current_ctx, outputs))
 
-        # Signal completion to ExecutionHandle.
-        if output_queue is not None:
+        # Signal completion to ExecutionHandle (top level only — nested
+        # schedulers must not send the None sentinel since the top level's
+        # queue keeps receiving frames from other iterations).
+        if output_queue is not None and top_level_stream:
             output_queue.put_nowait(None)
+
+        if top_level_stream:
+            state._stream_output_queue = None
 
         return outputs, item_ctxs
 
@@ -385,31 +405,72 @@ class Scheduler:
 
                 # Derive iteration index from the ctx tail so nested loops and
                 # multi-iter re-dispatch don't get confused. First iter's ctx
-                # has no "loop_N" suffix → n=0; second → tail="loop_1", n=1;
-                # etc. This replaces a previous ctx-keyed counter that reset
-                # on every new ctx and produced ever-deeper nesting
-                # (("main","loop_1","loop_1","loop_1",...)).
+                # has no per-loop suffix → n=0; second → tail matches our
+                # per-op prefix.
+                #
+                # Synthetic loops (Phase 3) use ``{op.full_name}#{n}`` as the
+                # segment so nested synthetic loops don't collide on the
+                # namespace (HAZARD from Phase 3 review: outer __loop_0__ and
+                # inner __loop_0__ both bumping to "loop_1" wrote to the same
+                # ctx cell, corrupting per-iter checkpoint snapshots). ``#``
+                # is not permitted in op names, so parsing is unambiguous.
+                #
+                # Classic ``GraphOp.loop(until=...)`` keeps the old ``loop_N``
+                # scheme for backward compat.
+                is_synth = getattr(op, "_loop_mode", None) == "synthetic"
+                if is_synth:
+                    iter_prefix = f"{op.full_name}#"
+                else:
+                    iter_prefix = "loop_"
+
                 tail = event.ctx[-1] if event.ctx else None
-                if isinstance(tail, str) and tail.startswith("loop_"):
+                if isinstance(tail, str) and tail.startswith(iter_prefix):
                     try:
-                        n = int(tail[5:])
+                        n = int(tail[len(iter_prefix):])
                     except ValueError:
                         n = 0
                 else:
                     n = 0
 
                 if getattr(op, "_loop_mode", None) == "synthetic":
-                    # Phase 3 rewritten loop: iterate iff any back-edge source
-                    # op fired during this iteration. Detected via end_time
-                    # metric at event.ctx (every op writes end_time on
-                    # completion; missing entry = didn't fire).
+                    # Phase 3 rewritten loop: iterate iff any of the removed
+                    # back-edges (u→v) would have fired this iter. "Would have
+                    # fired" depends on the source's type:
+                    #  - If u is a BranchOp, it wrote end_time regardless of
+                    #    which candidate it picked, so end_time-alone would
+                    #    always report True even when the branch chose END.
+                    #    Consult u's __branch_target__ output: the back-edge
+                    #    fires only if the chosen target equals v.
+                    #  - Otherwise, end_time presence at this ctx is enough.
                     fired = False
-                    for u_name in op._back_edge_sources:
+                    for u_name, v_name in op._back_edges:
                         u_op = op._ops.get(u_name)
                         if u_op is None:
                             continue
-                        idx = state.schema.get_index(u_op.full_name, "end_time")
-                        if idx >= 0 and event.ctx in state._cells[idx]:
+                        # Cheap presence check first — no branch consult if
+                        # the op didn't run at all this iter.
+                        et_idx = state.schema.get_index(u_op.full_name, "end_time")
+                        if et_idx < 0 or event.ctx not in state._cells[et_idx]:
+                            continue
+                        if getattr(u_op, "type", None) == "branch":
+                            bt_idx = state.schema.get_index(
+                                u_op.full_name, "__branch_target__"
+                            )
+                            if bt_idx < 0:
+                                # No branch-target output — treat as fired
+                                # (defensive; this shouldn't happen for a
+                                # real BranchOp).
+                                fired = True
+                                break
+                            chosen = (
+                                state._cells[bt_idx][event.ctx]
+                                if event.ctx in state._cells[bt_idx]
+                                else None
+                            )
+                            if chosen == v_name:
+                                fired = True
+                                break
+                        else:
                             fired = True
                             break
                     should_continue = fired
@@ -419,8 +480,10 @@ class Scheduler:
                     should_continue = not _evaluate_until(cfg, outputs)
 
                 if should_continue and n < cfg.max_iterations - 1:
+                    next_seg = f"{iter_prefix}{n + 1}"
                     next_ctx = (
-                        event.ctx + ("loop_1",) if n == 0 else event.ctx[:-1] + (f"loop_{n + 1}",)
+                        event.ctx + (next_seg,) if n == 0
+                        else event.ctx[:-1] + (next_seg,)
                     )
                     for var, val in outputs.items():
                         state[op.full_name, var, next_ctx] = val
