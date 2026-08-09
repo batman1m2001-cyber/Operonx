@@ -55,19 +55,80 @@ class DummyOp(BaseOp):
     def __init__(self, name: str):
         super().__init__(name=name)
 
-    def shared(self, **kwargs):
-        """Declare shared vars on current graph. Only valid on PARENT.
+    def declare(self, *, reducers=None, **vars):
+        """Declare shared vars on the current graph, with optional reducers.
 
-        Shared vars persist across all stream contexts within the graph.
-        Normal PARENT vars are copied per stream context.
+        Shared vars persist across all stream contexts within the graph. Normal
+        PARENT vars are copied per stream context. When a reducer is registered
+        for a var, concurrent/repeated writes to its shared cell go through
+        ``reducer(old, new)`` instead of overwriting. Without a reducer, shared
+        cell writes use last-write-wins semantics.
+
+        Args:
+            reducers: Optional ``{var_name: fn}`` mapping. Each ``fn`` is a
+                ``(old, new) -> merged`` reducer applied at cell write time.
+                Every key MUST be one of the vars declared in this call
+                (build-time check).
+            **vars: ``var_name=initial_value`` declarations. Same semantics as
+                ``PARENT.shared()``.
+
+        Raises:
+            TypeError: if called on anything other than PARENT.
+            RuntimeError: if called outside a ``@graph`` body.
+            ValueError: if a reducer key is not in the declared vars.
 
         Usage::
 
+            from operonx.reducers import add_messages
+
             @graph
-            def pipeline():
-                PARENT.shared(current_state="REMINDER", history=[])
-                # PARENT["current_state"] now shared across all stream contexts
+            def agent():
+                PARENT.declare(
+                    count=0,
+                    messages=[],
+                    reducers={"messages": add_messages},
+                )
         """
+        if self.name != "__PARENT__":
+            raise TypeError("declare() can only be called on PARENT")
+        current_graph = get_current()
+        if current_graph is None:
+            raise RuntimeError("PARENT.declare() must be called inside a @graph function body")
+
+        reducers = reducers or {}
+        if not isinstance(reducers, dict):
+            raise TypeError(f"declare() reducers must be a dict, got {type(reducers).__name__}")
+
+        # E4: reducer keys must reference declared vars
+        unknown = set(reducers) - set(vars)
+        if unknown:
+            raise ValueError(
+                f"declare() reducers reference undeclared vars: {sorted(unknown)}. "
+                f"declared vars: {sorted(vars)}"
+            )
+
+        if not hasattr(current_graph, "_shared_vars"):
+            current_graph._shared_vars = {}
+        current_graph._shared_vars.update(vars)
+
+        if not hasattr(current_graph, "_reducer_vars"):
+            current_graph._reducer_vars = {}
+        current_graph._reducer_vars.update(reducers)
+
+    def shared(self, **kwargs):
+        """DEPRECATED alias for :meth:`declare` (without reducers).
+
+        Kept for backward compatibility with pre-0.12 graphs. New code should
+        use ``PARENT.declare(**vars, reducers={...})``.
+        """
+        import warnings
+
+        warnings.warn(
+            "PARENT.shared() is deprecated; use PARENT.declare() instead. "
+            "declare() additionally accepts a `reducers=` kwarg.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if self.name != "__PARENT__":
             raise TypeError("shared() can only be called on PARENT")
         current_graph = get_current()

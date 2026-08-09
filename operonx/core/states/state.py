@@ -6,7 +6,29 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from operonx.core.states.cell import DEFAULT_CONTEXT, Cell
 from operonx.core.states.schema import StateSchema
 
-__all__ = ["MemoryState"]
+__all__ = ["MemoryState", "ReducerError"]
+
+
+class ReducerError(RuntimeError):
+    """Raised when a reducer registered on a shared cell throws.
+
+    Attributes:
+        idx: cell index whose reducer failed
+        old: value that was in the cell before the merge attempt
+        new: incoming value that triggered the merge attempt
+        cause: original exception raised by the reducer
+    """
+
+    def __init__(self, idx: int, old: Any, new: Any, cause: Exception) -> None:
+        super().__init__(
+            f"reducer on cell idx={idx} raised {type(cause).__name__}: {cause}. "
+            f"old={old!r}, new={new!r}"
+        )
+        self.idx = idx
+        self.old = old
+        self.new = new
+        self.cause = cause
+
 
 _uuid4 = uuid.uuid4
 
@@ -98,6 +120,33 @@ class MemoryState:
             return op, var, (ctx,)
         return op, var, ctx
 
+    def _write_cell(self, idx: int, ctx_key: tuple, value: Any) -> None:
+        """Single funnel for all cell writes.
+
+        Applies the cell's reducer if the cell is shared AND has one
+        registered on the schema. Both ``__setitem__`` and the push-ref
+        hop route through here so reducers never get bypassed.
+
+        Reducer contract: ``(old, new) -> merged``. See
+        ``operonx.reducers`` for the standard library. Reducer errors
+        raise ``ReducerError`` wrapping the operands.
+
+        Args:
+            idx: cell index in ``self._cells``
+            ctx_key: context tuple (``DEFAULT_CONTEXT`` for shared cells)
+            value: incoming write; will be merged with current value if a
+                reducer is registered
+        """
+        reducer = self.schema._reducers.get(idx)
+        if reducer is not None:
+            cell = self._cells[idx]
+            old = cell[ctx_key] if ctx_key in cell else cell.default_value
+            try:
+                value = reducer(old, value)
+            except Exception as e:  # noqa: BLE001 — re-raise wrapped
+                raise ReducerError(idx=idx, old=old, new=value, cause=e) from e
+        self._cells[idx][ctx_key] = value
+
     def __setitem__(
         self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]], value: Any
     ) -> None:
@@ -112,12 +161,13 @@ class MemoryState:
         if idx < 0:
             raise KeyError(f"({op}, {var}) not found in schema")
 
-        self._cells[idx][ctx_key] = value
+        self._write_cell(idx, ctx_key, value)
 
-        # Push ref? Push 1 hop to target
+        # Push ref? Push 1 hop to target — route through _write_cell so
+        # reducers apply on shared-cell targets too.
         push_ref = self.schema._push_refs[idx]
         if push_ref and push_ref.idx >= 0:
-            self._cells[push_ref.idx][ctx_key] = push_ref._fn(value)
+            self._write_cell(push_ref.idx, ctx_key, push_ref._fn(value))
 
     def __getitem__(self, key: Union[Tuple[str, str], Tuple[str, str, Optional[str]]]) -> Any:
         """Get value. Pull from source if pull_ref exists (1 hop only).
