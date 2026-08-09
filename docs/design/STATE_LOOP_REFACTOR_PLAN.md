@@ -15,7 +15,7 @@ Three coupled changes that turn operonx's shared-state + loop model into somethi
 |---|---|---|---|
 | 1 ✅ | `PARENT.declare(**vars, reducers=...)` + reducers on shared-cell writes | ~180 shipped | Forgettable `.shared()` name + silent data loss on fan-in |
 | 2 | Unified `_write_cell` funnel + `Checkpointer` + `step_id` + `InterruptOp` + `EmitOp` + `engine.stream(mode=updates|values|frames|custom)` + `@op(exclude/include/observe_max)` filter | ~795 | No inspect / replay / HITL / streaming / observability control / custom events for iterations |
-| 3 | Cyclic edges (Level 2 rewrite via Tarjan SCC) | ~340 | `with GraphOp.loop(...)` weirdness |
+| 3 ✅ | Cyclic edges (Level 2 rewrite via Tarjan SCC) | ~340 shipped | `with GraphOp.loop(...)` weirdness |
 | | **Total** | **~1020** | |
 
 **Explicitly out of scope** (each intentionally dropped after review):
@@ -510,6 +510,31 @@ Order: Phase 1 → Phase 3 (Phase 2 can slot before or after Phase 3 independent
 - Tests (~80 LOC — 9 error cases + happy paths + nested + auto_soft interaction)
 
 **~340 LOC** (was 250 in v2, correction from review — added Tarjan + full_name re-cache).
+
+### Shipped notes (2026-08 branch `feature/phase-3-cyclic-edges`)
+
+Termination mechanic (the plan was silent on this — locking it in):
+- Hidden loop stores `_back_edge_sources: Set[str]` — the names of user-authored back-edge SOURCE ops (the `u` in each removed `(u, v)`).
+- Per iteration, the outer scheduler's `_on_eof` for the loop op checks whether any name in `_back_edge_sources` has an `end_time` cell present at the iteration's ctx. Present = fired that iter → continue. Absent → terminate.
+- No marker cells, no op wrapping, no scheduler-level per-ctx activation set. Purely reads existing `end_time` metrics that `BaseOp._store_metrics` already writes.
+- Synthetic loops skip the classic `Scheduler.run` re-dispatch path (which uses `_evaluate_until`) — re-dispatch is only done from the outer scheduler's `_on_eof`. Doing both would double-iterate.
+- Ctx-bump for iter N derives `n` from the tail suffix (`int(tail[5:])` when tail matches `"loop_*"`) rather than a ctx-keyed counter. The old counter reset per new ctx and produced deepening nests (`("main","loop_1","loop_1","loop_1",...)`) instead of the intended `("main","loop_2")`.
+
+Reducer regression fix (shipped as `11c4fef` before the Phase 3 core):
+- Phase 1's `_write_cell` read `old = cell[ctx_key] if ctx_key in cell else default`. Shared cells always store at `DEFAULT_CONTEXT`, so writes coming from a nested ctx like `("main","loop_1")` never satisfied `ctx_key in cell` and degraded the reducer to LWW.
+- Fix: `old = cell[ctx_key]` unconditionally — `Cell.__getitem__` handles shared→DEFAULT mapping + parent walk internally. Bug was invisible to Phase 1's test suite because none of its tests exercised nested-ctx writes; surfaced immediately when Phase 3 loops iterated.
+
+Scope actually shipped:
+- `operonx/core/ops/graph/cycle_rewrite.py` — new, ~340 LOC
+- `graph_op.py` — build() ordering, 5 new slots, ancestor-aware `_validate_ref_scope`
+- `task_scheduler.py` — synthetic-loop termination in `_on_eof` + skip classic loop path + ctx-bump fix
+- `validation.py` — `ancestor_names` param on `validate_graph` / `_validate_refs`
+- `_decorators.py` — `@graph(strict_dag=True)` opt-out; `@graph(until=...)` suppresses new DeprecationWarning via `_internal=True`
+- `state.py` — `_write_cell` reducer read fix
+- Tests: 20 in `test_cycle_rewrite.py` + 4 in `test_reducer_nested_ctx_regression.py`
+
+Not implemented from the plan:
+- E8 (two back-edges to different entries → should raise E2) — spec'd but not enforced by `_scc_entry_and_back_edges`; the hidden loop silently drops one back-edge target. (Flagged by post-ship adversarial review.)
 
 ---
 
