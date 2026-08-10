@@ -1,10 +1,12 @@
-"""Tests: ask() inside @graph with if_() branching.
+"""Tests: LLMOp structured mode inside @graph with if_() branching.
 
 Verifies:
-- No deadlock when ask() nested after if_()
+- No deadlock when LLMOp(fields=...) nested after if_()
 - Skip path works correctly
-- Validators format validation
+- Validators format validation (via parsing.apply_validators)
 - @-prefix default values
+
+Replaces the pre-1.0 tests that exercised the removed ``ask()`` helper.
 """
 
 import asyncio
@@ -15,19 +17,20 @@ import pytest
 from operonx.core import END, START, Operon, graph
 from operonx.core.ops import op
 from operonx.core.ops.flow import if_
-from operonx.providers.ops import ask
+from operonx.providers.ops import LLMOp
 from tests.internal.providers.test_extract_retry import make_mock_hub
-
-# ── Tests: ask() after if_() branching ──
 
 
 class TestExtractAfterBranch:
     def _run_branch_test(self, needs_llm, responses, expected_final):
-        """Helper: build graph with if_() + extract, run with mock LLM."""
+        """Helper: build graph with if_() + LLMOp(fields=...), run with mock LLM."""
 
         @op
         def detect(text: str) -> dict:
-            return {"needs_llm": needs_llm, "quick_result": "skipped" if not needs_llm else None}
+            return {
+                "needs_llm": needs_llm,
+                "quick_result": "skipped" if not needs_llm else None,
+            }
 
         @op
         def skip(quick_result: str = None) -> dict:
@@ -44,7 +47,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = ask(
+                e = LLMOp.of(
                     resource="mock",
                     prompt={"user": "{text}"},
                     fields=["result: str"],
@@ -66,7 +69,6 @@ class TestExtractAfterBranch:
         assert result.get("final") == expected_final
 
     def test_skip_path_no_deadlock(self):
-        """if_() routes to skip path → extract NOT run, no deadlock."""
         self._run_branch_test(
             needs_llm=False,
             responses=["<result>should_not_run</result>"],
@@ -74,7 +76,6 @@ class TestExtractAfterBranch:
         )
 
     def test_llm_path_no_deadlock(self):
-        """if_() routes to LLM path → extract runs without deadlock."""
         self._run_branch_test(
             needs_llm=True,
             responses=["<result>found</result>"],
@@ -82,8 +83,6 @@ class TestExtractAfterBranch:
         )
 
     def test_llm_path_with_validators(self):
-        """LLM returns valid value → passes validators."""
-
         @op
         def detect(text: str) -> dict:
             return {"needs_llm": True, "quick_result": None}
@@ -103,7 +102,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = ask(
+                e = LLMOp.of(
                     resource="mock",
                     prompt={"user": "{text}"},
                     fields=["result: str"],
@@ -126,8 +125,6 @@ class TestExtractAfterBranch:
         assert result.get("final") == "confirm"
 
     def test_llm_path_validators_reject_uses_default(self):
-        """LLM returns invalid → @fallback default used."""
-
         @op
         def detect(text: str) -> dict:
             return {"needs_llm": True, "quick_result": None}
@@ -147,7 +144,7 @@ class TestExtractAfterBranch:
             @graph
             def wf(text):
                 d = detect(text=text)
-                e = ask(
+                e = LLMOp.of(
                     resource="mock",
                     prompt={"user": "{text}"},
                     fields=["result: str"],
@@ -170,48 +167,45 @@ class TestExtractAfterBranch:
         assert result.get("final") == "fallback"
 
 
-# ── Tests: validators format validation ──
+class TestParsingPureFunctions:
+    """Direct tests of the parsing pure functions used by LLMOp inline.
+    Previously covered by ParserOp._process tests."""
 
-
-class TestValidatorsFormat:
     def test_invalid_validators_returns_error(self):
-        """validators must be dict, not list."""
-        from operonx.core.ops.transform.parser_op import ParserOp
+        from operonx.providers.parsing import ExtractField, parse_and_extract
 
-        parser = ParserOp(format="xml", extract=["result: str"])
-        result = asyncio.run(
-            parser._process(
-                text="<result>hello</result>",
-                validators=["not", "a", "dict"],
-            )
+        fields = [ExtractField.from_string("result: str")]
+        result = parse_and_extract(
+            text="<result>hello</result>",
+            parser="xml",
+            fields=fields,
+            validators=["not", "a", "dict"],  # type: ignore[arg-type]
         )
         assert result.get("error") is not None
         assert "validators must be a dict" in result["error"]
 
     def test_valid_validators_dict(self):
-        """Proper dict validators work."""
-        from operonx.core.ops.transform.parser_op import ParserOp
+        from operonx.providers.parsing import ExtractField, parse_and_extract
 
-        parser = ParserOp(format="xml", extract=["result: str"])
-        result = asyncio.run(
-            parser._process(
-                text="<result>confirm</result>",
-                validators={"result": ["confirm", "deny", "@fallback"]},
-            )
+        fields = [ExtractField.from_string("result: str")]
+        result = parse_and_extract(
+            text="<result>confirm</result>",
+            parser="xml",
+            fields=fields,
+            validators={"result": ["confirm", "deny", "@fallback"]},
         )
         assert result["error"] is None
         assert result["result"] == "confirm"
 
     def test_validators_default_on_reject(self):
-        """@-prefix value used as default when validation fails."""
-        from operonx.core.ops.transform.parser_op import ParserOp
+        from operonx.providers.parsing import ExtractField, parse_and_extract
 
-        parser = ParserOp(format="xml", extract=["result: str"])
-        result = asyncio.run(
-            parser._process(
-                text="<result>unknown_intent</result>",
-                validators={"result": ["confirm", "deny", "@fallback"]},
-            )
+        fields = [ExtractField.from_string("result: str")]
+        result = parse_and_extract(
+            text="<result>unknown_intent</result>",
+            parser="xml",
+            fields=fields,
+            validators={"result": ["confirm", "deny", "@fallback"]},
         )
         assert result["error"] is None
         assert result["result"] == "fallback"
