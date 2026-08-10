@@ -43,6 +43,53 @@ from operonx.core.ops._shortcuts import (  # noqa: F401, E402
 )
 from operonx.core.ops._utils import _has_explicit_outputs, _set_wildcard_outputs  # noqa: F401, E402
 
+_OBS_KEY_WILDCARD = "*"
+_OBS_VALID_CHANNELS = frozenset({"trace", "checkpoint", _OBS_KEY_WILDCARD})
+
+
+def _normalise_observability(exclude, include):
+    """Validate + normalise ``@op(exclude=..., include=...)`` config.
+
+    Both args accept ``list[str]`` (apply to both observers) or ``dict``
+    with channel-keyed lists (``{"trace": [...], "checkpoint": [...]}``).
+    List form is normalised to ``{"*": [...]}``.
+
+    Returns ``(exclude_dict, include_dict)`` where each is either an empty
+    dict (no filter) or a dict of channel → tuple-of-vars.
+
+    Raises:
+        TypeError: shape wrong or non-string vars
+        ValueError: unknown channel keys, or both ``exclude`` and ``include`` set
+    """
+    if exclude is not None and include is not None:
+        raise ValueError("@op() cannot mix exclude= and include= — pick one filter mode")
+
+    def _norm(val, name):
+        if val is None:
+            return {}
+        if isinstance(val, (list, tuple)):
+            if not all(isinstance(v, str) for v in val):
+                raise TypeError(f"@op({name}=...): list entries must be str")
+            return {_OBS_KEY_WILDCARD: tuple(val)}
+        if isinstance(val, dict):
+            unknown = set(val) - _OBS_VALID_CHANNELS
+            if unknown:
+                raise ValueError(
+                    f"@op({name}={{...}}): unknown channels {sorted(unknown)}; "
+                    f"valid: {sorted(_OBS_VALID_CHANNELS)}"
+                )
+            out = {}
+            for ch, vars_ in val.items():
+                if not isinstance(vars_, (list, tuple)) or not all(
+                    isinstance(v, str) for v in vars_
+                ):
+                    raise TypeError(f"@op({name}={{{ch!r}: ...}}): value must be list[str]")
+                out[ch] = tuple(vars_)
+            return out
+        raise TypeError(f"@op({name}=...): must be list[str] or dict, got {type(val).__name__}")
+
+    return _norm(exclude, "exclude"), _norm(include, "include")
+
 
 def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
     """Strip top-level ``Media`` wrappers so consumer ops receive raw values.
@@ -112,6 +159,10 @@ class BaseOp(ABC):
         "_input_cache",
         "_metrics_idx",
         "_error_idx",
+        # Phase 2: observability filter (Checkpointer + Tracer both respect these)
+        "_obs_exclude",  # dict {"trace":[...], "checkpoint":[...]} or {"*":[...]}; empty = no exclude
+        "_obs_include",  # dict {"trace":[...], "checkpoint":[...]} or {"*":[...]}; None = no allowlist
+        "observe_max",  # int | None — per-op emit-event cap; raises ObserveBudgetExceeded on exceed
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -137,6 +188,9 @@ class BaseOp(ABC):
         bound: Optional[str] = None,
         cache: Union[bool, str, None] = None,
         delay: float = 0,
+        exclude=None,
+        include=None,
+        observe_max: Optional[int] = None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -148,6 +202,13 @@ class BaseOp(ABC):
         self._error_idx = None  # (schema, err_idx)
         self.cache = cache
         self.delay = delay
+
+        # Phase 2: observability filter. Normalised to dict form:
+        #   {"*": [vars]}                  — apply to both observers
+        #   {"trace": [...], "checkpoint": [...]}  — per-observer
+        # Mutual exclusion enforced here at op construction.
+        self._obs_exclude, self._obs_include = _normalise_observability(exclude, include)
+        self.observe_max = observe_max
         self.id = id or uuid.uuid4().hex
         if name is None:
             name = auto_name()
@@ -489,7 +550,9 @@ class BaseOp(ABC):
         """Store result dict into state.
 
         Uses state[op, var, ctx] = value for O(1) index-based storage.
-        Extracts $tags special key for dynamic tagging.
+        Extracts $tags special key for dynamic tagging. After all writes
+        commit, calls ``state.advance_step()`` so the checkpointer /
+        tracer see a fresh ``step_id`` for the next op's writes.
         """
         if not result:
             return
@@ -501,6 +564,9 @@ class BaseOp(ABC):
 
         for key, value in result.items():
             state[self.full_name, key, context_id] = value
+
+        # Phase 2: bump step_id after this op's outputs commit.
+        state.advance_step()
 
     # =========================================================================
     # 3b. OP-LEVEL CACHE
@@ -887,6 +953,10 @@ class BaseOp(ABC):
             op_cancelled = True
             raise
         except Exception:
+            # ObserveBudgetExceeded is a BaseException subclass and skips
+            # this handler by design — the circuit-breaker propagates up
+            # to the scheduler and halts the run.
+
             import sys
 
             error_msg = (

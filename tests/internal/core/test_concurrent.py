@@ -189,29 +189,38 @@ class TestCcuNestedGraph:
 class TestCcuLoop:
     @pytest.mark.asyncio
     async def test_ccu_loop(self):
-        """5 concurrent runs with loops of different lengths."""
+        """5 concurrent runs with loops of different lengths.
+
+        Migrated to 1.0.0 back-edge syntax — GraphOp.loop was removed.
+        """
+        from operonx.core.ops.flow.branch_op import if_
 
         @op
-        def inc_with_target(counter: int, target: int):
-            return {"counter": counter + 1, "target": target}
+        def inc_and_check(counter: int, target: int):
+            # Return the done flag directly — comparing a Ref to another
+            # Ref inside if_() doesn't resolve the RHS Ref, so we compute
+            # the boolean here and branch on ``inc["done"] == True``.
+            new_counter = counter + 1
+            return {"counter": new_counter, "done": new_counter >= target}
 
-        with GraphOp.loop(name="counter", until="counter >= target", counter=0, target=1) as g:
-            inc = inc_with_target(counter=PARENT["counter"], target=PARENT["target"])
+        @graph
+        def counter(target):
+            PARENT.declare(counter=0)
+            inc = inc_and_check(counter=PARENT["counter"], target=target)
             inc["counter"] >> PARENT["counter"]
-            inc["target"] >> PARENT["target"]
-            START >> inc >> END
+            START >> inc >> if_(inc["done"] == True, END).else_(inc)  # noqa: E712
 
-        engine = Operon(g)
+        # target=None → _build_fn_args maps it to PARENT["target"] Ref, which
+        # the schema turns into a graph input resolvable at engine.run().
+        engine = Operon(counter(target=None))
         targets = [1, 2, 3, 4, 5]
         results = await asyncio.gather(*[engine.run(inputs={"target": t}) for t in targets])
 
         for t, r in zip(targets, results):
-            # Loop emits one frame per iteration; engine.run(unwrap=True)
-            # gives scalar for 1-iteration loops, list for multi-iteration.
-            counter = r["counter"]
-            if isinstance(counter, list):
-                counter = counter[-1]  # final iteration value
-            assert counter == t, f"target={t}: expected counter={t}, got {counter}"
+            counter_val = r["counter"]
+            if isinstance(counter_val, list):
+                counter_val = counter_val[-1]
+            assert counter_val == t, f"target={t}: expected counter={t}, got {counter_val}"
 
 
 # =============================================================================

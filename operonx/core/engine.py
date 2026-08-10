@@ -104,6 +104,17 @@ class ExecutionHandle:
                         self._resolve_all_waiters(item)
                         self._cond.notify_all()
                         return
+                    if (
+                        isinstance(item, tuple)
+                        and len(item) == 3
+                        and isinstance(item[2], BaseException)
+                    ):
+                        # Some scheduler paths wrap errors in a frame tuple.
+                        self._error = item[2]
+                        self._done = True
+                        self._resolve_all_waiters(item[2])
+                        self._cond.notify_all()
+                        return
                     op, ctx, data = item
                     self._frames.append(item)
                     self._cond.notify_all()
@@ -438,6 +449,27 @@ class Operon:
         """Access the workflow state schema."""
         return self._schema
 
+    def _all_ops_registry(self) -> Dict[str, "BaseOp"]:
+        """Build ``{full_name: op}`` map for the whole graph tree.
+
+        Used by ``bind_checkpointer`` so per-op observability filters
+        (``@op(exclude=/include=/observe_max=)``) can be honoured.
+        """
+        registry: Dict[str, "BaseOp"] = {}
+
+        def _walk(op):
+            if getattr(op, "_full_name", None):
+                registry[op._full_name] = op
+            elif getattr(op, "name", None):
+                registry[op.name] = op
+            children = getattr(op, "_ops", None)
+            if children:
+                for child in children.values():
+                    _walk(child)
+
+        _walk(self.graph)
+        return registry
+
     def start(
         self,
         inputs: Dict[str, Any],
@@ -447,6 +479,7 @@ class Operon:
         request_id: Optional[str] = None,
         trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
+        checkpointer=None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -491,6 +524,19 @@ class Operon:
         if scratch:
             state._scratch.update(scratch)
 
+        # Phase 2: wire the checkpointer to the state's write funnel BEFORE
+        # the scheduler runs, so no writes are missed. Unsubscribe hook is
+        # invoked in the run's finally-block to detach cleanly.
+        _cp_unsubscribe = None
+        if checkpointer is not None:
+            from operonx.checkpoint.bridge import bind_checkpointer
+
+            _cp_unsubscribe = bind_checkpointer(
+                state,
+                checkpointer,
+                op_registry=self._all_ops_registry(),
+            )
+
         LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 
         graph_name = self.name
@@ -520,14 +566,37 @@ class Operon:
             v3_token = _v3_trace_var.set(_wf_trace)
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
-            except Exception as e:
-                queue.put_nowait(e)
             except asyncio.CancelledError:
+                # Phase 2b3 T5: notify the checkpointer of run-level cancel so
+                # audit trails and speculative-chain teardown observers hear it.
+                if checkpointer is not None:
+                    try:
+                        checkpointer.on_cancel(("main",))
+                    except Exception:
+                        LOGGER.exception("checkpointer.on_cancel failed")
                 queue.put_nowait(None)
                 raise
+            except BaseException as e:  # includes ObserveBudgetExceeded (Phase 2)
+                queue.put_nowait(e)
+                # Do NOT re-raise a BaseException — the ExecutionHandle re-raises
+                # it to the caller via _pump when the value is dequeued. Bubbling
+                # here would surface as an unhandled task exception.
             finally:
                 _v3_trace_var.reset(v3_token)
                 _wf_trace.ended_at = perf_counter()
+                # Detach any Phase 2 observers bound at start().
+                if _cp_unsubscribe is not None:
+                    try:
+                        _cp_unsubscribe()
+                    except Exception:
+                        LOGGER.exception("checkpointer unsubscribe failed")
+                # Phase 2b3 H3: drain any pending InterruptOp futures so the
+                # state's response bus doesn't leak entries after the run.
+                if state._interrupt_responses:
+                    for _iid, _fut in list(state._interrupt_responses.items()):
+                        if not _fut.done():
+                            _fut.cancel()
+                    state._interrupt_responses.clear()
                 # V3 consumers — auto-invoke on the completed trace.
                 # `asyncio.to_thread` so a slow HTTP consumer (Langfuse)
                 # doesn't block the event loop; per-consumer try/except
@@ -557,6 +626,7 @@ class Operon:
         request_id: Optional[str] = None,
         trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
+        checkpointer=None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -592,12 +662,197 @@ class Operon:
             request_id=request_id,
             trace_id=trace_id,
             scratch=scratch,
+            checkpointer=checkpointer,
         )
 
         result = await handle.collect(unwrap=True)
         result["$state"] = handle.state
 
         return result
+
+    async def invoke(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """LangGraph-familiar alias for :meth:`run`. Same signature."""
+        return await self.run(inputs, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Streaming helpers (module-local; see stream() below)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _idx_to_op_var_dispatch(state, idx: int):
+        for (op_name, var), i in state.schema._var_to_idx.items():
+            if i == idx:
+                return op_name, var
+        return "?", "?"
+
+    async def stream(  # noqa: C901 — routing on mode; keeps engine surface compact
+        self,
+        inputs: Dict[str, Any],
+        *,
+        mode: str = "updates",
+        channels: Optional[List[str]] = None,
+        checkpointer: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "asyncio.AsyncGenerator[Any, None]":
+        """LangGraph-familiar streaming iterator.
+
+        Args:
+            inputs: workflow inputs (same as ``run``/``invoke``)
+            mode: one of
+                - ``"updates"`` — yields ``{op_name: {var: value, ...}}`` per op
+                  completion (matches LangGraph's ``stream_mode="updates"``)
+                - ``"values"`` — yields the full state snapshot per step;
+                  requires a checkpointer (auto-created in-memory if omitted)
+                - ``"frames"`` — yields ``(op, ctx, data)`` operonx frames
+                - ``"custom"`` — yields :class:`~operonx.checkpoint.CustomEvent`
+                  emitted by any :class:`~operonx.EmitOp`, optionally filtered
+                  by ``channels=[...]``
+            channels: for ``mode="custom"`` only — restrict to these channel names
+            checkpointer: for ``mode="values"``; auto-created InMemory if None
+            **kwargs: forwarded to ``start()`` (user_id, session_id, etc.)
+
+        Yields:
+            mode-specific chunks (see above).
+        """
+        import asyncio
+
+        from operonx.checkpoint import InMemoryCheckpointer
+        from operonx.checkpoint.base import CustomEvent
+        from operonx.checkpoint.bridge import bind_custom_bus
+
+        # Only "values" mode strictly needs a checkpointer. Create an in-memory
+        # one on demand so callers don't have to plumb it manually.
+        if mode == "values" and checkpointer is None:
+            checkpointer = InMemoryCheckpointer()
+
+        # For mode="custom", subscribe to the state's custom bus and buffer
+        # events into a local queue. Handle is used for its scheduler task.
+        if mode == "custom":
+            queue: asyncio.Queue = asyncio.Queue()
+
+            def _sink(evt: CustomEvent):
+                if channels is None or evt.channel in channels:
+                    queue.put_nowait(evt)
+
+            handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
+            op_registry = self._all_ops_registry()
+            _unbind = bind_custom_bus(handle.state, _sink, op_registry=op_registry)
+            drainer = None
+            getter = None
+            try:
+                # Drain the frame queue in the background so scheduler can
+                # progress; we ignore frames here — only custom events.
+                async def _drain_frames():
+                    async for _ in handle:
+                        pass
+
+                drainer = asyncio.create_task(_drain_frames())
+                while not (drainer.done() and queue.empty()):
+                    getter = asyncio.create_task(queue.get())
+                    done, _pending = await asyncio.wait(
+                        {getter, drainer},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if getter in done:
+                        yield getter.result()
+                    else:
+                        getter.cancel()
+                        # Drain any remaining events after scheduler done.
+                        while not queue.empty():
+                            yield queue.get_nowait()
+                        break
+            finally:
+                _unbind()
+                # Phase 2b3 B3: cancel the scheduler on caller break/error so
+                # long-running ops (LLM calls, DB writes) don't keep burning
+                # resources with no consumer.
+                handle.cancel()
+                if drainer and not drainer.done():
+                    drainer.cancel()
+                if getter and not getter.done():
+                    getter.cancel()
+            return
+
+        # For "updates" and "values" we need per-op-completion granularity,
+        # not just the scheduler's output-frame stream (which only fires for
+        # ops that push to PARENT / END). We piggy-back on the state's write
+        # bus so every op invocation yields exactly once.
+        if mode in ("updates", "values"):
+            if mode == "values" and checkpointer is None:
+                checkpointer = InMemoryCheckpointer()
+            handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
+            state = handle.state
+
+            # Reverse index built once.
+            idx_to_key = {
+                idx: (op_name, var) for (op_name, var), idx in state.schema._var_to_idx.items()
+            }
+
+            # Buffer per-step writes into a list of updates. Each element
+            # in step_updates is {op_name: {var: value, ...}} for one step.
+            step_updates: Dict[int, Dict[str, Dict[str, Any]]] = {}
+
+            def _record(idx: int, ctx_key: tuple, value):
+                op_name, var = idx_to_key.get(idx, ("?", "?"))
+                step = state._current_step
+                step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
+
+            state.subscribe_writes(_record)
+            try:
+                # Consume the frame stream to drive the scheduler forward;
+                # we don't yield from it, but we need to advance so writes
+                # keep happening. Track "already yielded" step to yield newly-
+                # completed steps as they land.
+                last_yielded = -1
+                async for _ in handle:
+                    current = state._current_step
+                    while last_yielded < current - 1:
+                        last_yielded += 1
+                        if mode == "updates":
+                            batch = step_updates.pop(last_yielded, {})
+                            if batch:
+                                yield batch
+                        else:  # values
+                            if checkpointer is not None:
+                                try:
+                                    yield checkpointer.get_state(last_yielded)
+                                except Exception:
+                                    pass
+                # Drain any final steps after the handle completes.
+                current = state._current_step
+                while last_yielded < current:
+                    last_yielded += 1
+                    if mode == "updates":
+                        batch = step_updates.pop(last_yielded, {})
+                        if batch:
+                            yield batch
+                    else:
+                        if checkpointer is not None:
+                            try:
+                                yield checkpointer.get_state(last_yielded)
+                            except Exception:
+                                pass
+            finally:
+                state.unsubscribe_writes(_record)
+                # Phase 2b3 B3: cancel scheduler on caller break so a partial
+                # consume doesn't leave the graph running with no listener.
+                handle.cancel()
+            return
+
+        handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
+
+        if mode == "frames":
+            try:
+                async for frame in handle:
+                    yield frame
+            finally:
+                # Phase 2b3 B3: cancel on caller break/error.
+                handle.cancel()
+            return
+
+        raise ValueError(
+            f"engine.stream(mode={mode!r}) — valid modes: 'updates', 'values', 'frames', 'custom'"
+        )
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.

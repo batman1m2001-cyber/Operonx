@@ -37,11 +37,12 @@ from operonx.core import (
     SCRATCH,
     START,
     BranchOp,
+    EmitOp,
     FuncOp,
     GraphOp,
     Interrupt,
+    InterruptOp,
     Operon,
-    ParserOp,
     graph,
     op,
 )
@@ -115,8 +116,9 @@ __all__ = [
     # Core op types
     "GraphOp",
     "BranchOp",
+    "EmitOp",
+    "InterruptOp",
     "FuncOp",
-    "ParserOp",
     # Decorators
     "op",
     "graph",

@@ -1,7 +1,9 @@
 # Streaming
 
 Operonx is **streaming-first**. The classic `ForOp` / `MapOp` / `WhileOp`
-classes were replaced by two patterns: generator ops and `GraphOp.loop`.
+classes were replaced by two patterns: generator ops (for fan-out) and
+back-edges inside `@graph` (for feedback loops, rewritten at build time
+into a hidden `_GraphLoop` by the Phase 3 cycle-rewrite pass).
 
 ## Per-yield dispatch
 
@@ -81,21 +83,24 @@ three times, in parallel — not in a serial for-loop.
 If you need ordered output, collect downstream into a list op or use the
 ordered-collect helper (see API reference).
 
-## Loops with `GraphOp.loop`
+## Loops via back-edge (Phase 3 rewrite)
 
 For feedback loops where the iteration depends on the previous frame's
-state, use the loop builder:
+state, write a back-edge inside `@graph`. The build-time cycle-rewrite
+pass synthesizes a hidden `_GraphLoop` for the scheduler:
 
 ```python
-with GraphOp.loop(until="count >= 5", count=0) as loop:
+@graph
+def counter():
+    PARENT.declare(count=0)
     inc = increment(counter=PARENT["count"])
     inc["counter"] >> PARENT["count"]
-    START >> inc >> END
+    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
 ```
 
-The `until=` expression is evaluated against the current loop state after
-each iteration. `inc["counter"] >> PARENT["count"]` writes the new value
-back to the loop state for the next iteration to read.
+The `if_(...).else_(inc)` is the back-edge — else-target routes back to
+an earlier op. Each iteration commits its outputs to the shared cell,
+the branch reads the updated value, and decides to exit or loop again.
 
 ## Frame consumption
 
@@ -115,5 +120,5 @@ This is what tracers consume internally.
 - Generator ops are the default unit of fan-out. Prefer them over manual
   asyncio.gather patterns.
 - Loops have a small per-iteration overhead from state propagation. For
-  tight numeric loops, write the loop inside a single op instead of using
-  `GraphOp.loop`.
+  tight numeric loops, write the loop inside a single op instead of
+  using a graph-level back-edge.

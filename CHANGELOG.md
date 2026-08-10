@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-10
+
+Milestone release: state observability, HITL primitives, LangGraph-style
+back-edge loops, structured-output LLMOp, and cleanup of deprecated
+surfaces. See [MIGRATION.md](MIGRATION.md) for the upgrade recipe.
+
+### Added — Phase 1 (state)
+- `PARENT.declare(**vars, reducers={...})` — shared cells with optional
+  fan-in reducers. Replaces `PARENT.shared()`.
+- `operonx.reducers` — `add_messages` (LangGraph-compatible id-upsert
+  + `RemoveMessage` / `REMOVE_ALL_MESSAGES` sentinels), `dict_merge`,
+  plus support for `operator.add` / `operator.or_` from stdlib.
+
+### Added — Phase 2 (observability + HITL)
+- `Checkpointer` protocol + `InMemoryCheckpointer` with per-step delta
+  storage; `get_state(step)` folds, `get_updates(step)` returns delta,
+  `list_steps()` enumerates. Zero overhead when no checkpointer bound.
+- `MemoryState._write_cell` funnel + write-observer bus. All cell
+  mutations (including `SCRATCH[k] = v`) flow through it.
+- `@op(exclude=..., include=..., observe_max=...)` — filter observability
+  at emission source. Polymorphic list-or-dict; mutual-exclusion of
+  include/exclude. `ObserveBudgetExceeded` (inherits `BaseException`)
+  as a circuit breaker for runaway generator ops.
+- `InterruptOp` — HITL suspend/resume via `asyncio.Future`.
+- `EmitOp` — fire-and-forget custom events.
+- `engine.stream(mode="updates" | "values" | "frames" | "custom")` +
+  `engine.invoke()` alias.
+
+### Added — Phase 3 (loops)
+- Build-time cycle rewrite: write a back-edge inside `@graph` and the
+  Phase 3 pass compiles it into a hidden `_GraphLoop`. LangGraph-style
+  agent loops without the visible loop wrapper.
+- `@graph(strict_dag=True)` opt-out for fail-fast on accidental cycles.
+
+### Added — LLMOp structured-output layer
+- `LLMOp.of(fields=..., parser=..., validators=..., max_retries=...,
+  retry_hint=True)` — inline parse + validate + error-guided semantic
+  retry on the same resource (Instructor-style).
+- `LLMRefusalError` and `ValidatorError` exception classes; refusal
+  detected via `finish_reason` in `{content_filter, safety}` or
+  non-empty `extras.refusal` (structural, not content-heuristic).
+- `operonx.providers.parsing` — pure functions
+  (`parse_json` / `parse_xml` / `parse_yaml`, `ExtractField`,
+  `extract_value_by_path`, `convert_type`, `apply_validators`,
+  `parse_and_extract`) for text-only parsing without an LLM call.
+
+### Changed
+- Fallback trigger narrowed: `fallback=[...]` fires only on refusals,
+  content-filter blocks, or exhausted transport (SDK-side). Parse /
+  validator failures NO LONGER trigger fallback — they use
+  `max_retries` on the same resource.
+- Transport-level retries (429 / 5xx / timeout) are delegated to the
+  underlying SDK; LLMOp does not add its own transport-retry knob to
+  avoid double-retry surprises.
+
+### Removed (BREAKING)
+- `PARENT.shared(**vars)` — use `PARENT.declare(**vars)`.
+- `GraphOp.loop(name=..., until=..., **initial_state)` constructor —
+  use a back-edge inside `@graph` and let the rewrite synthesize the
+  loop. The `_GraphLoop` type still exists internally.
+- `@graph(until=..., max_iterations=...)` decorator surface — replaced
+  by (a) back-edge for control-flow loops or (b) `LLMOp(max_retries=N)`
+  for LLM parse/validate retry.
+- `ParserOp` class + `ParserType` alias — parsing lives inline in
+  `LLMOp(fields=..., parser=..., validators=...)`; pure functions for
+  standalone use are in `operonx.providers.parsing`.
+- `ask()` helper (`operonx.providers.ops.ask`) — subsumed by
+  `LLMOp.of(fields=..., max_retries=...)`.
+
+### Fixed
+- Shared-cell reducer degraded to LWW on nested-ctx writes (from
+  Phase 3 loop iterations) — `_write_cell` now reads `old` via
+  `Cell.__getitem__` which handles the shared→DEFAULT_CONTEXT mapping.
+
 ## [0.11.0] - 2026-07-30
 
 Branch-graph ergonomics release. Two additive, non-breaking features

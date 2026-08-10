@@ -23,6 +23,15 @@ _BASE_INIT_KEYS = frozenset(
         "bound",
         "cache",
         "contain_generation",
+        # Phase 2 observability filter kwargs — passed through to BaseOp.__init__
+        "exclude",
+        "include",
+        "observe_max",
+        # Phase 3 graph-only kwargs — routed to GraphOp.__init__ instead of
+        # silently landing in the input mapping (BUG 6 from Phase 3 review).
+        "strict_dag",
+        "auto_soft",
+        "concurrency",
     }
 )
 

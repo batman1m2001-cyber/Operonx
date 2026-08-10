@@ -1,29 +1,36 @@
 """@graph decorator for building reusable GraphOp factories.
 
-If the caller passes `until=` kwarg, the graph becomes a loop (GraphOp.loop).
-Otherwise it's a simple one-shot graph (GraphOp).
+The decorator turns a builder function into a factory that constructs a
+fresh ``GraphOp`` on every call. Function parameters become graph inputs;
+``Ref`` values are injected as ``PARENT[key]`` refs, static values pass
+through as-is.
 
-Example — simple graph::
+Example::
 
     @graph
     def classify(speech):
-        ...
-        START >> prompt >> llm >> parser >> END
+        prompt = build_prompt(text=speech)
+        response = llm(prompt=prompt)
+        result = parse(response=response["content"])
+        START >> prompt >> response >> result >> END
 
     g = classify(speech=PARENT["speech"])
 
-Example — loop graph (pass `until=`)::
+Note (1.0.0): the ``@graph(until=..., max_iterations=...)`` retry-loop
+sugar was removed. Two replacements depending on what you were doing:
 
-    @graph
-    def counter(count, until, max_iterations=5):
-        inc = increment(counter=count)
-        inc["counter"] >> PARENT["count"]
-        START >> inc >> END
+  * For LLM parse/validate retry, use ``LLMOp(fields=..., max_retries=...)``.
+    Retry lives inside the op, no graph-shape overhead.
+  * For general control-flow loops, write a back-edge in the ``@graph``
+    body — the Phase 3 cycle-rewrite pass synthesizes the loop for you::
 
-    g = counter(count=0, until="count >= 5", max_iterations=5)
+        @graph
+        def counter():
+            inc = increment(counter=PARENT["count"])
+            inc["counter"] >> PARENT["count"]
+            START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
 """
 
-import inspect
 from functools import wraps
 
 from operonx.core.loggings import LOGGER
@@ -31,9 +38,6 @@ from operonx.core.ops._shortcuts import _BASE_INIT_KEYS, split_shorthand_kwargs
 from operonx.core.ops.base import PARENT
 from operonx.core.states.ref import Ref
 from operonx.core.utils.auto_name import register_skip
-
-# Keys consumed by loop logic — popped from kwargs before graph creation
-_LOOP_KEYS = {"until", "max_iterations"}
 
 
 def _build_fn_args(input_mappings, param_names):
@@ -58,7 +62,7 @@ def _build_fn_args(input_mappings, param_names):
     return args
 
 
-def graph(fn=None, *, bound: "str | None" = None):
+def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
     """Decorator to turn a builder function into a reusable GraphOp factory.
 
     Can be used bare or with keyword arguments::
@@ -71,31 +75,23 @@ def graph(fn=None, *, bound: "str | None" = None):
         def io_pipeline(x):
             ...
 
-    The function's parameters become graph inputs. Ref values are injected as
-    PARENT refs; static values are passed through directly for use at build time.
-
-    If the caller passes ``until=`` kwarg, the graph becomes a feedback loop::
-
-        @graph
-        def ask(error="init", until="error == None", max_iterations=2, ...):
+        @graph(strict_dag=True)
+        def dag_only(x):
+            # back-edges here FAIL validate() instead of being rewritten
             ...
-
-        # Simple (no loop):
-        a = ask(fields=["result: str"], speech="hello")
-
-        # With retry loop:
-        a = ask(fields=["result: str"], until="error == None", max_iterations=3, speech="hello")
-
-    ``max_iterations`` can be a string expression evaluated against kwargs::
-
-        a = ask(retry=2, until="error == None", max_iterations="retry + 1", ...)
 
     Args:
         bound: Execution bound for the graph. ``None`` auto-detects from children.
             ``"sync"`` forces inline dispatch, ``"io"``/``"cpu"`` forces task dispatch.
+        strict_dag: Opt out of the Phase 3 cycle-to-loop rewrite. Back-edges
+            in the graph body are left as-is (and hit the classic cycle
+            warning path). Use when you want fail-fast behavior on accidental
+            cycles.
     """
 
-    def _make_graph_wrapper(fn, graph_bound):
+    def _make_graph_wrapper(fn, graph_bound, graph_strict_dag):
+        import inspect
+
         from operonx.core.ops.graph.graph_op import GraphOp
 
         sig = inspect.signature(fn)
@@ -109,77 +105,23 @@ def graph(fn=None, *, bound: "str | None" = None):
                 sorted(_BASE_INIT_KEYS),
             )
 
-        param_names = set(sig.parameters.keys()) - _LOOP_KEYS
+        param_names = set(sig.parameters.keys())
 
         @wraps(fn)
         def wrapper(**kwargs):
-            # Pop loop config from kwargs
-            until = kwargs.pop("until", None)
-            max_iterations = kwargs.pop("max_iterations", 100)
-
             input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
 
             # Inject decorator-level bound if not overridden at call time
             if graph_bound is not None and "bound" not in init_kwargs:
                 init_kwargs["bound"] = graph_bound
+            # Inject decorator-level strict_dag if not overridden at call time
+            if graph_strict_dag and "strict_dag" not in init_kwargs:
+                init_kwargs["strict_dag"] = True
 
-            if until is not None:
-                # ── Loop mode ──
-                loop_params = set()
-                config_params = set()
-                for name, param in sig.parameters.items():
-                    if name in _LOOP_KEYS:
-                        continue
-                    if param.kind == inspect.Parameter.KEYWORD_ONLY:
-                        config_params.add(name)
-                    elif param.kind not in (
-                        inspect.Parameter.VAR_KEYWORD,
-                        inspect.Parameter.VAR_POSITIONAL,
-                    ):
-                        loop_params.add(name)
-
-                loop_state = {}
-                config = {}
-                remaining_inputs = {}
-                for k, v in (input_mappings or {}).items():
-                    if isinstance(v, Ref) or v is PARENT:
-                        remaining_inputs[k] = v
-                    elif k in loop_params:
-                        loop_state[k] = v
-                    elif k in config_params:
-                        config[k] = v
-                    else:
-                        remaining_inputs[k] = v  # template vars etc
-                for k, v in init_kwargs.items():
-                    if k in loop_params:
-                        loop_state[k] = v
-                    elif k in config_params:
-                        config[k] = v
-
-                # Resolve max_iterations if string expression
-                if isinstance(max_iterations, str):
-                    defaults = {
-                        name: p.default
-                        for name, p in sig.parameters.items()
-                        if p.default is not inspect.Parameter.empty
-                    }
-                    _max = eval(max_iterations, {}, {**defaults, **loop_state, **config})  # noqa: S307
-                else:
-                    _max = max_iterations
-
-                g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
-                g.inputs.update(remaining_inputs or {})
-                with g:
-                    fn_args = {k: PARENT[k] for k in loop_state if k in loop_params}
-                    fn_args.update(config)
-                    fn_args.update(_build_fn_args(remaining_inputs, param_names))
-                    fn(**fn_args)
-            else:
-                # ── Simple mode ──
-                g = GraphOp(inputs=input_mappings or None, **init_kwargs)
-                with g:
-                    fn_args = _build_fn_args(input_mappings, param_names)
-                    fn(**fn_args)
+            g = GraphOp(inputs=input_mappings or None, **init_kwargs)
+            with g:
+                fn_args = _build_fn_args(input_mappings, param_names)
+                fn(**fn_args)
 
             return g
 
@@ -189,6 +131,6 @@ def graph(fn=None, *, bound: "str | None" = None):
 
     if fn is not None:
         # @graph without parentheses
-        return _make_graph_wrapper(fn, bound)
-    # @graph(bound="io") with parentheses
-    return lambda f: _make_graph_wrapper(f, bound)
+        return _make_graph_wrapper(fn, bound, strict_dag)
+    # @graph(bound="io", strict_dag=True) with parentheses
+    return lambda f: _make_graph_wrapper(f, bound, strict_dag)

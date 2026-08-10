@@ -131,13 +131,35 @@ def validate_graph(
     nexts: dict,
     entries: list,
     exits: list,
+    ancestor_names: set = None,
+    descendant_names: set = None,
+    sibling_names: set = None,
 ) -> ValidationResult:
-    """Run all validations on a graph and return result."""
+    """Run all validations on a graph and return result.
+
+    Args:
+        ancestor_names: names of ancestor GraphOps in the parent chain.
+            Refs pointing to any of these are considered valid (Phase 3: SCC
+            ops moved into a synthetic loop keep their original outer PARENT
+            refs, so the moved op sees the outer graph name).
+        descendant_names: names of ops living inside synthetic hidden loops
+            that are descendants of this graph. Outer ops may hold refs to
+            such moved SCC ops; the op instance is unchanged so state lookups
+            resolve at runtime (BUG 3 from Phase 3 review).
+        sibling_names: names of ops living in any ancestor graph's ``_ops``.
+            A BranchOp moved into a synthetic hidden loop may reference
+            siblings that stayed at the outer level (BUG 2 / E3 multi-exit-
+            via-branch): the branch's ``__branch_target__`` is re-routed at
+            the outer level through the loop's outgoing edges.
+    """
+    ancestor_names = ancestor_names or set()
+    descendant_names = descendant_names or set()
+    sibling_names = sibling_names or set()
     result = ValidationResult(graph_name=name)
-    result.issues.extend(_validate_branch_targets(ops))
+    result.issues.extend(_validate_branch_targets(ops, descendant_names, sibling_names))
     result.issues.extend(_validate_cycles(ops, edges))
     result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
-    result.issues.extend(_validate_refs(ops, name))
+    result.issues.extend(_validate_refs(ops, name, ancestor_names, descendant_names, sibling_names))
 
     for issue in result.warnings:
         LOGGER.warning("Graph '%s': %s", name, issue.message)
@@ -145,9 +167,26 @@ def validate_graph(
     return result
 
 
-def _validate_branch_targets(ops: Dict[str, "BaseOp"]) -> List[ValidationIssue]:
-    """Check all branch op targets exist in graph."""
+def _validate_branch_targets(
+    ops: Dict[str, "BaseOp"],
+    descendant_names: set = None,
+    sibling_names: set = None,
+) -> List[ValidationIssue]:
+    """Check all branch op targets exist in graph.
+
+    Args:
+        descendant_names: names of ops living inside synthetic hidden loops
+            that descend from this graph. A branch inside such a loop may
+            legitimately reference sibling ops that stayed at the outer level
+            (Phase 3 E3 multi-exit case): the branch's __branch_target__ is
+            re-routed at the outer level via the loop's outgoing edges.
+        sibling_names: names of ops in ancestor graphs' ``_ops`` — same
+            purpose as descendant_names but for branches inside a synthetic
+            hidden loop that reference OUTER siblings (BUG 2).
+    """
     issues = []
+    descendant_names = descendant_names or set()
+    sibling_names = sibling_names or set()
     available = sorted(ops.keys())
 
     for op_name, child in ops.items():
@@ -156,22 +195,26 @@ def _validate_branch_targets(ops: Dict[str, "BaseOp"]) -> List[ValidationIssue]:
         for target in getattr(child, "candidates", []):
             if target == "__END__":
                 continue
-            if target not in ops:
-                issues.append(
-                    ValidationIssue(
-                        level=ValidationLevel.ERROR,
-                        category="Invalid branch target",
-                        message=f"Branch op '{op_name}' references target '{target}' which doesn't exist",
-                        op_name=op_name,
-                        target_name=target,
-                        available_nodes=available,
-                        suggestions=[
-                            f"Check if '{target}' matches the 'name' parameter of the target op",
-                            f'Use the op variable directly: if_(condition, my_op) instead of if_(condition, "{target}")',
-                            f"Available ops: {available}",
-                        ],
-                    )
+            if target in ops:
+                continue
+            if target in descendant_names or target in sibling_names:
+                # SCC-inside-loop referencing sibling / cousin (BUG 2 fix).
+                continue
+            issues.append(
+                ValidationIssue(
+                    level=ValidationLevel.ERROR,
+                    category="Invalid branch target",
+                    message=f"Branch op '{op_name}' references target '{target}' which doesn't exist",
+                    op_name=op_name,
+                    target_name=target,
+                    available_nodes=available,
+                    suggestions=[
+                        f"Check if '{target}' matches the 'name' parameter of the target op",
+                        f'Use the op variable directly: if_(condition, my_op) instead of if_(condition, "{target}")',
+                        f"Available ops: {available}",
+                    ],
                 )
+            )
     return issues
 
 
@@ -284,9 +327,31 @@ def _validate_reachability(
     return issues
 
 
-def _validate_refs(ops: Dict[str, "BaseOp"], graph_name: str) -> List[ValidationIssue]:
-    """Validate all Ref references point to existing ops."""
+def _validate_refs(
+    ops: Dict[str, "BaseOp"],
+    graph_name: str,
+    ancestor_names: set = None,
+    descendant_names: set = None,
+    sibling_names: set = None,
+) -> List[ValidationIssue]:
+    """Validate all Ref references point to existing ops.
+
+    Args:
+        ancestor_names: set of ancestor GraphOp names. Refs pointing to any of
+            these are considered valid (Phase 3 rewrite moves SCC ops into a
+            hidden loop; their PARENT refs still target the outer graph).
+        descendant_names: set of op names living inside synthetic hidden
+            loops that descend from this graph. Outer ops may hold refs to
+            such moved SCC ops after Phase 3 rewrite; the op instance is
+            unchanged so state lookups by full_name still resolve.
+        sibling_names: set of op names living in any ancestor graph's ``_ops``.
+            A moved SCC op inside a synthetic loop may hold a Ref to a
+            sibling that stayed at the outer level (BUG 2 / E3 case).
+    """
     issues = []
+    ancestor_names = ancestor_names or set()
+    descendant_names = descendant_names or set()
+    sibling_names = sibling_names or set()
 
     for op_name, child in ops.items():
         for var, param in child.inputs.items():
@@ -298,7 +363,13 @@ def _validate_refs(ops: Dict[str, "BaseOp"], graph_name: str) -> List[Validation
                 continue
             if hasattr(ref_source, "name"):
                 ref_op_name = ref_source.name
-                if ref_op_name not in ops and ref_op_name != graph_name:
+                if (
+                    ref_op_name not in ops
+                    and ref_op_name != graph_name
+                    and ref_op_name not in ancestor_names
+                    and ref_op_name not in descendant_names
+                    and ref_op_name not in sibling_names
+                ):
                     issues.append(
                         ValidationIssue(
                             level=ValidationLevel.ERROR,

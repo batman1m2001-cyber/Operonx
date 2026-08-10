@@ -4,7 +4,7 @@ Provides the edge-connectivity classes and sentinel ops used by the
 ``>>`` / ``>`` operator syntax for wiring ops in a GraphOp.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any  # noqa: F401 — Any used in string annotations
 
 from operonx.core.ops._utils import _set_wildcard_outputs
 from operonx.core.ops.base import BaseOp
@@ -55,27 +55,69 @@ class DummyOp(BaseOp):
     def __init__(self, name: str):
         super().__init__(name=name)
 
-    def shared(self, **kwargs):
-        """Declare shared vars on current graph. Only valid on PARENT.
+    def declare(self, *, reducers: "dict | None" = None, **vars: "Any") -> None:
+        """Declare shared vars on the current graph, with optional reducers.
 
-        Shared vars persist across all stream contexts within the graph.
-        Normal PARENT vars are copied per stream context.
+        Shared vars persist across all stream contexts within the graph. Normal
+        PARENT vars are copied per stream context. When a reducer is registered
+        for a var, concurrent/repeated writes to its shared cell go through
+        ``reducer(old, new)`` instead of overwriting. Without a reducer, shared
+        cell writes use last-write-wins semantics.
+
+        Args:
+            reducers: Optional ``{var_name: fn}`` mapping. Each ``fn`` is a
+                ``(old, new) -> merged`` reducer applied at cell write time.
+                Every key MUST be one of the vars declared in this call
+                (build-time check).
+            **vars: ``var_name=initial_value`` declarations. Same semantics as
+                ``PARENT.shared()``.
+
+        Raises:
+            TypeError: if called on anything other than PARENT.
+            RuntimeError: if called outside a ``@graph`` body.
+            ValueError: if a reducer key is not in the declared vars.
 
         Usage::
 
+            from operonx.reducers import add_messages
+
             @graph
-            def pipeline():
-                PARENT.shared(current_state="REMINDER", history=[])
-                # PARENT["current_state"] now shared across all stream contexts
+            def agent():
+                PARENT.declare(
+                    count=0,
+                    messages=[],
+                    reducers={"messages": add_messages},
+                )
         """
         if self.name != "__PARENT__":
-            raise TypeError("shared() can only be called on PARENT")
+            raise TypeError("declare() can only be called on PARENT")
         current_graph = get_current()
         if current_graph is None:
-            raise RuntimeError("PARENT.shared() must be called inside a @graph function body")
+            raise RuntimeError("PARENT.declare() must be called inside a @graph function body")
+
+        reducers = reducers or {}
+        if not isinstance(reducers, dict):
+            raise TypeError(f"declare() reducers must be a dict, got {type(reducers).__name__}")
+
+        # E4: reducer keys must reference declared vars
+        unknown = set(reducers) - set(vars)
+        if unknown:
+            raise ValueError(
+                f"declare() reducers reference undeclared vars: {sorted(unknown)}. "
+                f"declared vars: {sorted(vars)}"
+            )
+
         if not hasattr(current_graph, "_shared_vars"):
             current_graph._shared_vars = {}
-        current_graph._shared_vars.update(kwargs)
+        current_graph._shared_vars.update(vars)
+
+        if not hasattr(current_graph, "_reducer_vars"):
+            current_graph._reducer_vars = {}
+        current_graph._reducer_vars.update(reducers)
+
+    # NOTE (1.0.0): ``PARENT.shared(**vars)`` was removed. Use
+    # ``PARENT.declare(**vars, reducers={...})`` instead — same shared-cell
+    # semantics plus optional reducers on fan-in writes.
 
     def __rshift__(self, other):
         if isinstance(other, SoftEdge):
@@ -198,6 +240,9 @@ class ScratchAccessor:
                 "engine.start(scratch={...})."
             ) from e
         state._scratch[key] = value
+        # Phase 2b3 B1: fire the scratch bus so checkpointers/tracers see
+        # SCRATCH mutations too. Fast path when no observer subscribed.
+        state._notify_scratch(key, value)
 
     def __delitem__(self, key: str) -> None:
         try:

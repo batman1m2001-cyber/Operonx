@@ -24,7 +24,10 @@ constructed by decorators or factory helpers.
 ::: operonx.core.ops.GraphOp
 ::: operonx.core.ops.BranchOp
 ::: operonx.core.ops.FuncOp
-::: operonx.core.ops.ParserOp
+
+Note (1.0.0): the standalone `ParserOp` was removed. Text parsing lives
+inline in `LLMOp(fields=..., parser=..., validators=...)`; pure text
+helpers (no LLM) are in `operonx.providers.parsing`.
 
 ## Branch helpers
 

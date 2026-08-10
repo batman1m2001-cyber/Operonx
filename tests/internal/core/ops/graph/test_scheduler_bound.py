@@ -286,25 +286,28 @@ class TestNestedGraph:
 class TestInlineLoop:
     @pytest.mark.asyncio
     async def test_loop_inline(self):
+        from operonx.core.ops.flow.branch_op import if_
         from operonx.core.states import StateSchema
 
         @op
         def increment(counter: int):
             return {"counter": counter + 1}
 
-        with GraphOp.loop(name="counter", until="count >= 3", count=0) as g:
+        # 1.0.0 migration: back-edge inside @graph instead of GraphOp.loop.
+        @graph
+        def counter():
+            PARENT.declare(count=0)
             inc = increment(counter=PARENT["count"])
             inc["counter"] >> PARENT["count"]
-            START >> inc >> END
+            START >> inc >> if_(PARENT["count"] >= 3, END).else_(inc)
 
+        g = counter()
         g.build()
-        schema = StateSchema(g)
-        state = schema.create_state()
-
-        result = {}
-        async for _, result in g.run(state):
+        state = StateSchema(g).create_state()
+        async for _, _ in g.run(state):
             pass
-        assert result["count"] == 3
+        idx = state.schema.get_index(g.full_name, "count")
+        assert state._cells[idx][("main",)] == 3
 
 
 # ============================================================

@@ -95,6 +95,79 @@ class ParserError(OpError):
         )
 
 
+class LLMRefusalError(OpError):
+    """LLM declined to answer the request.
+
+    Signalled by the provider via ``finish_reason`` (e.g. ``content_filter``,
+    ``safety``) or a dedicated ``refusal`` field on the response. Distinct
+    from transport failures (which the underlying SDK retries on its own)
+    and from semantic failures (parse/validator errors that trigger LLMOp's
+    error-guided retry). LLMOp treats a refusal as a signal to try the
+    next resource in the ``fallback=`` list rather than retrying the same
+    resource.
+
+    Attributes:
+        reason: Provider-supplied ``finish_reason`` when known.
+        refusal_text: Provider-supplied refusal message (if any).
+        resource: The resource key that produced the refusal.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        reason: Optional[str] = None,
+        refusal_text: Optional[str] = None,
+        resource: Optional[str] = None,
+        original_error: Optional[Exception] = None,
+    ):
+        self.reason = reason
+        self.refusal_text = refusal_text
+        self.resource = resource
+        super().__init__(
+            message=message,
+            op_type="llm",
+            original_error=original_error,
+            context={
+                "reason": reason,
+                "refusal_text": refusal_text,
+                "resource": resource,
+            },
+        )
+
+
+class ValidatorError(OpError):
+    """Extracted value failed its declared validator list.
+
+    Raised by the parsing layer inside LLMOp when a field's value is not in
+    the ``validators={"field": [...]}`` allow-list AND there is no
+    ``@`` -prefixed default in the list. Signals a semantic failure — LLMOp
+    routes this to its error-guided retry path, not to ``fallback=``.
+
+    Attributes:
+        field: Name of the field that failed validation.
+        value: Value that failed the allow-list check.
+        allowed: The list of acceptable values.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        field: str,
+        value: Any,
+        allowed: list,
+        original_error: Optional[Exception] = None,
+    ):
+        self.field = field
+        self.value = value
+        self.allowed = allowed
+        super().__init__(
+            message=message,
+            op_type="llm",
+            original_error=original_error,
+            context={"field": field, "value": repr(value), "allowed": allowed},
+        )
+
+
 class CodeError(OpError):
     """Exception khi user function trong FuncOp thất bại.
 
