@@ -1,143 +1,218 @@
-# Operonx → Agent Framework — Extension Plan (op-native)
+# Operonx → Agent Framework — Extension Plan (v2, post-1.0.0)
 
-**TL;DR** — Operonx already gives you 70% of what an agent framework needs: `GraphOp.loop` = ReAct loop, `LLMOp(stream=True)` = streaming LLM, nested `@graph` = sub-agent with isolated state, `ResourceHub` = pluggable backends, `Ref.parallel()` / `.collect()` = tool fan-out with ordered gather, `Interrupt` yield = preemptive cancellation, V3 tracing = automatic span nesting. Add **~4 pure-Python modules + ~8 op/graph factories + 1 composition root** and you have a real agent framework. Everything else that hermes-agent grew (60-param god-init, 7k-LOC turn controller, class-per-concern architecture) is a symptom of not having a DAG substrate.
+**Status:** rewrite of the pre-1.0.0 draft (preserved as
+`AGENT_EXTENSION_PLAN.md.v1.bak`). This version composes on top of the
+primitives that shipped in operonx 1.0.0 (2026-08-10): back-edge loops,
+`PARENT.declare(reducers={...})`, `Checkpointer`, `InterruptOp`,
+`engine.stream(mode=…)`, `LLMOp.of(fields=…, max_retries=…)`, filtered
+observability via `@op(exclude=…, include=…, observe_max=…)`, and the
+`operonx.reducers` module (`add_messages`, `dict_merge`).
+
+**TL;DR** — 1.0.0 turned operonx into a real agent substrate. What v1 had
+to build defensively (message accumulation, HITL branches, loop scaffolding,
+retry supervisors, tracing filters) now ships in-framework. This plan adds
+**one small package (`operonx/agents/`)**: a `@tool` decorator, a per-call
+dispatch subgraph, a ReAct-loop factory, a sub-agent factory, and a handful
+of pure-Python helpers. **~13 files, most under 200 LOC**, and the reference
+harness (`operonx-code`) built on top. Nothing invents a "framework layer" —
+we compose primitives already blessed by 1.0.0.
 
 ---
 
-## 1 · The mental-model shift
+## 1 · Why now (what 1.0.0 changed)
 
-Every "class" I proposed in v1 either **dissolves into an operonx primitive** or **shrinks to a thin pure-Python helper**. Nothing to invent; almost everything to compose.
+The pre-1.0.0 plan had to work around six missing primitives. All six shipped.
+The table below is the load-bearing delta — every row erased a v1 workaround.
 
-| v1 draft (hermes-style class) | Op-native form | Why |
+| Concern | v1 workaround | 1.0.0 primitive | Effect on this plan |
+|---|---|---|---|
+| Message accumulation across turns | Custom `append_messages` op with hand-written LangGraph-style id-upsert | `PARENT.declare(messages=[], reducers={"messages": add_messages})` | Delete custom merger. Turn output writes with `>> PARENT["messages"]`; framework merges. |
+| Loop control | `with GraphOp.loop(name=…, until="expr", **initial_state) as loop:` | Back-edge inside `@graph` → Phase 3 synthesizes hidden `_GraphLoop`. `strict_dag=True` opts out. | ReAct loop is a plain `@graph` with `if_(done, END).else_(llm)`. No imperative scaffolding. |
+| HITL / permission on destructive tools | Runtime `if_` branch reading a mode flag; hoped a human polled a queue somewhere | `InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent` on state's bus, awaits `state._interrupt_responses[id]`. `engine.stream()` auto-subscribes a listener; `handle.resume(id, value)` resolves. | `permission_gate` becomes a `Wait(InterruptOp) → if_ approve.else_ block` pattern. Real preempt, real resume. |
+| Structured LLM output + retry | Separate ParserOp + custom retry loop in `ask()`; hallucinated a fallback trigger on parse errors | `LLMOp.of(fields=…, parser=…, validators=…, max_retries=…, retry_hint=True)` — inline parse + validate + Instructor-style error-guided retry on the same resource. Fallback narrowed to structural refusals only. | Router/classifier ops disappear into LLMOp calls with `fields=`. Retry taxonomy is honest: parse/validate → `max_retries`, refusal → `fallback`, transport → SDK. |
+| Cross-turn state visibility / replay | Ad-hoc SCRATCH scraping | `Checkpointer` protocol + `InMemoryCheckpointer` — per-step delta store; `get_state(step)`, `get_updates(step)`, `list_steps()`. Zero overhead when unbound. | Sessions become "bind a checkpointer, replay the graph." Nothing custom in the agent layer. |
+| Progress streaming to consumer | Peek into `ExecutionHandle._queue` | `engine.stream(mode="custom", channels=[…])` + `EmitOp` — fire-and-forget custom events with channel filtering. `mode="updates"` for per-op deltas; `mode="values"` for full-state snapshots (needs checkpointer). | Progress events are `emit(channel="tool_start", …)` — no framework changes. |
+| Observability shaping | Hand-filtered per-op | `@op(exclude=…, include=…, observe_max=…)` — polymorphic list-or-dict; `ObserveBudgetExceeded` circuit-breaks runaway generators. | Prompt-cache defense, chunk-heavy streams, and tool-output truncation all shape at emission source. No tracer-side filter code. |
+
+Two other cleanups that ripple through the plan:
+
+- **`PARENT.shared(**vars)` was renamed to `PARENT.declare(**vars, reducers={…})`.** All the v1 shared-state examples get one line simpler and gain a merge policy.
+- **`ask()` was removed.** `LLMOp.of(fields=…)` is the one canonical LLM shorthand. Nothing to teach twice.
+
+**Net effect on scope:** v1 estimated 3–4 weeks compressed to 2–3. This
+revision compresses further, to **~2 weeks for P0–P3**, because five of the
+seven load-bearing scaffolds (message merge, loop, HITL, retry, streaming)
+are framework code we no longer write.
+
+---
+
+## 2 · What operonx 1.0.0 primitives you compose on
+
+These are the substrate. Every op-native construct in this plan resolves
+back to one of these.
+
+| Concern | Primitive | Evidence |
 |---|---|---|
-| `TurnController` | **dissolves → `GraphOp.loop(until=...)`** | Loops are a primitive |
-| `LLMClient` | **dissolves → `LLMOp`** | Already exists |
-| `ToolDispatcher` | **dissolves → subgraph** | Per-call dispatch is a graph of 4-6 ops |
-| `SubAgent` | **dissolves → nested `@graph`** | Nested `ctx` tuple isolates state automatically |
-| `Permission` engine | **dissolves → `permission_gate` op + `if_` branch** | Routing decision on runtime data |
-| `PromptAssembler` | **dissolves → `build_system_prompt` op** | Pure function wrapped in an op |
-| `Compactor` (the algo) | **dissolves → `compact` subgraph + `if_` gate** | Data-flow rewrite of messages |
-| Streaming plumbing | **dissolves → `LLMOp(stream=True)` + `ExecutionHandle`** | Frame-per-yield already works |
-| `ToolRegistry` | thin Python dict `{name: op_factory}` | Built at import time |
-| `ErrorClassifier` | thin pure function `(exc) → ErrorKind` | No I/O, no state |
-| `SessionStore` (storage) | class in `ResourceHub`; methods wrapped as ops | Lifecycle = resource; call-sites = ops |
-| `MemoryProvider` ABC + backends | classes in `ResourceHub`; methods wrapped as ops | Same |
-| `SkillLoader` (YAML parse) | pure function at agent init | One-shot |
-| `Agent` composition root | ~50-LOC factory function that builds the top-level `GraphOp` | Not a class |
+| Turn loop | Back-edge inside `@graph` — Phase 3 build-time rewrite synthesizes `_GraphLoop`; `max_iterations=1000` default cap; `strict_dag=True` opts out | `graph_op.py` · `cycle_rewrite.py` · [docs/design/STATE_LOOP_REFACTOR_PLAN.md](docs/design/STATE_LOOP_REFACTOR_PLAN.md) |
+| LLM streaming | `LLMOp.of(stream=True, …)` yields per token chunk; frames forwarded to `ExecutionHandle._queue` | `providers/ops/llm.py:_generate_core` · `engine.py:start` |
+| Structured LLM output | `LLMOp.of(fields=[…], parser="json"\|"xml"\|"yaml", validators={…}, max_retries=N, retry_hint=True)` — parse + validate + semantic retry on same resource | `providers/ops/llm.py:_structured_generate` |
+| Refusal vs parse failure | Structurally-detected `LLMRefusalError` (finish_reason ∈ {content_filter, safety} or non-empty `extras.refusal`) triggers `fallback=`; parse/validator failures use `max_retries` on the primary | `providers/ops/llm.py:_is_refusal` · MIGRATION.md §Runtime |
+| Sub-agent isolation | Nested `@graph` — child ops live at deeper `ctx` tuple; parent refs hermetic (validated at build); nested trace spans auto-nest | `graph_op.py` · [docs/architecture/state-model.md](docs/architecture/state-model.md) |
+| Shared cells + reducers | `PARENT.declare(**vars, reducers={var: fn(old,new)→merged})` — cell semantics + optional fan-in merge | `_edges.py:PARENTAccessor.declare` |
+| Message accumulation | `operonx.reducers.add_messages` — LangGraph-compatible id-upsert + `RemoveMessage` / `REMOVE_ALL_MESSAGES` sentinels | `operonx/reducers.py` |
+| Tool fan-out | Generator op yielding per tool call + `Ref.parallel(max=N)` on consumer | `ref.py:parallel` · `task_scheduler.py` |
+| Ordered gather | `Ref.collect()` — buffered, flushed at EOF in yield-index order | `task_scheduler.py:_on_eof` · `ref.py:collect` |
+| Preemptive cancel | `yield Interrupt(ctx_to_cancel=…)` from any op — scheduler drains pumps at that ctx prefix | `_events.py` · `task_scheduler.py` |
+| **HITL suspend/resume** | **`InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent`, awaits `state._interrupt_responses[id]`; outputs `response`, `timed_out`, `interrupt_id`** | `core/ops/flow/interrupt_op.py` |
+| **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer` (Phase 2). Bind at `Operon(g, checkpointer=…)`. `handle.get_state(step)`, `handle.list_steps()`. Zero overhead when unbound** | `checkpoint/base.py` · `checkpoint/memory.py` |
+| **Custom progress events** | **`EmitOp(channel=…, payload=…)` + `engine.stream(mode="custom", channels=[…])` — fire-and-forget filterable event bus** | `core/ops/flow/emit_op.py` · `engine.py:stream` |
+| **Observability shaping** | **`@op(exclude=[…], include=[…], observe_max=N)` — polymorphic filter at emission source; `ObserveBudgetExceeded` on runaway generators** | `core/ops/base.py` |
+| Async I/O dispatch | `@op(bound="io"\|"cpu"\|"sync")` — auto thread-pool routing | `core/ops/base.py` |
+| Config + secrets | `ResourceHub` — singleton, lazy, `resources.yaml`, `${VAR}` interpolation, 5-branch diagnostic errors | `core/registry/resource_hub.py` |
+| Per-run scratchpad | `SCRATCH[key]` — free-form dict on `MemoryState._scratch`; mutations flow through the observer bus (Phase 2b3 B1) | `core/ops/_edges.py:ScratchAccessor` |
 
-**Net effect:** the "12-module decomposition" from v1 collapses to **~13 small files** — 4 pure-Python + 8 op factories + 1 composition root. Most under 200 LOC.
+**You will build the agent by writing `@op`s and `@graph`s that plug into
+this substrate. You will not re-implement any of the above.**
 
 ---
 
-## 2 · What Operonx already gives you
+## 3 · The mental-model shift (unchanged from v1, sharper now)
 
-These aren't things to build. They're primitives to **compose**.
+Every "class" a hermes-style agent framework would demand either
+**dissolves into an operonx primitive** or **shrinks to a thin
+pure-Python helper**. 1.0.0 dissolves five more that v1 kept as ops.
 
-| Concern | Operonx primitive | Evidence |
+| A hermes-style class | Op-native form | Notes |
 |---|---|---|
-| Turn loop | `GraphOp.loop(until="expr", **state)` — state feedback via `>> PARENT["k"]`, `max_iterations` cap | `graph_op.py:130-163` · `task_scheduler.py:103-106` |
-| LLM streaming | `LLMOp(stream=True)` — token-per-frame, forwarded to `ExecutionHandle._queue` | `llm.py:406-427` · `engine.py:143-154` |
-| Sub-agent isolation | Nested `GraphOp` — child ops live at deeper `ctx` tuple; parent refs are hermetic (validated at build) | `graph_op.py:414-445` · [state-model.md:19](../../Operon/docs/architecture/state-model.md#L19) |
-| Trace-span nesting | V3 auto-record — every op invocation is one `OpExecution` with `op_id` + `ctx`; nested graphs auto-nest | `base.py:746-992` · `workflow_trace.py:1-100` |
-| Tool fan-out | Generator op yielding per tool call + `Ref.parallel(max=N)` on consumer | `ref.py:155-172` · [streaming.md:29-39](../../Operon/docs/architecture/streaming.md#L29) |
-| Ordered gather | `Ref.collect()` — buffered, flushed at EOF in yield-index order | `task_scheduler.py:346-361` |
-| Preemptive cancel | `yield Interrupt(ctx_to_cancel=...)` — scheduler drains queue + cancels pumps at that ctx prefix | `_events.py:38-64` · `task_scheduler.py:395-499` |
-| Async I/O dispatch | `@op(bound="io" \| "cpu" \| "sync")` — auto thread-pool routing | `base.py:657` `,669-683` |
-| Config + secrets | `ResourceHub` — singleton, lazy, `resources.yaml` + `${VAR}`, 5-branch diagnostic errors | `resource_hub.py:34,267-321` |
-| Retry | `@graph` factories accept `until="error == None"` + `max_iterations` — see `ask()` retry mode | `providers/ops/ask.py` |
-| Shared session vars | `PARENT.shared(x=...)` — single cell across all stream contexts | `_edges.py:58-78` |
-| Per-run scratchpad | `SCRATCH[key]` — free-form dict on `MemoryState._scratch` | `_edges.py:172-217` |
+| `TurnController` | Back-edge inside `@graph` — Phase 3 rewrite | v1 had `GraphOp.loop`; 1.0.0 collapses to DAG-native. |
+| `LLMClient` | `LLMOp.of` | Simple + structured mode in one class. |
+| `ToolDispatcher` | Subgraph (§7.2) | 5 ops + 2 branches per call. |
+| `SubAgent` | Nested `@graph` (§7.4) | Free ctx isolation + trace nesting. |
+| `Permission` engine | **`InterruptOp` → `if_(response.approved).else_(blocked)`** | v1 had a runtime branch on a stashed mode flag; 1.0.0 gives real HITL. |
+| `MessageStore` / accumulator | **`PARENT.declare(messages=[], reducers={"messages": add_messages})`** | v1 wrote a custom merger op; framework ships one. |
+| `SessionStore` | **`Checkpointer` binding** | v1 was a resource-registered SQLite class; 1.0.0 gives replay for free. |
+| `ProgressStream` / eventer | **`EmitOp` + `engine.stream(mode="custom")`** | v1 sniffed the frame queue; 1.0.0 has a bus. |
+| `RetrySupervisor` (parse errors) | **`LLMOp.of(max_retries=N, retry_hint=True)`** | v1 was a ~40-LOC ask() loop; 1.0.0 has Instructor-style semantic retry inline. |
+| `Tracer` filter | **`@op(exclude=…, include=…, observe_max=…)`** | v1 filtered downstream; 1.0.0 filters at emission source. |
+| `PromptAssembler` | `build_system_prompt` op | Pure fn wrapped in an op. |
+| `Compactor` (algo) | `compact` subgraph + `if_` gate | Data-flow rewrite of messages. |
+| `ToolRegistry` | Python dict `{name: op_factory}` | Built at import time. |
+| `ErrorClassifier` | Pure function `(exc) → ErrorKind` + `if_` | No I/O, no state. |
+| `MemoryProvider` ABC + backends | Classes in `ResourceHub`; methods wrapped as ops | Same. |
+| `SkillLoader` (YAML parse) | Pure function at agent init | One-shot. |
+| `Agent` composition root | ~30-LOC factory building the top-level `@graph` | Not a class. |
 
-You will build the agent by writing `@op`s and `@graph`s that plug into this substrate. You will not re-implement any of the above.
+**Net effect:** the "12-module decomposition" from v1 collapses further. Ten
+of the boxes above are now zero-LOC on our side — 1.0.0 handles them. What
+remains is ~13 small files, most under 200 LOC.
 
 ---
 
-## 3 · Where we're going — module layout
+## 4 · Module layout
 
 ```
 operonx/agents/                    (NEW · blessed primitives · in-tree)
-├── __init__.py                    # public surface
+├── __init__.py                    # public surface: Tool, TOOL_REGISTRY, build_react_agent, subagent
 ├── CONTRIBUTING.md                # Footprint Ladder governance
 │
-├── tool.py                        # @tool decorator, ToolRegistry dict
+├── tool.py                        # @tool decorator, TOOL_REGISTRY dict
 ├── errors.py                      # ClassifiedError + pure classify()
-├── session.py                     # SessionStore class (ResourceHub-registered)
 ├── memory.py                      # MemoryProvider ABC + LocalMarkdownMemory
 │
-├── ops/                           # thin op wrappers around the above
-│   ├── memory_ops.py              # memory_prefetch, memory_sync, memory_write
-│   ├── session_ops.py             # load_session, save_turn
-│   ├── permission_ops.py          # permission_gate (+ TLS approval ContextVar)
+├── ops/
+│   ├── memory_ops.py              # memory_prefetch (generator+fan-out), memory_sync, memory_write
+│   ├── permission_ops.py          # request_approval (InterruptOp wrapper); permission_check (policy)
 │   ├── compact_ops.py             # count_tokens, compact_messages
-│   ├── prompt_ops.py              # build_system_prompt, apply_cache_control
-│   └── skill_ops.py               # inject_skills_as_user_msg
+│   ├── prompt_ops.py              # build_system_prompt, apply_cache_control, assemble_api_messages
+│   ├── skill_ops.py               # inject_skills_as_user_msg
+│   └── progress_ops.py            # emit_progress helpers (thin EmitOp wrappers with typed payloads)
 │
-├── graphs/                        # graph factories
-│   ├── dispatch.py                # per-tool + all-tools dispatch subgraphs
-│   ├── react.py                   # ReAct GraphOp.loop factory
-│   └── subagent.py                # subagent nested-@graph factory
+├── graphs/
+│   ├── dispatch.py                # per-tool subgraph + all-tools fan-out
+│   ├── react.py                   # ReAct back-edge loop factory
+│   └── subagent.py                # sub-agent nested-@graph factory
 │
 └── skills/
     └── loader.py                  # SKILL.md YAML frontmatter parser
 ```
 
 Also in tree:
+
 ```
 operonx/cli/                        (renamed from operonx/tools/ — namespace fix)
 ```
 
+Rename is still valid — `operonx/tools/` currently holds `operonx-pack`
+(a Rust-spec serializer CLI). Freeing the `tools` name for agent tooling
+avoids a permanent semantic clash.
+
 Out of tree (sibling PyPI package, iterates independently):
+
 ```
 operonx-code/                       # reference coding-agent harness
 ```
 
 ---
 
-## 4 · The agent as a graph — end-to-end shape
+## 5 · The agent as a graph — end-to-end shape
 
 ```mermaid
 flowchart TD
-    START --> LOAD[load_session]
-    LOAD --> BUILD[build_system_prompt<br/>merges memory + skills + persona<br/>DATE-ONLY, cache-safe]
-    BUILD --> LOOP{"GraphOp.loop<br/>until = stop_reason == 'end_turn'"}
+    START --> LOAD[load_session<br/>reads Checkpointer if present]
+    LOAD --> BUILD[build_system_prompt<br/>date-only · cache-safe · once per session]
+    BUILD --> LOOP[/back-edge loop body/]
 
     subgraph LOOP_BODY [" "]
-        PREFETCH[memory_prefetch<br/>bounded 8s]
+        PREFETCH[memory_prefetch<br/>generator+fan-out<br/>bounded 8s]
         PREFETCH --> ASSEMBLE[assemble_api_messages<br/>+ api_content sidecar<br/>+ apply_cache_control LAST]
         ASSEMBLE --> COUNT[count_tokens]
-        COUNT --> GATE1{if_ tokens >= 75%}
+        COUNT --> GATE1{if_ tokens ≥ 75%}
         GATE1 -->|yes| COMPACT[compact subgraph]
-        GATE1 -->|no| LLM[LLMOp stream=True]
-        COMPACT --> LLM
+        GATE1 -->|no| LLM
+        COMPACT --> LLM[LLMOp.of stream=True]
         LLM --> ROUTER{if_ finish_reason == tool_calls}
         ROUTER -->|no| DONE[mark_done]
-        ROUTER -->|yes| DISPATCH[dispatch_all_tools<br/>generator op + fan-out]
-        DISPATCH --> SYNC[memory_sync + save_turn]
-        DONE --> SYNC
+        ROUTER -->|yes| DISPATCH[dispatch_all_tools<br/>generator+fan-out]
+        DISPATCH --> SYNC[memory_sync]
     end
 
-    LOOP_BODY --> END
+    LOOP_BODY --> BACK{{"if_ done, END<br/>else back to PREFETCH"}}
+    BACK -->|done| END
+    BACK -->|not done| PREFETCH
 ```
 
-Every box is either an `@op` we write (~10-100 LOC each) or an existing operonx op (`LLMOp`, `if_`, `GraphOp.loop`). No god-class.
+Every box is either an `@op` we write (~10–100 LOC each) or an existing
+operonx op (`LLMOp`, `if_`, `EmitOp`, `InterruptOp`). No god-class. The
+loop back-edge `BACK -->|not done| PREFETCH` is what the Phase 3 rewrite
+turns into a synthesized `_GraphLoop` at build time.
 
 ---
 
-## 5 · Core sketches (and the one design rule that shapes them)
+## 6 · Design rules
 
-**Design rule** — from operonx's own history. The classic `ForOp` / `MapOp` / `WhileOp` classes were replaced by `yield` + downstream fan-out because it collapses `for`, `map`, `while`, and *streaming* into a single primitive. **Never write a `for` loop inside an op if you can yield instead.** A generator op + `Ref.parallel(max=N)` downstream gives you per-item concurrency, per-item trace spans, per-item ctx isolation, and streaming-to-caller — all four for free.
+### Rule 1 — Yield + fan-out beats imperative iteration
+
+From operonx's own history: the classic `ForOp` / `MapOp` / `WhileOp`
+classes were replaced by `yield` + downstream fan-out because it collapses
+`for`, `map`, `while`, and *streaming* into a single primitive. **Never
+write a `for` loop inside an op if you can yield instead.** A generator op
++ `Ref.parallel(max=N)` downstream gives you per-item concurrency, per-item
+trace spans, per-item ctx isolation, and streaming-to-caller — all four for
+free.
 
 **Before** (imperative, hides parallelism, breaks streaming):
+
 ```python
 @op
 async def prefetch_all(query, providers):
     results = []
     for p in providers:
-        results.append(await p.prefetch(query))     # sequential I/O
-    return {"contexts": results}                    # batched result
+        results.append(await p.prefetch(query))   # sequential I/O
+    return {"contexts": results}                  # batched result
 ```
 
 **After** (yields, downstream fans out, streams naturally):
+
 ```python
 @op
 def each_provider(providers: list):
@@ -149,16 +224,68 @@ async def one_prefetch(query: str, provider):
     return {"context": await provider.prefetch(query)}
 
 # In the graph:
-gen  = each_provider(providers=PARENT["memory_providers"])
-one  = one_prefetch(query=PARENT["query"], provider=gen["provider"].parallel(max=4))
-merged = merge_contexts(items=one["context"].collect())      # ordered gather at EOF
+gen    = each_provider(providers=PARENT["memory_providers"])
+one    = one_prefetch(query=PARENT["query"], provider=gen["provider"].parallel(max=4))
+merged = merge_contexts(items=one["context"].collect())   # ordered gather at EOF
 ```
 
-Same intent, different taste. The generator version fans out in parallel automatically; the imperative version does I/O sequentially. **Apply this rule everywhere** — tool dispatch (§5.2), memory prefetch across N providers (§5.5), skill matching + injection (§5.5), sub-agent fan-out (§5.5), LLM token consumers (§5.5).
+Apply everywhere iteration is *independent* — tool dispatch (§7.2), memory
+prefetch (§7.5), skill matching (§7.5), sub-agent fan-out (§7.5), LLM token
+consumers (§7.5). The one place iteration is *dependent* is the outer ReAct
+loop (turn N+1's LLM input depends on turn N's tool results) — that's what
+back-edges are for.
 
-The one exception is §5.3 (the outer ReAct loop) where iteration is *genuinely dependent* — turn N+1's LLM input depends on turn N's tool results. That's the honest limit of the pattern; see §8.7.
+### Rule 2 — Loops go through back-edges, never imperative wrappers
 
-### 5.1 · `@tool` — a tool IS an `@op` with metadata
+The v1 plan hedged that `GraphOp.loop` was the framework's "one imperative
+primitive." 1.0.0 fixed that. **Every loop in the agent — outer ReAct,
+inner retry, sub-agent turns — is a back-edge inside a `@graph`.** The
+Phase 3 rewrite compiles it into a hidden `_GraphLoop` at build time; you
+never touch the loop wrapper.
+
+### Rule 3 — Reducers own accumulation, not custom ops
+
+If a cell accumulates across turns (messages, cost, tool-call log), declare
+it with a reducer:
+
+```python
+import operator
+from operonx.reducers import add_messages, dict_merge
+
+PARENT.declare(
+    messages=[],
+    cost_usd=0.0,
+    tool_stats={},
+    reducers={
+        "messages": add_messages,      # LangGraph id-upsert + RemoveMessage sentinels
+        "cost_usd": operator.add,
+        "tool_stats": dict_merge,
+    },
+)
+```
+
+No `append_messages` op. No manual merge. Each turn's op writes with
+`>> PARENT["messages"]`; the framework merges under a bounded lock.
+
+### Rule 4 — Retry taxonomy is honest
+
+Three failure modes, three primitives. Don't cross the streams.
+
+| Failure mode | Symptom | Handler | Where |
+|---|---|---|---|
+| Transport | 429, 5xx, connection reset, timeout | SDK's own retry (litellm / openai / anthropic) | Under LLMOp, invisible |
+| Parse / validate | JSON malformed, field missing, validator rejects | `LLMOp.of(max_retries=N, retry_hint=True)` — retries on **same resource** with the error injected into the next prompt | LLMOp inner loop |
+| Refusal / content-filter | `finish_reason ∈ {content_filter, safety}` or non-empty `extras.refusal` | `LLMOp.of(fallback=[…])` — tries next model | LLMOp fallback chain |
+| Semantic ("bad" answer that parsed fine) | Answer is correctly formed but wrong for the task | Agent-level: another loop iteration or self-critique | ReAct loop body |
+
+**No transport-retry knob on LLMOp** — the SDK is battle-tested. A wrapping
+retry would just double the exponential backoff.
+
+---
+
+## 7 · Core sketches
+
+### 7.1 · `@tool` — a tool IS an `@op` with metadata
 
 ```python
 # operonx/agents/tool.py
@@ -166,10 +293,17 @@ from operonx import op
 
 TOOL_REGISTRY: dict[str, callable] = {}
 
-def tool(*, name, description, schema,
-         readonly=False, concurrency_safe=False, destructive=False,
-         check_fn=None, max_result_chars=100_000, dynamic_schema_overrides=None):
-    """Register a function as both an @op and an LLM-callable tool."""
+def tool(
+    *, name, description, schema,
+    readonly=False, concurrency_safe=False, destructive=False,
+    check_fn=None, max_result_chars=100_000, dynamic_schema_overrides=None,
+):
+    """Register a function as both an @op and an LLM-callable tool.
+
+    The op_factory returned is the *same object* stored in TOOL_REGISTRY —
+    dispatch calls `.core(**args)` to reuse the op's own execution path
+    (free tracing, timing, cancellation, bound routing).
+    """
     def wrap(fn):
         fn._tool_meta = dict(
             name=name, description=description, schema=schema,
@@ -178,31 +312,37 @@ def tool(*, name, description, schema,
             max_result_chars=max_result_chars,
             dynamic_schema_overrides=dynamic_schema_overrides,
         )
-        op_factory = op(fn)                # reuse operonx @op — free tracing, timing, cancel
+        op_factory = op(fn)                # reuse operonx @op
         TOOL_REGISTRY[name] = op_factory
         return op_factory
     return wrap
 
-@tool(name="edit", description="str_replace edit", schema={...}, destructive=True)
+@tool(
+    name="edit",
+    description="str_replace edit",
+    schema={...},
+    destructive=True,                     # → triggers HITL approval in dispatch
+)
 async def edit_tool(path: str, old: str, new: str):
     ...
     return {"result": diff}
 ```
 
-Two schemas coexist by necessity:
-- **operonx `Param`** — signature-parsed, drives `>>` wiring at build time
-- **LLM JSON Schema** — hand-authored, drives the model's `tools=[...]` payload
+**Two schemas per tool are unavoidable:**
 
-That duplication is real; no elegant escape. Keep them side-by-side per tool.
+- operonx `Param` — signature-parsed, drives `>>` wiring at build time
+- LLM JSON Schema — hand-authored, drives the model's `tools=[…]` payload
 
-### 5.2 · `dispatch_all_tools` — per-call subgraph + generator-op fan-out
+Keep them side-by-side per tool. Wrap common patterns (`ExtractField`-style
+mini-DSL for the JSON Schema) in helpers if the pain grows.
+
+### 7.2 · `dispatch_all_tools` — subgraph + HITL for destructive tools
 
 ```python
 # operonx/agents/graphs/dispatch.py
-from operonx import op, graph, GraphOp, START, END, PARENT
+from operonx import op, graph, START, END, PARENT, InterruptOp, EmitOp
 from operonx.core.ops.flow import if_
 from operonx.agents.tool import TOOL_REGISTRY
-from operonx.agents.ops.permission_ops import permission_gate
 
 @op
 def each_call(tool_calls: list):
@@ -214,41 +354,66 @@ def each_call(tool_calls: list):
 
 @op
 def parse_call(call: dict):
-    """Steps 1-3 fused: parse args + middleware. Cheap sync."""
-    ...
-    return {"name": ..., "args": ..., "id": ...}
+    """Parse args + apply middleware. Cheap sync."""
+    return {"name": ..., "args": ..., "id": ..., "meta": TOOL_REGISTRY[...]._tool_meta}
+
+@op
+def is_destructive(meta: dict):
+    """Read the tool's declared destructive flag. Pure fn."""
+    return {"destructive": bool(meta.get("destructive"))}
 
 @op
 async def exec_tool(name: str, args: dict):
-    """Step 7 — resolve via registry and delegate. Bound="io" by default."""
+    """Resolve via registry and delegate. Runs on the op's own bound queue."""
     op_factory = TOOL_REGISTRY[name]
-    result = await op_factory.core(**args)      # reuse the op's own core()
+    result = await op_factory.core(**args)
     return {"raw": result}
 
 @op
 def blocked_result(reason: str, call_id: str):
-    """Every block path still emits a tool-result msg — hermes invariant."""
+    """Every block path emits a tool-result msg — LLM must see the refusal."""
     return {"tool_message": {"role": "tool", "tool_call_id": call_id,
                              "content": f"blocked: {reason}"}}
 
 @op
 def collect_result(raw: dict, call_id: str, name: str):
-    """Step 8 + 3-layer output truncation + <untrusted-content> wrap for high-risk."""
+    """Truncate + wrap high-risk output; emit the tool_message."""
     ...
     return {"tool_message": {...}}
 
 @graph
 def dispatch_one(call):
-    """Per-tool-call dispatch — steps 1-8 as a subgraph."""
+    """Per-tool-call dispatch.
+
+    Flow: parse → destructive? → [HITL approve → exec] OR [exec directly] → collect.
+    On HITL rejection, blocked_result short-circuits with a rejection message.
+    """
     parsed = parse_call(call=call)
-    perm   = permission_gate(name=parsed["name"], args=parsed["args"])
-    router = if_(perm["decision"] == "block", "blocked").else_("exec")
-    blocked = blocked_result(reason=perm["reason"], call_id=parsed["id"])
-    execd   = exec_tool(name=parsed["name"], args=parsed["args"])
-    result  = collect_result(raw=execd["raw"], call_id=parsed["id"], name=parsed["name"])
-    START >> parsed >> perm >> router
-    router >> ~blocked >> END
-    router >> ~execd >> result >> END
+    destr  = is_destructive(meta=parsed["meta"])
+
+    # HITL branch — InterruptOp emits on the state bus; engine.stream() hands
+    # out interrupt_id → Future pairs; handle.resume(id, {"approved": True/False})
+    # resolves it. When approved=False, response is short-circuited to blocked.
+    approve = InterruptOp(
+        payload={"tool": parsed["name"], "args": parsed["args"]},
+        timeout=300.0,                      # 5-minute auto-decline
+    )
+    approve_router = if_(approve["response"]["approved"] == True,  # noqa: E712
+                          "run").else_("blocked")
+
+    execd_direct   = exec_tool(name=parsed["name"], args=parsed["args"])
+    execd_approved = exec_tool(name=parsed["name"], args=parsed["args"])
+    result_direct   = collect_result(raw=execd_direct["raw"],   call_id=parsed["id"], name=parsed["name"])
+    result_approved = collect_result(raw=execd_approved["raw"], call_id=parsed["id"], name=parsed["name"])
+    blocked = blocked_result(reason="denied by human", call_id=parsed["id"])
+
+    router = if_(destr["destructive"] == True, "hitl").else_("direct")  # noqa: E712
+
+    START >> parsed >> destr >> router
+    router >> ~execd_direct >> result_direct >> END
+    router >> ~approve >> approve_router
+    approve_router >> ~execd_approved >> result_approved >> END
+    approve_router >> ~blocked >> END
 
 @graph
 def dispatch_all_tools(tool_calls):
@@ -259,81 +424,98 @@ def dispatch_all_tools(tool_calls):
     # downstream reads disp["tool_message"].collect() for ordered gather
 ```
 
-**What the 9-step pipeline maps to:**
+**What the 9-step pipeline maps to now:**
 
-| # | Step | Where it lives |
-|---|------|----------------|
-| 1 | Interrupt preflight | Scheduler primitive — `Interrupt` yield exists |
+| # | Step | Where it lives (post-1.0.0) |
+|---|------|------------------------------|
+| 1 | Interrupt preflight | Scheduler primitive — `yield Interrupt(ctx_to_cancel=…)` |
 | 2 | Parse args | `parse_call` op |
 | 3 | Tool-request middleware | Fused with 2 (cheap) |
-| 4 | Block eval (scope→plugin→guardrail) | `permission_gate` op + `if_` branch |
-| 5 | Checkpoint (destructive only) | Runtime branch inside `exec_tool` (reads `_tool_meta.destructive`) |
-| 6 | Callbacks | Soft `>` edge to observer op (or just V3 tracing) |
-| 7 | Execute | `exec_tool` op |
+| 4 | Block eval | `permission_check` op reading policy config → `if_` branch |
+| 5 | **HITL approve (destructive only)** | **`InterruptOp` — real suspend/resume via `state._interrupt_responses`; `engine.stream()` surfaces via `InterruptEvent`; caller `handle.resume(id, value)`** |
+| 6 | Callbacks | Soft `>` edge to observer op, or `EmitOp` for typed progress events |
+| 7 | Execute | `exec_tool` op — reuses the tool's own `.core(**args)` |
 | 8 | Ordered collect | `Ref.collect()` — operonx guarantees yield-index order |
-| 9 | Turn budget + drain /steer | Wrap op at loop end + `SCRATCH` for steer message |
+| 9 | Turn budget + drain / steer | Wrap op at loop end + `SCRATCH` for steer message |
 
-### 5.3 · ReAct loop — `GraphOp.loop` composing everything
+### 7.3 · ReAct loop — `@graph` with a back-edge
 
 ```python
 # operonx/agents/graphs/react.py
-from operonx import GraphOp, START, END, PARENT
-from operonx.providers.ops import LLMOp
+from operonx import op, graph, START, END, PARENT
 from operonx.core.ops.flow import if_
+from operonx.reducers import add_messages
+from operonx.providers.ops import LLMOp
 from operonx.agents.graphs.dispatch import dispatch_all_tools
 from operonx.agents.ops.memory_ops import memory_prefetch, memory_sync
 from operonx.agents.ops.compact_ops import count_tokens, compact_messages
-from operonx.agents.ops.session_ops import save_turn
 from operonx.agents.ops.prompt_ops import assemble_api_messages
 
-def build_react_loop(*, model, tool_schemas, until="stop_reason == 'end_turn'",
-                     max_iterations=25):
-    with GraphOp.loop(name="react", until=until, max_iterations=max_iterations,
-                      messages=[], stop_reason="") as loop:
+def build_react_agent(*, model, tool_schemas, max_iterations=25):
+    """Return a @graph factory implementing one full ReAct turn as a
+    back-edge loop. The loop body is the graph body; the back-edge from
+    `sync` back to `prefetch` (guarded by `if_(done, END).else_(prefetch)`)
+    is what Phase 3 rewrites into a synthesized `_GraphLoop`.
 
-        # Memory prefetch is a fan-out: see §5.5 for the multi-provider
-        # generator+parallel form. Shown as a single call here for readability.
+    `max_iterations` becomes the cap on the synthesized loop (default 1000);
+    the branch is your primary exit.
+    """
+
+    @graph(max_iterations=max_iterations)
+    def react_body():
+        # Shared cells with reducers. `add_messages` is LangGraph-compatible:
+        # id-upsert, RemoveMessage sentinels, REMOVE_ALL_MESSAGES supported.
+        PARENT.declare(
+            messages=[],
+            done=False,
+            reducers={"messages": add_messages},
+        )
+
+        # Memory prefetch — see §7.5 for the multi-provider generator+parallel form.
         prefetch = memory_prefetch(query=PARENT["messages"])
         assemble = assemble_api_messages(
             messages=PARENT["messages"],
             memory_context=prefetch["context"],
         )
         tokens   = count_tokens(messages=assemble["messages"])
-        gate     = if_(tokens["count"] >= assemble["threshold"], "compact").else_("skip")
+
         compact  = compact_messages(messages=assemble["messages"])
-        skip     = noop(messages=assemble["messages"])
+        gate1    = if_(tokens["count"] >= assemble["threshold"], compact).else_(assemble)
 
         llm      = LLMOp.of(
-            resource=model, stream=True,
-            prompt=[compact["messages"], skip["messages"]],  # fan-in via soft edges
+            resource=model,
+            stream=True,
+            messages=gate1,                # fan-in: either the compacted or original path
             tools=tool_schemas,
         )
-        router   = if_(llm["finish_reason"] == "tool_calls", "tools").else_("done")
         disp     = dispatch_all_tools(tool_calls=llm["tool_calls"])
-        done     = mark_done()
-        sync     = memory_sync(messages=disp["new_messages"])
-        persist  = save_turn(messages=sync["messages"])
+        sync     = memory_sync(new_messages=disp["tool_message"].collect())
 
-        # loop state feedback
-        persist["messages"]     >> PARENT["messages"]
-        persist["stop_reason"]  >> PARENT["stop_reason"]
+        # Turn writes accumulate into shared cells via reducers.
+        llm["assistant_message"]     >> PARENT["messages"]
+        sync["tool_messages"]        >> PARENT["messages"]
+        llm["done"]                  >> PARENT["done"]     # done when finish_reason != tool_calls
 
-        START >> prefetch >> assemble >> tokens >> gate
-        gate >> ~compact >> llm
-        gate >> ~skip >> llm
-        llm >> router
-        router >> ~disp >> sync >> persist >> END
-        router >> ~done >> persist >> END
-    return loop
+        START >> prefetch >> assemble >> tokens >> gate1 >> llm
+        # Router: no tool_calls → done, back-edge to END; else dispatch and loop back.
+        llm >> if_(llm["done"] == True, END).else_(disp)     # noqa: E712
+        disp >> sync
+        sync >> prefetch                                     # back-edge closes the loop
+
+    return react_body
 ```
 
-That is the entire agent turn. ~40 lines including whitespace.
+That is the entire agent turn. ~35 lines including whitespace. Compare with
+v1's `with GraphOp.loop(name="react", until="stop_reason == 'end_turn'", …)`
+scaffold — same behaviour, no imperative wrapper.
 
-### 5.4 · Sub-agent = nested `@graph`
+### 7.4 · Sub-agent = nested `@graph`
 
 ```python
 # operonx/agents/graphs/subagent.py
-from operonx import graph, PARENT, START, END
+from operonx import op, graph, PARENT, START, END
+from operonx.reducers import add_messages
+import operator
 
 DELEGATE_BLOCKED_TOOLS = frozenset(["delegate", "memory", "clarify", "send_message"])
 
@@ -341,33 +523,46 @@ DELEGATE_BLOCKED_TOOLS = frozenset(["delegate", "memory", "clarify", "send_messa
 def subagent(task: str, *, parent_tools: dict, max_iterations: int = 10):
     """Nested agent — its own loop, own state, restricted toolset.
 
-    - Nested ctx tuple auto-isolates state (state-model.md).
+    - Nested ctx tuple auto-isolates state.
     - Nested @graph auto-nests trace spans (V3 tracing).
-    - Cost bubbles up via explicit >> PARENT["cost_usd"].
-    - No sub-sub-delegation by default (blocklist).
+    - Cost + final message bubble up via explicit `>> PARENT[…]` writes.
+    - No sub-sub-delegation by default (blocklist enforced at construction).
+    - Cancellation propagates automatically: parent `yield Interrupt(ctx_to_cancel=…)`
+      drains all child ops at once.
     """
     child_tools = {n: t for n, t in parent_tools.items()
                    if n not in DELEGATE_BLOCKED_TOOLS}
-    loop = build_react_loop(
+
+    # Sub-agent's own accumulator — reducers apply within this nested scope.
+    PARENT.declare(
+        cost_usd=0.0,
+        final_message="",
+        reducers={"cost_usd": operator.add},
+    )
+
+    react = build_react_agent(
         model="claude-haiku-4-5",           # cheaper for sub-tasks
         tool_schemas=[t._tool_meta["schema"] for t in child_tools.values()],
         max_iterations=max_iterations,
-    )
-    # Inputs
-    task >> PARENT["messages"]  # simplified; real form injects a user message
-    # Cost bubble-up
-    loop["cost_usd"] >> PARENT["cost_usd"]
-    loop["final_message"] >> PARENT["final_message"]
-    START >> loop >> END
+    )()
+
+    # Inject the parent task as the initial user message.
+    react["messages"] >> PARENT["messages"]      # simplified; wrap task in a user-role msg
+
+    react["cost_usd"]      >> PARENT["cost_usd"]
+    react["final_message"] >> PARENT["final_message"]
+    START >> react >> END
 ```
 
-No HMAC capability tokens at v1 — enforce tool-subset at construction site. If we ship a plugin surface in v2, add the HMAC layer then. Cancellation propagates automatically: parent `yield Interrupt(ctx_to_cancel=child_ctx)` drains all child ops at once.
+No HMAC capability tokens at v1 — enforce tool-subset at construction site.
+If we ship a plugin surface in v2, add the HMAC layer then.
 
-### 5.5 · Where the yield+fan-out pattern reappears
+### 7.5 · Where the yield + fan-out pattern reappears
 
-Four more places we should use the pattern *instead of* an imperative op:
+Four places where an imperative op would be a mistake. Same pattern, same
+free wins (per-item concurrency, spans, ctx, streaming).
 
-**Memory prefetch across N providers** — bounded 8s deadline (hermes rule) drops in as `.parallel(max=N, timeout=8.0)`:
+**Memory prefetch across N providers** — bounded 8s deadline as `.parallel(max=N, timeout=8.0)`:
 
 ```python
 @op
@@ -375,12 +570,12 @@ def each_provider(providers: list):
     for p in providers:
         yield {"provider": p}
 
-gen  = each_provider(providers=PARENT["memory_providers"])
-one  = provider_prefetch(query=PARENT["query"], provider=gen["provider"].parallel(max=4))
-ctx  = merge_contexts(items=one["context"].collect())        # <memory-context>…</memory-context>
+gen = each_provider(providers=PARENT["memory_providers"])
+one = provider_prefetch(query=PARENT["query"], provider=gen["provider"].parallel(max=4))
+ctx = merge_contexts(items=one["context"].collect())   # <memory-context>…</memory-context>
 ```
 
-**Skill matching + injection** — each matching skill becomes a yield; downstream renders in parallel; ordered `collect()` concatenates:
+**Skill matching + injection** — each matching skill yields; downstream renders in parallel; ordered `collect()` concatenates:
 
 ```python
 @op
@@ -394,7 +589,7 @@ rendered = render_skill(skill=gen["skill"].parallel(max=8))
 user_msg = concat_as_user_msg(items=rendered["text"].collect())    # per hermes cache trick
 ```
 
-**Sub-agent orchestration (parallel sub-tasks)** — parent yields tasks, subagent graph is invoked per yield in parallel, results gather in order. Each subagent's `ctx` isolation is automatic; per-subagent trace spans are automatic; cost bubbles per-yield.
+**Sub-agent orchestration (parallel sub-tasks)** — parent yields tasks, subagent graph invoked per yield in parallel, results gather in order:
 
 ```python
 @op
@@ -403,59 +598,67 @@ def each_subtask(plan: dict):
         yield {"task": task}
 
 gen  = each_subtask(plan=orchestrator["plan"])
-subs = subagent(task=gen["task"].parallel(max=3),
-                parent_tools=PARENT["tools"])
+subs = subagent(task=gen["task"].parallel(max=3), parent_tools=PARENT["tools"])
 merged = merge_subagent_results(items=subs["final_message"].collect(),
                                 costs=subs["cost_usd"].collect())
 ```
 
-**LLM stream → multiple downstream consumers** — `LLMOp(stream=True)` already yields per token chunk. Fan-out to sibling downstream ops (moderation, storage, display, tool-call-assembly) means each consumer sees every chunk in parallel, not batched:
+**LLM stream → multiple downstream consumers** — `LLMOp.of(stream=True)` yields per token chunk; fan-out means each consumer sees every chunk in parallel:
 
 ```python
 llm       = LLMOp.of(resource="claude-sonnet", stream=True, prompt=..., tools=...)
-moderator = check_content(chunk=llm["content"].parallel(max=1))    # sequential guard
+moderator = check_content(chunk=llm["content"].parallel(max=1))     # sequential guard
 display   = stream_to_stdout(chunk=llm["content"].parallel(max=1))
 storage   = append_to_session(chunk=llm["content"].parallel(max=1))
-assembler = accumulate_tool_calls(delta=llm["tool_calls"].collect())    # buffered until EOF
+assembler = accumulate_tool_calls(delta=llm["tool_calls"].collect())  # buffered until EOF
 ```
 
-Every case above would have been a `for` loop + `asyncio.gather` in a hermes-style codebase. Here it's a generator + `.parallel()` — same intent, less to maintain, streaming for free.
+Every case above would have been a `for` loop + `asyncio.gather` in a
+hermes-style codebase. Here it's a generator + `.parallel()` — same intent,
+less to maintain, streaming for free.
 
 ---
 
-## 6 · Load-bearing invariants (unchanged from v1 — where they LIVE changes)
+## 8 · Load-bearing invariants
 
-These are **hard invariants** stolen from hermes's 3000+ LOC of prompt-cache defense. They now live inside specific ops, not scattered across a god-class.
+These are hard invariants stolen from hermes's ~3000 LOC of prompt-cache
+defense and tool-safety logic. They now live inside specific ops, not
+scattered across a god-class.
 
-### 6.1 · Prompt cache — invariants live in `prompt_ops.py`
+### 8.1 · Prompt cache — invariants in `prompt_ops.py`
 
 | # | Invariant | Where enforced |
 |---|-----------|----------------|
 | 1 | System prompt is **date-only**, never minute-precision | `build_system_prompt` op |
-| 2 | System prompt built ONCE per session, cached, replayed verbatim | `PARENT.shared("system_prompt")` — set once, read every turn |
-| 3 | `api_content` sidecar = exact bytes previously sent → byte-stable retries | Stored in `session.messages[i].api_content` column |
+| 2 | System prompt built ONCE per session, cached, replayed verbatim | `PARENT.declare(system_prompt=None)` — set once by `build_system_prompt`, read every turn |
+| 3 | `api_content` sidecar = exact bytes previously sent → byte-stable retries | Stored in checkpointer state via `save_turn` op |
 | 4 | Whitespace strip BEFORE `apply_cache_control` (marker rewrites str→list) | Ordered inside `assemble_api_messages` op |
 | 5 | 4 breakpoints TTL-shared (5m/1h): static prefix + system tail + last 2 msgs | `apply_cache_control` helper (pure fn) |
 | 6 | Plugin hooks inject into USER msg, NEVER system | `inject_skills_as_user_msg` op |
 | 7 | Ephemeral system prompt APPENDED after cached string | `assemble_api_messages` op |
 | 8 | OpenRouter: `role:tool` + top-level `cache_control` → silent hang | Special-case in `apply_cache_control` |
 
-Add a first-class metric: `cache_hit_rate` derived from `cache_read_tokens / (cache_read + cache_write)` — thread through V3 tracing. Hermes has the raw sums but not the ratio; we do better.
+Ship a first-class metric: `cache_hit_rate = cache_read_tokens / (cache_read + cache_write)`
+— thread through V3 tracing via `EmitOp(channel="cache_metrics", …)`. Hermes has the raw
+sums but not the ratio; we do better.
 
-### 6.2 · Compaction — 75% threshold, proactive+reactive, anti-thrash
+### 8.2 · Compaction — 75% threshold, proactive + reactive, anti-thrash
 
-Lives in `compact_ops.py` + gated by an `if_` branch in the ReAct loop. The `Compactor` "class" from v1 is just:
+Lives in `compact_ops.py` + gated by an `if_` branch in the ReAct loop.
+No `Compactor` class — just:
+
 - `count_tokens` op (pure, ~10 LOC)
-- `compact_messages` op — inside it, an LLMOp-chain summarizes, and re-injects the sentinels
-- Anti-thrash state via `PARENT.shared("last_compact_iter", -999)`; branch reads iteration delta
+- `compact_messages` op — inside it, an `LLMOp.of(fields=[…], parser="json")` summarizes, then re-injects the sentinels
+- Anti-thrash state via `PARENT.declare(last_compact_iter=-999)`; branch reads iteration delta from the synthesized loop's iter counter
 
 Sentinels stolen verbatim from hermes:
+
 - End marker: `--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---`
 - Skill re-injection: `[SKILL_PRUNED: content lost in compression; reload with skill_view(name='X')]`
 - Continuation sentinel when compacted window has no user turn
 - Summary prefix MUST include `"tools remain fully active — keep calling them normally"` + `"MEMORY.md is still authoritative"`
 
-### 6.3 · Error handling — pure `errors.py` module + `if_` branches
+### 8.3 · Error handling — pure `errors.py` + `if_` branches
 
 ```python
 # operonx/agents/errors.py
@@ -472,16 +675,38 @@ def classify(exc: Exception) -> ClassifiedError:
     ...
 ```
 
-Consumed by an `error_classifier` op that reads `llm["error"]` (operonx already captures errors into `state[op, "error", ctx]`, `base.py:922-934`) and routes via `if_` — no exception-handling machinery in the loop itself.
+Consumed by an `error_classifier` op that reads `llm["error"]` (operonx
+already captures errors into `state[op, "error", ctx]`) and routes via `if_`.
+**Parse errors don't reach this classifier** — they're absorbed by
+`LLMOp.of(max_retries=N)` inside the LLM call. Refusals don't reach it
+either — they trigger `fallback=` structurally. What's left here is
+context overflow, auth failure, rate-limit exhaustion after SDK's own
+retries — genuine failure modes.
+
+### 8.4 · HITL for destructive tools — invariants in `permission_ops.py`
+
+New in v2 — 1.0.0 makes this a real primitive.
+
+| # | Invariant | Where enforced |
+|---|-----------|----------------|
+| 1 | Every destructive tool call requires human approval by default | `dispatch_one` — `is_destructive` gate → `InterruptOp` |
+| 2 | Approval decision is per-call, never batched (else one "yes" approves N deletes) | `dispatch_one` runs per call; each call gets its own InterruptOp |
+| 3 | Timeout defaults to 5 minutes; on timeout the call is auto-declined | `InterruptOp(timeout=300.0)` + `timed_out` output routes to `blocked_result` |
+| 4 | Rejection produces a `role:tool` message the LLM sees ("blocked: denied by human") | `blocked_result` op |
+| 5 | Rejection does not tear down the turn; agent continues with the block message | Back-edge continues to next iteration; the block message accumulates via `add_messages` |
+| 6 | Approval mode can be pre-authorized session-wide (`--yes-mode`) — bypasses InterruptOp via a policy op that short-circuits before dispatch | `permission_check` op reads a session flag from `PARENT["approval_mode"]` |
+| 7 | Approval events are recorded in the checkpointer as `InterruptEvent`s → resume-safe | Framework — the InterruptOp fires `state._notify_interrupt(…)` |
 
 ---
 
-## 7 · Phase roadmap (compressed)
+## 9 · Phase roadmap
+
+Compressed further vs v1 because five load-bearing scaffolds landed in 1.0.0.
 
 ```
-Week 1   P0  P1                Tools + ReAct loop compose
-Week 2       P2                Memory + compaction + cache invariants + sessions
-Week 3            P3           Sub-agents + permission + skills
+Week 1   P0  P1                Tools + ReAct + HITL
+Week 2       P2                Memory + compaction + cache invariants
+Week 3            P3           Sub-agents + skills + policy modes
 Week 4                 P4      Reference harness (operonx-code)
 Later                       P5 Learning-loop pattern doc (defer)
 ```
@@ -489,47 +714,80 @@ Later                       P5 Learning-loop pattern doc (defer)
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
 | **0** | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
-| **1** | Tool + ReAct | `@tool` + `TOOL_REGISTRY` + `dispatch_all_tools` graph + `build_react_loop` factory + rewrite `docs/guide/05-agents.md` | 4–5d |
-| **2** | Context lifecycle | `SessionStore` (SQLite class + resource), `MemoryProvider` ABC + `LocalMarkdownMemory`, `memory_prefetch/sync` ops, `compact_messages` op + gate, prompt-cache invariants in `prompt_ops.py` | 5–7d |
-| **3** | Safety + sub-agents | `permission_gate` op + 3 modes + layered rules + TLS approval ContextVar; `subagent` `@graph` factory + delegate blocklist | 3–4d |
-| **4** | Skills + prompts | `SkillLoader` + `inject_skills_as_user_msg` op + YAML prompt-file support | 2d |
-| **5** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
-| **6** | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
+| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) | 3–4d |
+| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); `compact_messages` op + gate; prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore) | 3–5d |
+| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 3–4d |
+| **4** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
+| **5** | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
 
-**Estimate compression vs v1**: 3–4 weeks → **2–3 weeks**. Not because we cut scope — because we stopped building things operonx already had.
-
----
-
-## 8 · Honest gaps / mismatches
-
-The op-native form is elegant but not lossless. Six real gaps:
-
-1. **Two schemas per tool** — operonx `Param` (build-time wiring) vs LLM JSON Schema (runtime payload). Duplication is inherent. Keep them side-by-side per tool; wrap common patterns in helpers.
-2. **Checkpoint can't be statically pruned** — the op exists in every dispatch subgraph, no-ops for read-only tools. Runtime branch on `_tool_meta.destructive`.
-3. **`SCRATCH` reads require an `@op`** — branch conditions eval on state cells, not scratch. For cross-iteration state read from a branch, use `PARENT.shared(x=...)` instead.
-4. **HMAC capability tokens have no operonx equivalent** — enforce sub-agent tool-subset at graph construction site. Add HMAC in v2 only if we ship a plugin surface.
-5. **Backpressure** — `ExecutionHandle._queue` is unbounded (`engine.py:74`). Fine for typical sessions; long token-heavy sessions with a slow CLI consumer could exhaust memory. Would need an operonx-side change (`asyncio.Queue(maxsize=N)`). Defer to v2 unless we hit it.
-6. **Adaptive turn budget** — `max_iterations` is static. Hermes-style budget that shrinks on tool-error rate needs a callable `until=` reading `SCRATCH["turn_stats"]`. Operonx already accepts callable `until` — no framework change needed, just an idiom.
-
-7. **`GraphOp.loop` is the one imperative-feeling primitive.** The yield+fan-out pattern is elegant because iteration BECOMES data flow. `GraphOp.loop` stays imperative — it's a while-loop wrapped in graph syntax. That's not a framework mistake: **dependent iteration** (each turn's LLM input depends on the previous turn's tool results) is genuinely different from **independent iteration** (map, fan-out). You can parallelize the latter; you can't the former. Operonx's own [streaming.md](docs/architecture/streaming.md#L86) makes this distinction. **Mitigations we adopt**: (a) hide `GraphOp.loop` behind the `build_react_loop()` factory so users of the agent framework never write it directly; (b) use the yield+fan-out pattern for *everything inside* the loop. **Potential operonx-core improvement** (not blocking this plan — file as a design note for the core team): a `@fold(state=..., until=...)` decorator that reads like a Haskell/Rust fold instead of a Python while-loop:
-   ```python
-   @fold(state={"messages": [], "done": False}, until=lambda s: s["done"])
-   def one_turn(state):        # inner graph — returns updated state
-       ...
-   ```
-   Would keep the loop primitive but shed the imperative feel of `until="expr"` strings and `>> PARENT["k"]` assignments. Explore in operonx-core; not needed for this plan.
+**Estimate**: **P0–P3 in ~2 weeks**, P4 in another week. Down from v1's 3–4
+weeks. Not because we cut scope — because 1.0.0 shipped the substrate
+(reducers, back-edges, checkpointer, HITL, structured LLMOp) v1 had to build.
 
 ---
 
-## 9 · Steal / Reject — abbreviated
+## 10 · Honest gaps (v1 gap #7 resolved; new gaps identified)
 
-Same list as v1 (28 steals × 20 rejects). Only difference: **hermes-derived patterns steal *conceptually*, not architecturally.** We steal the `_check_fn` TTL-cache algorithm — we don't steal the ~7k-LOC god-class it lives in. We steal the `apply_cache_control` invariants — we don't steal the 60-parameter `__init__`.
+The op-native form is elegant but not lossless. Six real gaps remain.
 
-The biggest reject: **hermes's decision to make `AIAgent` a class at all**. That is what forced the 60-param init, the ~600 callbacks, the fat forwarder shims, the "Phase 1 step 4 in progress" perpetual refactor. Operonx's `@op`/`@graph` model **structurally prevents** that failure mode — you cannot god-class your way out of a DAG.
+1. **Two schemas per tool** — operonx `Param` (build-time wiring) vs LLM
+   JSON Schema (runtime payload). Duplication is inherent to the two
+   consumers. Keep them side-by-side per tool; wrap common patterns in
+   helpers.
+
+2. **HITL requires a caller loop** — `InterruptOp` is a real primitive,
+   but the caller (CLI, HTTP server, whatever) must `async for event in
+   engine.stream(mode="custom")`, filter for `InterruptEvent`, prompt the
+   human, and call `handle.resume(id, {"approved": …})`. That's a
+   ~30-LOC harness per surface (CLI, TUI, HTTP). Not framework work —
+   integration work.
+
+3. **`SCRATCH` reads require an `@op`** — branch conditions eval on state
+   cells, not scratch dict. For cross-iteration state read from a branch,
+   use a `PARENT.declare(x=…)` cell instead. (Unchanged from v1; still
+   annoying.)
+
+4. **HMAC capability tokens have no operonx equivalent** — enforce
+   sub-agent tool-subset at graph construction site. Add HMAC in v2 only
+   if we ship a plugin surface.
+
+5. **Backpressure** — `ExecutionHandle._queue` is unbounded. Fine for
+   typical sessions; long token-heavy sessions with a slow CLI consumer
+   could exhaust memory. Would need an operonx-core change
+   (`asyncio.Queue(maxsize=N)`). Defer to a later operonx release unless
+   we hit it.
+
+6. **Adaptive turn budget** — the synthesized loop's `max_iterations` is
+   static. A hermes-style budget that shrinks on tool-error rate needs
+   the loop's back-edge branch to read runtime state
+   (`PARENT["turn_stats"]`) via an `@op`. Doable without framework
+   changes; just an idiom to document.
+
+**Resolved from v1:** the "GraphOp.loop is the one imperative-feeling
+primitive" complaint (v1 gap #7) is gone. Back-edge loops in 1.0.0 are
+DAG-native. The `@fold` decorator wish is moot.
 
 ---
 
-## 10 · Governance — the Footprint Ladder
+## 11 · Steal / Reject — abbreviated
+
+Same list as v1 (28 steals × 20 rejects). The delta is that hermes-derived
+patterns steal *conceptually* now — we don't inherit any of hermes's
+plumbing. We steal the `_check_fn` TTL-cache algorithm; we don't steal the
+~7k-LOC god-class it lives in. We steal the `apply_cache_control`
+invariants; we don't steal the 60-parameter `__init__`. We steal the
+tool-block message contract (`role:tool` with `"blocked: reason"`); we
+don't steal the polling loop.
+
+The biggest reject remains **hermes's decision to make `AIAgent` a class
+at all**. That is what forced the 60-param init, the ~600 callbacks, the
+fat forwarder shims, the "Phase 1 step 4 in progress" perpetual refactor.
+Operonx's `@op`/`@graph` model **structurally prevents** that failure mode
+— you cannot god-class your way out of a DAG.
+
+---
+
+## 12 · Governance — the Footprint Ladder
 
 Unchanged from v1. Adopt on day 1 in `operonx/agents/CONTRIBUTING.md`.
 
@@ -546,40 +804,60 @@ Every PR adding a `core` primitive must justify why rungs 1–5 don't work.
 
 ---
 
-## 11 · First concrete step
+## 13 · First concrete step
 
-1. **P0 · half-day** — rename `operonx/tools/` → `operonx/cli/`, scaffold `operonx/agents/` per §3, add `CONTRIBUTING.md` with Footprint Ladder.
+1. **P0 · half-day** — rename `operonx/tools/` → `operonx/cli/` (single-file
+   change: `pack.py` + one `pyproject.toml` entry). Scaffold `operonx/agents/`
+   per §4. Add `CONTRIBUTING.md` with Footprint Ladder.
+
 2. **1-page ADR before P1 code** — cover:
-   - `@tool` decorator: metadata carrier only (op factory reused via `@op` under the hood)
-   - `TOOL_REGISTRY` shape: `dict[str, op_factory]`, populated at import time
-   - `dispatch_one` subgraph shape: 5 ops + 2 branches (see §5.2)
-   - Two-schema reality: operonx `Param` for wiring vs LLM JSON Schema for payload
-   - Where `check_fn` TTL+failure-grace lives (pure Python helper called at `get_tool_definitions()` build time)
-3. **Then P1** — build in this order:
-   1. `@tool` + `TOOL_REGISTRY` (module: `tool.py`)
-   2. `dispatch_one` subgraph (module: `graphs/dispatch.py`)
-   3. `dispatch_all_tools` + `each_call` generator op (same module)
-   4. `build_react_loop` factory (module: `graphs/react.py`)
-   5. Rewrite `docs/guide/05-agents.md` example — should be ~30 lines using the new factory
+   - `@tool` decorator: metadata carrier only (op factory reused via `@op`).
+   - `TOOL_REGISTRY` shape: `dict[str, op_factory]`, populated at import time.
+   - `dispatch_one` subgraph shape: 5 ops + 2 branches + optional InterruptOp
+     for destructive (see §7.2).
+   - Two-schema reality: operonx `Param` for wiring vs LLM JSON Schema for
+     payload.
+   - Where `check_fn` TTL + failure-grace lives (pure Python helper called
+     at `get_tool_definitions()` build time).
+   - **New in v2:** HITL harness contract (what CLI/HTTP callers must do
+     to respond to `InterruptEvent`).
 
-Everything after compounds on these five.
+3. **Then P1 — build in this order:**
+   1. `@tool` + `TOOL_REGISTRY` (`operonx/agents/tool.py`)
+   2. `dispatch_one` + `dispatch_all_tools` (`operonx/agents/graphs/dispatch.py`)
+   3. `permission_check` op (`operonx/agents/ops/permission_ops.py`)
+   4. `build_react_agent` factory (`operonx/agents/graphs/react.py`)
+   5. Rewrite `docs/guide/05-agents.md` example — should be ~25 lines using the new factory
+   6. Minimal HITL CLI harness in `examples/python/ex09_agent_workflow/` — reads InterruptEvents, prompts, calls `handle.resume`
+
+Everything after P1 compounds on these six.
 
 ---
 
 ## Sources studied
 
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — heartbeat scheduler, SKILL.md frontmatter, serialized session lane
-- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — **deep-inspected** across core loop, memory, tools, subagents, learning loop (see v1 draft for full evidence trail)
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — deep-inspected across core loop, memory, tools, subagents, learning loop (see v1 for full evidence trail)
 - [opencode-ai/opencode](https://github.com/opencode-ai/opencode) — canonical tool set, persistent shell, read-before-edit invariant
 - [BA-CalderonMorales/agent-harness](https://github.com/BA-CalderonMorales/agent-harness) — auto-compaction with headroom, layered permission rules, capability flags
 - [huggingface/smolagents](https://github.com/huggingface/smolagents) — prompts-as-YAML
+- [LangGraph](https://langchain-ai.github.io/langgraph/) — `add_messages` reducer semantics (RemoveMessage + REMOVE_ALL_MESSAGES sentinels are LangGraph-compatible in operonx 1.0.0), stream modes taxonomy
+- [Instructor](https://python.useinstructor.com/) — semantic retry with error-guided prompts (mirrored in `LLMOp.of(retry_hint=True)`)
 
 Operonx internals studied to ground the recast:
-- `operonx/core/ops/base.py` — BaseOp lifecycle, ContextVars, tracing hooks
-- `operonx/core/ops/graph/graph_op.py` — `GraphOp`, nesting, `loop()`
+
+- `operonx/core/ops/base.py` — `BaseOp` lifecycle, ContextVars, tracing hooks, `@op(exclude=…, include=…, observe_max=…)`
+- `operonx/core/ops/graph/graph_op.py` — `GraphOp`, nesting, `strict_dag=` opt-out
+- `operonx/core/ops/graph/cycle_rewrite.py` — Phase 3 back-edge → `_GraphLoop` rewrite
 - `operonx/core/ops/graph/task_scheduler.py` — streaming, `_on_eof` loop re-dispatch, `Ref.parallel()`/`.collect()`, `_sweep_ctx` interrupt handling
-- `operonx/core/ops/flow/branch_op.py` — `if_(...).else_()`, soft edges
-- `operonx/core/states/*` — `Ref`, `Cell`, `MemoryState`, per-context isolation
+- `operonx/core/ops/flow/branch_op.py` — `if_(…).else_()`, soft edges, back-edge classification
+- `operonx/core/ops/flow/interrupt_op.py` — `InterruptOp` HITL primitive
+- `operonx/core/ops/flow/emit_op.py` — `EmitOp` custom event bus
+- `operonx/core/states/*` — `Ref`, `Cell`, `MemoryState`, per-context isolation, `_notify_scratch` observer bus
+- `operonx/core/states/parent.py` + `_edges.py` — `PARENT.declare(reducers=…)`
+- `operonx/reducers.py` — `add_messages`, `dict_merge`, `RemoveMessage`, `REMOVE_ALL_MESSAGES`
+- `operonx/checkpoint/{base,memory,bridge}.py` — Checkpointer protocol, `CellWriteEvent`, `ScratchWriteEvent`, `StepEvent`, `InterruptEvent`, `CustomEvent`
 - `operonx/core/registry/resource_hub.py` — singleton, lazy, `${VAR}` interpolation
 - `operonx/core/workflow_trace.py` — V3 auto-record
-- `operonx/providers/ops/llm.py` — real op example with streaming + fallback + tools passthrough
+- `operonx/providers/ops/llm.py` — real op example with streaming + fallback + tools passthrough + `LLMOp.of` structured mode
+- `operonx/providers/parsing.py` — pure text parsing without an LLM call
