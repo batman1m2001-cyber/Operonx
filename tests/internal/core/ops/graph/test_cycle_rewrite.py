@@ -13,7 +13,7 @@ import warnings
 
 import pytest
 
-from operonx import Operon, PARENT, op
+from operonx import PARENT, Operon, op
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
 from operonx.core.ops.graph.cycle_rewrite import (
@@ -23,7 +23,6 @@ from operonx.core.ops.graph.cycle_rewrite import (
 )
 from operonx.core.ops.graph.graph_op import END, START, GraphOp
 from operonx.reducers import add_messages
-
 
 # =========================================================================
 # Detection primitives

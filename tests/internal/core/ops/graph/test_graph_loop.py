@@ -14,7 +14,6 @@ from operonx.core import END, PARENT, START, GraphOp, graph, op
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.states import StateSchema
 
-
 # ============================================================
 # Simple counter loop — while-shape with branch to END
 # ============================================================

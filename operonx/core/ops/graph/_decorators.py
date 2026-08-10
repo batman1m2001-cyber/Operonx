@@ -90,9 +90,9 @@ def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
     """
 
     def _make_graph_wrapper(fn, graph_bound, graph_strict_dag):
-        from operonx.core.ops.graph.graph_op import GraphOp
-
         import inspect
+
+        from operonx.core.ops.graph.graph_op import GraphOp
 
         sig = inspect.signature(fn)
         collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
