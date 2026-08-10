@@ -82,6 +82,7 @@ class GraphOp(BaseOp):
         "concurrency",
         "_loop_config",
         "_shared_vars",
+        "_reducer_vars",
         "_adj",
         "_initial_ready",
         "_stream_initial_ready",
@@ -108,7 +109,8 @@ class GraphOp(BaseOp):
         self.nexts = defaultdict(list)
         self.concurrency = concurrency
         self._loop_config = None
-        self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared()
+        self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared() or PARENT.declare()
+        self._reducer_vars = {}  # {var_name: reducer_fn} — set by PARENT.declare(reducers=...)
         self._adj = {}  # {op_name: [Link(dst, soft), ...]}
         self._initial_ready = {}  # {op_name: ready_count}
         self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}

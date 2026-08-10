@@ -39,6 +39,7 @@ class StateSchema:
         "_pull_refs",
         "_push_refs",
         "_shared_indices",
+        "_reducers",
         "_stream_policies",
     )
 
@@ -54,6 +55,9 @@ class StateSchema:
         self._pull_refs: List[Optional[Ref]] = []  # Pull data từ source khi đọc
         self._push_refs: List[Optional[Ref]] = []  # Push data đến target khi ghi
         self._shared_indices: set = set()  # indices of shared vars (graph-level, not per-context)
+        self._reducers: Dict[
+            int, Any
+        ] = {}  # {shared_idx: reducer_fn}; applied at cell-write in _write_cell
         self._stream_policies: Dict[
             Tuple[str, str], StreamPolicy
         ] = {}  # Stream policies by (op, var)
@@ -114,16 +118,24 @@ class StateSchema:
                 self._load_from(child)
 
     def _register_shared_vars(self, root_op) -> None:
-        """Register shared vars from PARENT.shared() calls. Recurses into nested graphs."""
+        """Register shared vars from PARENT.shared() / PARENT.declare() calls.
+
+        Recurses into nested graphs. Also binds reducers to their shared
+        indices when the graph declared ``PARENT.declare(reducers=...)``.
+        """
 
         def _scan(node):
             shared = getattr(node, "_shared_vars", None)
+            reducer_vars = getattr(node, "_reducer_vars", None) or {}
             if shared:
                 for var_name, initial_value in shared.items():
                     self._register(node.full_name, var_name, initial_value)
                     key = (node.full_name, var_name)
                     if key in self._var_to_idx:
-                        self._shared_indices.add(self._var_to_idx[key])
+                        idx = self._var_to_idx[key]
+                        self._shared_indices.add(idx)
+                        if var_name in reducer_vars:
+                            self._reducers[idx] = reducer_vars[var_name]
             if hasattr(node, "_ops") and node._ops:
                 for child in node._ops.values():
                     if hasattr(child, "_shared_vars"):

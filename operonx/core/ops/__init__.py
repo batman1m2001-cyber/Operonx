@@ -27,6 +27,8 @@ from .base import (
     split_shorthand_kwargs,
 )
 from .flow.branch_op import Branch, BranchOp, if_
+from .flow.emit_op import EmitOp
+from .flow.interrupt_op import InterruptOp
 from .graph.graph_op import GraphOp, graph
 from .transform.func_op import FuncOp, op
 from .transform.parser_op import ParserOp, ParserType
@@ -70,6 +72,8 @@ __all__ = [
     "BranchOp",
     "Branch",
     "if_",
+    "EmitOp",
+    "InterruptOp",
     # Transform
     "FuncOp",
     "op",

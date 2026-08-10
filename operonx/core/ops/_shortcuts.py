@@ -23,6 +23,10 @@ _BASE_INIT_KEYS = frozenset(
         "bound",
         "cache",
         "contain_generation",
+        # Phase 2 observability filter kwargs — passed through to BaseOp.__init__
+        "exclude",
+        "include",
+        "observe_max",
     }
 )
 
