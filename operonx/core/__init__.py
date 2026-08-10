@@ -37,8 +37,6 @@ from operonx.core.ops import (
     GraphOp,
     Interrupt,
     InterruptOp,
-    ParserOp,
-    ParserType,
     ScratchAccessor,
     graph,
     op,
@@ -78,8 +76,6 @@ __all__ = [
     "EmitOp",
     "InterruptOp",
     "FuncOp",
-    "ParserOp",
-    "ParserType",
     # Decorators
     "op",
     "graph",

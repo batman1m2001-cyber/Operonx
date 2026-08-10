@@ -5,7 +5,11 @@
 - ``GraphOp``       — container managing a sub-graph with parallel execution
 - ``BranchOp``      — conditional routing with precompiled conditions
 - ``FuncOp``        — wraps a Python function (supports generators for streaming)
-- ``ParserOp``      — extracts structured data from text (XML/JSON/etc.)
+
+Text→structured-output parsing is done inline by ``LLMOp(fields=..., parser=...,
+validators=...)`` — the standalone ``ParserOp`` was removed in 1.0.0. Its
+pure functions live in ``operonx.providers.parsing`` for callers that need
+text parsing without an LLM call.
 
 Markers: ``START``, ``END``, ``PARENT``, ``PENDING``.
 Decorators: ``op``, ``graph``, ``if_``.
@@ -31,7 +35,6 @@ from .flow.emit_op import EmitOp
 from .flow.interrupt_op import InterruptOp
 from .graph.graph_op import GraphOp, graph
 from .transform.func_op import FuncOp, op
-from .transform.parser_op import ParserOp, ParserType
 
 
 class _PendingSentinel:
@@ -77,8 +80,6 @@ __all__ = [
     # Transform
     "FuncOp",
     "op",
-    "ParserOp",
-    "ParserType",
     # Shorthand helpers
     "shorthand",
     "split_shorthand_kwargs",

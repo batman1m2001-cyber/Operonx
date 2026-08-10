@@ -15,13 +15,11 @@ class TestNodeIntegration:
             EmbeddingOp,
             LLMOp,
             RerankOp,
-            ask,
         )
 
         assert LLMOp is not None
         assert EmbeddingOp is not None
         assert RerankOp is not None
-        assert ask is not None
 
     def test_llm_node_with_parent_outputs(self):
         """Test LLMOp with PARENT reference for outputs."""

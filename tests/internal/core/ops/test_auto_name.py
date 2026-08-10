@@ -4,7 +4,6 @@ from operonx.core.ops.base import PARENT, BaseOp
 from operonx.core.ops.flow.branch_op import Branch, BranchOp
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.ops.transform.func_op import FuncOp, op
-from operonx.core.ops.transform.parser_op import ParserOp
 from operonx.core.utils.auto_name import (
     _name_from_bytecode,
     _parse_assignment,
@@ -134,10 +133,6 @@ class TestAutoName:
     def test_func_op_auto_name(self):
         processor = FuncOp(code_fn=lambda: None)
         assert processor.name == "processor"
-
-    def test_parser_op_auto_name(self):
-        parser = ParserOp(format="json", extract=["x"])
-        assert parser.name == "parser"
 
     def test_branch_op_auto_name(self):
         router = BranchOp()

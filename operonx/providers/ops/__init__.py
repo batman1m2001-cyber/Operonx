@@ -1,14 +1,16 @@
 """Workflow nodes for AI providers.
 
-Light ops (``LLMOp``, ``EmbeddingOp``, ``RerankOp``, ``OnnxOp``, ``ask``)
-only resolve resources via the hub — no heavy module-level deps. They're
-imported eagerly.
+Light ops (``LLMOp``, ``EmbeddingOp``, ``RerankOp``, ``OnnxOp``) only resolve
+resources via the hub — no heavy module-level deps. They're imported eagerly.
 
-``TritonOp`` is lazy-loaded because ``triton.py`` imports numpy at
-module level. Users who don't need Triton don't need numpy.
+``TritonOp`` is lazy-loaded because ``triton.py`` imports numpy at module
+level. Users who don't need Triton don't need numpy.
+
+Note (1.0.0): the ``ask()`` helper was removed. Its behaviour lives in
+``LLMOp(fields=..., parser=..., validators=..., max_retries=...)`` — LLMOp
+now does inline parsing + error-guided semantic retry in a single node.
 """
 
-from operonx.providers.ops.ask import ask
 from operonx.providers.ops.embedding import EmbeddingOp
 from operonx.providers.ops.llm import LLMOp
 from operonx.providers.ops.onnx import OnnxOp
@@ -36,5 +38,4 @@ __all__ = [
     "RerankOp",
     "OnnxOp",
     "TritonOp",
-    "ask",
 ]

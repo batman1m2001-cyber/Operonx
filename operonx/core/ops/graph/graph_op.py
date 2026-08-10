@@ -12,7 +12,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, AsyncGenerator, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, NamedTuple, Optional, Tuple
 
 from operonx.core.configs.edge_config import EdgeConfig, EdgeType
 from operonx.core.configs.op_config import OpType
@@ -89,6 +89,13 @@ class GraphOp(BaseOp):
         "_scheduler",
         "_out_vars",
         "_auto_soft",
+        # Phase 3 cycle-rewrite plumbing
+        "_strict_dag",
+        "_synthetic",
+        "_loop_mode",
+        "_back_edge_sources",
+        "_back_edges",
+        "_rewritten_from",
     ]
 
     type: OpType = "graph"
@@ -97,7 +104,13 @@ class GraphOp(BaseOp):
     # 1. DEFINE — build the graph structure
     # ═══════════════════════════════════════════════════════════════════
 
-    def __init__(self, concurrency: int = 64, auto_soft: bool = True, **kwargs):
+    def __init__(
+        self,
+        concurrency: int = 64,
+        auto_soft: bool = True,
+        strict_dag: bool = False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._token = None
         self._is_building = True
@@ -119,6 +132,15 @@ class GraphOp(BaseOp):
             str, dict
         ] = {}  # {op_name: {src_var: dest_var}} — vars mapped to PARENT output
         self._auto_soft = auto_soft  # auto-soften branch-merge edges at build time
+        # Phase 3: opt-out for the Level-2 cycle→loop rewrite. When True, back-edges
+        # remain as-is and hit the classic validate() warning path.
+        self._strict_dag = strict_dag
+        # Phase 3: hidden loops created by the cycle rewrite carry these markers.
+        self._synthetic = False
+        self._loop_mode = None  # None (classic), "synthetic" (rewritten hidden loop)
+        self._back_edge_sources: set = set()  # audit only; termination consults _back_edges
+        self._back_edges: list = []  # List[(u_name, v_name)] for termination per back-edge
+        self._rewritten_from = None  # audit dict populated by rewrite_cycles_to_loops
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -131,40 +153,20 @@ class GraphOp(BaseOp):
         if exc_type is None:
             self._setup_schema()
 
-    @classmethod
-    def loop(
-        cls,
-        name: Optional[str] = None,
-        until: Optional[Union[str, Callable]] = None,
-        max_iterations: int = 100,
-        **initial_state: Any,
-    ):
-        """Create a GraphOp configured for feedback-loop execution.
-
-        Each iteration re-runs the graph's scheduler, carrying forward outputs
-        as the next iteration's inputs. Stops when ``until`` evaluates to True
-        or ``max_iterations`` is reached.
-
-        Args:
-            name: Graph name.
-            until: Stop condition — a string expression (evaluated against outputs)
-                   or a callable ``(outputs_dict) -> bool``.
-            max_iterations: Safety cap on iterations (default 100).
-            **initial_state: Initial values for loop variables, injected as inputs.
-
-        Example::
-
-            with GraphOp.loop(name="counter", until="count >= 5", count=0) as g:
-                inc = increment(counter=PARENT["count"])
-                inc["counter"] >> PARENT["count"]
-                START >> inc >> END
-        """
-        g = cls(name=name, inputs=initial_state or None)
-        g._loop_config = LoopConfig(
-            until=until,
-            max_iterations=max_iterations,
-        )
-        return g
+    # NOTE (1.0.0): the classic ``GraphOp.loop(until=..., max_iterations=...)``
+    # constructor was removed. Write feedback loops with a back-edge inside
+    # ``@graph`` and let the Phase 3 cycle-rewrite pass synthesize the hidden
+    # loop for you::
+    #
+    #     @graph
+    #     def counter():
+    #         inc = increment(counter=PARENT["count"])
+    #         inc["counter"] >> PARENT["count"]
+    #         START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
+    #
+    # The synthesized ``_GraphLoop`` (internal-only) still lives as a private
+    # GraphOp instance with ``_loop_mode = "synthetic"`` and ``_loop_config``
+    # set by the rewrite pass; there is no user-facing constructor.
 
     @staticmethod
     def get_current_graph() -> Optional["GraphOp"]:
@@ -281,7 +283,19 @@ class GraphOp(BaseOp):
     # ═══════════════════════════════════════════════════════════════════
 
     def build(self):
-        """Build graph: children first, then schema → endpoints → topology → validation."""
+        """Build graph: cycle-rewrite → children → schema → endpoints → validation → topology.
+
+        The cycle-rewrite pass (Phase 3 Level-2) runs FIRST so that any
+        synthetic hidden ``GraphOp.loop`` children it creates are then built
+        alongside the user's own children. Ordering matters — validate() and
+        auto_soft assume a DAG and would produce wrong results on cyclic input.
+        """
+        # Phase 3: rewrite user-authored back-edges into hidden loop nodes
+        # BEFORE building children (so the hidden loop children get built too).
+        from operonx.core.ops.graph.cycle_rewrite import rewrite_cycles_to_loops
+
+        rewrite_cycles_to_loops(self)
+
         for child in self._ops.values():
             if hasattr(child, "build"):
                 child.build()
@@ -488,13 +502,28 @@ class GraphOp(BaseOp):
         """Discover inputs/outputs from child ops.
 
         Scans child ops for Ref references pointing to PARENT (self) —
-        those become the graph's inputs/outputs.
+        those become the graph's inputs/outputs. After a Phase 3 cycle
+        rewrite the SCC ops live inside a synthetic hidden loop but their
+        PARENT refs still point at *this* outer graph, so we descend into
+        synthetic-loop children when collecting refs (BUG 8 fix — otherwise
+        outer.inputs silently loses the moved ops' PARENT contributions
+        and Operon.input_schema() returns an incomplete surface).
         """
         LOGGER.debug("Graph [highlight]%s[/highlight]: building schema...", self.name)
         graph_inputs = {}
         graph_outputs = {}
 
-        for child_name, child in self._ops.items():
+        def _collect(child_name: str, child, loop_owner=None):
+            """Recurse into synthetic loops when scanning for PARENT refs.
+
+            ``loop_owner`` (when set) is the nearest enclosing synthetic
+            hidden loop containing ``child``. Its ``_out_vars`` gets the
+            emission mapping — that way the loop's own scheduler emits per-op
+            frames for moved SCC ops during ``engine.stream(mode="updates")``
+            (BUG 7 fix). ``self.inputs``/``self.outputs`` still absorb the
+            declaration so the outer graph's schema surface is complete
+            (BUG 8 fix).
+            """
             for var, param in child.inputs.items():
                 if isinstance(param.value, Ref) and param.value.raw_source is self:
                     graph_inputs[param.value.var] = Param(
@@ -512,7 +541,18 @@ class GraphOp(BaseOp):
                         default=param.default,
                         description=param.description,
                     )
-                    self._out_vars.setdefault(child_name, {})[var] = param.value.var
+                    (loop_owner or self)._out_vars.setdefault(child_name, {})[var] = (
+                        param.value.var
+                    )
+
+            # Descend into synthetic hidden loops — their children's PARENT
+            # refs point through the loop back to us.
+            if getattr(child, "_synthetic", False):
+                for grand_name, grand in child._ops.items():
+                    _collect(grand_name, grand, loop_owner=child)
+
+        for child_name, child in self._ops.items():
+            _collect(child_name, child)
 
         self.inputs = self._merge_params(graph_inputs, self.inputs)
         self.outputs = self._merge_params(graph_outputs, self.outputs)
@@ -546,30 +586,64 @@ class GraphOp(BaseOp):
             raise ValueError("Graph must have at least one exit op.")
 
     def _validate_ref_scope(self):
-        """Validate that all Ref inputs in child ops point to ops inside this graph or PARENT.
+        """Validate that all Ref inputs in child ops point to ops inside this graph,
+        PARENT, an ancestor GraphOp, or an op inside a synthetic-loop descendant
+        (Phase 3: outer ops may hold refs to SCC ops that were moved into a
+        hidden loop; the underlying op instance is unchanged — only its parent
+        graph is different — so state lookups still resolve correctly).
 
-        A Ref pointing to an op in a parent/outer graph will not resolve at runtime
-        because the child graph runs in its own isolated state. This catches a common
-        mistake when nesting subgraphs (e.g., extract() inside @graph).
+        A Ref pointing to an op in a *sibling* subgraph (a graph elsewhere in the
+        tree that isn't an ancestor or a synthetic descendant) won't resolve at
+        runtime because that graph runs in its own isolated state — those still
+        error.
 
         Raises:
-            ValueError: If a Ref points to an op outside this graph's scope.
+            ValueError: If a Ref points to an op outside the allowed scope.
         """
         valid_sources = set(self._ops.keys())
+
+        # Walk the parent chain to collect ancestor GraphOps (identity-based).
+        ancestors: set = set()
+        cur = self.parent
+        while cur is not None and hasattr(cur, "_ops"):
+            ancestors.add(id(cur))
+            cur = getattr(cur, "parent", None)
+
+        # Collect descendant op identities inside synthetic hidden loops (BUG 3
+        # from Phase 3 review — the rewrite moves SCC ops into a synthetic loop
+        # but outer ops may still hold refs to them; the op instances are
+        # unchanged so state lookups by full_name work).
+        descendants: set = set()
+
+        def _walk_synthetic(node):
+            for child in node._ops.values():
+                if getattr(child, "_synthetic", False):
+                    for grand in child._ops.values():
+                        descendants.add(id(grand))
+                    _walk_synthetic(child)
+
+        _walk_synthetic(self)
 
         for child_name, child in self._ops.items():
             for var, param in child.inputs.items():
                 if not isinstance(param.value, Ref):
                     continue
                 ref: Ref = param.value
-                # PARENT refs are OK — they resolve from graph inputs
+                # PARENT refs pointing to self are OK — resolve from graph inputs
                 if ref.raw_source is self:
                     continue
                 # Refs to ops inside this graph are OK
                 source_name = getattr(ref.raw_source, "name", None)
                 if source_name in valid_sources:
                     continue
-                # Ref points to an op outside this graph → error
+                # Refs to any ancestor GraphOp are OK
+                if id(ref.raw_source) in ancestors:
+                    continue
+                # Refs to any synthetic-loop descendant op are OK
+                if id(ref.raw_source) in descendants:
+                    continue
+                # Ref points to an op outside this graph and outside the ancestor
+                # / synthetic-descendant chain → error.
                 source_repr = source_name or repr(ref.raw_source)
                 raise ValueError(
                     f"Graph '{self.name}': op '{child_name}' input '{var}' references "
@@ -666,6 +740,37 @@ class GraphOp(BaseOp):
         compatibility even though the internal Python attribute was renamed to
         ``_initial_ready`` during the scheduler rewrite.
         """
+        # Phase 3: synthetic hidden loops can't serialize as classic
+        # loop_config because their termination is scheduler-side (back-edge
+        # activation) with no equivalent until-expression. Emitting a
+        # classic loop_config would silently tell external consumers "iter
+        # to max_iterations with no exit condition" (HAZARD from Phase 3
+        # review). Refuse loudly instead — callers must recompile from
+        # source for now.
+        if getattr(self, "_loop_mode", None) == "synthetic":
+            raise NotImplementedError(
+                f"GraphOp '{self.name}' is a synthetic loop from the Phase 3 "
+                "cycle-rewrite pass and does not yet have a serialization "
+                "format. Serialize the pre-rewrite graph or use "
+                "@graph(strict_dag=True) to opt out."
+            )
+        # Also refuse to serialize an outer graph that contains any synthetic
+        # loop descendant — the missing sub-config would poison consumers.
+        def _contains_synthetic(node):
+            for child in node._ops.values():
+                if getattr(child, "_synthetic", False):
+                    return True
+                if hasattr(child, "_ops") and _contains_synthetic(child):
+                    return True
+            return False
+
+        if _contains_synthetic(self):
+            raise NotImplementedError(
+                f"GraphOp '{self.name}' contains a synthetic hidden loop "
+                "(Phase 3 cycle-rewrite output). Serialize the pre-rewrite "
+                "graph or use @graph(strict_dag=True) on the affected subgraph."
+            )
+
         base = super().serialize()
         base.update(
             {
@@ -696,6 +801,42 @@ class GraphOp(BaseOp):
 
     def validate(self) -> ValidationResult:
         """Run all validations and return result."""
+        # Collect ancestor GraphOp names so _validate_refs allows moved-SCC
+        # ops to keep their outer PARENT refs after Phase 3 rewrite.
+        ancestor_names: set = set()
+        cur = self.parent
+        while cur is not None and hasattr(cur, "_ops"):
+            if getattr(cur, "name", None):
+                ancestor_names.add(cur.name)
+            cur = getattr(cur, "parent", None)
+
+        # Collect descendant op names inside synthetic hidden loops so
+        # _validate_refs allows outer ops to reference moved SCC ops (BUG 3).
+        descendant_names: set = set()
+
+        def _walk(node):
+            for child in node._ops.values():
+                if getattr(child, "_synthetic", False):
+                    for grand_name in child._ops:
+                        descendant_names.add(grand_name)
+                    _walk(child)
+
+        _walk(self)
+
+        # Collect sibling op names — ops living in any ancestor's _ops (not
+        # including ancestor graphs themselves). A BranchOp moved into a
+        # synthetic hidden loop may reference siblings that stayed at the
+        # outer level (BUG 2 / E3 multi-exit-via-branch): the branch's
+        # __branch_target__ is re-routed through the loop's outgoing edges
+        # at the outer level.
+        sibling_names: set = set()
+        cur = self.parent
+        while cur is not None and hasattr(cur, "_ops"):
+            for name in cur._ops:
+                if name != self.name:
+                    sibling_names.add(name)
+            cur = getattr(cur, "parent", None)
+
         return validate_graph(
             self.name,
             self._ops,
@@ -704,6 +845,9 @@ class GraphOp(BaseOp):
             self.nexts,
             self.entries,
             self.exits,
+            ancestor_names=ancestor_names,
+            descendant_names=descendant_names,
+            sibling_names=sibling_names,
         )
 
     def show(self, indent=0):

@@ -43,7 +43,6 @@ from operonx.core import (
     Interrupt,
     InterruptOp,
     Operon,
-    ParserOp,
     graph,
     op,
 )
@@ -120,7 +119,6 @@ __all__ = [
     "EmitOp",
     "InterruptOp",
     "FuncOp",
-    "ParserOp",
     # Decorators
     "op",
     "graph",
