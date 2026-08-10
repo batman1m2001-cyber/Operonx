@@ -1,4 +1,4 @@
-"""Tests for PARENT.shared() — persistent vars across stream contexts."""
+"""Tests for PARENT.declare() — persistent vars across stream contexts."""
 
 import asyncio
 
@@ -25,7 +25,7 @@ class TestSharedVarsBasic:
             return {"new_counter": counter + 1, "seen_idx": idx}
 
         with GraphOp(name="shared_test") as g:
-            PARENT.shared(counter=0)
+            PARENT.declare(counter=0)
 
             s = source(n=PARENT["n"])
             inc = increment(idx=s["idx"], counter=PARENT["counter"])
@@ -61,7 +61,7 @@ class TestSharedVarsBasic:
             return {"result": f"{status}_{x}"}
 
         with GraphOp(name="init_test") as g:
-            PARENT.shared(status="READY")
+            PARENT.declare(status="READY")
 
             s = source()
             r = reader(x=s["x"], status=PARENT["status"])
@@ -95,7 +95,7 @@ class TestSharedVarsBasic:
             return {"result": f"read_{state_val}", "new_state": new_state}
 
         with GraphOp(name="multi_turn") as g:
-            PARENT.shared(state_val="INITIAL")
+            PARENT.declare(state_val="INITIAL")
 
             s = source(n=PARENT["n"])
             p = process_turn(turn=s["turn"], state_val=PARENT["state_val"])
@@ -133,7 +133,7 @@ class TestSharedVarsWithNormalVars:
             return {"result": x * 10, "new_count": shared_count + 1}
 
         with GraphOp(name="mixed") as g:
-            PARENT.shared(shared_count=0)
+            PARENT.declare(shared_count=0)
 
             s = source(n=PARENT["n"])
             p = process(x=s["x"], shared_count=PARENT["shared_count"])
@@ -159,7 +159,7 @@ class TestSharedVarsEdgeCases:
 
     @pytest.mark.asyncio
     async def test_no_shared_vars_still_works(self):
-        """Graph without PARENT.shared() works as before."""
+        """Graph without PARENT.declare() works as before."""
 
         @op
         def source(n: int):
@@ -200,7 +200,7 @@ class TestSharedVarsEdgeCases:
             return {"new_history": new_history, "current_len": len(new_history)}
 
         with GraphOp(name="history") as g:
-            PARENT.shared(history=[])
+            PARENT.declare(history=[])
 
             s = source(n=PARENT["n"])
             a = append_history(msg=s["msg"], history=PARENT["history"])
@@ -240,7 +240,7 @@ class TestSharedVarsEdgeCases:
             return {"new_buffer": new_buffer}
 
         with GraphOp(name="scalar_test") as g:
-            PARENT.shared(buffer=[])
+            PARENT.declare(buffer=[])
 
             s = source(n=PARENT["n"])
             a = accumulate(x=s["x"], buffer=PARENT["buffer"])
@@ -272,7 +272,7 @@ class TestSharedVarsEdgeCases:
             return {"result": x * 10, "new_counter": counter + 1}
 
         with GraphOp(name="mixed_output") as g:
-            PARENT.shared(counter=0)
+            PARENT.declare(counter=0)
 
             s = source(n=PARENT["n"])
             p = process(x=s["x"], counter=PARENT["counter"])
@@ -299,9 +299,9 @@ class TestSharedVarsEdgeCases:
         assert isinstance(collected["result"], list)
 
     @pytest.mark.asyncio
-    async def test_shared_only_on_parent(self):
-        """PARENT.shared() raises if called on non-PARENT."""
+    async def test_declare_only_on_parent(self):
+        """PARENT.declare() raises if called on non-PARENT."""
         from operonx.core import START as s
 
-        with pytest.raises(TypeError, match="shared.*PARENT"):
-            s.shared(x=1)
+        with pytest.raises(TypeError, match="declare.*PARENT"):
+            s.declare(x=1)

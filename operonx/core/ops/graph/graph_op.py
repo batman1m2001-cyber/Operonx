@@ -12,7 +12,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, AsyncGenerator, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, NamedTuple, Optional, Tuple
 
 from operonx.core.configs.edge_config import EdgeConfig, EdgeType
 from operonx.core.configs.op_config import OpType
@@ -153,55 +153,20 @@ class GraphOp(BaseOp):
         if exc_type is None:
             self._setup_schema()
 
-    @classmethod
-    def loop(
-        cls,
-        name: Optional[str] = None,
-        until: Optional[Union[str, Callable]] = None,
-        max_iterations: int = 100,
-        **initial_state: Any,
-    ):
-        """DEPRECATED (Phase 3): construct a GraphOp configured for feedback-loop
-        execution.
-
-        Prefer writing the loop directly with a back-edge — the Phase 3 build-time
-        rewrite pass synthesizes an equivalent hidden loop for you::
-
-            @graph
-            def counter():
-                inc = increment(counter=PARENT["count"])
-                inc["counter"] >> PARENT["count"]
-                START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
-
-        Each iteration re-runs the graph's scheduler, carrying forward outputs
-        as the next iteration's inputs. Stops when ``until`` evaluates to True
-        or ``max_iterations`` is reached.
-
-        This constructor still works but emits a :class:`DeprecationWarning`. The
-        rewrite pass calls this internally via ``_internal=True`` to avoid noise.
-
-        Args:
-            name: Graph name.
-            until: Stop condition — a string expression (evaluated against outputs)
-                   or a callable ``(outputs_dict) -> bool``.
-            max_iterations: Safety cap on iterations (default 100).
-            **initial_state: Initial values for loop variables, injected as inputs.
-        """
-        if not initial_state.pop("_internal", False):
-            import warnings
-
-            warnings.warn(
-                "GraphOp.loop() is deprecated; write the loop with a back-edge inside "
-                "@graph and let the Phase 3 rewrite pass synthesize the loop.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        g = cls(name=name, inputs=initial_state or None)
-        g._loop_config = LoopConfig(
-            until=until,
-            max_iterations=max_iterations,
-        )
-        return g
+    # NOTE (1.0.0): the classic ``GraphOp.loop(until=..., max_iterations=...)``
+    # constructor was removed. Write feedback loops with a back-edge inside
+    # ``@graph`` and let the Phase 3 cycle-rewrite pass synthesize the hidden
+    # loop for you::
+    #
+    #     @graph
+    #     def counter():
+    #         inc = increment(counter=PARENT["count"])
+    #         inc["counter"] >> PARENT["count"]
+    #         START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
+    #
+    # The synthesized ``_GraphLoop`` (internal-only) still lives as a private
+    # GraphOp instance with ``_loop_mode = "synthetic"`` and ``_loop_config``
+    # set by the rewrite pass; there is no user-facing constructor.
 
     @staticmethod
     def get_current_graph() -> Optional["GraphOp"]:

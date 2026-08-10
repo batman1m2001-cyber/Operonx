@@ -281,36 +281,14 @@ class TestPushRefReducerPath:
 
 
 # ---------------------------------------------------------------------------
-# Backward compat — .shared() still works, emits deprecation warning
+# 1.0.0 removal — ``.shared()`` gone; only ``.declare()`` survives.
 # ---------------------------------------------------------------------------
 
 
-class TestBackwardCompatShared:
-    def test_shared_still_registers_vars(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            g = _minimal_graph("g", lambda: PARENT.shared(count=0, log=[]))
-        assert g._shared_vars == {"count": 0, "log": []}
-        assert g._reducer_vars == {}
-
-    def test_shared_emits_deprecation_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            _minimal_graph("g", lambda: PARENT.shared(count=0))
-
-        dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-        assert len(dep_warnings) == 1
-        assert "declare()" in str(dep_warnings[0].message)
-
-    def test_declare_and_shared_can_coexist(self):
-        """Migration path: existing .shared() code can add .declare() incrementally."""
-
-        def _both():
-            PARENT.shared(legacy=1)
-            PARENT.declare(new=2, reducers={"new": operator.add})
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            g = _minimal_graph("g", _both)
-        assert g._shared_vars == {"legacy": 1, "new": 2}
-        assert g._reducer_vars == {"new": operator.add}
+class TestSharedRemovedIn1_0_0:
+    def test_shared_attribute_is_gone(self):
+        """The deprecated ``PARENT.shared()`` alias was removed in 1.0.0.
+        Accessing it must raise ``AttributeError``, guiding users to
+        ``PARENT.declare()`` via the migration guide."""
+        with pytest.raises(AttributeError):
+            PARENT.shared(count=0)

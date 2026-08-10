@@ -12,12 +12,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from operonx.core import LOGGER
 from operonx.core.configs import OpType
-from operonx.core.exceptions import PromptError
+from operonx.core.exceptions import LLMRefusalError, PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 from operonx.providers.ops._utils import resolve_hub
+from operonx.providers.parsing import ExtractField, parse_and_extract
 
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
@@ -104,6 +105,13 @@ class LLMOp(BaseOp):
         "_fallback_llms",
         "_rng",
         "_initialized",
+        # Structured-output layer (merged from the deleted ParserOp in 1.0.0)
+        "fields",
+        "parser",
+        "validators",
+        "max_retries",
+        "retry_hint",
+        "_extract_fields",
     ]
 
     type: OpType = "llm"
@@ -115,6 +123,12 @@ class LLMOp(BaseOp):
         fallback: Optional[List[str]] = None,
         batch_mode: bool = False,
         seed: Optional[int] = None,
+        # ── Structured-output layer (merged from ask()/ParserOp in 1.0.0) ───
+        fields: Optional[List[str]] = None,
+        parser: Optional[str] = None,
+        validators: Optional[Dict[str, List[Any]]] = None,
+        max_retries: int = 0,
+        retry_hint: bool = True,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs: Any,
@@ -126,9 +140,29 @@ class LLMOp(BaseOp):
                 - Single string: "gpt-4"
                 - List for load balancing: ["gpt-4", "claude-3"]
             ratios: Weight ratios for load balancing. Must sum to 1.0.
-            fallback: Fallback resource keys tried in order on failure.
+            fallback: Fallback resource keys tried in order on **hard** failures
+                — refusals from the model, provider-side content filtering, or
+                exhausted transport retries (the underlying SDK gave up). NOT
+                triggered by parse/validator failures — those use ``max_retries``.
             batch_mode: Use OpenAI Batch API (50% cheaper).
             seed: Optional seed for load balancing RNG.
+            fields: Optional list of ``"path.to.value: type"`` extraction schemas
+                (see ``operonx.providers.parsing.ExtractField``). When set, the
+                LLM response is parsed inline; each field becomes a top-level
+                output of this op.
+            parser: Parser format when ``fields`` is set: ``"xml"``, ``"json"``,
+                or ``"yaml"``. Defaults to ``"xml"`` when ``fields`` is provided.
+            validators: Optional per-field allow-list validators applied after
+                extraction. Format: ``{"field_name": [allowed_value, ...]}``.
+                A value prefixed with ``@`` in the list is used as a default
+                when the extracted value doesn't match the allow-list.
+            max_retries: Max **semantic** retries when the parser or validators
+                report an error. Default 0 (no retry — first parse failure
+                surfaces as ``error`` in the output). Transport errors are the
+                SDK's responsibility and NOT counted here.
+            retry_hint: When True (default) and retrying, append the previous
+                LLM response and a "that failed — <error>, try again" user turn
+                so the model sees what went wrong.
             inputs: Input variable mappings.
             outputs: Output variable mappings.
             **kwargs: Additional keyword arguments for BaseOp.
@@ -140,6 +174,30 @@ class LLMOp(BaseOp):
         self.contain_generation = True
         self.fallback = fallback
         self._rng = random.Random(seed)
+
+        # Structured-output config (merged from ParserOp).
+        if fields and not parser:
+            parser = "xml"
+        if parser and not fields:
+            raise TypeError(
+                "LLMOp(parser=...) requires fields=[...] — parser has no work "
+                "to do without extraction schemas."
+            )
+        if validators and not fields:
+            raise TypeError(
+                "LLMOp(validators=...) requires fields=[...] — nothing to "
+                "validate without extracted values."
+            )
+        if max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+        self.fields = fields
+        self.parser = parser
+        self.validators = validators
+        self.max_retries = max_retries
+        self.retry_hint = retry_hint
+        self._extract_fields = (
+            [ExtractField.from_string(s) for s in fields] if fields else None
+        )
 
         # Validate resource + ratios
         if isinstance(resource, list):
@@ -184,6 +242,14 @@ class LLMOp(BaseOp):
             "usage": Param(type=dict, default={}),
             "extras": Param(type=dict, default={}),
         }
+        # When fields=[...] is set, extend the output schema with one Param
+        # per extracted field and an ``error`` field (parse/validate error
+        # string, or None on success). Callers wire the individual fields
+        # through refs the same way they used to wire ParserOp outputs.
+        if self._extract_fields:
+            for f in self._extract_fields:
+                output_schema[f.output_key] = Param(default=None)
+            output_schema["error"] = Param(type=str, default=None)
 
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
@@ -364,7 +430,23 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     async def _generate_core(self, **kwargs):
-        """Format prompt → select LLM → generate → fallback on error."""
+        """Format prompt → LLM → optional parse+semantic-retry → optional fallback.
+
+        Two shapes:
+          * ``fields=None`` (default): raw content mode — call once, on refusal
+            or SDK-side hard error try the ``fallback`` list, else propagate.
+          * ``fields=[...]`` set: structured mode — call LLM, parse+validate
+            inline via ``operonx.providers.parsing.parse_and_extract``. On
+            parse/validator failure, retry ``max_retries`` more times on the
+            SAME resource with the previous response + error injected into
+            the messages (Instructor-style error-guided retry). Semantic
+            failures NEVER trigger fallback — a different resource is
+            unlikely to fix a parser-shape bug.
+
+        Transport errors (429 / 5xx / timeout) are the SDK's responsibility;
+        anything that surfaces here has already exhausted the SDK's own
+        retries, so it counts as a hard failure and routes to ``fallback``.
+        """
         llm_params = self._build_llm_params(kwargs)
 
         if self.batch_mode:
@@ -374,30 +456,135 @@ class LLMOp(BaseOp):
             completion = await self._batch_coordinator.submit(**llm_params)
             return self._extract_completion(completion, self.resource)
 
+        if self._extract_fields is None:
+            return await self._llm_call_with_fallback(llm_params)
+        return await self._structured_generate(llm_params)
+
+    async def _llm_call_with_fallback(self, llm_params: Dict[str, Any]):
+        """One LLM call. Refusal or hard exception → try fallback resources."""
         selected = self._select_llm()
         resource = self._get_resource_key(selected)
 
         try:
             completion = await selected.generate(**llm_params)
-            return self._extract_completion(completion, resource)
+            result = self._extract_completion(completion, resource)
         except Exception as e:
             if not self._fallback_llms:
                 raise
             LOGGER.error(f"Primary {resource} failed: {e}")
             return await self._fallback_generate(llm_params)
 
+        if self._is_refusal(result):
+            reason = result.get("finish_reason")
+            refusal_text = (result.get("extras") or {}).get("refusal")
+            if not self._fallback_llms:
+                raise LLMRefusalError(
+                    message=f"{resource} refused the request",
+                    reason=reason,
+                    refusal_text=refusal_text,
+                    resource=resource,
+                )
+            LOGGER.warning(
+                f"Primary {resource} refused (finish_reason={reason!r}); trying fallback"
+            )
+            return await self._fallback_generate(llm_params)
+
+        return result
+
     async def _fallback_generate(self, llm_params):
-        """Try fallback LLMs in order. Raises if all fail."""
+        """Try fallback LLMs in order. Skips refusers + hard-failers; raises
+        when the list is exhausted."""
+        last_refusal_reason: Optional[str] = None
         for idx, fallback_llm in enumerate(self._fallback_llms):
             fallback_key = self.fallback[idx]
             try:
                 LOGGER.info(f"Trying fallback {fallback_key}...")
                 completion = await fallback_llm.generate(**llm_params)
+                result = self._extract_completion(completion, fallback_key)
+                if self._is_refusal(result):
+                    last_refusal_reason = result.get("finish_reason")
+                    LOGGER.warning(
+                        f"Fallback {fallback_key} refused "
+                        f"(finish_reason={last_refusal_reason!r}); trying next"
+                    )
+                    continue
                 LOGGER.info(f"Fallback to {fallback_key} succeeded")
-                return self._extract_completion(completion, fallback_key)
+                return result
             except Exception as fallback_error:
                 LOGGER.error(f"Fallback {fallback_key} failed: {fallback_error}")
-        raise RuntimeError("All fallback models failed")
+        raise RuntimeError(
+            f"All fallback models failed or refused "
+            f"(last_refusal_reason={last_refusal_reason!r})"
+        )
+
+    def _is_refusal(self, result: Dict[str, Any]) -> bool:
+        """Return True when the response looks like a provider-signalled refusal.
+
+        Detected via ``finish_reason in {"content_filter", "safety"}`` or a
+        non-empty ``extras.refusal`` field. Does NOT heuristically scan
+        ``content`` for phrases like "I can't help with that" — those
+        false-positive too often.
+        """
+        if result.get("finish_reason") in ("content_filter", "safety"):
+            return True
+        extras = result.get("extras") or {}
+        if extras.get("refusal"):
+            return True
+        return False
+
+    async def _structured_generate(self, llm_params: Dict[str, Any]):
+        """LLM call → parse+validate → error-guided semantic retry on failure.
+
+        Retries do NOT trigger fallback — parse/validator errors are semantic.
+        Uses the SAME LLM selection each attempt. On the final attempt, if
+        parsing still fails, returns the last LLM result with all extracted
+        fields set to ``None`` and ``error`` set to the last failure message —
+        downstream ops branch on ``error``.
+        """
+        messages_base = list(llm_params.get("messages", []))
+        last_error: Optional[str] = None
+        last_content: Optional[str] = None
+        last_result: Dict[str, Any] = {}
+
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0 and self.retry_hint and last_content is not None:
+                messages = messages_base + [
+                    {"role": "assistant", "content": last_content},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous response failed: {last_error}. "
+                            f"Please try again, following the required format exactly."
+                        ),
+                    },
+                ]
+            else:
+                messages = messages_base
+
+            attempt_params = dict(llm_params, messages=messages)
+            last_result = await self._llm_call_with_fallback(attempt_params)
+
+            parsed = parse_and_extract(
+                text=last_result.get("content", ""),
+                parser=self.parser,
+                fields=self._extract_fields,
+                validators=self.validators,
+            )
+
+            if parsed.get("error") is None:
+                return {**last_result, **parsed}
+
+            last_error = parsed["error"]
+            last_content = last_result.get("content")
+            LOGGER.warning(
+                "LLMOp semantic failure on attempt %d/%d: %s",
+                attempt + 1,
+                self.max_retries + 1,
+                last_error,
+            )
+
+        field_nones = {f.output_key: None for f in self._extract_fields}
+        return {**last_result, **field_nones, "error": last_error}
 
     # =========================================================================
     # Core: stream
@@ -700,18 +887,30 @@ class LLMOp(BaseOp):
         batch_mode=False,
         seed=None,
         prompt=None,
+        # Structured-output layer (merged from ask()/ParserOp in 1.0.0).
+        fields=None,
+        parser=None,
+        validators=None,
+        max_retries=0,
+        retry_hint=True,
         **kwargs,
     ) -> "LLMOp":
         """Create an LLMOp with flat kwargs.
 
-        Example::
+        Simple mode::
 
             llm = LLMOp.of(resource="gpt-4", prompt="Hello {name}", name="Alice")
+
+        Structured mode (replaces the removed ask() helper)::
+
             llm = LLMOp.of(
-                resource=["gpt-4", "claude-3"],
-                ratios=[0.7, 0.3],
-                prompt={"system": "You are {role}.", "user": "{q}"},
-                role="helper", q=PARENT["q"],
+                resource="claude-haiku",
+                prompt="Classify: {speech}",
+                fields=["result: str"],
+                parser="xml",
+                validators={"result": ["CONFIRM", "DENY", "@FALLBACK"]},
+                max_retries=2,
+                speech=PARENT["speech"],
             )
         """
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
@@ -723,6 +922,11 @@ class LLMOp(BaseOp):
             fallback=fallback,
             batch_mode=batch_mode,
             seed=seed,
+            fields=fields,
+            parser=parser,
+            validators=validators,
+            max_retries=max_retries,
+            retry_hint=retry_hint,
             inputs=input_mappings or None,
             **init_kwargs,
         )

@@ -61,9 +61,10 @@ appends to a list at the parent level.
 
 ## Loops vs streaming
 
-Generator ops parallelize fan-out. `GraphOp.loop` serializes feedback. Use
-generators for "do the same thing to N items"; use `loop` for "iterate
-until a condition is met."
+Generator ops parallelize fan-out. A back-edge inside `@graph` (see
+[Loops](03-loops-and-branches.md)) serialises feedback. Use generators
+for "do the same thing to N items"; use a back-edge for "iterate until
+a condition is met."
 
 ## Where to go next
 

@@ -1,1 +1,1 @@
-"""Tests for transform nodes (FuncOp, ParserOp)."""
+"""Tests for transform nodes (FuncOp)."""
