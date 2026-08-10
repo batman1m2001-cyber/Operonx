@@ -86,7 +86,8 @@ pure-Python helper**. 1.0.0 dissolves five more that v1 kept as ops.
 |---|---|---|
 | `TurnController` | Back-edge inside `@graph` — Phase 3 rewrite | v1 had `GraphOp.loop`; 1.0.0 collapses to DAG-native. |
 | `LLMClient` | `LLMOp.of` | Simple + structured mode in one class. |
-| `ToolDispatcher` | Subgraph (§7.2) | 5 ops + 2 branches per call. |
+| `Tool` (the LLM-callable thing) | **`ToolOp(BaseOp)` — first-class primitive (§7.1)** | The one deliberate new class in this plan. Everything else in the table dissolves. See §7.1a for the "op-worthy" criteria. |
+| `ToolDispatcher` | Thin subgraph over `ToolOp.dispatch()` (§7.2) | 3 ops + 2 branches per call — dispatch protocol lives on ToolOp. |
 | `SubAgent` | Nested `@graph` (§7.4) | Free ctx isolation + trace nesting. |
 | `Permission` engine | **`InterruptOp` → `if_(response.approved).else_(blocked)`** | v1 had a runtime branch on a stashed mode flag; 1.0.0 gives real HITL. |
 | `MessageStore` / accumulator | **`PARENT.declare(messages=[], reducers={"messages": add_messages})`** | v1 wrote a custom merger op; framework ships one. |
@@ -102,8 +103,10 @@ pure-Python helper**. 1.0.0 dissolves five more that v1 kept as ops.
 | `SkillLoader` (YAML parse) | Pure function at agent init | One-shot. |
 | `Agent` composition root | ~30-LOC factory building the top-level `@graph` | Not a class. |
 
-**Net effect:** the "12-module decomposition" from v1 collapses further. Ten
-of the boxes above are now zero-LOC on our side — 1.0.0 handles them. What
+**Net effect:** the "12-module decomposition" from v1 collapses further.
+Ten of the boxes above are now zero-LOC on our side — 1.0.0 handles them.
+One (`Tool` → `ToolOp`) is a deliberate first-class primitive, one class,
+~120 LOC (§7.1). The rest are thin `@op` + pure-Python helpers. What
 remains is ~13 small files, most under 200 LOC.
 
 ---
@@ -112,29 +115,48 @@ remains is ~13 small files, most under 200 LOC.
 
 ```
 operonx/agents/                    (NEW · blessed primitives · in-tree)
-├── __init__.py                    # public surface: Tool, TOOL_REGISTRY, build_react_agent, subagent
+├── __init__.py                    # public surface: ToolOp, tool, TOOL_REGISTRY,
+│                                  #                 build_react_agent, subagent
 ├── CONTRIBUTING.md                # Footprint Ladder governance
 │
-├── tool.py                        # @tool decorator, TOOL_REGISTRY dict
+├── tool.py                        # ToolOp(BaseOp) class · @tool shorthand · TOOL_REGISTRY dict
+│                                  # · _param_to_json_schema + _tool_message + _truncate helpers
 ├── errors.py                      # ClassifiedError + pure classify()
-├── memory.py                      # MemoryProvider ABC + LocalMarkdownMemory
+├── memory.py                      # MemoryProvider ABC ONLY (no MemoryOp — see §7.1a)
+│                                  # + LocalMarkdownMemory reference backend
 │
-├── ops/
+├── ops/                           # every file here is thin @op wrappers
 │   ├── memory_ops.py              # memory_prefetch (generator+fan-out), memory_sync, memory_write
-│   ├── permission_ops.py          # request_approval (InterruptOp wrapper); permission_check (policy)
+│   │                              # — thin wrappers around MemoryProvider methods; use case
+│   │                              #   varies too much to justify a MemoryOp base class
+│   ├── permission_ops.py          # permission_check (policy); wraps InterruptOp when needed
 │   ├── compact_ops.py             # count_tokens, compact_messages
 │   ├── prompt_ops.py              # build_system_prompt, apply_cache_control, assemble_api_messages
 │   ├── skill_ops.py               # inject_skills_as_user_msg
 │   └── progress_ops.py            # emit_progress helpers (thin EmitOp wrappers with typed payloads)
 │
 ├── graphs/
-│   ├── dispatch.py                # per-tool subgraph + all-tools fan-out
-│   ├── react.py                   # ReAct back-edge loop factory
-│   └── subagent.py                # sub-agent nested-@graph factory
+│   ├── dispatch.py                # dispatch_one subgraph + dispatch_all_tools fan-out (§7.2)
+│   ├── react.py                   # ReAct back-edge loop factory (§7.3)
+│   └── subagent.py                # sub-agent nested-@graph factory (§7.4)
 │
 └── skills/
     └── loader.py                  # SKILL.md YAML frontmatter parser
 ```
+
+**What's NOT in `operonx/agents/`** (deliberate boundary):
+
+- **RAG ops** (`RerankOp` today, potential future `VectorSearchOp`,
+  `HybridSearchOp`) live in `operonx/providers/ops/*` — same tier as
+  `LLMOp`/`EmbeddingOp`. RAG is a *provider* concern; the agent
+  framework consumes it via `LLMOp` inputs, doesn't own it. Blurring
+  RAG into "memory" would fight the community's mental model (LangChain
+  / LlamaIndex / Haystack all separate the two) and force
+  `MemoryProvider` to grow a `.search()` method that half its backends
+  won't implement.
+- **`ToolOp` is the one exception to "no first-class agent op"** — see
+  §7.1a for why. No `PermissionOp`, `CompactionOp`, or `SkillOp` — each
+  fails the 4-criteria bar; each is a plain `@op` + helper module.
 
 Also in tree:
 
@@ -285,62 +307,240 @@ retry would just double the exponential backoff.
 
 ## 7 · Core sketches
 
-### 7.1 · `@tool` — a tool IS an `@op` with metadata
+### 7.1 · `ToolOp` — the one new first-class op
+
+**Design call:** `ToolOp` is a real `BaseOp` subclass alongside `LLMOp`,
+`EmbeddingOp`, `RerankOp`, `InterruptOp`, `EmitOp`. See §7.1a for the
+"op-worthy" criteria and why tool clears the bar and memory doesn't.
 
 ```python
 # operonx/agents/tool.py
-from operonx import op
+from typing import Any, Callable, Dict, Optional
+from operonx.core.ops import BaseOp
+from operonx.core.utils.common import Param
+from operonx.core.configs import OpType
 
-TOOL_REGISTRY: dict[str, callable] = {}
+TOOL_REGISTRY: Dict[str, "ToolOp"] = {}
+
+class ToolOp(BaseOp):
+    """LLM-callable tool. Wraps a core callable + the metadata the LLM
+    provider payload and the HITL dispatcher both need.
+
+    Owns four things (each a real reason it's a class, not a dict):
+      1. JSON Schema — synthesized from Param signature + type hints for
+         the common cases (str/int/float/bool/enum/list-of-scalars/dict);
+         `schema_overrides=` for oneOf/discriminators/complex types.
+      2. Dispatch protocol — `.dispatch(tool_call: dict) → tool_message: dict`.
+         Parses args, executes via BaseOp.core, wraps the result into the
+         `role:"tool"` message the LLM expects. Truncates + tags high-risk
+         outputs per `max_result_chars`.
+      3. Policy metadata — `destructive`, `readonly`, `concurrency_safe`,
+         `check_fn` (TTL-cached availability probe). Read by the dispatcher
+         (§7.2) to route through HITL when destructive.
+      4. Tracing hooks — the op's span auto-includes `tool_name`,
+         `tool_call_id`, and an argument preview (redacted for
+         secret-typed params).
+    """
+
+    type: OpType = "tool"
+
+    __slots__ = (
+        "tool_name", "description", "schema",
+        "destructive", "readonly", "concurrency_safe",
+        "check_fn", "max_result_chars",
+    )
+
+    def __init__(
+        self,
+        *,
+        core: Callable,
+        tool_name: str,
+        description: str,
+        schema: Optional[dict] = None,        # None → synthesize from Param
+        schema_overrides: Optional[dict] = None,
+        destructive: bool = False,
+        readonly: bool = False,
+        concurrency_safe: bool = False,
+        check_fn: Optional[Callable] = None,
+        max_result_chars: int = 100_000,
+        **op_kwargs,
+    ):
+        super().__init__(**op_kwargs)
+        self._set_core(core)
+        self.tool_name = tool_name
+        self.description = description
+        self.schema = schema or self._synthesize_schema(overrides=schema_overrides)
+        self.destructive = destructive
+        self.readonly = readonly
+        self.concurrency_safe = concurrency_safe
+        self.check_fn = check_fn
+        self.max_result_chars = max_result_chars
+
+    def _synthesize_schema(self, *, overrides=None) -> dict:
+        """Build an OpenAI-style JSON Schema from self.inputs (Param dict).
+        Handles scalars, enums (via Param.choices=), lists of scalars, dicts
+        of scalars, Optional/None. Complex shapes must pass `schema=` or
+        `schema_overrides={arg_name: {...}}`."""
+        properties = {}
+        required = []
+        for arg_name, param in self.inputs.items():
+            if overrides and arg_name in overrides:
+                properties[arg_name] = overrides[arg_name]
+            else:
+                properties[arg_name] = _param_to_json_schema(param)
+            if param.required:
+                required.append(arg_name)
+        return {
+            "type": "function",
+            "function": {
+                "name": self.tool_name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        }
+
+    async def dispatch(self, tool_call: dict) -> dict:
+        """Execute a single LLM tool_call and return the tool_message dict
+        the LLM should see next. Called by the dispatcher (§7.2).
+
+        On failure, returns a tool_message with an error string — never
+        raises. Framework guarantee: the LLM ALWAYS sees a tool_message
+        per tool_call, even on internal errors.
+        """
+        import json
+        call_id = tool_call["id"]
+        try:
+            args = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as e:
+            return _tool_message(call_id, f"error: could not parse args: {e}")
+
+        try:
+            raw = await self.core(**args)
+        except Exception as e:
+            return _tool_message(call_id, f"error: {type(e).__name__}: {e}")
+
+        return _tool_message(call_id, _truncate(raw, self.max_result_chars))
+
 
 def tool(
-    *, name, description, schema,
+    *, name, description,
+    schema=None, schema_overrides=None,
     readonly=False, concurrency_safe=False, destructive=False,
-    check_fn=None, max_result_chars=100_000, dynamic_schema_overrides=None,
+    check_fn=None, max_result_chars=100_000,
 ):
-    """Register a function as both an @op and an LLM-callable tool.
+    """Shorthand — wraps a function into a ToolOp and registers it.
 
-    The op_factory returned is the *same object* stored in TOOL_REGISTRY —
-    dispatch calls `.core(**args)` to reuse the op's own execution path
-    (free tracing, timing, cancellation, bound routing).
+    Function signature drives the operonx Param dict (build-time wiring).
+    Param dict drives JSON Schema synthesis (LLM payload). One source of
+    truth for the common shapes; hand-override for the rest.
     """
     def wrap(fn):
-        fn._tool_meta = dict(
-            name=name, description=description, schema=schema,
-            readonly=readonly, concurrency_safe=concurrency_safe,
-            destructive=destructive, check_fn=check_fn,
+        op_instance = ToolOp(
+            core=fn,
+            tool_name=name,
+            description=description,
+            schema=schema,
+            schema_overrides=schema_overrides,
+            readonly=readonly,
+            concurrency_safe=concurrency_safe,
+            destructive=destructive,
+            check_fn=check_fn,
             max_result_chars=max_result_chars,
-            dynamic_schema_overrides=dynamic_schema_overrides,
+            name=name,                    # BaseOp.name (used for graph wiring)
         )
-        op_factory = op(fn)                # reuse operonx @op
-        TOOL_REGISTRY[name] = op_factory
-        return op_factory
+        TOOL_REGISTRY[name] = op_instance
+        return op_instance
     return wrap
 
 @tool(
     name="edit",
     description="str_replace edit",
-    schema={...},
-    destructive=True,                     # → triggers HITL approval in dispatch
+    destructive=True,                     # → dispatcher routes through InterruptOp
 )
-async def edit_tool(path: str, old: str, new: str):
+async def edit_tool(path: str, old: str, new: str) -> dict:
+    """path/old/new signature → Param dict → synthesized JSON schema. No
+    hand-authored schema needed because all three args are plain strings."""
     ...
     return {"result": diff}
 ```
 
-**Two schemas per tool are unavoidable:**
+**Schema synthesis — what's covered, what's not:**
 
-- operonx `Param` — signature-parsed, drives `>>` wiring at build time
-- LLM JSON Schema — hand-authored, drives the model's `tools=[…]` payload
+| Signature shape | Auto-synthesized? | Hand-author needed? |
+|---|---|---|
+| `x: str`, `n: int`, `f: float`, `b: bool` | ✅ | — |
+| `x: Optional[str]` (defaults to None) | ✅ | — |
+| `mode: Literal["a", "b", "c"]` | ✅ (via `enum:`) | — |
+| `items: list[str]`, `tags: dict[str, str]` | ✅ | — |
+| `payload: dict[str, Any]` (opaque) | ✅ (as `type: "object"`) | — |
+| `spec: MyPydanticModel` | ⚠️ partial (`type: "object"`) | Pass `schema_overrides={…}` for full shape |
+| `variant: Union[TypeA, TypeB]` (oneOf) | ❌ | Pass `schema_overrides={…}` |
+| Discriminated unions | ❌ | Pass `schema_overrides={…}` |
 
-Keep them side-by-side per tool. Wrap common patterns (`ExtractField`-style
-mini-DSL for the JSON Schema) in helpers if the pain grows.
+**Net effect:** most tools ship with NO hand-authored schema. The "two
+schemas per tool" pain that v1 flagged as unavoidable is closed for the
+common case — the hard case (oneOf, discriminators, deeply nested pydantic)
+still needs a hand-authored override, and that's honest.
 
-### 7.2 · `dispatch_all_tools` — subgraph + HITL for destructive tools
+### 7.1a · Why `ToolOp` earns a class (and memory doesn't)
+
+The bar for "deserves a dedicated BaseOp subclass" in operonx isn't
+arbitrary. Every existing dedicated op (`LLMOp`, `EmbeddingOp`, `RerankOp`,
+`TritonOp`, `OnnxOp`, `InterruptOp`, `EmitOp`) hits **all four** of these:
+
+1. **Complex I/O contract** — transport, retries, response shapes that
+   users would re-implement badly if left to bare `@op`.
+2. **Rich metadata for tracing** — the span carries data the framework
+   knows how to render (model, cost, tokens for LLMOp; provider, dim for
+   EmbeddingOp; …).
+3. **Reusable shape across many use cases** — the signature is stable
+   enough that a base class is a real ceiling on variance.
+4. **Non-trivial code volume** — enough boilerplate that inheriting from
+   the base saves real work, not just aesthetics.
+
+**Tool: 4/4.** JSON schema + args parsing + `role:tool` result contract +
+blocked-result contract (complex I/O). Tool name + destructive + readonly
++ check_fn + max_result_chars (rich metadata). Every agent has tools
+(reusable). Dispatch + args parse + result wrap + truncate + trace add
+up (non-trivial code). Every framework that skimps here reinvents these
+wheels badly — LangChain's `BaseTool` is 300 LOC for a reason. Ours is
+~120 because operonx primitives (Param, BaseOp lifecycle, tracing) do
+half the work.
+
+**Memory: 2/4.** Complex I/O contract? Only sometimes — dict is trivial,
+vector-DB is complex but that's the backend, not the memory layer.
+Rich metadata? Partial (provider name, cache stats). Reusable shape?
+**No** — a chatbot's conversation memory ≠ a coding-agent's file memory
+≠ a research-agent's paper memory. A universal MemoryOp signature would
+be so generic it stops earning its keep. Non-trivial code? Depends
+entirely on backend. **Verdict:** ship `MemoryProvider` as an ABC + thin
+`@op` wrappers per use case. No dedicated MemoryOp.
+
+**RAG is a different question** — retrieve→rerank→inject is a specific
+pipeline shape with 3-4 dedicated ops of its own. `RerankOp` already
+exists in `providers/ops/`. A future `VectorSearchOp` would live there
+too. RAG is a *provider concern*, not an *agent concern* — the agent
+framework consumes it via LLMOp inputs, doesn't own it.
+
+**One more class the plan does NOT add:** no `PermissionOp`, no
+`CompactionOp`, no `SkillOp`. Each hits 1–2 of the 4 criteria; each is
+an `@op` + a helper module. If pain accumulates, revisit — but starting
+with three speculative base classes is exactly the god-class trap we're
+avoiding.
+
+### 7.2 · `dispatch_all_tools` — thin wrapper around `ToolOp.dispatch`
+
+With `ToolOp.dispatch()` owning parse+execute+wrap (§7.1), the dispatcher
+shrinks to two responsibilities: fan out per tool_call, and route
+destructive calls through `InterruptOp`. That's it.
 
 ```python
 # operonx/agents/graphs/dispatch.py
-from operonx import op, graph, START, END, PARENT, InterruptOp, EmitOp
+from operonx import op, graph, START, END, InterruptOp
 from operonx.core.ops.flow import if_
 from operonx.agents.tool import TOOL_REGISTRY
 
@@ -353,66 +553,63 @@ def each_call(tool_calls: list):
         yield {"call": tc, "index": i}
 
 @op
-def parse_call(call: dict):
-    """Parse args + apply middleware. Cheap sync."""
-    return {"name": ..., "args": ..., "id": ..., "meta": TOOL_REGISTRY[...]._tool_meta}
+def lookup_tool(call: dict):
+    """Resolve tool from registry — pure. Returns None if unknown so the
+    downstream branch can emit an error tool_message rather than crash."""
+    name = call["function"]["name"]
+    return {"tool": TOOL_REGISTRY.get(name), "call": call}
 
 @op
-def is_destructive(meta: dict):
-    """Read the tool's declared destructive flag. Pure fn."""
-    return {"destructive": bool(meta.get("destructive"))}
+async def run_tool(tool, call: dict) -> dict:
+    """Dispatch one tool_call via ToolOp.dispatch — the tool owns
+    args parse + exec + result wrap. Returns {"tool_message": …}."""
+    if tool is None:
+        return {"tool_message": {
+            "role": "tool", "tool_call_id": call["id"],
+            "content": f"error: unknown tool {call['function']['name']}",
+        }}
+    return {"tool_message": await tool.dispatch(call)}
 
 @op
-async def exec_tool(name: str, args: dict):
-    """Resolve via registry and delegate. Runs on the op's own bound queue."""
-    op_factory = TOOL_REGISTRY[name]
-    result = await op_factory.core(**args)
-    return {"raw": result}
-
-@op
-def blocked_result(reason: str, call_id: str):
-    """Every block path emits a tool-result msg — LLM must see the refusal."""
-    return {"tool_message": {"role": "tool", "tool_call_id": call_id,
-                             "content": f"blocked: {reason}"}}
-
-@op
-def collect_result(raw: dict, call_id: str, name: str):
-    """Truncate + wrap high-risk output; emit the tool_message."""
-    ...
-    return {"tool_message": {...}}
+def blocked_result(reason: str, call: dict) -> dict:
+    """Rejection short-circuit — LLM must see one tool_message per call."""
+    return {"tool_message": {
+        "role": "tool", "tool_call_id": call["id"],
+        "content": f"blocked: {reason}",
+    }}
 
 @graph
 def dispatch_one(call):
-    """Per-tool-call dispatch.
+    """Per-tool-call dispatch. Destructive tools go through InterruptOp;
+    everything else runs directly.
 
-    Flow: parse → destructive? → [HITL approve → exec] OR [exec directly] → collect.
-    On HITL rejection, blocked_result short-circuits with a rejection message.
+    ToolOp.dispatch is called from run_tool — dispatcher never touches
+    args parsing or result wrapping. Deleting those responsibilities
+    from here (they moved to §7.1) is the whole point of ToolOp.
     """
-    parsed = parse_call(call=call)
-    destr  = is_destructive(meta=parsed["meta"])
+    looked = lookup_tool(call=call)
+    destr_router = if_(looked["tool"].destructive == True,  # noqa: E712
+                       "hitl").else_("direct")
 
-    # HITL branch — InterruptOp emits on the state bus; engine.stream() hands
-    # out interrupt_id → Future pairs; handle.resume(id, {"approved": True/False})
-    # resolves it. When approved=False, response is short-circuited to blocked.
+    # Direct path — most tools.
+    ran_direct = run_tool(tool=looked["tool"], call=looked["call"])
+
+    # HITL path — destructive tools only. InterruptOp emits on the state
+    # bus; engine.stream() hands out interrupt_id→Future pairs; caller
+    # calls handle.resume(id, {"approved": True/False}) to resolve.
     approve = InterruptOp(
-        payload={"tool": parsed["name"], "args": parsed["args"]},
-        timeout=300.0,                      # 5-minute auto-decline
+        payload={"tool": looked["tool"].tool_name, "call": looked["call"]},
+        timeout=300.0,                    # 5-minute auto-decline
     )
     approve_router = if_(approve["response"]["approved"] == True,  # noqa: E712
-                          "run").else_("blocked")
+                         "run").else_("block")
+    ran_approved = run_tool(tool=looked["tool"], call=looked["call"])
+    blocked = blocked_result(reason="denied by human", call=looked["call"])
 
-    execd_direct   = exec_tool(name=parsed["name"], args=parsed["args"])
-    execd_approved = exec_tool(name=parsed["name"], args=parsed["args"])
-    result_direct   = collect_result(raw=execd_direct["raw"],   call_id=parsed["id"], name=parsed["name"])
-    result_approved = collect_result(raw=execd_approved["raw"], call_id=parsed["id"], name=parsed["name"])
-    blocked = blocked_result(reason="denied by human", call_id=parsed["id"])
-
-    router = if_(destr["destructive"] == True, "hitl").else_("direct")  # noqa: E712
-
-    START >> parsed >> destr >> router
-    router >> ~execd_direct >> result_direct >> END
-    router >> ~approve >> approve_router
-    approve_router >> ~execd_approved >> result_approved >> END
+    START >> looked >> destr_router
+    destr_router >> ~ran_direct >> END
+    destr_router >> ~approve >> approve_router
+    approve_router >> ~ran_approved >> END
     approve_router >> ~blocked >> END
 
 @graph
@@ -424,17 +621,22 @@ def dispatch_all_tools(tool_calls):
     # downstream reads disp["tool_message"].collect() for ordered gather
 ```
 
+**Compared to v1's dispatch:** ~30 LOC lighter because `parse_call`,
+`exec_tool`, `collect_result`, `is_destructive` all moved into `ToolOp`
+(where they belong). What remains is pure orchestration: lookup, route
+by destructive flag, HITL for the yes branch, run for the no branch.
+
 **What the 9-step pipeline maps to now:**
 
-| # | Step | Where it lives (post-1.0.0) |
-|---|------|------------------------------|
+| # | Step | Where it lives (post-1.0.0 + ToolOp) |
+|---|------|--------------------------------------|
 | 1 | Interrupt preflight | Scheduler primitive — `yield Interrupt(ctx_to_cancel=…)` |
-| 2 | Parse args | `parse_call` op |
-| 3 | Tool-request middleware | Fused with 2 (cheap) |
-| 4 | Block eval | `permission_check` op reading policy config → `if_` branch |
-| 5 | **HITL approve (destructive only)** | **`InterruptOp` — real suspend/resume via `state._interrupt_responses`; `engine.stream()` surfaces via `InterruptEvent`; caller `handle.resume(id, value)`** |
+| 2 | Parse args | **`ToolOp.dispatch` (was `parse_call` op)** |
+| 3 | Tool-request middleware | **`ToolOp.dispatch` (fused, cheap)** |
+| 4 | Block eval | `lookup_tool` + `if_(tool.destructive, …)` branch |
+| 5 | HITL approve (destructive only) | `InterruptOp` — real suspend/resume via `state._interrupt_responses` |
 | 6 | Callbacks | Soft `>` edge to observer op, or `EmitOp` for typed progress events |
-| 7 | Execute | `exec_tool` op — reuses the tool's own `.core(**args)` |
+| 7 | Execute | **`ToolOp.dispatch` → `BaseOp.core(**args)` (was `exec_tool` op)** |
 | 8 | Ordered collect | `Ref.collect()` — operonx guarantees yield-index order |
 | 9 | Turn budget + drain / steer | Wrap op at loop end + `SCRATCH` for steer message |
 
@@ -692,6 +894,7 @@ New in v2 — 1.0.0 makes this a real primitive.
 | 1 | Every destructive tool call requires human approval by default | `dispatch_one` — `is_destructive` gate → `InterruptOp` |
 | 2 | Approval decision is per-call, never batched (else one "yes" approves N deletes) | `dispatch_one` runs per call; each call gets its own InterruptOp |
 | 3 | Timeout defaults to 5 minutes; on timeout the call is auto-declined | `InterruptOp(timeout=300.0)` + `timed_out` output routes to `blocked_result` |
+| 3a | **Which tools trigger HITL is a class-attribute decision, not a runtime lookup** | `ToolOp.destructive` — read once per call by `if_(looked["tool"].destructive == True, …)` in `dispatch_one`. No `_tool_meta` dunder access, no policy-file read at dispatch time (that's §8.4 #6's `--yes-mode` bypass, a separate override). |
 | 4 | Rejection produces a `role:tool` message the LLM sees ("blocked: denied by human") | `blocked_result` op |
 | 5 | Rejection does not tear down the turn; agent continues with the block message | Back-edge continues to next iteration; the block message accumulates via `add_messages` |
 | 6 | Approval mode can be pre-authorized session-wide (`--yes-mode`) — bypasses InterruptOp via a policy op that short-circuits before dispatch | `permission_check` op reads a session flag from `PARENT["approval_mode"]` |
@@ -714,7 +917,7 @@ Later                       P5 Learning-loop pattern doc (defer)
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
 | **0** | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
-| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) | 3–4d |
+| **1** | Tool + ReAct + HITL | **`ToolOp(BaseOp)` base class** (§7.1) — schema synthesis from `Param` + type hints; `.dispatch(tool_call)` protocol; policy metadata (`destructive`, `readonly`, `check_fn`, `max_result_chars`); auto-tracing with `tool_name`/`tool_call_id`. Plus `@tool` shorthand + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (§7.2, thinner than v1 draft — dispatch protocol lives on ToolOp); `build_react_agent` back-edge factory (§7.3); `permission_check` op; rewrite `docs/guide/05-agents.md` example (~25 lines) | 3–4d |
 | **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); `compact_messages` op + gate; prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore) | 3–5d |
 | **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 3–4d |
 | **4** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
@@ -726,14 +929,20 @@ weeks. Not because we cut scope — because 1.0.0 shipped the substrate
 
 ---
 
-## 10 · Honest gaps (v1 gap #7 resolved; new gaps identified)
+## 10 · Honest gaps (v1 gap #7 resolved; two-schemas closed for common case)
 
-The op-native form is elegant but not lossless. Six real gaps remain.
+The op-native form is elegant but not lossless. Six real gaps remain
+(one narrowed by `ToolOp` schema synthesis; the rest are honest limits).
 
-1. **Two schemas per tool** — operonx `Param` (build-time wiring) vs LLM
-   JSON Schema (runtime payload). Duplication is inherent to the two
-   consumers. Keep them side-by-side per tool; wrap common patterns in
-   helpers.
+1. **Two schemas per tool — narrowed, not eliminated.** `ToolOp` (§7.1)
+   synthesizes the LLM JSON Schema from the function's `Param` signature
+   + type hints for the common cases (scalars, `Literal[…]` enums, lists
+   of scalars, dict-of-scalars, `Optional`). Most tools ship with zero
+   hand-authored schema. The residual complexity — `Union`/oneOf,
+   discriminated unions, deeply-nested pydantic — needs
+   `schema_overrides={arg: {…}}`. That's an honest cost of the LLM
+   payload having more shape than a Python signature, not a framework
+   design mistake.
 
 2. **HITL requires a caller loop** — `InterruptOp` is a real primitive,
    but the caller (CLI, HTTP server, whatever) must `async for event in
@@ -811,26 +1020,36 @@ Every PR adding a `core` primitive must justify why rungs 1–5 don't work.
    per §4. Add `CONTRIBUTING.md` with Footprint Ladder.
 
 2. **1-page ADR before P1 code** — cover:
-   - `@tool` decorator: metadata carrier only (op factory reused via `@op`).
-   - `TOOL_REGISTRY` shape: `dict[str, op_factory]`, populated at import time.
-   - `dispatch_one` subgraph shape: 5 ops + 2 branches + optional InterruptOp
-     for destructive (see §7.2).
-   - Two-schema reality: operonx `Param` for wiring vs LLM JSON Schema for
-     payload.
+   - **`ToolOp(BaseOp)` design** — dispatch protocol (`.dispatch(tool_call) → tool_message`),
+     schema synthesis rules (what Param shapes auto-generate, when to hand-override),
+     policy metadata contract (`destructive`, `readonly`, `concurrency_safe`, `check_fn`,
+     `max_result_chars`), tracing span shape.
+   - `@tool` shorthand — thin factory that constructs a `ToolOp` subclass from a function.
+   - `TOOL_REGISTRY` shape: `dict[str, ToolOp]`, populated at import time.
+   - `dispatch_one` subgraph shape: 3 ops + 2 branches + optional InterruptOp
+     for destructive (see §7.2 — thinner than v1 because ToolOp owns dispatch).
+   - Two-schema reality: **narrowed** — synthesis covers scalars/enums/lists/dicts;
+     document what forces a `schema_overrides={}` override (see §10 gap #1).
    - Where `check_fn` TTL + failure-grace lives (pure Python helper called
-     at `get_tool_definitions()` build time).
-   - **New in v2:** HITL harness contract (what CLI/HTTP callers must do
-     to respond to `InterruptEvent`).
+     at `get_tool_definitions()` build time; `ToolOp` stores the fn ref).
+   - **HITL harness contract** — what CLI/HTTP callers must do to respond
+     to `InterruptEvent` (~30 LOC per surface).
+   - **What `ToolOp` explicitly does NOT own** — per-tool retry (belongs to the
+     LLM call site or a wrapper op), per-tool rate limits (belongs to a
+     ResourceHub-registered rate limiter), per-tool cost tracking (belongs
+     to a shared cell with a reducer). Keeps `ToolOp` thin.
 
 3. **Then P1 — build in this order:**
-   1. `@tool` + `TOOL_REGISTRY` (`operonx/agents/tool.py`)
-   2. `dispatch_one` + `dispatch_all_tools` (`operonx/agents/graphs/dispatch.py`)
-   3. `permission_check` op (`operonx/agents/ops/permission_ops.py`)
-   4. `build_react_agent` factory (`operonx/agents/graphs/react.py`)
-   5. Rewrite `docs/guide/05-agents.md` example — should be ~25 lines using the new factory
-   6. Minimal HITL CLI harness in `examples/python/ex09_agent_workflow/` — reads InterruptEvents, prompts, calls `handle.resume`
+   1. **`ToolOp(BaseOp)` class** + schema synthesis + `.dispatch()` (`operonx/agents/tool.py`)
+   2. `@tool` shorthand + `TOOL_REGISTRY` (same file)
+   3. `dispatch_one` + `dispatch_all_tools` (`operonx/agents/graphs/dispatch.py`) — thin now
+   4. `permission_check` op (`operonx/agents/ops/permission_ops.py`)
+   5. `build_react_agent` factory (`operonx/agents/graphs/react.py`)
+   6. Rewrite `docs/guide/05-agents.md` example — should be ~25 lines using the new factory
+   7. Minimal HITL CLI harness in `examples/python/ex09_agent_workflow/` — reads InterruptEvents, prompts, calls `handle.resume`
 
-Everything after P1 compounds on these six.
+Everything after P1 compounds on these seven — and 90% of "have I built an
+agent framework?" is answered by whether step 1 (`ToolOp`) is right.
 
 ---
 
