@@ -1,21 +1,20 @@
 # Operonx → Op Taxonomy Refactor Plan
 
-**Status:** proposed. Sequenced for **1.1.0** (add semantic ops + deprecate
-backend-named ops) → **2.0.0** (delete deprecated ops + `OpType` enum cleanup).
+**Status:** proposed. Sequenced for **1.1.0** (add + deprecate) → **2.0.0**
+(delete). Third revision after cross-check found factual errors and design
+inconsistencies in earlier drafts (see git log for the delta).
 
-**TL;DR** — Operonx has two mutually inconsistent op-naming patterns
-today: **semantic ops** (`LLMOp`, `EmbeddingOp`, `RerankOp` — each with a
-factory + swappable backends) and **backend-named ops** (`OnnxOp`,
-`TritonOp` — each a runtime wrapper without a semantic). Users hit
-"should I use `TritonOp` for STT or wait for `SttOp`?" and there is no
-good answer. This plan **deletes both backend-named ops** (no escape
-hatches — user's own `@op` is the escape hatch), **adds three semantic
-ops** (`SttOp`, `TtsOp`, `VectorSearchOp`), and **cleans up the `OpType`
-enum** to match. Considered and rejected a `ClassifierOp` because
-classification is too heterogeneous to abstract into one primitive (§2b).
-Independent of the agent-framework work
-(`AGENT_EXTENSION_PLAN.md`) — one is taxonomy hygiene, the other is
-building new primitives on top.
+**TL;DR** — Operonx has two mutually inconsistent op-naming patterns in
+1.0.0. Semantic ops (`LLMOp`, `EmbeddingOp`, `RerankOp` — each with a
+factory + swappable backends) are good. Backend-named ops (`OnnxOp`,
+`TritonOp` — each a runtime wrapper without a semantic) are bad. This
+plan **deletes both backend-named ops**, extracts a **low-level Triton
+helper** (`providers/triton/`) so user `@op`s can hit exotic models
+without pain, ships **one new semantic op** (`VectorSearchOp` — earns
+its place by completing the text/RAG stack alongside
+LLM+Embedding+Rerank), and **cleans up the `OpType` enum**. No new STT /
+TTS / classifier / OCR / VAD ops — those belong in user code as bare
+`@op`s (see §4 for the criteria).
 
 ---
 
@@ -32,30 +31,25 @@ EmbeddingOp  → providers/embeddings/{tei, vllm, huggingface, onnx}.py via embe
 RerankOp     → providers/rerankers/{tei, vllm, onnx}.py               via rerankers/factory.py
 ```
 
-- Each op has a stable semantic contract (`LLMOp` = text→text (+tools),
-  `EmbeddingOp` = text→vector, `RerankOp` = docs+query→scored docs).
+- Each op has a stable semantic contract.
 - Backends are swappable via `resource:` key + lazy-import factory.
-- New backend = one file under the backend package + one enum entry + one
-  factory branch. Optional deps isolated via `pip install operonx[<extra>]`.
-- Users write `LLMOp.of(resource="claude-haiku")` and never care which
-  transport is used.
+- New backend = one file + one enum entry + one factory branch.
+- Optional deps isolated via `pip install operonx[<extra>]`.
 
 ### Pattern B — backend-named ops (bad)
 
 ```
-OnnxOp    → coupled to the ONNX runtime; semantic is actually "classifier
-             head over embedding vectors" but the name says nothing about that
+OnnxOp    → coupled to the ONNX runtime; semantic is actually "MLP or
+             attention classifier head over embedding vectors" but the
+             name says nothing about that
 TritonOp  → pure transport wrapper; no semantic at all; users manually
-             map Triton tensor names to op inputs/outputs via inputs_map/outputs_map
+             map Triton tensor names via inputs_map/outputs_map
 ```
 
-- The op name announces the transport, not the intent.
-- Users must know the backend to pick the op — the opposite of pattern A.
-- Different transports for the same semantic each get their own op
-  (Triton-hosted STT via `TritonOp`; a hypothetical Whisper-local STT
-  would need a new op).
-- `TritonOp`'s manual `inputs_map`/`outputs_map` is exactly the wiring
-  `Param` was designed to obviate — it's a workaround, not a design.
+- Op name announces the transport, not the intent.
+- Different transports for the same semantic each need their own op.
+- `TritonOp`'s `inputs_map`/`outputs_map` bypasses `Param` — the very
+  wiring `Param` exists to obviate.
 
 ### `OpType` enum leaks the anti-pattern further
 
@@ -80,435 +74,170 @@ OpType = Literal[
 Three registered types (`milvus`, `mongo`, `s3`) name backends with no op
 behind them. Four (`for`, `while`, `stream`, `parser`) predate 1.0.0's
 back-edge loops + generator ops + `LLMOp.of(fields=…)` structured mode.
+Also: `InterruptOp.type = "interrupt"` and `EmitOp.type = "emit"` are
+assigned at class scope but **not in the Literal** — silent drift.
 
 ---
 
 ## 2 · The design principle
 
-**One way to do things: semantic op + backend adapter.** Every op in
-`operonx/providers/` after this refactor:
+**One way to do things: semantic op + backend adapter — but only when the
+op earns a framework slot.** Every op in `operonx/providers/` after this
+refactor:
 
-1. Names its **semantic intent** (`SttOp`, `TtsOp`, `VectorSearchOp`),
-   never its transport.
+1. Names its **semantic intent**, never its transport.
 2. Delegates transport to a **factory-selected backend** in a sibling
-   package (`providers/stt/`, `providers/tts/`, …).
-3. Uses **`Param` for input/output typing** — no `inputs_map` /
-   `outputs_map` bags.
-4. Ships with **1–2 backend adapters day one**; more added in follow-ups
-   or by users via the extension surface (subclass `BaseBackend` + register
-   in factory + PR).
+   package.
+3. Uses **`Param` for input/output typing** — no `inputs_map` bags.
+4. Ships with **1–2 backend adapters day one**; more via user PR.
 
-**No escape hatches.** If a user's model doesn't fit an existing semantic
-op, the escape hatch is a bare `@op` — operonx already gives them
-`bound="io"`, tracing, ResourceHub, `Param`-based typing for free. That's
-~30 LOC per exotic model. The framework's job is to make primitives good,
-not to prebuild wrappers for every backend under the sun.
+**No escape hatches at the op layer.** If a user's model doesn't fit an
+existing semantic op, the answer is a bare `@op` — operonx already gives
+them `bound="io"`, tracing, ResourceHub, `Param` typing for free. To
+make that ~30 LOC even smaller, ship **low-level transport helpers**
+(`providers/triton/client.py`, `providers/_utils/onnx.py::load_onnx_session`)
+so user `@op`s don't reimplement gRPC pooling or ONNX session loading.
 
-Escape hatches accumulate. Every `SomethingInvokeOp` competes with the
-matching `SomethingOp`, and some fraction of users pick the escape hatch
-because "more control", never move to the semantic op, and the taxonomy
-stays muddled forever. Deleting them forces the good path.
+**Trade cost, stated upfront (not buried in gaps):** deleting `TritonOp`
+means users writing bespoke Triton wrappers pay ~15 LOC of `@op` around
+`providers/triton/client.py`. Real cost, taken deliberately in exchange
+for taxonomy legibility. Competitors (BentoML, KServe, Ray Serve) keep a
+generic invoke op — operonx does not, on principle.
 
 ---
 
-## 2a · The 4-criteria bar for "op-worthy"
+## 3 · What earns a framework op — the 4-criteria bar
 
-Same bar used in `AGENT_EXTENSION_PLAN.md` §7.1a. A candidate earns a
+Same bar used in `AGENT_EXTENSION_PLAN.md §7.1a`. A candidate earns a
 dedicated `BaseOp` subclass only when it hits **all four**:
 
 1. **Complex I/O contract** — transport, retries, response shapes that
    users would re-implement badly if left to bare `@op`.
-2. **Rich metadata for tracing** — the span carries data the framework
-   knows how to render (model, cost, tokens for LLMOp; provider, dim
-   for EmbeddingOp; …).
+2. **Rich metadata for tracing** — the span carries framework-renderable
+   data (model, cost, tokens for LLMOp; provider, dim for EmbeddingOp).
 3. **Reusable shape across many use cases** — the signature is stable
    enough that a base class is a real ceiling on variance.
 4. **Non-trivial code volume** — enough boilerplate that inheriting from
-   the base saves real work, not just aesthetics.
+   the base saves real work.
 
-Applied to this plan's candidates:
+**Optional-field caveat:** optional outputs (like `words` on `SttOp`) are
+NOT `**kwargs` grab-bags if they represent **capabilities specific
+backends may or may not provide**, and the **core contract** is stable
+across all. `EmbeddingOp` doesn't fail the bar because some backends
+return sparse vectors and others dense — dense is the core, sparse is a
+capability.
 
-| Candidate | Bar | Verdict |
-|---|---|---|
-| `SttOp` | 4/4 — audio↔transcript is stable across whisper/triton/openai/deepgram | ✅ ship |
-| `TtsOp` | 4/4 — text→audio (+ streaming) is stable across triton/elevenlabs/openai/coqui | ✅ ship |
-| `VectorSearchOp` | 4/4 — query-vector→top-K-docs is stable across qdrant/milvus/pgvector/faiss/chroma | ✅ ship |
-| `ClassifierOp` | 2/4 — shape is **heterogeneous** (see §2b) | ❌ do NOT ship |
-| `RetrieveOp` (generic KV) | 2/4 — subsumed by VectorSearchOp for the semantic case; trivial `@op` for the rest | ❌ do NOT ship |
-| `PlanOp` / `ReasonOp` etc. | 1/4 — too broad, no stable shape | ❌ do NOT ship |
+### Applied to every candidate we considered
 
-**The bar is the plan's real discipline.** Without it, every ML task
-someone thinks of grows into an op class; taxonomy becomes noise.
+| Candidate | Bar | Verdict | Rationale |
+|---|---|---|---|
+| `VectorSearchOp` | 4/4 | ✅ ship (1.1.0) | Completes the text/RAG stack (LLM+Embedding+Rerank+VectorSearch). Stable core: `query vector → top-K docs`. Every RAG framework has one. |
+| `SttOp` | 4/4 semantics, but... | ❌ don't ship | Zero users in operonx or agent plan (agent plan doesn't do audio). Callbot has one Triton STT call site; bare `@op` is 10 LOC. Would ship as speculation. |
+| `TtsOp` | 4/4 semantics, but... | ❌ don't ship | Same reasoning as SttOp. Zero users beyond callbot. |
+| `ClassifierOp` | 4/4 semantics, but... | ❌ don't ship | Zero users. Existing callbot classification is either rule-based (`skip_classify`) or via `LLMOp.of(fields=…)`. If concrete demand appears, ship `SentimentOp`/`ModerationOp` narrowly at that point. |
+| `OcrOp` | 4/4 semantics, but... | ❌ don't ship | Zero users. Pure speculation. |
+| `VadOp` | Architecturally incompatible | ❌ don't ship | Callbot's VAD lives in `speech/per_call_audio.py` — a background audio-worker thread with per-call `_CallCtx` holding Silero LSTM state, online Gaussian noise model, per-30Hz chunk mutation. Not compatible with `PARENT.declare` (per-graph-run scope, not per-chunk stream state). Audio DSP belongs in its own subsystem, not the graph model. |
+| `SpeakerEmbedOp` | Zero users | ❌ don't ship | Same. |
+| `OnnxOp` | Was in framework | ❌ delete | Backend-named. Its bespoke I/O ("MLP or attention head over embeddings") is too narrow to earn a semantic op. Users write bare `@op` around `providers/_utils/onnx.py::load_onnx_session`. |
+| `TritonOp` | Was in framework | ❌ delete | Backend-named. Users write bare `@op` around `providers/triton/client.py` (new helper). |
 
----
+**Discipline over completeness.** "HuggingFace ships one" isn't a
+sufficient reason to ship one. **Concrete demand + stable shape + not
+better served by bare `@op` around a helper** is. Under that rule,
+VectorSearchOp is the only new op this plan ships.
 
-## 2b · Why NOT `ClassifierOp` (heterogeneity argument)
+**Why VectorSearchOp does earn a slot but STT/TTS/etc don't:**
 
-"Classification" is a category, not a task. Every specific classification
-task has subtly different shape:
-
-| Task | Input | Output |
-|---|---|---|
-| Sentiment | text | single label + score |
-| Intent (fixed labels) | text | single label + score (from a predefined set) |
-| Intent (dynamic labels) | text + candidate_labels | single label + score |
-| Toxicity | text | multi-label (violence, sex, hate, …) |
-| NLI (entailment) | (premise, hypothesis) | single label + score — pair-input, not single |
-| Zero-shot | text + candidate_labels | single label + score (labels change per call) |
-| Token classification (NER) | text | per-token labels |
-| Image / audio classification | different modality | (varies) |
-
-A universal `ClassifierOp` ends up either **too generic** (users write
-backend-specific `**kwargs` glue and lose type safety) or **too narrow**
-(missing common cases like NLI, zero-shot, multi-label). We'd spend
-follow-up releases growing warts to accommodate each new classification
-shape.
-
-**Compare with the ops that DO earn a class.** `SttOp` — audio in,
-transcript out, done. `TtsOp` — text in, audio out, done.
-`VectorSearchOp` — vector in, top-K docs out, done. Stable I/O across
-every backend.
-
-**The two honest paths for callers who need classification:**
-
-1. **Use `LLMOp.of(fields=[...], parser="json", max_retries=N)`.** Works
-   today. Expensive but flexible. Right choice when labels change often,
-   the reasoning is non-trivial, or call volume is low.
-
-2. **Write a bespoke `@op` around a dedicated classifier model.** ~15–50
-   LOC around `onnxruntime.InferenceSession` (via
-   `providers/onnx/backend.py:load_onnx_session()`) or `transformers.pipeline()`.
-   Fast, deterministic, cheap. Right choice when labels are fixed, the
-   call path is latency-sensitive, and volume is high.
-
-Callbot's intent classification is (2)'s natural home, in
-`callbot/ops/intent_classifier.py`, not in the framework.
-
-**If concrete demand ever appears for a NARROW well-defined
-classification task** (sentiment across many apps, moderation across
-many LLM apps), we ship `SentimentOp` / `ModerationOp` specifically —
-each with stable shape. Never the generic `ClassifierOp` umbrella.
-
-**Analogous rejection:** operonx doesn't have a generic `RetrievalOp`
-because retrieval is heterogeneous (vector vs BM25 vs hybrid vs
-cross-encoder). We're shipping `VectorSearchOp` specifically because
-vector retrieval has stable shape. Same reasoning, same result.
+- **VectorSearchOp** completes the text/RAG stack that operonx already
+  ships partially (LLMOp + EmbeddingOp + RerankOp). Its absence forces
+  every RAG user to write 30-50 LOC of vector-store client + bare `@op`
+  themselves. The composability payoff is real:
+  `EmbeddingOp → VectorSearchOp → RerankOp → LLMOp` is the canonical
+  RAG pipeline in one graph.
+- **STT/TTS/Classify/OCR** don't cluster into a pipeline with existing
+  ops. They're standalone task ops that would sit alone in a user's
+  graph — same shape as a bare `@op` wrapper. The framework layer adds
+  no compositional value.
+- **VAD** is stateful in a way `PARENT.declare` doesn't handle (see §3
+  table row). Fundamentally different architecture from graph ops.
 
 ---
 
-## 3 · What's changing — full op inventory
+## 4 · What's changing — full op inventory
 
 | Op | Category | Semantic | Backend package | Status |
 |---|---|---|---|---|
 | `LLMOp` | unchanged | text → text (+ tools + structured) | `providers/llms/` | Reference pattern. No work. |
 | `EmbeddingOp` | unchanged | text → vector | `providers/embeddings/` | Reference pattern. No work. |
 | `RerankOp` | unchanged | (docs, query) → scored docs | `providers/rerankers/` | Reference pattern. No work. |
-| `SttOp` | **NEW** | audio → transcript | `providers/stt/` (triton, whisper, openai, deepgram) | 1.1.0 |
-| `TtsOp` | **NEW** | text → audio | `providers/tts/` (triton, elevenlabs, openai, coqui, azure) | 1.1.0 |
-| `VectorSearchOp` | **NEW** | query vector → top-K docs | `providers/vector_stores/` (qdrant, milvus, pgvector, faiss, chroma) | 1.1.0 |
-| `OnnxOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: MLP/attention classifier over embeddings) | — | Users write bespoke `@op` around `providers/onnx/backend.py:load_onnx_session()` — the embedding-head shape is too callbot-specific to earn a framework op (§2b) |
-| `TritonOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: generic Triton client) | — | Triton is now a backend under `stt/`, `tts/`, `vector_stores/`. Exotic Triton models: users write bespoke `@op` around `providers/triton/client.py` (extracted from today's TritonOp) |
+| `VectorSearchOp` | **NEW** | query vector → top-K docs | `providers/vector_stores/` (qdrant, faiss day-one) | 1.1.0 |
+| `OnnxOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: MLP/attention head over embeddings) | — | Users write bare `@op` around `providers/_utils/onnx.py::load_onnx_session`. |
+| `TritonOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: generic Triton client) | — | Users write bare `@op` around new `providers/triton/client.py` helper. Callbot migrates its one STT call site. |
 
-**Net:** +3 semantic ops, –2 deletions, 3 unchanged. No renames, no
-escape hatches. See §2a for the "op-worthy" bar and §2b for why
-`ClassifierOp` was considered and rejected.
+**Net:** +1 semantic op, –2 deletions, 3 unchanged. See §3 for every
+rejected candidate and why.
 
 ---
 
-## 4 · Per-op sketches
-
-### 4.1 · `SttOp`
-
-```python
-# operonx/providers/ops/stt.py
-class SttOp(BaseOp):
-    """Speech-to-text. Audio bytes/samples → transcript."""
-
-    type: OpType = "stt"
-
-    inputs = {
-        "audio": Param(type=(bytes, list, "numpy.ndarray"), required=True),
-        "sample_rate": Param(type=int, required=False, default=16000),
-        "language": Param(type=str, required=False, default=None),
-    }
-    outputs = {
-        "transcript": Param(type=str),
-        "confidence": Param(type=float, required=False),
-        # optional per-backend extras:
-        "words": Param(type=list, required=False),        # word-level timestamps
-        "embedding": Param(type=list, required=False),    # some backends return speaker embedding
-    }
-```
-
-**Backends day-one:** Triton (matches callbot's current usage), Whisper (local).
-**Backends soon:** OpenAI Whisper API, Deepgram.
-
-### 4.2 · `TtsOp`
-
-```python
-# operonx/providers/ops/tts.py
-class TtsOp(BaseOp):
-    """Text-to-speech. Text → audio bytes/samples.
-
-    Streaming shape: yield {"audio_chunk": bytes} per chunk when backend supports.
-    Batch shape: return {"audio": bytes, "sample_rate": int} once.
-    """
-
-    type: OpType = "tts"
-
-    inputs = {
-        "text": Param(type=str, required=True),
-        "voice": Param(type=str, required=False, default=None),
-        "speed": Param(type=float, required=False, default=1.0),
-        "sample_rate": Param(type=int, required=False, default=24000),
-    }
-    outputs = {
-        "audio": Param(type=bytes),                      # batch mode
-        "audio_chunk": Param(type=bytes, required=False), # streaming mode
-        "sample_rate": Param(type=int),
-    }
-```
-
-**Backends day-one:** Triton, ElevenLabs (HTTP).
-**Backends soon:** OpenAI TTS, Coqui XTTS, Azure Speech.
-
-### 4.3 · `VectorSearchOp`
+## 5 · `VectorSearchOp` sketch
 
 ```python
 # operonx/providers/ops/vector_search.py
 class VectorSearchOp(BaseOp):
-    """Vector similarity search over a store. query vector → top-K docs."""
+    """Vector similarity search. query vector → top-K docs.
+
+    Core contract stable across all backends. Optional capabilities
+    (filter dialect, namespace, distance metric override) are per-backend
+    and default to backend-native behavior.
+    """
 
     type: OpType = "vector-search"
 
     inputs = {
-        "query_vector": Param(type=list, required=True),  # list[float]
-        "top_k": Param(type=int, required=False, default=10),
-        "filter": Param(type=dict, required=False, default=None),   # backend-specific metadata filter
-        "namespace": Param(type=str, required=False, default=None),
+        "query_vector": Param(type=list, required=True),           # list[float]
+        "top_k":        Param(type=int,  required=False, default=10),
+        "filter":       Param(type=dict, required=False, default=None),  # backend-native metadata filter
+        "namespace":    Param(type=str,  required=False, default=None),
     }
     outputs = {
-        "docs": Param(type=list),                        # list[dict] — id + content + metadata
-        "scores": Param(type=list),                      # list[float] — similarity per doc
+        "docs":   Param(type=list),   # list[dict] — id + content + metadata
+        "scores": Param(type=list),   # list[float] — similarity per doc
     }
 ```
 
 **Backends day-one:** Qdrant (HTTP client), FAISS (in-memory reference).
-**Backends soon:** pgvector, Milvus, Chroma.
+**Backends soon:** pgvector, Milvus, Chroma — via user PR following the
+`embeddings/factory.py` pattern.
 
-Composes naturally with `EmbeddingOp` for a RAG pipeline:
+**Composes with the existing text stack:**
 
 ```python
 @graph
-def rag():
-    q_emb  = EmbeddingOp(resource="bge-m3", texts=[PARENT["query"]])
-    hits   = VectorSearchOp(resource="qdrant:docs", query_vector=q_emb["embeddings"][0], top_k=5)
-    ranked = RerankOp(resource="bge-m3-reranker", docs=hits["docs"], query=PARENT["query"])
+def rag(query):
+    q_emb  = EmbeddingOp(resource="bge-m3", texts=[query])
+    hits   = VectorSearchOp(resource="qdrant:docs",
+                             query_vector=q_emb["embeddings"][0], top_k=5)
+    ranked = RerankOp(resource="bge-m3-reranker",
+                       docs=hits["docs"], query=query)
     llm    = LLMOp.of(resource="claude-haiku",
                        prompt="Context: {ctx}\n\nQ: {q}",
-                       ctx=ranked["docs"], q=PARENT["query"])
+                       ctx=ranked["docs"], q=query)
     START >> q_emb >> hits >> ranked >> llm >> END
 ```
 
 ---
 
-## 5 · Callbot's OnnxOp — the honest migration
+## 6 · Callbot migration in detail
 
-Today's `OnnxOp` in callbot's ML pipeline takes **already-computed embedding
-vectors** and runs an MLP or attention head → probabilities. That's a
-"downstream scoring head" pattern — narrow and callbot-specific enough
-that it doesn't earn a framework op (see §2b for the general "no generic
-classifier" argument).
+Callbot uses `TritonOp` in **one** place (STT) and has **zero** `OnnxOp`
+call sites. (Earlier drafts of this plan claimed a callbot OnnxOp
+classifier — that was wrong; `src/speech/denoise_classifier.py` is a
+hand-written `BaseOp` subclass calling `onnxruntime` directly, entirely
+outside the OnnxOp API.)
 
-**Migration path:** callbot writes a bare `@op` wrapping the same ONNX
-session helper that `providers/onnx/backend.py` already exposes. ~15 LOC:
+### `TritonOp(stt) → bare @op`
 
-```python
-# in callbot: src/callbot/ops/classifier_head.py
-from operonx.core import op
-from operonx.providers.onnx.backend import load_onnx_session
-
-_session = None  # module-level cache
-
-@op(bound="cpu")
-def classify_head(embeddings: list, role_ids: list = None, mask: list = None):
-    global _session
-    if _session is None:
-        _session = load_onnx_session("agent-classifier.onnx")
-
-    onnx_inputs = {"embeddings": embeddings}
-    if role_ids is not None:
-        onnx_inputs["role_ids"] = role_ids
-    if mask is not None:
-        onnx_inputs["mask"] = mask
-    probs = _session.run(None, onnx_inputs)[0]
-    return {"probabilities": probs.tolist()}
-```
-
-That's the whole thing. It replaces `OnnxOp(resource="agent-sentiment", …)`
-with `classify_head(embeddings=…)`. Same behaviour, no framework
-surface — the pattern is genuinely too callbot-specific to earn a
-first-class semantic op. If a second user shows up with the same shape,
-revisit as `EmbeddingScoreOp` / `ScoreHeadOp` — but not on speculation.
-
----
-
-## 6 · Module layout — before / after
-
-**Before (operonx 1.0.0):**
-
-```
-operonx/providers/
-├── llms/       {anthropic, openai, gemini, azure}.py + base, config, factory, batch_coordinator
-├── embeddings/ {tei, vllm, huggingface, onnx}.py    + base, config, factory
-├── rerankers/  {tei, vllm, onnx}.py                 + base, config, factory
-├── onnx/       backend.py, config.py, factory.py   ← standalone ONNX backend (used by OnnxOp)
-├── ops/
-│   ├── llm.py
-│   ├── embedding.py
-│   ├── rerank.py
-│   ├── onnx.py       ← DELETE (no replacement op; bespoke @op instead)
-│   └── triton.py     ← DELETE (Triton is a backend under stt/tts/vector_stores/)
-├── _utils/     huggingface.py, onnx.py
-├── auth/
-└── parsing.py
-```
-
-**After (operonx 2.0.0):**
-
-```
-operonx/providers/
-├── llms/          {anthropic, openai, gemini, azure}.py
-├── embeddings/    {tei, vllm, huggingface, onnx}.py
-├── rerankers/     {tei, vllm, onnx}.py
-├── stt/           {triton, whisper, openai, deepgram}.py + base, config, factory   ← NEW
-├── tts/           {triton, elevenlabs, openai, coqui, azure}.py + base, config, factory  ← NEW
-├── vector_stores/ {qdrant, faiss, pgvector, milvus, chroma}.py + base, config, factory   ← NEW
-├── onnx/          backend.py, config.py, factory.py    ← KEEP (used by embeddings/onnx.py, rerankers/onnx.py, and user @ops for bespoke classifiers)
-├── triton/        client.py, dtypes.py                  ← NEW (extracted from today's TritonOp — low-level helper used by stt/triton.py, tts/triton.py, vector_stores/triton.py, and user @ops for exotic Triton models)
-├── ops/
-│   ├── llm.py
-│   ├── embedding.py
-│   ├── rerank.py
-│   ├── stt.py            ← NEW
-│   ├── tts.py            ← NEW
-│   └── vector_search.py  ← NEW
-├── _utils/
-│   ├── huggingface.py
-│   ├── onnx.py
-│   └── audio.py          ← NEW (codec, resample, chunk-assembly helpers shared by stt/ + tts/)
-├── auth/
-└── parsing.py
-```
-
-**What's NOT in the layout:**
-
-- **No `providers/audios/` grouping.** STT and TTS backends barely
-  overlap (only `azure-speech` and `openai` show up in both, with
-  different APIs). Grouping earns no code-share win. Shared audio
-  utilities live at `providers/_utils/audio.py` — same tier as the
-  existing `providers/_utils/onnx.py`. If callbot's roadmap actually
-  introduces 5+ audio ops (VAD, wake-word, diarization, speaker-embed,
-  denoise) in-framework, revisit.
-- **No `providers/ops/onnx_invoke.py` / `triton_invoke.py` escape
-  hatches.** See §2 for the argument.
-- **No `providers/classifiers/` package or `ClassifierOp`.** Considered
-  and rejected (§2b). Sentiment/intent/toxicity/NLI/etc. all have
-  subtly different I/O shapes; a universal `ClassifierOp` would either
-  be too generic or too narrow. Callers use `LLMOp.of(fields=…)` or
-  write bespoke `@op`s. If concrete demand appears for a narrow
-  well-defined task (`SentimentOp`, `ModerationOp`), ship it
-  specifically then — not on speculation.
-
----
-
-## 7 · `OpType` enum cleanup
-
-Ships with 2.0.0 (breaking, but only visible to code that reads `OpType`
-directly, which is rare).
-
-| Current entry | 2.0.0 action | Reason |
-|---|---|---|
-| `"llm"` | keep | Matches `LLMOp` |
-| `"embedding"` | keep | Matches `EmbeddingOp` |
-| `"rerank"` | keep | Matches `RerankOp` |
-| — | **add `"stt"`** | Matches new `SttOp` |
-| — | **add `"tts"`** | Matches new `TtsOp` |
-| — | **add `"vector-search"`** | Matches new `VectorSearchOp` |
-| `"milvus"` | **remove** | Backend-named; no matching op; Milvus is a backend under `vector_stores/` |
-| `"mongo"` | **remove** | Same |
-| `"s3"` | **remove** | Same |
-| `"for"` | **remove** | Replaced by generator ops + `Ref.parallel()` in 1.0.0 |
-| `"while"` | **remove** | Replaced by back-edge loops (Phase 3) in 1.0.0 |
-| `"stream"` | **remove** | Replaced by `LLMOp(stream=True)` / generator ops in 1.0.0 |
-| `"parser"` | **remove** | `ParserOp` was removed in 1.0.0; parsing is inside `LLMOp.of(fields=…)` |
-| `"onnx"` | **remove** (if present today) | `OnnxOp` deleted; ONNX is a backend under `embeddings/`, `rerankers/`, plus a helper for user `@op`s |
-| `"triton"` | **remove** (if present today) | `TritonOp` deleted; Triton is a backend under `stt/`, `tts/`, `vector_stores/`, plus a helper (`providers/triton/client.py`) for user `@op`s |
-| `"tool-executor"` | keep or migrate to `"tool"` | Aligns with `ToolOp` from `AGENT_EXTENSION_PLAN.md` |
-| `"mcp"` | keep (reserved) | Future MCP client op |
-| `"graph"`, `"branch"`, `"code"`, `"lambda"`, `"prompt"`, `"doc-processor"`, `"data"`, `"default"`, `"dummy"`, `"interrupt"`, `"emit"` | keep | Real infrastructure / control-flow types |
-
----
-
-## 8 · Migration path — versioned + phased
-
-### operonx 1.1.0 — additive
-
-- Ship the three new semantic ops (`SttOp`, `TtsOp`, `VectorSearchOp`)
-  with 1–2 backends each.
-- Ship `providers/{stt,tts,vector_stores}/` packages with `base.py` +
-  `config.py` + `factory.py` per the reference pattern.
-- Ship `providers/triton/{client,dtypes}.py` — the low-level Triton
-  helper extracted from today's `TritonOp` (used by `stt/triton.py`,
-  `tts/triton.py`, `vector_stores/triton.py`, and user `@op`s for
-  exotic Triton models).
-- Ship `providers/_utils/audio.py`.
-- `OnnxOp` and `TritonOp` **remain functional** but emit a
-  `DeprecationWarning` on `__init__` pointing to the replacement:
-  ```
-  OnnxOp is deprecated (removed in 2.0.0). Write a bespoke @op around
-  operonx.providers.onnx.backend.load_onnx_session — the framework
-  no longer ships a generic classifier op. See §2b of
-  OP_TAXONOMY_REFACTOR_PLAN.md for reasoning.
-  ```
-  ```
-  TritonOp is deprecated (removed in 2.0.0). Options:
-    - For STT: use SttOp(resource="triton:<model>")
-    - For TTS: use TtsOp(resource="triton:<model>")
-    - For vector search: use VectorSearchOp(resource="triton:<model>")
-    - For exotic Triton models: write a bespoke @op around
-      operonx.providers.triton.client.TritonClient
-  ```
-- Consumers (callbot, others) migrate on 1.1.0 at their pace.
-- `OpType` enum unchanged in 1.1.0 (backward-compat).
-
-### operonx 2.0.0 — breaking cleanup
-
-- **Delete `OnnxOp`** (`operonx/providers/ops/onnx.py`) — one-line
-  removal + `__init__.py` export cleanup.
-- **Delete `TritonOp`** (`operonx/providers/ops/triton.py`) — same.
-- **`OpType` enum cleanup** per §7 (remove backend-named + stale entries,
-  add new semantic entries).
-- **Ship `MIGRATION.md` §Op-taxonomy** with the same recipes users saw
-  in the 1.1.0 deprecation warnings.
-
-### After 2.0.0 — backfill
-
-- Add remaining backends per op (all the "soon" entries in §4).
-- Ship a `providers/tts/coqui.py`, `providers/stt/deepgram.py`,
-  `providers/vector_stores/pgvector.py` etc. as demand appears — none of
-  these block 2.0.0.
-
----
-
-## 9 · Callbot migration in detail
-
-Callbot uses `TritonOp` in one place (STT) and `OnnxOp` in one place
-(bespoke classifier). Migration is small and can happen on 1.1.0.
-
-### 9.1 · `TritonOp(stt) → SttOp(triton)`
-
-Before ([`src/callbot/graph.py`](../../educa-reminder-agent/src/callbot/graph.py) STT section):
+Before ([`src/callbot/graph.py:114`](../../educa-reminder-agent/src/callbot/graph.py#L114)):
 
 ```python
 stt = TritonOp(
@@ -519,56 +248,202 @@ stt = TritonOp(
 )
 ```
 
-After:
+After (in callbot, ~15 LOC):
 
 ```python
-from operonx.providers.ops import SttOp
+# in callbot: src/callbot/ops/stt.py
+from operonx.core import op
+from operonx.providers.triton.client import get_triton_client   # new helper
 
-stt = SttOp(
-    resource="stt",                          # resolves to a Triton STT backend via resources.yaml
-    audio=stt_input["speech_audio"],
-    sample_rate=16000,
-)
-# stt["transcript"], stt["embedding"] downstream unchanged
+@op(bound="io")
+async def stt(speech_audio):
+    client = get_triton_client(url="…from resources.yaml…")   # module-level cached
+    result = await client.infer(
+        model_name="stt",
+        inputs={"AUDIO_SIGNAL": speech_audio},
+        outputs=["TRANSCRIPT", "EMBEDDING"],   # request BOTH — critical for denoise gate
+    )
+    return {
+        "transcript": result["TRANSCRIPT"],
+        "embedding":  result["EMBEDDING"],       # feeds DenoiseClassifier — MUST be requested
+    }
 ```
 
-Same Triton model behind the scenes — `providers/stt/triton.py` handles
-the `inputs_map`/`outputs_map` wiring internally, driven by the backend's
-config. Users stop caring about tensor names.
+**Critical: EMBEDDING must be requested explicitly.** Callbot's
+`DenoiseClassifier` gates the whole noise-rejection path on
+`stt["embedding"]` (see `denoise_classifier.py:76-78` — falls back to
+`is_speech=True` silently if missing). The old `TritonOp` requested it
+via `outputs_map`; the bare `@op` must too.
 
-### 9.2 · `OnnxOp(classifier) → bare @op`
+**Latency requirement:** `get_triton_client(url)` MUST return a
+process-cached `InferenceServerClient` — building a fresh gRPC channel
+per STT call would regress first-frame latency on the real-time hot
+path. Today's `TritonOp` cache is at `providers/ops/triton.py:49-57`
+(`_triton_clients: dict[str, client]`); the new
+`providers/triton/client.py` inherits that cache verbatim.
 
-See §5. ~15 LOC in `callbot/ops/classifier_head.py`. The pattern is
-callbot-specific enough that the framework doesn't provide a semantic
-op for it (see §2b).
+### `OnnxOp(classifier) → nothing`
+
+Nothing to migrate. Callbot has no `OnnxOp` call sites. Left in the
+inventory (§4) purely for the case of external users who might have one.
+
+---
+
+## 7 · Module layout — before / after
+
+**Before (operonx 1.0.0):**
+
+```
+operonx/providers/
+├── llms/       {anthropic, openai, gemini, azure}.py + base, config, factory, batch_coordinator
+├── embeddings/ {tei, vllm, huggingface, onnx}.py    + base, config, factory
+├── rerankers/  {tei, vllm, onnx}.py                 + base, config, factory
+├── onnx/       backend.py, config.py, factory.py   ← standalone ONNX backend (OnnxInferenceBackend class)
+├── ops/
+│   ├── llm.py
+│   ├── embedding.py
+│   ├── rerank.py
+│   ├── onnx.py       ← DELETE (2.0.0)
+│   └── triton.py     ← DELETE (2.0.0)
+├── _utils/
+│   ├── huggingface.py
+│   └── onnx.py       ← already contains load_onnx_session(dir) → (session, tokenizer, device)
+├── auth/
+└── parsing.py
+```
+
+**After (operonx 2.0.0):**
+
+```
+operonx/providers/
+├── llms/          (unchanged)
+├── embeddings/    (unchanged)
+├── rerankers/     (unchanged)
+├── vector_stores/ {qdrant, faiss}.py + base, config, factory       ← NEW
+├── triton/        client.py, decode.py, dtypes.py                  ← NEW (low-level helper for user @ops)
+├── onnx/          backend.py, config.py, factory.py                (unchanged — used by embeddings/onnx.py, rerankers/onnx.py, and user @ops)
+├── ops/
+│   ├── llm.py
+│   ├── embedding.py
+│   ├── rerank.py
+│   └── vector_search.py                                            ← NEW
+├── _utils/
+│   ├── huggingface.py
+│   └── onnx.py    (unchanged — hosts load_onnx_session)
+├── auth/
+└── parsing.py
+```
+
+**What's NOT in the layout (deliberate):**
+
+- **No `providers/{classifiers,stt,tts}/` packages.** These would only
+  earn their keep with concrete demand; today there is none (§3 table).
+- **No `providers/_utils/audio.py`.** Only ships if a future audio op
+  needs shared codec/resample helpers. Speculation-free.
+- **No `providers/ops/{onnx_invoke,triton_invoke}.py` escape hatches.**
+  User's own `@op` is the escape hatch; the low-level helpers make it
+  cheap (~15 LOC per exotic model).
+- **No STT/TTS/Classifier/OCR/VAD ops.** All belong in user code —
+  either as bare `@op`s (STT/TTS/Classifier/OCR) or as separate
+  subsystems (VAD, see §3 table).
+
+---
+
+## 8 · `OpType` enum cleanup
+
+Ships with 2.0.0 (breaking, but only visible to code that reads `OpType`
+directly).
+
+| Current entry | 2.0.0 action | Reason |
+|---|---|---|
+| `"llm"`, `"embedding"`, `"rerank"` | keep | Match existing ops |
+| — | **add `"vector-search"`** | Matches new `VectorSearchOp` |
+| **`"interrupt"`** | **add** (currently missing from Literal but used as `InterruptOp.type`) | Fix drift |
+| **`"emit"`** | **add** (currently missing from Literal but used as `EmitOp.type`) | Fix drift |
+| `"milvus"`, `"mongo"`, `"s3"` | **remove** | Backend-named, no ops today |
+| `"for"`, `"while"`, `"stream"` | **remove** | Replaced by back-edges + generators in 1.0.0 |
+| `"parser"` | **remove** + retag `core/exceptions.py:92`'s `ParserError.op_type` to `"code"` | `ParserOp` removed in 1.0.0; only residual is the exception tag |
+| `"onnx"`, `"triton"` | **remove** | `OnnxOp`/`TritonOp` deleted; ONNX/Triton are backends and helpers now |
+| `"tool-executor"` | keep or migrate to `"tool"` | Aligns with `ToolOp` from `AGENT_EXTENSION_PLAN.md` |
+| `"mcp"` | keep (reserved) | Future MCP client op |
+| `"graph"`, `"branch"`, `"code"`, `"lambda"`, `"prompt"`, `"doc-processor"`, `"data"`, `"default"`, `"dummy"` | keep | Real infrastructure / control-flow types |
+
+---
+
+## 9 · Migration path
+
+### operonx 1.1.0 — additive
+
+- Ship `VectorSearchOp` + `providers/vector_stores/` package (base +
+  config + factory + Qdrant + FAISS backends).
+- Ship `providers/triton/{client,decode,dtypes}.py` — extract from
+  today's `providers/ops/triton.py`:
+  - `client.py` — `get_triton_client(url)` with module-global cache
+    (inherit `_triton_clients` verbatim); numpy→Triton dtype conversion.
+  - `decode.py` — bytes/str output decoding + len==1 scalar flattening
+    (extracted from `triton.py:266-284`).
+  - `dtypes.py` — `_DTYPE_MAP` + coercion helpers.
+- `OnnxOp` and `TritonOp` **remain functional** but emit a
+  `DeprecationWarning` on `__init__`:
+
+  ```
+  OnnxOp is deprecated (removed in 2.0.0). Write a bare @op around
+  operonx.providers._utils.onnx.load_onnx_session — returns
+  (session, tokenizer, device_str) from a directory containing
+  model.onnx + tokenizer.json. See OP_TAXONOMY_REFACTOR_PLAN.md §6.
+  ```
+
+  ```
+  TritonOp is deprecated (removed in 2.0.0). Write a bare @op around
+  operonx.providers.triton.client.get_triton_client(url) — reuses the
+  same async gRPC client cache and dtype translation, in ~15 LOC.
+  See OP_TAXONOMY_REFACTOR_PLAN.md §6 for the pattern.
+  ```
+
+- Consumers (callbot, others) migrate on 1.1.0 at their pace.
+- `OpType` enum unchanged in 1.1.0 (backward-compat).
+
+### operonx 2.0.0 — breaking cleanup
+
+- **Delete `operonx/providers/ops/{onnx,triton}.py`.**
+- **`OpType` enum cleanup** per §8 (remove stale + backend-named; add
+  vector-search, interrupt, emit).
+- **Retag `core/exceptions.py:92`'s `ParserError.op_type`** from
+  `"parser"` to `"code"`.
+- **Ship `MIGRATION.md` §Op-taxonomy** with the same recipes users saw
+  in the 1.1.0 deprecation warnings.
+
+### After 2.0.0 — backfill
+
+- Add more vector store backends (pgvector, Milvus, Chroma) as demand
+  appears — none block 2.0.0.
+- Consider `SentimentOp` / `ModerationOp` / `SttOp` / `TtsOp` etc. ONLY
+  when concrete demand shows up. Never on speculation.
 
 ---
 
 ## 10 · Phase roadmap
 
-Compressed: additive work is parallelizable; deprecation + delete are
-just marker commits.
+Small refactor. Additive work is parallelizable; deprecation + delete
+are marker commits.
 
 ```
-Week 1  P0 · P1        _utils/audio.py + triton/client.py + SttOp + TtsOp
-Week 2       P2        VectorSearchOp + 2 backends
-Week 2            P3   Deprecation warnings on OnnxOp/TritonOp
+Week 1  P0 · P1        providers/triton/ helper + VectorSearchOp + 2 backends
+Week 1       P2        Deprecation warnings on OnnxOp/TritonOp
                                                   ← Ship 1.1.0
 
-Later       P4        Delete OnnxOp/TritonOp + OpType cleanup
+Later       P3        Delete OnnxOp/TritonOp + OpType cleanup
                                                   ← Ship 2.0.0
 ```
 
 | # | Phase | Deliverable | Size |
 |---|---|---|---|
-| **P0** | Scaffolding | `providers/_utils/audio.py` (codec, resample, chunk-assembly). `providers/triton/{client,dtypes}.py` (low-level helper extracted from today's TritonOp). Empty package skeletons for `stt/`, `tts/`, `vector_stores/` each with `base.py` (ABC) + `config.py` (type enum) + `factory.py` (dispatcher + lazy imports). | 1–1.5d |
-| **P1** | Stt + Tts | Op classes + 2 backends each. Stt: Triton + Whisper (local). Tts: Triton + ElevenLabs. Streaming semantics for Tts. Tests + docs. | 3–4d |
-| **P2** | VectorSearch | Op class + 2 backends (Qdrant, FAISS). Tests + docs + a RAG example (`ex16_rag_pipeline`). | 2–3d |
-| **P3** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` pointing to replacements. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d |
-| **P4** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim `OpType` per §7. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d |
+| **P0** | Scaffolding | `providers/triton/{client,decode,dtypes}.py` (extracted from `providers/ops/triton.py`, preserving `_triton_clients` module-global cache). Empty `providers/vector_stores/{base,config,factory}.py` skeleton. | 1d |
+| **P1** | VectorSearch | Op class (`providers/ops/vector_search.py`) + 2 backends (Qdrant HTTP client, FAISS in-memory). Tests + docs + a RAG example (`ex16_rag_pipeline`) composing EmbeddingOp → VectorSearchOp → RerankOp → LLMOp. | 2–3d |
+| **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d |
+| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d |
 
-**1.1.0 total: ~7 days of focused work.** Down from ~9 in the previous
-draft after dropping `ClassifierOp` (see §2b). 2.0.0 delta is trivial once
+**1.1.0 total: ~4 days of focused work.** 2.0.0 delta is trivial once
 callbot has migrated.
 
 ---
@@ -577,116 +452,118 @@ callbot has migrated.
 
 The refactor is clean but not free.
 
-1. **Backend coverage will be incomplete on day one.** Shipping 1–2
-   backends per new op means many "your model isn't supported" moments.
-   Mitigation: the factory + lazy-import + `pip install
-   operonx[<extra>]` pattern makes adding a backend a small, isolated
-   PR. Document the extension recipe in `CONTRIBUTING.md`.
+1. **Loss of `TritonOp`'s escape-hatch role.** Users with exotic Triton
+   models pay ~15 LOC of `@op` around `providers/triton/client.py`.
+   Real cost, deliberately taken (§2). Competitors (BentoML, KServe,
+   Ray Serve) keep a generic invoke op; operonx does not on principle.
 
-2. **Bespoke callbot classifier stays outside operonx.** The
-   embedding-head MLP/attention shape doesn't earn a semantic op — both
-   because sample size is one AND because classification broadly is too
-   heterogeneous for a universal op (§2b). Callbot maintains ~15 LOC of
-   `@op` code and owns the ONNX runtime lifecycle for that model.
+2. **Vector store backend coverage will be incomplete on day one.** Two
+   backends (Qdrant + FAISS) is the minimum viable set. Users likely
+   need pgvector, Milvus, Chroma soon. Mitigation: the factory pattern
+   makes adding a backend a small isolated PR. Document the recipe in
+   `providers/vector_stores/README.md`.
 
-3. **No `ClassifierOp` means callers with light classification needs
-   fall back to `LLMOp.of(fields=…)`.** That's more expensive
-   (200–1000ms vs 5–30ms) but it works today with zero migration
-   effort. Users only feel the cost if they're latency-sensitive AND
-   volume-heavy — at which point a bespoke `@op` around a dedicated
-   classifier model is the right answer, not a framework abstraction.
+3. **Callbot's classifier stays in callbot forever.** `speech/denoise_classifier.py`
+   is bespoke and doesn't map onto any framework op. That's honest —
+   real-time audio-thread classifiers aren't graph ops.
 
-4. **Vector store integrations are heavy.** Each backend is 100–200 LOC
-   + optional deps (`qdrant-client`, `pymilvus`, `faiss-cpu`,
-   `pgvector`, `chromadb`). We ship 2 to start; users likely need more.
-   `pip install operonx[qdrant]` etc. isolates the pain.
+4. **No `ClassifierOp` means callers with light classification needs use
+   `LLMOp.of(fields=…)` (expensive) or hand-write a bare `@op` around
+   ONNX (fast but per-user).** If concrete demand for a well-defined
+   text classifier appears, ship `SentimentOp` / `ModerationOp`
+   narrowly at that point — not the generic umbrella.
 
-5. **TTS streaming semantics vary wildly by backend.** Some yield
-   per-word audio, some per-sentence, some per-fixed-chunk-ms, some
-   don't stream at all. `TtsOp`'s streaming shape (yield
-   `{"audio_chunk": bytes}` per chunk) will need per-backend
-   normalization work. First cut may only support batch mode; streaming
-   ships as a follow-up.
+5. **Pre-existing bug not fixed by this plan:**
+   `providers/rerankers/config.py` declares `RerankingType.COHERE` but
+   `create_reranking()` has no COHERE branch (dead enum entry). Flag
+   for follow-up PR; out of scope here.
 
-6. **Loss of `TritonOp`'s escape-hatch role for exotic Triton models.**
-   The lift to write your own `@op` around `tritonclient.grpc.aio` is
-   ~30 LOC — narrowed to ~15 LOC now that `providers/triton/client.py`
-   ships as a low-level helper. Acknowledged as a real cost; the
-   counterargument (§2) is that the escape hatch was corrosive to the
-   taxonomy, so this trade is intentional.
+6. **ADR items open for P1:**
+   - Resource-key convention: `<op>:<name>` (`vector-search:docs`,
+     `triton:stt`)? Recommend yes — matches `EmbeddingType.ONNX = "onnx"`
+     inside factories.
+   - `VectorSearchOp` filter dialect: accept backend-native dict for
+     v1; consider a `Filter(...)` DSL only if users hit backend-lock-in
+     pain.
+   - Optional-deps naming: `operonx[qdrant]` vs `operonx[vector-qdrant]`.
+     Recommend the shorter form (backend name only) — matches
+     `operonx[onnx]` today.
 
 ---
 
 ## 12 · Relationship to `AGENT_EXTENSION_PLAN.md`
 
-Both plans are independent — one is taxonomy hygiene, the other is
-building new agent primitives on top of existing ones. The overlap is
-one line:
+Both plans are independent. This one is taxonomy hygiene + one new op;
+the agent plan is building agent primitives on top. The overlap is one
+line:
 
-> §4 of `AGENT_EXTENSION_PLAN.md` says "RAG lives in providers/ops/, not
-> agents/". This plan makes that concrete by shipping `VectorSearchOp`
-> there. When the agent-plan's P2 (memory) lands, it consumes
-> `VectorSearchOp` via its Ref, not by taking a dependency on the
-> underlying vector store.
+> §4 of `AGENT_EXTENSION_PLAN.md` says "RAG lives in providers/ops/,
+> not agents/". This plan makes that concrete by shipping
+> `VectorSearchOp` there. When the agent plan's memory subsystem lands,
+> it consumes `VectorSearchOp` via its Ref, not by taking a dependency
+> on the underlying vector store.
 
-Nothing else in this plan depends on the agent plan or vice versa.
-Ship in whichever order lands first.
+Nothing else in this plan depends on the agent plan or vice versa. Ship
+in whichever order lands first.
 
 ---
 
 ## 13 · First concrete step
 
-1. **P0 · ~1 day** — write `providers/_utils/audio.py` (skeleton with
-   `to_pcm16(...)`, `resample(...)`, `chunk_pcm(...)`, `pcm_to_wav(...)`).
-   Extract today's `TritonOp` internals into
-   `providers/triton/{client,dtypes}.py` — async gRPC client pooling +
-   numpy↔Triton dtype translation, no operonx-specific concepts. Scaffold
-   empty `providers/{stt,tts,vector_stores}/` packages each with
-   `base.py` (BaseX ABC), `config.py` (XType enum + XConfig dataclass),
-   `factory.py` (dispatcher, lazy imports, ImportError messages pointing
-   to `pip install operonx[<extra>]`), `__init__.py` with the
-   lazy-import shim used by `embeddings/__init__.py`.
+1. **P0 · ~1 day** — extract `providers/triton/{client,decode,dtypes}.py`
+   from today's `providers/ops/triton.py`. Preserve `_triton_clients`
+   module-global cache verbatim (critical for real-time latency).
+   Scaffold `providers/vector_stores/{base,config,factory}.py`.
 
 2. **1-page ADR before P1 code** — cover:
-   - Exact `Param` shapes for each new op (§4 sketches are indicative,
-     not final).
-   - How `resource:` strings dispatch to backends. Recommend
-     `<backend>:<name>` (`triton:stt`, `whisper:medium`,
-     `qdrant:docs`) — the same convention `embeddings/factory.py` uses
-     via `EmbeddingType` enum.
-   - Streaming contract for `TtsOp` (yield-per-chunk vs batch).
-   - `VectorSearchOp` filter dialect — accept a backend-native dict, or
-     define a `Filter(...)` DSL that translates? (Recommend: dict for
-     v1; DSL is a follow-up.)
-   - Optional-deps naming: `operonx[stt-whisper]` vs `operonx[whisper]`.
-     Recommend: prefix by op (`stt-whisper`, `tts-elevenlabs`) so users
-     know what surface it unlocks.
-   - Confirm: **no `ClassifyOp` / `ClassifierOp` shipping in this
-     plan** (§2b). If a reviewer proposes adding one, the ADR points
-     them to §2b's heterogeneity argument before code is written.
+   - `VectorSearchOp` Param shapes (§5 is indicative, not final).
+   - `resource:` string convention — recommend `<op>:<name>` matching
+     `EmbeddingType.ONNX = "onnx"` factory idiom.
+   - `filter` dialect for v1 — backend-native dict, escape hatch to
+     backend-specific behavior. Filter DSL is v2+.
+   - Optional-deps naming — `operonx[qdrant]` (backend name only).
+   - `providers/triton/client.py` cache ownership — module-global
+     `_triton_clients: dict[str, InferenceServerClient]` (inherited
+     from today's `triton.py:49-57`), NOT per-op-instance.
+   - Where the bytes/str output-decoding heuristic lives —
+     `providers/triton/decode.py::decode_infer_output()`, called by
+     user `@op`s explicitly.
+   - **Confirm: no STT / TTS / Classifier / OCR / VAD ops shipping**
+     (§3 table). Future contributors proposing them must present
+     concrete demand + explain why bare `@op` around the low-level
+     helpers is insufficient.
 
 3. **Then P1 — build in this order:**
-   1. `providers/stt/{base, config, factory, triton}.py`
-   2. `providers/ops/stt.py` — `SttOp` class
-   3. `providers/stt/whisper.py` — second backend to prove the factory
-   4. `providers/tts/{base, config, factory, triton}.py`
-   5. `providers/ops/tts.py` — `TtsOp` class
-   6. `providers/tts/elevenlabs.py` — second backend
-   7. Unit tests + integration test hitting the Triton stub for STT/TTS
-   8. Doc: `docs/guide/08-stt-tts.md` + `docs/api/providers.md` update
+   1. `providers/vector_stores/{base,config,factory}.py`
+   2. `providers/vector_stores/faiss.py` — start with FAISS (no
+      network dep, simplest test path)
+   3. `providers/ops/vector_search.py` — `VectorSearchOp` class
+   4. `providers/vector_stores/qdrant.py` — second backend to prove
+      the factory
+   5. Unit tests: FAISS in-memory smoke test; Qdrant against a
+      docker-compose'd instance in CI
+   6. `examples/python/ex16_rag_pipeline/` — full
+      EmbeddingOp → VectorSearchOp → RerankOp → LLMOp composition
+   7. Doc: `docs/guide/08-vector-search.md` +
+      `docs/api/providers.md` update
 
-Everything after P1 compounds on the scaffolding — P2 (VectorSearch)
-follows the same pattern for `vector_stores/`.
+Everything after P1 is P2 (deprecation warnings) + P3 (2.0.0 cleanup).
 
 ---
 
 ## Sources studied
 
 - `operonx/providers/ops/{llm,embedding,rerank,onnx,triton}.py` — current op shapes
-- `operonx/providers/{llms,embeddings,rerankers}/{base,config,factory}.py` — the reference pattern
-- `operonx/providers/onnx/backend.py` — the standalone ONNX backend (kept as helper for user `@op`s)
-- `operonx/providers/_utils/{huggingface,onnx}.py` — shared helper pattern (`_utils/audio.py` follows this)
-- `operonx/core/configs/op_config.py` — the `OpType` enum
-- `/home/thanglq/educa-reminder-agent/src/callbot/graph.py` — the two concrete uses of `TritonOp` + `OnnxOp` this refactor migrates
-- `MIGRATION.md` (operonx 1.0.0) — deprecation-then-remove pattern (`PARENT.shared`, `GraphOp.loop`, `ask()`, `ParserOp` shipped that way)
-- LangChain / LlamaIndex / Haystack — semantic-op naming precedent for STT / TTS / VectorSearch across the ecosystem
+- `operonx/providers/{llms,embeddings,rerankers}/{base,config,factory}.py` — reference pattern
+- `operonx/providers/onnx/backend.py` — the `OnnxInferenceBackend` class (kept)
+- `operonx/providers/_utils/onnx.py` — `load_onnx_session(dir) → (session, tokenizer, device)` — the actual location and signature of the ONNX helper users will call
+- `operonx/providers/ops/triton.py` — source of the `providers/triton/` extraction (client cache lines 49–57, dtype map, output decoding lines 266–284)
+- `operonx/core/configs/op_config.py` — the `OpType` Literal (missing `interrupt`, `emit`)
+- `operonx/core/exceptions.py:92` — `ParserError.op_type = "parser"` residual to retag
+- `operonx/core/ops/flow/{interrupt_op,emit_op}.py` — where `InterruptOp.type = "interrupt"` and `EmitOp.type = "emit"` are set but not in the Literal
+- `operonx/providers/rerankers/{config,factory}.py` — pre-existing `RerankingType.COHERE` dead entry
+- `/home/thanglq/educa-reminder-agent/src/callbot/graph.py` — the one `TritonOp` call site this refactor migrates
+- `/home/thanglq/educa-reminder-agent/src/speech/per_call_audio.py` — VAD state model (`_init_vad_buffers`, `_CallCtx`) that grounds the "VadOp doesn't fit `PARENT.declare`" argument in §3
+- `/home/thanglq/educa-reminder-agent/src/speech/denoise_classifier.py` — the ACTUAL callbot classifier (hand-written `BaseOp`, not `OnnxOp`) that earlier drafts of this plan misidentified
+- `MIGRATION.md` (operonx 1.0.0) — deprecation-then-remove pattern
+- Cross-check agents run 2026-08-10: factual accuracy check, callbot migration reality-check, adversarial design critique (findings incorporated in this rewrite)
