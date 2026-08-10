@@ -196,7 +196,7 @@ class TestBug5DanglingLookback:
         loop_name = next(n for n in g._ops if n.startswith("__loop_"))
         # After rewrite, the (a, c) edge must be gone from outer._edges (a
         # no longer lives there) and a matching (loop_name, c) must exist.
-        for (src, dst) in g._edges:
+        for src, dst in g._edges:
             assert src != "a", (
                 f"dangling edge: outer._edges still has ({src},{dst}) whose "
                 f"source is inside the hidden loop"
@@ -295,9 +295,9 @@ class TestHazardNestedSyntheticCtxNamespace:
             for ctx in state._cells[idx].contexts:
                 for seg in ctx:
                     # No bare "loop_N" segments from synthetic loops.
-                    assert not (
-                        isinstance(seg, str) and seg.startswith("loop_")
-                    ), f"leaked classic-loop ctx segment {seg!r} on {op_name}"
+                    assert not (isinstance(seg, str) and seg.startswith("loop_")), (
+                        f"leaked classic-loop ctx segment {seg!r} on {op_name}"
+                    )
 
 
 # =========================================================================

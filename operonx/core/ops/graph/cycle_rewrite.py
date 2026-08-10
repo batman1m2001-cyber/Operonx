@@ -271,9 +271,7 @@ def rewrite_cycles_to_loops(graph: "GraphOp") -> bool:
         # order dependent (Phase 3 review HAZARD: nondet iteration).
         scc_seq: List[str] = list(scc_list)
         scc: Set[str] = set(scc_seq)
-        entry_first, entries, scc_back = _scc_entry_and_back_edges(
-            graph, scc, back_edges
-        )
+        entry_first, entries, scc_back = _scc_entry_and_back_edges(graph, scc, back_edges)
 
         # E2 (+ E8): multiple entries into the SCC — either from outside
         # preds or from back-edges targeting distinct nodes.
@@ -444,7 +442,10 @@ def _synthesize_loop(
                 # iteration signal from _back_edges activation.
                 continue
             hidden._edges[key] = EdgeConfig(
-                from_node=src, to_node=dst, type=edge.type, soft=edge.soft,
+                from_node=src,
+                to_node=dst,
+                type=edge.type,
+                soft=edge.soft,
                 pinned_hard=edge.pinned_hard,
             )
             hidden.nexts[src].append(dst)
@@ -465,8 +466,11 @@ def _synthesize_loop(
         new_key = (loop_name, dst)
         if new_key not in outer._edges:
             outer._edges[new_key] = EdgeConfig(
-                from_node=loop_name, to_node=dst, type=edge.type,
-                soft=edge.soft, pinned_hard=edge.pinned_hard,
+                from_node=loop_name,
+                to_node=dst,
+                type=edge.type,
+                soft=edge.soft,
+                pinned_hard=edge.pinned_hard,
             )
             outer.nexts[loop_name].append(dst)
             outer.prevs[dst].append(loop_name)
@@ -492,8 +496,11 @@ def _synthesize_loop(
         new_key = (src, loop_name)
         if new_key not in outer._edges:
             outer._edges[new_key] = EdgeConfig(
-                from_node=src, to_node=loop_name, type=edge.type,
-                soft=edge.soft, pinned_hard=edge.pinned_hard,
+                from_node=src,
+                to_node=loop_name,
+                type=edge.type,
+                soft=edge.soft,
+                pinned_hard=edge.pinned_hard,
             )
             outer.nexts[src].append(loop_name)
             outer.prevs[loop_name].append(src)
@@ -516,7 +523,7 @@ def _synthesize_loop(
     #      edge to begin with (HAZARD from Phase 3 review: named-string
     #      branch candidates skipped by rewire).
     hidden_ends: Set[str] = set()  # nodes inside hidden that carry .end=True
-    for (src_in_scc, dst) in exits:
+    for src_in_scc, dst in exits:
         if dst == "__END__":
             hidden._ops[src_in_scc].end = True
             hidden_ends.add(src_in_scc)
@@ -526,7 +533,8 @@ def _synthesize_loop(
         new_key = (loop_name, dst)
         if new_key not in outer._edges and dst in outer._ops:
             outer._edges[new_key] = EdgeConfig(
-                from_node=loop_name, to_node=dst,
+                from_node=loop_name,
+                to_node=dst,
             )
             outer.nexts[loop_name].append(dst)
             outer.prevs[dst].append(loop_name)

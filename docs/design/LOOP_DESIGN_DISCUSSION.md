@@ -312,7 +312,7 @@ The loop question surfaced because these two features made everything ELSE about
 - [`WHILE_LOOP_PRIMITIVE.md`](WHILE_LOOP_PRIMITIVE.md) — the full `while_` design (parked; retained for future reference)
 - [`AUTO_SOFT_BRANCH_MERGE.md`](AUTO_SOFT_BRANCH_MERGE.md) — shipped in 0.11.0
 - [`BRANCH_INLINE_API.md`](BRANCH_INLINE_API.md) — shipped in 0.11.0
-- [`../../AGENT_EXTENSION_PLAN.md`](../../AGENT_EXTENSION_PLAN.md) — op-native agent framework plan; §Compactor covers trace-size mitigation
+- `AGENT_EXTENSION_PLAN.md` (in repo root) — op-native agent framework plan; §Compactor covers trace-size mitigation
 - LangGraph references:
   - [pregel/_loop.py](https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/pregel/_loop.py) — step counter, recursion limit
   - [pregel.md concept doc](https://github.com/langchain-ai/langgraph/blob/main/docs/docs/concepts/pregel.md) — Pregel model overview

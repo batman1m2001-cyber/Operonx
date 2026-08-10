@@ -123,9 +123,7 @@ def parse_xml(text: str) -> Dict[str, Any]:
     text = _strip_fence(text)
     try:
         root = ET.fromstring(text)
-        return (
-            {root.tag: xml_to_dict(root)} if len(root) > 0 else {root.tag: root.text}
-        )
+        return {root.tag: xml_to_dict(root)} if len(root) > 0 else {root.tag: root.text}
     except ET.ParseError:
         wrapped = f"<root>{text}</root>"
         root = ET.fromstring(wrapped)
@@ -218,15 +216,9 @@ def apply_validators(
     NOT mutate ``result``.
     """
     for field_name, allowed_values in validators.items():
-        clean_values = [
-            v.lstrip("@") if isinstance(v, str) else v for v in allowed_values
-        ]
+        clean_values = [v.lstrip("@") if isinstance(v, str) else v for v in allowed_values]
         default_value = next(
-            (
-                v.lstrip("@")
-                for v in allowed_values
-                if isinstance(v, str) and v.startswith("@")
-            ),
+            (v.lstrip("@") for v in allowed_values if isinstance(v, str) and v.startswith("@")),
             None,
         )
         value = result.get(field_name)
@@ -234,10 +226,7 @@ def apply_validators(
             if default_value is not None:
                 result[field_name] = default_value
             else:
-                return (
-                    f"Validation failed: '{field_name}' value {value!r} "
-                    f"not in {clean_values}"
-                )
+                return f"Validation failed: '{field_name}' value {value!r} not in {clean_values}"
     return None
 
 
@@ -261,10 +250,7 @@ def parse_and_extract(
     """
     if validators is not None and not isinstance(validators, dict):
         return {
-            "error": (
-                f"validators must be a dict, got "
-                f"{type(validators).__name__}: {validators!r}"
-            )
+            "error": (f"validators must be a dict, got {type(validators).__name__}: {validators!r}")
         }
     if not text:
         return {"error": "Empty input text"}

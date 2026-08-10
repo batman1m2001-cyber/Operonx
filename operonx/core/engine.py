@@ -691,9 +691,9 @@ class Operon:
         *,
         mode: str = "updates",
         channels: Optional[List[str]] = None,
-        checkpointer=None,
-        **kwargs,
-    ):
+        checkpointer: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "asyncio.AsyncGenerator[Any, None]":
         """LangGraph-familiar streaming iterator.
 
         Args:

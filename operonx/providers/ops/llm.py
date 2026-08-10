@@ -195,9 +195,7 @@ class LLMOp(BaseOp):
         self.validators = validators
         self.max_retries = max_retries
         self.retry_hint = retry_hint
-        self._extract_fields = (
-            [ExtractField.from_string(s) for s in fields] if fields else None
-        )
+        self._extract_fields = [ExtractField.from_string(s) for s in fields] if fields else None
 
         # Validate resource + ratios
         if isinstance(resource, list):
@@ -513,8 +511,7 @@ class LLMOp(BaseOp):
             except Exception as fallback_error:
                 LOGGER.error(f"Fallback {fallback_key} failed: {fallback_error}")
         raise RuntimeError(
-            f"All fallback models failed or refused "
-            f"(last_refusal_reason={last_refusal_reason!r})"
+            f"All fallback models failed or refused (last_refusal_reason={last_refusal_reason!r})"
         )
 
     def _is_refusal(self, result: Dict[str, Any]) -> bool:

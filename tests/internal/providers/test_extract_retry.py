@@ -32,9 +32,7 @@ def make_mock_hub(responses, finish_reasons=None, refusals=None):
         call_count["messages_history"].append(list(messages))
         content = responses[idx]
         finish_reason = (
-            finish_reasons[idx]
-            if finish_reasons and idx < len(finish_reasons)
-            else "stop"
+            finish_reasons[idx] if finish_reasons and idx < len(finish_reasons) else "stop"
         )
         refusal = refusals[idx] if refusals and idx < len(refusals) else None
 
@@ -50,9 +48,7 @@ def make_mock_hub(responses, finish_reasons=None, refusals=None):
             created=1000000,
             model="mock-model",
             object="chat.completion",
-            choices=[
-                Choice(index=0, message=msg, finish_reason=finish_reason)
-            ],
+            choices=[Choice(index=0, message=msg, finish_reason=finish_reason)],
             usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
 
@@ -129,9 +125,7 @@ async def test_validators_default_applies_on_mismatch():
 
 @pytest.mark.asyncio
 async def test_multiple_fields():
-    mock_hub, _ = make_mock_hub(
-        ["<intent>DENY</intent><confidence>0.95</confidence>"]
-    )
+    mock_hub, _ = make_mock_hub(["<intent>DENY</intent><confidence>0.95</confidence>"])
     with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
         g = _wf(
@@ -183,9 +177,7 @@ async def test_semantic_retry_parse_then_success():
 async def test_semantic_retry_injects_prior_error_as_hint():
     """When retry_hint=True (default), the retry attempt receives the last
     bad response plus a user turn describing the failure."""
-    mock_hub, call_count = make_mock_hub(
-        ["<unclosed>", "<result>CONFIRM</result>"]
-    )
+    mock_hub, call_count = make_mock_hub(["<unclosed>", "<result>CONFIRM</result>"])
     with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
         g = _wf(
@@ -212,9 +204,7 @@ async def test_semantic_retry_injects_prior_error_as_hint():
 @pytest.mark.asyncio
 async def test_retry_hint_off_does_not_inject_messages():
     """retry_hint=False → retry attempts see the original messages only."""
-    mock_hub, call_count = make_mock_hub(
-        ["<unclosed>", "<result>CONFIRM</result>"]
-    )
+    mock_hub, call_count = make_mock_hub(["<unclosed>", "<result>CONFIRM</result>"])
     with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = mock_hub
         g = _wf(
@@ -304,7 +294,7 @@ async def test_retry_twice_then_success():
     mock_hub, call_count = make_mock_hub(
         [
             "<unclosed>",
-            "<result>UNKNOWN</result>",   # parses but validator rejects
+            "<result>UNKNOWN</result>",  # parses but validator rejects
             "<result>CONFIRM</result>",
         ]
     )
@@ -397,8 +387,8 @@ async def test_semantic_failure_does_not_trigger_fallback():
         )
         result = await Operon(g).run(inputs={})
 
-    assert call_count["n"] == 2                 # primary retried once
-    assert fallback_called["n"] == 0            # fallback never touched
+    assert call_count["n"] == 2  # primary retried once
+    assert fallback_called["n"] == 0  # fallback never touched
     assert result["error"] is not None
 
 

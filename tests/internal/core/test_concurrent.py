@@ -214,17 +214,13 @@ class TestCcuLoop:
         # the schema turns into a graph input resolvable at engine.run().
         engine = Operon(counter(target=None))
         targets = [1, 2, 3, 4, 5]
-        results = await asyncio.gather(
-            *[engine.run(inputs={"target": t}) for t in targets]
-        )
+        results = await asyncio.gather(*[engine.run(inputs={"target": t}) for t in targets])
 
         for t, r in zip(targets, results):
             counter_val = r["counter"]
             if isinstance(counter_val, list):
                 counter_val = counter_val[-1]
-            assert counter_val == t, (
-                f"target={t}: expected counter={t}, got {counter_val}"
-            )
+            assert counter_val == t, f"target={t}: expected counter={t}, got {counter_val}"
 
 
 # =============================================================================

@@ -156,14 +156,10 @@ def validate_graph(
     descendant_names = descendant_names or set()
     sibling_names = sibling_names or set()
     result = ValidationResult(graph_name=name)
-    result.issues.extend(
-        _validate_branch_targets(ops, descendant_names, sibling_names)
-    )
+    result.issues.extend(_validate_branch_targets(ops, descendant_names, sibling_names))
     result.issues.extend(_validate_cycles(ops, edges))
     result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
-    result.issues.extend(
-        _validate_refs(ops, name, ancestor_names, descendant_names, sibling_names)
-    )
+    result.issues.extend(_validate_refs(ops, name, ancestor_names, descendant_names, sibling_names))
 
     for issue in result.warnings:
         LOGGER.warning("Graph '%s': %s", name, issue.message)

@@ -4,7 +4,7 @@ Provides the edge-connectivity classes and sentinel ops used by the
 ``>>`` / ``>`` operator syntax for wiring ops in a GraphOp.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any  # noqa: F401 — Any used in string annotations
 
 from operonx.core.ops._utils import _set_wildcard_outputs
 from operonx.core.ops.base import BaseOp
@@ -55,7 +55,7 @@ class DummyOp(BaseOp):
     def __init__(self, name: str):
         super().__init__(name=name)
 
-    def declare(self, *, reducers=None, **vars):
+    def declare(self, *, reducers: "dict | None" = None, **vars: "Any") -> None:
         """Declare shared vars on the current graph, with optional reducers.
 
         Shared vars persist across all stream contexts within the graph. Normal

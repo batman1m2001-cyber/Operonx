@@ -72,9 +72,7 @@ class TestExtractValueByPath:
         assert extract_value_by_path({"a": 1}, ["a"]) == 1
 
     def test_deep(self):
-        assert (
-            extract_value_by_path({"a": {"b": {"c": 42}}}, ["a", "b", "c"]) == 42
-        )
+        assert extract_value_by_path({"a": {"b": {"c": 42}}}, ["a", "b", "c"]) == 42
 
     def test_missing_returns_none(self):
         assert extract_value_by_path({"a": 1}, ["b"]) is None
@@ -130,9 +128,7 @@ class TestApplyValidators:
 
     def test_default_applied_on_mismatch(self):
         result = {"intent": "unknown"}
-        err = apply_validators(
-            result, {"intent": ["confirm", "deny", "@fallback"]}
-        )
+        err = apply_validators(result, {"intent": ["confirm", "deny", "@fallback"]})
         assert err is None
         assert result["intent"] == "fallback"
 
@@ -145,9 +141,7 @@ class TestApplyValidators:
 
     def test_none_value_uses_default_when_available(self):
         result = {"intent": None}
-        err = apply_validators(
-            result, {"intent": ["confirm", "@fallback"]}
-        )
+        err = apply_validators(result, {"intent": ["confirm", "@fallback"]})
         assert err is None
         assert result["intent"] == "fallback"
 

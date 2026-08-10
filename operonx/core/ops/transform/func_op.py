@@ -22,12 +22,12 @@ def op(
     func: Optional[Callable] = None,
     *,
     bound: Optional[str] = None,
-    cache=None,
+    cache: Optional[Any] = None,
     delay: float = 0,
-    exclude=None,
-    include=None,
+    exclude: Optional[Any] = None,
+    include: Optional[Any] = None,
     observe_max: Optional[int] = None,
-):
+) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
     Can be used bare or with keyword arguments::

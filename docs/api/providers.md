@@ -1,11 +1,10 @@
 # operonx.providers
 
-LLM, embedding, reranker, and ONNX provider ops — plus the `ask()`
-structured-output helper. Provider backends are loaded lazily — a
-tier-1 install (`pip install operonx`) can `import operonx.providers`
-without pulling `openai` / `httpx` / `numpy` / `torch`. Missing-dep
-errors surface only when the corresponding backend is actually
-accessed.
+LLM, embedding, reranker, and ONNX provider ops. Provider backends are
+loaded lazily — a tier-1 install (`pip install operonx`) can
+`import operonx.providers` without pulling `openai` / `httpx` / `numpy`
+/ `torch`. Missing-dep errors surface only when the corresponding
+backend is actually accessed.
 
 See [Pick an extra](../guide/00-installation.md#pick-an-extra) on the
 installation page for which extra each provider needs.
@@ -20,12 +19,18 @@ that's the recommended style.
 ::: operonx.providers.ops.EmbeddingOp
 ::: operonx.providers.ops.RerankOp
 
-## High-level helpers
+## Structured output (1.0.0)
 
-`ask()` is the structured-output variant that pairs `LLMOp` with a
-parser and (optionally) a validator-driven retry loop.
+`LLMOp` gained inline parsing + validators + error-guided semantic
+retry in 1.0.0 — pass `fields=`, `parser=`, `validators=`, `max_retries=`
+directly to `LLMOp.of()` (see class docs above). The old standalone
+`ask()` helper was removed.
 
-::: operonx.providers.ops.ask
+For pure text parsing without an LLM call, use the pure functions in
+`operonx.providers.parsing`:
+
+::: operonx.providers.parsing.parse_and_extract
+::: operonx.providers.parsing.ExtractField
 
 ## Resource resolution
 

@@ -78,6 +78,7 @@ class TestDetectBackEdges:
     def test_lookback_edges_excluded(self):
         """Explicit lookback edges are user-declared cycles — ignored by the
         rewrite pass (they're kept as-is)."""
+
         @op
         def step():
             return {"x": 1}
@@ -110,9 +111,11 @@ class TestTarjanSCCs:
 
     def test_multiple_disjoint_sccs(self):
         adj = {
-            "a": ["b"], "b": ["a"],  # SCC 1
-            "c": ["d"], "d": ["c"],  # SCC 2
-            "e": [],                  # non-cyclic
+            "a": ["b"],
+            "b": ["a"],  # SCC 1
+            "c": ["d"],
+            "d": ["c"],  # SCC 2
+            "e": [],  # non-cyclic
         }
         sccs = tarjan_sccs(["a", "b", "c", "d", "e"], adj)
         scc_sets = [set(s) for s in sccs]
@@ -387,6 +390,7 @@ class TestReducerAcrossIterations:
 class TestErrorCases:
     def test_E1_cycle_with_no_exit_raises(self):
         """SCC has no exit — build-time error."""
+
         @op
         def s():
             return {"x": 1}

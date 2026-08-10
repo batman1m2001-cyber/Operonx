@@ -541,9 +541,7 @@ class GraphOp(BaseOp):
                         default=param.default,
                         description=param.description,
                     )
-                    (loop_owner or self)._out_vars.setdefault(child_name, {})[var] = (
-                        param.value.var
-                    )
+                    (loop_owner or self)._out_vars.setdefault(child_name, {})[var] = param.value.var
 
             # Descend into synthetic hidden loops — their children's PARENT
             # refs point through the loop back to us.
@@ -754,6 +752,7 @@ class GraphOp(BaseOp):
                 "format. Serialize the pre-rewrite graph or use "
                 "@graph(strict_dag=True) to opt out."
             )
+
         # Also refuse to serialize an outer graph that contains any synthetic
         # loop descendant — the missing sub-config would poison consumers.
         def _contains_synthetic(node):

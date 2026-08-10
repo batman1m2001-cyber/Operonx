@@ -436,7 +436,7 @@ Build-time pass detects the back-edge and rewrites internally:
 
 **Critical fix**: v2 said "topo-sort, back-edge = topo(u) > topo(v)". Topo-sort **fails** on cyclic input — the very case the pass exists to handle. Correct algorithm:
 
-1. Use existing `find_cycles` DFS from [`operonx/core/utils/algo.py:9`](../../operonx/core/utils/algo.py) — colour-based (WHITE / GRAY / BLACK) — detects back-edges as GRAY-target edges during traversal
+1. Use existing `find_cycles` DFS from `operonx/core/utils/algo.py` (in the repo) — colour-based (WHITE / GRAY / BLACK) — detects back-edges as GRAY-target edges during traversal
 2. For each back-edge `(u, v)`, run **Tarjan's SCC** on the subgraph rooted at `v` to extract the loop body (~40 LOC of net-new code)
 3. Verify loop body: **exactly one entry** (v), **at least one exit** via `if_(cond, END)` — algorithm now matches E-table (v2 said "exactly ONE exit" but E3 allowed multiple; reconciled)
 4. Extract SCC into a hidden `GraphOp.loop(_max_iters=…)` node

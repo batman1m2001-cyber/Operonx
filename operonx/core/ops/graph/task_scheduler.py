@@ -426,7 +426,7 @@ class Scheduler:
                 tail = event.ctx[-1] if event.ctx else None
                 if isinstance(tail, str) and tail.startswith(iter_prefix):
                     try:
-                        n = int(tail[len(iter_prefix):])
+                        n = int(tail[len(iter_prefix) :])
                     except ValueError:
                         n = 0
                 else:
@@ -453,9 +453,7 @@ class Scheduler:
                         if et_idx < 0 or event.ctx not in state._cells[et_idx]:
                             continue
                         if getattr(u_op, "type", None) == "branch":
-                            bt_idx = state.schema.get_index(
-                                u_op.full_name, "__branch_target__"
-                            )
+                            bt_idx = state.schema.get_index(u_op.full_name, "__branch_target__")
                             if bt_idx < 0:
                                 # No branch-target output — treat as fired
                                 # (defensive; this shouldn't happen for a
@@ -481,10 +479,7 @@ class Scheduler:
 
                 if should_continue and n < cfg.max_iterations - 1:
                     next_seg = f"{iter_prefix}{n + 1}"
-                    next_ctx = (
-                        event.ctx + (next_seg,) if n == 0
-                        else event.ctx[:-1] + (next_seg,)
-                    )
+                    next_ctx = event.ctx + (next_seg,) if n == 0 else event.ctx[:-1] + (next_seg,)
                     for var, val in outputs.items():
                         state[op.full_name, var, next_ctx] = val
                     dispatch(event.op, next_ctx)
