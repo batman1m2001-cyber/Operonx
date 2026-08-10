@@ -142,16 +142,26 @@ router >> fail >> merge
 
 ### Loops
 
-```python
-from operonx.core import GraphOp, START, END, PARENT
+Write a back-edge inside `@graph` — the build-time cycle-rewrite pass
+turns it into a hidden `_GraphLoop` so the scheduler still sees a DAG:
 
-with GraphOp.loop(until="count >= 5", count=0) as loop:
+```python
+from operonx.core import graph, START, END, PARENT
+from operonx.core.ops.flow.branch_op import if_
+
+@graph
+def counter():
+    PARENT.declare(count=0)
     inc = increment(counter=PARENT["count"])
     inc["counter"] >> PARENT["count"]
-    START >> inc >> END
+    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
+
+g = counter()
 ```
 
-`until` accepts a string expression evaluated against graph outputs.
+The branch's `else_` target is the back-edge; each iteration commits
+its outputs to the shared `count` cell and the branch decides whether
+to loop again or exit. See `docs/guide/03-loops-and-branches.md`.
 
 ## Installation
 

@@ -1,4 +1,11 @@
-"""09 Agent Workflow — tool-calling agent built on @graph with until= loop.
+"""09 Agent Workflow — tool-calling agent with a back-edge inside @graph.
+
+1.0.0 migration note: pre-1.0 versions used @graph(until="done == True",
+max_iterations=10) as the loop control. That surface is gone; the loop is
+now expressed via a back-edge and the Phase 3 cycle-rewrite pass builds a
+hidden _GraphLoop under the hood. The max-iterations cap defaults to 1000
+on synthesized loops — the branch is your primary exit.
+
 
 Requires ``OPENAI_API_KEY`` in ``.env`` and ``llm:gpt-4o-mini`` in
 ``resources.yaml``. Run from this directory:
@@ -15,6 +22,7 @@ import json
 
 import operonx
 from operonx.core import END, PARENT, START, Operon, graph, op
+from operonx.core.ops.flow.branch_op import if_
 from operonx.providers import LLMOp
 
 # ── Tool functions ──────────────────────────────────────────────────────
@@ -124,35 +132,36 @@ def process_response(content, tool_calls, messages):
 
 
 @graph
-def agent_loop(messages, done, answer):
-    """Repeat LLM → process until `done` is True."""
+def agent_loop():
+    """Repeat LLM → process until ``done`` is True. The back-edge from
+    ``proc`` to ``llm`` is what makes this a loop; the Phase 3 rewrite
+    pass turns it into a hidden ``_GraphLoop`` at build time."""
+    PARENT.declare(messages=[], done=False, answer="")
     llm = LLMOp.of(
         resource="gpt-4o-mini",
-        messages=messages,
+        messages=PARENT["messages"],
         tools=TOOL_DESCRIPTIONS,
     )
     proc = process_response(
         content=llm["content"],
         tool_calls=llm["tool_calls"],
-        messages=messages,
+        messages=PARENT["messages"],
     )
     proc["messages"] >> PARENT["messages"]
     proc["done"] >> PARENT["done"]
     proc["answer"] >> PARENT["answer"]
-    START >> llm >> proc >> END
+    START >> llm >> proc >> if_(proc["done"] == True, END).else_(llm)  # noqa: E712
 
 
 @graph
 def agent(query):
     """init → loop until the LLM stops calling tools."""
     init = init_agent(query=query)
-    loop = agent_loop(
-        messages=init["messages"],
-        done=init["done"],
-        answer=init["answer"],
-        until="done == True",
-        max_iterations=10,
-    )
+    loop = agent_loop()
+    # Wire init's outputs into the loop's shared cells at run start.
+    init["messages"] >> loop["messages"]
+    init["done"] >> loop["done"]
+    init["answer"] >> loop["answer"]
     loop["answer"] >> PARENT["answer"]
     START >> init >> loop >> END
 
