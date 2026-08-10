@@ -115,28 +115,9 @@ class DummyOp(BaseOp):
             current_graph._reducer_vars = {}
         current_graph._reducer_vars.update(reducers)
 
-    def shared(self, **kwargs):
-        """DEPRECATED alias for :meth:`declare` (without reducers).
-
-        Kept for backward compatibility with pre-0.12 graphs. New code should
-        use ``PARENT.declare(**vars, reducers={...})``.
-        """
-        import warnings
-
-        warnings.warn(
-            "PARENT.shared() is deprecated; use PARENT.declare() instead. "
-            "declare() additionally accepts a `reducers=` kwarg.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if self.name != "__PARENT__":
-            raise TypeError("shared() can only be called on PARENT")
-        current_graph = get_current()
-        if current_graph is None:
-            raise RuntimeError("PARENT.shared() must be called inside a @graph function body")
-        if not hasattr(current_graph, "_shared_vars"):
-            current_graph._shared_vars = {}
-        current_graph._shared_vars.update(kwargs)
+    # NOTE (1.0.0): ``PARENT.shared(**vars)`` was removed. Use
+    # ``PARENT.declare(**vars, reducers={...})`` instead — same shared-cell
+    # semantics plus optional reducers on fan-in writes.
 
     def __rshift__(self, other):
         if isinstance(other, SoftEdge):
