@@ -65,6 +65,11 @@ class MemoryState:
         "_interrupt_observers",
         "_interrupt_responses",
         "_current_step",
+        # Phase 3 BUG 7 fix: nested schedulers (running inside synthetic
+        # loops) read this to forward frames to the top-level engine.stream()
+        # output_queue. Set by the top-level scheduler at run start; None
+        # otherwise. Not persisted, not serialized.
+        "_stream_output_queue",
     )
 
     def __init__(
@@ -132,6 +137,12 @@ class MemoryState:
         # the same op invocation share the same step_id — matches the plan's
         # "step_id per write batch" semantic (STATE_LOOP_REFACTOR_PLAN.md §Phase 2).
         self._current_step: int = 0
+
+        # Phase 3 BUG 7 fix: nested schedulers read this to forward per-op
+        # frames from ops moved into synthetic hidden loops to the top-level
+        # engine.stream() output_queue. Left None when the run wasn't started
+        # via engine.stream(); nested schedulers then behave as before.
+        self._stream_output_queue = None
 
         # Apply initial inputs
         if inputs:
@@ -320,6 +331,13 @@ class MemoryState:
         ``operonx.reducers`` for the standard library. Reducer errors
         raise ``ReducerError`` wrapping the operands.
 
+        For shared cells (every reducer target is one), the previous value is
+        always at ``DEFAULT_CONTEXT`` regardless of the write's ``ctx_key`` —
+        we route the read through ``Cell.__getitem__`` which handles that
+        mapping. Reading via ``ctx_key in cell`` would miss the accumulated
+        value when the write comes from a nested ctx like ``("main","loop_1")``
+        (Phase 3 loop iterations) and silently degrade the reducer to LWW.
+
         Args:
             idx: cell index in ``self._cells``
             ctx_key: context tuple (``DEFAULT_CONTEXT`` for shared cells)
@@ -329,7 +347,10 @@ class MemoryState:
         reducer = self.schema._reducers.get(idx)
         if reducer is not None:
             cell = self._cells[idx]
-            old = cell[ctx_key] if ctx_key in cell else cell.default_value
+            # Cell.__getitem__ handles shared→DEFAULT_CONTEXT + parent
+            # fallback + default_value; returns the "current" value in every
+            # case, which is exactly what the reducer needs.
+            old = cell[ctx_key]
             try:
                 value = reducer(old, value)
             except Exception as e:  # noqa: BLE001 — re-raise wrapped

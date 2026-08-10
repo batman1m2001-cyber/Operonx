@@ -27,6 +27,11 @@ _BASE_INIT_KEYS = frozenset(
         "exclude",
         "include",
         "observe_max",
+        # Phase 3 graph-only kwargs — routed to GraphOp.__init__ instead of
+        # silently landing in the input mapping (BUG 6 from Phase 3 review).
+        "strict_dag",
+        "auto_soft",
+        "concurrency",
     }
 )
 

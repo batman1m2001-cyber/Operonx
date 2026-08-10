@@ -58,7 +58,7 @@ def _build_fn_args(input_mappings, param_names):
     return args
 
 
-def graph(fn=None, *, bound: "str | None" = None):
+def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
     """Decorator to turn a builder function into a reusable GraphOp factory.
 
     Can be used bare or with keyword arguments::
@@ -70,6 +70,10 @@ def graph(fn=None, *, bound: "str | None" = None):
         @graph(bound="io")
         def io_pipeline(x):
             ...
+
+        @graph(strict_dag=True)
+        def dag_only(x):
+            ...  # back-edges here will FAIL validate() instead of being rewritten
 
     The function's parameters become graph inputs. Ref values are injected as
     PARENT refs; static values are passed through directly for use at build time.
@@ -93,9 +97,13 @@ def graph(fn=None, *, bound: "str | None" = None):
     Args:
         bound: Execution bound for the graph. ``None`` auto-detects from children.
             ``"sync"`` forces inline dispatch, ``"io"``/``"cpu"`` forces task dispatch.
+        strict_dag: Opt out of the Phase 3 cycle-to-loop rewrite. Back-edges
+            in the graph body are left as-is (and hit the classic cycle
+            warning path). Use when you want the pre-Phase-3 fail-fast
+            behavior on accidental cycles.
     """
 
-    def _make_graph_wrapper(fn, graph_bound):
+    def _make_graph_wrapper(fn, graph_bound, graph_strict_dag):
         from operonx.core.ops.graph.graph_op import GraphOp
 
         sig = inspect.signature(fn)
@@ -122,6 +130,9 @@ def graph(fn=None, *, bound: "str | None" = None):
             # Inject decorator-level bound if not overridden at call time
             if graph_bound is not None and "bound" not in init_kwargs:
                 init_kwargs["bound"] = graph_bound
+            # Inject decorator-level strict_dag if not overridden at call time
+            if graph_strict_dag and "strict_dag" not in init_kwargs:
+                init_kwargs["strict_dag"] = True
 
             if until is not None:
                 # ── Loop mode ──
@@ -167,7 +178,10 @@ def graph(fn=None, *, bound: "str | None" = None):
                 else:
                     _max = max_iterations
 
-                g = GraphOp.loop(until=until, max_iterations=_max, **loop_state)
+                # _internal=True suppresses the DeprecationWarning — the
+                # @graph(until=...) surface is still a supported user API in
+                # Phase 3 alongside back-edge rewrites.
+                g = GraphOp.loop(until=until, max_iterations=_max, _internal=True, **loop_state)
                 g.inputs.update(remaining_inputs or {})
                 with g:
                     fn_args = {k: PARENT[k] for k in loop_state if k in loop_params}
@@ -189,6 +203,6 @@ def graph(fn=None, *, bound: "str | None" = None):
 
     if fn is not None:
         # @graph without parentheses
-        return _make_graph_wrapper(fn, bound)
-    # @graph(bound="io") with parentheses
-    return lambda f: _make_graph_wrapper(f, bound)
+        return _make_graph_wrapper(fn, bound, strict_dag)
+    # @graph(bound="io", strict_dag=True) with parentheses
+    return lambda f: _make_graph_wrapper(f, bound, strict_dag)
