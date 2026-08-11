@@ -13,19 +13,13 @@ OpType = Literal[
     "doc-fetch",
     # Node điều khiển luồng
     "branch",
-    "for",
-    "while",
-    "stream",
+    "interrupt",
+    "emit",
     # Node xử lý
     "code",
     "lambda",
-    "parser",
     "prompt",
     "doc-processor",
-    # Node database/storage
-    "milvus",
-    "mongo",
-    "s3",
     # Node đặc biệt
     "graph",
     "default",
@@ -33,4 +27,20 @@ OpType = Literal[
     "tool-executor",
     "mcp",
 ]
-"""Các loại node được hỗ trợ trong workflow graph."""
+"""Các loại node được hỗ trợ trong workflow graph.
+
+Removed in 1.2.0:
+    ``for`` / ``while`` / ``stream`` — superseded in 1.0.0 by back-edge
+        loops, generator ops and ``Ref.parallel()``.
+    ``parser`` — ``ParserOp`` went away in 1.0.0; parsing lives inside
+        ``LLMOp(fields=...)``.
+    ``milvus`` / ``mongo`` / ``s3`` — named backends, not semantics, and
+        never had ops behind them. Storage is reached through
+        ``vector-search`` and ``doc-fetch``.
+    ``onnx`` / ``triton`` — assigned by the ops deleted in 1.2.0 (they
+        were never in this Literal, which is the drift this cleanup ends).
+
+Added in 1.2.0:
+    ``interrupt`` / ``emit`` — set by ``InterruptOp`` / ``EmitOp`` since
+        1.0.0 but missing here, so the Literal disagreed with the code.
+"""

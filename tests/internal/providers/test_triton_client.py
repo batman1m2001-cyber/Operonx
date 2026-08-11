@@ -309,54 +309,57 @@ class TestTritonClientInfer:
 
 
 # =============================================================================
-# TritonOp still behaves the same on top of the extracted client
+# The ops removed in 1.2.0 stay removed
 # =============================================================================
 
 
-class TestTritonOpUsesExtractedClient:
-    @pytest.mark.asyncio
-    async def test_op_maps_names_through_client(self, mock_grpc):
-        from operonx.providers.ops import TritonOp
+class TestRemovedOps:
+    """`OnnxOp` and `TritonOp` named their transport rather than a
+    semantic. They are gone; these assert they don't quietly return."""
+
+    def test_tritonop_is_gone(self):
+        import operonx.providers as providers
+        import operonx.providers.ops as ops
+
+        with pytest.raises(AttributeError):
+            ops.TritonOp
+        with pytest.raises(AttributeError):
+            providers.TritonOp
+
+    def test_onnxop_is_gone(self):
+        import operonx.providers as providers
+        import operonx.providers.ops as ops
+
+        with pytest.raises(AttributeError):
+            ops.OnnxOp
+        with pytest.raises(AttributeError):
+            providers.OnnxOp
+
+    def test_modules_are_gone(self):
+        import importlib
+
+        for mod in ("operonx.providers.ops.triton", "operonx.providers.ops.onnx"):
+            with pytest.raises(ModuleNotFoundError):
+                importlib.import_module(mod)
+
+    def test_replacement_is_importable(self):
+        # The whole point: the useful part survives as a helper users
+        # wrap in their own @op.
         from operonx.providers.triton import TritonClient
 
-        op = TritonOp(
-            name="stt",
-            resource={"url": "localhost:8001", "model": "asr"},
-            inputs_map={"AUDIO_SIGNAL": "speech_audio"},
-            outputs_map={"TRANSCRIPT": "transcript", "EMBEDDING": "embedding"},
-        )
+        assert hasattr(TritonClient, "get")
+        assert hasattr(TritonClient, "infer")
 
-        client = TritonClient.get("localhost:8001")
-        client.raw.infer = AsyncMock(
-            return_value=_mock_result(
-                {
-                    "TRANSCRIPT": np.array([b"xin chao"]),
-                    "EMBEDDING": np.ones(8, dtype=np.float32),
-                }
-            )
-        )
+    def test_onnx_helper_survives_at_its_real_path(self):
+        # Deprecation warnings in 1.1.0 pointed here; it must still hold.
+        from operonx.providers._utils.onnx import load_onnx_session
 
-        out = await op._process(speech_audio=np.zeros(16, dtype=np.float32))
+        assert callable(load_onnx_session)
 
-        # Op-side names, not Triton tensor names.
-        assert out["transcript"] == "xin chao"
-        assert out["embedding"].shape == (8,)
-        assert "TRANSCRIPT" not in out
+    def test_onnx_remains_a_backend(self):
+        # Removing the op must not remove ONNX as an embedding/rerank backend.
+        from operonx.providers.embeddings.config import EmbeddingType
+        from operonx.providers.rerankers.config import RerankingType
 
-    @pytest.mark.asyncio
-    async def test_op_reuses_cached_client(self, mock_grpc):
-        from operonx.providers.ops import TritonOp
-
-        op = TritonOp(
-            name="stt",
-            resource={"url": "localhost:8001", "model": "asr"},
-            inputs_map={"A": "a"},
-            outputs_map={"OUT": "out"},
-        )
-        c1 = op._get_client()
-        c2 = op._get_client()
-        assert c1 is c2
-        # And it's the same instance the module-level cache hands out.
-        from operonx.providers.triton import TritonClient
-
-        assert c1 is TritonClient.get("localhost:8001")
+        assert EmbeddingType.ONNX.value == "onnx"
+        assert RerankingType.ONNX.value == "onnx"

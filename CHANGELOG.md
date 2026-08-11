@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-11
+
+Removes the two backend-named ops. See
+[MIGRATION.md](MIGRATION.md#migrating-to-operonx-120) for recipes.
+
+### Removed (BREAKING)
+
+- `OnnxOp` — write a bare `@op` around
+  `operonx.providers._utils.onnx.load_onnx_session`. ONNX remains a
+  backend for `EmbeddingOp` and `RerankOp` via `api_type: onnx`.
+- `TritonOp` — write a bare `@op` around
+  `operonx.providers.triton.TritonClient.get(url)`, which supplies the
+  pooled gRPC client, dtype translation and output decoding.
+
+Both named their *transport* rather than a semantic: the op name told
+you the runtime instead of the intent, so every backend needed its own
+op and callers had to know the transport to pick one.
+
+> **Removal was brought forward.** The warnings shipped in 1.1.0 said
+> "removed in 2.0.0". If you are pinned `operonx>=1.x` and use either op,
+> upgrading to 1.2.0 **will** break you — pin `operonx<1.2.0` until you
+> have migrated.
+
+### Changed (BREAKING)
+
+- `OpType` cleanup. Removed `for`, `while`, `stream` (superseded in 1.0.0
+  by back-edge loops, generator ops and `Ref.parallel()`), `parser`
+  (`ParserOp` went in 1.0.0), and `milvus`, `mongo`, `s3` (named
+  backends, never had ops). Added `interrupt` and `emit`, which
+  `InterruptOp` / `EmitOp` have set since 1.0.0 without the Literal
+  listing them — the drift this ends. Only affects code reading the
+  Literal directly.
+- `ParserError` now reports `op_type="code"` rather than `"parser"`.
+
 ## [1.1.0] - 2026-08-11
 
 Retrieval release: a two-store RAG stack, plus the first step of the op
@@ -625,7 +659,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.7.0...v1.0.0
 [0.7.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.2...v0.7.0
