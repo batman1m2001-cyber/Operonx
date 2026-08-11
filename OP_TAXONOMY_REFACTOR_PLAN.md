@@ -1,9 +1,9 @@
 # Operonx → Op Taxonomy Refactor Plan
 
-**Status:** **1.1.0 work is complete and merged** (PRs #20 → #24);
-2.0.0 remains. Sequenced for 1.1.0 (add + deprecate) → 2.0.0 (delete).
-Third revision after cross-check found factual errors and design
-inconsistencies in earlier drafts (see git log for the delta).
+**Status:** **complete.** 1.1.0 added the retrieval stack and deprecated
+the backend-named ops; 1.2.0 removed them. Third revision after
+cross-check found factual errors and design inconsistencies in earlier
+drafts (see git log for the delta).
 
 ### Shipped
 
@@ -14,9 +14,20 @@ inconsistencies in earlier drafts (see git log for the delta).
 | [#22](https://github.com/batman1m2001-cyber/Operonx/pull/22) | P1b/c | pgvector backend + `doc_stores/` + `DocFetchOp` |
 | [#23](https://github.com/batman1m2001-cyber/Operonx/pull/23) | P1d | `MemoryDocStore`, `ex16_rag_pipeline`, guide + filter-dialect docs |
 | [#24](https://github.com/batman1m2001-cyber/Operonx/pull/24) | P2 | `DeprecationWarning` on `OnnxOp`/`TritonOp`; CHANGELOG 1.1.0 |
+| [#25](https://github.com/batman1m2001-cyber/Operonx/pull/25) | follow-up | Qdrant backend |
+| [#26](https://github.com/batman1m2001-cyber/Operonx/pull/26) | release | v1.1.0 → PyPI |
+| _this PR_ | P3 | Remove `OnnxOp`/`TritonOp`, `OpType` cleanup, retag `ParserError`, MIGRATION §1.2.0 |
 
-**Still open:** publish 1.1.0 · callbot migrates off `TritonOp` ·
-then P3 (2.0.0 deletions) · Qdrant backend (non-blocking).
+**All phases shipped.** 1.1.0 published to PyPI; Qdrant landed in #25;
+P3 removals shipped as **1.2.0** rather than 2.0.0 at the maintainer's
+direction.
+
+> **Removal was accelerated.** §8 and the warnings shipped in 1.1.0 both
+> said 2.0.0. Removing in a minor release breaks semver for anyone
+> pinned `operonx>=1.x`, so `MIGRATION.md` and the CHANGELOG both say so
+> plainly and tell affected users to pin `operonx<1.2.0` until migrated.
+> Known downstream: callbot pins `>=1.0.0` and still calls `TritonOp` on
+> its `dev` branch; its migration is prepared but not merged.
 
 ### What implementation changed vs this plan
 
@@ -874,8 +885,8 @@ Later           Qdrant backend · Mongo/Redis doc stores   (not blocking)
 | **P1c** | DocFetch | `providers/doc_stores/{base,config,factory,_reorder}.py` + **Postgres** backend + `providers/ops/doc_fetch.py` per §5.8. Order restoration + `missing` reporting are the load-bearing tests. Reuses P1b's mocked-connection approach. | 1.5d | ✅ #22 |
 | **P1d** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → DocFetchOp → RerankOp → LLMOp). Rewrote `docs/guide/04-rag.md` (which had a placeholder fetch *and* a resources.yaml format that does not exist) + new `providers/vector_stores/README.md` with the §5.4 filter table. Plus an unplanned `MemoryDocStore` so the example runs with no servers. | 1d | ✅ #23 |
 | **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. | 0.5d | ✅ #24 |
-| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. **Blocked on callbot migrating off `TritonOp`.** | 1d | ⏳ |
-| **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). Not blocking 1.1.0. | 1d | ⏳ next |
+| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. **Shipped as 1.2.0, not 2.0.0** (see note below). | 1d | ✅ |
+| **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). | 1d | ✅ #25 |
 
 **1.1.0 is complete** — P0–P2 merged (#20–#24). Version bump and
 publish remain a deliberate release step. 2.0.0 delta is trivial once

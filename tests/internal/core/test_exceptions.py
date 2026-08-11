@@ -103,9 +103,17 @@ class TestParserError:
             message="Invalid JSON syntax", input_text='{"broken": ', format_type="json"
         )
         msg = str(error)
-        assert "[PARSER]" in msg
+        # op_type is "code" since 1.2.0 — "parser" left the OpType Literal
+        # along with ParserOp, and parsing now happens inside LLMOp.
+        assert "[CODE]" in msg
         assert "Invalid JSON syntax" in msg
         assert "format:" in msg and "json" in msg
+
+    def test_op_type_is_code_not_parser(self):
+        """Regression guard for the 1.2.0 OpType cleanup."""
+        error = ParserError(message="x", input_text="t", format_type="json")
+        assert error.op_type == "code"
+        assert "[PARSER]" not in str(error)
 
     def test_with_original_error(self):
         """Test parser error with original exception."""

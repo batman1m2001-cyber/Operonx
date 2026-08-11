@@ -20,7 +20,7 @@ Operonx/
 │   │   ├── configs/               # Pydantic config models
 │   │   └── exceptions.py          # OpError hierarchy
 │   ├── providers/                 # LLM, embedding, reranker, ONNX backends
-│   │   ├── ops/                   # LLMOp, EmbeddingOp, RerankOp, OnnxOp, chat, ask
+│   │   ├── ops/                   # LLMOp, EmbeddingOp, RerankOp, VectorSearchOp, DocFetchOp
 │   │   ├── llms/                  # OpenAI, Azure, Gemini, Anthropic, vLLM
 │   │   ├── embeddings/            # vLLM, TEI, HuggingFace, ONNX
 │   │   ├── rerankers/             # vLLM, TEI, HuggingFace, ONNX, Pinecone

@@ -89,7 +89,10 @@ class ParserError(OpError):
 
         super().__init__(
             message=message,
-            op_type="parser",
+            # "parser" left the OpType Literal in 1.2.0 along with ParserOp;
+            # parsing now happens inside LLMOp, whose failures surface from
+            # ordinary op code.
+            op_type="code",
             original_error=original_error,
             context={"format": format_type, "input": input_text},
         )

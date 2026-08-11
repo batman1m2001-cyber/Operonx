@@ -1,3 +1,133 @@
+# Migrating operonx
+
+- [To 1.2.0](#migrating-to-operonx-120) — `OnnxOp` and `TritonOp` removed
+- [To 1.0.0](#migrating-to-operonx-100) — `PARENT.shared`, `GraphOp.loop`,
+  `@graph(until=)`, `ParserOp`, `ask()` removed
+
+---
+
+# Migrating to operonx 1.2.0
+
+1.2.0 removes the two **backend-named** ops. Both named their *transport*
+rather than a semantic, so the op name told you the runtime instead of
+the intent and every backend needed its own op. Everything else in 1.1.x
+is unaffected.
+
+> **Note on timing.** The deprecation warnings shipped in 1.1.0 said
+> "removed in 2.0.0". Removal was brought forward to 1.2.0. If you are
+> pinned `operonx>=1.x` and use either op, upgrading to 1.2.0 **will**
+> break you — pin `operonx<1.2.0` until you have migrated. Sorry for the
+> mismatch; the recipes below are unchanged from what those warnings
+> described.
+
+## 1. `TritonOp` → a bare `@op` on `TritonClient`
+
+The useful parts — a process-cached async gRPC client, numpy↔Triton dtype
+translation, and text-output decoding — ship as
+`operonx.providers.triton.TritonClient`. What is left is the tensor-name
+mapping, which belongs to you.
+
+**Before**
+
+```python
+from operonx.providers.ops import TritonOp
+
+stt = TritonOp(
+    resource="stt",
+    inputs_map={"AUDIO_SIGNAL": "speech_audio"},
+    outputs_map={"TRANSCRIPT": "transcript", "EMBEDDING": "embedding"},
+    inputs={"speech_audio": prep["speech_audio"]},
+)
+```
+
+**After**
+
+```python
+from operonx.core import op
+from operonx.providers.triton import TritonClient
+
+@op(bound="io")
+async def stt(speech_audio):
+    client = TritonClient.get("localhost:8001")   # pooled per URL
+    r = await client.infer(
+        model="fastconformer_asr",
+        inputs={"AUDIO_SIGNAL": speech_audio},
+        outputs=["TRANSCRIPT", "EMBEDDING"],
+    )
+    # Must be a LITERAL dict — operonx infers an op's declared outputs by
+    # AST-parsing the return statement. A comprehension declares nothing,
+    # and the graph then BUILDS fine but fails at runtime with
+    # "(op, var) not found in schema".
+    return {"transcript": r["TRANSCRIPT"], "embedding": r["EMBEDDING"]}
+
+# in the graph
+stt_node = stt(speech_audio=prep["speech_audio"])
+```
+
+Two things worth carrying over deliberately:
+
+- **Always reach the client via `TritonClient.get(url)`.** It caches the
+  gRPC channel per URL. Constructing a client per call adds connection
+  setup to every request.
+- **Request every output you consume.** `infer` maps an output it cannot
+  read to `None` rather than raising, so dropping one degrades silently
+  downstream instead of failing loudly.
+
+If you were resolving config from `resources.yaml`, keep doing so — read
+the `triton:<name>` entry with `ResourceHub.instance().get_config(...)`
+inside your op.
+
+## 2. `OnnxOp` → a bare `@op` on `load_onnx_session`
+
+`OnnxOp`'s shape — a classifier head over precomputed embeddings — was
+too narrow to earn a framework op.
+
+**Before**
+
+```python
+from operonx.providers.ops import OnnxOp
+
+pred = OnnxOp.of(resource="sentiment", embeddings=emb["embeddings"])
+```
+
+**After**
+
+```python
+from operonx.core import op
+from operonx.providers._utils.onnx import load_onnx_session
+
+_session = None
+
+@op(bound="cpu")
+def classify(embeddings: list):
+    global _session
+    if _session is None:
+        # Returns a 3-TUPLE from a directory holding model.onnx +
+        # tokenizer.json — not a bare session.
+        _session, _tokenizer, _device = load_onnx_session("models/sentiment")
+    probs = _session.run(None, {"embeddings": embeddings})[0]
+    return {"probabilities": probs.tolist()}
+```
+
+**ONNX remains a first-class backend** for `EmbeddingOp` and `RerankOp`
+via `api_type: onnx` — only the standalone op is gone.
+
+## 3. `OpType` cleanup
+
+Only affects code that reads the `OpType` Literal directly, which is rare.
+
+| Entry | Change | Why |
+|---|---|---|
+| `for`, `while`, `stream` | removed | Superseded in 1.0.0 by back-edge loops, generator ops, `Ref.parallel()` |
+| `parser` | removed | `ParserOp` went in 1.0.0; parsing lives in `LLMOp(fields=...)` |
+| `milvus`, `mongo`, `s3` | removed | Named backends, not semantics; never had ops behind them |
+| `interrupt`, `emit` | **added** | Set by `InterruptOp` / `EmitOp` since 1.0.0 but missing from the Literal |
+| `vector-search`, `doc-fetch` | added in 1.1.0 | Match `VectorSearchOp` / `DocFetchOp` |
+
+`ParserError` now reports `op_type="code"` instead of `"parser"`.
+
+---
+
 # Migrating to operonx 1.0.0
 
 1.0.0 removes four surfaces that had deprecated / alternative paths in
