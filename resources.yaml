@@ -132,6 +132,20 @@ vector_store:docs-pg:
     - tenant
     - doc_type
 
+# Qdrant — the standalone option once you outgrow Postgres. Its payload
+# feature deliberately goes unused for content: metadata_columns lists
+# the filterable fields, and anything else stays in the store of record.
+# The distance function is fixed on the collection, so `metric` is
+# informational here.
+# vector_store:docs-qdrant:
+#   api_type: qdrant
+#   url: ${QDRANT_URL:http://localhost:6333}
+#   api_key: ${QDRANT_API_KEY:}
+#   collection: docs
+#   metadata_columns:
+#     - tenant
+#     - doc_type
+
 # Store of record — the source of truth DocFetchOp hydrates from. Same
 # database as vector_store:docs-pg above, so there is no dual-write risk
 # and the connection pool is shared.

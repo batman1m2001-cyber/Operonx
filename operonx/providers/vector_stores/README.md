@@ -93,6 +93,14 @@ vector_store:docs:
 hits = VectorSearchOp.of(resource="docs", query_vector=v, collection="acme")
 ```
 
+Filters are validated by qdrant-client's own Pydantic models, so an
+unrecognised shape raises instead of being quietly ignored. Restrict what
+comes back with `metadata_columns` — left unset, Qdrant returns the whole
+payload, which is how document content sneaks into a derived index.
+
+The distance function is fixed on the Qdrant **collection**, not per
+query, so `metric` is informational for this backend.
+
 ### Milvus / Chroma (not yet shipped)
 
 Recorded so the `filter` parameter's type makes sense. Milvus's dialect

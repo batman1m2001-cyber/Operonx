@@ -81,6 +81,7 @@ _LAZY_BACKENDS = {
     "create_vector_store": "operonx.providers.vector_stores",
     "FaissVectorStore": "operonx.providers.vector_stores",
     "PgVectorStore": "operonx.providers.vector_stores",
+    "QdrantVectorStore": "operonx.providers.vector_stores",
     # Doc stores
     "BaseDocStore": "operonx.providers.doc_stores",
     "DocStoreType": "operonx.providers.doc_stores",
@@ -131,6 +132,7 @@ __all__ = [
     "create_vector_store",
     "FaissVectorStore",
     "PgVectorStore",
+    "QdrantVectorStore",
     # Doc stores
     "BaseDocStore",
     "DocStoreType",
