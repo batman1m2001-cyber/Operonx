@@ -22,6 +22,12 @@ from __future__ import annotations
 from operonx.agents.graphs.dispatch import build_dispatch
 from operonx.agents.graphs.react import agent_result, build_react_agent
 from operonx.agents.memory import LocalMarkdownMemory, MemoryEntry, MemoryProvider
+from operonx.agents.ops.compact_ops import (
+    apply_compaction,
+    count_tokens,
+    plan_compaction,
+    unmatched_tool_calls,
+)
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
 
@@ -34,6 +40,10 @@ __all__ = [
     "MemoryProvider",
     "MemoryEntry",
     "LocalMarkdownMemory",
+    "count_tokens",
+    "plan_compaction",
+    "apply_compaction",
+    "unmatched_tool_calls",
     "build_dispatch",
     "build_react_agent",
     "agent_result",
