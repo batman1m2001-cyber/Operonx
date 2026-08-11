@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `Ref` nested inside a dict or list is now rejected at construction
+  instead of silently degrading to a literal.** Operonx wires one param
+  to one state cell holding one pull-ref, so `my_op(cfg={"a": src["x"]})`
+  had no cell to put `src["x"]` in. Three things broke at once, none of
+  them noisily: the op received the `Ref` object rather than the value,
+  no dependency edge was created (so ordering was unguaranteed), and
+  `GraphOp._validate`'s cross-graph scope check never saw it — a `Ref`
+  to an op in another graph passed hermeticity validation. It now raises
+  `TypeError` naming the param, the exact path, and the source var.
+
+  Only the *value* side is scanned. `my_op(inputs={"a": src["x"]})` is
+  the params mapping, not a container holding a ref, and is unaffected.
+
+  Found while probing `InterruptOp(payload={"tool": …, "args": …})` for
+  the agent work — a human approving a destructive tool call was shown
+  `Ref` objects instead of the tool name and arguments. It was never an
+  `InterruptOp` bug; every op behaved this way.
+
+  Supporting the nested form properly (hoisting each buried ref into its
+  own cell and reassembling the container at read time) is a larger
+  change that also alters the `serialize()` wire format operonx-rs
+  consumes. This release makes the broken form loud; it does not yet
+  make it work.
+
 ## [1.2.0] - 2026-08-11
 
 Removes the two backend-named ops. See
