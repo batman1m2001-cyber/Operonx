@@ -20,6 +20,12 @@ from operonx.agents.ops.memory_ops import (
     merge_memory,
     provider_prefetch,
 )
+from operonx.agents.ops.prompt_ops import (
+    apply_cache_control,
+    assemble_api_messages,
+    build_system_prompt,
+    prefix_is_stable,
+)
 
 __all__ = [
     "each_provider",
@@ -31,4 +37,8 @@ __all__ = [
     "plan_compaction",
     "apply_compaction",
     "unmatched_tool_calls",
+    "build_system_prompt",
+    "assemble_api_messages",
+    "apply_cache_control",
+    "prefix_is_stable",
 ]
