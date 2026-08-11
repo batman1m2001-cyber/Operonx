@@ -10,6 +10,88 @@ from operonx.core.states.ref import Ref
 from operonx.core.utils.common import Param
 
 
+def _find_nested_ref(
+    value: Any, path: str = "", _seen: set[int] | None = None
+) -> tuple[str, Ref] | None:
+    """Return ``(path, ref)`` for the first Ref buried in a container.
+
+    A Ref is only wired when it is *the* value of a param — one param maps
+    to one state cell, which holds one pull-ref. A Ref nested inside a
+    dict or list has no cell to live in, so it silently stays a ``Ref``
+    object: the op receives it verbatim, no dependency edge is created,
+    and the cross-graph scope check in ``GraphOp._validate`` never sees
+    it. Callers use this to reject the syntax at construction time
+    instead of letting it fail as wrong data at runtime.
+
+    The walk is exhaustive rather than depth-capped. A cap would make the
+    original bug reappear one level past it — silently, which is the
+    whole failure mode being fixed here. Cost is one pass over a
+    hand-written literal at construction time; self-referential
+    structures terminate via ``_seen``.
+    """
+    if _seen is None:
+        _seen = set()
+
+    # A Ref carries transforms (`s["a"] + 1`, `s["a"] >= 5`) and stream
+    # policy (`.parallel()`, `.collect()`) but is still a Ref, so it is
+    # checked before the container branches — every operator in ref.py
+    # returns a new Ref rather than some other type.
+    if isinstance(value, Ref):
+        return path, value
+
+    if not isinstance(value, (dict, list, tuple)):
+        return None
+
+    marker = id(value)
+    if marker in _seen:
+        return None
+    _seen.add(marker)
+
+    # Dict *keys* and set members need no handling: Ref overloads __eq__
+    # to build branch conditions and so is unhashable — Python rejects
+    # `{ref: v}` and `{ref}` before we ever see them.
+    if isinstance(value, dict):
+        items = ((f"{path}[{k!r}]", v) for k, v in value.items())
+    else:
+        items = ((f"{path}[{i}]", v) for i, v in enumerate(value))
+
+    for sub_path, v in items:
+        found = _find_nested_ref(v, sub_path, _seen)
+        if found:
+            return found
+    return None
+
+
+def _reject_nested_ref(key: str, value: Any) -> None:
+    """Raise if ``value`` is a container hiding a Ref. No-op otherwise.
+
+    Top-level Refs are handled by :func:`resolve_value` and never reach
+    here as containers, so this only fires on the unwired form.
+    """
+    found = _find_nested_ref(value)
+    if found is None:
+        return
+
+    path, ref = found
+    source = getattr(ref.raw_source, "name", None) or repr(ref.raw_source)
+    raise TypeError(
+        f"Input '{key}' has a Ref nested inside a {type(value).__name__} "
+        f"at '{key}{path}' → {source}.{ref.var}.\n"
+        f"\n"
+        f"Operonx wires one param to one state cell holding one ref, so a "
+        f"Ref inside a container is never resolved: the op would receive "
+        f"the Ref object itself, no dependency edge would be created, and "
+        f"cross-graph scope checks would not see it.\n"
+        f"\n"
+        f"Pass it as its own param:\n"
+        f"    my_op({key}_part=<source>['{ref.var}'], ...)\n"
+        f"or assemble the container in an upstream @op and pass one ref:\n"
+        f"    @op\n"
+        f"    def build_{key}(part): return {{'{key}': {{...part...}}}}\n"
+        f"    my_op({key}=build_{key}(part=<source>['{ref.var}'])['{key}'])"
+    )
+
+
 def resolve_value(key: str, value: Any, parent) -> Any:
     """Convert value to a Ref or keep as a literal.
 
@@ -19,6 +101,11 @@ def resolve_value(key: str, value: Any, parent) -> Any:
         - Ref(op, "var") → kept as-is
         - PARENT["x"] → Ref(parent, "x")
         - literal → kept as-is
+
+    Raises:
+        TypeError: if ``value`` is a container with a Ref buried in it —
+            a form operonx cannot wire, and which used to degrade to a
+            literal silently. See :func:`_reject_nested_ref`.
     """
 
     def resolve_parent(source):
@@ -42,7 +129,10 @@ def resolve_value(key: str, value: Any, parent) -> Any:
         resolved = resolve_parent(value)
         return Ref(resolved, key)
 
-    # Literal value
+    # Literal value — but a "literal" holding a Ref is the silent-failure
+    # case, not a literal. Reject it here, where we still know the param
+    # name, rather than at runtime where it surfaces as wrong data.
+    _reject_nested_ref(key, value)
     return value
 
 
