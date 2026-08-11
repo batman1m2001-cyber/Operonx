@@ -37,6 +37,7 @@ from operonx.agents.ops.prompt_ops import (
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
 from operonx.agents.session import AgentSession
+from operonx.agents.skills import Skill, inject_skills, load_skills, match_skills
 from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
 
 __all__ = [
@@ -62,4 +63,8 @@ __all__ = [
     "AgentSession",
     "make_delegate_tool",
     "describe_delegation",
+    "Skill",
+    "load_skills",
+    "match_skills",
+    "inject_skills",
 ]
