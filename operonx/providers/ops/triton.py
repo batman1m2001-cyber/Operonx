@@ -15,6 +15,7 @@ Example::
 """
 
 import logging
+import warnings
 from typing import Any, Dict, Optional
 
 from operonx.core.configs import OpType
@@ -78,6 +79,19 @@ class TritonOp(BaseOp):
                 String: looks up "triton:{resource}" in ResourceHub.
                 Dict: {"url": "...", "model": "...", "model_version": "", "timeout": 30}
         """
+        warnings.warn(
+            "TritonOp is deprecated and will be removed in operonx 2.0.0. It names "
+            "its transport rather than a semantic, so every Triton-hosted model "
+            "needs its own op. Replacements:\n"
+            "  - Vector search: VectorSearchOp(resource=...) with a vector_store resource\n"
+            "  - Anything else: write a bare @op around\n"
+            "      operonx.providers.triton.TritonClient.get(url)\n"
+            "    which reuses the same pooled gRPC client and dtype translation in\n"
+            "    ~15 lines. See OP_TAXONOMY_REFACTOR_PLAN.md section 6.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
