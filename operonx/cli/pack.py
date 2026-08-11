@@ -31,8 +31,9 @@ time. Run from inside the example directory when targeting a graph that
 needs provider resources.
 
 Ships with ``pip install operonx`` — registered via the
-``[project.scripts] operonx-pack = "operonx.tools.pack:main"`` entry
-point.
+``[project.scripts] operonx-pack = "operonx.cli.pack:main"`` entry
+point, and reachable as ``operonx pack`` through the umbrella
+dispatcher in :mod:`operonx.cli`.
 """
 
 from __future__ import annotations

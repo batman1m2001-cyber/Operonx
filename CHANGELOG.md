@@ -66,6 +66,29 @@ op and callers had to know the transport to pick one.
   listing them — the drift this ends. Only affects code reading the
   Literal directly.
 - `ParserError` now reports `op_type="code"` rather than `"parser"`.
+- `operonx.tools` → **`operonx.cli`**. The package holds console-script
+  entry points (`operonx-pack`); `tools` now reads as *agent tools* and
+  is being freed for `operonx.agents`. No shim — a shim would keep the
+  name occupied, which is the whole point of the move. The
+  `operonx-pack` **command is unchanged**; only `from operonx.tools.pack
+  import …` breaks.
+
+### Removed
+
+- Dead `operonx` console script. `pyproject.toml` declared
+  `operonx = "operonx.cli:main"` from the April 2026 Hush→Operon
+  migration through 1.1.0, pointing at a scaffolding CLI that the same
+  migration deleted. `operonx --help` raised `ModuleNotFoundError` in
+  every published release. `operonx-pack` is unaffected and remains the
+  only console script.
+
+### Added
+
+- `operonx/agents/` — package scaffold for the agent composition layer
+  (tools, dispatch, ReAct loops, sub-agents), with
+  `operonx/agents/CONTRIBUTING.md` defining the Footprint Ladder and the
+  op-worthy bar that govern what may land there. No public surface yet;
+  see [AGENT_EXTENSION_PLAN.md](AGENT_EXTENSION_PLAN.md).
 
 ## [1.1.0] - 2026-08-11
 

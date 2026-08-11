@@ -1,6 +1,7 @@
 # Migrating operonx
 
-- [To 1.2.0](#migrating-to-operonx-120) — `OnnxOp` and `TritonOp` removed
+- [To 1.2.0](#migrating-to-operonx-120) — `OnnxOp` and `TritonOp` removed;
+  `operonx.tools` → `operonx.cli`
 - [To 1.0.0](#migrating-to-operonx-100) — `PARENT.shared`, `GraphOp.loop`,
   `@graph(until=)`, `ParserOp`, `ask()` removed
 
@@ -10,8 +11,9 @@
 
 1.2.0 removes the two **backend-named** ops. Both named their *transport*
 rather than a semantic, so the op name told you the runtime instead of
-the intent and every backend needed its own op. Everything else in 1.1.x
-is unaffected.
+the intent and every backend needed its own op. It also renames the CLI
+package (§4) — a one-line import change, and only if you imported it.
+Everything else in 1.1.x is unaffected.
 
 > **Note on timing.** The deprecation warnings shipped in 1.1.0 said
 > "removed in 2.0.0". Removal was brought forward to 1.2.0. If you are
@@ -125,6 +127,39 @@ Only affects code that reads the `OpType` Literal directly, which is rare.
 | `vector-search`, `doc-fetch` | added in 1.1.0 | Match `VectorSearchOp` / `DocFetchOp` |
 
 `ParserError` now reports `op_type="code"` instead of `"parser"`.
+
+## 4. `operonx.tools` → `operonx.cli`
+
+**The `operonx-pack` command is unchanged.** If you only ever run it from
+a shell or CI, there is nothing to do.
+
+Only the import path moved:
+
+```python
+# Before
+from operonx.tools.pack import pack_one
+
+# After
+from operonx.cli.pack import pack_one
+```
+
+There is **no compatibility shim**. Leaving one would keep the `tools`
+name occupied, and freeing it is the entire reason for the move —
+`operonx.agents` needs `tools` to mean *agent tools* (the callables an
+LLM invokes), not *command-line tools*. Two meanings for one name in one
+namespace is a permanent tax.
+
+### The dead `operonx` command
+
+`pyproject.toml` declared a second console script,
+`operonx = "operonx.cli:main"`, from the April 2026 Hush→Operon migration
+through 1.1.0. It pointed at a project-scaffolding CLI that the same
+migration deleted, so `operonx --help` raised `ModuleNotFoundError` in
+every published release. It is removed in 1.2.0.
+
+If you have a script or Dockerfile invoking `operonx …`, it was already
+failing — there is no replacement, because there was never a working
+command. `operonx-pack` is the only console script operonx ships.
 
 ---
 

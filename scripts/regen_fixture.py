@@ -46,7 +46,7 @@ def regen(fixture_dir: Path) -> None:
     graph = module.build_graph()
     graph.build()
 
-    from operonx.tools.pack import _scrub
+    from operonx.cli.pack import _scrub
     cleaned = _scrub(graph.serialize())
     cleaned["schema_version"] = "1.0"
     graph_path.write_text(json.dumps(cleaned, indent=2, default=str))

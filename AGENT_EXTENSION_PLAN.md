@@ -28,7 +28,7 @@ The table below is the load-bearing delta — every row erased a v1 workaround.
 |---|---|---|---|
 | Message accumulation across turns | Custom `append_messages` op with hand-written LangGraph-style id-upsert | `PARENT.declare(messages=[], reducers={"messages": add_messages})` | Delete custom merger. Turn output writes with `>> PARENT["messages"]`; framework merges. |
 | Loop control | `with GraphOp.loop(name=…, until="expr", **initial_state) as loop:` | Back-edge inside `@graph` → Phase 3 synthesizes hidden `_GraphLoop`. `strict_dag=True` opts out. | ReAct loop is a plain `@graph` with `if_(done, END).else_(llm)`. No imperative scaffolding. |
-| HITL / permission on destructive tools | Runtime `if_` branch reading a mode flag; hoped a human polled a queue somewhere | `InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent` on state's bus, awaits `state._interrupt_responses[id]`. `engine.stream()` auto-subscribes a listener; `handle.resume(id, value)` resolves. | `permission_gate` becomes a `Wait(InterruptOp) → if_ approve.else_ block` pattern. Real preempt, real resume. |
+| HITL / permission on destructive tools | Runtime `if_` branch reading a mode flag; hoped a human polled a queue somewhere | `InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent` on state's bus, awaits `state._interrupt_responses[id]`. ~~`engine.stream()` auto-subscribes a listener; `handle.resume(id, value)` resolves.~~ 🔴 **that wiring does not exist — §15.1 V3** | `permission_gate` becomes a `Wait(InterruptOp) → if_ approve.else_ block` pattern. Real preempt, real resume. |
 | Structured LLM output + retry | Separate ParserOp + custom retry loop in `ask()`; hallucinated a fallback trigger on parse errors | `LLMOp.of(fields=…, parser=…, validators=…, max_retries=…, retry_hint=True)` — inline parse + validate + Instructor-style error-guided retry on the same resource. Fallback narrowed to structural refusals only. | Router/classifier ops disappear into LLMOp calls with `fields=`. Retry taxonomy is honest: parse/validate → `max_retries`, refusal → `fallback`, transport → SDK. |
 | Cross-turn state visibility / replay | Ad-hoc SCRATCH scraping | `Checkpointer` protocol + `InMemoryCheckpointer` — per-step delta store; `get_state(step)`, `get_updates(step)`, `list_steps()`. Zero overhead when unbound. | Sessions become "bind a checkpointer, replay the graph." Nothing custom in the agent layer. |
 | Progress streaming to consumer | Peek into `ExecutionHandle._queue` | `engine.stream(mode="custom", channels=[…])` + `EmitOp` — fire-and-forget custom events with channel filtering. `mode="updates"` for per-op deltas; `mode="values"` for full-state snapshots (needs checkpointer). | Progress events are `emit(channel="tool_start", …)` — no framework changes. |
@@ -51,6 +51,11 @@ are framework code we no longer write.
 These are the substrate. Every op-native construct in this plan resolves
 back to one of these.
 
+> **Read §15.2 before depending on a row.** This table was written from
+> docstrings and design docs, not from running code. Two rows have been
+> probed since; one was wrong. §15.2 tracks per-row verification status —
+> probe the row when the phase that needs it starts, not all of them now.
+
 | Concern | Primitive | Evidence |
 |---|---|---|
 | Turn loop | Back-edge inside `@graph` — Phase 3 build-time rewrite synthesizes `_GraphLoop`; `max_iterations=1000` default cap; `strict_dag=True` opts out | `graph_op.py` · `cycle_rewrite.py` · [docs/design/STATE_LOOP_REFACTOR_PLAN.md](docs/design/STATE_LOOP_REFACTOR_PLAN.md) |
@@ -63,7 +68,7 @@ back to one of these.
 | Tool fan-out | Generator op yielding per tool call + `Ref.parallel(max=N)` on consumer | `ref.py:parallel` · `task_scheduler.py` |
 | Ordered gather | `Ref.collect()` — buffered, flushed at EOF in yield-index order | `task_scheduler.py:_on_eof` · `ref.py:collect` |
 | Preemptive cancel | `yield Interrupt(ctx_to_cancel=…)` from any op — scheduler drains pumps at that ctx prefix | `_events.py` · `task_scheduler.py` |
-| **HITL suspend/resume** | **`InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent`, awaits `state._interrupt_responses[id]`; outputs `response`, `timed_out`, `interrupt_id`** | `core/ops/flow/interrupt_op.py` |
+| **HITL suspend/resume** | **`InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent`, awaits `state._interrupt_responses[id]`; outputs `response`, `timed_out`, `interrupt_id`.** 🔴 The op works, but the **engine is not wired to the bus** — see §15.1 V3 for the path that does work | `core/ops/flow/interrupt_op.py` |
 | **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer` (Phase 2). Bind at `Operon(g, checkpointer=…)`. `handle.get_state(step)`, `handle.list_steps()`. Zero overhead when unbound** | `checkpoint/base.py` · `checkpoint/memory.py` |
 | **Custom progress events** | **`EmitOp(channel=…, payload=…)` + `engine.stream(mode="custom", channels=[…])` — fire-and-forget filterable event bus** | `core/ops/flow/emit_op.py` · `engine.py:stream` |
 | **Observability shaping** | **`@op(exclude=[…], include=[…], observe_max=N)` — polymorphic filter at emission source; `ObserveBudgetExceeded` on runaway generators** | `core/ops/base.py` |
@@ -145,6 +150,22 @@ operonx/cli/                        (renamed from operonx/tools/ — namespace f
 Rename is still valid — `operonx/tools/` currently holds `operonx-pack`
 (a Rust-spec serializer CLI). Freeing the `tools` name for agent tooling
 avoids a permanent semantic clash.
+
+**Done (P0, 1.2.0).** No back-compat shim: a shim would keep `tools`
+occupied, which is the whole point of the move. The `operonx-pack`
+console script is unchanged; only `from operonx.tools.pack import …`
+breaks, and `scripts/regen_fixture.py` was its one in-repo consumer.
+
+The rename surfaced a dead `operonx = "operonx.cli:main"` script entry,
+carried since the April 2026 Hush→Operon migration and pointing at a
+scaffolding CLI that the same migration deleted — `operonx --help` had
+raised `ModuleNotFoundError` in every published release. **Removed
+rather than implemented.** Operonx is a library; an umbrella dispatcher
+with nothing to dispatch to fails criterion 3 of the op-worthy bar
+(zero concrete demand) that this plan applies to everything else.
+`tests/internal/cli/test_entry_points.py` now imports every declared
+`[project.scripts]` target the way the generated wrapper does, so the
+next dangling entry fails in CI instead of on a user's first install.
 
 Out of tree (sibling PyPI package, iterates independently):
 
@@ -337,6 +358,12 @@ Keep them side-by-side per tool. Wrap common patterns (`ExtractField`-style
 mini-DSL for the JSON Schema) in helpers if the pain grows.
 
 ### 7.2 · `dispatch_all_tools` — subgraph + HITL for destructive tools
+
+> 🔴 **This sketch has three confirmed defects — see §15.1 V1, V2, V5
+> before implementing.** In short: the per-arm duplication is
+> unnecessary (arms can converge via a `PARENT` cell), the `InterruptOp`
+> payload dict does not resolve its Refs, and `exec_tool` has no error
+> path — a raising tool silently produces no tool message at all.
 
 ```python
 # operonx/agents/graphs/dispatch.py
@@ -713,20 +740,31 @@ Later                       P5 Learning-loop pattern doc (defer)
 
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
-| **0** | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
-| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) | 3–4d |
-| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); `compact_messages` op + gate; prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore) | 3–5d |
-| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 3–4d |
+| **0** ✅ | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
+| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) — **plus §14.3 rows 1–6**: tool-error→tool-message, unknown-tool handling, history invariant, concurrent-HITL gate, repeat cap, state injection, and the `wrap_*` closure fold (§14.2) | 5–7d |
+| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
+| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
 | **4** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
 | **5** | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
 
-**Estimate**: **P0–P3 in ~2 weeks**, P4 in another week. Down from v1's 3–4
-weeks. Not because we cut scope — because 1.0.0 shipped the substrate
-(reducers, back-edges, checkpointer, HITL, structured LLMOp) v1 had to build.
+**Estimate**: **P0–P3 in ~3 weeks**, P4 in another week.
+
+Revised upward from ~2 weeks after the §14 audit. The loop estimate was
+right; the tool-execution and context-lifecycle estimates were not.
+LangChain spends ~9,400 LOC on middleware against ~2,000 on the loop, and
+this plan had the ratio inverted. We still come out far below both
+references — 1.0.0 shipped the substrate (reducers, back-edges,
+checkpointer, HITL, structured LLMOp) that v1 and langgraph both had to
+build — but "the agent is just a loop" was the wrong lesson to draw from
+that.
 
 ---
 
 ## 10 · Honest gaps (v1 gap #7 resolved; new gaps identified)
+
+> **See also §14** — a cross-implementation audit against hermes-agent,
+> langgraph and langchain (11 Aug 2026) found nine further gaps, six of
+> which belong in P1. The list below predates it.
 
 The op-native form is elegant but not lossless. Six real gaps remain.
 
@@ -821,6 +859,23 @@ Every PR adding a `core` primitive must justify why rungs 1–5 don't work.
      at `get_tool_definitions()` build time).
    - **New in v2:** HITL harness contract (what CLI/HTTP callers must do
      to respond to `InterruptEvent`).
+   - **New (§14):** where the `wrap_*` closure fold lives, and why it is
+     not a graph feature.
+   - **New (§14):** the tool-failure contract — every failure mode
+     (raise, timeout, cancel, unknown name, denial) produces a tool
+     message, so the history invariant holds and the model can recover.
+   - **New (§14):** how concurrent `InterruptOp`s are serialised under
+     `.parallel()` fan-out.
+   - **New (§14.5):** in-tree `operonx/agents/` vs a sibling package —
+     answer it, don't assume it. LangGraph reversed this exact call.
+
+   Two things to **verify before writing `dispatch.py`**, because both
+   change its shape:
+   - Can two branch arms converge on a single node, or does each arm need
+     its own instance (as §7.2 currently assumes)? Nothing in
+     `tests/internal/core/ops/flow/` establishes this.
+   - Does an `InterruptOp` inside a `.parallel()` fan-out suspend only its
+     own arm, or the whole pump?
 
 3. **Then P1 — build in this order:**
    1. `@tool` + `TOOL_REGISTRY` (`operonx/agents/tool.py`)
@@ -834,11 +889,203 @@ Everything after P1 compounds on these six.
 
 ---
 
+## 14 · Cross-implementation audit (11 Aug 2026)
+
+Read `NousResearch/hermes-agent`, `langchain-ai/langgraph` and
+`langchain-ai/langchain` at HEAD and measured them against this plan.
+Two conclusions: **the skeleton is confirmed correct**, and **the plan
+mistakes the loop for the work**.
+
+### 14.1 · Sizes
+
+| Codebase | Agent layer | Shape |
+|---|---|---|
+| `langgraph/libs/prebuilt` | **3,676 LOC** | `tool_node.py` 2,030 · `chat_agent_executor.py` 1,015 |
+| `langchain/libs/langchain_v1/langchain/agents` | **13,702 LOC** | `middleware/` ~9,400 · `factory.py` 2,062 |
+| `hermes-agent/agent` | **136,329 LOC** (~140 modules) | `conversation_loop.py` 7,757 · `run_agent.py` 8,303 |
+
+Our estimate (~13 files, most <200 LOC) is the right order of magnitude
+against langgraph's prebuilt layer. Hermes is a hosted product, not a
+framework — ~45 of its modules are provider adapters, credential pools
+and billing views that `ResourceHub` + `LLMOp` already own or that are
+correctly out of scope.
+
+**Hermes is not a structural teacher.** `run_conversation` is a single
+**6,335-line function** — zero nested defs, 35 loops, 46 `try` blocks,
+and the module exports exactly one symbol. `AIAgent` carries **260
+methods**. §11's "biggest reject" is empirically confirmed. Its value
+here is as a *checklist of concerns*, and those live in its small
+modules, never in the loop.
+
+### 14.2 · The one structural hole — `wrap_*` has nowhere to live
+
+LangChain v1 exposes six middleware hooks, and they compile in two
+fundamentally different ways:
+
+| Hook | Compiles to | We have it? |
+|---|---|---|
+| `before_agent` · `before_model` · `after_model` · `after_agent` | A real graph node — `graph.add_node(f"{m.name}.before_model", …)` | **Yes, free.** That is just an op in the graph |
+| `wrap_model_call` · `wrap_tool_call` | A **Python closure chain folded inside one node** — `_chain_model_call_handlers` / `_chain_tool_call_wrappers`, composed right-to-left by `compose_two` | **No. Nothing in this plan corresponds to it** |
+
+The compiled LangChain agent graph is `model` + `tools` plus one node per
+state-hook middleware. The wrappers are invisible to the graph.
+
+They must be. A `wrap_*` handler receives a `handler` continuation it may
+call **zero times** (cache hit, short-circuit), **once** (passthrough), or
+**N times** (retry with a modified request):
+
+```python
+def wrap_tool_call(self, request, handler):
+    for attempt in range(3):
+        result = handler(request)           # same step, re-invoked
+        if result.status != "error":
+            return result
+    return result
+```
+
+**A DAG edge cannot express that.** Back-edge loops give us *iteration*
+across turns; they do not give *re-invocation with modified input inside
+a single step*. Retry-around-a-call, response caching, and short-circuit
+are all this shape.
+
+**Resolution — rung 1, not core.** Compose wrappers as a plain Python
+fold inside `exec_tool` and the LLM-call op. No operonx change, no new
+primitive, no graph feature. This is precisely what LangChain does, and
+it is the same conclusion the Footprint Ladder reaches independently:
+start at rung 1 and climb only when it provably fails. It does not fail
+here.
+
+Design note for P1: the fold belongs in `operonx/agents/graphs/dispatch.py`
+as a `wrappers: list[Callable]` parameter threaded to `exec_tool`, not as
+an `@op` argument — wrappers are control flow, and control flow that the
+tracer sees as data flow produces spans that lie about what ran.
+
+### 14.3 · Gaps confirmed by an independent implementation
+
+Every gap found by reading `ToolNode` also has a shipped LangChain
+middleware behind it. These are not speculation.
+
+| Missing from this plan | Their implementation | Consequence if skipped |
+|---|---|---|
+| **Tool errors must become tool messages** | `tool_error.py` + `tool_retry.py` (612 LOC); langgraph `handle_tool_errors` | `exec_tool` has no error path. **The first tool that raises kills the run and the model never learns.** Highest-severity item in P1 |
+| **Unknown tool name** | `_validate_tool_call` → `ToolMessage(status="error")` listing valid names | `TOOL_REGISTRY[name]` raises `KeyError` in both `parse_call` and `exec_tool` |
+| **Every `tool_call` needs a matching tool message** | `_validate_chat_history` | Most providers 400 on an unmatched call. `blocked_result` covers denial; crash, timeout and cancel are uncovered |
+| ~~**Concurrent HITL**~~ 🔴 **WRONG — see §15.1 V4** | `human_in_the_loop.py` (500 LOC); hermes `_ConcurrentToolAuthorizationGate` | ~~§7.2 fans out `.parallel(max=10)` and each arm can raise its own `InterruptOp` — ten simultaneous approval prompts~~ Probed: the pump serialises, one event outstanding at a time. **No gate needed.** |
+| **Repeat / loop cap** | `tool_call_limit.py` (495); hermes `ToolCallSignature` + `LoopCapConfig` | Model calls the same tool with identical args forever, inside `max_iterations` |
+| **State injection into tools** | `InjectedState` / `InjectedStore` / `ToolRuntime` | A tool needing session context has no channel that isn't also in the LLM schema |
+| **Iteration budget** | `model_call_limit.py` (267) | Already logged as gap #6 in §10 |
+| **Redaction / PII** | `pii.py` + `_redaction.py` (1,332) | Nothing in this plan. Tool output flows to the model and the tracer unfiltered |
+| **Context compaction depth** | `summarization.py` + `context_editing.py` (1,208); hermes `context_compressor.py` (7,386) | P2 budgets one `compact_messages` op for what two teams treat as a subsystem |
+
+### 14.4 · What changes in the plan
+
+1. **Fold rows 1–6 of §14.3 into P1.** They are not polish. Without the
+   first three, the first tool exception ends the run — the most common
+   thing that happens to a real agent.
+2. **Resolve the branch-convergence question before writing
+   `dispatch.py`.** §7.2 instantiates `exec_tool` and `collect_result`
+   twice, once per branch arm, because it is not established that two
+   arms can converge on one node. No test in
+   `tests/internal/core/ops/flow/` covers it. If they cannot converge,
+   the dispatch subgraph's shape changes and the duplication grows with
+   every branch.
+3. **P2 grows.** Compaction is a subsystem, not an op.
+4. **Add redaction to P3**, next to the permission policy modes — it is
+   the same trust boundary.
+5. **Leave the loop alone.** Both implementations confirm §5 and §7.3.
+   The ReAct loop really is ~35 lines on our primitives; the reason
+   theirs are bigger is scaffolding we genuinely do not need.
+
+### 14.5 · One decision worth revisiting
+
+`create_react_agent` is **deprecated in langgraph v1.0** and moved to
+`langchain.agents`, along with `HumanInterrupt` and `ActionRequest`. The
+team that shipped this at scale concluded the agent layer does not belong
+in the graph-runtime package.
+
+This plan puts `operonx/agents/` in-tree. That is not obviously wrong —
+we have no equivalent of the langchain/langgraph split, and P4's
+`operonx-code` harness is already out of tree. But it is a reversal by
+the closest prior art, and worth an explicit answer in the P1 ADR rather
+than an assumption.
+
+---
+
+## 15 · Verification ledger
+
+**Why this exists.** §2 lists fifteen primitives as "the substrate —
+everything resolves back to one of these." It was written from docstrings
+and design docs, not from running code. Two rows have since been probed
+and **one was wrong**: `interrupt_op.py`'s own docstring says engine
+integration is *future* Phase 2b3 work, and §2 wrote it up as shipped.
+
+Two out of two proves nothing statistically. It does establish that a
+docstring is not evidence. So: **before you build on a §2 row, probe it.**
+Not all of them up front — that trades a week for certainty we do not
+need yet. One at a time, when the phase that needs it comes up.
+
+Convention: 🔴 confirmed wrong · 🟡 unverified · 🟢 verified by a probe
+that lives in `tests/`.
+
+### 15.1 · Confirmed issues — fix when the owning phase starts
+
+| # | § | Issue | Owner phase |
+|---|---|---|---|
+| V1 | §7.2 | 🔴 Duplicates `exec_tool` + `collect_result` per branch arm. Unnecessary — arms **can** converge on one node by writing `PARENT` cells (`a["raw"] >> PARENT["picked"]`, `collect(raw=PARENT["picked"])`). Direct `collect(raw=a["raw"])` genuinely fails, so the sketch's caution was right; the conclusion was not. **Dispatch gets simpler, not more complex.** | P1 |
+| V2 | §7.2 | 🔴 `InterruptOp(payload={"tool": …, "args": …})` — a Ref nested in a dict was silently unresolved, so the human approved blind. Now raises (`_params._reject_nested_ref`). Until nested-ref support lands, build the payload in an upstream `@op` and pass one bare Ref. | P1 |
+| V3 | §2 · §7.2 | 🔴 `engine.stream()` does **not** auto-subscribe to the interrupt bus and `handle.resume(id, value)` does **not** exist. `bind_interrupt_bus` has zero callers outside its own export. Working path today: `handle = engine.start(...)`, `bind_interrupt_bus(handle.state, sink)`, `handle.state.resume_interrupt(iid, value)` — verified end to end. Wiring it properly is a contained `engine.py` change. | P1 |
+| V4 | §14.3 | 🔴 **My error.** The "concurrent HITL → N simultaneous approval prompts, needs a serialising gate" row is wrong. The pump serialises: exactly one `InterruptEvent` outstanding at a time, 2.76s wall for 3 calls. No gate needed. Delete the row when §14.3 is next edited. | — |
+| V5 | new | 🔴 **Errors never leave `Operon.run()`.** `GraphOp._process` catches everything, logs it, writes `state[full_name, "error", ctx]`, and returns a partial result. Intended (`ex08_error_handling`: "workflow doesn't crash"), but it means a raising tool produces no output, the downstream collector *also* fails, no tool message is emitted, and the provider 400s on the next turn. **`exec_tool` must catch every exception itself and always return a tool message.** Two silent failures stack otherwise. | P1 |
+| V6 | §5 | 🟡 The `@graph` in §7.3 has never been built or run. §14 confirmed the *shape* against langgraph, not that this code compiles. Build it as the first P1 commit, before anything depends on it. | P1 |
+
+### 15.2 · §2 rows — verification status
+
+Probe the row, then flip its light and link the test.
+
+| § 2 row | Status | Needed by |
+|---|---|---|
+| **HITL suspend/resume** (`InterruptOp`) | 🔴 partly wrong — see V3 | P1 |
+| Tool fan-out (generator op + `Ref.parallel(max=N)`) | 🟡 | P1 |
+| Ordered gather (`Ref.collect()` — yield-index order) | 🟡 | P1 |
+| Turn loop (back-edge → synthesized `_GraphLoop`; termination when no back-edge source fired) | 🟡 | P1 |
+| Shared cells + reducers (`PARENT.declare(reducers=)`) | 🟡 — partly exercised by the V1 probe, not by a committed test | P1 |
+| Message accumulation (`add_messages` id-upsert, `RemoveMessage`) | 🟡 | P1 |
+| Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🟡 | P1 |
+| Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 | P1 |
+| LLM streaming (`stream=True` per-token frames) | 🟡 | P2 |
+| Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
+| Cross-run persistence (`Checkpointer`, `handle.get_state(step)`, `list_steps()`) | 🟡 | P2 |
+| Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟡 | P2 |
+| Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
+| Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
+| Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🟡 | P3 |
+| Async I/O dispatch (`@op(bound=)`) | 🟢 — exercised throughout the existing suite | — |
+| Config + secrets (`ResourceHub`) | 🟢 — exercised throughout the existing suite | — |
+
+### 15.3 · Core work surfaced, not scheduled
+
+| # | Item | Status |
+|---|---|---|
+| C1 | Reject Refs nested in containers | **done** — `_params._find_nested_ref`, PR #29 |
+| C2 | *Support* nested Refs (hoist each buried ref into its own cell, reassemble at read time). Needs a decision first: teach operonx-rs the new `serialize()` form, or refuse to serialize graphs using it as synthetic loops already do. | open — blocks nothing in P1 given V2's workaround |
+| C3 | Wire `engine.stream()` + `handle.resume()` to the interrupt bus (V3) | open — ~½ day, contained to `engine.py` |
+
+### 15.4 · The rule
+
+A row stays 🟡 until a **committed test** exercises it — not a scratch
+probe, not a docstring, not this plan. When a phase starts, promote only
+the rows that phase needs. Anything found wrong gets a line in §15.1 and
+a fix in the same PR that needed it.
+
+---
+
 ## Sources studied
 
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — heartbeat scheduler, SKILL.md frontmatter, serialized session lane
-- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — deep-inspected across core loop, memory, tools, subagents, learning loop (see v1 for full evidence trail)
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — deep-inspected across core loop, memory, tools, subagents, learning loop (see v1 for full evidence trail); re-measured 11 Aug 2026 (§14)
 - [opencode-ai/opencode](https://github.com/opencode-ai/opencode) — canonical tool set, persistent shell, read-before-edit invariant
+- [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) — `libs/prebuilt`: `ToolNode` error handling, tool-call validation, state injection, `tools_condition` (§14)
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) — `libs/langchain_v1/langchain/agents`: the middleware stack, and the `wrap_*`-as-closure-chain finding that §14.2 turns on
 - [BA-CalderonMorales/agent-harness](https://github.com/BA-CalderonMorales/agent-harness) — auto-compaction with headroom, layered permission rules, capability flags
 - [huggingface/smolagents](https://github.com/huggingface/smolagents) — prompts-as-YAML
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — `add_messages` reducer semantics (RemoveMessage + REMOVE_ALL_MESSAGES sentinels are LangGraph-compatible in operonx 1.0.0), stream modes taxonomy
