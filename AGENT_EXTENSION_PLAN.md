@@ -1036,6 +1036,34 @@ a per-call boundary that did not exist looked like one that did.
 | A6 | **A failed turn was reported as the previous turn's answer.** operonx returns a partial result rather than raising, so `session.send()` committed a history ending on an unanswered user turn and returned a stale `final` | no test made a model call fail mid-session |
 | A7 | **Compaction declined to act while 114× over budget.** One oversized exchange inside the keep window means nothing is "older". A test asserted this behaviour and **locked the bug in** | the test used a small conversation, where the assertion looks right |
 
+### 16.1c · The one that was not a bug but a gap
+
+`plan_compaction`, `assemble_api_messages`, `apply_cache_control`,
+`inject_skills` and `merge_memory` were built, tested, exported — and
+**wired into nothing**. `build_react_agent` never called them. A
+deployment grew context until the provider rejected it, with a
+fully-tested compactor sitting unused and zero prompt-cache benefit.
+
+Every unit test on those modules passed, because each piece worked. The
+gap was only visible by asking what the model actually *receives*, which
+is what `test_context_wiring.py` now does.
+
+They are now a stage inside the loop: `count_turn → last_user → plan →
+apply → memory → skills → assemble → cache_control → call_model`.
+
+Two decisions worth recording:
+
+- **Compaction shapes the prompt, not the stored conversation.** The
+  history stays whole, so nothing is lost irrecoverably and
+  `agent_result` still returns everything that happened. The cost is
+  re-planning each turn, which is computation over a list.
+- **Memory is gathered in one op rather than the §7.5 fan-out.**
+  `collect()` behind `parallel()` *inside a loop* invokes its consumer
+  per item with a partial batch (V10), and the assembler needs one
+  merged context per turn — a fan-out would silently hand the model a
+  fraction of its memory. `gather_memory` documents this; the fan-out
+  ops remain right outside a loop.
+
 ### 16.2 · Refuted — reported by an agent, disproved by probe
 
 Recorded because the temptation to act on a plausible report is the point.

@@ -28,8 +28,12 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.ops.compact_ops import apply_compaction, plan_compaction
+from operonx.agents.ops.memory_ops import gather_memory
+from operonx.agents.ops.prompt_ops import apply_cache_control, assemble_api_messages
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
+from operonx.agents.skills import inject_skills
 from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
@@ -73,6 +77,26 @@ def normalize_messages(messages: Any = None) -> dict:
 
 
 @op
+def last_user_text(messages: Optional[list] = None) -> dict:
+    """The most recent user turn, for memory and skill matching.
+
+    Both retrieve against "what was asked", which is the last user
+    message rather than the whole transcript — matching on the transcript
+    makes every turn retrieve the same thing regardless of the question.
+    The budget notice is skipped: it is framework text, not a query.
+    """
+    for message in reversed(messages or []):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            if content.startswith("You have used your entire turn budget"):
+                continue
+            return {"text": content}
+    return {"text": ""}
+
+
+@op
 def gather_tool_messages(tool_messages: Optional[list] = None) -> dict:
     """Re-wrap collected tool results as one list for the reducer.
 
@@ -104,6 +128,12 @@ def build_react_agent(
     approval_timeout: float = 300.0,
     policy: Optional[ToolPolicy] = None,
     redactor: Optional[Redactor] = None,
+    system: str = "",
+    memory_providers: Optional[list] = None,
+    skills: Optional[list] = None,
+    token_budget: int = 100_000,
+    keep_recent: int = 6,
+    cache_breakpoints: int = 1,
     budget_notice: str = BUDGET_EXHAUSTED,
 ):
     """Build the ReAct agent graph.
@@ -127,8 +157,25 @@ def build_react_agent(
         redactor: Strips credential-shaped strings from tool output
             before the model or the tracer sees it. See
             :class:`~operonx.agents.redact.Redactor`.
-        budget_notice: Message appended when the budget runs out. Must
-            tell the model to answer now — an empty or vague notice
+        system: System prompt. Sent first and never changed, which is
+            what lets a provider cache the prefix.
+        memory_providers: :class:`~operonx.agents.memory.MemoryProvider`
+            instances consulted each turn. Retrieved context is placed
+            *after* the conversation, not in the system prompt, because
+            it changes per query and leading with it would push the whole
+            history out of the cached prefix.
+        skills: Loaded :class:`~operonx.agents.skills.Skill` objects.
+            Matched per turn and injected as a user message, same
+            placement and same reason as memory.
+        token_budget: Prompt budget. Compaction triggers at 75% of it,
+            not at 100% — the turn that discovers the budget is exceeded
+            has already failed.
+        keep_recent: Exchanges kept verbatim by compaction. Recency is
+            what the model is reasoning about; summarising it is how a
+            compactor makes an agent forget what it just did.
+        cache_breakpoints: Cache markers placed on the stable prefix.
+        budget_notice: Message appended when the turn budget runs out.
+            Must tell the model to answer now — an empty or vague notice
             produces another tool call it is not allowed to make.
 
     Returns:
@@ -183,7 +230,37 @@ def build_react_agent(
         )
 
         counter = count_turn(turns=PARENT["turns"])
-        model = call_model(messages=PARENT["messages"])
+        asked = last_user_text(messages=PARENT["messages"])
+
+        # ── context stage ────────────────────────────────────────────
+        # Compaction shapes the *prompt*, not the stored conversation.
+        # The history stays whole so nothing is lost irrecoverably and
+        # `agent_result` still returns everything that happened; the cost
+        # is re-planning each turn, which is pure computation over a list.
+        planned = plan_compaction(
+            messages=PARENT["messages"],
+            budget=token_budget,
+            keep_recent=keep_recent,
+        )
+        compacted = apply_compaction(
+            pinned=planned["pinned"],
+            summarize=planned["summarize"],
+            keep=planned["keep"],
+        )
+        recalled = gather_memory(providers=memory_providers, query=asked["text"])
+        matched = inject_skills(query=asked["text"], skills=skills)
+        assembled = assemble_api_messages(
+            system=system,
+            messages=compacted["messages"],
+            memory_context=recalled["context"],
+            notices=matched["notices"],
+        )
+        cached = apply_cache_control(
+            messages=assembled["messages"],
+            breakpoints=cache_breakpoints,
+        )
+
+        model = call_model(messages=cached["messages"])
         router = decide(
             done=model["done"],
             exhausted=counter["exhausted"],
@@ -203,7 +280,8 @@ def build_react_agent(
         assistant["messages"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
 
-        START >> counter >> model >> assistant >> router
+        START >> counter >> asked >> planned >> compacted >> recalled >> matched
+        matched >> assembled >> cached >> model >> assistant >> router
         router >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 

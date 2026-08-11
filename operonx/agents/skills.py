@@ -195,8 +195,13 @@ def inject_skills(
     """
     selected = match_skills(query, [s for s in (skills or []) if isinstance(s, Skill)], limit)
     block = render_skills(selected)
+    message = {"role": "user", "content": block} if block else None
     return {
-        "message": {"role": "user", "content": block} if block else None,
+        "message": message,
+        # `notices` is the list shape `assemble_api_messages` consumes.
+        # Empty rather than [None] when nothing matched — an empty block
+        # still changes the prompt on the turns it is empty.
+        "notices": [message] if message else [],
         "names": [s.name for s in selected],
         "count": len(selected),
     }

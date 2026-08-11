@@ -22,7 +22,13 @@ from operonx.agents.memory import MemoryEntry, MemoryProvider, render_memory_blo
 from operonx.core.loggings import LOGGER
 from operonx.core.ops.transform.func_op import op
 
-__all__ = ["each_provider", "provider_prefetch", "merge_memory", "memory_write"]
+__all__ = [
+    "each_provider",
+    "provider_prefetch",
+    "merge_memory",
+    "memory_write",
+    "gather_memory",
+]
 
 
 @op
@@ -142,3 +148,45 @@ async def memory_write(
         LOGGER.error("memory: write to %s failed: %s", type(provider).__name__, exc)
         return {"written": False, "error": f"{type(exc).__name__}: {exc}"}
     return {"written": True, "error": ""}
+
+
+@op(bound="io")
+async def gather_memory(
+    providers: Optional[list] = None,
+    query: str = "",
+    limit: int = 5,
+    deadline: float = 8.0,
+) -> dict:
+    """Prefetch from every provider concurrently and merge, in one op.
+
+    §7.5 calls for a generator fan-out here, and `each_provider` /
+    `provider_prefetch` / `merge_memory` implement exactly that. They are
+    *not* used inside the agent loop, for a measured reason: `collect()`
+    behind `parallel()` inside a loop invokes its consumer once per item
+    with a partial batch rather than once with the whole set (§15.1 V10).
+    The assembler needs one merged context string per turn, and a partial
+    batch would silently give the model a fraction of its memory.
+
+    So this gathers internally. The cost is per-provider trace spans, and
+    the fan-out ops remain the right choice outside a loop.
+    """
+    providers = [p for p in (providers or []) if p is not None]
+    if not providers or not query:
+        return {"context": None, "count": 0}
+
+    async def one(provider):
+        try:
+            return await asyncio.wait_for(provider.prefetch(query, limit), timeout=deadline)
+        except asyncio.TimeoutError:
+            LOGGER.warning(
+                "memory: %s exceeded the %.1fs deadline; continuing without it",
+                type(provider).__name__,
+                deadline,
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail the turn
+            LOGGER.error("memory: %s failed: %s", type(provider).__name__, exc)
+        return []
+
+    gathered = await asyncio.gather(*(one(p) for p in providers))
+    merged = merge_memory.__wrapped__(entries=[list(g) for g in gathered])
+    return {"context": merged["context"], "count": merged["count"]}
