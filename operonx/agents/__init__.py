@@ -12,18 +12,20 @@ See ``AGENT_EXTENSION_PLAN.md`` for the full design and
 :doc:`CONTRIBUTING <CONTRIBUTING>` for the Footprint Ladder that governs
 what is allowed to land here.
 
-**Status: scaffold.** P0 (namespace + governance) is complete; the public
-surface below arrives in P1. ``__all__`` stays empty until there is
-something real to export — an empty package is honest, a package full of
-``NotImplementedError`` stubs is not.
-
-Planned surface (P1–P3)::
-
-    from operonx.agents import tool, TOOL_REGISTRY   # P1
-    from operonx.agents import build_react_agent     # P1
-    from operonx.agents import subagent              # P3
+**Status: P1 in progress.** Tools and dispatch have landed; the ReAct
+loop factory (``build_react_agent``) and the sub-agent factory arrive
+next. Nothing is exported before it works.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
+
+__all__ = [
+    "tool",
+    "ToolMeta",
+    "TOOL_REGISTRY",
+    "get_tool_definitions",
+    "build_dispatch",
+]
