@@ -10,6 +10,7 @@ OpType = Literal[
     "embedding",
     "rerank",
     "vector-search",
+    "doc-fetch",
     # Node điều khiển luồng
     "branch",
     "for",

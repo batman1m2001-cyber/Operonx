@@ -80,12 +80,22 @@ _LAZY_BACKENDS = {
     "VectorStoreConfig": "operonx.providers.vector_stores",
     "create_vector_store": "operonx.providers.vector_stores",
     "FaissVectorStore": "operonx.providers.vector_stores",
+    "PgVectorStore": "operonx.providers.vector_stores",
+    # Doc stores
+    "BaseDocStore": "operonx.providers.doc_stores",
+    "DocStoreType": "operonx.providers.doc_stores",
+    "DocStoreConfig": "operonx.providers.doc_stores",
+    "create_doc_store": "operonx.providers.doc_stores",
+    "reorder_by_ids": "operonx.providers.doc_stores",
+    "partition_by_ids": "operonx.providers.doc_stores",
+    "PostgresDocStore": "operonx.providers.doc_stores",
     # Workflow ops
     "LLMOp": "operonx.providers.ops",
     "EmbeddingOp": "operonx.providers.ops",
     "RerankOp": "operonx.providers.ops",
     "OnnxOp": "operonx.providers.ops",
     "VectorSearchOp": "operonx.providers.ops",
+    "DocFetchOp": "operonx.providers.ops",
     # Ops with heavy module-level deps (numpy, etc.)
     "TritonOp": "operonx.providers.ops",
 }
@@ -110,6 +120,7 @@ __all__ = [
     "RerankOp",
     "OnnxOp",
     "VectorSearchOp",
+    "DocFetchOp",
     "TritonOp",
     # Vector stores
     "BaseVectorStore",
@@ -118,6 +129,15 @@ __all__ = [
     "VectorStoreConfig",
     "create_vector_store",
     "FaissVectorStore",
+    "PgVectorStore",
+    # Doc stores
+    "BaseDocStore",
+    "DocStoreType",
+    "DocStoreConfig",
+    "create_doc_store",
+    "reorder_by_ids",
+    "partition_by_ids",
+    "PostgresDocStore",
     # LLM
     "BaseLLM",
     "LLMType",

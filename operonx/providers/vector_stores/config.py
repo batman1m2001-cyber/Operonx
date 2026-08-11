@@ -1,7 +1,7 @@
 """Vector store configuration."""
 
 from enum import Enum
-from typing import ClassVar, Dict, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from operonx.core.utils import YamlModel
 
@@ -45,6 +45,12 @@ class VectorStoreConfig(YamlModel):
             does not support.
         dsn: pgvector only — Postgres connection string.
         table: pgvector only — table holding ``(id, embedding, …)``.
+        id_column: pgvector only — primary key column. Default ``"id"``.
+        vector_column: pgvector only — embedding column. Default
+            ``"embedding"``.
+        metadata_columns: pgvector only — columns returned as ``metadata``
+            and writable via ``upsert``. Keep this to *filterable* fields;
+            document content belongs in your store of record.
         url: Qdrant only — server endpoint.
         api_key: Qdrant only — auth token.
     """
@@ -63,6 +69,9 @@ class VectorStoreConfig(YamlModel):
     # pgvector
     dsn: Optional[str] = None
     table: Optional[str] = None
+    id_column: Optional[str] = None
+    vector_column: Optional[str] = None
+    metadata_columns: Optional[List[str]] = None
 
     # Qdrant
     url: Optional[str] = None
