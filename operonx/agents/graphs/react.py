@@ -2,7 +2,7 @@
 
 ::
 
-    START ─▶ seed ─▶ count ─▶ call_model ─▶ route ─┬─▶ END
+    START ─▶ count_turn ─▶ call_model ─▶ decide ─┬─▶ END
                                   └─▶ dispatch ──▶ back to call_model
 
 The back-edge is what the Phase 3 cycle rewrite turns into a synthesized
@@ -44,15 +44,11 @@ BUDGET_EXHAUSTED = (
 )
 
 
-@op
-def seed_messages(messages: Optional[list] = None) -> dict:
-    """Put the caller's opening messages into the shared cell.
-
-    A graph *input* cannot be written to a ``PARENT`` cell directly — the
-    ``>>`` write operator takes an op output. So the conversation enters
-    through an op.
-    """
-    return {"messages": list(messages or [])}
+# The graph input is named `messages`, the same as the shared cell, so
+# operonx seeds the cell from it directly. An explicit seeding op wrote
+# the opening messages a *second* time — invisible when they carry ids,
+# because `add_messages` upserts on id, and a duplicated user turn
+# otherwise.
 
 
 @op
@@ -159,7 +155,6 @@ def build_react_agent(
             reducers={"messages": add_messages},
         )
 
-        seed = seed_messages(messages=messages)
         counter = count_turn(turns=PARENT["turns"])
         model = call_model(messages=PARENT["messages"])
         router = decide(
@@ -172,16 +167,15 @@ def build_react_agent(
         disp = dispatch_one(call=calls["call"].parallel(max=8))
         gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
 
-        # Seed the conversation, then accumulate. The reducer merges by id,
-        # so a re-emitted message updates rather than duplicating.
-        seed["messages"] >> PARENT["messages"]
+        # Accumulate into the shared cell. The reducer merges by id, so a
+        # re-emitted message updates rather than duplicating.
         counter["turns"] >> PARENT["turns"]
         counter["notice"] >> PARENT["messages"]
         counter["exhausted"] >> PARENT["stopped_early"]
         model["assistant_message"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
 
-        START >> seed >> counter >> model >> router
+        START >> counter >> model >> router
         router >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 

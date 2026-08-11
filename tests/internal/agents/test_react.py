@@ -133,6 +133,16 @@ class TestTurns:
         assert result["messages"][0]["content"] == "hi"
 
     @pytest.mark.asyncio
+    async def test_opening_messages_without_ids_are_not_duplicated(self):
+        """`add_messages` upserts on id, so an id-less opening turn is the
+        only way a double-seed shows up. An explicit seeding op wrote the
+        input a second time; every test here used ids, so it stayed
+        invisible until an example printed the conversation."""
+        plain = [{"role": "user", "content": "hi"}]
+        result, _ = await run_agent([([], True)], messages=plain)
+        assert [m["role"] for m in result["messages"]] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
     async def test_parallel_tool_calls_all_answered(self):
         """Every tool_call needs a matching result or the provider 400s."""
         calls = [{"id": f"t{i}", "name": "echo", "args": {"a": i}} for i in range(4)]
