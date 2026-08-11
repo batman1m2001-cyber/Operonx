@@ -146,6 +146,22 @@ Rename is still valid — `operonx/tools/` currently holds `operonx-pack`
 (a Rust-spec serializer CLI). Freeing the `tools` name for agent tooling
 avoids a permanent semantic clash.
 
+**Done (P0, 1.2.0).** No back-compat shim: a shim would keep `tools`
+occupied, which is the whole point of the move. The `operonx-pack`
+console script is unchanged; only `from operonx.tools.pack import …`
+breaks, and `scripts/regen_fixture.py` was its one in-repo consumer.
+
+The rename surfaced a dead `operonx = "operonx.cli:main"` script entry,
+carried since the April 2026 Hush→Operon migration and pointing at a
+scaffolding CLI that the same migration deleted — `operonx --help` had
+raised `ModuleNotFoundError` in every published release. **Removed
+rather than implemented.** Operonx is a library; an umbrella dispatcher
+with nothing to dispatch to fails criterion 3 of the op-worthy bar
+(zero concrete demand) that this plan applies to everything else.
+`tests/internal/cli/test_entry_points.py` now imports every declared
+`[project.scripts]` target the way the generated wrapper does, so the
+next dangling entry fails in CI instead of on a user's first install.
+
 Out of tree (sibling PyPI package, iterates independently):
 
 ```
@@ -713,7 +729,7 @@ Later                       P5 Learning-loop pattern doc (defer)
 
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
-| **0** | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
+| **0** ✅ | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
 | **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) | 3–4d |
 | **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); `compact_messages` op + gate; prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore) | 3–5d |
 | **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 3–4d |

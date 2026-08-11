@@ -147,6 +147,9 @@ dev = [
     "httpx>=0.24",
     "ruff>=0.1",
     "pre-commit",
+    # tests/internal/cli/ parses pyproject.toml to verify every
+    # [project.scripts] target resolves; tomllib is stdlib only on 3.11+.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 docs = [
     "mkdocs>=1.6",
@@ -155,8 +158,7 @@ docs = [
 ]
 
 [project.scripts]
-operonx = "operonx.cli:main"
-operonx-pack = "operonx.tools.pack:main"
+operonx-pack = "operonx.cli.pack:main"
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operonx"
