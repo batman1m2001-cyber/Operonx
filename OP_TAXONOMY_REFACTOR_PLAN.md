@@ -1,8 +1,46 @@
 # Operonx → Op Taxonomy Refactor Plan
 
-**Status:** proposed. Sequenced for **1.1.0** (add + deprecate) → **2.0.0**
-(delete). Third revision after cross-check found factual errors and design
+**Status:** **1.1.0 work is complete and merged** (PRs #20 → #24);
+2.0.0 remains. Sequenced for 1.1.0 (add + deprecate) → 2.0.0 (delete).
+Third revision after cross-check found factual errors and design
 inconsistencies in earlier drafts (see git log for the delta).
+
+### Shipped
+
+| PR | Phase | Delivered |
+|---|---|---|
+| [#20](https://github.com/batman1m2001-cyber/Operonx/pull/20) | P0 | `providers/triton/` helper; `TritonOp._process` 120 → 19 lines |
+| [#21](https://github.com/batman1m2001-cyber/Operonx/pull/21) | P1a | `VectorSearchOp` + `vector_stores/` + FAISS backend |
+| [#22](https://github.com/batman1m2001-cyber/Operonx/pull/22) | P1b/c | pgvector backend + `doc_stores/` + `DocFetchOp` |
+| [#23](https://github.com/batman1m2001-cyber/Operonx/pull/23) | P1d | `MemoryDocStore`, `ex16_rag_pipeline`, guide + filter-dialect docs |
+| [#24](https://github.com/batman1m2001-cyber/Operonx/pull/24) | P2 | `DeprecationWarning` on `OnnxOp`/`TritonOp`; CHANGELOG 1.1.0 |
+
+**Still open:** publish 1.1.0 · callbot migrates off `TritonOp` ·
+then P3 (2.0.0 deletions) · Qdrant backend (non-blocking).
+
+### What implementation changed vs this plan
+
+Recorded because the plan was written before the code existed, and two
+decisions moved:
+
+1. **Resource keys are `<category>:<name>`, not `<backend>:<name>`.**
+   §11 item 6 proposed `pgvector:docs`. That fights the established
+   ResourceHub convention, where `EmbeddingOp(resource="bge-m3")`
+   resolves `embedding:bge-m3` and the backend is chosen by `api_type`
+   *inside* the config. Shipped as `vector_store:docs` / `doc_store:main`,
+   with a bare name auto-prefixed and a key containing `:` passed
+   through — matching `TritonOp`'s existing behaviour.
+
+2. **A `MemoryDocStore` was added, unplanned.** FAISS gave
+   `vector_stores` a zero-infrastructure backend; `doc_stores` had none,
+   so the canonical two-store pipeline could not be demonstrated or
+   tested without Postgres. ~90 LOC closed the asymmetry and made
+   `ex16_rag_pipeline` runnable with no servers.
+
+Everything else landed as designed, including the load-bearing calls:
+ids-only outputs (§5.2), native filters with no DSL (§5.4), order
+restoration in `BaseDocStore` rather than per backend (§5.8), and
+`bound` as a backend class attribute (§5.6).
 
 **TL;DR** — Operonx has two mutually inconsistent op-naming patterns in
 1.0.0. Semantic ops (`LLMOp`, `EmbeddingOp`, `RerankOp` — each with a
@@ -831,15 +869,16 @@ Later           Qdrant backend · Mongo/Redis doc stores   (not blocking)
 | # | Phase | Deliverable | Size | State |
 |---|---|---|---|---|
 | **P0** | Triton helper | `providers/triton/{client,decode,dtypes}.py` extracted from `providers/ops/triton.py`, preserving the module-global client cache. `TritonOp._process` 120 → 19 lines. 40 tests. | 1d | ✅ merged (PR #20) |
-| **P1a** | VectorSearch core | `providers/vector_stores/{base,config,factory}.py` per §5.6 (incl. `bound` class attr) + `providers/ops/vector_search.py` + **FAISS** backend (no server → CI without docker; proves the ids-only contract). Unit tests. | 1.5–2d | ⏳ next |
-| **P1b** | pgvector backend | `providers/vector_stores/pgvector.py` — async `psycopg`, SQL-fragment filter + equality sugar (§5.4). Integration tests against a docker-compose'd Postgres+pgvector in CI. | 1.5d | ⏳ |
-| **P1c** | DocFetch | `providers/doc_stores/{base,config,factory,_reorder}.py` + **Postgres** backend + `providers/ops/doc_fetch.py` per §5.8. Order restoration + `missing` reporting are the load-bearing tests. Reuses P1b's docker-compose Postgres. | 1.5d | ⏳ |
-| **P1d** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → DocFetchOp → RerankOp → LLMOp). `docs/guide/08-vector-search.md` + `providers/vector_stores/README.md` with the §5.4 filter table. | 1d | ⏳ |
-| **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d | ⏳ |
-| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d | ⏳ |
-| **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). Not blocking 1.1.0. | 1d | — |
+| **P1a** | VectorSearch core | `providers/vector_stores/{base,config,factory}.py` per §5.6 (incl. `bound` class attr) + `providers/ops/vector_search.py` + **FAISS** backend (no server → CI without docker; proves the ids-only contract). Unit tests. | 1.5–2d | ✅ #21 |
+| **P1b** | pgvector backend | `providers/vector_stores/pgvector.py` — async `psycopg`, SQL-fragment filter + equality sugar (§5.4). SQL shape asserted against captured statements; live-Postgres CI service still open. | 1.5d | ✅ #22 |
+| **P1c** | DocFetch | `providers/doc_stores/{base,config,factory,_reorder}.py` + **Postgres** backend + `providers/ops/doc_fetch.py` per §5.8. Order restoration + `missing` reporting are the load-bearing tests. Reuses P1b's mocked-connection approach. | 1.5d | ✅ #22 |
+| **P1d** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → DocFetchOp → RerankOp → LLMOp). Rewrote `docs/guide/04-rag.md` (which had a placeholder fetch *and* a resources.yaml format that does not exist) + new `providers/vector_stores/README.md` with the §5.4 filter table. Plus an unplanned `MemoryDocStore` so the example runs with no servers. | 1d | ✅ #23 |
+| **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. | 0.5d | ✅ #24 |
+| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. **Blocked on callbot migrating off `TritonOp`.** | 1d | ⏳ |
+| **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). Not blocking 1.1.0. | 1d | ⏳ next |
 
-**1.1.0 remaining: ~6 days** (P0 done). 2.0.0 delta is trivial once
+**1.1.0 is complete** — P0–P2 merged (#20–#24). Version bump and
+publish remain a deliberate release step. 2.0.0 delta is trivial once
 callbot has migrated.
 
 ---
