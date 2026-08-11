@@ -206,16 +206,20 @@ EMPTY_RESULT: dict[str, Any] = {
 }
 
 
-def agent_result(result: dict, agent) -> dict:
-    """Read the agent's answer out of an ``Operon.run()`` result.
+def agent_result(source: Any, agent) -> dict:
+    """Read the agent's answer out of a finished run.
 
     Args:
-        result: What ``Operon.run()`` returned.
-        agent: The built graph that produced it — the same object passed
+        source: Either what ``Operon.run()`` returned (its ``"$state"``
+            entry is used) or a ``MemoryState`` directly. The HITL path
+            goes through ``engine.start()``, and ``handle.result()``
+            builds its dict from emitted frames only — it carries no
+            state — so those callers pass ``handle.state``.
+        agent: The built graph that produced it — the same object handed
             to ``Operon(...)``. Needed because the answer lives in that
             graph's shared cells.
 
-    Always read the agent through this. Indexing ``result`` directly
+    Always read the agent through this. Indexing the run dict directly
     gives the *stream of writes*: one entry per loop iteration, so
     ``result["messages"]`` is a list of per-turn lists rather than the
     conversation. The reducer-merged value is in the cell.
@@ -226,8 +230,8 @@ def agent_result(result: dict, agent) -> dict:
     partial result rather than propagating — so check the logs rather
     than concluding the agent had nothing to say.
     """
-    state = result.get("$state")
-    if state is None:
+    state = source.get("$state") if isinstance(source, dict) else source
+    if state is None or not hasattr(state, "schema"):
         return dict(EMPTY_RESULT)
 
     def cell(var, default):
