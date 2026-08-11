@@ -23,7 +23,8 @@ taxonomy cleanup. See [OP_TAXONOMY_REFACTOR_PLAN.md](OP_TAXONOMY_REFACTOR_PLAN.m
   list.
 - `operonx.providers.vector_stores` — `BaseVectorStore` (with a
   per-backend `bound` hint), config, lazy-import factory, and the
-  **FAISS** (no server, `bound="cpu"`) and **pgvector** backends.
+  **FAISS** (no server, `bound="cpu"`), **pgvector**, and **Qdrant**
+  backends.
 - `operonx.providers.doc_stores` — `BaseDocStore` (order restoration
   lives in the base so no backend can reintroduce misalignment), config,
   factory, and the **Postgres** and **memory** backends.
@@ -31,7 +32,8 @@ taxonomy cleanup. See [OP_TAXONOMY_REFACTOR_PLAN.md](OP_TAXONOMY_REFACTOR_PLAN.m
   `DocFetchOp` uses internally, exported for custom fetch ops.
 - `operonx.providers.triton` — `TritonClient` with a process-cached gRPC
   channel and dict-in/dict-out `infer()`, plus pure dtype/decode helpers.
-- New extras: `operonx[faiss]`, `operonx[pgvector]`, `operonx[postgres]`.
+- New extras: `operonx[faiss]`, `operonx[pgvector]`, `operonx[postgres]`,
+  `operonx[qdrant]`.
 - `OpType` gains `"vector-search"` and `"doc-fetch"` (additive only).
 - Example [`ex16_rag_pipeline`](examples/python/ex16_rag_pipeline/) — the
   full pipeline, runnable with no servers.
