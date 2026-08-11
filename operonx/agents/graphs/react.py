@@ -10,18 +10,17 @@ loop at build time. Nothing here wraps or drives iteration.
 
 **Reading the result.** ``Operon.run()`` reports a graph's declared
 outputs as the *stream of writes* — with a loop that means one entry per
-iteration, so ``result["messages"]`` is a list of lists. The
-reducer-merged value lives in the state cell. ``finish`` exists to read
-those cells once, at the end, and emit them as ordinary outputs; use
-:func:`agent_result` rather than indexing the raw dict.
+iteration, so ``result["messages"]`` is a list of per-turn lists. The
+reducer-merged conversation lives in the state cell, so read the agent
+through :func:`agent_result` rather than indexing the raw dict.
 
 **The turn cap lives here, not in the graph.** ``@graph`` has no
 ``max_iterations`` and the synthesized loop's ceiling is a runaway guard
 set far above any real workload. That guard is the wrong tool for a
 budget anyway: it cuts mid-flight, the model is never told, and you keep
-whatever partial state existed. ``call_model`` counts turns itself and
-sets ``done`` when the budget is spent, so the loop exits the same way it
-exits on success and the model gets a final turn to summarise.
+whatever partial state existed. ``count_turn`` injects a notice at the
+limit instead and lets the model take one final turn, so exhaustion
+exits the way success does.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.policy import ToolPolicy
 from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
@@ -73,14 +73,11 @@ def gather_tool_messages(tool_messages: Optional[list] = None) -> dict:
     return {"messages": [m for m in tool_messages if isinstance(m, dict)]}
 
 
-"""There is deliberately no ``finish`` op.
-
-The obvious design — a terminal op reading the cells and emitting them —
-does not run. A loop containing a generator emits its frames at *item*
-contexts, so an op wired after the loop never reaches ready and is
-skipped silently. The conversation lives in the shared cells regardless,
-so :func:`agent_result` reads those directly instead.
-"""
+# There is deliberately no terminal `finish` op. The obvious design — an
+# op after the loop that reads the cells and emits them — never runs: a
+# loop containing a generator emits at *item* contexts, so a downstream
+# op never reaches ready and is skipped with no error. The conversation
+# lives in the shared cells regardless, so `agent_result` reads those.
 
 
 def build_react_agent(
@@ -88,6 +85,7 @@ def build_react_agent(
     call_model: Callable,
     max_turns: int = 25,
     approval_timeout: float = 300.0,
+    policy: Optional[ToolPolicy] = None,
     budget_notice: str = BUDGET_EXHAUSTED,
 ):
     """Build the ReAct agent graph.
@@ -103,8 +101,11 @@ def build_react_agent(
             dispatch of whatever tools it asked for. Reaching it is a
             normal exit, not a cut: the model is given ``budget_notice``
             and one final turn to answer.
-        approval_timeout: Seconds a destructive tool call waits for a
-            human before being denied. See :mod:`operonx.agents.graphs.dispatch`.
+        approval_timeout: Seconds a gated tool call waits for a human
+            before being denied. See :mod:`operonx.agents.graphs.dispatch`.
+        policy: Which tools may run, ask, or are refused outright. See
+            :class:`~operonx.agents.policy.ToolPolicy`. Defaults to
+            destructive-asks, everything-else-runs.
         budget_notice: Message appended when the budget runs out. Must
             tell the model to answer now — an empty or vague notice
             produces another tool call it is not allowed to make.
@@ -115,7 +116,7 @@ def build_react_agent(
     if max_turns < 1:
         raise ValueError(f"max_turns must be >= 1, got {max_turns}. One turn is one model call.")
 
-    dispatch_one = build_dispatch(approval_timeout=approval_timeout)
+    dispatch_one = build_dispatch(approval_timeout=approval_timeout, policy=policy)
 
     @op
     def count_turn(turns: int = 0) -> dict:

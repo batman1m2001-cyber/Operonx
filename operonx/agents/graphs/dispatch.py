@@ -37,6 +37,7 @@ import asyncio
 import json
 from typing import Any, Dict, Optional
 
+from operonx.agents.policy import DEFAULT_POLICY, DENY_MESSAGE, ToolPolicy
 from operonx.agents.tool import TOOL_REGISTRY
 from operonx.core.ops.base import END, START
 from operonx.core.ops.flow.branch_op import if_
@@ -113,12 +114,14 @@ def each_call(tool_calls: Optional[list] = None):
 
 
 @op
-def parse_call(call: Optional[dict] = None) -> dict:
-    """Validate a tool call against the registry and shape the payloads.
+def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
+    """Validate a tool call against the registry and policy, and shape
+    the payloads.
 
-    Never raises. An unknown tool or unparseable arguments become
-    ``error``, which ``execute`` turns into a tool message — the model
-    can correct itself from that, but not from a traceback.
+    Never raises. An unknown tool, unparseable arguments, or a policy
+    refusal all become ``error``, which ``execute`` turns into a tool
+    message — the model can correct itself from that, but not from a
+    traceback.
     """
     call = call or {}
     call_id = call.get("id") or call.get("tool_call_id") or ""
@@ -145,16 +148,29 @@ def parse_call(call: Optional[dict] = None) -> dict:
         error = _ARGS_ERROR.format(name=name, error=f"got {type(raw_args).__name__}")
 
     factory = TOOL_REGISTRY.get(name)
-    if factory is None and not error:
+    meta = getattr(factory, "_tool_meta", None) or {}
+
+    # Policy decides allow / ask / deny from what the tool declares. A
+    # refusal is folded into `error` rather than routed through the gate:
+    # asking a human to approve something policy already forbids trains
+    # them to click through, and their answer would be ignored.
+    decision = (policy or DEFAULT_POLICY).decide(name, meta)
+
+    # Policy is evaluated **before** the unknown-tool check, so a rule
+    # like ``rules={"shell": "deny"}`` still refuses when that tool is
+    # not loaded. Reporting "no tool named 'shell'" instead would tell
+    # the model the capability is merely absent and invite it to look
+    # for another route to the same thing.
+    if decision == "deny" and not error:
+        error = DENY_MESSAGE.format(name=name)
+    elif factory is None and not error:
         error = _UNKNOWN_TOOL.format(
             name=name, available=", ".join(sorted(TOOL_REGISTRY)) or "(none registered)"
         )
 
-    meta = getattr(factory, "_tool_meta", None) or {}
-    # An unknown or malformed call must not reach the approval gate — it
-    # cannot execute anyway, and asking a human to approve a call that
-    # will never run trains them to click through.
-    needs_approval = bool(meta.get("destructive")) and not error
+    # An unknown, denied or malformed call must not reach the approval
+    # gate — it cannot execute, so there is nothing to approve.
+    needs_approval = decision == "ask" and not error
 
     # Built here, deliberately: a Ref nested in a dict is rejected at
     # construction, so the InterruptOp downstream takes one bare ref.
@@ -255,14 +271,17 @@ async def execute(
     return {"tool_message": _tool_message(call_id, tool_name, _stringify(raw, max_result_chars))}
 
 
-def build_dispatch(*, approval_timeout: float = 300.0):
+def build_dispatch(*, approval_timeout: float = 300.0, policy: Optional[ToolPolicy] = None):
     """Return the per-call dispatch subgraph.
 
     Args:
-        approval_timeout: Seconds a destructive call waits for a human.
-            On expiry the call is **denied**, not executed — a gate that
-            fails open is decoration. The model is told it expired so it
-            can ask rather than silently retry.
+        approval_timeout: Seconds a call waits for a human. On expiry the
+            call is **denied**, not executed — a gate that fails open is
+            decoration. The model is told it expired so it can ask rather
+            than silently retry.
+        policy: Which tools may run, ask, or are refused outright.
+            Defaults to :data:`~operonx.agents.policy.DEFAULT_POLICY` —
+            destructive tools ask, everything else runs.
     """
 
     @graph
@@ -273,7 +292,7 @@ def build_dispatch(*, approval_timeout: float = 300.0):
         # policy arm later costs one node, not a second execution path.
         PARENT.declare(decision=None)
 
-        parsed = parse_call(call=call)
+        parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY)
 
         approve = InterruptOp(
             payload=parsed["approval_payload"],  # bare ref — see module docstring

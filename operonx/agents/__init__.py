@@ -12,14 +12,16 @@ See ``AGENT_EXTENSION_PLAN.md`` for the full design and
 :doc:`CONTRIBUTING <CONTRIBUTING>` for the Footprint Ladder that governs
 what is allowed to land here.
 
-**Status: P1 in progress.** Tools and dispatch have landed; the ReAct
-loop factory (``build_react_agent``) and the sub-agent factory arrive
-next. Nothing is exported before it works.
+**Status: P1.** Tools, permission policy, dispatch and the ReAct loop
+have landed. Memory, compaction and sub-agents are P2/P3. Nothing is
+exported before it works.
 """
 
 from __future__ import annotations
 
 from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.graphs.react import agent_result, build_react_agent
+from operonx.agents.policy import ToolPolicy
 from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
 
 __all__ = [
@@ -27,5 +29,8 @@ __all__ = [
     "ToolMeta",
     "TOOL_REGISTRY",
     "get_tool_definitions",
+    "ToolPolicy",
     "build_dispatch",
+    "build_react_agent",
+    "agent_result",
 ]
