@@ -94,7 +94,7 @@ class TestConfigAndFactory:
         assert DocStoreConfig._category == "doc_store"
 
     def test_backend_types(self):
-        assert {t.value for t in DocStoreType} == {"postgres", "mongo", "redis"}
+        assert {t.value for t in DocStoreType} == {"postgres", "mongo", "redis", "memory"}
 
     def test_default_id_field(self):
         assert DocStoreConfig().id_field == "id"
@@ -400,3 +400,147 @@ class TestExports:
         from operonx.providers.registry import doc_store_plugin
 
         assert doc_store_plugin.is_registered()
+
+
+# =============================================================================
+# MemoryDocStore — zero-infra store of record
+# =============================================================================
+
+
+def _mem(**kw):
+    kw.setdefault("api_type", DocStoreType.MEMORY)
+    kw.setdefault("collection", "docs")
+    return create_doc_store(DocStoreConfig(**kw))
+
+
+class TestMemoryDocStore:
+    def test_bound_is_cpu(self):
+        # Pure dict lookups — nothing to await on.
+        assert _mem().bound == "cpu"
+
+    def test_seeds_from_config(self):
+        store = _mem(documents=[{"id": 1, "t": "a"}])
+        assert 1 in store._collections["docs"]
+
+    @pytest.mark.asyncio
+    async def test_fetch_preserves_requested_order(self):
+        store = _mem(documents=[{"id": i} for i in (1, 2, 3)])
+        rows, missing = await store.fetch([3, 1, 2], collection="docs")
+        assert [r["id"] for r in rows] == [3, 1, 2]
+        assert missing == []
+
+    @pytest.mark.asyncio
+    async def test_reports_missing(self):
+        store = _mem(documents=[{"id": 1}])
+        rows, missing = await store.fetch([1, 99], collection="docs")
+        assert [r["id"] for r in rows] == [1]
+        assert missing == [99]
+
+    @pytest.mark.asyncio
+    async def test_projection(self):
+        store = _mem(documents=[{"id": 1, "title": "a", "body": "b"}])
+        rows, _ = await store.fetch([1], collection="docs", fields=["title"])
+        assert rows[0]["title"] == "a"
+        assert "body" not in rows[0]
+        # The id must survive projection or the base can't match rows to ids.
+        assert rows[0]["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_copies_not_internal_dicts(self):
+        store = _mem(documents=[{"id": 1, "t": "orig"}])
+        rows, _ = await store.fetch([1], collection="docs")
+        rows[0]["t"] = "mutated"
+        again, _ = await store.fetch([1], collection="docs")
+        assert again[0]["t"] == "orig"
+
+    def test_put_requires_the_id_field(self):
+        store = _mem()
+        with pytest.raises(ValueError, match="missing its id field"):
+            store.put([{"no_id": 1}], collection="docs")
+
+    def test_put_replaces_by_id(self):
+        store = _mem(documents=[{"id": 1, "v": "old"}])
+        store.put([{"id": 1, "v": "new"}], collection="docs")
+        assert store._collections["docs"][1]["v"] == "new"
+
+    @pytest.mark.asyncio
+    async def test_unknown_collection_raises(self):
+        store = _mem()
+        with pytest.raises(ValueError, match="no collection 'nope'"):
+            await store.fetch([1], collection="nope")
+
+    @pytest.mark.asyncio
+    async def test_custom_id_field(self):
+        store = _mem(id_field="doc_key", documents=[{"doc_key": "x", "t": "a"}])
+        rows, missing = await store.fetch(["x"], collection="docs", id_field="doc_key")
+        assert rows[0]["t"] == "a"
+        assert missing == []
+
+
+# =============================================================================
+# The pair, composed — VectorSearchOp → DocFetchOp in a real graph
+# =============================================================================
+
+
+class TestTwoStorePipeline:
+    @pytest.mark.asyncio
+    async def test_search_then_fetch_stays_score_aligned(self):
+        """The whole point of the pair: ids come back ranked, and the rows
+        that follow are in the same order — no manual zipping, no silent
+        misalignment."""
+        from operonx.providers.vector_stores import (
+            VectorStoreConfig,
+            VectorStoreMetric,
+            VectorStoreType,
+            create_vector_store,
+        )
+
+        # Derived index: vectors + ids, no content.
+        index = create_vector_store(
+            VectorStoreConfig(api_type=VectorStoreType.FAISS, metric=VectorStoreMetric.IP, dim=4)
+        )
+        await index.upsert(
+            ids=[10, 20, 30],
+            vectors=[[1, 0, 0, 0], [0, 1, 0, 0], [0.9, 0.1, 0, 0]],
+        )
+
+        # Store of record: the content, deliberately inserted in an order
+        # that does not match either id order or score order.
+        docs = _mem(
+            documents=[
+                {"id": 20, "title": "second"},
+                {"id": 30, "title": "third"},
+                {"id": 10, "title": "first"},
+            ]
+        )
+
+        ids, scores, _ = await index.search(query_vector=[1, 0, 0, 0], top_k=2)
+        assert ids == [10, 30]
+
+        rows, missing = await docs.fetch(ids, collection="docs")
+        assert [r["id"] for r in rows] == [10, 30]
+        assert [r["title"] for r in rows] == ["first", "third"]
+        assert missing == []
+        # Rows line up with scores positionally — that is the contract.
+        assert len(rows) == len(scores)
+
+    @pytest.mark.asyncio
+    async def test_index_drift_surfaces_as_missing(self):
+        """An id in the index with no row in the store of record is real
+        drift (deleted doc, failed sync) and must be visible."""
+        from operonx.providers.vector_stores import (
+            VectorStoreConfig,
+            VectorStoreType,
+            create_vector_store,
+        )
+
+        index = create_vector_store(VectorStoreConfig(api_type=VectorStoreType.FAISS, dim=4))
+        await index.upsert(ids=[1, 2], vectors=[[1, 0, 0, 0], [0, 1, 0, 0]])
+
+        docs = _mem(documents=[{"id": 1, "title": "only one"}])
+
+        ids, _, _ = await index.search(query_vector=[1, 0, 0, 0], top_k=2)
+        rows, missing = await docs.fetch(ids, collection="docs")
+
+        assert [r["id"] for r in rows] == [1]
+        assert missing == [2]

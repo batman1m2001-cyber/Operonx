@@ -1,7 +1,7 @@
 """Document store configuration."""
 
 from enum import Enum
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from operonx.core.utils import YamlModel
 
@@ -12,6 +12,7 @@ class DocStoreType(Enum):
     POSTGRES = "postgres"
     MONGO = "mongo"
     REDIS = "redis"
+    MEMORY = "memory"  # dict-backed; tests and examples, not production
 
 
 class DocStoreConfig(YamlModel):
@@ -29,6 +30,8 @@ class DocStoreConfig(YamlModel):
         id_field: Default primary-key field name.
         dsn: Postgres / Mongo / Redis connection string.
         database: Mongo only — database name.
+        documents: Memory only — records to seed the default collection
+            with at construction time.
     """
 
     _category: ClassVar[str] = "doc_store"
@@ -39,6 +42,7 @@ class DocStoreConfig(YamlModel):
 
     dsn: Optional[str] = None
     database: Optional[str] = None
+    documents: Optional[List[Dict[str, Any]]] = None
 
     @classmethod
     def default(cls) -> "DocStoreConfig":

@@ -1,0 +1,57 @@
+embedding:openai:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: text-embedding-3-small
+  dimensions: 1536
+
+llm:gpt-4o-mini:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+# ── The derived index ──────────────────────────────────────────────────
+# Vectors + ids only. FAISS needs no server, which is why this example
+# runs anywhere. It also stores no metadata, so it cannot filter — see
+# the pgvector block below for that.
+vector_store:docs-faiss:
+  api_type: faiss
+  metric: cosine
+  dim: 1536
+
+# ── The source of truth ────────────────────────────────────────────────
+# In-memory so the example needs no database. Everything the LLM actually
+# reads comes from here.
+doc_store:corpus:
+  api_type: memory
+  collection: docs
+  id_field: id
+
+# ── Swapping in real infrastructure ────────────────────────────────────
+# Replace the two blocks above with these and the graph is unchanged.
+# Both point at the same database, so there is no dual-write risk and the
+# connection pool is shared.
+#
+#   CREATE TABLE docs_vec (
+#       id        bigint PRIMARY KEY,
+#       embedding vector(1536),
+#       tenant    text
+#   );
+#   CREATE INDEX ON docs_vec USING hnsw (embedding vector_cosine_ops);
+#
+# The index opclass must match `metric`, or Postgres silently falls back
+# to a sequential scan.
+#
+# vector_store:docs-faiss:          # keep the name; only the body changes
+#   api_type: pgvector
+#   metric: cosine
+#   dsn: ${PG_DSN}
+#   table: docs_vec
+#   metadata_columns: [tenant]      # filterable fields only, never content
+#
+# doc_store:corpus:
+#   api_type: postgres
+#   dsn: ${PG_DSN}
+#   collection: docs
+#   id_field: id

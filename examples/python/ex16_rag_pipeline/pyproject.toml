@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex16-rag-pipeline"
+version = "0.1.0"
+description = "Two-store RAG: VectorSearchOp for ids, DocFetchOp for content."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx[openai,faiss]>=1.1.0",
+]

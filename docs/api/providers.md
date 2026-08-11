@@ -11,13 +11,38 @@ installation page for which extra each provider needs.
 
 ## Provider ops
 
-The four core provider op types. Each exposes an `Op.of(...)`
-classmethod for concise construction with explicit keyword args —
-that's the recommended style.
+The core provider op types. Each exposes an `Op.of(...)` classmethod
+for concise construction with explicit keyword args — that's the
+recommended style.
 
 ::: operonx.providers.ops.LLMOp
 ::: operonx.providers.ops.EmbeddingOp
 ::: operonx.providers.ops.RerankOp
+
+### Retrieval (1.1.0)
+
+`VectorSearchOp` and `DocFetchOp` are a **pair**. The vector index is
+derived data holding vectors, ids, and filterable metadata; document
+content lives in the store of record. `VectorSearchOp` answers *which*
+documents, `DocFetchOp` answers *what they say* — and returns rows in
+the same order as the ids it was given, so hits stay aligned with their
+scores.
+
+See the [RAG guide](../guide/04-rag.md) for the full pipeline and
+`operonx/providers/vector_stores/README.md` for each backend's filter
+dialect.
+
+::: operonx.providers.ops.VectorSearchOp
+::: operonx.providers.ops.DocFetchOp
+
+### Ordering helpers
+
+Vector search returns score-ordered ids; key-based fetches return
+arbitrary order. `DocFetchOp` reconciles them internally — these are
+exported for anyone writing their own fetch op.
+
+::: operonx.providers.doc_stores.reorder_by_ids
+::: operonx.providers.doc_stores.partition_by_ids
 
 ## Structured output (1.0.0)
 
@@ -75,6 +100,10 @@ reference.
   (in `operonx.providers.embeddings`).
 - Reranker — `RerankingConfig`, `RerankingType`
   (in `operonx.providers.rerankers`).
+- Vector store — `VectorStoreConfig`, `VectorStoreType`,
+  `VectorStoreMetric` (in `operonx.providers.vector_stores`).
+- Document store — `DocStoreConfig`, `DocStoreType`
+  (in `operonx.providers.doc_stores`).
 - Auth — `KeycloakTokenConfig` (in `operonx.providers.auth`).
 
 ## Factory functions
@@ -86,4 +115,6 @@ users don't call these directly.
 ::: operonx.providers.llms.create_llm
 ::: operonx.providers.embeddings.create_embedding
 ::: operonx.providers.rerankers.create_reranking
+::: operonx.providers.vector_stores.create_vector_store
+::: operonx.providers.doc_stores.create_doc_store
 ::: operonx.providers.auth.create_auth
