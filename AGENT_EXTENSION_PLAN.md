@@ -935,6 +935,10 @@ that lives in `tests/`.
 | V7 | §7.3 | 🔴 **No turn cap exists at graph level.** The synthesized loop is pinned to 1000 at `cycle_rewrite.py:402`. Deliberately **not** plumbed through `@graph`: a graph-level cap cuts mid-flight, tells the model nothing and leaves partial state. `count_turn` in the agent layer injects a notice at the limit and lets the model take one final turn, so exhaustion exits the way success does. | P1 ✅ |
 | V8 | core | ✅ **fixed.** A back-edge source below a generator fan-out never fired, so any loop of the ReAct shape stopped after one iteration — silently. `end_time` lands at `('main','[0]','__collect__')`, never at the iteration ctx, and the spec (`STATE_LOOP_REFACTOR_PLAN.md:518`) required an exact match. Termination now accepts any ctx below the iteration's. 14 regression tests; none of the 32 prior cycle-rewrite tests put a generator in a loop. | P1 ✅ |
 | V9 | §7.3 | 🔴 **An op wired after a generator-containing loop never runs.** The loop emits at item contexts, so the downstream op never reaches ready and is skipped with no error. Kills the obvious "terminal `finish` op reads the cells and emits them" design. `agent_result(result, agent)` reads the cells directly instead, which is why it needs the graph. | P1 ✅ |
+| V12 | new | 🔴 **`LLMOp` templates its prompt.** `_format_value` runs `format_map` over any string containing `{`, so a tool returning `{"city": "Hanoi"}` makes the *next* model call raise `PromptError: Missing template variable(s)`. Any JSON, code or CSS the agent reads does the same. `prepare_prompt` doubles braces; `format_map` collapses them back. No opt-out exists in core — worth one (C6). | P1 ✅ |
+| V13 | new | 🔴 **A subgraph emits `None` for outputs a frame did not write.** Straight into an `add_messages` cell that raises, and since op errors go to state rather than propagating, the run ends quietly mid-conversation. `normalize_messages` absorbs it. | P1 ✅ |
+| V14 | new | 🔴 **`add_messages` upserts on id, so a stable id silently overwrites history.** Every assistant turn stamped `assistant-0` meant each turn replaced the last: the tool-calling turn vanished, its tool messages answered nothing, and the conversation came back `user → tool → assistant` — a *plausible* result, which is why it survived. Fresh uuid per turn. | P1 ✅ |
+| V15 | new | 🟡 **`LLMOp` prepends `llm:` to the resource key**, so `resource="llm:qwen"` resolves as `llm:llm:qwen`. Documented on `make_llm_caller`; arguably the error message should say so. | — |
 | V11 | §2 | 🔴 **Checkpointer API mis-stated.** Binding is `engine.start(inputs, checkpointer=cp)` — `Operon(g, checkpointer=)` raises `TypeError`. `get_state(step)` and `list_steps()` are methods on the **checkpointer**, not on `ExecutionHandle`, which has neither. The primitive itself works: 6 steps recorded for a 3-iteration loop, each a per-step cell snapshot. `AgentSession` uses the real API. | P2 ✅ |
 | V10 | §7.2 | 🔴 **`collect()` behind `parallel()` inside a loop invokes per item**, not per batch — measured `[[0],[2],[0],[2]]` for 2 items × 2 iterations. Consumers must tolerate a partial batch. Harmless when the target cell has a reducer, since each write merges; `gather_tool_messages` handles both shapes. | P1 ✅ |
 
@@ -971,8 +975,21 @@ Probe the row, then flip its light and link the test.
 | C3 | Wire `engine.stream()` + `handle.resume()` to the interrupt bus (V3) | open — ~½ day, contained to `engine.py` |
 | C4 | Loop termination below a generator fan-out (V8) | **done** — `task_scheduler._ctxs_within` |
 | C5 | An op after a generator-containing loop never becomes ready (V9). Worked around in the agent layer; the underlying readiness rule is untouched. | open — no owner |
+| C6 | No way to pass a message list to `LLMOp` without prompt templating (V12). Every agent must escape braces defensively. A `template=False` flag, or treating a `list` prompt as data, would remove a whole class of surprise. | open — no owner |
 
-### 15.4 · The rule
+### 15.4 · Scripted doubles verify code, not contracts
+
+Every unit test in `tests/internal/agents/` scripts the model. That
+verified the loop, dispatch, budget, policy and approval — and missed
+**four consecutive bugs** at the `LLMOp` seam (V12–V14 plus a build
+failure), because a scripted double reproduces the shape you assumed
+rather than the one the dependency has.
+
+`test_live_agent.py` is the answer for the model seam. The same gap
+applies to every 🟡 row in §15.2 that is currently exercised only through
+a stub.
+
+### 15.5 · The rule
 
 A row stays 🟡 until a **committed test** exercises it — not a scratch
 probe, not a docstring, not this plan. When a phase starts, promote only
