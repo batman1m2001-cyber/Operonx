@@ -179,51 +179,272 @@ rejected candidate and why.
 
 ---
 
-## 5 · `VectorSearchOp` sketch
+## 5 · `VectorSearchOp` design
+
+### 5.1 · The load-bearing principle: the index is not a store
+
+**A vector DB is a derived index, not a store of record.** You must be
+able to `DROP` it and rebuild from source. That gives you:
+
+- **No dual-write bug.** Doc updated in Postgres but stale in the vector
+  DB's payload is among the most common RAG production failures — and it
+  fails silently, serving stale context to the LLM.
+- **Cheap re-indexing.** Swap embedding models without rewriting your
+  document corpus.
+- **Real access control.** Row-level security, roles, audit live in a
+  real DB. Vector DBs have primitive-to-no ACL.
+- **Compliance.** GDPR delete, retention policy, audit trail are mature
+  in Postgres, immature everywhere else.
+- **Index cost.** Payload bloats RAM/SSD, often ~10×.
+
+**The one exception:** the index MUST carry *filter-relevant* metadata —
+`tenant_id`, `doc_type`, `created_at`, permission tags. Without it,
+filtered search is impossible: you would over-fetch and post-filter,
+which silently breaks top-k semantics (ask for 10, get 3, no error).
+
+So the line this plan draws:
+
+> **Vector index stores: vector + id + small filterable metadata.
+> Never document content.**
+
+Consequence: **hydration is unconditional, not optional.** Every RAG
+pipeline has a fetch step against the store of record. This is the
+opposite of how LangChain / LlamaIndex / Haystack model it (they bundle
+a docstore behind `similarity_search() → Document[]`), and the
+divergence is deliberate — in a DAG, hydration deserves its own trace
+span, its own `bound="io"`, and its own `.parallel()`. In most RAG
+pipelines hydration costs more wall-clock than the vector search, and
+today that cost is invisible.
+
+### 5.2 · Op signature
 
 ```python
 # operonx/providers/ops/vector_search.py
 class VectorSearchOp(BaseOp):
-    """Vector similarity search. query vector → top-K docs.
+    """Vector similarity search over a derived index.
 
-    Core contract stable across all backends. Optional capabilities
-    (filter dialect, namespace, distance metric override) are per-backend
-    and default to backend-native behavior.
+    Returns ids + scores + filterable metadata. Does NOT return document
+    content — see §5.1. Hydrate from your store of record in a separate
+    op.
     """
 
     type: OpType = "vector-search"
 
     inputs = {
-        "query_vector": Param(type=list, required=True),           # list[float]
+        "query_vector": Param(type=list, required=True),                 # list[float]
         "top_k":        Param(type=int,  required=False, default=10),
-        "filter":       Param(type=dict, required=False, default=None),  # backend-native metadata filter
-        "namespace":    Param(type=str,  required=False, default=None),
+        # Backend-NATIVE filter. dict for most backends; str for Milvus
+        # (boolean-expression dialect). See §5.4.
+        "filter":       Param(type=(dict, str), required=False, default=None),
+        "collection":   Param(type=str,  required=False, default=None),  # collection / table / index
     }
     outputs = {
-        "docs":   Param(type=list),   # list[dict] — id + content + metadata
-        "scores": Param(type=list),   # list[float] — similarity per doc
+        "ids":      Param(type=list),   # list[str|int] — score-ordered
+        "scores":   Param(type=list),   # list[float]
+        "metadata": Param(type=list),   # list[dict] — filterable fields ONLY, never content
     }
 ```
 
-**Backends day-one:** Qdrant (HTTP client), FAISS (in-memory reference).
-**Backends soon:** pgvector, Milvus, Chroma — via user PR following the
-`embeddings/factory.py` pattern.
+All three outputs are **index-aligned** — `ids[i]`, `scores[i]`,
+`metadata[i]` describe the same hit.
 
-**Composes with the existing text stack:**
+**No `payloads` output.** Earlier drafts had one; it was removed
+because the name invites exactly the mistake §5.1 forbids. One contract,
+no backend-conditional behavior — even backends that *could* return
+content don't.
+
+### 5.3 · Canonical RAG pipeline (two stores, explicit)
 
 ```python
+@op(bound="io")
+async def fetch_docs(ids: list):
+    """Hydrate from the store of record — user code, ~10 LOC.
+    NOTE: SQL returns rows in arbitrary order; restore score order."""
+    rows = await db.fetch("SELECT id, content FROM docs WHERE id = ANY($1)", ids)
+    return {"rows": reorder_by_ids(rows, ids)}
+
 @graph
-def rag(query):
+def rag(query, tenant):
     q_emb  = EmbeddingOp(resource="bge-m3", texts=[query])
-    hits   = VectorSearchOp(resource="qdrant:docs",
-                             query_vector=q_emb["embeddings"][0], top_k=5)
-    ranked = RerankOp(resource="bge-m3-reranker",
-                       docs=hits["docs"], query=query)
+    hits   = VectorSearchOp(
+        resource="pgvector:docs",
+        query_vector=q_emb["embeddings"][0],
+        top_k=20,
+        filter={"tenant": tenant},          # matched against indexed metadata
+    )
+    docs   = fetch_docs(ids=hits["ids"])    # ← the store of record
+    ranked = RerankOp(resource="bge-m3-reranker", docs=docs["rows"], query=query)
     llm    = LLMOp.of(resource="claude-haiku",
-                       prompt="Context: {ctx}\n\nQ: {q}",
-                       ctx=ranked["docs"], q=query)
-    START >> q_emb >> hits >> ranked >> llm >> END
+                      prompt="Context: {ctx}\n\nQ: {q}",
+                      ctx=ranked["docs"], q=query)
+    START >> q_emb >> hits >> docs >> ranked >> llm >> END
 ```
+
+**The ordering footgun.** `VectorSearchOp` returns ids in score order.
+`SELECT … WHERE id = ANY(...)` returns rows in arbitrary order. Zipping
+them naively mismatches every doc to the wrong score — silently. Ship a
+pure helper users can reach for:
+
+```python
+from operonx.providers.vector_stores import reorder_by_ids
+```
+
+Five lines, not an op. Used in the shipped example so the pattern is
+visible.
+
+**We do NOT ship a `DocFetchOp`.** Stores of record are too
+heterogeneous (Postgres / Mongo / MySQL / DynamoDB / S3 / Elasticsearch)
+— the same argument that rejected `ClassifierOp` in §3. Users' fetch is
+~10 LOC against a client they already hold.
+
+### 5.4 · Filters are backend-native (no DSL)
+
+`filter=` takes the backend's own dialect, untranslated. A portable
+filter DSL was considered and rejected:
+
+- **It leaks.** Qdrant has geo-radius / nested / `has_id`; pgvector has
+  all of SQL; Milvus has `json_contains`. A DSL either can't express
+  these or grows forever chasing them — and needs a `filter_native=`
+  escape hatch anyway, giving two ways to filter.
+- **Translation bugs are silent and dangerous.** A filter that fails to
+  apply doesn't error — it returns *more* rows than it should. In a
+  multi-tenant system that is a data leak found in production, not a
+  test failure.
+- **The portability win mostly evaporates on inspection.** Backend
+  migration is rare. Dev/prod parity doesn't need it (pgvector-docker →
+  pgvector-prod is the same dialect). Swapping to FAISS for tests
+  doesn't need it (FAISS has no filtering at all).
+
+Same logical query — `tenant = "acme" AND created_at >= 1700000000 AND
+doc_type IN (faq, manual)` — in each backend's native form:
+
+**Qdrant** — condition-tree dict:
+
+```python
+filter={"must": [
+    {"key": "tenant",     "match": {"value": "acme"}},
+    {"key": "created_at", "range": {"gte": 1700000000}},
+    {"key": "doc_type",   "match": {"any": ["faq", "manual"]}},
+]}
+```
+
+Full vocabulary passes through: `must`/`should`/`must_not`;
+`match.value|any|except|text`; `range`; `is_empty`, `is_null`,
+`has_id`; `geo_radius`, `geo_bounding_box`; `nested`.
+
+**pgvector** — SQL fragment + bound params (never interpolated, so no
+injection path):
+
+```python
+filter={
+    "where":  "tenant = %(tenant)s AND created_at >= %(since)s AND doc_type = ANY(%(types)s)",
+    "params": {"tenant": "acme", "since": 1700000000, "types": ["faq", "manual"]},
+}
+```
+
+Plus equality sugar for the common case, disambiguated by the absence
+of a `where` key:
+
+```python
+filter={"tenant": "acme"}       # → WHERE tenant = %(tenant)s
+```
+
+**Milvus** — boolean-expression **string**, not a dict (this is why the
+`filter` Param accepts `(dict, str)`):
+
+```python
+filter='tenant == "acme" && created_at >= 1700000000 && doc_type in ["faq","manual"]'
+```
+
+**Chroma** — Mongo-flavored dict:
+
+```python
+filter={"$and": [
+    {"tenant":     {"$eq":  "acme"}},
+    {"created_at": {"$gte": 1700000000}},
+    {"doc_type":   {"$in":  ["faq", "manual"]}},
+]}
+```
+
+**FAISS** — no filtering; anything but `None` raises:
+
+```
+ValueError: FAISS does not support metadata filtering. Its index holds
+vectors only. Use pgvector or Qdrant for filtered search, or
+pre-partition into separate FAISS indices and select via collection=.
+```
+
+Deliberately **no Python post-filtering fallback** — over-fetch-then-filter
+silently breaks top-k, and a silent wrong-result is worse than a refusal.
+
+**Every backend validates its own dialect shape and raises on anything
+unrecognized.** A filter that quietly fails to apply is a tenant-isolation
+leak; it must never degrade to "no filter".
+
+The docs cost of choosing native over a DSL is one page:
+`providers/vector_stores/README.md` carries exactly this table so the
+native syntax is one click away rather than a trip to vendor docs.
+
+### 5.5 · Backends
+
+No LangChain, anywhere — every backend talks to the vendor's own client,
+exactly as `providers/llms/` uses `anthropic` / `openai` directly.
+
+| Backend | Ship | Client (official) | Extra | Async | `bound` |
+|---|---|---|---|---|---|
+| **FAISS** | **day one** | `faiss-cpu` (Meta) | `operonx[faiss]` | No — sync C++ | `cpu` |
+| **pgvector** | **day one** | `psycopg[binary]` + pgvector ext | `operonx[pgvector]` | Yes — `AsyncConnection` | `io` |
+| **Qdrant** | fast-follow | `qdrant-client` | `operonx[qdrant]` | Yes — `AsyncQdrantClient` | `io` |
+| Milvus | later | `pymilvus` | `operonx[milvus]` | Yes — `AsyncMilvusClient` | `io` |
+| Chroma | later | `chromadb` | `operonx[chroma]` | Yes — `AsyncHttpClient` | `io` |
+| Weaviate | later | `weaviate-client` | — | Yes | `io` |
+| MongoDB | probably never | — | — | — | — |
+
+**Why FAISS + pgvector day one** (this ordering follows from §5.1):
+
+- **pgvector** is the cleanest expression of the two-store rule. Your
+  docs are already in Postgres; the vector table
+  (`id, embedding, tenant_id`) sits beside the doc table; hydration is a
+  `WHERE id = ANY(...)` against the *same database*. One system,
+  transactional consistency, zero dual-write risk. Filtering is just SQL.
+- **FAISS** needs no server, so CI runs without docker — and being
+  vector-only by nature, it *proves* the ids-only contract instead of
+  letting us quietly lean on payload.
+- **Qdrant** is the right answer once you outgrow Postgres, but its
+  headline feature (payload storage) is one §5.1 tells you not to use,
+  so it loses its day-one claim.
+- **MongoDB** vector search is Atlas-only (managed cloud); no
+  self-hosted equivalent. Narrow audience.
+
+### 5.6 · Backend ABC
+
+```python
+class BaseVectorStore(ABC):
+    """Backend contract. `bound` is declared per-backend because FAISS is
+    CPU-bound (local index) while every network-backed store is I/O-bound;
+    VectorSearchOp reads it at init to pick the right thread pool."""
+
+    bound: str = "io"        # FAISS overrides to "cpu"
+
+    @abstractmethod
+    async def search(self, query_vector, top_k, filter=None, collection=None) -> tuple[list, list, list]:
+        """→ (ids, scores, metadata), index-aligned, score-ordered."""
+
+    @abstractmethod
+    async def upsert(self, ids, vectors, metadata=None, collection=None) -> None:
+        """Write path. Declared now, wired to an op later — see §5.7."""
+```
+
+### 5.7 · Write path deferred (but designed for)
+
+Vector search implies vector insert. Indexing is usually an offline
+batch job, but the agent plan's memory subsystem will want on-the-fly
+writes (store this turn's embedding).
+
+**Decision:** put `upsert()` on the ABC now, ship only `VectorSearchOp`.
+Add `VectorUpsertOp` when agent-memory concretely needs it — no rework,
+because the backend contract is already right. Consistent with the
+"no speculation" discipline in §3.
 
 ---
 
@@ -319,7 +540,9 @@ operonx/providers/
 ├── llms/          (unchanged)
 ├── embeddings/    (unchanged)
 ├── rerankers/     (unchanged)
-├── vector_stores/ {qdrant, faiss}.py + base, config, factory       ← NEW
+├── vector_stores/ {faiss, pgvector}.py day-one · {qdrant}.py fast-follow
+│                  + base.py (ABC w/ `bound` attr), config.py, factory.py,
+│                  _reorder.py (reorder_by_ids), README.md (filter dialects)  ← NEW
 ├── triton/        client.py, decode.py, dtypes.py                  ← NEW (low-level helper for user @ops)
 ├── onnx/          backend.py, config.py, factory.py                (unchanged — used by embeddings/onnx.py, rerankers/onnx.py, and user @ops)
 ├── ops/
@@ -374,15 +597,16 @@ directly).
 
 ### operonx 1.1.0 — additive
 
-- Ship `VectorSearchOp` + `providers/vector_stores/` package (base +
-  config + factory + Qdrant + FAISS backends).
-- Ship `providers/triton/{client,decode,dtypes}.py` — extract from
-  today's `providers/ops/triton.py`:
-  - `client.py` — `get_triton_client(url)` with module-global cache
-    (inherit `_triton_clients` verbatim); numpy→Triton dtype conversion.
-  - `decode.py` — bytes/str output decoding + len==1 scalar flattening
-    (extracted from `triton.py:266-284`).
-  - `dtypes.py` — `_DTYPE_MAP` + coercion helpers.
+- Ship `VectorSearchOp` + `providers/vector_stores/` package — `base.py`
+  (ABC with `bound` attr + `search()`/`upsert()`), `config.py`,
+  `factory.py`, `_reorder.py`, and the **FAISS + pgvector** backends.
+  Qdrant follows right after (not blocking).
+- ✅ **Shipped (PR #20)** `providers/triton/{client,decode,dtypes}.py`,
+  extracted from `providers/ops/triton.py`:
+  - `client.py` — `TritonClient.get(url)`, process-cached so the gRPC
+    channel is reused; dict-in/dict-out `infer()`.
+  - `decode.py` — bytes/str output decoding + single-element collapse.
+  - `dtypes.py` — `DTYPE_MAP` + numpy coercion helpers.
 - `OnnxOp` and `TritonOp` **remain functional** but emit a
   `DeprecationWarning` on `__init__`:
 
@@ -428,22 +652,29 @@ Small refactor. Additive work is parallelizable; deprecation + delete
 are marker commits.
 
 ```
-Week 1  P0 · P1        providers/triton/ helper + VectorSearchOp + 2 backends
-Week 1       P2        Deprecation warnings on OnnxOp/TritonOp
+        P0   ✅ providers/triton/ helper                      (PR #20, merged)
+Week 1  P1a     vector_stores ABC + factory + FAISS + the op
+Week 1  P1b     pgvector backend (+ docker-compose CI)
+Week 2  P1c     two-store RAG example + docs
+Week 2  P2      Deprecation warnings on OnnxOp/TritonOp
                                                   ← Ship 1.1.0
 
-Later       P3        Delete OnnxOp/TritonOp + OpType cleanup
+Later   P3      Delete OnnxOp/TritonOp + OpType cleanup
                                                   ← Ship 2.0.0
+Later           Qdrant backend                    (not blocking)
 ```
 
-| # | Phase | Deliverable | Size |
-|---|---|---|---|
-| **P0** | Scaffolding | `providers/triton/{client,decode,dtypes}.py` (extracted from `providers/ops/triton.py`, preserving `_triton_clients` module-global cache). Empty `providers/vector_stores/{base,config,factory}.py` skeleton. | 1d |
-| **P1** | VectorSearch | Op class (`providers/ops/vector_search.py`) + 2 backends (Qdrant HTTP client, FAISS in-memory). Tests + docs + a RAG example (`ex16_rag_pipeline`) composing EmbeddingOp → VectorSearchOp → RerankOp → LLMOp. | 2–3d |
-| **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d |
-| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d |
+| # | Phase | Deliverable | Size | State |
+|---|---|---|---|---|
+| **P0** | Triton helper | `providers/triton/{client,decode,dtypes}.py` extracted from `providers/ops/triton.py`, preserving the module-global client cache. `TritonOp._process` 120 → 19 lines. 40 tests. | 1d | ✅ merged (PR #20) |
+| **P1a** | VectorSearch core | `providers/vector_stores/{base,config,factory}.py` per §5.6 (incl. `bound` class attr) + `reorder_by_ids` helper + `providers/ops/vector_search.py` + **FAISS** backend (no server → CI without docker; proves the ids-only contract). Unit tests. | 1.5–2d | ⏳ next |
+| **P1b** | pgvector backend | `providers/vector_stores/pgvector.py` — async `psycopg`, SQL-fragment filter + equality sugar (§5.4). Integration tests against a docker-compose'd Postgres+pgvector in CI. | 1.5d | ⏳ |
+| **P1c** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → user `fetch_docs` → RerankOp → LLMOp), incl. the `reorder_by_ids` footgun. `docs/guide/08-vector-search.md` + `providers/vector_stores/README.md` with the §5.4 filter table. | 1d | ⏳ |
+| **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d | ⏳ |
+| **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d | ⏳ |
+| **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). Not blocking 1.1.0. | 1d | — |
 
-**1.1.0 total: ~4 days of focused work.** 2.0.0 delta is trivial once
+**1.1.0 remaining: ~4.5 days** (P0 done). 2.0.0 delta is trivial once
 callbot has migrated.
 
 ---
@@ -458,10 +689,25 @@ The refactor is clean but not free.
    Ray Serve) keep a generic invoke op; operonx does not on principle.
 
 2. **Vector store backend coverage will be incomplete on day one.** Two
-   backends (Qdrant + FAISS) is the minimum viable set. Users likely
-   need pgvector, Milvus, Chroma soon. Mitigation: the factory pattern
-   makes adding a backend a small isolated PR. Document the recipe in
+   backends (FAISS + pgvector) is the minimum viable set; Qdrant lands
+   right after. Users may want Milvus / Chroma / Weaviate. Mitigation:
+   the factory pattern makes adding a backend a small isolated PR
+   (~100–150 LOC). Document the recipe in
    `providers/vector_stores/README.md`.
+
+2a. **Native filters mean graphs are backend-coupled.** Swapping
+   pgvector → Qdrant rewrites every `filter=` in every graph. Accepted
+   deliberately (§5.4): a portable DSL leaks, and its silent
+   translation bugs land in a security-relevant path. The escape stays
+   open — `filter=` can learn a DSL later (shapes are unambiguous:
+   `{"$and": …}` vs Qdrant's `{"must": …}`) with native moving to
+   `filter_native=`. Backward compatible.
+
+2b. **Hydration is user code, so its correctness is user-owned.** The
+   ordering footgun (§5.3) is real and silent — `reorder_by_ids` plus
+   the shipped example are the mitigation, but nothing *forces* callers
+   to use them. Considered shipping a `DocFetchOp` to own this;
+   rejected because stores of record are too heterogeneous (§5.3).
 
 3. **Callbot's classifier stays in callbot forever.** `speech/denoise_classifier.py`
    is bespoke and doesn't map onto any framework op. That's honest —
@@ -478,16 +724,27 @@ The refactor is clean but not free.
    `create_reranking()` has no COHERE branch (dead enum entry). Flag
    for follow-up PR; out of scope here.
 
-6. **ADR items open for P1:**
-   - Resource-key convention: `<op>:<name>` (`vector-search:docs`,
-     `triton:stt`)? Recommend yes — matches `EmbeddingType.ONNX = "onnx"`
-     inside factories.
-   - `VectorSearchOp` filter dialect: accept backend-native dict for
-     v1; consider a `Filter(...)` DSL only if users hit backend-lock-in
-     pain.
-   - Optional-deps naming: `operonx[qdrant]` vs `operonx[vector-qdrant]`.
-     Recommend the shorter form (backend name only) — matches
-     `operonx[onnx]` today.
+6. **Decisions now settled (were open in earlier drafts):**
+   - **Two-store model** — index carries vector + id + filterable
+     metadata only; content lives in the store of record; hydration is
+     an explicit user `@op`. §5.1.
+   - **No `payloads` output** — `ids` / `scores` / `metadata`, index-aligned. §5.2.
+   - **Filters are backend-native, no DSL.** §5.4.
+   - **`filter` Param accepts `(dict, str)`** — Milvus's dialect is an
+     expression string. §5.2.
+   - **`collection=`, not `namespace=`** — matches Qdrant/Milvus
+     vocabulary; `namespace` is Pinecone-specific.
+   - **`bound` is a backend class attribute**, not fixed on the op —
+     FAISS is `cpu`, network stores are `io`. §5.6.
+   - **`upsert()` on the ABC now, `VectorUpsertOp` later.** §5.7.
+   - **Day-one backends: FAISS + pgvector**; Qdrant fast-follow. §5.5.
+   - **Optional-deps naming: `operonx[faiss]`, `operonx[pgvector]`,
+     `operonx[qdrant]`** — backend name only, matching `operonx[onnx]`.
+   - **Resource-key convention: `<backend>:<name>`**
+     (`pgvector:docs`, `faiss:docs`, `qdrant:docs`) — matches how
+     `embeddings/factory.py` dispatches on `EmbeddingType`.
+   - **No LangChain dependency**, here or anywhere — every backend uses
+     the vendor's own client, as `providers/llms/` already does. §5.5.
 
 ---
 
@@ -510,42 +767,44 @@ in whichever order lands first.
 
 ## 13 · First concrete step
 
-1. **P0 · ~1 day** — extract `providers/triton/{client,decode,dtypes}.py`
-   from today's `providers/ops/triton.py`. Preserve `_triton_clients`
-   module-global cache verbatim (critical for real-time latency).
-   Scaffold `providers/vector_stores/{base,config,factory}.py`.
+**P0 is done** — `providers/triton/{client,decode,dtypes}.py` landed in
+PR #20 with the module-global client cache preserved and 40 tests.
+`TritonOp._process` is down to 19 lines of name-mapping.
 
-2. **1-page ADR before P1 code** — cover:
-   - `VectorSearchOp` Param shapes (§5 is indicative, not final).
-   - `resource:` string convention — recommend `<op>:<name>` matching
-     `EmbeddingType.ONNX = "onnx"` factory idiom.
-   - `filter` dialect for v1 — backend-native dict, escape hatch to
-     backend-specific behavior. Filter DSL is v2+.
-   - Optional-deps naming — `operonx[qdrant]` (backend name only).
-   - `providers/triton/client.py` cache ownership — module-global
-     `_triton_clients: dict[str, InferenceServerClient]` (inherited
-     from today's `triton.py:49-57`), NOT per-op-instance.
-   - Where the bytes/str output-decoding heuristic lives —
-     `providers/triton/decode.py::decode_infer_output()`, called by
-     user `@op`s explicitly.
-   - **Confirm: no STT / TTS / Classifier / OCR / VAD ops shipping**
-     (§3 table). Future contributors proposing them must present
-     concrete demand + explain why bare `@op` around the low-level
-     helpers is insufficient.
+Design questions that were open before P1 are now settled in §11 item 6
+— no separate ADR needed. Build order for **P1a** (next):
 
-3. **Then P1 — build in this order:**
-   1. `providers/vector_stores/{base,config,factory}.py`
-   2. `providers/vector_stores/faiss.py` — start with FAISS (no
-      network dep, simplest test path)
-   3. `providers/ops/vector_search.py` — `VectorSearchOp` class
-   4. `providers/vector_stores/qdrant.py` — second backend to prove
-      the factory
-   5. Unit tests: FAISS in-memory smoke test; Qdrant against a
-      docker-compose'd instance in CI
-   6. `examples/python/ex16_rag_pipeline/` — full
-      EmbeddingOp → VectorSearchOp → RerankOp → LLMOp composition
-   7. Doc: `docs/guide/08-vector-search.md` +
-      `docs/api/providers.md` update
+1. `providers/vector_stores/base.py` — `BaseVectorStore` ABC per §5.6,
+   with the `bound` class attribute and both `search()` and `upsert()`
+   declared (upsert unwired until §5.7).
+2. `providers/vector_stores/config.py` — `VectorStoreType` enum +
+   `VectorStoreConfig`, mirroring `embeddings/config.py`.
+3. `providers/vector_stores/factory.py` — `create_vector_store(config)`
+   with per-branch lazy imports and `_missing_extra_message`, mirroring
+   `embeddings/factory.py`.
+4. `providers/vector_stores/_reorder.py` — `reorder_by_ids(rows, ids,
+   key="id")`, the §5.3 footgun helper. Pure, ~5 LOC, re-exported from
+   the package root.
+5. `providers/vector_stores/faiss.py` — FAISS backend. `bound = "cpu"`.
+   Raises the §5.4 message on any non-`None` filter.
+6. `providers/ops/vector_search.py` — `VectorSearchOp`, reading `bound`
+   from the resolved backend.
+7. Unit tests — index-alignment of `ids`/`scores`/`metadata`, score
+   ordering, `top_k` honored, `reorder_by_ids` round-trip incl. missing
+   ids, FAISS filter-raises, factory lazy-import error message.
+
+Then **P1b** (pgvector, incl. the SQL-fragment + equality-sugar filter
+shapes and docker-compose'd integration CI), then **P1c** (the
+two-store RAG example + `providers/vector_stores/README.md` carrying
+the §5.4 filter table).
+
+Ordering rationale: FAISS first because it needs no server (fast unit
+tests, no docker in CI) and because being vector-only it *proves* the
+ids-only contract from §5.2 rather than letting us lean on payload.
+
+Docs land with P1c: `docs/guide/08-vector-search.md`,
+`providers/vector_stores/README.md` (the §5.4 filter table + the
+add-a-backend recipe), and a `docs/api/providers.md` update.
 
 Everything after P1 is P2 (deprecation warnings) + P3 (2.0.0 cleanup).
 
