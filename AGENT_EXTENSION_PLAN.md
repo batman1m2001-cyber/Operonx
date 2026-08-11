@@ -730,19 +730,30 @@ Later                       P5 Learning-loop pattern doc (defer)
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
 | **0** ✅ | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
-| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) | 3–4d |
-| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); `compact_messages` op + gate; prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore) | 3–5d |
-| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 3–4d |
+| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) — **plus §14.3 rows 1–6**: tool-error→tool-message, unknown-tool handling, history invariant, concurrent-HITL gate, repeat cap, state injection, and the `wrap_*` closure fold (§14.2) | 5–7d |
+| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
+| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
 | **4** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
 | **5** | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
 
-**Estimate**: **P0–P3 in ~2 weeks**, P4 in another week. Down from v1's 3–4
-weeks. Not because we cut scope — because 1.0.0 shipped the substrate
-(reducers, back-edges, checkpointer, HITL, structured LLMOp) v1 had to build.
+**Estimate**: **P0–P3 in ~3 weeks**, P4 in another week.
+
+Revised upward from ~2 weeks after the §14 audit. The loop estimate was
+right; the tool-execution and context-lifecycle estimates were not.
+LangChain spends ~9,400 LOC on middleware against ~2,000 on the loop, and
+this plan had the ratio inverted. We still come out far below both
+references — 1.0.0 shipped the substrate (reducers, back-edges,
+checkpointer, HITL, structured LLMOp) that v1 and langgraph both had to
+build — but "the agent is just a loop" was the wrong lesson to draw from
+that.
 
 ---
 
 ## 10 · Honest gaps (v1 gap #7 resolved; new gaps identified)
+
+> **See also §14** — a cross-implementation audit against hermes-agent,
+> langgraph and langchain (11 Aug 2026) found nine further gaps, six of
+> which belong in P1. The list below predates it.
 
 The op-native form is elegant but not lossless. Six real gaps remain.
 
@@ -837,6 +848,23 @@ Every PR adding a `core` primitive must justify why rungs 1–5 don't work.
      at `get_tool_definitions()` build time).
    - **New in v2:** HITL harness contract (what CLI/HTTP callers must do
      to respond to `InterruptEvent`).
+   - **New (§14):** where the `wrap_*` closure fold lives, and why it is
+     not a graph feature.
+   - **New (§14):** the tool-failure contract — every failure mode
+     (raise, timeout, cancel, unknown name, denial) produces a tool
+     message, so the history invariant holds and the model can recover.
+   - **New (§14):** how concurrent `InterruptOp`s are serialised under
+     `.parallel()` fan-out.
+   - **New (§14.5):** in-tree `operonx/agents/` vs a sibling package —
+     answer it, don't assume it. LangGraph reversed this exact call.
+
+   Two things to **verify before writing `dispatch.py`**, because both
+   change its shape:
+   - Can two branch arms converge on a single node, or does each arm need
+     its own instance (as §7.2 currently assumes)? Nothing in
+     `tests/internal/core/ops/flow/` establishes this.
+   - Does an `InterruptOp` inside a `.parallel()` fan-out suspend only its
+     own arm, or the whole pump?
 
 3. **Then P1 — build in this order:**
    1. `@tool` + `TOOL_REGISTRY` (`operonx/agents/tool.py`)
@@ -850,11 +878,135 @@ Everything after P1 compounds on these six.
 
 ---
 
+## 14 · Cross-implementation audit (11 Aug 2026)
+
+Read `NousResearch/hermes-agent`, `langchain-ai/langgraph` and
+`langchain-ai/langchain` at HEAD and measured them against this plan.
+Two conclusions: **the skeleton is confirmed correct**, and **the plan
+mistakes the loop for the work**.
+
+### 14.1 · Sizes
+
+| Codebase | Agent layer | Shape |
+|---|---|---|
+| `langgraph/libs/prebuilt` | **3,676 LOC** | `tool_node.py` 2,030 · `chat_agent_executor.py` 1,015 |
+| `langchain/libs/langchain_v1/langchain/agents` | **13,702 LOC** | `middleware/` ~9,400 · `factory.py` 2,062 |
+| `hermes-agent/agent` | **136,329 LOC** (~140 modules) | `conversation_loop.py` 7,757 · `run_agent.py` 8,303 |
+
+Our estimate (~13 files, most <200 LOC) is the right order of magnitude
+against langgraph's prebuilt layer. Hermes is a hosted product, not a
+framework — ~45 of its modules are provider adapters, credential pools
+and billing views that `ResourceHub` + `LLMOp` already own or that are
+correctly out of scope.
+
+**Hermes is not a structural teacher.** `run_conversation` is a single
+**6,335-line function** — zero nested defs, 35 loops, 46 `try` blocks,
+and the module exports exactly one symbol. `AIAgent` carries **260
+methods**. §11's "biggest reject" is empirically confirmed. Its value
+here is as a *checklist of concerns*, and those live in its small
+modules, never in the loop.
+
+### 14.2 · The one structural hole — `wrap_*` has nowhere to live
+
+LangChain v1 exposes six middleware hooks, and they compile in two
+fundamentally different ways:
+
+| Hook | Compiles to | We have it? |
+|---|---|---|
+| `before_agent` · `before_model` · `after_model` · `after_agent` | A real graph node — `graph.add_node(f"{m.name}.before_model", …)` | **Yes, free.** That is just an op in the graph |
+| `wrap_model_call` · `wrap_tool_call` | A **Python closure chain folded inside one node** — `_chain_model_call_handlers` / `_chain_tool_call_wrappers`, composed right-to-left by `compose_two` | **No. Nothing in this plan corresponds to it** |
+
+The compiled LangChain agent graph is `model` + `tools` plus one node per
+state-hook middleware. The wrappers are invisible to the graph.
+
+They must be. A `wrap_*` handler receives a `handler` continuation it may
+call **zero times** (cache hit, short-circuit), **once** (passthrough), or
+**N times** (retry with a modified request):
+
+```python
+def wrap_tool_call(self, request, handler):
+    for attempt in range(3):
+        result = handler(request)           # same step, re-invoked
+        if result.status != "error":
+            return result
+    return result
+```
+
+**A DAG edge cannot express that.** Back-edge loops give us *iteration*
+across turns; they do not give *re-invocation with modified input inside
+a single step*. Retry-around-a-call, response caching, and short-circuit
+are all this shape.
+
+**Resolution — rung 1, not core.** Compose wrappers as a plain Python
+fold inside `exec_tool` and the LLM-call op. No operonx change, no new
+primitive, no graph feature. This is precisely what LangChain does, and
+it is the same conclusion the Footprint Ladder reaches independently:
+start at rung 1 and climb only when it provably fails. It does not fail
+here.
+
+Design note for P1: the fold belongs in `operonx/agents/graphs/dispatch.py`
+as a `wrappers: list[Callable]` parameter threaded to `exec_tool`, not as
+an `@op` argument — wrappers are control flow, and control flow that the
+tracer sees as data flow produces spans that lie about what ran.
+
+### 14.3 · Gaps confirmed by an independent implementation
+
+Every gap found by reading `ToolNode` also has a shipped LangChain
+middleware behind it. These are not speculation.
+
+| Missing from this plan | Their implementation | Consequence if skipped |
+|---|---|---|
+| **Tool errors must become tool messages** | `tool_error.py` + `tool_retry.py` (612 LOC); langgraph `handle_tool_errors` | `exec_tool` has no error path. **The first tool that raises kills the run and the model never learns.** Highest-severity item in P1 |
+| **Unknown tool name** | `_validate_tool_call` → `ToolMessage(status="error")` listing valid names | `TOOL_REGISTRY[name]` raises `KeyError` in both `parse_call` and `exec_tool` |
+| **Every `tool_call` needs a matching tool message** | `_validate_chat_history` | Most providers 400 on an unmatched call. `blocked_result` covers denial; crash, timeout and cancel are uncovered |
+| **Concurrent HITL** | `human_in_the_loop.py` (500 LOC); hermes `_ConcurrentToolAuthorizationGate` | §7.2 fans out `.parallel(max=10)` and each arm can raise its own `InterruptOp` — **ten simultaneous approval prompts** |
+| **Repeat / loop cap** | `tool_call_limit.py` (495); hermes `ToolCallSignature` + `LoopCapConfig` | Model calls the same tool with identical args forever, inside `max_iterations` |
+| **State injection into tools** | `InjectedState` / `InjectedStore` / `ToolRuntime` | A tool needing session context has no channel that isn't also in the LLM schema |
+| **Iteration budget** | `model_call_limit.py` (267) | Already logged as gap #6 in §10 |
+| **Redaction / PII** | `pii.py` + `_redaction.py` (1,332) | Nothing in this plan. Tool output flows to the model and the tracer unfiltered |
+| **Context compaction depth** | `summarization.py` + `context_editing.py` (1,208); hermes `context_compressor.py` (7,386) | P2 budgets one `compact_messages` op for what two teams treat as a subsystem |
+
+### 14.4 · What changes in the plan
+
+1. **Fold rows 1–6 of §14.3 into P1.** They are not polish. Without the
+   first three, the first tool exception ends the run — the most common
+   thing that happens to a real agent.
+2. **Resolve the branch-convergence question before writing
+   `dispatch.py`.** §7.2 instantiates `exec_tool` and `collect_result`
+   twice, once per branch arm, because it is not established that two
+   arms can converge on one node. No test in
+   `tests/internal/core/ops/flow/` covers it. If they cannot converge,
+   the dispatch subgraph's shape changes and the duplication grows with
+   every branch.
+3. **P2 grows.** Compaction is a subsystem, not an op.
+4. **Add redaction to P3**, next to the permission policy modes — it is
+   the same trust boundary.
+5. **Leave the loop alone.** Both implementations confirm §5 and §7.3.
+   The ReAct loop really is ~35 lines on our primitives; the reason
+   theirs are bigger is scaffolding we genuinely do not need.
+
+### 14.5 · One decision worth revisiting
+
+`create_react_agent` is **deprecated in langgraph v1.0** and moved to
+`langchain.agents`, along with `HumanInterrupt` and `ActionRequest`. The
+team that shipped this at scale concluded the agent layer does not belong
+in the graph-runtime package.
+
+This plan puts `operonx/agents/` in-tree. That is not obviously wrong —
+we have no equivalent of the langchain/langgraph split, and P4's
+`operonx-code` harness is already out of tree. But it is a reversal by
+the closest prior art, and worth an explicit answer in the P1 ADR rather
+than an assumption.
+
+---
+
 ## Sources studied
 
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — heartbeat scheduler, SKILL.md frontmatter, serialized session lane
-- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — deep-inspected across core loop, memory, tools, subagents, learning loop (see v1 for full evidence trail)
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — deep-inspected across core loop, memory, tools, subagents, learning loop (see v1 for full evidence trail); re-measured 11 Aug 2026 (§14)
 - [opencode-ai/opencode](https://github.com/opencode-ai/opencode) — canonical tool set, persistent shell, read-before-edit invariant
+- [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) — `libs/prebuilt`: `ToolNode` error handling, tool-call validation, state injection, `tools_condition` (§14)
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain) — `libs/langchain_v1/langchain/agents`: the middleware stack, and the `wrap_*`-as-closure-chain finding that §14.2 turns on
 - [BA-CalderonMorales/agent-harness](https://github.com/BA-CalderonMorales/agent-harness) — auto-compaction with headroom, layered permission rules, capability flags
 - [huggingface/smolagents](https://github.com/huggingface/smolagents) — prompts-as-YAML
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — `add_messages` reducer semantics (RemoveMessage + REMOVE_ALL_MESSAGES sentinels are LangGraph-compatible in operonx 1.0.0), stream modes taxonomy
