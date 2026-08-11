@@ -552,6 +552,55 @@ service, and the cleanest expression of the two-store model (one
 database, two tables, no dual-write risk). Other backends land on
 demand, each ~80–120 LOC behind the same factory pattern.
 
+### 5.9 · No pre-composed `retriever()` graph (considered, rejected)
+
+Since §5.3 documents `VectorSearchOp → DocFetchOp → RerankOp` as *the*
+canonical shape, the obvious next step is to ship it as a `@graph`
+factory so callers write one node instead of three. We're not doing
+that. The composition ships as an **example**, not as API.
+
+**Because retrieval isn't stable enough to freeze.** Roughly half of
+real pipelines don't fit the fixed shape:
+
+| Variant | Common? | Fits `search → fetch → rerank`? |
+|---|---|---|
+| No rerank (latency / cost) | Very | No |
+| Hybrid: vector + BM25 → fusion | Increasingly standard | No |
+| Multi-query (HyDE, expansion) → parallel search → dedupe | Common where quality matters | No |
+| Multi-index (search N collections, merge) | Common in multi-tenant | No |
+| Parent-document (search chunks, fetch parents) | Common | Partially — fetch key ≠ search id |
+| Sentence-window (search sentence, fetch neighbours) | Common | No |
+| Plain search → fetch → rerank | Most common single shape | Yes |
+
+That's "most common variant", not "stable core" — the same distinction
+that decided §2b.
+
+**And the parameters explode.** Covering even a few variants needs
+`vector_resource`, `doc_resource`, `rerank_resource`, `search_top_k`,
+`rerank_top_k`, `rerank=True|False`, `filter`, `collection`, `fields`,
+`id_field` — ~10 before hybrid or multi-query, at which point the call
+is longer than the three nodes it replaced. That is the god-init this
+whole plan exists to avoid.
+
+**Why `build_react_agent` earns a factory and this doesn't.** The agent
+plan *does* ship composed graphs, so the objection isn't "no composed
+graphs" — it's stability. A ReAct loop (`llm → tools → llm → …`) is
+~95% invariant across agent implementations, and the scaffolding it
+hides (back-edge, reducers, shared cells) is genuinely fiddly. Retrieval
+is ~50% invariant and the thing being hidden is three lines of ordinary
+wiring.
+
+**What ships instead:** the composition lives in
+`examples/python/ex16_rag_pipeline/` (P1d) and as a copy-pasteable block
+in `docs/guide/08-vector-search.md`. A recipe adapts to hybrid /
+multi-query / no-rerank by editing; a signature has to be fought.
+
+**When to revisit:** if one specific composed shape proves both stable
+*and* painful. The likeliest candidate is **hybrid retrieval** — vector
++ BM25 + reciprocal-rank fusion — where the fusion math is fiddly and
+invariant. That would be `build_hybrid_retriever(...)` as a factory, on
+concrete demand. Never the generic `retriever()` umbrella.
+
 ---
 
 ## 6 · Callbot migration in detail
@@ -862,6 +911,9 @@ The refactor is clean but not free.
      `missing` ids** rather than silently shortening `rows`. §5.8.
    - **`DocFetchOp` boundary: fetch-by-ids + projection only.** No
      joins, writes, transactions, custom SQL, or query-in-YAML. §5.8.
+   - **No pre-composed `retriever()` graph.** The canonical composition
+     ships as an example, not API — retrieval is ~50% invariant, so
+     freezing it means a god-init. §5.9.
    - **Optional-deps naming: `operonx[faiss]`, `operonx[pgvector]`,
      `operonx[qdrant]`, `operonx[postgres]`** — backend name only,
      matching `operonx[onnx]`.
