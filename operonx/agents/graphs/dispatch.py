@@ -38,6 +38,7 @@ import json
 from typing import Any, Dict, Optional
 
 from operonx.agents.policy import DEFAULT_POLICY, DENY_MESSAGE, ToolPolicy
+from operonx.agents.redact import Redactor
 from operonx.agents.tool import TOOL_REGISTRY
 from operonx.core.ops.base import END, START
 from operonx.core.ops.flow.branch_op import if_
@@ -228,6 +229,7 @@ async def execute(
     decision: Optional[dict] = None,
     max_result_chars: int = 100_000,
     timeout: Optional[float] = None,
+    redactor: Any = None,
 ) -> dict:
     """Run one tool call and return exactly one tool message.
 
@@ -268,10 +270,21 @@ async def execute(
         content = _EXEC_ERROR.format(name=tool_name, error=f"{type(exc).__name__}: {exc}")
         return {"tool_message": _tool_message(call_id, tool_name, content, is_error=True)}
 
-    return {"tool_message": _tool_message(call_id, tool_name, _stringify(raw, max_result_chars))}
+    content = _stringify(raw, max_result_chars)
+    # Redact before the content reaches either the model or the tracer.
+    # A tool that reads .env or prints a stack trace with a connection
+    # string otherwise puts a live credential in both.
+    if redactor is not None:
+        content = redactor.scrub(content)
+    return {"tool_message": _tool_message(call_id, tool_name, content)}
 
 
-def build_dispatch(*, approval_timeout: float = 300.0, policy: Optional[ToolPolicy] = None):
+def build_dispatch(
+    *,
+    approval_timeout: float = 300.0,
+    policy: Optional[ToolPolicy] = None,
+    redactor: Optional[Redactor] = None,
+):
     """Return the per-call dispatch subgraph.
 
     Args:
@@ -282,6 +295,11 @@ def build_dispatch(*, approval_timeout: float = 300.0, policy: Optional[ToolPoli
         policy: Which tools may run, ask, or are refused outright.
             Defaults to :data:`~operonx.agents.policy.DEFAULT_POLICY` —
             destructive tools ask, everything else runs.
+        redactor: Strips credential-shaped strings from tool output
+            before it reaches the model or the tracer. ``None`` disables
+            it — opt-in, because over-redaction produces an agent that
+            cannot read its own project and is harder to diagnose than a
+            leak.
     """
 
     @graph
@@ -317,6 +335,7 @@ def build_dispatch(*, approval_timeout: float = 300.0, policy: Optional[ToolPoli
             decision=PARENT["decision"],
             max_result_chars=parsed["max_result_chars"],
             timeout=parsed["timeout"],
+            redactor=redactor,
         )
 
         START >> parsed

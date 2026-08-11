@@ -34,6 +34,7 @@ from operonx.agents.ops.prompt_ops import (
     build_system_prompt,
 )
 from operonx.agents.policy import ToolPolicy
+from operonx.agents.redact import Redactor
 from operonx.agents.session import AgentSession
 from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
 
@@ -43,6 +44,7 @@ __all__ = [
     "TOOL_REGISTRY",
     "get_tool_definitions",
     "ToolPolicy",
+    "Redactor",
     "MemoryProvider",
     "MemoryEntry",
     "LocalMarkdownMemory",

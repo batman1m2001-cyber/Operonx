@@ -29,6 +29,7 @@ from typing import Any, Callable, Optional
 
 from operonx.agents.graphs.dispatch import build_dispatch
 from operonx.agents.policy import ToolPolicy
+from operonx.agents.redact import Redactor
 from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
@@ -82,6 +83,7 @@ def build_react_agent(
     max_turns: int = 25,
     approval_timeout: float = 300.0,
     policy: Optional[ToolPolicy] = None,
+    redactor: Optional[Redactor] = None,
     budget_notice: str = BUDGET_EXHAUSTED,
 ):
     """Build the ReAct agent graph.
@@ -102,6 +104,9 @@ def build_react_agent(
         policy: Which tools may run, ask, or are refused outright. See
             :class:`~operonx.agents.policy.ToolPolicy`. Defaults to
             destructive-asks, everything-else-runs.
+        redactor: Strips credential-shaped strings from tool output
+            before the model or the tracer sees it. See
+            :class:`~operonx.agents.redact.Redactor`.
         budget_notice: Message appended when the budget runs out. Must
             tell the model to answer now — an empty or vague notice
             produces another tool call it is not allowed to make.
@@ -112,7 +117,9 @@ def build_react_agent(
     if max_turns < 1:
         raise ValueError(f"max_turns must be >= 1, got {max_turns}. One turn is one model call.")
 
-    dispatch_one = build_dispatch(approval_timeout=approval_timeout, policy=policy)
+    dispatch_one = build_dispatch(
+        approval_timeout=approval_timeout, policy=policy, redactor=redactor
+    )
 
     @op
     def count_turn(turns: int = 0) -> dict:
