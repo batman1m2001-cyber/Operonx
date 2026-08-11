@@ -1,5 +1,6 @@
 """OnnxOp — run arbitrary ONNX models (classifiers, transformers) via ResourceHub."""
 
+import warnings
 from typing import Any, Dict, List, Optional
 
 from operonx.core.configs import OpType
@@ -41,6 +42,20 @@ class OnnxOp(BaseOp):
         outputs: Dict[str, Any] = None,
         **kwargs: Any,
     ):
+        warnings.warn(
+            "OnnxOp is deprecated and will be removed in operonx 2.0.0. It names its "
+            "runtime rather than a semantic, and its shape (a classifier head over "
+            "precomputed embeddings) is too narrow to earn a framework op. Write a "
+            "bare @op around\n"
+            "    operonx.providers._utils.onnx.load_onnx_session(model_dir)\n"
+            "which returns (session, tokenizer, device) from a directory holding "
+            "model.onnx + tokenizer.json. ONNX also remains available as a backend "
+            "for EmbeddingOp and RerankOp via api_type: onnx. See "
+            "OP_TAXONOMY_REFACTOR_PLAN.md section 4.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # ONNX inference is CPU-bound
         kwargs.setdefault("bound", "cpu")
         super().__init__(**kwargs)

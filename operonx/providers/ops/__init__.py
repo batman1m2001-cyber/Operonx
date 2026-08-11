@@ -1,7 +1,8 @@
 """Workflow nodes for AI providers.
 
-Light ops (``LLMOp``, ``EmbeddingOp``, ``RerankOp``, ``OnnxOp``) only resolve
-resources via the hub — no heavy module-level deps. They're imported eagerly.
+Light ops (``LLMOp``, ``EmbeddingOp``, ``RerankOp``, ``OnnxOp``,
+``VectorSearchOp``, ``DocFetchOp``) only resolve resources via the hub — no heavy
+module-level deps. They're imported eagerly.
 
 ``TritonOp`` is lazy-loaded because ``triton.py`` imports numpy at module
 level. Users who don't need Triton don't need numpy.
@@ -11,10 +12,12 @@ Note (1.0.0): the ``ask()`` helper was removed. Its behaviour lives in
 now does inline parsing + error-guided semantic retry in a single node.
 """
 
+from operonx.providers.ops.doc_fetch import DocFetchOp
 from operonx.providers.ops.embedding import EmbeddingOp
 from operonx.providers.ops.llm import LLMOp
 from operonx.providers.ops.onnx import OnnxOp
 from operonx.providers.ops.rerank import RerankOp
+from operonx.providers.ops.vector_search import VectorSearchOp
 
 
 def __getattr__(name: str):
@@ -37,5 +40,7 @@ __all__ = [
     "EmbeddingOp",
     "RerankOp",
     "OnnxOp",
+    "VectorSearchOp",
+    "DocFetchOp",
     "TritonOp",
 ]

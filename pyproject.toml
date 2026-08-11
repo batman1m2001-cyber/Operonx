@@ -81,6 +81,18 @@ huggingface = [
     "torch>=2.0",
     "numpy>=2.2.6",
 ]
+faiss = [
+    "faiss-cpu>=1.8",
+    "numpy>=2.2.6",
+]
+pgvector = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+]
+postgres = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+]
 langfuse = [
     "langfuse>=2.6.0,<3.0.0",
 ]
@@ -114,6 +126,9 @@ all = [
     "boto3>=1.28",
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
+    "faiss-cpu>=1.8",
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
     "langfuse>=2.6.0,<3.0.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",

@@ -15,9 +15,8 @@ Example::
 """
 
 import logging
+import warnings
 from typing import Any, Dict, Optional
-
-import numpy as np
 
 from operonx.core.configs import OpType
 from operonx.core.ops import BaseOp
@@ -25,58 +24,6 @@ from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 
 LOGGER = logging.getLogger(__name__)
-
-# Lazy import tritonclient
-_aio_grpcclient = None
-
-
-def _get_aio_grpcclient():
-    global _aio_grpcclient
-    if _aio_grpcclient is None:
-        try:
-            import tritonclient.grpc.aio as aio_grpc
-
-            _aio_grpcclient = aio_grpc
-        except ImportError:
-            raise ImportError(
-                "tritonclient is required for TritonOp. "
-                "Install with: pip install tritonclient[grpc]"
-            )
-    return _aio_grpcclient
-
-
-# Cache async Triton clients per URL
-_triton_clients: Dict[str, Any] = {}
-
-
-def _get_triton_client(url: str):
-    """Get or create an async Triton gRPC client for a given URL."""
-    if url not in _triton_clients:
-        aio_grpc = _get_aio_grpcclient()
-        _triton_clients[url] = aio_grpc.InferenceServerClient(url=url)
-    return _triton_clients[url]
-
-
-# Numpy dtype → Triton dtype string
-_DTYPE_MAP = {
-    np.float32: "FP32",
-    np.float64: "FP64",
-    np.float16: "FP16",
-    np.int32: "INT32",
-    np.int64: "INT64",
-    np.int16: "INT16",
-    np.int8: "INT8",
-    np.uint8: "UINT8",
-    np.bool_: "BOOL",
-}
-
-
-def _numpy_to_triton_dtype(arr: np.ndarray) -> str:
-    """Map numpy dtype to Triton dtype string."""
-    for np_dtype, triton_str in _DTYPE_MAP.items():
-        if arr.dtype == np_dtype:
-            return triton_str
-    raise ValueError(f"Unsupported numpy dtype: {arr.dtype}")
 
 
 class TritonOp(BaseOp):
@@ -132,6 +79,19 @@ class TritonOp(BaseOp):
                 String: looks up "triton:{resource}" in ResourceHub.
                 Dict: {"url": "...", "model": "...", "model_version": "", "timeout": 30}
         """
+        warnings.warn(
+            "TritonOp is deprecated and will be removed in operonx 2.0.0. It names "
+            "its transport rather than a semantic, so every Triton-hosted model "
+            "needs its own op. Replacements:\n"
+            "  - Vector search: VectorSearchOp(resource=...) with a vector_store resource\n"
+            "  - Anything else: write a bare @op around\n"
+            "      operonx.providers.triton.TritonClient.get(url)\n"
+            "    which reuses the same pooled gRPC client and dtype translation in\n"
+            "    ~15 lines. See OP_TAXONOMY_REFACTOR_PLAN.md section 6.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
@@ -192,7 +152,9 @@ class TritonOp(BaseOp):
 
     def _get_client(self):
         if self._client is None:
-            self._client = _get_triton_client(self.url)
+            from operonx.providers.triton import TritonClient
+
+            self._client = TritonClient.get(self.url)
         return self._client
 
     async def _process(self, **kwargs) -> Dict[str, Any]:
@@ -217,73 +179,24 @@ class TritonOp(BaseOp):
                     f"TritonOp resource '{self.resource}' resolved to invalid config: {config}"
                 )
 
-        aio_grpc = _get_aio_grpcclient()
         client = self._get_client()
 
-        # Build Triton inputs
-        triton_inputs = []
-        for triton_name, op_name in self.inputs_map.items():
-            data = kwargs.get(op_name)
-            if data is None:
-                continue
+        # op var names → Triton tensor names. ``infer`` skips None values,
+        # so optional model inputs left unwired are simply omitted.
+        triton_inputs = {
+            triton_name: kwargs.get(op_name) for triton_name, op_name in self.inputs_map.items()
+        }
 
-            # Convert to numpy if needed
-            if not isinstance(data, np.ndarray):
-                data = np.array(data)
+        result = await client.infer(
+            model=self.model_name,
+            inputs=triton_inputs,
+            outputs=list(self.outputs_map.keys()),
+            model_version=self.model_version,
+            timeout=self.timeout,
+        )
 
-            # Ensure at least 1D
-            if data.ndim == 0:
-                data = data.reshape(1)
-
-            triton_dtype = _numpy_to_triton_dtype(data)
-            inp = aio_grpc.InferInput(triton_name, list(data.shape), triton_dtype)
-            inp.set_data_from_numpy(data)
-            triton_inputs.append(inp)
-
-        # Build Triton outputs
-        triton_outputs = [
-            aio_grpc.InferRequestedOutput(triton_name) for triton_name in self.outputs_map.keys()
-        ]
-
-        # Async inference — enables Triton dynamic batching
-        try:
-            result = await client.infer(
-                model_name=self.model_name,
-                model_version=self.model_version,
-                inputs=triton_inputs,
-                outputs=triton_outputs,
-                client_timeout=self.timeout,
-            )
-        except Exception as e:
-            LOGGER.error("Triton inference failed for model '%s': %s", self.model_name, e)
-            raise
-
-        # Map outputs
-        output = {}
-        for triton_name, op_name in self.outputs_map.items():
-            try:
-                raw = result.as_numpy(triton_name)
-                # Decode bytes/string outputs
-                if raw.dtype.kind in ("S", "U", "O"):
-                    # Byte string or object → decode to str
-                    if raw.ndim == 0:
-                        output[op_name] = (
-                            raw.item().decode("utf-8")
-                            if isinstance(raw.item(), bytes)
-                            else str(raw.item())
-                        )
-                    else:
-                        decoded = [
-                            v.decode("utf-8") if isinstance(v, bytes) else str(v) for v in raw.flat
-                        ]
-                        output[op_name] = decoded[0] if len(decoded) == 1 else decoded
-                else:
-                    output[op_name] = raw
-            except Exception as e:
-                LOGGER.warning("Failed to get output '%s' from Triton: %s", triton_name, e)
-                output[op_name] = None
-
-        return output
+        # Triton tensor names → op var names.
+        return {op_name: result[triton_name] for triton_name, op_name in self.outputs_map.items()}
 
     @shorthand
     def of(cls, resource=None, **kwargs) -> "TritonOp":

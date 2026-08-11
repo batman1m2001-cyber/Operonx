@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-11
+
+Retrieval release: a two-store RAG stack, plus the first step of the op
+taxonomy cleanup. See [OP_TAXONOMY_REFACTOR_PLAN.md](OP_TAXONOMY_REFACTOR_PLAN.md).
+
+### Added — retrieval
+
+- `VectorSearchOp` — vector similarity search returning `ids`, `scores`,
+  and `metadata`, index-aligned and best-match first. Backend-native
+  filters, never translated.
+- `DocFetchOp` — fetch records by primary key from a store of record.
+  Returns rows **in the order of the ids given**, and reports ids that
+  matched nothing in `missing` rather than silently returning a shorter
+  list.
+- `operonx.providers.vector_stores` — `BaseVectorStore` (with a
+  per-backend `bound` hint), config, lazy-import factory, and the
+  **FAISS** (no server, `bound="cpu"`) and **pgvector** backends.
+- `operonx.providers.doc_stores` — `BaseDocStore` (order restoration
+  lives in the base so no backend can reintroduce misalignment), config,
+  factory, and the **Postgres** and **memory** backends.
+- `reorder_by_ids` / `partition_by_ids` — the ordering helpers
+  `DocFetchOp` uses internally, exported for custom fetch ops.
+- `operonx.providers.triton` — `TritonClient` with a process-cached gRPC
+  channel and dict-in/dict-out `infer()`, plus pure dtype/decode helpers.
+- New extras: `operonx[faiss]`, `operonx[pgvector]`, `operonx[postgres]`.
+- `OpType` gains `"vector-search"` and `"doc-fetch"` (additive only).
+- Example [`ex16_rag_pipeline`](examples/python/ex16_rag_pipeline/) — the
+  full pipeline, runnable with no servers.
+
+### Design notes
+
+- **The vector index is derived data.** It holds vectors, ids, and small
+  *filterable* metadata — never document content, which lives in the
+  store of record. This avoids the most common silent RAG bug: a document
+  updated in your database but stale inside the index's payload. It also
+  makes hydration its own trace span, where it usually costs more
+  wall-clock than the search itself.
+- **Filters are backend-native, with no portable DSL.** A DSL leaks, and
+  a mistranslation is silent — a filter that fails to apply returns
+  *more* rows, which in a multi-tenant system is a data leak rather than
+  a warning. Every backend validates its own dialect and raises on
+  shapes it does not recognise; nothing degrades to "no filter".
+- **FAISS refuses filters** rather than post-filtering in Python, which
+  would silently return fewer than `top_k` hits.
+
+### Deprecated
+
+- `OnnxOp` — removed in 2.0.0. Write a bare `@op` around
+  `operonx.providers._utils.onnx.load_onnx_session`. ONNX remains
+  available as a backend for `EmbeddingOp` and `RerankOp`.
+- `TritonOp` — removed in 2.0.0. Use `VectorSearchOp` where it applies,
+  or a bare `@op` around `operonx.providers.triton.TritonClient.get(url)`
+  (~15 lines, same pooled client).
+
+Both still work in 1.1.x and emit a `DeprecationWarning` naming the
+replacement.
+
+### Fixed
+
+- `docs/guide/04-rag.md` documented a `resources.yaml` format that does
+  not exist (nested `embeddings:` / `llms:` blocks instead of flat
+  `embedding:<name>:` keys) — copying it produced a load error.
+- Removed the stale `ask` export from `operonx.providers`; the helper was
+  deleted in 1.0.0, so `from operonx.providers import ask` raised
+  `AttributeError`.
+- Provider tests are auto-marked `integration` by their conftest, which
+  CI's `-m "not integration"` selector excludes. Mock-only suites now
+  carry the `unit` marker the conftest honours — 83 previously
+  never-executed tests now run on every PR.
+
 ## [1.0.0] - 2026-08-10
 
 Milestone release: state observability, HITL primitives, LangGraph-style
@@ -553,7 +623,9 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.7.0...v1.0.0
 [0.7.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.6.0...v0.6.1

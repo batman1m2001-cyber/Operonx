@@ -86,6 +86,62 @@ reranking:bge-m3-onnx:
   dimensions: 1024
 
 # =============================================================================
+# Retrieval Configurations
+#
+# The two-store model: a vector index is DERIVED data (vectors + ids +
+# small filterable metadata), while the document content lives in a store
+# of record. VectorSearchOp answers "which ids"; DocFetchOp answers "what
+# are they". Point both at the same Postgres and they share a pool.
+# =============================================================================
+
+# Local FAISS index — no server. Vector-only, so it supports no metadata
+# filtering; pre-partition into several indices and pick with collection=
+# if you need that.
+vector_store:docs-faiss:
+  api_type: faiss
+  metric: ip
+  dim: 1024
+  path: ${FAISS_INDEX_PATH:./data/docs.faiss}
+
+# Empty in-memory FAISS index — handy for tests and local development.
+vector_store:scratch:
+  api_type: faiss
+  metric: cosine
+  dim: 1024
+
+# Postgres + pgvector. metadata_columns lists the FILTERABLE fields the
+# index carries — never document content. The HNSW index opclass must
+# match `metric` (vector_ip_ops / vector_cosine_ops / vector_l2_ops) or
+# Postgres silently falls back to a sequential scan.
+#
+#   CREATE TABLE docs_vec (
+#       id        bigint PRIMARY KEY,
+#       embedding vector(1024),
+#       tenant    text,
+#       doc_type  text
+#   );
+#   CREATE INDEX ON docs_vec USING hnsw (embedding vector_ip_ops);
+vector_store:docs-pg:
+  api_type: pgvector
+  metric: ip
+  dsn: ${PGVECTOR_DSN:postgresql://postgres@localhost:5432/postgres}
+  table: docs_vec
+  id_column: id
+  vector_column: embedding
+  metadata_columns:
+    - tenant
+    - doc_type
+
+# Store of record — the source of truth DocFetchOp hydrates from. Same
+# database as vector_store:docs-pg above, so there is no dual-write risk
+# and the connection pool is shared.
+doc_store:main:
+  api_type: postgres
+  dsn: ${PGVECTOR_DSN:postgresql://postgres@localhost:5432/postgres}
+  collection: docs
+  id_field: id
+
+# =============================================================================
 # Observability Configurations
 # =============================================================================
 
