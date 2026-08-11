@@ -30,6 +30,36 @@ class LoopConfig:
             self._compiled_until = compile(self.until, "<until>", "eval")
 
 
+def _ctx_within(child: tuple, parent: tuple) -> bool:
+    """True if ``child`` is ``parent`` itself or a context below it."""
+    n = len(parent)
+    return len(child) >= n and child[:n] == parent
+
+
+def _ctxs_within(cell, iter_ctx: tuple) -> list:
+    """Contexts in ``cell`` belonging to the iteration rooted at ``iter_ctx``.
+
+    An op inside a synthetic loop does not always run at the loop's own
+    context. Downstream of a generator fan-out it runs at ``(…, "[i]")``,
+    and behind ``Ref.collect()`` at ``(…, "[i]", "__collect__")``. Loop
+    termination asks "did this op run this iteration", so the answer has
+    to include those deeper contexts.
+
+    Safe against stale iterations because iteration contexts are
+    *siblings* tagged ``#N`` rather than nested: at iteration 1
+    (``("main", "g.__loop_0__#1")``) an iteration-0 context such as
+    ``("main", "[0]")`` is not below it.
+
+    Ordering: contexts are returned newest-first. The exact-match fast
+    path keeps existing loops at their current cost, and the scan below
+    hits the current iteration's entries immediately rather than walking
+    every context accumulated so far.
+    """
+    if iter_ctx in cell:
+        return [iter_ctx]
+    return [c for c in reversed(cell.contexts) if _ctx_within(c, iter_ctx)]
+
+
 def _evaluate_until(cfg: LoopConfig, outputs: dict) -> bool:
     """Evaluate loop stop condition against current outputs."""
     if cfg is None or cfg.until is None:
@@ -441,7 +471,16 @@ class Scheduler:
                     #    always report True even when the branch chose END.
                     #    Consult u's __branch_target__ output: the back-edge
                     #    fires only if the chosen target equals v.
-                    #  - Otherwise, end_time presence at this ctx is enough.
+                    #  - Otherwise, having run this iter is enough.
+                    #
+                    # "This iter" is the iteration ctx *or any ctx below it*.
+                    # The original rule required an exact match, which silently
+                    # capped any loop whose back-edge source sits downstream of
+                    # a generator fan-out at one iteration: such an op records
+                    # end_time at ("main","[0]","__collect__"), never at
+                    # ("main",). Iterations are siblings tagged ``#N``, not
+                    # nested, so a previous iteration's contexts are never
+                    # descendants of the current one and cannot leak in.
                     fired = False
                     for u_name, v_name in op._back_edges:
                         u_op = op._ops.get(u_name)
@@ -450,7 +489,10 @@ class Scheduler:
                         # Cheap presence check first — no branch consult if
                         # the op didn't run at all this iter.
                         et_idx = state.schema.get_index(u_op.full_name, "end_time")
-                        if et_idx < 0 or event.ctx not in state._cells[et_idx]:
+                        if et_idx < 0:
+                            continue
+                        ran_ctxs = _ctxs_within(state._cells[et_idx], event.ctx)
+                        if not ran_ctxs:
                             continue
                         if getattr(u_op, "type", None) == "branch":
                             bt_idx = state.schema.get_index(u_op.full_name, "__branch_target__")
@@ -460,12 +502,12 @@ class Scheduler:
                                 # real BranchOp).
                                 fired = True
                                 break
-                            chosen = (
-                                state._cells[bt_idx][event.ctx]
-                                if event.ctx in state._cells[bt_idx]
-                                else None
-                            )
-                            if chosen == v_name:
+                            # A branch inside a fan-out runs once per item, so
+                            # the edge fires if *any* instance chose v.
+                            bt_cell = state._cells[bt_idx]
+                            if any(
+                                (bt_cell[c] if c in bt_cell else None) == v_name for c in ran_ctxs
+                            ):
                                 fired = True
                                 break
                         else:

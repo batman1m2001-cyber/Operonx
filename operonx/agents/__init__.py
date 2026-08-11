@@ -12,18 +12,66 @@ See ``AGENT_EXTENSION_PLAN.md`` for the full design and
 :doc:`CONTRIBUTING <CONTRIBUTING>` for the Footprint Ladder that governs
 what is allowed to land here.
 
-**Status: scaffold.** P0 (namespace + governance) is complete; the public
-surface below arrives in P1. ``__all__`` stays empty until there is
-something real to export — an empty package is honest, a package full of
-``NotImplementedError`` stubs is not.
-
-Planned surface (P1–P3)::
-
-    from operonx.agents import tool, TOOL_REGISTRY   # P1
-    from operonx.agents import build_react_agent     # P1
-    from operonx.agents import subagent              # P3
+**Status: P1.** Tools, permission policy, dispatch and the ReAct loop
+have landed. Memory, compaction and sub-agents are P2/P3. Nothing is
+exported before it works.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.graphs.react import agent_result, build_react_agent
+from operonx.agents.graphs.subagent import describe_delegation, make_delegate_tool
+from operonx.agents.memory import LocalMarkdownMemory, MemoryEntry, MemoryProvider
+from operonx.agents.ops.compact_ops import (
+    apply_compaction,
+    count_tokens,
+    plan_compaction,
+    unmatched_tool_calls,
+)
+from operonx.agents.ops.prompt_ops import (
+    apply_cache_control,
+    assemble_api_messages,
+    build_system_prompt,
+)
+from operonx.agents.policy import ToolPolicy
+from operonx.agents.redact import Redactor
+from operonx.agents.session import AgentSession
+from operonx.agents.skills import Skill, inject_skills, load_skills, match_skills
+from operonx.agents.tool import (
+    TOOL_REGISTRY,
+    ToolMeta,
+    clear_registry,
+    get_tool_definitions,
+    tool,
+)
+
+__all__ = [
+    "tool",
+    "ToolMeta",
+    "TOOL_REGISTRY",
+    "get_tool_definitions",
+    "clear_registry",
+    "ToolPolicy",
+    "Redactor",
+    "MemoryProvider",
+    "MemoryEntry",
+    "LocalMarkdownMemory",
+    "count_tokens",
+    "plan_compaction",
+    "apply_compaction",
+    "unmatched_tool_calls",
+    "build_system_prompt",
+    "assemble_api_messages",
+    "apply_cache_control",
+    "build_dispatch",
+    "build_react_agent",
+    "agent_result",
+    "AgentSession",
+    "make_delegate_tool",
+    "describe_delegation",
+    "Skill",
+    "load_skills",
+    "match_skills",
+    "inject_skills",
+]

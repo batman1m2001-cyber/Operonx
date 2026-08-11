@@ -69,7 +69,7 @@ back to one of these.
 | Ordered gather | `Ref.collect()` — buffered, flushed at EOF in yield-index order | `task_scheduler.py:_on_eof` · `ref.py:collect` |
 | Preemptive cancel | `yield Interrupt(ctx_to_cancel=…)` from any op — scheduler drains pumps at that ctx prefix | `_events.py` · `task_scheduler.py` |
 | **HITL suspend/resume** | **`InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent`, awaits `state._interrupt_responses[id]`; outputs `response`, `timed_out`, `interrupt_id`.** 🔴 The op works, but the **engine is not wired to the bus** — see §15.1 V3 for the path that does work | `core/ops/flow/interrupt_op.py` |
-| **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer` (Phase 2). Bind at `Operon(g, checkpointer=…)`. `handle.get_state(step)`, `handle.list_steps()`. Zero overhead when unbound** | `checkpoint/base.py` · `checkpoint/memory.py` |
+| **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer`.** 🔴 Bind at **`engine.start(inputs, checkpointer=…)`**, not `Operon(...)`; `get_state(step)` / `list_steps()` are on the **checkpointer**, not the handle — see §15.1 V11 | `checkpoint/base.py` · `checkpoint/memory.py` |
 | **Custom progress events** | **`EmitOp(channel=…, payload=…)` + `engine.stream(mode="custom", channels=[…])` — fire-and-forget filterable event bus** | `core/ops/flow/emit_op.py` · `engine.py:stream` |
 | **Observability shaping** | **`@op(exclude=[…], include=[…], observe_max=N)` — polymorphic filter at emission source; `ObserveBudgetExceeded` on runaway generators** | `core/ops/base.py` |
 | Async I/O dispatch | `@op(bound="io"\|"cpu"\|"sync")` — auto thread-pool routing | `core/ops/base.py` |
@@ -357,184 +357,79 @@ async def edit_tool(path: str, old: str, new: str):
 Keep them side-by-side per tool. Wrap common patterns (`ExtractField`-style
 mini-DSL for the JSON Schema) in helpers if the pain grows.
 
-### 7.2 · `dispatch_all_tools` — subgraph + HITL for destructive tools
+### 7.2 · Tool dispatch — shipped shape
 
-> 🔴 **This sketch has three confirmed defects — see §15.1 V1, V2, V5
-> before implementing.** In short: the per-arm duplication is
-> unnecessary (arms can converge via a `PARENT` cell), the `InterruptOp`
-> payload dict does not resolve its Refs, and `exec_tool` has no error
-> path — a raising tool silently produces no tool message at all.
+> **Built.** `operonx/agents/graphs/dispatch.py`. The sketch this replaces
+> had three defects (§15.1 V1, V2, V5); what follows is what runs.
 
-```python
-# operonx/agents/graphs/dispatch.py
-from operonx import op, graph, START, END, PARENT, InterruptOp, EmitOp
-from operonx.core.ops.flow import if_
-from operonx.agents.tool import TOOL_REGISTRY
-
-@op
-def each_call(tool_calls: list):
-    """Generator op — one frame per tool call. Downstream fan-out is
-    automatic; consumer uses .parallel() for concurrency, .collect() for
-    ordered gather."""
-    for i, tc in enumerate(tool_calls):
-        yield {"call": tc, "index": i}
-
-@op
-def parse_call(call: dict):
-    """Parse args + apply middleware. Cheap sync."""
-    return {"name": ..., "args": ..., "id": ..., "meta": TOOL_REGISTRY[...]._tool_meta}
-
-@op
-def is_destructive(meta: dict):
-    """Read the tool's declared destructive flag. Pure fn."""
-    return {"destructive": bool(meta.get("destructive"))}
-
-@op
-async def exec_tool(name: str, args: dict):
-    """Resolve via registry and delegate. Runs on the op's own bound queue."""
-    op_factory = TOOL_REGISTRY[name]
-    result = await op_factory.core(**args)
-    return {"raw": result}
-
-@op
-def blocked_result(reason: str, call_id: str):
-    """Every block path emits a tool-result msg — LLM must see the refusal."""
-    return {"tool_message": {"role": "tool", "tool_call_id": call_id,
-                             "content": f"blocked: {reason}"}}
-
-@op
-def collect_result(raw: dict, call_id: str, name: str):
-    """Truncate + wrap high-risk output; emit the tool_message."""
-    ...
-    return {"tool_message": {...}}
-
-@graph
-def dispatch_one(call):
-    """Per-tool-call dispatch.
-
-    Flow: parse → destructive? → [HITL approve → exec] OR [exec directly] → collect.
-    On HITL rejection, blocked_result short-circuits with a rejection message.
-    """
-    parsed = parse_call(call=call)
-    destr  = is_destructive(meta=parsed["meta"])
-
-    # HITL branch — InterruptOp emits on the state bus; engine.stream() hands
-    # out interrupt_id → Future pairs; handle.resume(id, {"approved": True/False})
-    # resolves it. When approved=False, response is short-circuited to blocked.
-    approve = InterruptOp(
-        payload={"tool": parsed["name"], "args": parsed["args"]},
-        timeout=300.0,                      # 5-minute auto-decline
-    )
-    approve_router = if_(approve["response"]["approved"] == True,  # noqa: E712
-                          "run").else_("blocked")
-
-    execd_direct   = exec_tool(name=parsed["name"], args=parsed["args"])
-    execd_approved = exec_tool(name=parsed["name"], args=parsed["args"])
-    result_direct   = collect_result(raw=execd_direct["raw"],   call_id=parsed["id"], name=parsed["name"])
-    result_approved = collect_result(raw=execd_approved["raw"], call_id=parsed["id"], name=parsed["name"])
-    blocked = blocked_result(reason="denied by human", call_id=parsed["id"])
-
-    router = if_(destr["destructive"] == True, "hitl").else_("direct")  # noqa: E712
-
-    START >> parsed >> destr >> router
-    router >> ~execd_direct >> result_direct >> END
-    router >> ~approve >> approve_router
-    approve_router >> ~execd_approved >> result_approved >> END
-    approve_router >> ~blocked >> END
-
-@graph
-def dispatch_all_tools(tool_calls):
-    """Top-level fan-out. .parallel() for concurrency, .collect() for order."""
-    gen  = each_call(tool_calls=tool_calls)
-    disp = dispatch_one(call=gen["call"].parallel(max=10))
-    START >> gen >> disp >> END
-    # downstream reads disp["tool_message"].collect() for ordered gather
+```
+parse ─▶ route ─▶ approve (InterruptOp) ─▶ normalize ─┐
+             └──▶ auto_ok ───────────────────────────┴─▶ execute
 ```
 
-**What the 9-step pipeline maps to now:**
+Four ops and one branch per call — fewer than the sketch, because the two
+approval arms converge on a single `execute` through `PARENT["decision"]`
+instead of each carrying its own copy of the execution path.
 
-| # | Step | Where it lives (post-1.0.0) |
-|---|------|------------------------------|
-| 1 | Interrupt preflight | Scheduler primitive — `yield Interrupt(ctx_to_cancel=…)` |
-| 2 | Parse args | `parse_call` op |
-| 3 | Tool-request middleware | Fused with 2 (cheap) |
-| 4 | Block eval | `permission_check` op reading policy config → `if_` branch |
-| 5 | **HITL approve (destructive only)** | **`InterruptOp` — real suspend/resume via `state._interrupt_responses`; `engine.stream()` surfaces via `InterruptEvent`; caller `handle.resume(id, value)`** |
-| 6 | Callbacks | Soft `>` edge to observer op, or `EmitOp` for typed progress events |
-| 7 | Execute | `exec_tool` op — reuses the tool's own `.core(**args)` |
-| 8 | Ordered collect | `Ref.collect()` — operonx guarantees yield-index order |
-| 9 | Turn budget + drain / steer | Wrap op at loop end + `SCRATCH` for steer message |
+**Every call returns exactly one tool message.** Providers reject a
+conversation in which an assistant `tool_call` has no matching result, so
+unknown tool, unparseable arguments, an exception inside the tool, a
+timeout and a human denial all come back as messages the model can act
+on. `execute` catches everything *itself* — operonx records op errors
+into state and returns a partial result rather than raising, so an
+uncaught error would emit no message at all and surface a turn later as
+a provider 400.
 
-### 7.3 · ReAct loop — `@graph` with a back-edge
+**`parse_call` assembles the approval payload** and hands `InterruptOp` a
+single bare ref. A Ref nested in a dict is rejected at construction now;
+before that check existed, the human approving a destructive call was
+shown `Ref` objects instead of the tool name and arguments.
 
-```python
-# operonx/agents/graphs/react.py
-from operonx import op, graph, START, END, PARENT
-from operonx.core.ops.flow import if_
-from operonx.reducers import add_messages
-from operonx.providers.ops import LLMOp
-from operonx.agents.graphs.dispatch import dispatch_all_tools
-from operonx.agents.ops.memory_ops import memory_prefetch, memory_sync
-from operonx.agents.ops.compact_ops import count_tokens, compact_messages
-from operonx.agents.ops.prompt_ops import assemble_api_messages
+**`normalize_decision` keeps expiry distinct from refusal.** `InterruptOp`
+reports a timeout on a separate output; writing only `response` made "no
+one answered" indistinguishable from "a human said no", and the model was
+told it had been declined.
 
-def build_react_agent(*, model, tool_schemas, max_iterations=25):
-    """Return a @graph factory implementing one full ReAct turn as a
-    back-edge loop. The loop body is the graph body; the back-edge from
-    `sync` back to `prefetch` (guarded by `if_(done, END).else_(prefetch)`)
-    is what Phase 3 rewrites into a synthesized `_GraphLoop`.
+`execute`'s parameter is `tool_name`, not `name` — `name` is in
+`_BASE_INIT_KEYS` and operonx warns it may be read as an op constructor
+argument rather than an input.
 
-    `max_iterations` becomes the cap on the synthesized loop (default 1000);
-    the branch is your primary exit.
-    """
+### 7.3 · ReAct loop — shipped shape
 
-    @graph(max_iterations=max_iterations)
-    def react_body():
-        # Shared cells with reducers. `add_messages` is LangGraph-compatible:
-        # id-upsert, RemoveMessage sentinels, REMOVE_ALL_MESSAGES supported.
-        PARENT.declare(
-            messages=[],
-            done=False,
-            reducers={"messages": add_messages},
-        )
+> **Built.** `operonx/agents/graphs/react.py`. The v2 sketch did not
+> compile: `@graph(max_iterations=…)` does not exist. Running it produced
+> §15.1 V7–V10.
 
-        # Memory prefetch — see §7.5 for the multi-provider generator+parallel form.
-        prefetch = memory_prefetch(query=PARENT["messages"])
-        assemble = assemble_api_messages(
-            messages=PARENT["messages"],
-            memory_context=prefetch["context"],
-        )
-        tokens   = count_tokens(messages=assemble["messages"])
-
-        compact  = compact_messages(messages=assemble["messages"])
-        gate1    = if_(tokens["count"] >= assemble["threshold"], compact).else_(assemble)
-
-        llm      = LLMOp.of(
-            resource=model,
-            stream=True,
-            messages=gate1,                # fan-in: either the compacted or original path
-            tools=tool_schemas,
-        )
-        disp     = dispatch_all_tools(tool_calls=llm["tool_calls"])
-        sync     = memory_sync(new_messages=disp["tool_message"].collect())
-
-        # Turn writes accumulate into shared cells via reducers.
-        llm["assistant_message"]     >> PARENT["messages"]
-        sync["tool_messages"]        >> PARENT["messages"]
-        llm["done"]                  >> PARENT["done"]     # done when finish_reason != tool_calls
-
-        START >> prefetch >> assemble >> tokens >> gate1 >> llm
-        # Router: no tool_calls → done, back-edge to END; else dispatch and loop back.
-        llm >> if_(llm["done"] == True, END).else_(disp)     # noqa: E712
-        disp >> sync
-        sync >> prefetch                                     # back-edge closes the loop
-
-    return react_body
+```
+START ─▶ seed ─▶ count_turn ─▶ call_model ─▶ decide ─┬─▶ END
+                     ▲                                │
+                     └── gather ◀── dispatch ◀────────┘
 ```
 
-That is the entire agent turn. ~35 lines including whitespace. Compare with
-v1's `with GraphOp.loop(name="react", until="stop_reason == 'end_turn'", …)`
-scaffold — same behaviour, no imperative wrapper.
+`call_model` is **injected**, not constructed here — the loop is testable
+without a provider and callers choose their own `LLMOp.of(...)`.
+
+**The turn budget lives in the agent layer, not the graph.** A
+graph-level cap cuts mid-flight, tells the model nothing, and leaves
+partial state. `count_turn` injects a notice at the limit and lets the
+model take one final turn, so exhaustion exits the way success does.
+Keeping it out of `call_model` matters too: a budget the caller could
+forget to implement is not a budget.
+
+**`decide` folds the three exit conditions** — model finished, budget
+spent, no tools requested — into one boolean, so the branch stays a
+Ref-vs-literal comparison, the only form `if_` evaluates correctly.
+
+**There is no terminal `finish` op.** An op wired after a loop that
+contains a generator never becomes ready and is skipped silently (V9), so
+`agent_result(result, agent)` reads the merged cells directly. That is
+also why it takes the graph.
+
+**`gather_tool_messages` exists because `collect()` hands over a single
+message dict per call** while `add_messages` requires lists on both
+sides. Writing raw frames raised inside the reducer, and since operonx
+records op errors rather than propagating them, the run ended quietly
+with a partial conversation.
 
 ### 7.4 · Sub-agent = nested `@graph`
 
@@ -1031,12 +926,21 @@ that lives in `tests/`.
 
 | # | § | Issue | Owner phase |
 |---|---|---|---|
-| V1 | §7.2 | 🔴 Duplicates `exec_tool` + `collect_result` per branch arm. Unnecessary — arms **can** converge on one node by writing `PARENT` cells (`a["raw"] >> PARENT["picked"]`, `collect(raw=PARENT["picked"])`). Direct `collect(raw=a["raw"])` genuinely fails, so the sketch's caution was right; the conclusion was not. **Dispatch gets simpler, not more complex.** | P1 |
-| V2 | §7.2 | 🔴 `InterruptOp(payload={"tool": …, "args": …})` — a Ref nested in a dict was silently unresolved, so the human approved blind. Now raises (`_params._reject_nested_ref`). Until nested-ref support lands, build the payload in an upstream `@op` and pass one bare Ref. | P1 |
+| V1 | §7.2 | ✅ **resolved in P1.** 🔴 Duplicates `exec_tool` + `collect_result` per branch arm. Unnecessary — arms **can** converge on one node by writing `PARENT` cells (`a["raw"] >> PARENT["picked"]`, `collect(raw=PARENT["picked"])`). Direct `collect(raw=a["raw"])` genuinely fails, so the sketch's caution was right; the conclusion was not. **Dispatch gets simpler, not more complex.** Built that way: both approval arms write `PARENT["decision"]` and one `execute` reads it. | P1 |
+| V2 | §7.2 | ✅ **resolved in P1.** 🔴 `InterruptOp(payload={"tool": …, "args": …})` — a Ref nested in a dict was silently unresolved, so the human approved blind. Now raises (`_params._reject_nested_ref`). Until nested-ref support lands, build the payload in an upstream `@op` and pass one bare Ref — `parse_call` does. | P1 |
 | V3 | §2 · §7.2 | 🔴 `engine.stream()` does **not** auto-subscribe to the interrupt bus and `handle.resume(id, value)` does **not** exist. `bind_interrupt_bus` has zero callers outside its own export. Working path today: `handle = engine.start(...)`, `bind_interrupt_bus(handle.state, sink)`, `handle.state.resume_interrupt(iid, value)` — verified end to end. Wiring it properly is a contained `engine.py` change. | P1 |
 | V4 | §14.3 | 🔴 **My error.** The "concurrent HITL → N simultaneous approval prompts, needs a serialising gate" row is wrong. The pump serialises: exactly one `InterruptEvent` outstanding at a time, 2.76s wall for 3 calls. No gate needed. Delete the row when §14.3 is next edited. | — |
-| V5 | new | 🔴 **Errors never leave `Operon.run()`.** `GraphOp._process` catches everything, logs it, writes `state[full_name, "error", ctx]`, and returns a partial result. Intended (`ex08_error_handling`: "workflow doesn't crash"), but it means a raising tool produces no output, the downstream collector *also* fails, no tool message is emitted, and the provider 400s on the next turn. **`exec_tool` must catch every exception itself and always return a tool message.** Two silent failures stack otherwise. | P1 |
-| V6 | §5 | 🟡 The `@graph` in §7.3 has never been built or run. §14 confirmed the *shape* against langgraph, not that this code compiles. Build it as the first P1 commit, before anything depends on it. | P1 |
+| V5 | new | ✅ **resolved in P1.** 🔴 **Errors never leave `Operon.run()`.** `GraphOp._process` catches everything, logs it, writes `state[full_name, "error", ctx]`, and returns a partial result. Intended (`ex08_error_handling`: "workflow doesn't crash"), but it means a raising tool produces no output, the downstream collector *also* fails, no tool message is emitted, and the provider 400s on the next turn. **`exec_tool` must catch every exception itself and always return a tool message.** Two silent failures stack otherwise. `execute` now catches everything and always returns a tool message. | P1 |
+| V6 | §5 | ✅ **done — and it did not compile.** §7.3 used `@graph(max_iterations=…)`, which does not exist; the kwarg was removed with the 1.0.0 retry sugar. Four further defects came out of running it: V7–V10 below. | P1 |
+| V7 | §7.3 | 🔴 **No turn cap exists at graph level.** The synthesized loop is pinned to 1000 at `cycle_rewrite.py:402`. Deliberately **not** plumbed through `@graph`: a graph-level cap cuts mid-flight, tells the model nothing and leaves partial state. `count_turn` in the agent layer injects a notice at the limit and lets the model take one final turn, so exhaustion exits the way success does. | P1 ✅ |
+| V8 | core | ✅ **fixed.** A back-edge source below a generator fan-out never fired, so any loop of the ReAct shape stopped after one iteration — silently. `end_time` lands at `('main','[0]','__collect__')`, never at the iteration ctx, and the spec (`STATE_LOOP_REFACTOR_PLAN.md:518`) required an exact match. Termination now accepts any ctx below the iteration's. 14 regression tests; none of the 32 prior cycle-rewrite tests put a generator in a loop. | P1 ✅ |
+| V9 | §7.3 | 🔴 **An op wired after a generator-containing loop never runs.** The loop emits at item contexts, so the downstream op never reaches ready and is skipped with no error. Kills the obvious "terminal `finish` op reads the cells and emits them" design. `agent_result(result, agent)` reads the cells directly instead, which is why it needs the graph. | P1 ✅ |
+| V12 | new | 🔴 **`LLMOp` templates its prompt.** `_format_value` runs `format_map` over any string containing `{`, so a tool returning `{"city": "Hanoi"}` makes the *next* model call raise `PromptError: Missing template variable(s)`. Any JSON, code or CSS the agent reads does the same. `prepare_prompt` doubles braces; `format_map` collapses them back. No opt-out exists in core — worth one (C6). | P1 ✅ |
+| V13 | new | 🔴 **A subgraph emits `None` for outputs a frame did not write.** Straight into an `add_messages` cell that raises, and since op errors go to state rather than propagating, the run ends quietly mid-conversation. `normalize_messages` absorbs it. | P1 ✅ |
+| V14 | new | 🔴 **`add_messages` upserts on id, so a stable id silently overwrites history.** Every assistant turn stamped `assistant-0` meant each turn replaced the last: the tool-calling turn vanished, its tool messages answered nothing, and the conversation came back `user → tool → assistant` — a *plausible* result, which is why it survived. Fresh uuid per turn. | P1 ✅ |
+| V15 | new | 🟡 **`LLMOp` prepends `llm:` to the resource key**, so `resource="llm:qwen"` resolves as `llm:llm:qwen`. Documented on `make_llm_caller`; arguably the error message should say so. | — |
+| V11 | §2 | 🔴 **Checkpointer API mis-stated.** Binding is `engine.start(inputs, checkpointer=cp)` — `Operon(g, checkpointer=)` raises `TypeError`. `get_state(step)` and `list_steps()` are methods on the **checkpointer**, not on `ExecutionHandle`, which has neither. The primitive itself works: 6 steps recorded for a 3-iteration loop, each a per-step cell snapshot. `AgentSession` uses the real API. | P2 ✅ |
+| V10 | §7.2 | 🔴 **`collect()` behind `parallel()` inside a loop invokes per item**, not per batch — measured `[[0],[2],[0],[2]]` for 2 items × 2 iterations. Consumers must tolerate a partial batch. Harmless when the target cell has a reducer, since each write merges; `gather_tool_messages` handles both shapes. | P1 ✅ |
 
 ### 15.2 · §2 rows — verification status
 
@@ -1045,16 +949,16 @@ Probe the row, then flip its light and link the test.
 | § 2 row | Status | Needed by |
 |---|---|---|
 | **HITL suspend/resume** (`InterruptOp`) | 🔴 partly wrong — see V3 | P1 |
-| Tool fan-out (generator op + `Ref.parallel(max=N)`) | 🟡 | P1 |
-| Ordered gather (`Ref.collect()` — yield-index order) | 🟡 | P1 |
-| Turn loop (back-edge → synthesized `_GraphLoop`; termination when no back-edge source fired) | 🟡 | P1 |
-| Shared cells + reducers (`PARENT.declare(reducers=)`) | 🟡 — partly exercised by the V1 probe, not by a committed test | P1 |
-| Message accumulation (`add_messages` id-upsert, `RemoveMessage`) | 🟡 | P1 |
+| Tool fan-out (generator op + `Ref.parallel(max=N)`) | 🟢 `test_loop_generator_backedge.py` — but see V8/V10 | P1 |
+| Ordered gather (`Ref.collect()` — yield-index order) | 🔴 **per-item inside a loop, not per batch** — V10 | P1 |
+| Turn loop (back-edge → synthesized `_GraphLoop`; termination when no back-edge source fired) | 🟢 after the V8 fix; was broken for any loop containing a generator | P1 |
+| Shared cells + reducers (`PARENT.declare(reducers=)`) | 🟢 verified — the cell merges correctly; `run()`'s output dict does not (V6 F2) | P1 |
+| Message accumulation (`add_messages` id-upsert, `RemoveMessage`) | 🟢 id-upsert verified end to end; **raises on a non-list**, which is why `gather_tool_messages` exists | P1 |
 | Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🟡 | P1 |
 | Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 | P1 |
 | LLM streaming (`stream=True` per-token frames) | 🟡 | P2 |
 | Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
-| Cross-run persistence (`Checkpointer`, `handle.get_state(step)`, `list_steps()`) | 🟡 | P2 |
+| Cross-run persistence (`Checkpointer`) | 🔴 works, but §2 named the wrong binding site and the wrong object for the accessors — V11 | P2 |
 | Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟡 | P2 |
 | Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
 | Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
@@ -1069,13 +973,89 @@ Probe the row, then flip its light and link the test.
 | C1 | Reject Refs nested in containers | **done** — `_params._find_nested_ref`, PR #29 |
 | C2 | *Support* nested Refs (hoist each buried ref into its own cell, reassemble at read time). Needs a decision first: teach operonx-rs the new `serialize()` form, or refuse to serialize graphs using it as synthetic loops already do. | open — blocks nothing in P1 given V2's workaround |
 | C3 | Wire `engine.stream()` + `handle.resume()` to the interrupt bus (V3) | open — ~½ day, contained to `engine.py` |
+| C4 | Loop termination below a generator fan-out (V8) | **done** — `task_scheduler._ctxs_within` |
+| C5 | An op after a generator-containing loop never becomes ready (V9). Worked around in the agent layer; the underlying readiness rule is untouched. | open — no owner |
+| C6 | No way to pass a message list to `LLMOp` without prompt templating (V12). Every agent must escape braces defensively. A `template=False` flag, or treating a `list` prompt as data, would remove a whole class of surprise. | open — no owner |
 
-### 15.4 · The rule
+### 15.4 · Scripted doubles verify code, not contracts
+
+Every unit test in `tests/internal/agents/` scripts the model. That
+verified the loop, dispatch, budget, policy and approval — and missed
+**four consecutive bugs** at the `LLMOp` seam (V12–V14 plus a build
+failure), because a scripted double reproduces the shape you assumed
+rather than the one the dependency has.
+
+`test_live_agent.py` is the answer for the model seam. The same gap
+applies to every 🟡 row in §15.2 that is currently exercised only through
+a stub.
+
+### 15.5 · The rule
 
 A row stays 🟡 until a **committed test** exercises it — not a scratch
 probe, not a docstring, not this plan. When a phase starts, promote only
 the rows that phase needs. Anything found wrong gets a line in §15.1 and
 a fix in the same PR that needed it.
+
+---
+
+## 16 · Core findings from adversarial review (11 Aug 2026)
+
+Four agents were asked to find silent failures in the primitives §2
+rests on. Their claims were then **verified empirically rather than
+believed** — three of the highest-severity ones turned out to be wrong,
+which is the reason for this section's structure. Nothing below is
+reported unless a probe reproduced it.
+
+### 16.1 · Confirmed
+
+| # | Finding | Impact |
+|---|---|---|
+| F1 | **Streamed tool calls were appended, not assembled.** One call arrived as N fragments, each holding a slice of JSON that parses as nothing. Streaming worked, tool calling worked, only the combination broke. | **Fixed** — `LLMOp._merge_tool_call_deltas`, 13 tests |
+| F2 | **`Interrupt()` with no `ctx_to_cancel` cancels the entire run and returns cleanly.** The default `()` makes `_is_descendant_or_equal` true for every ctx. Outputs come back as `{"__interrupt__": …}` with no error — a one-word user mistake silently loses the run | open |
+| F3 | **`@op(exclude=…)` does not filter the V3 trace.** A var excluded from observation still appears in `handle.trace`. `base.py`'s own comment claims "Checkpointer + Tracer both respect these"; only the checkpoint/custom/interrupt buses consult it. Security-relevant — it is the documented way to keep a secret out of the trace | open |
+| F4 | **`observe_max` is a no-op unless a checkpointer is bound.** The counter lives in `bind_checkpointer`'s closure, which `engine.start` only creates when `checkpointer is not None`. A runaway generator under `engine.run()` is uncapped — 50 frames emitted against a budget of 5 | open |
+| F5 | **Streaming frames are dropped unless the op is PARENT/END-bound.** Measured: 3 frames when bound, **0** when the same streaming op feeds a downstream consumer — the normal agent shape. §2's "frames forwarded to `ExecutionHandle._queue`" is conditional on graph topology, not on `stream=True` | open |
+| F6 | **`parser="xml"` returns `None` with `error=None` for a wrapped element.** `<r><result>X</result></r>` with `fields=["result: str"]` yields nothing, and because `error` is `None`, `max_retries` never fires. `parsing.py`'s own docstring example is wrong. Repeated sibling tags likewise collapse to `None` | open |
+| F7 | **Valid JSON with the wrong keys parses "successfully".** `{"bad": 1}` against `fields=["result: str"]` returns `{"result": None, "error": None}` — no retry, no error. Structured mode cannot tell "model answered wrongly" from "model answered" | open |
+| F8 | **The final streaming frame repeats the full accumulated `content`.** `_stream_final` re-emits the whole text through the same frame path as the per-token deltas, so a consumer joining frames double-counts. Only the incidental presence of `finish_reason` distinguishes them | open — contract, not a bug |
+
+### 16.1b · Confirmed in the agent layer — all fixed
+
+These were **my** bugs, found by adversarial review rather than by the
+tests written alongside the code. The shape they share: the tests
+exercised *one* tool call, or answered *every* approval the same way, so
+a per-call boundary that did not exist looked like one that did.
+
+| # | Bug | Why the tests missed it |
+|---|---|---|
+| A1 | **A human-denied destructive tool executed anyway.** The approval decision travelled through a `PARENT` cell, which is shared across contexts by definition — with calls fanned out, the last arm to answer overwrote every sibling. Denying one and approving another ran **both**. Now the two arms are separate inputs to `execute` | every test answered all approvals identically |
+| A2 | **Sub-agent `allow_tools` was never enforced** — privilege escalation. The allowed names were computed and used only for an empty check; the child resolved against the global registry and ran tools its parent had excluded. Now compiled into a default-deny `ToolPolicy` | the test asserted the *helper* reported the right names, never that a child was restricted |
+| A3 | **Tool exception text bypassed the redactor** — a stack trace with a connection string went to the model and the tracer verbatim, the exact case redaction exists for | scrubbing was only asserted on the success path |
+| A4 | **Truncation ran before redaction**, cutting the END marker off a PEM block so the pattern no longer matched and key material shipped | no test combined a secret with a truncation limit |
+| A5 | **A synchronous `@tool` failed every call** with "object dict can't be used in 'await'" | every fixture was `async def` |
+| A6 | **A failed turn was reported as the previous turn's answer.** operonx returns a partial result rather than raising, so `session.send()` committed a history ending on an unanswered user turn and returned a stale `final` | no test made a model call fail mid-session |
+| A7 | **Compaction declined to act while 114× over budget.** One oversized exchange inside the keep window means nothing is "older". A test asserted this behaviour and **locked the bug in** | the test used a small conversation, where the assertion looks right |
+
+### 16.2 · Refuted — reported by an agent, disproved by probe
+
+Recorded because the temptation to act on a plausible report is the point.
+
+| Claim | Reality |
+|---|---|
+| Shared-cell defaults bleed across runs | **No.** Two runs of the same engine each ended with one message. `add_messages` returns a new list rather than mutating `old` — verified directly |
+| A nested subgraph's `PARENT.declare()` makes a separate cell, so a sub-agent's writes never reach the parent | **No.** The outer cell held both the parent's and the child's message |
+| `add_messages` mutates its `old` argument | **No.** `old` was unchanged after merge |
+
+### 16.3 · Scope
+
+F1 is fixed because it broke the agent layer directly. **F2–F7 are core
+defects outside this plan's scope** — each needs its own decision, and
+several change published behaviour. They are recorded here rather than
+fixed silently.
+
+The agent layer does not depend on F3/F4 (it has its own `Redactor`),
+nor on F6/F7 (it does not use `fields=`). It *would* depend on F5 the
+moment anyone streams, which is P4's problem.
 
 ---
 
