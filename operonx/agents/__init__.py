@@ -38,13 +38,20 @@ from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
 from operonx.agents.session import AgentSession
 from operonx.agents.skills import Skill, inject_skills, load_skills, match_skills
-from operonx.agents.tool import TOOL_REGISTRY, ToolMeta, get_tool_definitions, tool
+from operonx.agents.tool import (
+    TOOL_REGISTRY,
+    ToolMeta,
+    clear_registry,
+    get_tool_definitions,
+    tool,
+)
 
 __all__ = [
     "tool",
     "ToolMeta",
     "TOOL_REGISTRY",
     "get_tool_definitions",
+    "clear_registry",
     "ToolPolicy",
     "Redactor",
     "MemoryProvider",

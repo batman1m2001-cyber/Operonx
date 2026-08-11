@@ -53,6 +53,26 @@ BUDGET_EXHAUSTED = (
 
 
 @op
+def normalize_messages(messages: Any = None) -> dict:
+    """Coerce a message write into the list ``add_messages`` requires.
+
+    A subgraph's declared outputs are emitted per frame, and a frame that
+    has not written a given var carries ``None`` for it. Writing that
+    straight into a reducer cell raises ``add_messages expects list, got
+    NoneType`` — and since operonx records op errors into state rather
+    than propagating them, the run then ends quietly mid-conversation.
+    Found against a live model on the second turn, not by any unit test.
+    """
+    if messages is None:
+        return {"messages": []}
+    if isinstance(messages, dict):
+        return {"messages": [messages]}
+    if isinstance(messages, list):
+        return {"messages": [m for m in messages if isinstance(m, dict)]}
+    return {"messages": []}
+
+
+@op
 def gather_tool_messages(tool_messages: Optional[list] = None) -> dict:
     """Re-wrap collected tool results as one list for the reducer.
 
@@ -170,6 +190,7 @@ def build_react_agent(
             tool_calls=model["tool_calls"],
         )
 
+        assistant = normalize_messages(messages=model["assistant_message"])
         calls = each_call_of(tool_calls=model["tool_calls"])
         disp = dispatch_one(call=calls["call"].parallel(max=8))
         gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
@@ -179,10 +200,10 @@ def build_react_agent(
         counter["turns"] >> PARENT["turns"]
         counter["notice"] >> PARENT["messages"]
         counter["exhausted"] >> PARENT["stopped_early"]
-        model["assistant_message"] >> PARENT["messages"]
+        assistant["messages"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
 
-        START >> counter >> model >> router
+        START >> counter >> model >> assistant >> router
         router >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 
