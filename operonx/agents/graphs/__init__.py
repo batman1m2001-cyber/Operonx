@@ -9,5 +9,13 @@ first caller's settings for every later one.
 from __future__ import annotations
 
 from operonx.agents.graphs.dispatch import build_dispatch
+from operonx.agents.graphs.react import agent_result, build_react_agent
+from operonx.agents.graphs.subagent import describe_delegation, make_delegate_tool
 
-__all__ = ["build_dispatch"]
+__all__ = [
+    "build_dispatch",
+    "build_react_agent",
+    "agent_result",
+    "make_delegate_tool",
+    "describe_delegation",
+]
