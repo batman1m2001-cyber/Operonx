@@ -19,6 +19,95 @@ we compose primitives already blessed by 1.0.0.
 
 ---
 
+## 0 · State — read this first (11 Aug 2026)
+
+**P0–P3 are complete, merged to `main`, and verified against a live
+tool-calling model.** `main` is at `c328edb`. Nothing below is aspirational
+unless it says so.
+
+### 0.1 · What exists
+
+```
+operonx/agents/
+├── tool.py            @tool + TOOL_REGISTRY + get_tool_definitions
+├── policy.py          ToolPolicy — allow / ask / deny
+├── redact.py          Redactor — credential scrubbing
+├── memory.py          MemoryProvider ABC + LocalMarkdownMemory
+├── skills.py          SKILL.md loading, matching, injection
+├── session.py         AgentSession — multi-turn
+├── graphs/
+│   ├── dispatch.py    per-call subgraph: parse → route → approve → execute
+│   ├── react.py       build_react_agent + agent_result
+│   └── subagent.py    make_delegate_tool
+└── ops/
+    ├── model_ops.py   make_llm_caller — the LLMOp ↔ loop adapter
+    ├── compact_ops.py plan_compaction / apply_compaction
+    ├── memory_ops.py  gather_memory (+ the fan-out ops)
+    └── prompt_ops.py  build_system_prompt / assemble / apply_cache_control
+```
+
+The loop, with the context stage wired in:
+
+```
+count_turn → last_user → plan → apply → memory → skills
+           → assemble → cache_control → call_model → decide ─┬─▶ END
+                    ▲                                        │
+                    └──── gather ◀── dispatch ◀──────────────┘
+```
+
+**Tests:** 1559 unit (`-m "not integration"`), 5 live. 15 test files under
+`tests/internal/agents/`, plus `tests/internal/core/ops/graph/test_loop_generator_backedge.py`
+and `tests/internal/providers/test_llm_stream_tool_calls.py` for the two
+core fixes.
+
+### 0.2 · Running the live tests
+
+Only `siraya/qwen3.7-plus` was found to support tool calling. The in-house
+gemma endpoint does **not** — its vLLM runs without
+`--enable-auto-tool-choice` and rejects `tool_choice="auto"`, so an agent
+pointed at it never calls a tool and merely looks unhelpful.
+`test_provider_supports_tool_calling` checks this first so the failure
+reads as a server misconfiguration rather than an agent bug.
+
+```bash
+export OPERONX_TEST_LLM_URL=<siraya base url>     # from callbot .env: QWEN_API_URL
+export OPERONX_TEST_LLM_KEY=<key>                 #                    QWEN_API_KEY
+export OPERONX_TEST_LLM_MODEL=qwen3.7-plus
+uv run pytest tests/internal/agents/test_live_agent.py -m integration
+```
+
+Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
+` = ` spacing and therefore cannot be shell-sourced — parse it, don't
+`source` it.
+
+### 0.3 · What is NOT done
+
+| | |
+|---|---|
+| **P4** | The out-of-tree `operonx-code` harness. Needs §16 F5 answered first — a coding agent streams, and streaming frames are dropped unless the op is PARENT/END-bound |
+| **P5** | Deferred: learning loop, MCP client, heartbeat scheduler |
+| **§16 F2–F8** | Seven confirmed **core** defects, recorded and deliberately not fixed. Each needs its own decision and several change published behaviour |
+| **§15.2** | Rows still 🟡: `EmitOp`/`stream(mode="custom")`, `SCRATCH`, preemptive cancel, sub-agent trace nesting |
+| **C6** | No way to hand `LLMOp` a message list without prompt templating, so every agent must escape braces defensively |
+
+### 0.4 · The lesson this plan kept re-learning
+
+Four §2 rows were **wrong**, not merely unverified. Four bugs hid behind
+scripted model doubles until a live run. Seven more hid until an
+adversarial review. One whole subsystem was built, tested and wired to
+nothing.
+
+The common thread: **a passing test proves the code does what you wrote,
+never that your assumption about the dependency was right.** §15.4 states
+it; §16 is the evidence. Probe the primitive, run it live, and check what
+the consumer actually receives — the unit test is the weakest of the three.
+
+Three plausible high-severity reports from the adversarial review were
+**disproved by probe** (§16.2). Acting on them would have been the
+mistake, so they are recorded alongside the real findings.
+
+---
+
 ## 1 · Why now (what 1.0.0 changed)
 
 The pre-1.0.0 plan had to work around six missing primitives. All six shipped.
@@ -636,11 +725,11 @@ Later                       P5 Learning-loop pattern doc (defer)
 | # | Phase | Deliverable | Size |
 |---|-------|-------------|------|
 | **0** ✅ | Namespace + governance | Rename `operonx/tools/` → `operonx/cli/`; scaffold `operonx/agents/`; write Footprint Ladder into `CONTRIBUTING.md` | 0.5d |
-| **1** | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) — **plus §14.3 rows 1–6**: tool-error→tool-message, unknown-tool handling, history invariant, concurrent-HITL gate, repeat cap, state injection, and the `wrap_*` closure fold (§14.2) | 5–7d |
-| **2** | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
-| **3** | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
-| **4** | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
-| **5** | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
+| **1** ✅ | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) — **plus §14.3 rows 1–6**: tool-error→tool-message, unknown-tool handling, history invariant, concurrent-HITL gate, repeat cap, state injection, and the `wrap_*` closure fold (§14.2) | 5–7d |
+| **2** ✅ | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
+| **3** ✅ | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
+| **4** ⬜ | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
+| **5** ⬜ | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
 
 **Estimate**: **P0–P3 in ~3 weeks**, P4 in another week.
 
@@ -954,15 +1043,15 @@ Probe the row, then flip its light and link the test.
 | Turn loop (back-edge → synthesized `_GraphLoop`; termination when no back-edge source fired) | 🟢 after the V8 fix; was broken for any loop containing a generator | P1 |
 | Shared cells + reducers (`PARENT.declare(reducers=)`) | 🟢 verified — the cell merges correctly; `run()`'s output dict does not (V6 F2) | P1 |
 | Message accumulation (`add_messages` id-upsert, `RemoveMessage`) | 🟢 id-upsert verified end to end; **raises on a non-list**, which is why `gather_tool_messages` exists | P1 |
-| Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🟡 | P1 |
-| Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 | P1 |
-| LLM streaming (`stream=True` per-token frames) | 🟡 | P2 |
+| Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🔴 parses "successfully" into `None` with `error=None` on wrong keys and on wrapped XML, so `max_retries` never fires — §16 F6/F7. **The agent layer does not use `fields=`** | — |
+| Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 unverified — the agent layer does not rely on it | — |
+| LLM streaming (`stream=True` per-token frames) | 🔴 **two defects** — tool-call deltas were appended not merged (fixed); frames are dropped unless the op is PARENT/END-bound (§16 F5, open) | P4 |
 | Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
-| Cross-run persistence (`Checkpointer`) | 🔴 works, but §2 named the wrong binding site and the wrong object for the accessors — V11 | P2 |
-| Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟡 | P2 |
+| Cross-run persistence (`Checkpointer`) | 🟢 works — but §2 named the wrong binding site and the wrong accessors (V11). `AgentSession` uses the real API | P2 ✅ |
+| Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🔴 `exclude=` does not filter the V3 trace and `observe_max` is a no-op without a checkpointer — §16 F3/F4. The agent layer uses its own `Redactor` instead | — |
 | Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
 | Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
-| Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🟡 | P3 |
+| Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🔴 a **bare `Interrupt()`** cancels the entire run and returns cleanly — §16 F2 | — |
 | Async I/O dispatch (`@op(bound=)`) | 🟢 — exercised throughout the existing suite | — |
 | Config + secrets (`ResourceHub`) | 🟢 — exercised throughout the existing suite | — |
 
