@@ -23,6 +23,11 @@ def create_doc_store(config: DocStoreConfig) -> BaseDocStore:
         ImportError: With a pointer to the right ``operonx[<extra>]``
             install when an optional dependency is missing.
     """
+    if config.api_type == DocStoreType.MEMORY:
+        # No optional dependency — always importable.
+        from operonx.providers.doc_stores.memory import MemoryDocStore
+
+        return MemoryDocStore(config)
     if config.api_type == DocStoreType.POSTGRES:
         try:
             from operonx.providers.doc_stores.postgres import PostgresDocStore

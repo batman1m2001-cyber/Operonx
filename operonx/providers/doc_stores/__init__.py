@@ -13,6 +13,7 @@ from operonx.providers.doc_stores._reorder import partition_by_ids, reorder_by_i
 from operonx.providers.doc_stores.base import BaseDocStore
 from operonx.providers.doc_stores.config import DocStoreConfig, DocStoreType
 from operonx.providers.doc_stores.factory import create_doc_store
+from operonx.providers.doc_stores.memory import MemoryDocStore
 
 _LAZY_BACKENDS = {
     "PostgresDocStore": "operonx.providers.doc_stores.postgres",
@@ -38,6 +39,7 @@ __all__ = [
     "DocStoreConfig",
     "DocStoreType",
     "create_doc_store",
+    "MemoryDocStore",
     "reorder_by_ids",
     "partition_by_ids",
     "PostgresDocStore",

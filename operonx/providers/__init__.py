@@ -89,6 +89,7 @@ _LAZY_BACKENDS = {
     "reorder_by_ids": "operonx.providers.doc_stores",
     "partition_by_ids": "operonx.providers.doc_stores",
     "PostgresDocStore": "operonx.providers.doc_stores",
+    "MemoryDocStore": "operonx.providers.doc_stores",
     # Workflow ops
     "LLMOp": "operonx.providers.ops",
     "EmbeddingOp": "operonx.providers.ops",
