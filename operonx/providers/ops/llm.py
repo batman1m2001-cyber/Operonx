@@ -851,12 +851,63 @@ class LLMOp(BaseOp):
             acc["finish_reason"] = choice.finish_reason
 
         if choice.delta.tool_calls:
-            acc["tool_calls"].extend([tc.model_dump() for tc in choice.delta.tool_calls])
+            LLMOp._merge_tool_call_deltas(choice.delta.tool_calls, acc)
 
         if hasattr(choice.delta, "refusal") and choice.delta.refusal:
             acc["refusal"] = (acc["refusal"] or "") + choice.delta.refusal
 
         return yield_dict
+
+    @staticmethod
+    def _merge_tool_call_deltas(deltas, acc: dict) -> None:
+        """Assemble streamed tool-call deltas into whole tool calls.
+
+        A provider streams one tool call across many chunks, each carrying
+        the ``index`` it belongs to and a fragment of ``arguments``::
+
+            {index: 0, id: "call_abc", function: {name: "get_weather"}}
+            {index: 0, function: {arguments: '{"city": '}}
+            {index: 0, function: {arguments: '"Hanoi"}'}}
+
+        Appending these verbatim yields one broken call per chunk — each
+        with a fragment of JSON that parses as nothing. Merging on
+        ``index`` is what turns them back into a call. ``id`` and ``name``
+        arrive once, usually on the first fragment, so the first non-empty
+        value wins rather than the last.
+
+        Non-streaming responses were always correct, which is why this
+        survived: streaming and tool calling each worked alone, and only
+        the combination — the one an agent needs — was broken.
+        """
+        by_index = acc.setdefault("_tool_call_index", {})
+        for delta in deltas:
+            data = delta.model_dump()
+            index = data.get("index")
+            if index is None:
+                # No index to merge on: keep it whole rather than guess.
+                acc["tool_calls"].append(data)
+                continue
+
+            if index not in by_index:
+                entry = {
+                    "id": data.get("id"),
+                    "type": data.get("type") or "function",
+                    "function": {"name": None, "arguments": ""},
+                }
+                by_index[index] = entry
+                acc["tool_calls"].append(entry)
+
+            entry = by_index[index]
+            if data.get("id") and not entry.get("id"):
+                entry["id"] = data["id"]
+            if data.get("type"):
+                entry["type"] = data["type"]
+
+            fn = data.get("function") or {}
+            if fn.get("name") and not entry["function"]["name"]:
+                entry["function"]["name"] = fn["name"]
+            if fn.get("arguments"):
+                entry["function"]["arguments"] += fn["arguments"]
 
     @staticmethod
     def _new_stream_acc() -> dict:
@@ -867,6 +918,11 @@ class LLMOp(BaseOp):
             "finish_reason": "stop",
             "usage_raw": {},
             "tool_calls": [],
+            # index → the entry in `tool_calls` being assembled for it.
+            # Declared here so the accumulator's shape is visible; only
+            # `tool_calls` is read into the op's outputs (see line ~640),
+            # so this scratch key never reaches a caller.
+            "_tool_call_index": {},
             "refusal": None,
         }
 
