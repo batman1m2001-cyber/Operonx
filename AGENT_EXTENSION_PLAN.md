@@ -69,7 +69,7 @@ back to one of these.
 | Ordered gather | `Ref.collect()` — buffered, flushed at EOF in yield-index order | `task_scheduler.py:_on_eof` · `ref.py:collect` |
 | Preemptive cancel | `yield Interrupt(ctx_to_cancel=…)` from any op — scheduler drains pumps at that ctx prefix | `_events.py` · `task_scheduler.py` |
 | **HITL suspend/resume** | **`InterruptOp(payload=…, timeout=…)` — emits `InterruptEvent`, awaits `state._interrupt_responses[id]`; outputs `response`, `timed_out`, `interrupt_id`.** 🔴 The op works, but the **engine is not wired to the bus** — see §15.1 V3 for the path that does work | `core/ops/flow/interrupt_op.py` |
-| **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer` (Phase 2). Bind at `Operon(g, checkpointer=…)`. `handle.get_state(step)`, `handle.list_steps()`. Zero overhead when unbound** | `checkpoint/base.py` · `checkpoint/memory.py` |
+| **Cross-run persistence** | **`Checkpointer` protocol + `InMemoryCheckpointer`.** 🔴 Bind at **`engine.start(inputs, checkpointer=…)`**, not `Operon(...)`; `get_state(step)` / `list_steps()` are on the **checkpointer**, not the handle — see §15.1 V11 | `checkpoint/base.py` · `checkpoint/memory.py` |
 | **Custom progress events** | **`EmitOp(channel=…, payload=…)` + `engine.stream(mode="custom", channels=[…])` — fire-and-forget filterable event bus** | `core/ops/flow/emit_op.py` · `engine.py:stream` |
 | **Observability shaping** | **`@op(exclude=[…], include=[…], observe_max=N)` — polymorphic filter at emission source; `ObserveBudgetExceeded` on runaway generators** | `core/ops/base.py` |
 | Async I/O dispatch | `@op(bound="io"\|"cpu"\|"sync")` — auto thread-pool routing | `core/ops/base.py` |
@@ -935,6 +935,7 @@ that lives in `tests/`.
 | V7 | §7.3 | 🔴 **No turn cap exists at graph level.** The synthesized loop is pinned to 1000 at `cycle_rewrite.py:402`. Deliberately **not** plumbed through `@graph`: a graph-level cap cuts mid-flight, tells the model nothing and leaves partial state. `count_turn` in the agent layer injects a notice at the limit and lets the model take one final turn, so exhaustion exits the way success does. | P1 ✅ |
 | V8 | core | ✅ **fixed.** A back-edge source below a generator fan-out never fired, so any loop of the ReAct shape stopped after one iteration — silently. `end_time` lands at `('main','[0]','__collect__')`, never at the iteration ctx, and the spec (`STATE_LOOP_REFACTOR_PLAN.md:518`) required an exact match. Termination now accepts any ctx below the iteration's. 14 regression tests; none of the 32 prior cycle-rewrite tests put a generator in a loop. | P1 ✅ |
 | V9 | §7.3 | 🔴 **An op wired after a generator-containing loop never runs.** The loop emits at item contexts, so the downstream op never reaches ready and is skipped with no error. Kills the obvious "terminal `finish` op reads the cells and emits them" design. `agent_result(result, agent)` reads the cells directly instead, which is why it needs the graph. | P1 ✅ |
+| V11 | §2 | 🔴 **Checkpointer API mis-stated.** Binding is `engine.start(inputs, checkpointer=cp)` — `Operon(g, checkpointer=)` raises `TypeError`. `get_state(step)` and `list_steps()` are methods on the **checkpointer**, not on `ExecutionHandle`, which has neither. The primitive itself works: 6 steps recorded for a 3-iteration loop, each a per-step cell snapshot. `AgentSession` uses the real API. | P2 ✅ |
 | V10 | §7.2 | 🔴 **`collect()` behind `parallel()` inside a loop invokes per item**, not per batch — measured `[[0],[2],[0],[2]]` for 2 items × 2 iterations. Consumers must tolerate a partial batch. Harmless when the target cell has a reducer, since each write merges; `gather_tool_messages` handles both shapes. | P1 ✅ |
 
 ### 15.2 · §2 rows — verification status
@@ -953,7 +954,7 @@ Probe the row, then flip its light and link the test.
 | Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 | P1 |
 | LLM streaming (`stream=True` per-token frames) | 🟡 | P2 |
 | Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
-| Cross-run persistence (`Checkpointer`, `handle.get_state(step)`, `list_steps()`) | 🟡 | P2 |
+| Cross-run persistence (`Checkpointer`) | 🔴 works, but §2 named the wrong binding site and the wrong object for the accessors — V11 | P2 |
 | Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟡 | P2 |
 | Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
 | Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
