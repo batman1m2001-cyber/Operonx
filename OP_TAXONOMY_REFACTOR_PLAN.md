@@ -131,7 +131,8 @@ capability.
 
 | Candidate | Bar | Verdict | Rationale |
 |---|---|---|---|
-| `VectorSearchOp` | 4/4 | ✅ ship (1.1.0) | Completes the text/RAG stack (LLM+Embedding+Rerank+VectorSearch). Stable core: `query vector → top-K docs`. Every RAG framework has one. |
+| `VectorSearchOp` | 4/4 | ✅ ship (1.1.0) | Completes the text/RAG stack (LLM+Embedding+Rerank+VectorSearch). Stable core: `query vector → top-K ids`. Every RAG framework has one. |
+| `DocFetchOp` | 3.5/4 | ✅ ship (1.1.0) | **Reversal — earlier drafts rejected this.** See the note below. Stable core: `ids → rows`, identical across every store of record. Sits on the critical path of the canonical pipeline (§5.1 makes hydration unconditional), so demand is concrete, not speculative. Owning it also eliminates the silent ordering footgun (§5.3). |
 | `SttOp` | 4/4 semantics, but... | ❌ don't ship | Zero users in operonx or agent plan (agent plan doesn't do audio). Callbot has one Triton STT call site; bare `@op` is 10 LOC. Would ship as speculation. |
 | `TtsOp` | 4/4 semantics, but... | ❌ don't ship | Same reasoning as SttOp. Zero users beyond callbot. |
 | `ClassifierOp` | 4/4 semantics, but... | ❌ don't ship | Zero users. Existing callbot classification is either rule-based (`skip_classify`) or via `LLMOp.of(fields=…)`. If concrete demand appears, ship `SentimentOp`/`ModerationOp` narrowly at that point. |
@@ -143,17 +144,37 @@ capability.
 
 **Discipline over completeness.** "HuggingFace ships one" isn't a
 sufficient reason to ship one. **Concrete demand + stable shape + not
-better served by bare `@op` around a helper** is. Under that rule,
-VectorSearchOp is the only new op this plan ships.
+better served by bare `@op` around a helper** is. Under that rule this
+plan ships exactly two new ops — and they're a pair, because §5.1 makes
+them one pipeline.
 
-**Why VectorSearchOp does earn a slot but STT/TTS/etc don't:**
+**On the `DocFetchOp` reversal.** Earlier drafts rejected it, reasoning
+that stores of record are "too heterogeneous" — the same argument that
+killed `ClassifierOp`. That argument was wrong here. Fetch-by-ids is one
+of the most stable contracts in the stack:
 
-- **VectorSearchOp** completes the text/RAG stack that operonx already
-  ships partially (LLMOp + EmbeddingOp + RerankOp). Its absence forces
-  every RAG user to write 30-50 LOC of vector-store client + bare `@op`
-  themselves. The composability payoff is real:
-  `EmbeddingOp → VectorSearchOp → RerankOp → LLMOp` is the canonical
-  RAG pipeline in one graph.
+```
+Postgres  → SELECT … WHERE id = ANY($1)
+Mongo     → find({_id: {$in: ids}})
+Redis     → MGET / pipelined HGETALL
+DynamoDB  → BatchGetItem
+ES        → mget
+```
+
+ids in, rows out, everywhere. The heterogeneity is in the *connection*,
+which is exactly what `ResourceHub` already abstracts. Rejecting it also
+meant telling users to build a parallel config-and-pooling system beside
+the one operonx already ships — which is the real inconsistency.
+
+**Why these two earn slots but STT/TTS/etc don't:**
+
+- **VectorSearchOp + DocFetchOp** complete the text/RAG stack operonx
+  already ships partially (LLMOp + EmbeddingOp + RerankOp). Their
+  absence forces every RAG user to hand-roll a vector-store client *and*
+  a document fetcher *and* their own connection pooling. The
+  composability payoff is real:
+  `EmbeddingOp → VectorSearchOp → DocFetchOp → RerankOp → LLMOp` is the
+  canonical RAG pipeline in one graph, with every hop separately traced.
 - **STT/TTS/Classify/OCR** don't cluster into a pipeline with existing
   ops. They're standalone task ops that would sit alone in a user's
   graph — same shape as a bare `@op` wrapper. The framework layer adds
@@ -170,16 +191,17 @@ VectorSearchOp is the only new op this plan ships.
 | `LLMOp` | unchanged | text → text (+ tools + structured) | `providers/llms/` | Reference pattern. No work. |
 | `EmbeddingOp` | unchanged | text → vector | `providers/embeddings/` | Reference pattern. No work. |
 | `RerankOp` | unchanged | (docs, query) → scored docs | `providers/rerankers/` | Reference pattern. No work. |
-| `VectorSearchOp` | **NEW** | query vector → top-K docs | `providers/vector_stores/` (qdrant, faiss day-one) | 1.1.0 |
+| `VectorSearchOp` | **NEW** | query vector → top-K (ids, scores, metadata) | `providers/vector_stores/` (faiss, pgvector day-one) | 1.1.0 |
+| `DocFetchOp` | **NEW** | ids → rows, order-preserved | `providers/doc_stores/` (postgres day-one) | 1.1.0 |
 | `OnnxOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: MLP/attention head over embeddings) | — | Users write bare `@op` around `providers/_utils/onnx.py::load_onnx_session`. |
 | `TritonOp` | **DEPRECATE (1.1.0) → DELETE (2.0.0)** | (was: generic Triton client) | — | Users write bare `@op` around new `providers/triton/client.py` helper. Callbot migrates its one STT call site. |
 
-**Net:** +1 semantic op, –2 deletions, 3 unchanged. See §3 for every
-rejected candidate and why.
+**Net:** +2 semantic ops (one pair — §5.1 makes them one pipeline),
+–2 deletions, 3 unchanged. See §3 for every rejected candidate and why.
 
 ---
 
-## 5 · `VectorSearchOp` design
+## 5 · The retrieval pair — `VectorSearchOp` + `DocFetchOp`
 
 ### 5.1 · The load-bearing principle: the index is not a store
 
@@ -256,23 +278,21 @@ content don't.
 ### 5.3 · Canonical RAG pipeline (two stores, explicit)
 
 ```python
-@op(bound="io")
-async def fetch_docs(ids: list):
-    """Hydrate from the store of record — user code, ~10 LOC.
-    NOTE: SQL returns rows in arbitrary order; restore score order."""
-    rows = await db.fetch("SELECT id, content FROM docs WHERE id = ANY($1)", ids)
-    return {"rows": reorder_by_ids(rows, ids)}
-
 @graph
 def rag(query, tenant):
     q_emb  = EmbeddingOp(resource="bge-m3", texts=[query])
     hits   = VectorSearchOp(
-        resource="pgvector:docs",
+        resource="pgvector:docs",             # the derived index
         query_vector=q_emb["embeddings"][0],
         top_k=20,
-        filter={"tenant": tenant},          # matched against indexed metadata
+        filter={"tenant": tenant},            # matched against indexed metadata
     )
-    docs   = fetch_docs(ids=hits["ids"])    # ← the store of record
+    docs   = DocFetchOp(
+        resource="postgres:main",             # the store of record
+        ids=hits["ids"],
+        collection="docs",
+        fields=["id", "title", "content"],
+    )
     ranked = RerankOp(resource="bge-m3-reranker", docs=docs["rows"], query=query)
     llm    = LLMOp.of(resource="claude-haiku",
                       prompt="Context: {ctx}\n\nQ: {q}",
@@ -280,22 +300,26 @@ def rag(query, tenant):
     START >> q_emb >> hits >> docs >> ranked >> llm >> END
 ```
 
-**The ordering footgun.** `VectorSearchOp` returns ids in score order.
-`SELECT … WHERE id = ANY(...)` returns rows in arbitrary order. Zipping
-them naively mismatches every doc to the wrong score — silently. Ship a
-pure helper users can reach for:
+Five hops, five trace spans. Hydration is a first-class node — which
+matters because in most RAG pipelines it costs more wall-clock than the
+vector search, and today that cost is invisible.
+
+**The ordering footgun, and why the framework owns it.**
+`VectorSearchOp` returns ids in score order. `SELECT … WHERE id = ANY(…)`
+returns rows in *arbitrary* order. Zipping them naively mismatches every
+doc to the wrong score — silently, with no error. Every user hits this
+once, in production.
+
+`DocFetchOp` restores score order internally (see §5.8), so callers
+can't get it wrong. The same logic ships as a pure helper for users who
+write their own fetch op anyway:
 
 ```python
-from operonx.providers.vector_stores import reorder_by_ids
+from operonx.providers.doc_stores import reorder_by_ids
 ```
 
-Five lines, not an op. Used in the shipped example so the pattern is
-visible.
-
-**We do NOT ship a `DocFetchOp`.** Stores of record are too
-heterogeneous (Postgres / Mongo / MySQL / DynamoDB / S3 / Elasticsearch)
-— the same argument that rejected `ClassifierOp` in §3. Users' fetch is
-~10 LOC against a client they already hold.
+Five lines, exported from the package root, used inside `DocFetchOp`
+and in the shipped example.
 
 ### 5.4 · Filters are backend-native (no DSL)
 
@@ -446,6 +470,88 @@ Add `VectorUpsertOp` when agent-memory concretely needs it — no rework,
 because the backend contract is already right. Consistent with the
 "no speculation" discipline in §3.
 
+### 5.8 · `DocFetchOp` — the store of record
+
+§5.1 makes hydration unconditional, which puts it on the critical path
+of every RAG pipeline. That earns it a framework op (§3 bar, with the
+reversal noted there) rather than leaving each user to rebuild
+connection config and pooling beside the ones `ResourceHub` already
+provides.
+
+```python
+# operonx/providers/ops/doc_fetch.py
+class DocFetchOp(BaseOp):
+    """Fetch records by primary key from a store of record.
+
+    Returns rows in the SAME ORDER as the `ids` input — so a
+    VectorSearchOp → DocFetchOp chain stays score-aligned without the
+    caller doing anything. See §5.3.
+    """
+
+    type: OpType = "doc-fetch"
+
+    inputs = {
+        "ids":        Param(type=list, required=True),                   # list[str|int]
+        "collection": Param(type=str,  required=False, default=None),    # table / collection
+        "fields":     Param(type=list, required=False, default=None),    # projection; None = all
+        "id_field":   Param(type=str,  required=False, default="id"),
+    }
+    outputs = {
+        "rows":    Param(type=list),   # list[dict] — id-aligned with `ids`
+        "missing": Param(type=list),   # list[str|int] — ids with no record
+    }
+```
+
+**Two guarantees worth stating** — both are the reason this is an op and
+not a snippet:
+
+1. **`rows` is index-aligned with `ids`.** Backends restore order after
+   the fetch. Callers never zip mismatched data.
+2. **Missing ids surface explicitly** in `missing` rather than silently
+   shortening `rows`. An index that has drifted from the store of record
+   (deleted doc, failed sync) is a real condition; it should be
+   observable, not invisible.
+
+#### The boundary — stated so this doesn't become an ORM
+
+`DocFetchOp` does **fetch-by-ids with optional projection. Nothing
+else.**
+
+| Supported | Not supported — write your own `@op` |
+|---|---|
+| Fetch N records by primary key | Joins across tables |
+| Column/field projection (`fields=`) | Arbitrary `WHERE` clauses |
+| Per-call `collection` selection | Writes, upserts, deletes |
+| Missing-id reporting | Transactions |
+| Order restoration | Custom SQL, stored procedures, query-in-YAML |
+
+Anything past that line, users write a bare `@op` — the escape hatch is
+preserved, and `providers/doc_stores/` clients stay importable for it.
+Without this boundary written down, the op grows an ORM one feature
+request at a time.
+
+**No query strings in `resources.yaml`.** Resources carry connection
+config only (DSN, pool size, credentials) — the same split operonx
+already uses for LLMs, where the model config is a resource but the
+prompt is a call-site argument. Business logic does not live in YAML.
+
+#### Backends
+
+| Backend | Ship | Client (official) | Extra | Fetch primitive |
+|---|---|---|---|---|
+| **Postgres** | **day one** | `psycopg[binary]` | `operonx[postgres]` | `SELECT … WHERE id = ANY($1)` |
+| Mongo | later | `motor` / `pymongo` async | `operonx[mongo]` | `find({_id: {$in: ids}})` |
+| Redis | later | `redis` (async) | `operonx[redis]` | pipelined `MGET` / `HGETALL` |
+| DynamoDB | later | `aioboto3` | — | `BatchGetItem` |
+| Elasticsearch | later | `elasticsearch[async]` | — | `mget` |
+
+**Postgres day one only, deliberately.** pgvector users already run
+Postgres, so the *same* docker-compose instance serves both the pgvector
+integration tests and the `DocFetchOp` tests — one dependency, one CI
+service, and the cleanest expression of the two-store model (one
+database, two tables, no dual-write risk). Other backends land on
+demand, each ~80–120 LOC behind the same factory pattern.
+
 ---
 
 ## 6 · Callbot migration in detail
@@ -542,14 +648,18 @@ operonx/providers/
 ├── rerankers/     (unchanged)
 ├── vector_stores/ {faiss, pgvector}.py day-one · {qdrant}.py fast-follow
 │                  + base.py (ABC w/ `bound` attr), config.py, factory.py,
-│                  _reorder.py (reorder_by_ids), README.md (filter dialects)  ← NEW
+│                  README.md (filter dialects)                       ← NEW
+├── doc_stores/    {postgres}.py day-one · {mongo, redis}.py later
+│                  + base.py, config.py, factory.py,
+│                  _reorder.py (reorder_by_ids)                      ← NEW
 ├── triton/        client.py, decode.py, dtypes.py                  ← NEW (low-level helper for user @ops)
 ├── onnx/          backend.py, config.py, factory.py                (unchanged — used by embeddings/onnx.py, rerankers/onnx.py, and user @ops)
 ├── ops/
 │   ├── llm.py
 │   ├── embedding.py
 │   ├── rerank.py
-│   └── vector_search.py                                            ← NEW
+│   ├── vector_search.py                                            ← NEW
+│   └── doc_fetch.py                                                ← NEW
 ├── _utils/
 │   ├── huggingface.py
 │   └── onnx.py    (unchanged — hosts load_onnx_session)
@@ -581,6 +691,7 @@ directly).
 |---|---|---|
 | `"llm"`, `"embedding"`, `"rerank"` | keep | Match existing ops |
 | — | **add `"vector-search"`** | Matches new `VectorSearchOp` |
+| — | **add `"doc-fetch"`** | Matches new `DocFetchOp` |
 | **`"interrupt"`** | **add** (currently missing from Literal but used as `InterruptOp.type`) | Fix drift |
 | **`"emit"`** | **add** (currently missing from Literal but used as `EmitOp.type`) | Fix drift |
 | `"milvus"`, `"mongo"`, `"s3"` | **remove** | Backend-named, no ops today |
@@ -599,8 +710,11 @@ directly).
 
 - Ship `VectorSearchOp` + `providers/vector_stores/` package — `base.py`
   (ABC with `bound` attr + `search()`/`upsert()`), `config.py`,
-  `factory.py`, `_reorder.py`, and the **FAISS + pgvector** backends.
-  Qdrant follows right after (not blocking).
+  `factory.py`, and the **FAISS + pgvector** backends. Qdrant follows
+  right after (not blocking).
+- Ship `DocFetchOp` + `providers/doc_stores/` package — `base.py`,
+  `config.py`, `factory.py`, `_reorder.py`, and the **Postgres**
+  backend. Mongo/Redis on demand.
 - ✅ **Shipped (PR #20)** `providers/triton/{client,decode,dtypes}.py`,
   extracted from `providers/ops/triton.py`:
   - `client.py` — `TritonClient.get(url)`, process-cached so the gRPC
@@ -653,28 +767,30 @@ are marker commits.
 
 ```
         P0   ✅ providers/triton/ helper                      (PR #20, merged)
-Week 1  P1a     vector_stores ABC + factory + FAISS + the op
+Week 1  P1a     vector_stores ABC + factory + FAISS + VectorSearchOp
 Week 1  P1b     pgvector backend (+ docker-compose CI)
-Week 2  P1c     two-store RAG example + docs
+Week 2  P1c     doc_stores ABC + factory + Postgres + DocFetchOp
+Week 2  P1d     two-store RAG example + docs
 Week 2  P2      Deprecation warnings on OnnxOp/TritonOp
                                                   ← Ship 1.1.0
 
 Later   P3      Delete OnnxOp/TritonOp + OpType cleanup
                                                   ← Ship 2.0.0
-Later           Qdrant backend                    (not blocking)
+Later           Qdrant backend · Mongo/Redis doc stores   (not blocking)
 ```
 
 | # | Phase | Deliverable | Size | State |
 |---|---|---|---|---|
 | **P0** | Triton helper | `providers/triton/{client,decode,dtypes}.py` extracted from `providers/ops/triton.py`, preserving the module-global client cache. `TritonOp._process` 120 → 19 lines. 40 tests. | 1d | ✅ merged (PR #20) |
-| **P1a** | VectorSearch core | `providers/vector_stores/{base,config,factory}.py` per §5.6 (incl. `bound` class attr) + `reorder_by_ids` helper + `providers/ops/vector_search.py` + **FAISS** backend (no server → CI without docker; proves the ids-only contract). Unit tests. | 1.5–2d | ⏳ next |
+| **P1a** | VectorSearch core | `providers/vector_stores/{base,config,factory}.py` per §5.6 (incl. `bound` class attr) + `providers/ops/vector_search.py` + **FAISS** backend (no server → CI without docker; proves the ids-only contract). Unit tests. | 1.5–2d | ⏳ next |
 | **P1b** | pgvector backend | `providers/vector_stores/pgvector.py` — async `psycopg`, SQL-fragment filter + equality sugar (§5.4). Integration tests against a docker-compose'd Postgres+pgvector in CI. | 1.5d | ⏳ |
-| **P1c** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → user `fetch_docs` → RerankOp → LLMOp), incl. the `reorder_by_ids` footgun. `docs/guide/08-vector-search.md` + `providers/vector_stores/README.md` with the §5.4 filter table. | 1d | ⏳ |
+| **P1c** | DocFetch | `providers/doc_stores/{base,config,factory,_reorder}.py` + **Postgres** backend + `providers/ops/doc_fetch.py` per §5.8. Order restoration + `missing` reporting are the load-bearing tests. Reuses P1b's docker-compose Postgres. | 1.5d | ⏳ |
+| **P1d** | RAG example + docs | `examples/python/ex16_rag_pipeline/` showing the **two-store** shape end-to-end (EmbeddingOp → VectorSearchOp → DocFetchOp → RerankOp → LLMOp). `docs/guide/08-vector-search.md` + `providers/vector_stores/README.md` with the §5.4 filter table. | 1d | ⏳ |
 | **P2** | Deprecation | `DeprecationWarning` on `OnnxOp.__init__` / `TritonOp.__init__` with the wording from §9. `CHANGELOG.md` entry. Ship 1.1.0. | 0.5d | ⏳ |
 | **P3** | Delete + enum | Remove `operonx/providers/ops/{onnx,triton}.py`. Trim + extend `OpType` per §8. Retag `ParserError.op_type`. `MIGRATION.md` §Op-taxonomy. Ship 2.0.0. | 1d | ⏳ |
 | **Follow-up** | Qdrant backend | `providers/vector_stores/qdrant.py` — condition-tree filter (§5.4). Not blocking 1.1.0. | 1d | — |
 
-**1.1.0 remaining: ~4.5 days** (P0 done). 2.0.0 delta is trivial once
+**1.1.0 remaining: ~6 days** (P0 done). 2.0.0 delta is trivial once
 callbot has migrated.
 
 ---
@@ -703,11 +819,12 @@ The refactor is clean but not free.
    `{"$and": …}` vs Qdrant's `{"must": …}`) with native moving to
    `filter_native=`. Backward compatible.
 
-2b. **Hydration is user code, so its correctness is user-owned.** The
-   ordering footgun (§5.3) is real and silent — `reorder_by_ids` plus
-   the shipped example are the mitigation, but nothing *forces* callers
-   to use them. Considered shipping a `DocFetchOp` to own this;
-   rejected because stores of record are too heterogeneous (§5.3).
+2b. **`DocFetchOp`'s boundary will be pushed on.** Fetch-by-ids +
+   projection covers the common case, but users will want joins,
+   permission filters, soft-delete handling, decryption. The boundary
+   in §5.8 is what keeps this from becoming an ORM — the escape hatch
+   is a bare `@op`, and `providers/doc_stores/` clients stay importable
+   for it. Expect to defend that line in review.
 
 3. **Callbot's classifier stays in callbot forever.** `speech/denoise_classifier.py`
    is bespoke and doesn't map onto any framework op. That's honest —
@@ -738,8 +855,16 @@ The refactor is clean but not free.
      FAISS is `cpu`, network stores are `io`. §5.6.
    - **`upsert()` on the ABC now, `VectorUpsertOp` later.** §5.7.
    - **Day-one backends: FAISS + pgvector**; Qdrant fast-follow. §5.5.
+   - **`DocFetchOp` ships alongside `VectorSearchOp`** — hydration is
+     unconditional under §5.1, so it's on the critical path, not
+     speculative. Reverses earlier drafts. §5.8 + §3.
+   - **`DocFetchOp` guarantees id-order restoration and reports
+     `missing` ids** rather than silently shortening `rows`. §5.8.
+   - **`DocFetchOp` boundary: fetch-by-ids + projection only.** No
+     joins, writes, transactions, custom SQL, or query-in-YAML. §5.8.
    - **Optional-deps naming: `operonx[faiss]`, `operonx[pgvector]`,
-     `operonx[qdrant]`** — backend name only, matching `operonx[onnx]`.
+     `operonx[qdrant]`, `operonx[postgres]`** — backend name only,
+     matching `operonx[onnx]`.
    - **Resource-key convention: `<backend>:<name>`**
      (`pgvector:docs`, `faiss:docs`, `qdrant:docs`) — matches how
      `embeddings/factory.py` dispatches on `EmbeddingType`.
@@ -782,21 +907,20 @@ Design questions that were open before P1 are now settled in §11 item 6
 3. `providers/vector_stores/factory.py` — `create_vector_store(config)`
    with per-branch lazy imports and `_missing_extra_message`, mirroring
    `embeddings/factory.py`.
-4. `providers/vector_stores/_reorder.py` — `reorder_by_ids(rows, ids,
-   key="id")`, the §5.3 footgun helper. Pure, ~5 LOC, re-exported from
-   the package root.
-5. `providers/vector_stores/faiss.py` — FAISS backend. `bound = "cpu"`.
+4. `providers/vector_stores/faiss.py` — FAISS backend. `bound = "cpu"`.
    Raises the §5.4 message on any non-`None` filter.
-6. `providers/ops/vector_search.py` — `VectorSearchOp`, reading `bound`
+5. `providers/ops/vector_search.py` — `VectorSearchOp`, reading `bound`
    from the resolved backend.
-7. Unit tests — index-alignment of `ids`/`scores`/`metadata`, score
-   ordering, `top_k` honored, `reorder_by_ids` round-trip incl. missing
-   ids, FAISS filter-raises, factory lazy-import error message.
+6. Unit tests — index-alignment of `ids`/`scores`/`metadata`, score
+   ordering, `top_k` honored, FAISS filter-raises, factory lazy-import
+   error message.
 
 Then **P1b** (pgvector, incl. the SQL-fragment + equality-sugar filter
-shapes and docker-compose'd integration CI), then **P1c** (the
-two-store RAG example + `providers/vector_stores/README.md` carrying
-the §5.4 filter table).
+shapes and docker-compose'd integration CI), **P1c**
+(`providers/doc_stores/` + Postgres + `DocFetchOp` per §5.8 — the
+load-bearing tests are order restoration and `missing` reporting;
+reuses P1b's Postgres service), then **P1d** (the two-store RAG example
++ `providers/vector_stores/README.md` carrying the §5.4 filter table).
 
 Ordering rationale: FAISS first because it needs no server (fast unit
 tests, no docker in CI) and because being vector-only it *proves* the
