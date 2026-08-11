@@ -17,6 +17,12 @@ from operonx.providers.triton import (
     to_infer_array,
 )
 
+# The providers conftest auto-marks this directory as `integration`, which
+# CI's `-m "not integration"` selector excludes. These tests are mock-only
+# (no Triton server) and cheap, so opt back in via the `unit` marker the
+# conftest honours — otherwise they never run on a PR.
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # dtypes
 # =============================================================================

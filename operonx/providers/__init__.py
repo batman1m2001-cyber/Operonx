@@ -73,12 +73,19 @@ _LAZY_BACKENDS = {
     "HFReranker": "operonx.providers.rerankers",
     "ONNXReranker": "operonx.providers.rerankers",
     "PineconeReranker": "operonx.providers.rerankers",
+    # Vector stores
+    "BaseVectorStore": "operonx.providers.vector_stores",
+    "VectorStoreType": "operonx.providers.vector_stores",
+    "VectorStoreMetric": "operonx.providers.vector_stores",
+    "VectorStoreConfig": "operonx.providers.vector_stores",
+    "create_vector_store": "operonx.providers.vector_stores",
+    "FaissVectorStore": "operonx.providers.vector_stores",
     # Workflow ops
     "LLMOp": "operonx.providers.ops",
     "EmbeddingOp": "operonx.providers.ops",
     "RerankOp": "operonx.providers.ops",
     "OnnxOp": "operonx.providers.ops",
-    "ask": "operonx.providers.ops",
+    "VectorSearchOp": "operonx.providers.ops",
     # Ops with heavy module-level deps (numpy, etc.)
     "TritonOp": "operonx.providers.ops",
 }
@@ -102,8 +109,15 @@ __all__ = [
     "EmbeddingOp",
     "RerankOp",
     "OnnxOp",
+    "VectorSearchOp",
     "TritonOp",
-    "ask",
+    # Vector stores
+    "BaseVectorStore",
+    "VectorStoreType",
+    "VectorStoreMetric",
+    "VectorStoreConfig",
+    "create_vector_store",
+    "FaissVectorStore",
     # LLM
     "BaseLLM",
     "LLMType",

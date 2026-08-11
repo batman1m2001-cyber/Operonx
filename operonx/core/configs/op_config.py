@@ -9,6 +9,7 @@ OpType = Literal[
     "llm",
     "embedding",
     "rerank",
+    "vector-search",
     # Node điều khiển luồng
     "branch",
     "for",
