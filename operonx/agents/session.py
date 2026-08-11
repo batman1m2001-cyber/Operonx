@@ -97,6 +97,7 @@ class AgentSession:
             The same shape as :func:`~operonx.agents.graphs.react.agent_result`,
             for this exchange.
         """
+        previous = list(self._messages)
         self._messages.append({"role": "user", "content": text})
 
         engine = Operon(self.agent)
@@ -122,13 +123,37 @@ class AgentSession:
         # state, so the merged conversation is read from the run's state.
         result = agent_result(handle.state, self.agent)
 
+        # A turn that ended without an assistant reply did not succeed.
+        # operonx records op errors into state and returns a partial
+        # result rather than raising, so a failed model call comes back
+        # looking like a short conversation — and committing it left the
+        # history ending on an unanswered user turn while `final` still
+        # held the *previous* turn's reply. The caller was told the turn
+        # succeeded and shown a stale answer.
+        messages = result.get("messages") or []
+        answered = bool(messages) and messages[-1].get("role") == "assistant"
+        if not answered:
+            # Roll back to before this turn so the caller can retry
+            # without the history accumulating consecutive user turns
+            # (which the provider rejects anyway).
+            self._messages = previous
+            return {
+                **result,
+                "messages": list(previous),
+                "final": None,
+                "error": (
+                    "the agent produced no reply; an op raised and operonx "
+                    "recorded it into state rather than propagating. Check "
+                    "the logs. The conversation was left unchanged."
+                ),
+            }
+
         # Replace rather than append: the agent's cell already holds the
         # full conversation including what we sent, so appending its
         # output would duplicate every earlier turn.
-        if result["messages"]:
-            self._messages = list(result["messages"])
+        self._messages = list(messages)
         self._turns += int(result.get("turns") or 0)
-        return result
+        return {**result, "error": ""}
 
     def approve(self, event: Any, approved: bool, reason: str = "") -> bool:
         """Answer a pending approval. Returns whether it was still waiting.

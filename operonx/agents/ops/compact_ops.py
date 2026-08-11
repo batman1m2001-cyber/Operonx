@@ -175,6 +175,16 @@ def plan_compaction(
     keep_groups = groups[-keep_recent:] if keep_recent > 0 else []
     older = groups[: len(groups) - len(keep_groups)]
 
+    # One oversized exchange — a tool that returned a whole file — can put
+    # the conversation far over budget while sitting entirely inside the
+    # keep window, so nothing is "older" and compaction declined to act.
+    # Measured at 114k tokens against a 1000 budget with needed=False.
+    # Shrink the window until there is something to summarise, keeping at
+    # least the most recent exchange: the model is mid-task and dropping
+    # what it just did is worse than being over budget.
+    while not older and len(keep_groups) > 1:
+        older, keep_groups = keep_groups[:1], keep_groups[1:]
+
     # A previous summary is re-summarised rather than kept, or the
     # conversation accumulates one marker per compaction forever.
     return {

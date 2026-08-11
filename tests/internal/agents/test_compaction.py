@@ -91,9 +91,38 @@ class TestTrigger:
     def test_zero_budget_disables_compaction(self):
         assert plan(messages=conversation(20), budget=0)["needed"] is False
 
-    def test_nothing_older_than_the_keep_window(self):
+    def test_over_budget_inside_the_keep_window_still_compacts(self):
+        """This test previously asserted the opposite and locked in a bug.
+
+        One oversized exchange — a tool returning a whole file — puts the
+        conversation far over budget while sitting entirely inside the
+        keep window, so nothing is "older" and compaction declined to
+        act. Measured at 114k tokens against a 1000 budget with
+        `needed=False`, which is exactly how a context fills up.
+        """
         msgs = conversation(2, size=4000)
-        assert plan(messages=msgs, budget=10, keep_recent=50)["needed"] is False
+        out = plan(messages=msgs, budget=10, keep_recent=50)
+        assert out["needed"] is True
+        assert out["summarize"], "something must be given up to get under budget"
+
+    def test_the_most_recent_exchange_is_never_given_up(self):
+        """Shrinking the window must stop at one. The model is mid-task;
+        dropping what it just did is worse than being over budget."""
+        msgs = conversation(4, size=4000)
+        out = plan(messages=msgs, budget=10, keep_recent=50)
+        assert out["keep"], "the latest exchange must survive"
+        assert out["keep"][0]["role"] == "assistant"
+
+    def test_a_single_oversized_exchange_cannot_be_split(self):
+        """With only one exchange there is nothing older to summarise, and
+        splitting it would orphan its tool messages."""
+        msgs = [{"role": "system", "content": "s"}] + exchange(0, size=100_000)
+        out = plan(messages=msgs, budget=10, keep_recent=6)
+        assert out["needed"] is False
+        assert unmatched_tool_calls(out["keep"]) == {
+            "calls_without_results": [],
+            "results_without_calls": [],
+        }
 
 
 class TestPairingIsPreserved:

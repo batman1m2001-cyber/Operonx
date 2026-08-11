@@ -204,3 +204,72 @@ class TestApproval:
         # No callback this time — the previous one must not still be live.
         await session.send("two")
         assert len(first_turn) == count_after_first
+
+
+class TestFailedTurns:
+    """A run that produced no reply must not be reported as success.
+
+    operonx records op errors into state and returns a partial result
+    rather than raising, so a failed model call comes back looking like a
+    short conversation. Committing it left the history ending on an
+    unanswered user turn while `final` still held the **previous** turn's
+    reply — the caller was told the turn succeeded and shown a stale
+    answer.
+    """
+
+    @staticmethod
+    def _flaky(fail_on):
+        state = {"i": 0}
+
+        @op
+        def call_model(messages: list = None) -> dict:
+            state["i"] += 1
+            if state["i"] == fail_on:
+                raise RuntimeError("model exploded")
+            return {
+                "assistant_message": [
+                    {"id": f"a{state['i']}", "role": "assistant", "content": f"reply {state['i']}"}
+                ],
+                "tool_calls": [],
+                "done": True,
+            }
+
+        return call_model
+
+    def _session(self, fail_on):
+        agent = build_react_agent(call_model=self._flaky(fail_on), max_turns=3)(messages=None)
+        return AgentSession(agent)
+
+    @pytest.mark.asyncio
+    async def test_failure_is_not_reported_as_the_previous_answer(self):
+        session = self._session(fail_on=2)
+        await session.send("one")
+        result = await session.send("two")
+        assert result["final"] is None, "a stale answer is worse than no answer"
+        assert result["error"]
+
+    @pytest.mark.asyncio
+    async def test_history_is_rolled_back_so_a_retry_is_possible(self):
+        """Otherwise the history accumulates consecutive user turns, which
+        the provider rejects anyway."""
+        session = self._session(fail_on=2)
+        await session.send("one")
+        before = session.messages
+        await session.send("two")
+        assert session.messages == before
+        assert [m["role"] for m in session.messages] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_a_successful_turn_reports_no_error(self):
+        session = self._session(fail_on=99)
+        result = await session.send("one")
+        assert result["error"] == ""
+        assert result["final"]["content"] == "reply 1"
+
+    @pytest.mark.asyncio
+    async def test_turn_count_does_not_advance_on_failure(self):
+        session = self._session(fail_on=2)
+        await session.send("one")
+        before = session.turns
+        await session.send("two")
+        assert session.turns == before

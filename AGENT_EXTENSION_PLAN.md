@@ -998,6 +998,67 @@ a fix in the same PR that needed it.
 
 ---
 
+## 16 · Core findings from adversarial review (11 Aug 2026)
+
+Four agents were asked to find silent failures in the primitives §2
+rests on. Their claims were then **verified empirically rather than
+believed** — three of the highest-severity ones turned out to be wrong,
+which is the reason for this section's structure. Nothing below is
+reported unless a probe reproduced it.
+
+### 16.1 · Confirmed
+
+| # | Finding | Impact |
+|---|---|---|
+| F1 | **Streamed tool calls were appended, not assembled.** One call arrived as N fragments, each holding a slice of JSON that parses as nothing. Streaming worked, tool calling worked, only the combination broke. | **Fixed** — `LLMOp._merge_tool_call_deltas`, 13 tests |
+| F2 | **`Interrupt()` with no `ctx_to_cancel` cancels the entire run and returns cleanly.** The default `()` makes `_is_descendant_or_equal` true for every ctx. Outputs come back as `{"__interrupt__": …}` with no error — a one-word user mistake silently loses the run | open |
+| F3 | **`@op(exclude=…)` does not filter the V3 trace.** A var excluded from observation still appears in `handle.trace`. `base.py`'s own comment claims "Checkpointer + Tracer both respect these"; only the checkpoint/custom/interrupt buses consult it. Security-relevant — it is the documented way to keep a secret out of the trace | open |
+| F4 | **`observe_max` is a no-op unless a checkpointer is bound.** The counter lives in `bind_checkpointer`'s closure, which `engine.start` only creates when `checkpointer is not None`. A runaway generator under `engine.run()` is uncapped — 50 frames emitted against a budget of 5 | open |
+| F5 | **Streaming frames are dropped unless the op is PARENT/END-bound.** Measured: 3 frames when bound, **0** when the same streaming op feeds a downstream consumer — the normal agent shape. §2's "frames forwarded to `ExecutionHandle._queue`" is conditional on graph topology, not on `stream=True` | open |
+| F6 | **`parser="xml"` returns `None` with `error=None` for a wrapped element.** `<r><result>X</result></r>` with `fields=["result: str"]` yields nothing, and because `error` is `None`, `max_retries` never fires. `parsing.py`'s own docstring example is wrong. Repeated sibling tags likewise collapse to `None` | open |
+| F7 | **Valid JSON with the wrong keys parses "successfully".** `{"bad": 1}` against `fields=["result: str"]` returns `{"result": None, "error": None}` — no retry, no error. Structured mode cannot tell "model answered wrongly" from "model answered" | open |
+| F8 | **The final streaming frame repeats the full accumulated `content`.** `_stream_final` re-emits the whole text through the same frame path as the per-token deltas, so a consumer joining frames double-counts. Only the incidental presence of `finish_reason` distinguishes them | open — contract, not a bug |
+
+### 16.1b · Confirmed in the agent layer — all fixed
+
+These were **my** bugs, found by adversarial review rather than by the
+tests written alongside the code. The shape they share: the tests
+exercised *one* tool call, or answered *every* approval the same way, so
+a per-call boundary that did not exist looked like one that did.
+
+| # | Bug | Why the tests missed it |
+|---|---|---|
+| A1 | **A human-denied destructive tool executed anyway.** The approval decision travelled through a `PARENT` cell, which is shared across contexts by definition — with calls fanned out, the last arm to answer overwrote every sibling. Denying one and approving another ran **both**. Now the two arms are separate inputs to `execute` | every test answered all approvals identically |
+| A2 | **Sub-agent `allow_tools` was never enforced** — privilege escalation. The allowed names were computed and used only for an empty check; the child resolved against the global registry and ran tools its parent had excluded. Now compiled into a default-deny `ToolPolicy` | the test asserted the *helper* reported the right names, never that a child was restricted |
+| A3 | **Tool exception text bypassed the redactor** — a stack trace with a connection string went to the model and the tracer verbatim, the exact case redaction exists for | scrubbing was only asserted on the success path |
+| A4 | **Truncation ran before redaction**, cutting the END marker off a PEM block so the pattern no longer matched and key material shipped | no test combined a secret with a truncation limit |
+| A5 | **A synchronous `@tool` failed every call** with "object dict can't be used in 'await'" | every fixture was `async def` |
+| A6 | **A failed turn was reported as the previous turn's answer.** operonx returns a partial result rather than raising, so `session.send()` committed a history ending on an unanswered user turn and returned a stale `final` | no test made a model call fail mid-session |
+| A7 | **Compaction declined to act while 114× over budget.** One oversized exchange inside the keep window means nothing is "older". A test asserted this behaviour and **locked the bug in** | the test used a small conversation, where the assertion looks right |
+
+### 16.2 · Refuted — reported by an agent, disproved by probe
+
+Recorded because the temptation to act on a plausible report is the point.
+
+| Claim | Reality |
+|---|---|
+| Shared-cell defaults bleed across runs | **No.** Two runs of the same engine each ended with one message. `add_messages` returns a new list rather than mutating `old` — verified directly |
+| A nested subgraph's `PARENT.declare()` makes a separate cell, so a sub-agent's writes never reach the parent | **No.** The outer cell held both the parent's and the child's message |
+| `add_messages` mutates its `old` argument | **No.** `old` was unchanged after merge |
+
+### 16.3 · Scope
+
+F1 is fixed because it broke the agent layer directly. **F2–F7 are core
+defects outside this plan's scope** — each needs its own decision, and
+several change published behaviour. They are recorded here rather than
+fixed silently.
+
+The agent layer does not depend on F3/F4 (it has its own `Redactor`),
+nor on F6/F7 (it does not use `fields=`). It *would* depend on F5 the
+moment anyone streams, which is P4's problem.
+
+---
+
 ## Sources studied
 
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — heartbeat scheduler, SKILL.md frontmatter, serialized session lane

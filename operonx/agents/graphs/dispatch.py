@@ -34,6 +34,7 @@ the tool name and arguments (V2).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from typing import Any, Dict, Optional
 
@@ -64,7 +65,8 @@ _UNKNOWN_TOOL = (
 _ARGS_ERROR = "Error: could not parse arguments for {name!r}: {error}. Expected a JSON object."
 _EXEC_ERROR = "Error: tool {name!r} failed: {error}"
 _TIMEOUT = "Error: tool {name!r} timed out after {timeout}s."
-_DENIED = "Blocked: a human declined this {name!r} call. Do not retry it; ask how to proceed."
+_DO_NOT_RETRY = "Do not retry it; ask how to proceed."
+_DENIED = "Blocked: a human declined this {name!r} call. " + _DO_NOT_RETRY
 _TIMED_OUT_APPROVAL = (
     "Blocked: the approval request for {name!r} expired with no answer. "
     "Treat it as declined and ask how to proceed."
@@ -82,12 +84,8 @@ def _tool_message(call_id: str, name: str, content: str, *, is_error: bool = Fal
     }
 
 
-def _stringify(result: Any, limit: int) -> str:
-    """Render a tool result for the model, truncating to ``limit``.
-
-    Truncation is announced rather than silent — a model shown a
-    half-file with no marker will reason about it as if it were whole.
-    """
+def _stringify(result: Any, limit: int = 0) -> str:
+    """Render a tool result as text. ``limit`` is applied by `_truncate`."""
     if isinstance(result, str):
         text = result
     else:
@@ -95,9 +93,17 @@ def _stringify(result: Any, limit: int) -> str:
             text = json.dumps(result, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             text = str(result)
+    return _truncate(text, limit) if limit else text
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Trim to ``limit``, announcing that it happened.
+
+    Silent truncation makes a model reason about half a file as if it
+    were whole. Applied *after* redaction — see `execute.message`.
+    """
     if limit and len(text) > limit:
-        omitted = len(text) - limit
-        return f"{text[:limit]}\n\n[truncated: {omitted} more characters]"
+        return f"{text[:limit]}\n\n[truncated: {len(text) - limit} more characters]"
     return text
 
 
@@ -226,12 +232,20 @@ async def execute(
     args: Optional[dict] = None,
     call_id: str = "",
     error: str = "",
-    decision: Optional[dict] = None,
+    human_decision: Optional[dict] = None,
+    auto_decision: Optional[dict] = None,
     max_result_chars: int = 100_000,
     timeout: Optional[float] = None,
     redactor: Any = None,
 ) -> dict:
     """Run one tool call and return exactly one tool message.
+
+    Takes the two approval arms as **separate inputs** rather than
+    through a shared cell. A ``PARENT`` cell is shared across contexts by
+    definition, so with tool calls fanned out the last arm to answer
+    overwrote every sibling: denying one destructive call and approving
+    another ran *both*. Only one arm fires per call, so the other input
+    is simply absent.
 
     Catches every exception on purpose. operonx records op errors into
     state and returns a partial result rather than propagating (V5), so
@@ -239,44 +253,70 @@ async def execute(
     and the provider would reject the *next* request — a failure that
     surfaces one turn away from its cause.
     """
-    if error:
-        return {"tool_message": _tool_message(call_id, tool_name, error, is_error=True)}
 
-    decision = decision or {}
+    def message(content: Any, *, is_error: bool = False) -> dict:
+        """Scrub, then truncate, then wrap.
+
+        Order matters: truncating first can cut the tail off a
+        multi-line secret — a PEM block loses its END marker — and the
+        pattern then no longer matches, so the key material ships
+        unredacted. Every path goes through here, including the error
+        paths: a stack trace carrying a connection string is the exact
+        case redaction exists for, and it used to bypass it.
+        """
+        text = content if isinstance(content, str) else _stringify(content, 0)
+        if redactor is not None:
+            text = redactor.scrub(text)
+        return {
+            "tool_message": _tool_message(
+                call_id, tool_name, _truncate(text, max_result_chars), is_error=is_error
+            )
+        }
+
+    if error:
+        return message(error, is_error=True)
+
+    # Whichever arm ran. Both absent means neither did, which is a denial
+    # by default — a gate that fails open is decoration.
+    decision = human_decision or auto_decision or {}
     if not decision.get("approved", False):
         template = _TIMED_OUT_APPROVAL if decision.get("timed_out") else _DENIED
-        reason = decision.get("reason") or template.format(name=tool_name)
-        return {"tool_message": _tool_message(call_id, tool_name, reason, is_error=True)}
+        reason = decision.get("reason")
+        content = f"{reason} {_DO_NOT_RETRY}" if reason else template.format(name=tool_name)
+        return message(content, is_error=True)
 
     factory = TOOL_REGISTRY.get(tool_name)
     if factory is None:
         # Registry mutated between parse and execute — vanishingly rare,
         # but returning a message beats an AttributeError that produces none.
-        content = _UNKNOWN_TOOL.format(
-            name=tool_name, available=", ".join(sorted(TOOL_REGISTRY)) or "(none registered)"
+        return message(
+            _UNKNOWN_TOOL.format(
+                name=tool_name,
+                available=", ".join(sorted(TOOL_REGISTRY)) or "(none registered)",
+            ),
+            is_error=True,
         )
-        return {"tool_message": _tool_message(call_id, tool_name, content, is_error=True)}
 
     try:
         call = factory(**(args or {}))
         # Reuse the op's own execution path so the tool keeps its tracing,
         # timing and bound routing rather than being called as a raw fn.
-        coro = call.core(**(args or {}))
-        raw = await asyncio.wait_for(coro, timeout) if timeout else await coro
+        result = call.core(**(args or {}))
+        # A @tool may be a plain def. Awaiting its dict unconditionally
+        # failed every call with "object dict can't be used in 'await'".
+        if inspect.isawaitable(result):
+            raw = await asyncio.wait_for(result, timeout) if timeout else await result
+        else:
+            raw = result
     except asyncio.TimeoutError:
-        content = _TIMEOUT.format(name=tool_name, timeout=timeout)
-        return {"tool_message": _tool_message(call_id, tool_name, content, is_error=True)}
+        return message(_TIMEOUT.format(name=tool_name, timeout=timeout), is_error=True)
     except Exception as exc:  # noqa: BLE001 - every failure must reach the model
-        content = _EXEC_ERROR.format(name=tool_name, error=f"{type(exc).__name__}: {exc}")
-        return {"tool_message": _tool_message(call_id, tool_name, content, is_error=True)}
+        return message(
+            _EXEC_ERROR.format(name=tool_name, error=f"{type(exc).__name__}: {exc}"),
+            is_error=True,
+        )
 
-    content = _stringify(raw, max_result_chars)
-    # Redact before the content reaches either the model or the tracer.
-    # A tool that reads .env or prints a stack trace with a connection
-    # string otherwise puts a live credential in both.
-    if redactor is not None:
-        content = redactor.scrub(content)
-    return {"tool_message": _tool_message(call_id, tool_name, content)}
+    return message(raw)
 
 
 def build_dispatch(
@@ -304,12 +344,12 @@ def build_dispatch(
 
     @graph
     def dispatch_one(call):
-        from operonx.core.ops._edges import PARENT
-
-        # Both approval arms land here; `execute` reads the cell. Adding a
-        # policy arm later costs one node, not a second execution path.
-        PARENT.declare(decision=None)
-
+        # The two approval arms feed `execute` as **separate inputs**, not
+        # through a shared cell. A `PARENT` cell is shared across contexts
+        # by definition, so once tool calls fan out the last arm to answer
+        # overwrote every sibling — denying one destructive call and
+        # approving another ran both. Only one arm fires per call, so the
+        # other input is simply absent at read time.
         parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY)
 
         approve = InterruptOp(
@@ -324,15 +364,13 @@ def build_dispatch(
         )
         auto = auto_approve()
 
-        decided["decision"] >> PARENT["decision"]
-        auto["decision"] >> PARENT["decision"]
-
         run = execute(
             tool_name=parsed["tool_name"],
             args=parsed["args"],
             call_id=parsed["call_id"],
             error=parsed["error"],
-            decision=PARENT["decision"],
+            human_decision=decided["decision"],
+            auto_decision=auto["decision"],
             max_result_chars=parsed["max_result_chars"],
             timeout=parsed["timeout"],
             redactor=redactor,

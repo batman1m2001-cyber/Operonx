@@ -6,13 +6,17 @@ by the parent. Nesting a `@graph` already gives isolated state, nested
 trace spans and cancellation that propagates from the parent, so none of
 that is written here.
 
-**The toolset is enforced at construction, not at call time.** There are
-no capability tokens: the delegating tool closes over the exact registry
-subset the child may use, so a child cannot widen its own permissions
-because it never receives the means to. That also means the restriction
-is only as good as the construction site — an author who passes the full
-registry has given the child everything, and nothing downstream will
-object.
+**The toolset is enforced by a policy, not by omission.** An earlier
+version computed the child's allowed names and then never passed them
+anywhere — the child resolved against the global ``TOOL_REGISTRY`` and
+happily ran tools its parent had excluded. `allow_tools` was decoration.
+Now the names are compiled into a `ToolPolicy` that denies everything
+else, which is the same mechanism the parent uses and the only one
+`dispatch` actually consults.
+
+There are still no capability tokens, so the construction site remains
+the boundary: an author who passes the full registry has given the child
+everything, and nothing downstream will object.
 
 **Delegation does not nest by default.** A sub-agent that can delegate
 can spawn a tree, and a model that has decided delegation is the answer
@@ -29,7 +33,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from operonx.agents.graphs.react import agent_result, build_react_agent
-from operonx.agents.policy import ToolPolicy
+from operonx.agents.policy import DEFAULT_POLICY, ToolPolicy
 from operonx.agents.redact import Redactor
 from operonx.agents.tool import TOOL_REGISTRY, tool
 from operonx.core.engine import Operon
@@ -128,10 +132,13 @@ def make_delegate_tool(
         ValueError: if ``name`` is already registered — see
             :func:`~operonx.agents.tool.tool`.
     """
-    child_names = _child_tool_names(allow_tools, depth, max_depth)
 
     @tool(name=name, description=description, schema=DELEGATE_SCHEMA, bound="io")
     async def delegate(task: str) -> dict:
+        # Resolved per call, not at decoration. A construction-time
+        # snapshot made the child's toolset depend on module import
+        # order, and a tool registered later was invisible to it.
+        child_names = _child_tool_names(allow_tools, depth, max_depth)
         if not child_names:
             # Better to say so than to spawn an agent that can only talk.
             return {"error": NO_TOOLS_MESSAGE}
@@ -139,7 +146,7 @@ def make_delegate_tool(
         child = build_react_agent(
             call_model=call_model,
             max_turns=max_turns,
-            policy=policy,
+            policy=_child_policy(child_names, policy),
             redactor=redactor,
         )(messages=None)
 
@@ -178,6 +185,26 @@ def make_delegate_tool(
         }
 
     return delegate
+
+
+def _child_policy(child_names: List[str], parent: Optional[ToolPolicy]) -> ToolPolicy:
+    """Compile the allowed names into a policy that refuses the rest.
+
+    Default-deny with an explicit per-name rule, rather than trusting the
+    child to only ask for what it was given: the model chooses tool names
+    freely, and dispatch resolves them against the process-wide registry.
+    Omitting a tool from a list the child never sees restricts nothing.
+
+    Allowed tools keep the **parent's** verdict, so a destructive tool
+    that would have asked the parent still asks in the child rather than
+    being silently promoted to `allow` by delegation.
+    """
+    base = parent or DEFAULT_POLICY
+    rules = {}
+    for tool_name in child_names:
+        meta = getattr(TOOL_REGISTRY.get(tool_name), "_tool_meta", None) or {}
+        rules[tool_name] = base.decide(tool_name, meta)
+    return ToolPolicy(default="deny", destructive=None, readonly=None, rules=rules)
 
 
 def describe_delegation(
