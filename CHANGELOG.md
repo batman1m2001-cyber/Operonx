@@ -112,6 +112,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MCP client — `operonx.agents.mcp`.** Connect to a Model Context
+  Protocol server and expose its tools as ordinary `@tool` ops, so the
+  ReAct loop, the permission gate and the redactor treat them like local
+  ones. Install with `operonx[mcp]`.
+
+  ```python
+  client, names = await connect_mcp(MCPServer(name="fs", command="npx", args=[...]))
+  agent = build_react_agent(...)      # register BEFORE building
+  ```
+
+  Three MCP-specific hazards are handled rather than inherited:
+
+  - **Namespacing.** Tools register as `server__tool`. A third-party
+    server able to register `bash` would be a remote code-execution hole.
+  - **Unannotated means gated.** MCP's `readOnlyHint` / `destructiveHint`
+    are optional and server-supplied. Absent hints mean *unknown*, and
+    unknown third-party code asks a human before it runs.
+  - **In-band errors raise.** MCP reports failure as a flag on an
+    otherwise ordinary result, so the content of a failed call reads
+    exactly like an answer.
+
 - **`SCRATCH.get()`, `.keys()`, `.items()`.** `ScratchAccessor` documented
   itself as "dict-like" and had none of them, so `SCRATCH.get("k")` — the
   first idiom anyone reaches for — raised `AttributeError` from inside an
