@@ -90,7 +90,6 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 |---|---|
 | **P5** | Deferred: learning loop, MCP client, heartbeat scheduler |
 | **Unverified primitives** | `EmitOp`/`stream(mode="custom")`, `SCRATCH`, sub-agent trace nesting — still 🟡 in the [archive](docs/design/AGENT_PLAN_ARCHIVE.md)'s §15.2 table |
-| **C6** | No way to hand `LLMOp` a message list without prompt templating, so every agent must escape braces defensively |
 
 ### 0.4 · Where the rest of the context lives
 

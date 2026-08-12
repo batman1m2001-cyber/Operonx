@@ -110,6 +110,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapsed to `"b"` — the leaf branch reassigned where the nested branch
   built a list. Both now build a list.
 
+### Breaking — `prompt=` no longer accepts a list; use `messages=`
+
+`LLMOp` treated its prompt as a template and ran `format_map` over every
+string in it. Correct for a template, destructive for a conversation: any
+brace in any message became a template variable that did not exist, and
+the run died on the **next** model call.
+
+```python
+messages = [{"role": "tool", "content": '{"city": "Hanoi"}'}]
+LLMOp.of(resource="x", prompt=messages)
+# PromptError: Missing template variable(s) '"city"'
+```
+
+It was not an edge case. Every JSON tool result, every file the agent read
+containing braces, and the model's **own tool-call arguments** — which are
+a JSON string in the history — hit it. An agent poisoned its next turn
+simply by calling a tool.
+
+The two inputs are now separate and mutually exclusive:
+
+| | Accepts | Formatted? |
+|---|---|---|
+| `prompt=` | str, dict | yes, with the template variables |
+| `messages=` | list | never |
+
+Passing both raises; passing neither raises; passing `messages=` with
+template variables raises, because they could only be ignored.
+
+**Migration.** `prompt=[…]` → `messages=[…]`. If you relied on a
+*templated* message list — the multimodal case, where an image URL arrived
+as `{image_url}` — build the list in an upstream `@op` and pass the result:
+
+```python
+@op
+def build_vision_prompt(query: str, image_url: str) -> dict:
+    return {"messages": [
+        {"role": "user", "content": [
+            {"type": "text", "text": f"Describe: {query}"},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]},
+    ]}
+
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
+```
+
+`prompt={"system": …, "user": …}` is unchanged and still covers the
+standard two-message templated call.
+
+This deletes `_escape_braces` and `prepare_prompt` from
+`operonx.agents.ops.model_ops` — a full recursive walk of the conversation
+on every turn, doubling braces so `format_map` could undo them, plus a
+second walk to undo it. Both walks are gone.
+
+- **An unmatched brace raised a bare `ValueError`.** `"cost is {"` skipped
+  the `KeyError` branch that produces `PromptError`, so it surfaced as a
+  format-string error with no mention of the prompt — a stack trace from
+  the formatter for someone typing `{` in a chat message. It is a
+  `PromptError` now, and the message names `messages=` as the fix.
+
+- **The trace showed nothing for a `messages=` call.** The trace
+  normaliser read `inputs.get("prompt")` only, so multimodal blocks went
+  unwrapped. It reads both.
+
 ### Migration — union schemas need `?`
 
 `fields=[…]` entries are **required** by default. Any list where some

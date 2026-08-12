@@ -28,44 +28,10 @@ from uuid import uuid4
 
 from operonx.core.ops.transform.func_op import op
 
-__all__ = ["adapt_llm_output", "prepare_prompt", "make_llm_caller"]
+__all__ = ["adapt_llm_output", "make_llm_caller"]
 
 #: Stop reasons that mean the answer is incomplete rather than finished.
 TRUNCATED_REASONS = frozenset({"length", "max_tokens", "content_filter"})
-
-
-def _escape_braces(value: Any) -> Any:
-    """Double every brace in every string, recursively.
-
-    ``LLMOp`` treats its prompt as a template and runs ``format_map`` over
-    any string containing ``{``. That is right for a prompt and wrong for
-    a conversation: an agent's history is *data*. A tool returning
-    ``{"city": "Hanoi"}`` makes the next model call raise
-    ``PromptError: Missing template variable(s) '"city"'``, and so does any
-    file the agent read that contains braces — JSON, code, CSS.
-
-    Doubling is the standard escape: ``format_map`` collapses ``{{`` back
-    to ``{``, so the model sees exactly the original text. Applied to
-    every string in the structure, since tool-call ``arguments`` are
-    JSON strings too and the formatter walks into them.
-
-    Found by running against a live model on turn two. No unit test would
-    have caught it — every scripted model in the suite returns
-    brace-free prose.
-    """
-    if isinstance(value, str):
-        return value.replace("{", "{{").replace("}", "}}")
-    if isinstance(value, dict):
-        return {k: _escape_braces(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_escape_braces(v) for v in value]
-    return value
-
-
-@op
-def prepare_prompt(messages: Optional[list] = None) -> dict:
-    """Make a conversation safe to pass as an ``LLMOp`` prompt."""
-    return {"prompt": _escape_braces([m for m in (messages or []) if isinstance(m, dict)])}
 
 
 @op
@@ -151,12 +117,16 @@ def make_llm_caller(
         # that moves together.
         @graph
         def model_call(messages=None):
-            # LLMOp templates its prompt; a conversation is data. See
-            # `_escape_braces`.
-            prepared = prepare_prompt(messages=messages)
+            # `messages=`, never `prompt=`. A conversation is data, and
+            # `prompt=` formats what it is given — which used to mean every
+            # brace in the history (a JSON tool result, pasted code, the
+            # model's own tool-call arguments) became a template variable
+            # that did not exist, killing the *next* model call. This layer
+            # carried an `_escape_braces` walk to survive that; `messages=`
+            # made it unnecessary.
             llm = LLMOp.of(
                 resource=resource,
-                prompt=prepared["prompt"],
+                messages=messages,
                 tools=tools,
                 **llm_kwargs,
             )
@@ -170,7 +140,7 @@ def make_llm_caller(
             adapted["done"] >> PARENT["done"]
             adapted["finish_reason"] >> PARENT["finish_reason"]
             adapted["truncated"] >> PARENT["truncated"]
-            START >> prepared >> llm >> adapted >> END
+            START >> llm >> adapted >> END
 
         return model_call(messages=messages)
 

@@ -87,7 +87,8 @@ from operonx.providers import LLMOp, EmbeddingOp
 llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
-# Prompt template + LLM in one op — prompt accepts str / dict / list
+# Prompt template + LLM in one op — prompt= takes str or dict;
+# a ready message list goes to messages= and is never formatted
 c = LLMOp.of(
     resource="gpt-4o",
     prompt={"system": "...", "user": "{q}"},

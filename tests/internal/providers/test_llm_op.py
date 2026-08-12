@@ -90,7 +90,7 @@ class TestLLMOpIntegration:
         schema = StateSchema(op=node)
         state = MemoryState(
             schema,
-            inputs={"prompt": [{"role": "user", "content": "Say 'Hello' in exactly one word."}]},
+            inputs={"messages": [{"role": "user", "content": "Say 'Hello' in exactly one word."}]},
         )
 
         result = {}
@@ -118,7 +118,7 @@ class TestLLMOpIntegration:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Count from 1 to 5, one number per line."}]
+                "messages": [{"role": "user", "content": "Count from 1 to 5, one number per line."}]
             },
             request_id=request_id,
         )
@@ -252,7 +252,7 @@ class TestLLMOpLoadBalancing:
 
         schema = StateSchema(op=node)
         state = MemoryState(
-            schema, inputs={"prompt": [{"role": "user", "content": "Say 'Hi' in one word."}]}
+            schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
         )
 
         result = {}
@@ -443,7 +443,7 @@ class TestLLMOpFallback:
 
         schema = StateSchema(op=node)
         state = MemoryState(
-            schema, inputs={"prompt": [{"role": "user", "content": "Say 'Hi' in one word."}]}
+            schema, inputs={"messages": [{"role": "user", "content": "Say 'Hi' in one word."}]}
         )
 
         result = {}
@@ -504,7 +504,7 @@ class TestLLMOpTools:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "What's the weather in Tokyo?"}],
+                "messages": [{"role": "user", "content": "What's the weather in Tokyo?"}],
                 "tools": tools,
                 "tool_choice": "auto",
             },
@@ -554,7 +554,7 @@ class TestLLMOpTools:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "What is 2 + 2?"}],
+                "messages": [{"role": "user", "content": "What is 2 + 2?"}],
                 "tools": tools,
                 "tool_choice": {"type": "function", "function": {"name": "calculate"}},
             },
@@ -590,7 +590,7 @@ class TestLLMOpResponseFormat:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {
                         "role": "system",
                         "content": "You are a helpful assistant that responds in JSON format.",
@@ -634,7 +634,7 @@ class TestLLMOpResponseFormat:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {"role": "user", "content": "Give me info about Python programming language."}
                 ],
                 "response_format": {
@@ -692,7 +692,7 @@ class TestLLMOpVision:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {
                         "role": "user",
                         "content": [
@@ -739,7 +739,7 @@ class TestLLMOpVision:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {
                         "role": "user",
                         "content": [
@@ -784,7 +784,7 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Say 'hello' in one word."}],
+                "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
                 "temperature": 0.0,
             },
         )
@@ -811,7 +811,9 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Write a very long story about a dragon."}],
+                "messages": [
+                    {"role": "user", "content": "Write a very long story about a dragon."}
+                ],
                 "max_tokens": 20,
             },
         )
@@ -843,7 +845,9 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Count from 1 to 10, one number per line."}],
+                "messages": [
+                    {"role": "user", "content": "Count from 1 to 10, one number per line."}
+                ],
                 "stop": ["5"],
             },
         )
@@ -872,7 +876,7 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Say 'hello' in one word."}],
+                "messages": [{"role": "user", "content": "Say 'hello' in one word."}],
                 "top_p": 0.1,  # Very focused sampling
             },
         )
@@ -899,7 +903,7 @@ class TestLLMOpGenerationParams:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Write a short sentence about cats."}],
+                "messages": [{"role": "user", "content": "Write a short sentence about cats."}],
                 "frequency_penalty": 0.5,
                 "presence_penalty": 0.5,
             },
@@ -930,7 +934,7 @@ class TestLLMOpGenerationParams:
             state = MemoryState(
                 schema,
                 inputs={
-                    "prompt": [
+                    "messages": [
                         {"role": "user", "content": "Pick a random number between 1 and 100."}
                     ],
                     "seed": 12345,
@@ -968,7 +972,7 @@ class TestLLMOpLogprobs:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Say 'yes' or 'no'."}],
+                "messages": [{"role": "user", "content": "Say 'yes' or 'no'."}],
                 "logprobs": True,
                 "top_logprobs": 3,
             },
@@ -1009,7 +1013,7 @@ class TestLLMOpMultipleCompletions:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Say a random word."}],
+                "messages": [{"role": "user", "content": "Say a random word."}],
                 "n": 1,  # Keep at 1 for now since we only extract first choice
                 "temperature": 1.0,
             },
@@ -1041,7 +1045,7 @@ class TestLLMOpUserTracking:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [{"role": "user", "content": "Say hello."}],
+                "messages": [{"role": "user", "content": "Say hello."}],
                 "user": "test-user-12345",
             },
         )
@@ -1126,7 +1130,7 @@ class TestLLMOpAudio:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {
                         "role": "user",
                         "content": [
@@ -1174,7 +1178,7 @@ class TestLLMOpComplexWorkflow:
         state1 = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {"role": "system", "content": "You are a helpful math tutor."},
                     {"role": "user", "content": "What is 2+2?"},
                 ]
@@ -1189,7 +1193,7 @@ class TestLLMOpComplexWorkflow:
         state2 = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {"role": "system", "content": "You are a helpful math tutor."},
                     {"role": "user", "content": "What is 2+2?"},
                     {"role": "assistant", "content": result1["content"]},
@@ -1219,7 +1223,7 @@ class TestLLMOpComplexWorkflow:
         state = MemoryState(
             schema,
             inputs={
-                "prompt": [
+                "messages": [
                     {"role": "system", "content": "You must respond in ALL CAPS only."},
                     {"role": "user", "content": "Say hello"},
                 ]

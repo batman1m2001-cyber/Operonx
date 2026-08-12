@@ -72,51 +72,83 @@ class TestPromptDictForm:
             node._build_messages({"role": "assistant", "content": "hi"}, {})
 
 
-class TestPromptListForm:
-    """Prompt = list of message dicts (raw OpenAI format)."""
+class TestMessagesForm:
+    """``messages=`` — a conversation, passed through untouched.
 
-    def test_construction(self):
-        node = _make_llmop(
-            prompt=[
-                {"role": "system", "content": "You are {role}."},
-                {"role": "user", "content": "Help with {task}."},
-            ],
-            role="an assistant",
-            task="math",
-        )
-        assert "role" in node.inputs
-        assert "task" in node.inputs
+    ``prompt=`` used to accept a list and format it. That made every agent
+    a bug waiting for a brace: a tool returning ``{"city": "Hanoi"}``, a
+    user pasting CSS, or the model's own tool-call arguments all became
+    template variables that do not exist, and the run died on the *next*
+    model call.
+    """
 
-    def test_format(self):
-        node = _make_llmop(prompt=[])
-        messages = node._build_messages(
-            [
-                {"role": "system", "content": "You are {role}."},
-                {"role": "user", "content": "Help with {task}."},
-            ],
-            {"role": "an assistant", "task": "math"},
-        )
-        assert len(messages) == 2
-        assert messages[0]["content"] == "You are an assistant."
-        assert messages[1]["content"] == "Help with math."
+    def test_a_list_prompt_is_refused_and_names_the_replacement(self):
+        node = _make_llmop(prompt="stub")
+        with pytest.raises(PromptError, match="messages="):
+            node._build_messages([{"role": "user", "content": "hi"}], {})
 
-    def test_format_multimodal(self):
-        node = _make_llmop(prompt=[])
-        messages = node._build_messages(
-            [
-                {"role": "system", "content": "You are a vision expert."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Describe: {query}"},
-                        {"type": "image_url", "image_url": {"url": "{image_url}"}},
-                    ],
-                },
-            ],
-            {"query": "this image", "image_url": "https://example.com/cat.jpg"},
-        )
-        assert messages[1]["content"][0]["text"] == "Describe: this image"
-        assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/cat.jpg"
+    def test_messages_pass_through_unformatted(self):
+        node = _make_llmop(prompt="stub")
+        history = [
+            {"role": "user", "content": "what is the weather"},
+            {"role": "tool", "content": '{"city": "Hanoi", "temp": 30}'},
+        ]
+        out = node._resolve_messages(None, history, {})
+        assert out == history, "a conversation must arrive exactly as written"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param('{"city": "Hanoi"}', id="json-tool-result"),
+            pytest.param("body { margin: 0 }", id="pasted-css"),
+            pytest.param("def f(): return {'a': 1}", id="pasted-python"),
+            pytest.param("cost is {", id="unmatched-brace"),
+        ],
+    )
+    def test_braces_that_used_to_kill_the_run(self, content):
+        node = _make_llmop(prompt="stub")
+        out = node._resolve_messages(None, [{"role": "tool", "content": content}], {})
+        assert out[0]["content"] == content
+
+    def test_multimodal_blocks_survive(self):
+        """The case that justified list-shaped prompts. It still works — the
+        substitution just happens in an upstream op now, where an f-string
+        is clearer than ``{}`` magic."""
+        node = _make_llmop(prompt="stub")
+        history = [
+            {"role": "system", "content": "You are a vision expert."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe: this image"},
+                    {"type": "image_url", "image_url": {"url": "https://x/cat.jpg"}},
+                ],
+            },
+        ]
+        out = node._resolve_messages(None, history, {})
+        assert out[1]["content"][1]["image_url"]["url"] == "https://x/cat.jpg"
+
+    def test_both_inputs_is_an_error(self):
+        node = _make_llmop(prompt="stub")
+        with pytest.raises(PromptError, match="mutually exclusive"):
+            node._resolve_messages("hi", [{"role": "user", "content": "hi"}], {})
+
+    def test_neither_input_is_an_error(self):
+        node = _make_llmop(prompt="stub")
+        with pytest.raises(PromptError, match="required"):
+            node._resolve_messages(None, None, {})
+
+    def test_template_vars_with_messages_raise(self):
+        """Ignoring them would send the unsubstituted text to the model and
+        report success — the caller asked for something that cannot happen."""
+        node = _make_llmop(prompt="stub")
+        with pytest.raises(PromptError, match="never formatted"):
+            node._resolve_messages(None, [{"role": "user", "content": "hi"}], {"name": "x"})
+
+    def test_messages_must_be_a_list(self):
+        node = _make_llmop(prompt="stub")
+        with pytest.raises(PromptError, match="must be a list"):
+            node._resolve_messages(None, "not a list", {})
 
 
 class TestPromptErrors:
