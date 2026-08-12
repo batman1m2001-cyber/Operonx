@@ -88,7 +88,6 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 
 | | |
 |---|---|
-| **P4** | The out-of-tree `operonx-code` harness. No longer blocked: `stream(mode="updates")` now delivers a generator's yields as they land — see [Streaming](docs/architecture/streaming.md) |
 | **P5** | Deferred: learning loop, MCP client, heartbeat scheduler |
 | **Unverified primitives** | `EmitOp`/`stream(mode="custom")`, `SCRATCH`, sub-agent trace nesting — still 🟡 in the [archive](docs/design/AGENT_PLAN_ARCHIVE.md)'s §15.2 table |
 | **C6** | No way to hand `LLMOp` a message list without prompt templating, so every agent must escape braces defensively |
@@ -739,7 +738,7 @@ Later                       P5 Learning-loop pattern doc (defer)
 | **1** ✅ | Tool + ReAct + HITL | `@tool` + `TOOL_REGISTRY`; `dispatch_one`/`dispatch_all_tools` graphs (incl. destructive→InterruptOp branch); `build_react_agent` back-edge factory; `permission_check` op; rewrite `docs/guide/05-agents.md` example (should be ~25 lines) — **plus §14.3 rows 1–6**: tool-error→tool-message, unknown-tool handling, history invariant, concurrent-HITL gate, repeat cap, state injection, and the `wrap_*` closure fold (§14.2) | 5–7d |
 | **2** ✅ | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
 | **3** ✅ | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
-| **4** ⬜ | Reference harness | Sibling `operonx-code` package — bash/read/edit/patch/glob/grep/webfetch tools, persistent shell resource, CLI entrypoint | 5–7d |
+| **4** ✅ | Reference harness | `packages/operonx-code/` — read/glob/grep/edit/write/bash/webfetch, persistent shell, rooted workspace with a read-before-edit ledger, REPL. 70 unit + 4 live tests. See §17 | 5–7d |
 | **5** ⬜ | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
 
 **Estimate**: **P0–P3 in ~3 weeks**, P4 in another week.
@@ -906,3 +905,71 @@ The mechanics those findings established now live where they are used:
 cancellation), [Streaming](docs/architecture/streaming.md) (which stream
 mode sees which ops), and [Observability](docs/architecture/observability.md)
 (`exclude=`/`include=`, `observe_max`).
+
+---
+
+## 17 · P4 — what the reference harness measured
+
+`packages/operonx-code/` exists to answer a question the framework cannot
+answer about itself: **how much does a real agent have to add?**
+
+| | Lines |
+|---|---|
+| Tools (read/glob/grep/edit/write/bash/webfetch) | ~470 |
+| Workspace — path containment + read ledger | ~160 |
+| Persistent shell | ~200 |
+| CLI / REPL | ~210 |
+| **The agent itself** — prompt, policy, wiring | **~165** |
+
+The loop, dispatch, approval, compaction, prompt-cache shaping and
+redaction are all `operonx.agents`. Nothing in the harness re-implements
+control flow, which was the claim P0–P3 were built to make good on. For
+reference, langchain spends ~9,400 LOC on middleware alone.
+
+### What the live run found that 70 unit tests did not
+
+`glob(pattern="**/*.py")` returned **zero files** in a directory full of
+Python. `fnmatch` has no concept of a path separator, so `**/` required a
+literal `/` and could never match a file at the root. Every unit test used
+bare patterns like `*.py`, which worked.
+
+The model asked twice, got `{"count": 0}` with no error both times,
+concluded the files did not exist, and fell back to `bash ls`. Two turns
+burned, and had the directory been large enough it would have given up.
+
+That is [Failure modes §1 and §3](docs/architecture/failure-modes.md)
+exactly: a plausible value instead of an error, in a code path whose tests
+shared an assumption with the code. It is fixed, `Path.glob` does the
+matching now, and three parametrised cases pin `*.py`, `**/*.py` and
+`src/*.py` to the same answer.
+
+### Decisions worth recording
+
+- **Sibling package, not in-tree.** A coding agent needs opinions — which
+  tools exist, what the prompt says, when to ask a human — and opinions in
+  a framework become defaults nobody can change. §14.5 flagged this as a
+  call to make rather than assume; langgraph reversed the same one.
+- **Read-before-edit, enforced by content hash rather than mtime.** An
+  edit inside the same clock tick is still an edit, and mtime resolution
+  is filesystem-dependent.
+- **`realpath` before the containment test.** A symlink inside the root
+  pointing at `/etc` is the whole attack, and a lexical prefix check
+  passes it.
+- **A shell timeout kills the shell.** A command abandoned mid-flight
+  leaves unknown state — an unterminated heredoc, a half-typed pipeline —
+  and reusing it would corrupt every later command with an error pointing
+  at the wrong line. The message says the session was replaced, because
+  silently starting fresh is how an agent gets confused about its own `cd`.
+- **A bash timeout is returned, not raised.** It is information the model
+  can act on — split the work, redirect to a file, raise the limit.
+- **Redaction is on by default here**, unlike the framework. A coding
+  agent reads `.env` files and prints environment variables routinely.
+
+### Still open
+
+- `webfetch` needs `httpx` and has no live test — the `[web]` extra is
+  declared but the tool is unexercised against a real page.
+- No sub-agent tool. `make_delegate_tool` exists in the framework and the
+  harness does not wire it; a large refactor would benefit.
+- The REPL renders the final answer only. Token streaming is possible now
+  that F5 is fixed, and is not wired.
