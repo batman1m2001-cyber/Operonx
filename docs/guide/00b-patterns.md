@@ -99,31 +99,72 @@ c = LLMOp.of(
 Never positional. The keyword form catches typos at construction time
 rather than at runtime against a wrong parameter name.
 
-## Edge types — `>>`, and why you rarely write `~`
+## Edge types — `>>` and `~`
+
+An edge decides **when a node becomes ready**. Two kinds:
+
+- **Hard `>>`** — the default. The target waits for *every* hard
+  predecessor.
+- **Soft `~`** — the target fires when **any one** soft predecessor
+  completes. All soft predecessors of a node collapse to a single
+  ready-count.
 
 ```python
-a >> b                                 # hard edge: b waits for a
-route >> handler_a                     # branch outputs — softened for you
-[handler_a, handler_b] >> merge        # fan-in — softened for you
+a >> b                      # b waits for a
+a >> ~d                     # d fires when any one soft pred finishes
+c >> ~d                     # …so a or c, whichever lands first
 ```
 
-- **Hard `>>`** — the default. `b` runs once every predecessor has fired.
-- **Soft** — a *conditional* dependency: the target fires when **any one**
-  soft predecessor completes. Branch arms need this, because the arm that
-  was not selected never runs and would block a hard merge forever.
+Soft edges exist for two *different* reasons, and conflating them is why
+`~` used to be everywhere. They are worth keeping apart.
 
-You almost never write the soft form. `GraphOp(auto_soft=True)` is the
-default, and `build()` derives it: any two predecessors of a merge that
-trace back to a common branch through *disjoint* first hops have their
-edges flipped to soft automatically.
+### 1. Branch merges — derived, never written
 
-That matters because the old manual form failed the wrong way. Forgetting
-`~` was a **silent deadlock at run time**, not a build error — the merge
-simply waited forever for a branch that was never going to run.
+When a branch routes to one of several arms and those arms fan back into a
+merge, the arms that were not selected never run. A hard merge would wait
+for them forever.
 
-`~m` still parses, and an edge already marked soft is left alone. Opt a
-specific edge out of the automatic pass with
-`g.add_edge(src, dst, hard=True)`.
+`build()` handles this. `GraphOp(auto_soft=True)` is the default, and any
+two predecessors of a merge that trace back to a common branch through
+*disjoint* first hops get their edges softened automatically.
+
+```python
+START >> cls >> if_(cls["score"] >= 50, passed).else_(failed)
+[passed, failed] >> rep >> END        # no ~ — derived at build time
+```
+
+**Do not write `~` here.** It is the case the pass exists for, and the
+manual form failed the wrong way round: forgetting it was a silent
+deadlock at run time, not a build error.
+
+Opt a specific edge out with `g.add_edge(src, dst, hard=True)`, or the
+whole graph with `GraphOp(auto_soft=False)`. The edge record keeps the two
+apart — `auto_soft` marks what the pass derived, `pinned_hard` what you
+pinned.
+
+### 2. Trigger control — authored, and nothing can infer it
+
+Sometimes you want "run this as soon as *any* of these finishes" with no
+branch anywhere. A race between two sources; a best-effort predecessor you
+do not want to block on. Nothing in the graph shape says that — it is a
+scheduling decision, so you state it:
+
+```python
+fast_source  >> ~consume
+slow_source  >> ~consume       # consume runs on whichever lands first
+```
+
+That is what `~` is for, and it is the only rename-safe way to say it —
+`add_edge("fast_source", "consume", soft=True)` does the same job with a
+string that a rename will silently break.
+
+### `~` on a sentinel is an error
+
+`~END` reads like it means something and never did: edges into `END` are
+unconditionally soft already, and `END` is output forwarding at build time
+rather than a node the scheduler waits on. `~START` and `~PARENT` are the
+same. All three raise.
+
 
 ## State references — `PARENT[...]` vs `op[...]`
 

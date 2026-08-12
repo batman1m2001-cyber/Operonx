@@ -67,7 +67,7 @@ Operonx/
 | **Engine** (`Operon`) | Pure orchestrator. Takes a graph, runs it, emits `WorkflowTrace`. |
 | **Graph** (`GraphOp`) | A DAG of ops. Built with `with GraphOp(...) as g:` + `>>` edges. |
 | **Op** | A node in the graph. Created via `@op`, `LLMOp.of(...)`, etc. |
-| **Edge** | `>>`. Branch-conditional merges are softened automatically at build time; `~` is the manual form and is rarely needed. |
+| **Edge** | `>>` (hard) or `>>~` (soft — target fires on *any one* soft pred). Branch merges are softened automatically at build; `~` is for trigger control nothing can infer. |
 | **Frame** | One execution step — when an op produces output, a frame is emitted. |
 | **PARENT** | Marker for inputs from `engine.run()` or the parent graph. |
 | **op["key"]** | Reference to a sibling op's output within the same graph. |

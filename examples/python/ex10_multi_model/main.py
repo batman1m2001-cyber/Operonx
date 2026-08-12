@@ -83,7 +83,7 @@ def cost_routing(query):
     complex_llm["content"] >> PARENT["answer"]
 
     START >> classifier >> check >> router
-    router >> [simple_llm, complex_llm] >> ~END
+    router >> [simple_llm, complex_llm] >> END
 
 
 @graph

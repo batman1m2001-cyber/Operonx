@@ -118,3 +118,48 @@ class TestTildeSoftEdge:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestTildeOnASentinel:
+    """`~END` reads like it means something and never did.
+
+    `~` is a statement about ready-counting: it makes the target fire when
+    any one soft predecessor completes. A sentinel has no ready-count.
+    Edges into `END` are unconditionally soft already, and `END` is output
+    forwarding at build time rather than a node the scheduler waits on —
+    so `~END` was a no-op twice over, and it appeared in three shipped
+    examples because it looked meaningful.
+    """
+
+    @pytest.mark.parametrize("sentinel", ["END", "START", "PARENT"])
+    def test_it_raises_rather_than_doing_nothing(self, sentinel):
+        from operonx.core import END, PARENT, START
+
+        marker = {"END": END, "START": START, "PARENT": PARENT}[sentinel]
+        with pytest.raises(TypeError, match="sentinel"):
+            ~marker
+
+    def test_the_message_says_what_to_write_instead(self):
+        from operonx.core import END
+
+        with pytest.raises(TypeError) as exc:
+            ~END
+        assert ">> __END__" in str(exc.value)
+        assert "already soft" in str(exc.value)
+
+    def test_tilde_on_a_real_op_still_works(self):
+        """The operator keeps its one real job — trigger control on a node
+        that actually has a ready-count."""
+        from operonx.core import PARENT, op
+        from operonx.core.ops import SoftEdge
+
+        @op
+        def a(x: int) -> dict:
+            return {"o": x}
+
+        # Bind first: operonx names an op from its assignment target, and
+        # pytest's assertion rewriting would otherwise supply its own
+        # temporary (`@py_assert4`), which is not a legal op name.
+        node = a(x=PARENT["x"])
+        marker = ~node
+        assert isinstance(marker, SoftEdge)

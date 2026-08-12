@@ -113,8 +113,13 @@ The scheduler:
 
 Branch ops emit frames on **soft** edges only when their condition
 selects that branch. `build()` softens branch-merge edges automatically
-(`auto_soft=True`), because forgetting the manual `~` was a silent
-run-time deadlock rather than a build error. Generator ops yield once per item; downstream ops
+(`auto_soft=True`), because forgetting to do it by hand was a silent
+run-time deadlock rather than a build error. That derivation is tracked
+separately from an authored `~`: the edge record carries `auto_soft` for
+what the pass decided and `pinned_hard` for what the author pinned, so a
+soft edge you wrote for **trigger control** — "fire on whichever
+predecessor lands first" — is never confused with one derived from a
+branch. Generator ops yield once per item; downstream ops
 run once per yield (streaming default — see [Streaming](streaming.md)).
 
 ## Contexts

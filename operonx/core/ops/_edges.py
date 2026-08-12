@@ -119,6 +119,23 @@ class DummyOp(BaseOp):
     # ``PARENT.declare(**vars, reducers={...})`` instead — same shared-cell
     # semantics plus optional reducers on fan-in writes.
 
+    def __invert__(self):
+        """``~START`` / ``~END`` / ``~PARENT`` — refused.
+
+        ``~`` is a statement about *ready-counting*: it makes the target
+        fire when any one soft predecessor completes. A sentinel has no
+        ready-count to modify.
+
+        ``~END`` in particular reads like it means something and never did:
+        edges into END are unconditionally soft already, and END is output
+        forwarding at build time rather than a node the scheduler waits on.
+        """
+        raise TypeError(
+            f"`~{self.name}` is meaningless — {self.name} is a sentinel, not a "
+            f"node with a ready-count. Write `>> {self.name}` instead. "
+            f"(Edges into END are already soft; `~END` never did anything.)"
+        )
+
     def __rshift__(self, other):
         if isinstance(other, SoftEdge):
             raise TypeError(
