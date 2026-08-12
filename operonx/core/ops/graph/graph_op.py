@@ -685,10 +685,18 @@ class GraphOp(BaseOp):
             if self._is_building:
                 self.build()
 
-            _outputs, stream_ctxs = await self._scheduler.run(state, context_id)
+            _outputs, stream_ctxs, _interrupted = await self._scheduler.run(state, context_id)
 
             _has_generators = any(op.is_gen for op in self._ops.values())
-            if not stream_ctxs and not _has_generators:
+            if _interrupted:
+                # The invocation was cancelled from inside. `_outputs` is
+                # whatever the cells happened to hold — all-`None` when the
+                # cancelled op never wrote — and yielding it hands the parent
+                # a result indistinguishable from a successful null answer.
+                # The streaming branch below already skips all-`None` items;
+                # this is the batch equivalent.
+                _outputs = {}
+            elif not stream_ctxs and not _has_generators:
                 self.store_result(state, _outputs, context_id)
                 yield context_id, _outputs
             else:

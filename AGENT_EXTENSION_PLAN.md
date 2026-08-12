@@ -55,7 +55,7 @@ count_turn → last_user → plan → apply → memory → skills
                     └──── gather ◀── dispatch ◀──────────────┘
 ```
 
-**Tests:** 1589 unit (`-m "not integration"`), 5 live. 15 test files under
+**Tests:** 1593 unit (`-m "not integration"`), 5 live. 15 test files under
 `tests/internal/agents/`, plus `tests/internal/core/ops/graph/test_loop_generator_backedge.py`
 and `tests/internal/providers/test_llm_stream_tool_calls.py` for the first
 two core fixes, and five more for §16 F2–F8:
@@ -1211,7 +1211,7 @@ kept passing — `test_missing_field_becomes_none` (F7) and the
 A7: a test can hold a bug in place, and passing is not evidence of
 correctness when the assertion was written from the implementation.
 
-Verification: 1589 unit tests green in both fixed and random order, ruff
+Verification: 1593 unit tests green in both fixed and random order, ruff
 and `mkdocs --strict` clean, and the 5 live tests re-run against
 `qwen3.7-plus`. F8 was additionally confirmed against a real streaming
 response — the deltas join to exactly the final frame's content, and a
@@ -1234,7 +1234,31 @@ The general lesson: "a missing field is an error" is right for a schema
 describing *one* response and wrong for a schema describing *several*.
 Only the author knows which they wrote, so the framework has to ask.
 
-**F2 was only half-fixed for generators.** `_pump` stamps `result.ctx`
+**F2 was not fixed on three of its five paths.** Auditing every route an
+`Interrupt` can take — rather than the one the first test happened to
+exercise — found the fix held for batch ops on a parallel branch and for
+inline `bound="sync"` ops, and failed everywhere else. All five now pass:
+
+| Path | Before the audit |
+|---|---|
+| batch op on a parallel branch | ✅ fixed in the first pass |
+| inline `bound="sync"` op | ✅ fixed in the first pass |
+| generator, mid-stream | ❌ resolved to the op ctx, so it swept its siblings |
+| nested `GraphOp` | ❌ interrupt unreported **and** a phantom `None` result |
+| synthetic loop (`__loop_0__`) | ✅ once the nested path was fixed — it is a nested graph |
+
+**Nested subgraphs lost the cancellation entirely.** A subgraph runs its
+own scheduler with `output_queue=None`, which is right for frames — the
+outer scheduler forwards those via `_out_vars`, and passing the queue down
+would double-emit — but it also dropped the `__interrupt__` record. Worse,
+`GraphOp.run` then yielded the cells as they stood, all-`None`, and the
+parent forwarded that as a result. Six branches with one interrupted came
+back as `[0, 1, None, 3, 4, 5]` with zero interrupts: the cancellation was
+invisible *and* replaced by a plausible wrong value. `Scheduler.run` now
+returns `root_interrupted`, and the record falls back to the run-level
+queue.
+
+**Generators resolved `SELF` too coarsely.** `_pump` stamps `result.ctx`
 with the op's dispatch ctx because the self-cancel guard needs that key,
 so resolving `SELF` against it made a top-level generator's bare
 `Interrupt()` sweep everything under `("main",)` — the original bug,

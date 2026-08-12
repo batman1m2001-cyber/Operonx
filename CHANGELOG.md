@@ -76,6 +76,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   given call. Without the marker such a call reports missing fields on
   every turn and burns its retries. See the migration note below.
 
+- **A cancellation inside a nested subgraph reached nobody, and the
+  parent reported a `None` result for it.** A subgraph runs its own
+  scheduler with `output_queue=None` — correct for frames, which the
+  outer scheduler forwards via `_out_vars`, but it also dropped the
+  `__interrupt__` record, so `handle.interrupts` stayed empty. Meanwhile
+  `GraphOp.run` yielded the cells as they stood, all-`None`, which the
+  parent forwarded as an ordinary result. Measured: six branches with one
+  interrupted reported `[0, 1, None, 3, 4, 5]` and zero interrupts; it now
+  reports `[0, 1, 3, 4, 5]` and one. `Scheduler.run` returns a third value,
+  `root_interrupted`, and the interrupt record falls back to the run-level
+  queue.
+
 - **A generator's untargeted `Interrupt` cancelled its sibling yields.**
   `_pump` stamps `result.ctx` with the op's *dispatch* ctx, because the
   self-cancel guard looks that value up in `tasks_by_ctx`. Resolving

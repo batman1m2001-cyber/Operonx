@@ -107,7 +107,7 @@ class Scheduler:
         state,
         context_id: tuple,
         output_queue: asyncio.Queue = None,
-    ) -> Tuple[dict, List[tuple]]:
+    ) -> Tuple[dict, List[tuple], bool]:
         """Drive graph execution, including loop re-dispatch if configured.
 
         Parameters
@@ -119,9 +119,11 @@ class Scheduler:
 
         Returns
         -------
-        (outputs, item_ctxs)
-            outputs     - final batch outputs dict (empty when streaming).
-            item_ctxs   - list of per-item context tuples produced by generators.
+        (outputs, item_ctxs, root_interrupted)
+            outputs          - final batch outputs dict (empty when streaming).
+            item_ctxs        - per-item context tuples produced by generators.
+            root_interrupted - True when a cancellation covered this run's own
+                               root context, so ``outputs`` is not a result.
         """
         g = self.graph
         # BUG 7 fix (Phase 3): the top-level scheduler surfaces its
@@ -139,7 +141,9 @@ class Scheduler:
         effective_queue = output_queue
         if effective_queue is None and getattr(g, "_loop_mode", None) == "synthetic":
             effective_queue = getattr(state, "_stream_output_queue", None)
-        outputs, item_ctxs = await self._run_once(state, context_id, effective_queue)
+        outputs, item_ctxs, root_interrupted = await self._run_once(
+            state, context_id, effective_queue
+        )
 
         # Top-level loop re-dispatch (GraphOp.loop() sets _loop_config on g).
         # Synthetic loops (Phase 3 rewrite) skip this path — their outer
@@ -165,7 +169,8 @@ class Scheduler:
                 for var, val in outputs.items():
                     state[g.full_name, var, next_ctx] = val
                 current_ctx = next_ctx
-                outputs, _ = await self._run_once(state, current_ctx)
+                outputs, _, _iter_interrupted = await self._run_once(state, current_ctx)
+                root_interrupted = root_interrupted or _iter_interrupted
             # Push final outputs so handle.collect() gets the latest values.
             if output_queue is not None and n_iters > 0:
                 output_queue.put_nowait((g.name, current_ctx, outputs))
@@ -179,19 +184,22 @@ class Scheduler:
         if top_level_stream:
             state._stream_output_queue = None
 
-        return outputs, item_ctxs
+        return outputs, item_ctxs, root_interrupted
 
     async def _run_once(
         self,
         state,
         context_id: tuple,
         output_queue: asyncio.Queue = None,
-    ) -> Tuple[dict, List[tuple]]:
+    ) -> Tuple[dict, List[tuple], bool]:
         """Execute the graph exactly once (no loop re-dispatch).
 
         Returns
         -------
-        (outputs, item_ctxs)
+        (outputs, item_ctxs, root_interrupted)
+            ``root_interrupted`` is True when a sweep covered this run's own
+            ``context_id`` — the invocation was cancelled and its outputs are
+            whatever happened to be in the cells, not a result.
         """
         g = self.graph
         _start_time = datetime.now(timezone.utc)
@@ -211,6 +219,8 @@ class Scheduler:
         # Each Frame/EOF put on queue also increments; _on_frame/_on_eof decrement after processing.
         # When inflight == 0, the graph is fully done.
         inflight: int = 0
+        # Set by _sweep_ctx when a cancellation covers this run's own root.
+        root_interrupted: bool = False
 
         # ready[ctx][op_name] = number of hard-edge predecessors still outstanding.
         # When it reaches 0, the op is dispatched.
@@ -340,16 +350,31 @@ class Scheduler:
                             result.ctx = ctx
                             _resolve_interrupt_target(result, item_ctx)
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
-                            if output_queue is not None:
-                                output_queue.put_nowait(
-                                    ("__interrupt__", ctx, {"__interrupt__": result})
-                                )
+                            _report_interrupt(result, ctx)
                         else:
                             _on_frame(Frame(op_name, item_ctx, result))
                     _on_eof(EOF(op_name, ctx))
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     _on_eof(EOF(op_name, ctx))
+
+        def _report_interrupt(event: Interrupt, ctx: tuple) -> None:
+            """Forward the ``__interrupt__`` record to whoever is listening.
+
+            A nested subgraph runs its own scheduler with ``output_queue=None``
+            — the outer scheduler forwards its *frames* via ``_out_vars``, so
+            passing the queue down would double-emit them. The interrupt record
+            is not a frame and is emitted exactly once, at the scheduler that
+            performed the sweep, so it can safely fall back to the run-level
+            queue. Without this a cancellation inside a subgraph reached
+            nobody: ``handle.interrupts`` stayed empty and the only trace of it
+            was an all-``None`` result.
+            """
+            queue_ = output_queue
+            if queue_ is None:
+                queue_ = getattr(state, "_stream_output_queue", None)
+            if queue_ is not None:
+                queue_.put_nowait(("__interrupt__", ctx, {"__interrupt__": event}))
 
         def _on_frame(event: Frame) -> None:
             """Handle one Frame: seed item ctx, decrement ready, route when ready."""
@@ -556,7 +581,14 @@ class Scheduler:
             own pump task is spared so the emitter can finish cleanly
             (its EOF and finally block decrement inflight as normal).
             """
-            nonlocal inflight
+            nonlocal inflight, root_interrupted
+
+            # A sweep covering this run's own root means the invocation was
+            # cancelled. A nested GraphOp needs to know: without it, it
+            # yields whatever the cells hold — all-``None`` — and the parent
+            # forwards that as a perfectly ordinary result.
+            if _is_descendant_or_equal(context_id, ctx_prefix):
+                root_interrupted = True
 
             # 1. Drain queue. Frame/EOF/Interrupt items at descendant ctxs
             #    get dropped; inflight is decremented by exactly the drop
@@ -669,8 +701,7 @@ class Scheduler:
                 _on_frame(event)
             elif isinstance(event, Interrupt):
                 await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
-                if output_queue is not None:
-                    output_queue.put_nowait(("__interrupt__", event.ctx, {"__interrupt__": event}))
+                _report_interrupt(event, event.ctx)
             else:
                 _on_eof(event)
             # Drain any inline ops triggered by the queue event.
@@ -691,4 +722,4 @@ class Scheduler:
 
         _reset_state(_state_var_token)
 
-        return outputs, item_ctxs
+        return outputs, item_ctxs, root_interrupted
