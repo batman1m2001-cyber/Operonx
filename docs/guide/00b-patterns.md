@@ -84,7 +84,7 @@ prefer the `.of()` classmethod with explicit keyword arguments:
 from operonx.providers import LLMOp, EmbeddingOp
 
 # Provider ops with .of()
-llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["msgs"])
+llm = LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
 # Prompt template + LLM in one op — prompt= takes str or dict;

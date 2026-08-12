@@ -63,23 +63,48 @@ async def main():
 asyncio.run(main())
 ```
 
-`prompt=` accepts three shapes:
+`prompt=` is a **template**, in one of two shapes:
 
 * **str** — becomes a single user message.
-* **dict** with `system` / `user` keys — 1-2 messages with `{var}` placeholders.
-* **list** — a full OpenAI messages array (multimodal blocks supported).
+* **dict** with `system` / `user` keys — the standard two-message call.
 
 Every non-reserved kwarg is a template variable substituted into any
 `{var}` placeholder inside `prompt`. The output key is `content` by default.
 
 ## Passing a pre-built messages list
 
-When you already have a list of messages (e.g. multi-turn conversation),
-pass it as `prompt=`:
+A conversation is data, not a template, so it goes to `messages=` — which
+is never formatted:
 
 ```python
-llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["messages"])
+llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"])
 START >> llm >> END
+```
+
+The two are mutually exclusive, and one is required.
+
+!!! warning "Do not pass a conversation to `prompt=`"
+    `prompt=` formats what it is given. A message list is full of braces
+    the formatter tries to resolve — a tool returning `{"city": "Hanoi"}`,
+    a user pasting CSS, the model's own tool-call arguments — and each one
+    becomes a template variable that does not exist. `prompt=` used to
+    accept a list; it now raises and names `messages=`.
+
+Multimodal content is a message list too, so it also goes through
+`messages=`. Build it in an upstream op when the values are computed:
+
+```python
+@op
+def build_vision_prompt(query: str, image_url: str) -> dict:
+    return {"messages": [
+        {"role": "user", "content": [
+            {"type": "text", "text": f"Describe: {query}"},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]},
+    ]}
+
+p = build_vision_prompt(query=PARENT["query"], image_url=upload["url"])
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
 ```
 
 ## Streaming a response
