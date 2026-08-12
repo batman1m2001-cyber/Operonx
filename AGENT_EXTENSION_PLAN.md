@@ -55,7 +55,7 @@ count_turn → last_user → plan → apply → memory → skills
                     └──── gather ◀── dispatch ◀──────────────┘
 ```
 
-**Tests:** 1587 unit (`-m "not integration"`), 5 live. 15 test files under
+**Tests:** 1589 unit (`-m "not integration"`), 5 live. 15 test files under
 `tests/internal/agents/`, plus `tests/internal/core/ops/graph/test_loop_generator_backedge.py`
 and `tests/internal/providers/test_llm_stream_tool_calls.py` for the first
 two core fixes, and five more for §16 F2–F8:
@@ -1202,7 +1202,7 @@ upgrading:
 | | What a caller may notice |
 |---|---|
 | F2 | `Interrupt()` with no target now cancels the emitter's branch, not the run. Nothing in-tree relied on the old default — every call site already passed `ctx_to_cancel` |
-| F7 | `fields=[…]` reports a missing field as an error where it used to return `None` silently. Code that treated `None` as "optional field absent" now sees `error` set |
+| F7 | `fields=[…]` reports a missing field as an error where it used to return `None` silently. **A union schema must mark its optional entries `"name?: type"`** or every call fails — see §16.4 |
 | F8 | Streamed `LLMOp` frames carry `final`. Additive, but a consumer asserting exact frame dicts will see the new key |
 
 Two tests asserted the old behaviour and had to be rewritten rather than
@@ -1211,11 +1211,44 @@ kept passing — `test_missing_field_becomes_none` (F7) and the
 A7: a test can hold a bug in place, and passing is not evidence of
 correctness when the assertion was written from the implementation.
 
-Verification: 1587 unit tests green in both fixed and random order, ruff
+Verification: 1589 unit tests green in both fixed and random order, ruff
 and `mkdocs --strict` clean, and the 5 live tests re-run against
 `qwen3.7-plus`. F8 was additionally confirmed against a real streaming
 response — the deltas join to exactly the final frame's content, and a
 naive join double-counts.
+
+### 16.4 · What the follow-up review caught
+
+Fixing the eight was not the end of it. Re-reading the diff against real
+callers found two things the regression tests could not, because both
+tests and code were written from the same assumption.
+
+**F7 would have broken callbot's `ahamove_hr` agent on every call.** Its
+extractor declares twelve fields and its own comment says non-compound
+states emit only `intent` — a *union schema*, where absence is the normal
+case. Requiring every declared field turned each turn into a semantic
+failure plus `max_retries` retries plus an all-`None` result. Fixed by
+adding `"name?: type"` for optional fields, required by default.
+
+The general lesson: "a missing field is an error" is right for a schema
+describing *one* response and wrong for a schema describing *several*.
+Only the author knows which they wrote, so the framework has to ask.
+
+**F2 was only half-fixed for generators.** `_pump` stamps `result.ctx`
+with the op's dispatch ctx because the self-cancel guard needs that key,
+so resolving `SELF` against it made a top-level generator's bare
+`Interrupt()` sweep everything under `("main",)` — the original bug,
+disguised. It resolves against the per-yield `item_ctx` now. 3 of 5
+sibling yields survived before, 5 of 5 after.
+
+Two things checked and found acceptable rather than fixed:
+
+- **Repeated XML leaves with a `: str` hint stringify the list** —
+  `<item>a</item><item>b</item>` yields `"['a', 'b']"`. Ugly, but it only
+  happens where a value was previously dropped outright, and the shape is
+  visible rather than silent.
+- **`observe_max` counts for the whole run, so a loop accumulates.** That
+  is what a per-run budget means, and the docstring already says so.
 
 ---
 

@@ -83,6 +83,59 @@ class TestDefaultTarget:
         assert event.ctx_to_cancel == event.ctx
 
 
+class TestGeneratorEmitter:
+    """A generator's ``SELF`` is the *yield* that emitted it.
+
+    ``_pump`` stamps ``result.ctx`` with the op's dispatch ctx, because
+    the self-cancel guard looks that up in ``tasks_by_ctx``. Resolving
+    ``SELF`` against the same value made a top-level generator's untargeted
+    interrupt cancel everything under ``("main",)`` — F2 all over again,
+    just harder to see because earlier yields had already completed. It
+    resolves against ``item_ctx`` instead.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_mid_stream_interrupt_spares_the_other_yields(self):
+        @op
+        def gen(n: int):
+            for i in range(6):
+                if i == 2:
+                    yield Interrupt(reason="mid-stream")
+                else:
+                    yield {"i": i}
+
+        @op
+        async def use(i: int):
+            await asyncio.sleep(0.01)
+            return {"j": i}
+
+        with GraphOp(name="f2_gen") as g:
+            s = gen(n=PARENT["n"])
+            u = use(i=s["i"].parallel())
+            START >> s >> u >> END
+
+        handle = Operon(g).start(inputs={"n": 1})
+        out = await asyncio.wait_for(handle.collect(), timeout=30)
+        assert len(out.get("j", [])) == 5, "only the interrupting yield should be lost"
+
+    @pytest.mark.asyncio
+    async def test_the_target_is_the_yield_ctx_not_the_op_ctx(self):
+        @op
+        def gen(n: int):
+            yield {"i": 0}
+            yield Interrupt(reason="x")
+
+        with GraphOp(name="f2_genctx") as g:
+            s = gen(n=PARENT["n"])
+            START >> s >> END
+
+        handle = Operon(g).start(inputs={"n": 1})
+        await asyncio.wait_for(handle.collect(), timeout=30)
+        event = handle.interrupts[0]
+        assert event.ctx_to_cancel != event.ctx, "the yield ctx is finer than the op ctx"
+        assert len(event.ctx_to_cancel) > len(event.ctx)
+
+
 class TestExplicitAll:
     @pytest.mark.asyncio
     async def test_cancelling_everything_still_works_when_asked_for(self):

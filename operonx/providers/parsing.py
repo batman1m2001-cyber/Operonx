@@ -26,6 +26,9 @@ Two rules that are easy to get backwards:
 
 - **A field the payload does not contain is an error**, so ``max_retries``
   can fire. A field the payload sets to ``null`` is an answer, and is not.
+  Mark a field ``"name?: type"`` when absence is expected — a *union
+  schema*, where one field list covers several response shapes, needs
+  this on every entry that is not always present.
 - **An XML document element is stripped when it gets in the way.** XML must
   have exactly one root, so a path written against the payload
   (``"result"``) is matched inside a lone root as well as at the top. JSON
@@ -69,26 +72,43 @@ class ExtractField:
         output_key: Key under which the extracted value is returned.
         chain_path: Dot-separated path into the parsed dict.
         type_hint: Type name used for coercion (``str`` / ``int`` / ``bool`` / ...).
+        optional: When True, absence is an answer rather than an error.
     """
 
     output_key: str
     chain_path: List[str]
     type_hint: str
+    optional: bool = False
 
     @classmethod
     def from_string(cls, schema_str: str) -> "ExtractField":
         """Parse a schema string like ``"user.address.city: str"``.
 
         Missing type hint defaults to ``Any``.
+
+        A ``?`` before the colon marks the field optional::
+
+            "result: str"        # required — absence is a parse error
+            "chosen_date?: str"  # optional — absence yields None
+
+        Optional matters for a **union schema**, where one field list
+        covers several response shapes and most entries are expected to be
+        absent on any given call. Without the marker every such call would
+        report missing fields and burn its retries.
         """
         if ":" not in schema_str:
             schema_str += ": Any"
         chain_text, type_hint = schema_str.split(":", 1)
-        chain_path = chain_text.strip().split(".")
+        chain_text = chain_text.strip()
+        optional = chain_text.endswith("?")
+        if optional:
+            chain_text = chain_text[:-1].strip()
+        chain_path = chain_text.split(".")
         return cls(
             output_key=chain_path[-1],
             chain_path=chain_path,
             type_hint=type_hint.strip(),
+            optional=optional,
         )
 
 
@@ -321,7 +341,8 @@ def parse_and_extract(
     for field in fields:
         raw = _resolve_field(parsed_data, field.chain_path, parser)
         if raw is MISSING:
-            missing.append(".".join(field.chain_path))
+            if not field.optional:
+                missing.append(".".join(field.chain_path))
             raw = None
         result[field.output_key] = convert_type(raw, field.type_hint)
 

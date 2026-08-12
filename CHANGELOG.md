@@ -70,6 +70,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer. A validator's `@default` counts as an answer, so it still
   applies.
 
+  **A field may be marked optional** with `"name?: type"`, which is
+  required for a *union schema* — one field list covering several
+  response shapes, where most entries are expected to be absent on any
+  given call. Without the marker such a call reports missing fields on
+  every turn and burns its retries. See the migration note below.
+
+- **A generator's untargeted `Interrupt` cancelled its sibling yields.**
+  `_pump` stamps `result.ctx` with the op's *dispatch* ctx, because the
+  self-cancel guard looks that value up in `tasks_by_ctx`. Resolving
+  `Interrupt.SELF` against the same value meant a top-level generator's
+  bare `Interrupt()` still swept everything under `("main",)` — F2 again,
+  harder to see because earlier yields had already completed. It resolves
+  against the per-yield `item_ctx` instead. Measured: 3 of 5 sibling
+  yields survived, now 5 of 5.
+
 - **XML's document element no longer hides the fields under it.** XML must
   have exactly one root, so `<r><result>X</result></r>` parsed to `{"r":
   {"result": "X"}}` while the caller reasonably wrote
@@ -82,6 +97,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Repeated XML leaf siblings are kept.** `<item>a</item><item>b</item>`
   collapsed to `"b"` — the leaf branch reassigned where the nested branch
   built a list. Both now build a list.
+
+### Migration — union schemas need `?`
+
+`fields=[…]` entries are **required** by default. Any list where some
+entries are legitimately absent on a given response must mark those
+entries optional, or every call reports an error and exhausts
+`max_retries`:
+
+```python
+_SMART_FIELDS = [
+    "result: str",        # always present — leave required
+    "has_cccd?: bool",    # only on document turns
+    "chosen_date?: str",  # only on scheduling turns
+]
+```
+
+This is not hypothetical: callbot's `ahamove_hr` extractor declares
+twelve fields whose own comment says "non-compound states emit only
+`intent`; compound states emit the relevant subset". Every one of its
+calls would have failed. Single-field extractors — the common case — need
+no change.
 
 ### Changed
 

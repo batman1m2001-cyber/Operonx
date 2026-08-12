@@ -66,6 +66,27 @@ class TestExtractField:
         assert f.chain_path == ["user", "address", "city"]
         assert f.output_key == "city"
 
+    def test_required_by_default(self):
+        assert ExtractField.from_string("result: str").optional is False
+
+    def test_question_mark_marks_optional(self):
+        f = ExtractField.from_string("result?: str")
+        assert f.optional is True
+        assert f.output_key == "result", "the marker must not leak into the key"
+        assert f.chain_path == ["result"]
+
+    def test_optional_on_a_nested_path(self):
+        f = ExtractField.from_string("user.city?: str")
+        assert f.optional is True
+        assert f.chain_path == ["user", "city"]
+        assert f.output_key == "city"
+
+    def test_optional_without_a_type_hint(self):
+        f = ExtractField.from_string("result?")
+        assert f.optional is True
+        assert f.output_key == "result"
+        assert f.type_hint == "Any"
+
 
 class TestExtractValueByPath:
     def test_shallow(self):
@@ -301,6 +322,38 @@ class TestParseAndExtract:
         )
         assert result["intent"] == "FALLBACK"
         assert result["error"] is None
+
+    def test_an_optional_field_may_be_absent(self):
+        result = parse_and_extract(
+            text="<a>1</a>",
+            parser="xml",
+            fields=self._fields("a: str", "b?: str"),
+        )
+        assert result["a"] == "1"
+        assert result["b"] is None
+        assert result["error"] is None
+
+    def test_a_union_schema_does_not_report_every_call(self):
+        """One field list covering several response shapes is a real
+        pattern — callbot's ahamove_hr extractor declares twelve fields and
+        expects one on a non-compound turn. Without ``?`` every call would
+        report missing fields and burn its retries."""
+        union = self._fields(
+            "result: str",
+            "has_cccd?: bool",
+            "chosen_date?: str",
+            "terminal_cue?: str",
+        )
+        result = parse_and_extract("<result>CONFIRM</result>", "xml", union)
+        assert result["result"] == "CONFIRM"
+        assert result["error"] is None
+        assert result["has_cccd"] is None
+
+    def test_a_required_field_in_a_union_still_errors(self):
+        union = self._fields("result: str", "has_cccd?: bool")
+        result = parse_and_extract("<has_cccd>true</has_cccd>", "xml", union)
+        assert result["error"] is not None
+        assert "result" in result["error"]
 
     def test_only_some_fields_missing_still_errors(self):
         result = parse_and_extract(

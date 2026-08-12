@@ -291,10 +291,14 @@ class Scheduler:
                         if isinstance(result, Interrupt):
                             # Stamp emitter identity so the main loop
                             # knows which task to skip during the
-                            # self-cancel guard.
+                            # self-cancel guard. That guard looks up
+                            # `tasks_by_ctx`, which is keyed by the op's
+                            # dispatch ctx — so `.ctx` stays coarse while
+                            # SELF resolves to `item_ctx`, the ctx of the
+                            # yield that actually emitted the interrupt.
                             result.op = op_name
                             result.ctx = ctx
-                            _resolve_interrupt_target(result, ctx)
+                            _resolve_interrupt_target(result, item_ctx)
                             queue.put_nowait(result)
                         else:
                             queue.put_nowait(Frame(op_name, item_ctx, result))
@@ -334,7 +338,7 @@ class Scheduler:
                         if isinstance(result, Interrupt):
                             result.op = op_name
                             result.ctx = ctx
-                            _resolve_interrupt_target(result, ctx)
+                            _resolve_interrupt_target(result, item_ctx)
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             if output_queue is not None:
                                 output_queue.put_nowait(
