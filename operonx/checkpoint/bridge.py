@@ -33,52 +33,21 @@ from operonx.checkpoint.base import (
     ObserveBudgetExceeded,
     ScratchWriteEvent,
 )
+from operonx.core.ops.base import should_emit_for_channel
 from operonx.core.states.state import MemoryState
 
 __all__ = [
     "bind_checkpointer",
+    "bind_observe_budget",
     "should_emit_for_channel",
     "bind_custom_bus",
     "bind_interrupt_bus",
 ]
 
 
-def should_emit_for_channel(op, var: str, channel: str) -> bool:
-    """Return True iff an event for ``op.var`` should be emitted on ``channel``.
-
-    Resolves the per-op ``exclude``/``include`` config (both list form and
-    dict-per-channel form). Fast path when the op has no filter set at all
-    (bare ``@op`` decoration).
-
-    Args:
-        op: an op instance with ``_obs_exclude`` / ``_obs_include`` attrs, or
-            ``None`` (treated as no filter)
-        var: variable name being written
-        channel: ``"trace"`` or ``"checkpoint"``
-
-    Returns:
-        True → emit event; False → filter out.
-    """
-    if op is None:
-        return True
-
-    include = getattr(op, "_obs_include", None) or {}
-    if include:
-        # Allowlist mode: emit iff var is listed for this channel or wildcard.
-        allowed = set(include.get(channel, ())) | set(include.get("*", ()))
-        # If neither channel-specific nor wildcard bucket exists at all, the
-        # op only restricts the OTHER channel — this channel sees everything.
-        if channel not in include and "*" not in include:
-            return True
-        return var in allowed
-
-    exclude = getattr(op, "_obs_exclude", None) or {}
-    if exclude:
-        # Blocklist mode: skip if var is listed for this channel or wildcard.
-        blocked = set(exclude.get(channel, ())) | set(exclude.get("*", ()))
-        return var not in blocked
-
-    return True
+# Re-exported from core: the V3 tracer consults the same predicate, and
+# core cannot import this package. Kept importable here because this was
+# the original home and callers reference ``bridge.should_emit_for_channel``.
 
 
 def bind_checkpointer(
@@ -114,8 +83,6 @@ def bind_checkpointer(
         step_id_getter = lambda: state._current_step
 
     op_registry = op_registry or {}
-    # Per-op emit counter for observe_max circuit breaker.
-    op_emit_counts: Dict[str, int] = {}
 
     def _observer(idx: int, ctx_key: tuple, value) -> None:
         op_name, var = idx_to_key.get(idx, ("?", "?"))
@@ -124,15 +91,10 @@ def bind_checkpointer(
         if not should_emit_for_channel(op_instance, var, "checkpoint"):
             return
 
-        # observe_max circuit breaker
-        if op_instance is not None:
-            limit = getattr(op_instance, "observe_max", None)
-            if limit is not None:
-                count = op_emit_counts.get(op_name, 0) + 1
-                op_emit_counts[op_name] = count
-                if count > limit:
-                    raise ObserveBudgetExceeded(op=op_name, count=count, limit=limit)
-
+        # The observe_max circuit breaker used to live here. It counted
+        # only while a checkpointer was bound, so a runaway generator under
+        # a plain ``engine.run()`` was uncapped — see bind_observe_budget,
+        # which the engine binds on every run instead.
         checkpointer.on_cell_write(
             CellWriteEvent(
                 step_id=step_id_getter(),
@@ -167,6 +129,64 @@ def bind_checkpointer(
         state.unsubscribe_scratch(_scratch_observer)
 
     return _unsubscribe
+
+
+def bind_observe_budget(
+    state: MemoryState,
+    op_registry: Dict[str, object],
+) -> Optional[Callable[[], None]]:
+    """Enforce ``@op(observe_max=N)`` for the duration of a run.
+
+    Returns an unsubscribe callable, or ``None`` when no op in the graph
+    declares a budget — in which case nothing is subscribed and the run
+    pays nothing.
+
+    This is separate from :func:`bind_checkpointer`, where the counter
+    used to live. That closure only exists when a checkpointer is passed
+    to ``engine.start()``, so ``observe_max`` silently did nothing under
+    ``engine.run()`` — the cheap path, and the one a runaway generator is
+    most likely to be running in. Measured before the split: 50 frames
+    emitted against a budget of 5, no error.
+
+    :class:`ObserveBudgetExceeded` is a ``BaseException``, so it bypasses
+    ``BaseOp.run``'s ``except Exception`` and halts the run rather than
+    being recorded as an op error.
+    """
+    budgets: Dict[str, int] = {}
+    for name, op_instance in op_registry.items():
+        limit = getattr(op_instance, "observe_max", None)
+        if limit is not None:
+            budgets[name] = limit
+    if not budgets:
+        return None
+
+    # Only vars that reach at least one observer count against the budget.
+    # ``ObserveBudgetExceeded``'s own message offers ``@op(exclude=[...])``
+    # as a remedy, so a fully-silenced var has to be free — otherwise the
+    # advice in the error is wrong.
+    counted_idx: Dict[int, str] = {}
+    for (op_name, var), idx in state.schema._var_to_idx.items():
+        if op_name not in budgets:
+            continue
+        op_instance = op_registry[op_name]
+        if should_emit_for_channel(op_instance, var, "checkpoint") or should_emit_for_channel(
+            op_instance, var, "trace"
+        ):
+            counted_idx[idx] = op_name
+
+    counts: Dict[str, int] = {}
+
+    def _observer(idx: int, _ctx_key: tuple, _value) -> None:
+        op_name = counted_idx.get(idx)
+        if op_name is None:
+            return
+        count = counts.get(op_name, 0) + 1
+        counts[op_name] = count
+        if count > budgets[op_name]:
+            raise ObserveBudgetExceeded(op=op_name, count=count, limit=budgets[op_name])
+
+    state.subscribe_writes(_observer)
+    return lambda: state.unsubscribe_writes(_observer)
 
 
 def bind_custom_bus(

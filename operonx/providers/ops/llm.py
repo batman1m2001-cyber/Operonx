@@ -1,9 +1,9 @@
 """LLMOp — unified prompt-formatting + language-model op for operonx-providers.
 
-Accepts a polymorphic ``prompt=`` input (str / dict / list of messages) plus
-template variables via ``**kwargs``. Formats messages internally, then calls
-the LLM via ResourceHub. Supports streaming, load balancing, fallback chains,
-and OpenAI Batch API mode.
+Takes exactly one of ``prompt=`` (a template — str or dict — formatted with
+template variables from ``**kwargs``) or ``messages=`` (a ready OpenAI
+messages array, never formatted). Calls the LLM via ResourceHub. Supports
+streaming, load balancing, fallback chains, and OpenAI Batch API mode.
 """
 
 import random
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 # LLM knobs — never treated as template variables.
 _LLM_PARAM_KEYS = (
     "prompt",
+    "messages",
     "temperature",
     "max_tokens",
     "tools",
@@ -58,18 +59,29 @@ def _mime_from_data_url(url: str) -> Optional[str]:
 class LLMOp(BaseOp):
     """Op that formats a prompt and calls a language model via ResourceHub.
 
-    The ``prompt=`` input accepts three shapes:
+    Give it exactly one of ``prompt=`` or ``messages=``.
 
-    * **str** — becomes a single user message: ``"Hello {name}"``.
-    * **dict** with ``system`` / ``user`` keys — 1-2 messages with ``{var}``
-      placeholders.
-    * **list** — full OpenAI messages array (may contain multimodal blocks).
+    ``prompt=`` is a **template**, and every string in it is
+    ``str.format_map``-substituted with the non-reserved kwargs:
 
-    All non-reserved kwargs are template variables — every string leaf inside
-    ``prompt`` gets ``str.format_map``-substituted with them.
+    * **str** — one user message: ``"Hello {name}"``.
+    * **dict** with ``system`` / ``user`` keys — the standard two-message call.
+
+    ``messages=`` is a **conversation**: a full OpenAI messages array, passed
+    through untouched. Use it whenever the content is data rather than a
+    template — an agent's history, a multimodal block assembled upstream,
+    anything past two messages.
+
+    The split exists because formatting a conversation is destructive. Any
+    brace in any message — a tool returning ``{"city": "Hanoi"}``, a user
+    pasting CSS, the model's own tool-call arguments — becomes a template
+    variable that does not exist, and the run dies on the *next* model call.
+    ``prompt=`` used to accept a list, which made that the default outcome
+    for every agent.
 
     Inputs:
-        prompt (str | dict | list): Message template. Required.
+        prompt (str | dict): Message template. Mutually exclusive with ``messages``.
+        messages (list): Ready OpenAI messages array, never formatted.
         temperature (float): Sampling temperature. Default: 0.0.
         max_tokens (int): Max output tokens. Default: None.
         tools (list): Tool/function definitions. Default: None.
@@ -93,6 +105,8 @@ class LLMOp(BaseOp):
             prompt={"system": "You are {role}.", "user": "{query}"},
             role="helpful", query=PARENT["query"],
         )
+
+        chat = LLMOp.of(resource="gpt-4o", messages=history["messages"])
     """
 
     __slots__ = [
@@ -214,7 +228,8 @@ class LLMOp(BaseOp):
 
         # Fixed LLM knobs
         input_schema = {
-            "prompt": Param(type=(str, dict, list), required=True),
+            "prompt": Param(type=(str, dict), default=None),
+            "messages": Param(type=list, default=None),
             "temperature": Param(type=float, default=0.0),
             "max_tokens": Param(type=int, default=None),
             "tools": Param(type=list, default=None),
@@ -234,6 +249,10 @@ class LLMOp(BaseOp):
         output_schema = {
             "role": Param(type=str, default="assistant"),
             "content": Param(type=str, required=True),
+            # Streaming only: False on a token delta, True on the frame
+            # that repeats the accumulated content. Batch calls are always
+            # final. See ``_stream_final``.
+            "final": Param(type=bool, default=True),
             "finish_reason": Param(type=str, default=None),
             "model_used": Param(type=str, required=True),
             "tool_calls": Param(type=list, default=[]),
@@ -248,6 +267,10 @@ class LLMOp(BaseOp):
             for f in self._extract_fields:
                 output_schema[f.output_key] = Param(default=None)
             output_schema["error"] = Param(type=str, default=None)
+
+        # Checked on the *raw* mapping: _normalize_params wraps each value
+        # in a Param, so a literal list is no longer a list by then.
+        _check_prompt_inputs(inputs or {})
 
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
@@ -311,11 +334,27 @@ class LLMOp(BaseOp):
         return set(source.inputs) - RESERVED_KEYS
 
     def _build_messages(self, prompt: Any, vars: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Turn a prompt (str / dict / list) into an OpenAI messages array.
+        """Turn a **template** (str / dict) into an OpenAI messages array.
 
-        Every string leaf inside ``prompt`` is ``str.format_map``-substituted
-        with ``vars``. Raises ``PromptError`` on missing variable.
+        Every string leaf is ``str.format_map``-substituted with ``vars``.
+        Raises ``PromptError`` on a missing variable.
         """
+        if isinstance(prompt, list):
+            raise PromptError(
+                message=(
+                    "prompt= no longer accepts a list. A list of messages is a "
+                    "conversation, and formatting one is destructive: any brace "
+                    "in any message becomes a template variable that does not "
+                    "exist. Pass it as messages= instead, which is never "
+                    "formatted. If you meant a multi-message *template*, build "
+                    "the list in an upstream @op and pass the result as "
+                    "messages=; prompt={'system': ..., 'user': ...} covers the "
+                    "two-message case."
+                ),
+                prompt=prompt,
+                original_error=TypeError("prompt=list is not supported; use messages="),
+            )
+
         if isinstance(prompt, str):
             content = _format_value(prompt, vars, prompt)
             return [{"role": "user", "content": content}]
@@ -344,22 +383,23 @@ class LLMOp(BaseOp):
         raise PromptError(
             message="Invalid prompt type",
             prompt=prompt,
-            original_error=TypeError(f"Expected str, dict, or list, got {type(prompt).__name__}"),
+            original_error=TypeError(f"Expected str or dict, got {type(prompt).__name__}"),
         )
 
     def _extract_prompt_and_vars(self, kwargs: Dict[str, Any]) -> tuple:
-        """Split kwargs into (prompt, template_vars, llm_knobs)."""
+        """Split kwargs into (prompt, messages, template_vars, llm_knobs)."""
         prompt = kwargs.pop("prompt", None)
+        messages = kwargs.pop("messages", None)
         llm_knobs = {}
         for key in _LLM_PARAM_KEYS:
-            if key == "prompt":
+            if key in ("prompt", "messages"):
                 continue
             if key in kwargs:
                 val = kwargs.pop(key)
                 if val is not None:
                     llm_knobs[key] = val
         # Anything left over is a template variable
-        return prompt, kwargs, llm_knobs
+        return prompt, messages, kwargs, llm_knobs
 
     # =========================================================================
     # Lazy init
@@ -631,9 +671,20 @@ class LLMOp(BaseOp):
         raise RuntimeError("All streaming fallback models failed")
 
     def _stream_final(self, acc, resource):
-        """Build the final metadata yield for a stream."""
+        """Build the final metadata yield for a stream.
+
+        ``content`` here is the **whole** accumulated response, not the
+        remaining tail — the per-token frames already carried every piece
+        of it. ``final=True`` is what separates the two; before it existed
+        the only difference was the incidental presence of
+        ``finish_reason``, and nothing said so.
+
+        Consumers should either join the ``final=False`` frames or read
+        this one, never both.
+        """
         return {
             "role": "assistant",
+            "final": True,
             "content": acc["response"],
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
@@ -653,17 +704,61 @@ class LLMOp(BaseOp):
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Format prompt into messages and return LLM-ready params dict."""
         inputs_copy = dict(_inputs)
-        prompt, template_vars, llm_knobs = self._extract_prompt_and_vars(inputs_copy)
+        prompt, messages, template_vars, llm_knobs = self._extract_prompt_and_vars(inputs_copy)
+        built = self._resolve_messages(prompt, messages, template_vars)
+        return {"messages": built, **llm_knobs}
 
+    def _resolve_messages(
+        self,
+        prompt: Any,
+        messages: Any,
+        template_vars: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Pick the one input that was given and turn it into messages.
+
+        Exactly one of ``prompt`` / ``messages`` — neither is a missing
+        argument, both is a contradiction, and either way answering with
+        one of them silently would be a guess.
+        """
+        if prompt is not None and messages is not None:
+            raise PromptError(
+                message=(
+                    "prompt= and messages= are mutually exclusive. prompt= is a "
+                    "template and is formatted; messages= is a conversation and "
+                    "is not. Pass one."
+                ),
+                prompt=prompt,
+                original_error=ValueError("both prompt= and messages= were given"),
+            )
+        if messages is not None:
+            if not isinstance(messages, list):
+                raise PromptError(
+                    message=f"messages= must be a list, got {type(messages).__name__}",
+                    prompt=messages,
+                    original_error=TypeError(type(messages).__name__),
+                )
+            if template_vars:
+                # Ignoring them would be the silent-plausible-answer shape:
+                # the caller expected substitution and gets none, with the
+                # wrong text reaching the model.
+                raise PromptError(
+                    message=(
+                        f"messages= is never formatted, so the template "
+                        f"variable(s) {sorted(template_vars)} could only be "
+                        f"ignored. Format them upstream, or use prompt=."
+                    ),
+                    prompt=messages,
+                    missing_vars=sorted(template_vars),
+                    original_error=ValueError(f"unused: {sorted(template_vars)}"),
+                )
+            return list(messages)
         if prompt is None:
             raise PromptError(
-                message="prompt is required",
+                message="one of prompt= or messages= is required",
                 prompt=None,
-                original_error=ValueError("LLMOp received prompt=None"),
+                original_error=ValueError("LLMOp received neither prompt= nor messages="),
             )
-
-        messages = self._build_messages(prompt, template_vars)
-        return {"messages": messages, **llm_knobs}
+        return self._build_messages(prompt, template_vars)
 
     def _extract_completion(self, completion: Any, resource: str) -> Dict[str, Any]:
         """Extract structured output dict from a ChatCompletion response."""
@@ -716,10 +811,18 @@ class LLMOp(BaseOp):
         trace-time view. Real op state is untouched.
         """
         prompt = inputs.get("prompt")
-        if prompt is not None:
+        raw_messages = inputs.get("messages")
+        if prompt is not None or raw_messages is not None:
             try:
                 vars = {k: v for k, v in inputs.items() if k not in RESERVED_KEYS}
-                messages = self._build_messages(prompt, vars)
+                # messages= is already built; only a template needs formatting.
+                # Reading `prompt` alone here meant a messages= call traced no
+                # media at all.
+                messages = (
+                    list(raw_messages)
+                    if raw_messages is not None
+                    else self._build_messages(prompt, vars)
+                )
                 wrapped = self._wrap_openai_media_blocks(messages)
                 inputs = {**inputs, "messages": wrapped}
             except Exception:
@@ -843,7 +946,11 @@ class LLMOp(BaseOp):
 
         if choice.delta.content:
             acc["response"] += choice.delta.content
-            yield_dict = {"content": choice.delta.content, "role": "assistant"}
+            # ``final=False`` marks this as a delta. The last frame of a
+            # stream repeats the whole accumulated text under the same
+            # ``content`` key, so a consumer that joins frames without
+            # checking would emit the answer twice.
+            yield_dict = {"content": choice.delta.content, "role": "assistant", "final": False}
         else:
             yield_dict = None
 
@@ -940,6 +1047,7 @@ class LLMOp(BaseOp):
         batch_mode=False,
         seed=None,
         prompt=None,
+        messages=None,
         # Structured-output layer (merged from ask()/ParserOp in 1.0.0).
         fields=None,
         parser=None,
@@ -953,6 +1061,10 @@ class LLMOp(BaseOp):
         Simple mode::
 
             llm = LLMOp.of(resource="gpt-4", prompt="Hello {name}", name="Alice")
+
+        Conversation — a message list that is data, never formatted::
+
+            chat = LLMOp.of(resource="gpt-4", messages=history["messages"])
 
         Structured mode (replaces the removed ask() helper)::
 
@@ -969,6 +1081,8 @@ class LLMOp(BaseOp):
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
         if prompt is not None:
             input_mappings["prompt"] = prompt
+        if messages is not None:
+            input_mappings["messages"] = messages
         return cls(
             resource=resource,
             ratios=ratios,
@@ -1061,6 +1175,42 @@ def _extract_template_variables(template: Any) -> set:
     return set()
 
 
+def _check_prompt_inputs(inputs: Dict[str, Any]) -> None:
+    """Reject prompt/messages mistakes that are knowable at construction.
+
+    A ``Ref`` resolves at run time and can only be checked there — banning
+    it here would outlaw the legitimate ``prompt=PARENT["template"]``
+    wiring. A **literal** list, or both inputs at once, is knowable now,
+    and one model call later is a much worse place to find out.
+    """
+    prompt = inputs.get("prompt")
+    messages = inputs.get("messages")
+    if prompt is not None and messages is not None:
+        raise PromptError(
+            message=(
+                "prompt= and messages= are mutually exclusive. prompt= is a "
+                "template and is formatted; messages= is a conversation and is "
+                "not. Pass one."
+            ),
+            prompt=prompt,
+            original_error=ValueError("both prompt= and messages= were given"),
+        )
+    if isinstance(prompt, list):
+        raise PromptError(
+            message=(
+                "prompt= no longer accepts a list — pass it as messages=, which "
+                "is never formatted. Formatting a conversation turns every brace "
+                "in it (a JSON tool result, pasted code, the model's own "
+                "tool-call arguments) into a template variable that does not "
+                "exist. For a multi-message *template*, build the list in an "
+                "upstream @op; prompt={'system': …, 'user': …} covers the "
+                "two-message case."
+            ),
+            prompt=prompt,
+            original_error=TypeError("prompt=list is not supported; use messages="),
+        )
+
+
 def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any:
     """Recursively format template variables in a value.
 
@@ -1076,6 +1226,21 @@ def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any
                 message="Missing template variable(s)",
                 prompt=template if template is not None else value,
                 missing_vars=missing,
+                original_error=e,
+            ) from e
+        except ValueError as e:
+            # An unmatched brace — "cost is {" — is a format-string error,
+            # not a missing variable, so it skipped the KeyError branch and
+            # surfaced as a bare ValueError about format strings with no
+            # mention of the prompt. Someone typing "{" in a chat message
+            # got a stack trace from the formatter.
+            raise PromptError(
+                message=(
+                    f"Malformed template: {e}. Double a literal brace ({{{{ }}}}) "
+                    f"if you meant one, or pass the text as messages= if it is "
+                    f"data rather than a template."
+                ),
+                prompt=template if template is not None else value,
                 original_error=e,
             ) from e
     elif isinstance(value, dict):

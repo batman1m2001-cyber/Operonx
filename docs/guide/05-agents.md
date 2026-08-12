@@ -184,8 +184,96 @@ it would silently shadow another tool — and a schema that is not a JSON
 Schema object, which the provider would otherwise reject with an error
 naming the request rather than the tool.
 
+## Multi-turn — `AgentSession`
+
+One `Operon.run()` is one *exchange*. A session threads the history across
+several:
+
+```python
+from operonx.agents import AgentSession
+
+session = AgentSession(agent, system="You are terse.")
+await session.send("what files are here?")
+await session.send("delete the second one")      # sees turn 1
+```
+
+Pass `on_approval=` whenever gated tools are reachable — without it a
+gated call waits out its full `approval_timeout` with nobody to answer,
+which reads as a hang rather than as a question.
+
+## Context that survives a long conversation
+
+`build_react_agent` runs a context stage before every model call:
+compaction, memory retrieval, skill matching, prompt assembly and
+cache-control placement.
+
+```python
+agent = build_react_agent(
+    call_model=call_model,
+    token_budget=100_000,        # compact the prompt above this
+    keep_recent=6,               # exchanges kept verbatim
+    memory_providers=[LocalMarkdownMemory("./memory.md")],
+    skills=load_skills("./skills"),
+)(messages=None)
+```
+
+Compaction shapes the **prompt**, not the stored conversation, so nothing
+is lost irrecoverably and `agent_result` still returns everything that
+happened.
+
+Retrieved memory and matched skills are placed *after* the conversation,
+not in the system prompt: they change per query, and leading with them
+would push the whole history out of the provider's cached prefix.
+
+## Tools from another process — MCP
+
+Connect to a Model Context Protocol server and its tools become ordinary
+`@tool` ops:
+
+```python
+from operonx.agents import MCPServer, connect_mcp
+
+client, names = await connect_mcp(
+    MCPServer(name="fs", command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "."])
+)
+try:
+    agent = build_react_agent(call_model=..., )(messages=None)   # build AFTER registering
+finally:
+    await client.close()
+```
+
+Needs `operonx[mcp]`. Three things it does that are worth knowing:
+
+- Tools are namespaced `server__tool`, so a third-party server cannot
+  shadow a local one.
+- A tool the server does **not** annotate as read-only is gated by
+  default. Absent hints mean unknown, and unknown third-party code asks a
+  human. If a live run seems to hang, this is usually why.
+- Registration must happen **before** the graph is built —
+  `get_tool_definitions()` reads the registry at build time.
+
+## Running on a schedule — `Heartbeat`
+
+For agents nobody is talking to:
+
+```python
+from operonx.agents import Heartbeat
+
+hb = Heartbeat(session, "Check the queue and handle anything new.", interval=300)
+await hb.start()
+...
+await hb.stop()
+```
+
+An overlapping beat is **skipped and counted** (`hb.skipped`) rather than
+queued — a backlog never drains. A failing beat does not stop the clock.
+
 ## Where to go next
 
 - Stream the model's tokens: [Streaming](06-streaming.md).
 - Trace every tool call: [Tracing](07-tracing.md).
-- The design and its open questions: [AGENT_EXTENSION_PLAN.md](https://github.com/batman1m2001-cyber/Operonx/blob/main/AGENT_EXTENSION_PLAN.md).
+- Teach the agent from its own work: [Learning loop](09-learning-loop.md).
+- Keep a credential out of the trace:
+  [Observability](../architecture/observability.md).
+- What is known-broken today:
+  [Open findings](https://github.com/batman1m2001-cyber/Operonx/blob/main/docs/design/OPEN_FINDINGS.md).

@@ -22,6 +22,7 @@ from __future__ import annotations
 from operonx.agents.graphs.dispatch import build_dispatch
 from operonx.agents.graphs.react import agent_result, build_react_agent
 from operonx.agents.graphs.subagent import describe_delegation, make_delegate_tool
+from operonx.agents.heartbeat import Heartbeat
 from operonx.agents.memory import LocalMarkdownMemory, MemoryEntry, MemoryProvider
 from operonx.agents.ops.compact_ops import (
     apply_compaction,
@@ -46,7 +47,29 @@ from operonx.agents.tool import (
     tool,
 )
 
+
+def __getattr__(name: str):
+    """Expose the MCP layer without importing it.
+
+    ``operonx.agents.mcp`` needs the ``mcp`` SDK, which is an optional
+    extra. Importing it at package import time would make
+    ``from operonx.agents import tool`` fail on an install that never
+    asked for MCP.
+    """
+    if name in ("MCPServer", "MCPClient", "MCPError", "connect_mcp", "register_mcp_tools"):
+        from operonx.agents import mcp as _mcp
+
+        return getattr(_mcp, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
+    "Heartbeat",
+    "MCPServer",
+    "MCPClient",
+    "MCPError",
+    "connect_mcp",
+    "register_mcp_tools",
     "tool",
     "ToolMeta",
     "TOOL_REGISTRY",

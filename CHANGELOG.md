@@ -7,7 +7,329 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-12
+
+### Known issues
+
+Four adversarial reviews produced **31 reproduced findings**; nine are
+fixed here and **22 remain open**, each with a runnable repro, in
+[`docs/design/OPEN_FINDINGS.md`](docs/design/OPEN_FINDINGS.md). The
+highest-severity open ones: `Media` unwrapped only on an op's first
+invocation (core), a budget-exhausted turn stranding an unanswered
+`tool_call` in the stored history (agents), `grep` answering differently
+depending on whether `ripgrep` is installed (harness), and an `MCPClient`
+closed from the wrong task cancelling an unrelated task.
+
+### Fixed — cancellation and fatal errors
+
+Found by auditing the *shapes* the existing 29 interrupt tests never used:
+every one of them applies `.parallel()` or a generator, which puts the
+emitting op below the root context and gives it its own task. The default
+shapes were all broken.
+
+- **`Interrupt.SELF` at the graph root was still `Interrupt.ALL`.** The
+  earlier fix moved the default from `()` to the emitter's context; for an
+  op running at `("main",)` those are the same total sweep, so a flat graph
+  kept the original defect. It now raises `InterruptTargetError` naming
+  both ways out. A *nested* subgraph is exempt — its root ctx is also
+  `("main",)` but its sweep runs in its own scheduler and cannot reach the
+  parent, so the blast radius is bounded by construction.
+
+- **Inline (`bound="sync"`) ops were never swept.** `@op` on a plain `def`
+  resolves to `"sync"` — the default — and those run from
+  `inline_pending`, which `_sweep_ctx` never touched. Measured:
+  `Interrupt.ALL` cancelled 0 of 4 downstream ops and the run returned a
+  normal-looking result.
+
+- **The emitter's own queued EOF was dropped.** A non-generator op enqueues
+  its `Interrupt` and its `EOF` in one event-loop slice, so the sweep found
+  the EOF already queued and discarded it — while the sequential-edge
+  section skipped the emitter precisely because it expected that EOF to
+  advance the queue. Measured: 6 items in, 1 out, no error.
+
+- **A `BaseException` in `_pump` deadlocked the scheduler.**
+  `ObserveBudgetExceeded` is a `BaseException` by design, and escaped
+  without enqueuing anything: `inflight` reached zero while the main loop
+  was parked on `queue.get()`. The run hung forever. Reachable from a plain
+  `run()` since `observe_max` became always-on in this release cycle.
+
+- **A reused `Interrupt` object was mutated in place.** A module-level
+  `STOP = Interrupt(...)` was resolved once and kept the first emitter's
+  context; later emissions swept a stale context and reported the wrong
+  emitter. It is stamped into a copy now.
+
+### Fixed — parsing and MCP
+
+- **`convert_type` coerced a list object rather than its elements.**
+  Repeated XML siblings build a list, so the output type depended on the
+  data: one `<item>` gave `"a"`, two gave the string `"['a', 'b']"`, and a
+  field declared `int` held a list. Introduced by the repeat fix earlier in
+  this cycle.
+
+- **MCP `list_tools` read only the first page.** A paginating server's
+  later tools were never registered, and `allow=` then reported them as
+  "not provided" — blaming the server for a tool it does provide. Measured
+  against a 5-tool server with page size 2: operonx saw 2.
+
+- **MCP tool names were not sanitised.** Only the namespace was. MCP allows
+  dots and arbitrary length; providers require `^[A-Za-z0-9_-]{1,64}$` and
+  reject the *whole request*, so one `github.create_issue` stopped every
+  tool working, local ones included.
+
+- **A structured-only MCP result read as empty.** A spec-legal server may
+  answer entirely in `structuredContent`; reading only `content` returned
+  `""` as a success.
+
+
 ### Fixed
+
+- **`Interrupt()` with no `ctx_to_cancel` no longer cancels the entire
+  run.** The field defaulted to `()`, which is a prefix of every context,
+  so the sweep matched all of them. The run came back as
+  `{"__interrupt__": …}` with no error anywhere — omitting one keyword
+  argument silently discarded everything in flight and looked like
+  success. The default is now `Interrupt.SELF`, a sentinel the scheduler
+  resolves to the emitting op's own context; cancelling the whole run is
+  spelled `Interrupt(ctx_to_cancel=Interrupt.ALL)`. Measured on eight
+  parallel branches with one emitting an untargeted interrupt: two
+  results before, seven after.
+
+  The sentinel is deliberately not a tuple, so a code path that forgot to
+  resolve it would raise rather than quietly matching everything again.
+
+- **`@op(exclude=…)` / `@op(include=…)` now filter the V3 trace.**
+  `base.py` documented these as "Checkpointer + Tracer both respect
+  these"; only the checkpoint, custom and interrupt buses ever consulted
+  them, and `OpExecution` recorded inputs and outputs verbatim. The one
+  documented way to keep a credential out of an observable artifact
+  excluded it from the durable log and printed it in the trace — and in
+  every consumer built on the trace. Both the per-yield record for
+  generators and the final record for batch ops are filtered.
+  `should_emit_for_channel` moved to `operonx.core.ops.base` (still
+  importable from `operonx.checkpoint.bridge`) because core cannot import
+  the checkpoint package.
+
+- **`@op(observe_max=N)` is enforced on every run, not only when a
+  checkpointer is bound.** The counter lived in `bind_checkpointer`'s
+  closure, which `engine.start` builds only when `checkpointer is not
+  None` — so the runaway-generator circuit breaker did nothing under a
+  plain `engine.run()`, the cheap path a runaway is most likely to be in.
+  Measured: 50 frames emitted against a budget of 5, no error. It now
+  lives in `bind_observe_budget`, bound on every run, and binds nothing
+  when no op declares a budget. Vars silenced on *both* observer channels
+  still cost nothing, because `ObserveBudgetExceeded`'s own message
+  offers `@op(exclude=[…])` as a remedy.
+
+- **`stream(mode="updates")` delivers each write as it lands.** It was
+  paced by `async for _ in handle`, which only ticks on *output* frames,
+  so a graph whose single output arrives at the end buffered every
+  intermediate update and released them together. Measured: four
+  generator yields 150ms apart, all delivered at once after the run —
+  which is the shape of an LLM streaming into a consumer, so the one mode
+  able to watch it was not actually live. Pacing now comes from the write
+  bus.
+
+  The related half is a contract, now written down rather than changed:
+  `handle` frames and `mode="frames"` carry the graph's **outputs**. An op
+  feeding only a downstream consumer emits none, whatever it yields.
+  Widening that would put every intermediate var into `result()`, which is
+  built from the same frames.
+
+- **A missing field is a parse error instead of a silent `None`.**
+  `{"bad": 1}` against `fields=["result: str"]` returned `{"result":
+  None, "error": None}` — so `max_retries` never fired and the caller
+  could not tell "the model answered wrongly" from "the model answered
+  null". An absent field now reports an error naming it and the keys that
+  were actually present; a field explicitly set to null is still an
+  answer. A validator's `@default` counts as an answer, so it still
+  applies.
+
+  **A field may be marked optional** with `"name?: type"`, which is
+  required for a *union schema* — one field list covering several
+  response shapes, where most entries are expected to be absent on any
+  given call. Without the marker such a call reports missing fields on
+  every turn and burns its retries. See the migration note below.
+
+- **A cancellation inside a nested subgraph reached nobody, and the
+  parent reported a `None` result for it.** A subgraph runs its own
+  scheduler with `output_queue=None` — correct for frames, which the
+  outer scheduler forwards via `_out_vars`, but it also dropped the
+  `__interrupt__` record, so `handle.interrupts` stayed empty. Meanwhile
+  `GraphOp.run` yielded the cells as they stood, all-`None`, which the
+  parent forwarded as an ordinary result. Measured: six branches with one
+  interrupted reported `[0, 1, None, 3, 4, 5]` and zero interrupts; it now
+  reports `[0, 1, 3, 4, 5]` and one. `Scheduler.run` returns a third value,
+  `root_interrupted`, and the interrupt record falls back to the run-level
+  queue.
+
+- **A generator's untargeted `Interrupt` cancelled its sibling yields.**
+  `_pump` stamps `result.ctx` with the op's *dispatch* ctx, because the
+  self-cancel guard looks that value up in `tasks_by_ctx`. Resolving
+  `Interrupt.SELF` against the same value meant a top-level generator's
+  bare `Interrupt()` still swept everything under `("main",)` — F2 again,
+  harder to see because earlier yields had already completed. It resolves
+  against the per-yield `item_ctx` instead. Measured: 3 of 5 sibling
+  yields survived, now 5 of 5.
+
+- **XML's document element no longer hides the fields under it.** XML must
+  have exactly one root, so `<r><result>X</result></r>` parsed to `{"r":
+  {"result": "X"}}` while the caller reasonably wrote
+  `fields=["result: str"]` and got `None`. A lone dict root is now
+  descended into when the path misses at the top — including for
+  `parsing.py`'s own docstring example, which was wrong for exactly this
+  reason. JSON and YAML are untouched: there a single top-level key is a
+  key the author chose.
+
+- **Repeated XML leaf siblings are kept.** `<item>a</item><item>b</item>`
+  collapsed to `"b"` — the leaf branch reassigned where the nested branch
+  built a list. Both now build a list.
+
+### Added
+
+- **`Heartbeat` — running an agent on a schedule.** A timer that calls
+  `session.send()`, for agents nobody is talking to: a monitor that polls
+  a queue, an agent that files a morning report. Three decisions are made
+  explicitly rather than left to chance, because each is a way a scheduler
+  fails *silently* — a stopped one, a skipping one and a backlogged one
+  all look identical from outside:
+
+  - **An overlapping beat is skipped and counted.** Queueing by default
+    builds a backlog that never drains; cancelling the live turn destroys
+    work mid-flight. `skipped` exists so 400 dropped beats do not read as
+    400 successful ones.
+  - **A failing beat does not stop the clock** — a scheduler that dies on
+    its first exception is indistinguishable from one with nothing to do.
+    A throwing `on_result` or `on_error` cannot stop it either.
+  - **`stop()` lets the current beat finish.** Cancelling mid-`send()`
+    leaves the conversation ending on an unanswered user turn, which the
+    next beat would build on.
+
+- **MCP client — `operonx.agents.mcp`.** Connect to a Model Context
+  Protocol server and expose its tools as ordinary `@tool` ops, so the
+  ReAct loop, the permission gate and the redactor treat them like local
+  ones. Install with `operonx[mcp]`.
+
+  ```python
+  client, names = await connect_mcp(MCPServer(name="fs", command="npx", args=[...]))
+  agent = build_react_agent(...)      # register BEFORE building
+  ```
+
+  Three MCP-specific hazards are handled rather than inherited:
+
+  - **Namespacing.** Tools register as `server__tool`. A third-party
+    server able to register `bash` would be a remote code-execution hole.
+  - **Unannotated means gated.** MCP's `readOnlyHint` / `destructiveHint`
+    are optional and server-supplied. Absent hints mean *unknown*, and
+    unknown third-party code asks a human before it runs.
+  - **In-band errors raise.** MCP reports failure as a flag on an
+    otherwise ordinary result, so the content of a failed call reads
+    exactly like an answer.
+
+- **`SCRATCH.get()`, `.keys()`, `.items()`.** `ScratchAccessor` documented
+  itself as "dict-like" and had none of them, so `SCRATCH.get("k")` — the
+  first idiom anyone reaches for — raised `AttributeError` from inside an
+  op body, where `BaseOp.run` records it into state rather than raising.
+  A typo therefore surfaced as an op failure. `SCRATCH["k"]` already
+  returned `None` for a missing key, so `get()` adds only the spelling.
+
+  Outside a run `get()` returns its default rather than a `ScratchRef`:
+  a ref is a *wiring* marker, and `get(key, default)` reads as a value
+  lookup, so returning one would smuggle a marker where data is expected.
+  `SCRATCH["k"]` keeps returning a `ScratchRef` at construction time.
+
+### Breaking — `prompt=` no longer accepts a list; use `messages=`
+
+`LLMOp` treated its prompt as a template and ran `format_map` over every
+string in it. Correct for a template, destructive for a conversation: any
+brace in any message became a template variable that did not exist, and
+the run died on the **next** model call.
+
+```python
+messages = [{"role": "tool", "content": '{"city": "Hanoi"}'}]
+LLMOp.of(resource="x", prompt=messages)
+# PromptError: Missing template variable(s) '"city"'
+```
+
+It was not an edge case. Every JSON tool result, every file the agent read
+containing braces, and the model's **own tool-call arguments** — which are
+a JSON string in the history — hit it. An agent poisoned its next turn
+simply by calling a tool.
+
+The two inputs are now separate and mutually exclusive:
+
+| | Accepts | Formatted? |
+|---|---|---|
+| `prompt=` | str, dict | yes, with the template variables |
+| `messages=` | list | never |
+
+Passing both raises; passing neither raises; passing `messages=` with
+template variables raises, because they could only be ignored.
+
+**Migration.** `prompt=[…]` → `messages=[…]`. If you relied on a
+*templated* message list — the multimodal case, where an image URL arrived
+as `{image_url}` — build the list in an upstream `@op` and pass the result:
+
+```python
+@op
+def build_vision_prompt(query: str, image_url: str) -> dict:
+    return {"messages": [
+        {"role": "user", "content": [
+            {"type": "text", "text": f"Describe: {query}"},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]},
+    ]}
+
+llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
+```
+
+`prompt={"system": …, "user": …}` is unchanged and still covers the
+standard two-message templated call.
+
+This deletes `_escape_braces` and `prepare_prompt` from
+`operonx.agents.ops.model_ops` — a full recursive walk of the conversation
+on every turn, doubling braces so `format_map` could undo them, plus a
+second walk to undo it. Both walks are gone.
+
+- **An unmatched brace raised a bare `ValueError`.** `"cost is {"` skipped
+  the `KeyError` branch that produces `PromptError`, so it surfaced as a
+  format-string error with no mention of the prompt — a stack trace from
+  the formatter for someone typing `{` in a chat message. It is a
+  `PromptError` now, and the message names `messages=` as the fix.
+
+- **The trace showed nothing for a `messages=` call.** The trace
+  normaliser read `inputs.get("prompt")` only, so multimodal blocks went
+  unwrapped. It reads both.
+
+### Migration — union schemas need `?`
+
+`fields=[…]` entries are **required** by default. Any list where some
+entries are legitimately absent on a given response must mark those
+entries optional, or every call reports an error and exhausts
+`max_retries`:
+
+```python
+_SMART_FIELDS = [
+    "result: str",        # always present — leave required
+    "has_cccd?: bool",    # only on document turns
+    "chosen_date?: str",  # only on scheduling turns
+]
+```
+
+This is not hypothetical: callbot's `ahamove_hr` extractor declares
+twelve fields whose own comment says "non-compound states emit only
+`intent`; compound states emit the relevant subset". Every one of its
+calls would have failed. Single-field extractors — the common case — need
+no change.
+
+### Changed
+
+- **Streamed `LLMOp` frames carry `final`.** The last frame of a stream
+  repeats the whole accumulated `content` through the same channel as the
+  per-token deltas, so a consumer joining frames emitted the answer
+  twice; the only thing distinguishing it was the incidental presence of
+  `finish_reason`. Deltas are now `final=False` and the closing frame
+  `final=True`. Batch calls default to `True`. Consumers should join the
+  deltas or read the final frame, never both.
 
 - **A `Ref` nested inside a dict or list is now rejected at construction
   instead of silently degrading to a literal.** Operonx wires one param

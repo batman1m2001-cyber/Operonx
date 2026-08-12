@@ -119,6 +119,23 @@ class DummyOp(BaseOp):
     # ``PARENT.declare(**vars, reducers={...})`` instead — same shared-cell
     # semantics plus optional reducers on fan-in writes.
 
+    def __invert__(self):
+        """``~START`` / ``~END`` / ``~PARENT`` — refused.
+
+        ``~`` is a statement about *ready-counting*: it makes the target
+        fire when any one soft predecessor completes. A sentinel has no
+        ready-count to modify.
+
+        ``~END`` in particular reads like it means something and never did:
+        edges into END are unconditionally soft already, and END is output
+        forwarding at build time rather than a node the scheduler waits on.
+        """
+        raise TypeError(
+            f"`~{self.name}` is meaningless — {self.name} is a sentinel, not a "
+            f"node with a ready-count. Write `>> {self.name}` instead. "
+            f"(Edges into END are already soft; `~END` never did anything.)"
+        )
+
     def __rshift__(self, other):
         if isinstance(other, SoftEdge):
             raise TypeError(
@@ -257,6 +274,42 @@ class ScratchAccessor:
         except LookupError:
             return False
         return key in state._scratch
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Read ``key``, or ``default`` when it is absent.
+
+        ``SCRATCH[key]`` already returns ``None`` for a missing key, so
+        this adds nothing but the idiom people reach for first. Without
+        it, ``SCRATCH.get("k")`` raised ``AttributeError`` from inside an
+        op body — where ``BaseOp.run`` records it into state rather than
+        raising, so it surfaced as an op error rather than an obvious typo.
+
+        Outside a run this returns ``default`` rather than a
+        :class:`ScratchRef`: a ref is a *wiring* marker and ``get()`` with
+        a default reads as a value lookup, so returning one would smuggle
+        a marker into a place expecting data.
+        """
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return default
+        return state._scratch.get(key, default)
+
+    def keys(self):
+        """Keys currently in scratch — empty outside a run."""
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return ()
+        return tuple(state._scratch)
+
+    def items(self):
+        """``(key, value)`` pairs — a snapshot, empty outside a run."""
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return ()
+        return tuple(state._scratch.items())
 
 
 SCRATCH = ScratchAccessor()

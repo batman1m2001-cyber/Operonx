@@ -109,15 +109,15 @@ class TestStreamCoreYields:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
+        async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         # 2 token yields + 1 final metadata yield
         assert len(results) == 3
 
         # Token yields
-        assert results[0] == {"content": "Hello", "role": "assistant"}
-        assert results[1] == {"content": " world", "role": "assistant"}
+        assert results[0] == {"content": "Hello", "role": "assistant", "final": False}
+        assert results[1] == {"content": " world", "role": "assistant", "final": False}
 
         # Final yield has complete metadata
         final = results[2]
@@ -125,6 +125,41 @@ class TestStreamCoreYields:
         assert final["model_used"] == "gpt-4o"
         assert final["finish_reason"] == "stop"
         assert final["usage"]["prompt_tokens"] == 5
+
+    @pytest.mark.asyncio
+    async def test_the_last_frame_repeats_the_whole_content(self, hub):
+        """F8 — joining every frame's ``content`` double-counts the answer.
+
+        The last frame carries the accumulated text, not a tail, and it
+        arrives through the same channel as the deltas. ``final`` is the
+        only thing that separates them; before it, consumers had to notice
+        that ``finish_reason`` happened to be set.
+        """
+        from operonx.providers.ops import LLMOp
+
+        if not hub.has("llm:gpt-4o"):
+            pytest.skip("llm:gpt-4o not configured")
+
+        op = LLMOp(name="test", resource="gpt-4o", stream=True)
+        op._llms = [
+            make_mock_llm(
+                [
+                    make_chunk(content="Hel"),
+                    make_chunk(content="lo"),
+                    make_chunk(finish_reason="stop"),
+                ]
+            )
+        ]
+        op._initialized = True
+
+        results = [r async for r in op._stream_core(messages=[{"role": "user", "content": "hi"}])]
+
+        naive = "".join(r["content"] for r in results)
+        assert naive == "HelloHello", "the duplication is real, not hypothetical"
+
+        deltas = "".join(r["content"] for r in results if not r["final"])
+        assert deltas == "Hello"
+        assert next(r for r in results if r["final"])["content"] == "Hello"
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_final_only(self, hub):
@@ -144,7 +179,7 @@ class TestStreamCoreYields:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
+        async for item in op._stream_core(messages=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         assert len(results) == 1
@@ -180,7 +215,7 @@ class TestStreamingLLMInGraph:
                 name="llm",
                 resource="gpt-4o",
                 stream=True,
-                inputs={"prompt": PARENT["prompt"]},
+                inputs={"messages": PARENT["messages"]},
             )
             START >> llm >> END
 
@@ -190,7 +225,7 @@ class TestStreamingLLMInGraph:
         llm._initialized = True
 
         engine = Operon(g)
-        handle = engine.start(inputs={"prompt": [{"role": "user", "content": "hi"}]})
+        handle = engine.start(inputs={"messages": [{"role": "user", "content": "hi"}]})
         frames = []
         async for op, ctx, data in handle:
             frames.append((op, ctx, data))
@@ -231,7 +266,7 @@ class TestStreamingLLMInGraph:
                 name="llm",
                 resource="gpt-4o",
                 stream=True,
-                inputs={"prompt": PARENT["prompt"]},
+                inputs={"messages": PARENT["messages"]},
             )
             START >> llm >> END
 
@@ -240,7 +275,7 @@ class TestStreamingLLMInGraph:
         llm._initialized = True
 
         engine = Operon(g)
-        result = await engine.run(inputs={"prompt": [{"role": "user", "content": "hi"}]})
+        result = await engine.run(inputs={"messages": [{"role": "user", "content": "hi"}]})
 
         # run() collects all yields — last yield (final metadata) is the output
         # The streaming op yields multiple times; final result contains accumulated content
@@ -273,7 +308,7 @@ class TestStreamingWithThinking:
         op._initialized = True
 
         results = []
-        async for item in op._stream_core(prompt=[{"role": "user", "content": "think"}]):
+        async for item in op._stream_core(messages=[{"role": "user", "content": "think"}]):
             results.append(item)
 
         # 1 content token + 1 final
@@ -323,7 +358,7 @@ class TestStreamingFallback:
         llm_op._initialized = True
 
         results = []
-        async for item in llm_op._stream_core(prompt=[{"role": "user", "content": "hi"}]):
+        async for item in llm_op._stream_core(messages=[{"role": "user", "content": "hi"}]):
             results.append(item)
 
         # Should get fallback response

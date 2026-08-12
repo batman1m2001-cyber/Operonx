@@ -145,7 +145,10 @@ def multi_turn(history, message):
     msgs = build_messages(history=history, message=message)
     llm = LLMOp.of(
         resource="gpt-4o-mini",
-        prompt=msgs["messages"],
+        # A conversation is data — `messages=` is never formatted. Passing
+        # it to `prompt=` would try to resolve every brace in the history
+        # as a template variable.
+        messages=msgs["messages"],
         temperature=0.7,
         max_tokens=200,
     )

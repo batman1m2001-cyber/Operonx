@@ -109,7 +109,7 @@ def branch(score):
 
     START >> grade_router
     grade_router >> [ex, gd, av, fl]
-    [ex, gd, av, fl] >> ~END
+    [ex, gd, av, fl] >> END
 
 
 async def main() -> None:

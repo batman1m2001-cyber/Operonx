@@ -10,7 +10,7 @@ import operator
 import pytest
 
 from operonx.checkpoint import InMemoryCheckpointer, ObserveBudgetExceeded, bind_checkpointer
-from operonx.checkpoint.bridge import should_emit_for_channel
+from operonx.checkpoint.bridge import bind_observe_budget, should_emit_for_channel
 from operonx.core.ops.graph.graph_op import END, PARENT, START, GraphOp
 from operonx.core.ops.transform.func_op import FuncOp, op
 from operonx.core.states.schema import StateSchema
@@ -167,10 +167,17 @@ class TestBridgeIncludeFilter:
 
 
 class TestObserveBudgetExceeded:
+    """The budget lives in ``bind_observe_budget``, not ``bind_checkpointer``.
+
+    It used to be counted inside the checkpointer's closure, which the
+    engine only builds when a checkpointer was passed — so the circuit
+    breaker did nothing under a plain ``engine.run()``. These tests bind
+    it directly; ``TestObserveBudgetWithoutCheckpointer`` covers the wiring.
+    """
+
     def test_within_budget_no_raise(self):
         _, _, state, _, registry = _built_with_filtered_node(observe_max=5)
-        cp = InMemoryCheckpointer()
-        bind_checkpointer(state, cp, lambda: 0, op_registry=registry)
+        bind_observe_budget(state, registry)
 
         for _ in range(5):
             state["g.node", "count"] = 1
@@ -178,8 +185,7 @@ class TestObserveBudgetExceeded:
 
     def test_exceed_budget_raises(self):
         _, _, state, _, registry = _built_with_filtered_node(observe_max=3)
-        cp = InMemoryCheckpointer()
-        bind_checkpointer(state, cp, lambda: 0, op_registry=registry)
+        bind_observe_budget(state, registry)
 
         state["g.node", "count"] = 1
         state["g.node", "count"] = 2
@@ -192,8 +198,27 @@ class TestObserveBudgetExceeded:
         assert err.count == 4
         assert err.limit == 3
 
+    def test_a_checkpointer_does_not_double_count(self):
+        """Both were bound at once during the move; the budget halved."""
+        _, _, state, _, registry = _built_with_filtered_node(observe_max=3)
+        bind_checkpointer(state, InMemoryCheckpointer(), lambda: 0, op_registry=registry)
+        bind_observe_budget(state, registry)
+
+        for _ in range(3):
+            state["g.node", "count"] = 1
+        with pytest.raises(ObserveBudgetExceeded):
+            state["g.node", "count"] = 1
+
+    def test_no_budget_declared_binds_nothing(self):
+        _, _, state, _, registry = _built_with_filtered_node()
+        assert bind_observe_budget(state, registry) is None
+
     def test_filtered_writes_do_not_count(self):
-        """Vars silenced by exclude should not consume the observe_max budget."""
+        """Vars silenced by exclude should not consume the observe_max budget.
+
+        ``ObserveBudgetExceeded``'s message offers ``@op(exclude=[...])``
+        as a fix, so a var no observer ever sees has to be free.
+        """
         with GraphOp(name="g") as g:
             PARENT.declare(count=0)
             node = FuncOp(
@@ -208,12 +233,74 @@ class TestObserveBudgetExceeded:
         g.build()
         schema = StateSchema(g)
         state = MemoryState(schema)
-        cp = InMemoryCheckpointer()
-        bind_checkpointer(state, cp, lambda: 0, op_registry={"g.node": node, "g": g})
+        bind_observe_budget(state, {"g.node": node, "g": g})
 
         # Every write is filtered out, so the counter never increments — no raise.
         for _ in range(10):
             state["g.node", "count"] = 1
+
+    def test_a_trace_only_exclusion_still_counts(self):
+        """``exclude={"trace": ...}`` leaves the checkpoint bus reading the
+        var, so it is still an emitted event."""
+        with GraphOp(name="g") as g:
+            PARENT.declare(count=0)
+            node = FuncOp(
+                name="node",
+                code_fn=_passthrough,
+                inputs={},
+                exclude={"trace": ["count"]},
+                observe_max=1,
+            )
+            node["count"] >> PARENT["count"]
+            START >> node >> END
+        g.build()
+        state = MemoryState(StateSchema(g))
+        bind_observe_budget(state, {"g.node": node, "g": g})
+
+        state["g.node", "count"] = 1
+        with pytest.raises(ObserveBudgetExceeded):
+            state["g.node", "count"] = 2
+
+
+class TestObserveBudgetWithoutCheckpointer:
+    """F4 — the breaker has to fire on the cheap path too.
+
+    Measured before the fix: 50 frames emitted against a budget of 5, no
+    error, because the counter only existed inside ``bind_checkpointer``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_runaway_generator_is_capped_under_plain_run(self):
+        from operonx.core import Operon, op
+
+        @op(observe_max=5)
+        def tokens(n: int):
+            for i in range(50):
+                yield {"tok": i}
+
+        with GraphOp(name="cap") as g:
+            t = tokens(n=PARENT["n"])
+            START >> t >> END
+
+        with pytest.raises(ObserveBudgetExceeded) as exc_info:
+            await Operon(g).run(inputs={"n": 1})
+        assert exc_info.value.limit == 5
+
+    @pytest.mark.asyncio
+    async def test_an_op_within_budget_still_completes(self):
+        from operonx.core import Operon, op
+
+        @op(observe_max=50)
+        def tokens(n: int):
+            for i in range(3):
+                yield {"tok": i}
+
+        with GraphOp(name="ok") as g:
+            t = tokens(n=PARENT["n"])
+            START >> t >> END
+
+        result = await Operon(g).run(inputs={"n": 1})
+        assert len(result["tok"]) == 3
 
 
 class TestBackwardCompatWithoutRegistry:

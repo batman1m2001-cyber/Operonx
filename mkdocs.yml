@@ -103,12 +103,17 @@ nav:
       - Streaming: guide/06-streaming.md
       - Tracing: guide/07-tracing.md
       - Deployment: guide/08-deployment.md
+      - Learning loop: guide/09-learning-loop.md
   - Architecture:
       - Overview: architecture/overview.md
       - Execution flow: architecture/execution-flow.md
       - State model: architecture/state-model.md
       - Streaming: architecture/streaming.md
+      - Observability: architecture/observability.md
       - Resource hub: architecture/resource-hub.md
+      - Failure modes: architecture/failure-modes.md
+  - Open findings: design/OPEN_FINDINGS.md
+  - Handoff: HANDOFF.md
   - API reference:
       - operonx.core: api/core.md
       - operonx.core.ops: api/ops.md

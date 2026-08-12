@@ -88,7 +88,7 @@ def error_routing(a, b):
     on_error["output"] >> PARENT["output"]
     START >> divide >> router
     router >> [on_success, on_error]
-    [on_success, on_error] >> ~END
+    [on_success, on_error] >> END
 
 
 @graph

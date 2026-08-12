@@ -80,7 +80,7 @@ embedding:openai:
 Then reference by key in your op definitions:
 
 ```python
-llm = LLMOp.of(resource="gpt-4o-mini", prompt=PARENT["msgs"])
+llm = LLMOp.of(resource="gpt-4o-mini", messages=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="openai", texts=PARENT["docs"])
 ```
 

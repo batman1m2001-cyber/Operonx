@@ -138,7 +138,7 @@ router >> good >> merge
 router >> fail >> merge
 ```
 
-`if_()` evaluates conditions in order; the first match routes through a soft edge (`>>~` semantically — branch outputs use soft edges so non-matching branches don't block downstream).
+`if_()` evaluates conditions in order and fires only the matching op. Merge edges below a branch are softened automatically at build time, so the arm that was not selected never blocks the merge. The `~` operator is for the separate case of *trigger control* — making a node fire on whichever predecessor lands first.
 
 ### Loops
 

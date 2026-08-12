@@ -66,6 +66,27 @@ class TestExtractField:
         assert f.chain_path == ["user", "address", "city"]
         assert f.output_key == "city"
 
+    def test_required_by_default(self):
+        assert ExtractField.from_string("result: str").optional is False
+
+    def test_question_mark_marks_optional(self):
+        f = ExtractField.from_string("result?: str")
+        assert f.optional is True
+        assert f.output_key == "result", "the marker must not leak into the key"
+        assert f.chain_path == ["result"]
+
+    def test_optional_on_a_nested_path(self):
+        f = ExtractField.from_string("user.city?: str")
+        assert f.optional is True
+        assert f.chain_path == ["user", "city"]
+        assert f.output_key == "city"
+
+    def test_optional_without_a_type_hint(self):
+        f = ExtractField.from_string("result?")
+        assert f.optional is True
+        assert f.output_key == "result"
+        assert f.type_hint == "Any"
+
 
 class TestExtractValueByPath:
     def test_shallow(self):
@@ -244,16 +265,171 @@ class TestParseAndExtract:
         assert result["error"] is not None
         assert "must be a dict" in result["error"]
 
-    def test_missing_field_becomes_none(self):
+    def test_missing_field_is_an_error(self):
+        """Well-formed output with the wrong keys is a semantic failure.
+
+        It used to return ``{"missing": None, "error": None}``, so
+        ``max_retries`` never fired and the caller could not tell "the
+        model answered wrongly" from "the model answered null". An earlier
+        version of this test asserted the old behaviour and locked it in.
+        """
         result = parse_and_extract(
             text="<other>1</other>",
             parser="xml",
             fields=self._fields("missing: str"),
         )
-        # No validators + missing value → convert_type(None, "str") short-
-        # circuits to None (historical ParserOp behaviour).
         assert result["missing"] is None
+        assert result["error"] is not None
+        assert "missing" in result["error"]
+
+    def test_the_error_names_the_keys_that_were_there(self):
+        """Without them the message cannot be acted on — the whole point is
+        telling the model what it actually produced."""
+        result = parse_and_extract(
+            text='{"bad": 1}',
+            parser="json",
+            fields=self._fields("result: str"),
+        )
+        assert "bad" in result["error"]
+
+    def test_an_explicit_null_is_an_answer_not_an_error(self):
+        """The model was asked and said nothing — that is a value, and
+        conflating it with a wrong-shaped reply is what F7 was about."""
+        result = parse_and_extract(
+            text='{"result": null}',
+            parser="json",
+            fields=self._fields("result: str"),
+        )
+        assert result["result"] is None
         assert result["error"] is None
+
+    def test_json_with_the_wrong_keys_is_an_error(self):
+        result = parse_and_extract(
+            text='{"bad": 1}',
+            parser="json",
+            fields=self._fields("result: str"),
+        )
+        assert result["error"] is not None
+
+    def test_a_validator_default_counts_as_an_answer(self):
+        """An ``@default`` exists so a shaky model still yields a usable
+        value; reporting the field as missing would defeat it."""
+        result = parse_and_extract(
+            text="<other>1</other>",
+            parser="xml",
+            fields=self._fields("intent: str"),
+            validators={"intent": ["YES", "NO", "@FALLBACK"]},
+        )
+        assert result["intent"] == "FALLBACK"
+        assert result["error"] is None
+
+    def test_an_optional_field_may_be_absent(self):
+        result = parse_and_extract(
+            text="<a>1</a>",
+            parser="xml",
+            fields=self._fields("a: str", "b?: str"),
+        )
+        assert result["a"] == "1"
+        assert result["b"] is None
+        assert result["error"] is None
+
+    def test_a_union_schema_does_not_report_every_call(self):
+        """One field list covering several response shapes is a real
+        pattern — callbot's ahamove_hr extractor declares twelve fields and
+        expects one on a non-compound turn. Without ``?`` every call would
+        report missing fields and burn its retries."""
+        union = self._fields(
+            "result: str",
+            "has_cccd?: bool",
+            "chosen_date?: str",
+            "terminal_cue?: str",
+        )
+        result = parse_and_extract("<result>CONFIRM</result>", "xml", union)
+        assert result["result"] == "CONFIRM"
+        assert result["error"] is None
+        assert result["has_cccd"] is None
+
+    def test_a_required_field_in_a_union_still_errors(self):
+        union = self._fields("result: str", "has_cccd?: bool")
+        result = parse_and_extract("<has_cccd>true</has_cccd>", "xml", union)
+        assert result["error"] is not None
+        assert "result" in result["error"]
+
+    def test_only_some_fields_missing_still_errors(self):
+        result = parse_and_extract(
+            text="<a>1</a>",
+            parser="xml",
+            fields=self._fields("a: str", "b: str"),
+        )
+        assert result["a"] == "1"
+        assert result["error"] is not None
+        assert "b" in result["error"]
+
+
+class TestXmlDocumentElement:
+    """F6 — XML must have one root, so a field path misses by one level."""
+
+    def _fields(self, *specs):
+        return [ExtractField.from_string(s) for s in specs]
+
+    def test_a_wrapped_field_resolves(self):
+        """This is the module docstring's own example, which returned
+        ``None`` for as long as the docstring has existed."""
+        result = parse_and_extract(
+            text="<r><result>CONFIRM</result></r>",
+            parser="xml",
+            fields=self._fields("result: str"),
+        )
+        assert result == {"result": "CONFIRM", "error": None}
+
+    def test_the_explicit_path_still_works(self):
+        result = parse_and_extract(
+            text="<r><result>CONFIRM</result></r>",
+            parser="xml",
+            fields=self._fields("r.result: str"),
+        )
+        assert result["result"] == "CONFIRM"
+        assert result["error"] is None
+
+    def test_a_flat_document_is_unaffected(self):
+        result = parse_and_extract(
+            text="<result>CONFIRM</result>",
+            parser="xml",
+            fields=self._fields("result: str"),
+        )
+        assert result["result"] == "CONFIRM"
+
+    def test_two_roots_are_not_descended_into(self):
+        """Descending is only safe for the *one* root XML forces on you."""
+        result = parse_and_extract(
+            text="<a><x>1</x></a><b><y>2</y></b>",
+            parser="xml",
+            fields=self._fields("x: str"),
+        )
+        assert result["error"] is not None
+
+    def test_json_is_not_unwrapped(self):
+        """A lone top-level key in JSON is a key the author chose."""
+        result = parse_and_extract(
+            text='{"data": {"result": "X"}}',
+            parser="json",
+            fields=self._fields("result: str"),
+        )
+        assert result["error"] is not None
+
+    def test_repeated_leaf_siblings_are_kept(self):
+        """They used to overwrite each other, so only the last survived."""
+        assert parse_xml("<items><item>a</item><item>b</item></items>") == {
+            "items": {"item": ["a", "b"]}
+        }
+
+    def test_a_single_leaf_is_still_a_scalar(self):
+        assert parse_xml("<items><item>a</item></items>") == {"items": {"item": "a"}}
+
+    def test_repeated_branch_siblings_still_work(self):
+        assert parse_xml("<r><i><a>1</a></i><i><a>2</a></i></r>") == {
+            "r": {"i": [{"a": "1"}, {"a": "2"}]}
+        }
 
     def test_bool_coercion_from_xml(self):
         result = parse_and_extract(

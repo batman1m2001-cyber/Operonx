@@ -111,9 +111,80 @@ The scheduler:
 4. When `END` is reached (all outgoing paths completed), returns the
    forwarded result.
 
-Branch ops emit frames on `>>~` (soft) edges only when their condition
-selects that branch. Generator ops yield once per item; downstream ops
+Branch ops emit frames on **soft** edges only when their condition
+selects that branch. `build()` softens branch-merge edges automatically
+(`auto_soft=True`), because forgetting to do it by hand was a silent
+run-time deadlock rather than a build error. That derivation is tracked
+separately from an authored `~`: the edge record carries `auto_soft` for
+what the pass decided and `pinned_hard` for what the author pinned, so a
+soft edge you wrote for **trigger control** — "fire on whichever
+predecessor lands first" — is never confused with one derived from a
+branch. Generator ops yield once per item; downstream ops
 run once per yield (streaming default — see [Streaming](streaming.md)).
+
+## Contexts
+
+Every op invocation runs at a **context** — a tuple of path segments
+identifying *which* invocation it is:
+
+| Context | Meaning |
+|---|---|
+| `("main",)` | the root run |
+| `("main", "[2]")` | the branch handling a generator's third yield |
+| `("main", "[2]", "__collect__")` | a `collect()` consumer under that branch |
+| `("main", "g.__loop_0__#1")` | iteration 1 of a synthesized loop |
+
+Two properties the rest of the system rests on:
+
+- **Containment is a tuple-prefix test.** `("main", "[2]")` is inside
+  `("main",)`. This is why an empty prefix matches every context, and why
+  cancellation targets have to be explicit (below).
+- **Loop iterations are siblings, not nesting.** Iteration 1 is
+  `("main", "g.__loop_0__#1")`, not a child of iteration 0. A stale
+  iteration is therefore never "inside" the current one, which is what
+  makes termination decidable.
+
+## Cancellation
+
+An op cancels in-flight work by returning or yielding an `Interrupt`. The
+scheduler drops queued frames at the target context, cancels its in-flight
+tasks, and clears the bookkeeping.
+
+```python
+from operonx.core import Interrupt
+
+@op
+def guard(score: float):
+    if score < 0:
+        return Interrupt(reason="negative score")   # cancels this branch
+    return {"ok": score}
+```
+
+`ctx_to_cancel` defaults to `Interrupt.SELF`, which the scheduler resolves
+to the emitter's own context — the *yield's* context for a generator, not
+the whole op. Cancelling everything is destructive and has to be written
+out:
+
+```python
+Interrupt(ctx_to_cancel=Interrupt.ALL, reason="fatal")
+```
+
+Three things worth knowing:
+
+- **The emitter survives its own sweep.** It finishes normally, so its EOF
+  and cleanup run as usual.
+- **A cancelled invocation produces no result.** A subgraph whose root was
+  swept yields nothing rather than the cells as they stand — otherwise the
+  parent receives an all-`None` dict indistinguishable from a successful
+  null answer.
+- **The cancellation is reported.** A `("__interrupt__", ctx, …)` record
+  reaches `handle.interrupts` even when the sweep happened inside a nested
+  subgraph.
+
+`Interrupt.SELF` is a sentinel, not a tuple. If a code path ever fails to
+resolve it, the containment test raises `TypeError` rather than silently
+matching every context — see
+[Failure modes §8](failure-modes.md#8-an-empty-prefix-matches-everything).
 
 ## Phase 4 — Tracing
 

@@ -6,41 +6,65 @@ Every op has a typed input and output dict. Edges between ops are wired by
 ## Cell layout
 
 State lives in a triple-keyed cell map: `(op_full_name, var_name, context_id) → Value`.
-The context tuple is how parent ↔ child boundaries stay correct in
-nested `@graph`s and how generator-op iterations stay isolated:
+
+The two keys that vary carry **different** kinds of nesting, and mixing
+them up is the usual source of confusion:
+
+- **`op_full_name` carries graph nesting.** An op inside a nested `@graph`
+  is named `outer.sub.c` — the dots are the graph tree.
+- **`context_id` carries *iteration*.** `("main",)` for the ordinary run,
+  `("main", "[2]")` for the branch handling a generator's third yield,
+  `("main", "g.__loop_0__#1")` for the second turn of a loop.
+
+A nested graph does **not** get a deeper context. Measured on a two-level
+graph, both spans run at `("main",)`:
+
+```
+outer.p       ctx=('main',)
+outer.sub.c   ctx=('main',)
+```
 
 ```mermaid
 flowchart LR
-    subgraph PARENT["parent: GraphOp 'main' &nbsp;(context = ())"]
-        P_score["('main', 'score', ())"]
-        P_size["('main', 'size', ())"]
+    subgraph PARENT["parent: GraphOp 'main'"]
+        P_score["('main.score', 'value', ('main',))"]
+        P_size["('main.size', 'value', ('main',))"]
     end
 
-    subgraph CHILD["child: nested @graph 'verify' &nbsp;(context = ('verify',))"]
-        C_grade["('verify.cls', 'grade', ('verify',))"]
-        C_score["('verify.cls', 'score', ('verify',))"]
-        C_out["('verify.work', 'trace', ('verify',))"]
+    subgraph CHILD["child: nested @graph 'verify' — deeper *name*, same context"]
+        C_grade["('main.verify.cls', 'grade', ('main',))"]
+        C_out["('main.verify.work', 'trace', ('main',))"]
     end
 
     P_score -->|"verify(score=PARENT['score'])"| C_grade
-    P_size -->|"verify(size=PARENT['size'])"| C_score
     C_out -->|"work['trace'] >> PARENT['trace']"| P_size
 
     classDef parent fill:#ede7f6,stroke:#5e35b1,color:#311b92
     classDef child fill:#e0f2f1,stroke:#00897b,color:#004d40
     class P_score,P_size parent
-    class C_grade,C_score,C_out child
+    class C_grade,C_out child
 ```
 
 Three rules fall out of this layout:
 
-- **`PARENT["k"]` reads from the enclosing context.** From the child's
-  point of view, `PARENT` is the immediate parent — the runtime walks
-  the context tuple upward until it finds `k`.
-- **`op["k"]` reads from a sibling at the same context.** No walk —
-  same context, different op name.
-- **`op["src"] >> PARENT["dst"]` writes upward.** The scheduler emits
-  the frame to both the child's own state and the parent's slot.
+- **`PARENT["k"]` reads from the enclosing graph.** From the child's point
+  of view, `PARENT` is the graph that invoked it.
+- **`op["k"]` reads from a sibling in the same graph.**
+- **`op["src"] >> PARENT["dst"]` writes upward** — the scheduler emits the
+  frame to both the child's own cell and the parent's slot.
+
+Hermeticity is enforced at **build** time by name: an op inside a nested
+`@graph` that references an op outside it fails to build. It is not
+enforced by context, because there is no context boundary to enforce it
+with.
+
+!!! note "What this means for cancellation"
+    An `Interrupt` emitted inside a nested graph resolves `Interrupt.SELF`
+    to the *graph's* context — often `("main",)`. It does **not** cancel
+    the whole run: a subgraph runs its own scheduler, and the sweep only
+    reaches that scheduler's own tasks. The effect is correctly scoped to
+    the subgraph; the reported `ctx_to_cancel` just looks broader than the
+    effect. See [Execution flow](execution-flow.md#cancellation).
 
 ## PARENT vs op["key"]
 

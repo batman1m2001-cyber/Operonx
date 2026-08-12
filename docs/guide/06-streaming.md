@@ -24,11 +24,16 @@ LLM ops support streaming via `stream=True`:
 ```python
 from operonx.providers import LLMOp
 
-llm = LLMOp.of(resource="gpt-4o", prompt=PARENT["messages"], stream=True)
+llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"], stream=True)
 ```
 
 With streaming on, `llm["content"]` is a stream of token chunks rather
 than a single string. Downstream ops see one frame per chunk.
+
+The **last** frame repeats the whole accumulated `content` rather than a
+tail, so joining every frame emits the answer twice. `final` separates
+them — join the `final=False` deltas, or read the one `final=True` frame,
+never both.
 
 ## Consuming frames
 
