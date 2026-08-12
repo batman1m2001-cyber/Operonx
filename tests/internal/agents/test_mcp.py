@@ -203,9 +203,10 @@ class TestRegistration:
 
 class TestPermissionDefaults:
     @pytest.mark.asyncio
-    async def test_a_read_only_hint_is_honoured(self, client):
+    @pytest.mark.parametrize("name", ["echo__echo", "echo__add", "echo__braces"])
+    async def test_a_read_only_hint_is_honoured(self, client, name):
         await register_mcp_tools(client)
-        meta = TOOL_REGISTRY["echo__echo"]._tool_meta
+        meta = TOOL_REGISTRY[name]._tool_meta
         assert meta["readonly"] is True
         assert meta["destructive"] is False
 
@@ -215,7 +216,7 @@ class TestPermissionDefaults:
         human. The alternative is that a server omitting its annotations
         gets to run unattended."""
         await register_mcp_tools(client)
-        meta = TOOL_REGISTRY["echo__add"]._tool_meta
+        meta = TOOL_REGISTRY["echo__unannotated"]._tool_meta
         assert meta["destructive"] is True
 
     @pytest.mark.asyncio

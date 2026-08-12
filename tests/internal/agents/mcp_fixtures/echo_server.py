@@ -19,7 +19,7 @@ def echo(text: str) -> str:
     return f"echo: {text}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def add(a: int, b: int) -> int:
     """Add two numbers."""
     return a + b
@@ -31,7 +31,7 @@ def explode(reason: str) -> str:
     raise RuntimeError(f"deliberate failure: {reason}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def slow(seconds: float) -> str:
     """Sleep, to exercise the call timeout."""
     import time
@@ -40,10 +40,17 @@ def slow(seconds: float) -> str:
     return "finished"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def braces() -> str:
     """Return JSON, which used to poison the next model call."""
     return '{"city": "Hanoi", "temp": 30}'
+
+
+@mcp.tool()
+def unannotated(x: str) -> str:
+    """No annotations at all — a server that says nothing about what this
+    does. Absent hints mean unknown, and unknown must be gated."""
+    return f"did something with {x}"
 
 
 if __name__ == "__main__":

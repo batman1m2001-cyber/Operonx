@@ -54,6 +54,12 @@ Operonx/
 | examples/python/ | Runnable Python | Learning by example (ex01..ex15) |
 | .claude/skills/ | On-demand | Repeatable workflows: /publish, /bench, /example |
 
+### Start here
+
+**`HANDOFF.md` at the repository root** orients a fresh session: branch
+state, what to do next in priority order, how to run the live tests, and
+the traps that cost time. Read it before anything else.
+
 ### Which doc answers which question
 
 Open the one that matches the question. Do not read the plan documents for
@@ -67,6 +73,7 @@ measured to be wrong.
 | What reaches the trace? `exclude=`, `observe_max`? | `docs/architecture/observability.md` |
 | **What mistakes does this codebase keep making?** | `docs/architecture/failure-modes.md` |
 | Is this plausible claim about operonx actually true? | `docs/design/AGENT_PLAN_ARCHIVE.md` |
+| **What is known-broken right now?** | `docs/design/OPEN_FINDINGS.md` — 22 open, each with a runnable repro in `docs/design/repros/` |
 | What changed, and what breaks on upgrade? | `CHANGELOG.md` |
 | What is the agent layer for, and what is left? | `AGENT_EXTENSION_PLAN.md` §0 |
 | Should this belong in `operonx/agents/`? | `operonx/agents/CONTRIBUTING.md` |

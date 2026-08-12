@@ -175,7 +175,7 @@ class MCPClient:
             read, write = await stack.enter_async_context(stdio_client(params))
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
-            listed = await session.list_tools()
+            tools = await self._list_all_tools(session)
         except Exception as e:
             await stack.aclose()
             raise MCPError(
@@ -185,8 +185,34 @@ class MCPClient:
 
         self._stack = stack
         self._session = session
-        self._tools = list(_attr(listed, "tools", default=[]) or [])
+        self._tools = tools
         return self
+
+    @staticmethod
+    async def _list_all_tools(session: Any) -> List[Any]:
+        """Every page of ``tools/list``, not just the first.
+
+        ``list_tools()`` returns one page plus a ``next_cursor``. Reading
+        one page and dropping the cursor meant a paginating server's later
+        tools were never registered — and ``allow=`` then reported them as
+        "not provided", blaming the server for a tool it does provide.
+        Measured against a 5-tool server with page size 2: operonx saw 2.
+        """
+        from mcp.types import PaginatedRequestParams
+
+        collected: List[Any] = []
+        cursor = None
+        for _ in range(1000):  # a runaway-server backstop, not a page cap
+            listed = await (
+                session.list_tools()
+                if cursor is None
+                else session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+            )
+            collected.extend(_attr(listed, "tools", default=[]) or [])
+            cursor = _attr(listed, "next_cursor", "nextCursor")
+            if not cursor:
+                break
+        return collected
 
     async def close(self) -> None:
         """Shut the server down. Idempotent."""
@@ -232,11 +258,21 @@ class MCPClient:
                 timeout=self.server.timeout,
             )
         except asyncio.TimeoutError as e:
-            raise MCPError(f"{self.server.name}__{name} exceeded {self.server.timeout:.0f}s") from e
+            raise MCPError(f"{self.server.name}__{name} exceeded {self.server.timeout:g}s") from e
         except Exception as e:
             raise MCPError(f"{self.server.name}__{name} failed: {type(e).__name__}: {e}") from e
 
         text = _flatten(_attr(result, "content"))
+        if not text:
+            # A spec-legal server may answer entirely in `structuredContent`
+            # with no text block. Reading only `content` returned "" — a
+            # success carrying nothing, which is the shortened-result
+            # failure `_flatten` exists to prevent.
+            structured = _attr(result, "structured_content", "structuredContent")
+            if structured is not None:
+                import json as _json
+
+                text = _json.dumps(structured, default=str)
         if bool(_attr(result, "is_error", "isError", default=False)):
             # In-band error. Ignoring the flag would format a failure as an
             # answer, which is the one thing a tool result must never do.
@@ -356,7 +392,11 @@ async def register_mcp_tools(
         if not server_name or (allow is not None and server_name not in allow):
             continue
 
-        full_name = f"{namespace}__{server_name}"
+        # The server-side half is third-party input. MCP allows dots and
+        # arbitrary length; providers require ^[A-Za-z0-9_-]{1,64}$ and
+        # reject the *whole request* when one name violates it — so a single
+        # `github.create_issue` stopped every tool working, local ones too.
+        full_name = f"{namespace}__{_UNSAFE.sub('_', server_name)}"[:64]
         if full_name in TOOL_REGISTRY:
             raise MCPError(
                 f"{full_name!r} is already registered. Two servers sharing a "

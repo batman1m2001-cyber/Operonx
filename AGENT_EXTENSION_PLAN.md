@@ -94,6 +94,7 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 | **`operonx-code` gaps** | `webfetch` has no live test · no sub-agent tool wired (`make_delegate_tool` exists and the harness does not use it) · the REPL renders the final answer only, though F5 makes token streaming possible |
 | **callbot migration** | needs `?` on the 11 union fields in `ahamove_hr`, and `prompt=`→`messages=` if it ever passes a list, before bumping the operonx pin |
 | **Never dogfooded** | the harness has only run against toy fixtures. Every live run so far found a defect a full unit suite missed |
+| **22 open findings** | four adversarial reviews produced 31 reproduced findings; 9 fixed in 1.3.0, the rest catalogued with runnable repros in [`docs/design/OPEN_FINDINGS.md`](docs/design/OPEN_FINDINGS.md). Start there |
 
 ### 0.4 · Where the rest of the context lives
 

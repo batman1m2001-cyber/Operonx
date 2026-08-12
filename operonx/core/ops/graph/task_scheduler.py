@@ -6,7 +6,7 @@ Event-driven: Frame/EOF events drive op dispatch.
 
 import asyncio
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Dict, List, Tuple
@@ -36,15 +36,56 @@ def _ctx_within(child: tuple, parent: tuple) -> bool:
     return len(child) >= n and child[:n] == parent
 
 
-def _resolve_interrupt_target(event: Interrupt, emitter_ctx: tuple) -> None:
-    """Substitute ``Interrupt.SELF`` with the emitting op's context.
+class InterruptTargetError(ValueError):
+    """``Interrupt.SELF`` was emitted where it cannot mean anything."""
 
-    Done here rather than in the dataclass because the emitter's ctx is
-    the scheduler's to know. Every other value — including
-    ``Interrupt.ALL`` — passes through untouched.
+
+def _stamped(
+    event: Interrupt,
+    op_name: str,
+    ctx: tuple,
+    emitter_ctx: tuple,
+    *,
+    is_root_scheduler: bool,
+) -> Interrupt:
+    """Return a resolved **copy** of ``event``, stamped with its emitter.
+
+    A copy because the op may return a reused object — a module-level
+    ``STOP = Interrupt(...)``, a class attribute, the same instance from
+    several yields. Resolving in place stamped the first emitter's context
+    onto it permanently, so every later emission swept a stale (usually
+    already-dead) context and reported the wrong emitter. Measured: two
+    different items both recorded ``('main', '[1]')``.
+
+    ``Interrupt.SELF`` becomes ``emitter_ctx``; every other value —
+    including ``Interrupt.ALL`` — passes through untouched.
+
+    Raises:
+        InterruptTargetError: ``SELF`` from an op at the **outermost**
+            scheduler's root context. There "my own context" and
+            "everything" are the same tuple, so the sentinel cannot mean
+            what it says — and sweeping the run silently is the exact
+            failure it replaced. The default was only moved from ``()`` to
+            ``("main",)``, which is just as total for a flat graph.
+
+            A *nested* subgraph is exempt even though its root ctx is also
+            ``("main",)``: its sweep runs in its own scheduler and cannot
+            reach the parent's tasks, so the blast radius is bounded by
+            construction rather than by the tuple.
     """
-    if event.ctx_to_cancel is SELF_CTX:
-        event.ctx_to_cancel = emitter_ctx
+    target = event.ctx_to_cancel
+    if target is SELF_CTX:
+        if is_root_scheduler and len(emitter_ctx) <= 1:
+            raise InterruptTargetError(
+                f"Interrupt.SELF from {op_name!r} at context {emitter_ctx}: this op "
+                f"runs at the graph's root, where its own context and the whole run "
+                f"are the same thing. Name what to cancel — Interrupt(ctx_to_cancel="
+                f"Interrupt.ALL) to end the run, or the ctx of the branch you mean. "
+                f"SELF is for ops below the root: a generator's yield, a loop "
+                f"iteration, a fanned-out item."
+            )
+        target = emitter_ctx
+    return replace(event, op=op_name, ctx=ctx, ctx_to_cancel=target)
 
 
 def _ctxs_within(cell, iter_ctx: tuple) -> list:
@@ -218,9 +259,15 @@ class Scheduler:
         # dispatch() increments before spawning a task; _pump() decrements in finally.
         # Each Frame/EOF put on queue also increments; _on_frame/_on_eof decrement after processing.
         # When inflight == 0, the graph is fully done.
+        # Only the engine passes an output_queue, so this identifies the
+        # outermost scheduler — a nested GraphOp runs its own with none.
+        _is_root_scheduler = output_queue is not None
         inflight: int = 0
         # Set by _sweep_ctx when a cancellation covers this run's own root.
         root_interrupted: bool = False
+        # BaseExceptions (ObserveBudgetExceeded) rescued from _pump so the
+        # main loop can re-raise them instead of hanging.
+        fatal: List[BaseException] = []
 
         # ready[ctx][op_name] = number of hard-edge predecessors still outstanding.
         # When it reaches 0, the op is dispatched.
@@ -299,6 +346,23 @@ class Scheduler:
                 try:
                     async for item_ctx, result in op.run(state, ctx):
                         if isinstance(result, Interrupt):
+                            # Validated before stamping. Raising from inside
+                            # this `async for` would throw into a suspended
+                            # generator, whose finally then resets a
+                            # ContextVar token from the wrong context — so
+                            # the misuse is routed to the main loop instead,
+                            # which re-raises it to the caller intact.
+                            try:
+                                result = _stamped(
+                                    result,
+                                    op_name,
+                                    ctx,
+                                    item_ctx,
+                                    is_root_scheduler=_is_root_scheduler,
+                                )
+                            except InterruptTargetError as e:
+                                fatal.append(e)
+                                break
                             # Stamp emitter identity so the main loop
                             # knows which task to skip during the
                             # self-cancel guard. That guard looks up
@@ -306,9 +370,6 @@ class Scheduler:
                             # dispatch ctx — so `.ctx` stays coarse while
                             # SELF resolves to `item_ctx`, the ctx of the
                             # yield that actually emitted the interrupt.
-                            result.op = op_name
-                            result.ctx = ctx
-                            _resolve_interrupt_target(result, item_ctx)
                             queue.put_nowait(result)
                         else:
                             queue.put_nowait(Frame(op_name, item_ctx, result))
@@ -324,6 +385,16 @@ class Scheduler:
                     state[op_name, "error", ctx] = str(e)
                     queue.put_nowait(EOF(op_name, ctx))
                     inflight += 1  # account for the EOF we just put on queue
+                except BaseException as e:
+                    # ObserveBudgetExceeded is a BaseException on purpose —
+                    # a circuit breaker is not an op result. But letting it
+                    # escape here enqueued nothing, so the main loop stayed
+                    # parked in `await queue.get()` with inflight already at
+                    # zero: the run hung forever and the exception was never
+                    # retrieved. Hand it to the main loop as an event.
+                    fatal.append(e)
+                    queue.put_nowait(EOF(op_name, ctx))
+                    inflight += 1
                 finally:
                     inflight -= 1
                     bucket = tasks_by_ctx.get(ctx)
@@ -346,9 +417,34 @@ class Scheduler:
                 try:
                     async for item_ctx, result in op.run(state, ctx):
                         if isinstance(result, Interrupt):
-                            result.op = op_name
-                            result.ctx = ctx
-                            _resolve_interrupt_target(result, item_ctx)
+                            # Validated before stamping. Raising from inside
+                            # this `async for` would throw into a suspended
+                            # generator, whose finally then resets a
+                            # ContextVar token from the wrong context — so
+                            # the misuse is routed to the main loop instead,
+                            # which re-raises it to the caller intact.
+                            try:
+                                result = _stamped(
+                                    result,
+                                    op_name,
+                                    ctx,
+                                    item_ctx,
+                                    is_root_scheduler=_is_root_scheduler,
+                                )
+                            except InterruptTargetError as e:
+                                fatal.append(e)
+                                break
+                            try:
+                                result = _stamped(
+                                    result,
+                                    op_name,
+                                    ctx,
+                                    item_ctx,
+                                    is_root_scheduler=_is_root_scheduler,
+                                )
+                            except InterruptTargetError as e:
+                                fatal.append(e)
+                                break
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             _report_interrupt(result, ctx)
                         else:
@@ -601,9 +697,23 @@ class Scheduler:
                 except asyncio.QueueEmpty:
                     break
                 item_ctx = getattr(item, "ctx", None)
-                if item_ctx is not None and _is_descendant_or_equal(item_ctx, ctx_prefix):
+                item_op = getattr(item, "op", None)
+                is_emitter = exclude is not None and (item_op, item_ctx) == exclude
+                if (
+                    item_ctx is not None
+                    and _is_descendant_or_equal(item_ctx, ctx_prefix)
+                    and not is_emitter
+                ):
                     drop_count += 1
                 else:
+                    # The emitter is spared its own already-queued EOF. A
+                    # non-generator op enqueues the Interrupt and its EOF in
+                    # the same event-loop slice, so by the time the sweep
+                    # runs the EOF is sitting in the queue — and dropping it
+                    # meant `_on_eof` never advanced the sequential edge the
+                    # emitter was holding. Measured: 6 items in, 1 out, no
+                    # error. The seq section below skips the emitter for the
+                    # same reason, on the assumption this EOF arrives.
                     keep.append(item)
             for item in keep:
                 queue.put_nowait(item)
@@ -686,17 +796,35 @@ class Scheduler:
                 if any(_is_descendant_or_equal(ictx, ctx_prefix) for ictx, _ in buf):
                     collect_bufs.pop(key, None)
 
+            # Inline ops are queued here, not spawned as tasks, so cancelling
+            # `tasks_by_ctx` never touched them. `@op` on a plain `def`
+            # resolves to bound="sync" — the *default* — so an Interrupt in
+            # an all-sync graph swept nothing at all and the run completed
+            # normally with an interrupt record attached. Measured:
+            # Interrupt.ALL cancelled 0 of 4 downstream ops.
+            if inline_pending:
+                emitter = exclude if exclude is not None else (None, None)
+                inline_pending[:] = [
+                    (op_name, ctx)
+                    for (op_name, ctx) in inline_pending
+                    if not _is_descendant_or_equal(ctx, ctx_prefix) or (op_name, ctx) == emitter
+                ]
+
         # Seed entry ops.
         for entry in g.entries:
             dispatch(entry, context_id)
 
         # Drain inline ops seeded above.
         await _drain_inline()
+        if fatal:
+            raise fatal[0]
 
         # Main event loop — only runs if task-based ops exist.
         while inflight > 0:
             event = await queue.get()
             inflight -= 1
+            if fatal:
+                raise fatal[0]
             if isinstance(event, Frame):
                 _on_frame(event)
             elif isinstance(event, Interrupt):

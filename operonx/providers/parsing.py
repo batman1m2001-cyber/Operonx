@@ -233,11 +233,20 @@ def _resolve_field(parsed: Any, chain_path: List[str], parser: ParserFormat) -> 
 def convert_type(value: Any, type_hint: str) -> Any:
     """Coerce ``value`` to ``type_hint`` (str / int / float / bool / …).
 
+    A **list** is coerced element-wise. Repeated XML siblings now build a
+    list, and applying a scalar hint to the list object made the output
+    type depend on the data: one ``<item>`` gave ``"a"``, two gave the
+    string ``"['a', 'b']"``. With ``: int`` the whole list passed through
+    untouched, so a field declared ``int`` held a list. Both silent.
+
     Unknown type hints and unconvertible values pass through unchanged.
     Booleans handle string forms (``"true"`` / ``"1"`` / ``"yes"``).
     ``None`` stays ``None`` except for ``bool``/``string`` which normalise.
     """
     type_hint = type_hint.lower().strip()
+
+    if isinstance(value, list):
+        return [convert_type(v, type_hint) for v in value]
 
     if type_hint in ("bool", "boolean"):
         if value is None:

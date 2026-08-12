@@ -112,6 +112,8 @@ nav:
       - Observability: architecture/observability.md
       - Resource hub: architecture/resource-hub.md
       - Failure modes: architecture/failure-modes.md
+  - Open findings: design/OPEN_FINDINGS.md
+  - Handoff: HANDOFF.md
   - API reference:
       - operonx.core: api/core.md
       - operonx.core.ops: api/ops.md

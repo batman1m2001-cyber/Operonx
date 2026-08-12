@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-12
+
+### Known issues
+
+Four adversarial reviews produced **31 reproduced findings**; nine are
+fixed here and **22 remain open**, each with a runnable repro, in
+[`docs/design/OPEN_FINDINGS.md`](docs/design/OPEN_FINDINGS.md). The
+highest-severity open ones: `Media` unwrapped only on an op's first
+invocation (core), a budget-exhausted turn stranding an unanswered
+`tool_call` in the stored history (agents), `grep` answering differently
+depending on whether `ripgrep` is installed (harness), and an `MCPClient`
+closed from the wrong task cancelling an unrelated task.
+
+### Fixed — cancellation and fatal errors
+
+Found by auditing the *shapes* the existing 29 interrupt tests never used:
+every one of them applies `.parallel()` or a generator, which puts the
+emitting op below the root context and gives it its own task. The default
+shapes were all broken.
+
+- **`Interrupt.SELF` at the graph root was still `Interrupt.ALL`.** The
+  earlier fix moved the default from `()` to the emitter's context; for an
+  op running at `("main",)` those are the same total sweep, so a flat graph
+  kept the original defect. It now raises `InterruptTargetError` naming
+  both ways out. A *nested* subgraph is exempt — its root ctx is also
+  `("main",)` but its sweep runs in its own scheduler and cannot reach the
+  parent, so the blast radius is bounded by construction.
+
+- **Inline (`bound="sync"`) ops were never swept.** `@op` on a plain `def`
+  resolves to `"sync"` — the default — and those run from
+  `inline_pending`, which `_sweep_ctx` never touched. Measured:
+  `Interrupt.ALL` cancelled 0 of 4 downstream ops and the run returned a
+  normal-looking result.
+
+- **The emitter's own queued EOF was dropped.** A non-generator op enqueues
+  its `Interrupt` and its `EOF` in one event-loop slice, so the sweep found
+  the EOF already queued and discarded it — while the sequential-edge
+  section skipped the emitter precisely because it expected that EOF to
+  advance the queue. Measured: 6 items in, 1 out, no error.
+
+- **A `BaseException` in `_pump` deadlocked the scheduler.**
+  `ObserveBudgetExceeded` is a `BaseException` by design, and escaped
+  without enqueuing anything: `inflight` reached zero while the main loop
+  was parked on `queue.get()`. The run hung forever. Reachable from a plain
+  `run()` since `observe_max` became always-on in this release cycle.
+
+- **A reused `Interrupt` object was mutated in place.** A module-level
+  `STOP = Interrupt(...)` was resolved once and kept the first emitter's
+  context; later emissions swept a stale context and reported the wrong
+  emitter. It is stamped into a copy now.
+
+### Fixed — parsing and MCP
+
+- **`convert_type` coerced a list object rather than its elements.**
+  Repeated XML siblings build a list, so the output type depended on the
+  data: one `<item>` gave `"a"`, two gave the string `"['a', 'b']"`, and a
+  field declared `int` held a list. Introduced by the repeat fix earlier in
+  this cycle.
+
+- **MCP `list_tools` read only the first page.** A paginating server's
+  later tools were never registered, and `allow=` then reported them as
+  "not provided" — blaming the server for a tool it does provide. Measured
+  against a 5-tool server with page size 2: operonx saw 2.
+
+- **MCP tool names were not sanitised.** Only the namespace was. MCP allows
+  dots and arbitrary length; providers require `^[A-Za-z0-9_-]{1,64}$` and
+  reject the *whole request*, so one `github.create_issue` stopped every
+  tool working, local ones included.
+
+- **A structured-only MCP result read as empty.** A spec-legal server may
+  answer entirely in `structuredContent`; reading only `content` returned
+  `""` as a success.
+
+
 ### Fixed
 
 - **`Interrupt()` with no `ctx_to_cancel` no longer cancels the entire
