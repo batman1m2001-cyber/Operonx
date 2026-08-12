@@ -107,6 +107,47 @@ p = build_vision_prompt(query=PARENT["query"], image_url=upload["url"])
 llm = LLMOp.of(resource="gpt-4o", messages=p["messages"])
 ```
 
+## Structured output — `fields=`
+
+Ask the model for a shape rather than prose, and have it parsed inline:
+
+```python
+classify = LLMOp.of(
+    resource="gpt-4o",
+    prompt={"system": "Classify the intent.", "user": "{utterance}"},
+    fields=["intent: str", "confidence: float"],
+    parser="xml",                       # or "json" / "yaml"
+    validators={"intent": ["book", "cancel", "@unknown"]},
+    max_retries=2,
+    utterance=PARENT["utterance"],
+)
+# classify["intent"], classify["confidence"], classify["error"]
+```
+
+Each field becomes a top-level output. `error` is `None` on success and a
+human-readable string otherwise — that is what `max_retries` reads to
+decide whether to ask again.
+
+Three rules worth knowing before you rely on it:
+
+- **A missing field is an error, not a `None`.** That is what lets
+  `max_retries` fire. A field the model explicitly set to `null` *is* an
+  answer and is not an error.
+- **Mark optional fields `"name?: type"`.** A *union schema* — one field
+  list covering several response shapes, where most entries are absent on
+  any given call — needs this on every entry that is not always present.
+  Without it every call reports missing fields and burns its retries.
+- **A `@`-prefixed validator value is a default.** When the model answers
+  outside the allow-list, that value is substituted instead of erroring.
+
+```python
+fields=[
+    "intent: str",          # always present
+    "chosen_date?: str",    # only on booking turns
+    "reason?: str",         # only on cancellations
+]
+```
+
 ## Streaming a response
 
 `LLMOp` supports streaming. The op yields one frame per token chunk;
@@ -128,3 +169,5 @@ See [Streaming](06-streaming.md) for the consumption side.
 - Multi-step agents: [Agents](05-agents.md).
 - Add retrieval: [RAG](04-rag.md).
 - Trace every call: [Tracing](07-tracing.md).
+- What reaches the trace, and how to keep a credential out of it:
+  [Observability](../architecture/observability.md).

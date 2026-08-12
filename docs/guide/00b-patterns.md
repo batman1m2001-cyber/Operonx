@@ -197,39 +197,44 @@ with GraphOp(name="iterate") as g:
 Tune dispatch with `Ref.parallel(max=N)` / `Ref.collect()` on the
 downstream input — see [Streaming](06-streaming.md).
 
-### `@graph.loop()` (replaces `WhileOp`)
+### Feedback loops — a back-edge inside `@graph`
 
-A feedback loop that re-dispatches the inner graph until a Python
-expression on the loop's state evaluates truthy:
+`GraphOp.loop(until=…)` and `@graph.loop(…)` were **removed in 1.0.0**. A
+loop is now an ordinary edge that points backwards, and the build-time
+cycle-rewrite pass turns it into a hidden loop graph for the scheduler:
 
 ```python
-from operonx.core import GraphOp, START, END, PARENT
+from operonx.core import END, PARENT, START, graph, op
+from operonx.core.ops.flow.branch_op import if_
+
 
 @op
-def increment(counter: int):
-    return {"counter": counter + 1}
+def increment(count: int) -> dict:
+    return {"count": count + 1}
 
-with GraphOp.loop(until="count >= 5", count=0) as loop:
-    inc = increment(counter=PARENT["count"])
-    inc["counter"] >> PARENT["count"]                   # update loop state
-    START >> inc >> END
+
+@graph
+def counter():
+    PARENT.declare(count=0)
+    inc = increment(count=PARENT["count"])
+    inc["count"] >> PARENT["count"]        # commit for the next iteration
+    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
 ```
 
-The decorator form, for reusable loops:
+The `else_(inc)` is the back-edge. Each iteration writes its result to the
+shared cell, the branch reads the updated value, and decides to exit or go
+round again.
 
-```python
-from operonx.core import graph
+Two things that follow from the rewrite, and are easy to get wrong:
 
-@graph.loop(until="done == True", max_iterations=10)
-def agent_loop(messages, done, answer):
-    # …op definitions…
-    process["new_messages"] >> PARENT["messages"]
-    process["done"] >> PARENT["done"]
-    process["answer"] >> PARENT["answer"]
-```
+- **Iterations are siblings, not nesting.** Iteration 1 runs at
+  `("main", "g.__loop_0__#1")`, not inside iteration 0. That is what makes
+  "did this op run *this* iteration" answerable.
+- **The loop ends when no back-edge source fired.** There is no iteration
+  counter to reason about — the branch not taking the back-edge is the
+  exit.
 
-The body's `>> PARENT[...]` lines are how the next iteration sees
-updated state.
+See [Loops and branches](03-loops-and-branches.md) for the full treatment.
 
 ## Branch routing — `if_()` and `Branch`
 
