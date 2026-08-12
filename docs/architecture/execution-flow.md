@@ -111,8 +111,10 @@ The scheduler:
 4. When `END` is reached (all outgoing paths completed), returns the
    forwarded result.
 
-Branch ops emit frames on `>>~` (soft) edges only when their condition
-selects that branch. Generator ops yield once per item; downstream ops
+Branch ops emit frames on **soft** edges only when their condition
+selects that branch. `build()` softens branch-merge edges automatically
+(`auto_soft=True`), because forgetting the manual `~` was a silent
+run-time deadlock rather than a build error. Generator ops yield once per item; downstream ops
 run once per yield (streaming default — see [Streaming](streaming.md)).
 
 ## Contexts
