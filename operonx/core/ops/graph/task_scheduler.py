@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
-from operonx.core.ops._events import EOF, Frame, Interrupt
+from operonx.core.ops._events import EOF, SELF_CTX, Frame, Interrupt
 from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
 
@@ -34,6 +34,17 @@ def _ctx_within(child: tuple, parent: tuple) -> bool:
     """True if ``child`` is ``parent`` itself or a context below it."""
     n = len(parent)
     return len(child) >= n and child[:n] == parent
+
+
+def _resolve_interrupt_target(event: Interrupt, emitter_ctx: tuple) -> None:
+    """Substitute ``Interrupt.SELF`` with the emitting op's context.
+
+    Done here rather than in the dataclass because the emitter's ctx is
+    the scheduler's to know. Every other value — including
+    ``Interrupt.ALL`` — passes through untouched.
+    """
+    if event.ctx_to_cancel is SELF_CTX:
+        event.ctx_to_cancel = emitter_ctx
 
 
 def _ctxs_within(cell, iter_ctx: tuple) -> list:
@@ -283,6 +294,7 @@ class Scheduler:
                             # self-cancel guard.
                             result.op = op_name
                             result.ctx = ctx
+                            _resolve_interrupt_target(result, ctx)
                             queue.put_nowait(result)
                         else:
                             queue.put_nowait(Frame(op_name, item_ctx, result))
@@ -322,6 +334,7 @@ class Scheduler:
                         if isinstance(result, Interrupt):
                             result.op = op_name
                             result.ctx = ctx
+                            _resolve_interrupt_target(result, ctx)
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             if output_queue is not None:
                                 output_queue.put_nowait(

@@ -15,11 +15,22 @@ Contract of the top-level ``parse_and_extract`` entry point:
     # → {"result": "CONFIRM", "error": None}
     # OR {"result": None, "error": "Parse error (xml): ..."}
     # OR {"result": "FALLBACK", "error": None}   # @FALLBACK default applied
+    # OR {"result": None, "error": "Missing field(s) in xml output: result"}
 
 The function ALWAYS returns a dict with the requested field keys plus an
 ``error`` key that is either ``None`` (success) or a human-readable string
 (failure). It never raises — LLMOp uses the ``error`` value to decide
 whether to trigger a semantic-retry.
+
+Two rules that are easy to get backwards:
+
+- **A field the payload does not contain is an error**, so ``max_retries``
+  can fire. A field the payload sets to ``null`` is an answer, and is not.
+- **An XML document element is stripped when it gets in the way.** XML must
+  have exactly one root, so a path written against the payload
+  (``"result"``) is matched inside a lone root as well as at the top. JSON
+  and YAML get no such treatment — there a single top-level key is a key
+  the author meant.
 """
 
 import json
@@ -35,6 +46,7 @@ __all__ = [
     "parse_json",
     "parse_xml",
     "parse_yaml",
+    "MISSING",
     "extract_value_by_path",
     "convert_type",
     "apply_validators",
@@ -108,16 +120,17 @@ def parse_xml(text: str) -> Dict[str, Any]:
     def xml_to_dict(element):
         result = {}
         for child in element:
-            if len(child) == 0:
-                result[child.tag] = child.text
+            # Leaves and branches take the same repeat handling. They used
+            # not to: a leaf reassigned ``result[tag]``, so
+            # ``<item>a</item><item>b</item>`` kept only ``"b"`` and lost
+            # the rest without a word.
+            value = child.text if len(child) == 0 else xml_to_dict(child)
+            if child.tag in result:
+                if not isinstance(result[child.tag], list):
+                    result[child.tag] = [result[child.tag]]
+                result[child.tag].append(value)
             else:
-                child_dict = xml_to_dict(child)
-                if child.tag in result:
-                    if not isinstance(result[child.tag], list):
-                        result[child.tag] = [result[child.tag]]
-                    result[child.tag].append(child_dict)
-                else:
-                    result[child.tag] = child_dict
+                result[child.tag] = value
         return result
 
     text = _strip_fence(text)
@@ -147,15 +160,54 @@ _PARSER_MAP = {
 # ---------------------------------------------------------------------------
 
 
-def extract_value_by_path(data: Dict[str, Any], chain_path: List[str]) -> Any:
-    """Walk ``data`` following ``chain_path``; return ``None`` if missing."""
+#: Distinguishes "the path is not in the payload" from "the payload holds
+#: null there". Both used to arrive as ``None``, which is why a model that
+#: answered with the wrong keys looked like one that answered.
+MISSING = object()
+
+
+def _walk(data: Any, chain_path: List[str]) -> Any:
+    """Follow ``chain_path`` into ``data``; return :data:`MISSING` if absent."""
     current = data
     for key in chain_path:
         if isinstance(current, dict) and key in current:
             current = current[key]
         else:
-            return None
+            return MISSING
     return current
+
+
+def extract_value_by_path(data: Dict[str, Any], chain_path: List[str]) -> Any:
+    """Walk ``data`` following ``chain_path``; return ``None`` if missing.
+
+    Kept for callers that only need the value. Use :func:`_walk` when the
+    difference between absent and null matters.
+    """
+    value = _walk(data, chain_path)
+    return None if value is MISSING else value
+
+
+def _resolve_field(parsed: Any, chain_path: List[str], parser: ParserFormat) -> Any:
+    """Resolve one field, tolerating XML's mandatory document element.
+
+    XML has to have exactly one root, so ``<r><result>X</result></r>``
+    parses to ``{"r": {"result": "X"}}`` while the caller quite reasonably
+    wrote ``fields=["result: str"]``. Descending through a lone dict root
+    makes that work — including for this module's own docstring example,
+    which was wrong for exactly this reason.
+
+    Not applied to JSON or YAML: there a single top-level key is a real
+    key the author chose, not a syntactic requirement, so descending into
+    it would be a guess.
+    """
+    value = _walk(parsed, chain_path)
+    if value is not MISSING or parser != "xml":
+        return value
+    if isinstance(parsed, dict) and len(parsed) == 1:
+        (only,) = parsed.values()
+        if isinstance(only, dict):
+            return _walk(only, chain_path)
+    return MISSING
 
 
 def convert_type(value: Any, type_hint: str) -> Any:
@@ -265,14 +317,35 @@ def parse_and_extract(
         return {"error": f"Parse error ({parser}): {e}"}
 
     result: Dict[str, Any] = {}
+    missing: List[str] = []
     for field in fields:
-        raw = extract_value_by_path(parsed_data, field.chain_path)
+        raw = _resolve_field(parsed_data, field.chain_path, parser)
+        if raw is MISSING:
+            missing.append(".".join(field.chain_path))
+            raw = None
         result[field.output_key] = convert_type(raw, field.type_hint)
 
     if validators:
         err = apply_validators(result, validators)
         if err is not None:
             return {"error": err}
+        # A validator's ``@default`` counts as an answer, so a field it
+        # filled is no longer missing.
+        missing = [p for p in missing if result.get(p.split(".")[-1]) is None]
+
+    if missing:
+        # Well-formed output with the wrong keys is a semantic failure, and
+        # reporting it as one is what lets ``max_retries`` fire. It used to
+        # come back as ``{"result": None, "error": None}`` — indistinguishable
+        # from the model answering null on purpose, which still is not an
+        # error here.
+        return {
+            **result,
+            "error": (
+                f"Missing field(s) in {parser} output: {', '.join(missing)}. "
+                f"Parsed keys: {sorted(parsed_data) if isinstance(parsed_data, dict) else '—'}"
+            ),
+        }
 
     result["error"] = None
     return result

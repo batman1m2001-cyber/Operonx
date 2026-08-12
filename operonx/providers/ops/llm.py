@@ -234,6 +234,10 @@ class LLMOp(BaseOp):
         output_schema = {
             "role": Param(type=str, default="assistant"),
             "content": Param(type=str, required=True),
+            # Streaming only: False on a token delta, True on the frame
+            # that repeats the accumulated content. Batch calls are always
+            # final. See ``_stream_final``.
+            "final": Param(type=bool, default=True),
             "finish_reason": Param(type=str, default=None),
             "model_used": Param(type=str, required=True),
             "tool_calls": Param(type=list, default=[]),
@@ -631,9 +635,20 @@ class LLMOp(BaseOp):
         raise RuntimeError("All streaming fallback models failed")
 
     def _stream_final(self, acc, resource):
-        """Build the final metadata yield for a stream."""
+        """Build the final metadata yield for a stream.
+
+        ``content`` here is the **whole** accumulated response, not the
+        remaining tail — the per-token frames already carried every piece
+        of it. ``final=True`` is what separates the two; before it existed
+        the only difference was the incidental presence of
+        ``finish_reason``, and nothing said so.
+
+        Consumers should either join the ``final=False`` frames or read
+        this one, never both.
+        """
         return {
             "role": "assistant",
+            "final": True,
             "content": acc["response"],
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
@@ -843,7 +858,11 @@ class LLMOp(BaseOp):
 
         if choice.delta.content:
             acc["response"] += choice.delta.content
-            yield_dict = {"content": choice.delta.content, "role": "assistant"}
+            # ``final=False`` marks this as a delta. The last frame of a
+            # stream repeats the whole accumulated text under the same
+            # ``content`` key, so a consumer that joins frames without
+            # checking would emit the answer twice.
+            yield_dict = {"content": choice.delta.content, "role": "assistant", "final": False}
         else:
             yield_dict = None
 

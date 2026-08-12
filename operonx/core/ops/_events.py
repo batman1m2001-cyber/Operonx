@@ -6,6 +6,25 @@ a circular import for any module under ``ops/`` that needs these types).
 """
 
 from dataclasses import dataclass
+from typing import Any, ClassVar
+
+
+class _SelfContext:
+    """Sentinel for ``Interrupt(ctx_to_cancel=…)`` meaning "my own ctx".
+
+    Deliberately **not** a tuple. The scheduler substitutes the emitter's
+    context before any sweep runs; if a code path ever forgets to, the
+    sweep raises ``TypeError`` instead of matching every context — which
+    is exactly the silent whole-run cancellation this sentinel replaced.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "Interrupt.SELF"
+
+
+SELF_CTX = _SelfContext()
 
 
 @dataclass
@@ -41,9 +60,20 @@ class Interrupt:
 
     Returned/yielded by user op bodies to cancel queued frames + in-flight
     tasks at ``ctx_to_cancel`` (and its descendants). ``op`` and ``ctx``
-    record the emitter for tracing; ``ctx_to_cancel`` is the explicit target
-    — typically the prior turn's ctx, stored in ``SCRATCH`` when long-running
+    record the emitter for tracing; ``ctx_to_cancel`` is the target —
+    typically the prior turn's ctx, stored in ``SCRATCH`` when long-running
     work began.
+
+    ``ctx_to_cancel`` defaults to :data:`Interrupt.SELF`, which the
+    scheduler resolves to the emitter's own context. Cancelling the whole
+    run is spelled ``Interrupt.ALL`` and has to be asked for::
+
+        Interrupt(reason="bad input")                    # this branch
+        Interrupt(ctx_to_cancel=Interrupt.ALL, ...)      # everything
+
+    The empty tuple used to be the default, and it is a prefix of every
+    context — so omitting the argument discarded the entire run and
+    returned cleanly, with no error anywhere for the caller to notice.
 
     The scheduler:
         1. Drops Frame/EOF items at ctx_to_cancel from the queue.
@@ -60,5 +90,10 @@ class Interrupt:
 
     op: str = ""
     ctx: tuple = ()
-    ctx_to_cancel: tuple = ()
+    ctx_to_cancel: Any = SELF_CTX
     reason: str = ""
+
+    #: Resolved by the scheduler to the emitting op's own context.
+    SELF: ClassVar[Any] = SELF_CTX
+    #: Every context in the run. Destructive, so it must be written out.
+    ALL: ClassVar[tuple] = ()

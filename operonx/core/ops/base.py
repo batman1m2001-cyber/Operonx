@@ -91,6 +91,50 @@ def _normalise_observability(exclude, include):
     return _norm(exclude, "exclude"), _norm(include, "include")
 
 
+def should_emit_for_channel(op, var: str, channel: str) -> bool:
+    """Return True iff an event for ``op.var`` should be emitted on ``channel``.
+
+    Resolves the per-op ``exclude``/``include`` config (both list form and
+    dict-per-channel form). Fast path when the op has no filter set at all
+    (bare ``@op`` decoration).
+
+    Lives in core rather than in ``operonx.checkpoint.bridge`` because the
+    V3 tracer needs it too and core cannot import the checkpoint package.
+    ``bridge`` re-exports this name — it was the original home, and
+    ``@op(exclude={"trace": [...]})`` was silently checkpoint-only for as
+    long as that was the only caller.
+
+    Args:
+        op: an op instance with ``_obs_exclude`` / ``_obs_include`` attrs, or
+            ``None`` (treated as no filter)
+        var: variable name being written
+        channel: ``"trace"`` or ``"checkpoint"``
+
+    Returns:
+        True → emit event; False → filter out.
+    """
+    if op is None:
+        return True
+
+    include = getattr(op, "_obs_include", None) or {}
+    if include:
+        # Allowlist mode: emit iff var is listed for this channel or wildcard.
+        allowed = set(include.get(channel, ())) | set(include.get("*", ()))
+        # If neither channel-specific nor wildcard bucket exists at all, the
+        # op only restricts the OTHER channel — this channel sees everything.
+        if channel not in include and "*" not in include:
+            return True
+        return var in allowed
+
+    exclude = getattr(op, "_obs_exclude", None) or {}
+    if exclude:
+        # Blocklist mode: skip if var is listed for this channel or wildcard.
+        blocked = set(exclude.get(channel, ())) | set(exclude.get("*", ()))
+        return var not in blocked
+
+    return True
+
+
 def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
     """Strip top-level ``Media`` wrappers so consumer ops receive raw values.
 
@@ -748,6 +792,21 @@ class BaseOp(ABC):
         else:
             yield await core_fn(**inputs)
 
+    def _filter_for_trace(self, values: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy ``values``, dropping vars this op hides from the trace.
+
+        ``@op(exclude={"trace": ["api_key"]})`` is the documented way to
+        keep a secret out of ``handle.trace`` and everything built from it
+        (Langfuse, the local HTML consumer, any custom one). It only ever
+        reached the checkpoint bus, so the value was excluded from the
+        durable log and printed in the trace.
+
+        The no-filter path — every bare ``@op`` — is a plain dict copy.
+        """
+        if not self._obs_exclude and not self._obs_include:
+            return dict(values)
+        return {k: v for k, v in values.items() if should_emit_for_channel(self, k, "trace")}
+
     def _v3_infer_upstreams(
         self,
         state: "MemoryState",
@@ -936,8 +995,15 @@ class BaseOp(ABC):
                             ctx=ctx,
                             start_time=_yield_start,
                             end_time=perf_counter(),
-                            inputs=dict(_inputs),  # shallow copy — op may reuse dict
-                            outputs=dict(result) if isinstance(result, dict) else {"_": result},
+                            # Shallow copies — the op may reuse its dicts —
+                            # with @op(exclude=/include=) applied. Every
+                            # trace consumer reads these, so filtering at
+                            # the source is what makes the filter mean
+                            # anything at all.
+                            inputs=self._filter_for_trace(_inputs),
+                            outputs=self._filter_for_trace(result)
+                            if isinstance(result, dict)
+                            else {"_": result},
                             upstreams=_v3_upstreams,
                             status=STATUS_OK,
                         )
@@ -1041,8 +1107,10 @@ class BaseOp(ABC):
                                 ctx=ctx_for_end,
                                 start_time=perf_start,
                                 end_time=perf_start + duration_ms / 1000.0,
-                                inputs=dict(_inputs),
-                                outputs=dict(_outputs) if isinstance(_outputs, dict) else {},
+                                inputs=self._filter_for_trace(_inputs),
+                                outputs=self._filter_for_trace(_outputs)
+                                if isinstance(_outputs, dict)
+                                else {},
                                 upstreams=_v3_upstreams,
                                 status=v3_status,
                                 error=error_msg,

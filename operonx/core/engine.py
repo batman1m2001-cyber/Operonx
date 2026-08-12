@@ -152,7 +152,15 @@ class ExecutionHandle:
         return self
 
     async def __anext__(self) -> tuple[str, Any, dict[str, Any]]:
-        """Yield the next frame (op, ctx, data) as it arrives. Waits if no frames are available yet."""
+        """Yield the next frame (op, ctx, data) as it arrives. Waits if no frames are available yet.
+
+        Frames are the graph's **outputs**: an op appears here only if it
+        writes a PARENT- or END-bound var. A generator wired into a
+        downstream consumer yields nothing to this iterator no matter how
+        much it produces — ``result()``/``collect()`` are built from these
+        frames, so widening it would put every intermediate var into the
+        result. ``Operon.stream(mode="updates")`` watches those ops.
+        """
         async with self._cond:
             while self._idx >= len(self._frames):
                 if self._done:
@@ -537,6 +545,14 @@ class Operon:
                 op_registry=self._all_ops_registry(),
             )
 
+        # ``@op(observe_max=N)`` is enforced on every run, checkpointer or
+        # not. It used to be counted inside bind_checkpointer's closure,
+        # which made the circuit breaker a no-op under plain ``run()``.
+        # Binds nothing (and returns None) when no op declares a budget.
+        from operonx.checkpoint.bridge import bind_observe_budget
+
+        _budget_unsubscribe = bind_observe_budget(state, self._all_ops_registry())
+
         LOGGER.info(format_event("workflow_start", request_id=request_id, graph_name=self.name))
 
         graph_name = self.name
@@ -590,6 +606,11 @@ class Operon:
                         _cp_unsubscribe()
                     except Exception:
                         LOGGER.exception("checkpointer unsubscribe failed")
+                if _budget_unsubscribe is not None:
+                    try:
+                        _budget_unsubscribe()
+                    except Exception:
+                        LOGGER.exception("observe budget unsubscribe failed")
                 # Phase 2b3 H3: drain any pending InterruptOp futures so the
                 # state's response bus doesn't leak entries after the run.
                 if state._interrupt_responses:
@@ -700,10 +721,15 @@ class Operon:
             inputs: workflow inputs (same as ``run``/``invoke``)
             mode: one of
                 - ``"updates"`` — yields ``{op_name: {var: value, ...}}`` per op
-                  completion (matches LangGraph's ``stream_mode="updates"``)
+                  completion (matches LangGraph's ``stream_mode="updates"``).
+                  Covers **every** op, including generators in the middle of
+                  the graph, and delivers each write as it lands.
                 - ``"values"`` — yields the full state snapshot per step;
                   requires a checkpointer (auto-created in-memory if omitted)
-                - ``"frames"`` — yields ``(op, ctx, data)`` operonx frames
+                - ``"frames"`` — yields ``(op, ctx, data)`` for ops that
+                  write a graph **output** (PARENT- or END-bound). An op
+                  feeding only a downstream consumer emits nothing here,
+                  whatever it yields — use ``"updates"`` to watch those.
                 - ``"custom"`` — yields :class:`~operonx.checkpoint.CustomEvent`
                   emitted by any :class:`~operonx.EmitOp`, optionally filtered
                   by ``channels=[...]``
@@ -797,46 +823,77 @@ class Operon:
                 step = state._current_step
                 step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
 
-            state.subscribe_writes(_record)
-            try:
-                # Consume the frame stream to drive the scheduler forward;
-                # we don't yield from it, but we need to advance so writes
-                # keep happening. Track "already yielded" step to yield newly-
-                # completed steps as they land.
-                last_yielded = -1
-                async for _ in handle:
-                    current = state._current_step
-                    while last_yielded < current - 1:
-                        last_yielded += 1
-                        if mode == "updates":
-                            batch = step_updates.pop(last_yielded, {})
-                            if batch:
-                                yield batch
-                        else:  # values
-                            if checkpointer is not None:
-                                try:
-                                    yield checkpointer.get_state(last_yielded)
-                                except Exception:
-                                    pass
-                # Drain any final steps after the handle completes.
-                current = state._current_step
-                while last_yielded < current:
-                    last_yielded += 1
+            # A write signals the pacer. This loop used to be driven by
+            # ``async for _ in handle``, which only ticks on *output*
+            # frames — so a graph whose single output lands at the end
+            # buffered every intermediate update and released them all at
+            # once. Measured: four generator yields 150ms apart, all
+            # delivered together after the run. Streaming an LLM into a
+            # consumer is exactly that shape.
+            signal: asyncio.Queue = asyncio.Queue()
+
+            def _record(idx: int, ctx_key: tuple, value):
+                op_name, var = idx_to_key.get(idx, ("?", "?"))
+                step = state._current_step
+                step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
+                signal.put_nowait(step)
+
+            def _flush(upto: int, last: int):
+                """Yield completed steps in ``(last, upto]``; return the new last."""
+                out = []
+                while last < upto:
+                    last += 1
                     if mode == "updates":
-                        batch = step_updates.pop(last_yielded, {})
+                        batch = step_updates.pop(last, {})
                         if batch:
-                            yield batch
-                    else:
-                        if checkpointer is not None:
-                            try:
-                                yield checkpointer.get_state(last_yielded)
-                            except Exception:
-                                pass
+                            out.append(batch)
+                    elif checkpointer is not None:
+                        try:
+                            out.append(checkpointer.get_state(last))
+                        except Exception:
+                            pass
+                return out, last
+
+            state.subscribe_writes(_record)
+            drainer = None
+            getter = None
+            try:
+                # The scheduler still needs its frames consumed to make
+                # progress; that just isn't the pacer any more.
+                async def _drain_frames():
+                    async for _ in handle:
+                        pass
+
+                drainer = asyncio.create_task(_drain_frames())
+                last_yielded = -1
+                while not (drainer.done() and signal.empty()):
+                    getter = asyncio.create_task(signal.get())
+                    done, _pending = await asyncio.wait(
+                        {getter, drainer},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if getter not in done:
+                        getter.cancel()
+                    # A step is only complete once the counter has moved
+                    # past it, so flush up to current - 1 while running.
+                    batches, last_yielded = _flush(state._current_step - 1, last_yielded)
+                    for batch in batches:
+                        yield batch
+                    while not signal.empty():
+                        signal.get_nowait()
+                # The run is over, so the last step is complete too.
+                batches, last_yielded = _flush(state._current_step, last_yielded)
+                for batch in batches:
+                    yield batch
             finally:
                 state.unsubscribe_writes(_record)
                 # Phase 2b3 B3: cancel scheduler on caller break so a partial
                 # consume doesn't leave the graph running with no listener.
                 handle.cancel()
+                if drainer is not None and not drainer.done():
+                    drainer.cancel()
+                if getter is not None and not getter.done():
+                    getter.cancel()
             return
 
         handle = self.start(inputs, checkpointer=checkpointer, **kwargs)

@@ -55,14 +55,18 @@ count_turn → last_user → plan → apply → memory → skills
                     └──── gather ◀── dispatch ◀──────────────┘
 ```
 
-**Tests:** 1559 unit (`-m "not integration"`), 5 live. 15 test files under
+**Tests:** 1587 unit (`-m "not integration"`), 5 live. 15 test files under
 `tests/internal/agents/`, plus `tests/internal/core/ops/graph/test_loop_generator_backedge.py`
-and `tests/internal/providers/test_llm_stream_tool_calls.py` for the two
-core fixes.
+and `tests/internal/providers/test_llm_stream_tool_calls.py` for the first
+two core fixes, and five more for §16 F2–F8:
+`test_interrupt_default_target.py`, `test_trace_exclude.py`,
+`test_stream_intermediate.py`, `test_bridge_filter.py`,
+`test_parsing.py`.
 
 ### 0.2 · Running the live tests
 
-Only `siraya/qwen3.7-plus` was found to support tool calling. The in-house
+Only `qwen3.7-plus` (on the siraya endpoint) was found to support tool
+calling — the model id carries no `siraya/` prefix. The in-house
 gemma endpoint does **not** — its vLLM runs without
 `--enable-auto-tool-choice` and rejects `tool_choice="auto"`, so an agent
 pointed at it never calls a tool and merely looks unhelpful.
@@ -84,9 +88,8 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 
 | | |
 |---|---|
-| **P4** | The out-of-tree `operonx-code` harness. Needs §16 F5 answered first — a coding agent streams, and streaming frames are dropped unless the op is PARENT/END-bound |
+| **P4** | The out-of-tree `operonx-code` harness. No longer blocked: F5 is fixed, and `stream(mode="updates")` now delivers a generator's yields as they land (§16.1a) |
 | **P5** | Deferred: learning loop, MCP client, heartbeat scheduler |
-| **§16 F2–F8** | Seven confirmed **core** defects, recorded and deliberately not fixed. Each needs its own decision and several change published behaviour |
 | **§15.2** | Rows still 🟡: `EmitOp`/`stream(mode="custom")`, `SCRATCH`, preemptive cancel, sub-agent trace nesting |
 | **C6** | No way to hand `LLMOp` a message list without prompt templating, so every agent must escape braces defensively |
 
@@ -1043,15 +1046,15 @@ Probe the row, then flip its light and link the test.
 | Turn loop (back-edge → synthesized `_GraphLoop`; termination when no back-edge source fired) | 🟢 after the V8 fix; was broken for any loop containing a generator | P1 |
 | Shared cells + reducers (`PARENT.declare(reducers=)`) | 🟢 verified — the cell merges correctly; `run()`'s output dict does not (V6 F2) | P1 |
 | Message accumulation (`add_messages` id-upsert, `RemoveMessage`) | 🟢 id-upsert verified end to end; **raises on a non-list**, which is why `gather_tool_messages` exists | P1 |
-| Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🔴 parses "successfully" into `None` with `error=None` on wrong keys and on wrapped XML, so `max_retries` never fires — §16 F6/F7. **The agent layer does not use `fields=`** | — |
+| Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🟢 after §16 F6/F7 — a missing field is now an error, so `max_retries` fires; a lone XML root is descended into. **The agent layer does not use `fields=`** | — |
 | Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 unverified — the agent layer does not rely on it | — |
-| LLM streaming (`stream=True` per-token frames) | 🔴 **two defects** — tool-call deltas were appended not merged (fixed); frames are dropped unless the op is PARENT/END-bound (§16 F5, open) | P4 |
+| LLM streaming (`stream=True` per-token frames) | 🟢 after three fixes — tool-call deltas are merged (F1), `stream(mode="updates")` is live for intermediate ops (F5), and the closing frame is marked `final=True` so joining deltas no longer double-counts (F8). Handle frames remain outputs-only, by design and now documented | P4 |
 | Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
 | Cross-run persistence (`Checkpointer`) | 🟢 works — but §2 named the wrong binding site and the wrong accessors (V11). `AgentSession` uses the real API | P2 ✅ |
-| Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🔴 `exclude=` does not filter the V3 trace and `observe_max` is a no-op without a checkpointer — §16 F3/F4. The agent layer uses its own `Redactor` instead | — |
+| Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟢 after §16 F3/F4 — `exclude=`/`include=` now filter the V3 trace, and `observe_max` is enforced on every run. The agent layer still uses its own `Redactor`, which is scoped to tool output rather than op vars | — |
 | Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
 | Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
-| Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🔴 a **bare `Interrupt()`** cancels the entire run and returns cleanly — §16 F2 | — |
+| Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🟢 after §16 F2 — a bare `Interrupt()` now cancels the emitter's branch; the whole run needs `Interrupt.ALL` | — |
 | Async I/O dispatch (`@op(bound=)`) | 🟢 — exercised throughout the existing suite | — |
 | Config + secrets (`ResourceHub`) | 🟢 — exercised throughout the existing suite | — |
 
@@ -1100,13 +1103,36 @@ reported unless a probe reproduced it.
 | # | Finding | Impact |
 |---|---|---|
 | F1 | **Streamed tool calls were appended, not assembled.** One call arrived as N fragments, each holding a slice of JSON that parses as nothing. Streaming worked, tool calling worked, only the combination broke. | **Fixed** — `LLMOp._merge_tool_call_deltas`, 13 tests |
-| F2 | **`Interrupt()` with no `ctx_to_cancel` cancels the entire run and returns cleanly.** The default `()` makes `_is_descendant_or_equal` true for every ctx. Outputs come back as `{"__interrupt__": …}` with no error — a one-word user mistake silently loses the run | open |
-| F3 | **`@op(exclude=…)` does not filter the V3 trace.** A var excluded from observation still appears in `handle.trace`. `base.py`'s own comment claims "Checkpointer + Tracer both respect these"; only the checkpoint/custom/interrupt buses consult it. Security-relevant — it is the documented way to keep a secret out of the trace | open |
-| F4 | **`observe_max` is a no-op unless a checkpointer is bound.** The counter lives in `bind_checkpointer`'s closure, which `engine.start` only creates when `checkpointer is not None`. A runaway generator under `engine.run()` is uncapped — 50 frames emitted against a budget of 5 | open |
-| F5 | **Streaming frames are dropped unless the op is PARENT/END-bound.** Measured: 3 frames when bound, **0** when the same streaming op feeds a downstream consumer — the normal agent shape. §2's "frames forwarded to `ExecutionHandle._queue`" is conditional on graph topology, not on `stream=True` | open |
-| F6 | **`parser="xml"` returns `None` with `error=None` for a wrapped element.** `<r><result>X</result></r>` with `fields=["result: str"]` yields nothing, and because `error` is `None`, `max_retries` never fires. `parsing.py`'s own docstring example is wrong. Repeated sibling tags likewise collapse to `None` | open |
-| F7 | **Valid JSON with the wrong keys parses "successfully".** `{"bad": 1}` against `fields=["result: str"]` returns `{"result": None, "error": None}` — no retry, no error. Structured mode cannot tell "model answered wrongly" from "model answered" | open |
-| F8 | **The final streaming frame repeats the full accumulated `content`.** `_stream_final` re-emits the whole text through the same frame path as the per-token deltas, so a consumer joining frames double-counts. Only the incidental presence of `finish_reason` distinguishes them | open — contract, not a bug |
+| F2 | **`Interrupt()` with no `ctx_to_cancel` cancels the entire run and returns cleanly.** The default `()` makes `_is_descendant_or_equal` true for every ctx. Outputs come back as `{"__interrupt__": …}` with no error — a one-word user mistake silently loses the run | **Fixed** — default is `Interrupt.SELF`, resolved by the scheduler to the emitter's ctx; whole-run cancel is `Interrupt.ALL`. 8 tests |
+| F3 | **`@op(exclude=…)` does not filter the V3 trace.** A var excluded from observation still appears in `handle.trace`. `base.py`'s own comment claims "Checkpointer + Tracer both respect these"; only the checkpoint/custom/interrupt buses consult it. Security-relevant — it is the documented way to keep a secret out of the trace | **Fixed** — `BaseOp._filter_for_trace` on both the per-yield and batch records; `should_emit_for_channel` moved to core. 9 tests |
+| F4 | **`observe_max` is a no-op unless a checkpointer is bound.** The counter lives in `bind_checkpointer`'s closure, which `engine.start` only creates when `checkpointer is not None`. A runaway generator under `engine.run()` is uncapped — 50 frames emitted against a budget of 5 | **Fixed** — `bind_observe_budget`, bound on every run, binds nothing when no op declares a budget. 8 tests |
+| F5 | **Streaming frames are dropped unless the op is PARENT/END-bound.** Measured: 3 frames when bound, **0** when the same streaming op feeds a downstream consumer — the normal agent shape. §2's "frames forwarded to `ExecutionHandle._queue`" is conditional on graph topology, not on `stream=True` | **Fixed, and split in two** — see §16.1a. 6 tests |
+| F6 | **`parser="xml"` returns `None` with `error=None` for a wrapped element.** `<r><result>X</result></r>` with `fields=["result: str"]` yields nothing, and because `error` is `None`, `max_retries` never fires. `parsing.py`'s own docstring example is wrong. Repeated sibling tags likewise collapse to `None` | **Fixed** — a lone dict root is descended into (XML only); repeated leaves build a list. 8 tests |
+| F7 | **Valid JSON with the wrong keys parses "successfully".** `{"bad": 1}` against `fields=["result: str"]` returns `{"result": None, "error": None}` — no retry, no error. Structured mode cannot tell "model answered wrongly" from "model answered" | **Fixed** — absent ⇒ error naming the field and the keys present; explicit null is still an answer; a validator `@default` still applies. 6 tests |
+| F8 | **The final streaming frame repeats the full accumulated `content`.** `_stream_final` re-emits the whole text through the same frame path as the per-token deltas, so a consumer joining frames double-counts. Only the incidental presence of `finish_reason` distinguishes them | **Fixed** — deltas are `final=False`, the closing frame `final=True`. Verified live. 2 tests |
+
+### 16.1a · F5 was two defects wearing one label
+
+The finding said "streaming frames are dropped". Probing it split the
+claim in half, and only one half was a bug:
+
+- **`handle` frames are the graph's outputs, by design.** `result()` and
+  `collect()` are built from the same frames, so forwarding every
+  intermediate op's yields would put every internal var into the result.
+  Left as-is and **documented** on `ExecutionHandle.__anext__` and
+  `stream(mode="frames")`, which promised "operonx frames" and said
+  nothing about the restriction.
+- **`stream(mode="updates")` did see every op — and was not live.** It
+  was paced by `async for _ in handle`, so it only advanced when an
+  *output* frame arrived. Measured: four generator yields 150ms apart,
+  all released together at the end. A graph that streams a model into a
+  consumer emits its single output last, which is precisely the shape
+  that broke. Pacing now comes from the write bus: the same four yields
+  arrive at 185/336/487/640ms.
+
+The reason this matters for P4 is the second half, not the first. A
+coding agent doesn't need intermediate ops in `result()`; it needs the
+tokens while they are being produced.
 
 ### 16.1b · Confirmed in the agent layer — all fixed
 
@@ -1165,14 +1191,31 @@ Recorded because the temptation to act on a plausible report is the point.
 
 ### 16.3 · Scope
 
-F1 is fixed because it broke the agent layer directly. **F2–F7 are core
-defects outside this plan's scope** — each needs its own decision, and
-several change published behaviour. They are recorded here rather than
-fixed silently.
+**All eight are fixed** (12 Aug 2026). F1 went first because it broke the
+agent layer directly; F2–F8 were recorded rather than fixed silently
+because several change published behaviour, and were then done as one
+pass with the decisions written into the CHANGELOG.
 
-The agent layer does not depend on F3/F4 (it has its own `Redactor`),
-nor on F6/F7 (it does not use `fields=`). It *would* depend on F5 the
-moment anyone streams, which is P4's problem.
+Three of them changed a contract, so they are worth knowing about before
+upgrading:
+
+| | What a caller may notice |
+|---|---|
+| F2 | `Interrupt()` with no target now cancels the emitter's branch, not the run. Nothing in-tree relied on the old default — every call site already passed `ctx_to_cancel` |
+| F7 | `fields=[…]` reports a missing field as an error where it used to return `None` silently. Code that treated `None` as "optional field absent" now sees `error` set |
+| F8 | Streamed `LLMOp` frames carry `final`. Additive, but a consumer asserting exact frame dicts will see the new key |
+
+Two tests asserted the old behaviour and had to be rewritten rather than
+kept passing — `test_missing_field_becomes_none` (F7) and the
+`bind_checkpointer`-bound budget tests (F4). That is the same shape as
+A7: a test can hold a bug in place, and passing is not evidence of
+correctness when the assertion was written from the implementation.
+
+Verification: 1587 unit tests green in both fixed and random order, ruff
+and `mkdocs --strict` clean, and the 5 live tests re-run against
+`qwen3.7-plus`. F8 was additionally confirmed against a real streaming
+response — the deltas join to exactly the final frame's content, and a
+naive join double-counts.
 
 ---
 

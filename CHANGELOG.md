@@ -9,6 +9,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Interrupt()` with no `ctx_to_cancel` no longer cancels the entire
+  run.** The field defaulted to `()`, which is a prefix of every context,
+  so the sweep matched all of them. The run came back as
+  `{"__interrupt__": …}` with no error anywhere — omitting one keyword
+  argument silently discarded everything in flight and looked like
+  success. The default is now `Interrupt.SELF`, a sentinel the scheduler
+  resolves to the emitting op's own context; cancelling the whole run is
+  spelled `Interrupt(ctx_to_cancel=Interrupt.ALL)`. Measured on eight
+  parallel branches with one emitting an untargeted interrupt: two
+  results before, seven after.
+
+  The sentinel is deliberately not a tuple, so a code path that forgot to
+  resolve it would raise rather than quietly matching everything again.
+
+- **`@op(exclude=…)` / `@op(include=…)` now filter the V3 trace.**
+  `base.py` documented these as "Checkpointer + Tracer both respect
+  these"; only the checkpoint, custom and interrupt buses ever consulted
+  them, and `OpExecution` recorded inputs and outputs verbatim. The one
+  documented way to keep a credential out of an observable artifact
+  excluded it from the durable log and printed it in the trace — and in
+  every consumer built on the trace. Both the per-yield record for
+  generators and the final record for batch ops are filtered.
+  `should_emit_for_channel` moved to `operonx.core.ops.base` (still
+  importable from `operonx.checkpoint.bridge`) because core cannot import
+  the checkpoint package.
+
+- **`@op(observe_max=N)` is enforced on every run, not only when a
+  checkpointer is bound.** The counter lived in `bind_checkpointer`'s
+  closure, which `engine.start` builds only when `checkpointer is not
+  None` — so the runaway-generator circuit breaker did nothing under a
+  plain `engine.run()`, the cheap path a runaway is most likely to be in.
+  Measured: 50 frames emitted against a budget of 5, no error. It now
+  lives in `bind_observe_budget`, bound on every run, and binds nothing
+  when no op declares a budget. Vars silenced on *both* observer channels
+  still cost nothing, because `ObserveBudgetExceeded`'s own message
+  offers `@op(exclude=[…])` as a remedy.
+
+- **`stream(mode="updates")` delivers each write as it lands.** It was
+  paced by `async for _ in handle`, which only ticks on *output* frames,
+  so a graph whose single output arrives at the end buffered every
+  intermediate update and released them together. Measured: four
+  generator yields 150ms apart, all delivered at once after the run —
+  which is the shape of an LLM streaming into a consumer, so the one mode
+  able to watch it was not actually live. Pacing now comes from the write
+  bus.
+
+  The related half is a contract, now written down rather than changed:
+  `handle` frames and `mode="frames"` carry the graph's **outputs**. An op
+  feeding only a downstream consumer emits none, whatever it yields.
+  Widening that would put every intermediate var into `result()`, which is
+  built from the same frames.
+
+- **A missing field is a parse error instead of a silent `None`.**
+  `{"bad": 1}` against `fields=["result: str"]` returned `{"result":
+  None, "error": None}` — so `max_retries` never fired and the caller
+  could not tell "the model answered wrongly" from "the model answered
+  null". An absent field now reports an error naming it and the keys that
+  were actually present; a field explicitly set to null is still an
+  answer. A validator's `@default` counts as an answer, so it still
+  applies.
+
+- **XML's document element no longer hides the fields under it.** XML must
+  have exactly one root, so `<r><result>X</result></r>` parsed to `{"r":
+  {"result": "X"}}` while the caller reasonably wrote
+  `fields=["result: str"]` and got `None`. A lone dict root is now
+  descended into when the path misses at the top — including for
+  `parsing.py`'s own docstring example, which was wrong for exactly this
+  reason. JSON and YAML are untouched: there a single top-level key is a
+  key the author chose.
+
+- **Repeated XML leaf siblings are kept.** `<item>a</item><item>b</item>`
+  collapsed to `"b"` — the leaf branch reassigned where the nested branch
+  built a list. Both now build a list.
+
+### Changed
+
+- **Streamed `LLMOp` frames carry `final`.** The last frame of a stream
+  repeats the whole accumulated `content` through the same channel as the
+  per-token deltas, so a consumer joining frames emitted the answer
+  twice; the only thing distinguishing it was the incidental presence of
+  `finish_reason`. Deltas are now `final=False` and the closing frame
+  `final=True`. Batch calls default to `True`. Consumers should join the
+  deltas or read the final frame, never both.
+
 - **A `Ref` nested inside a dict or list is now rejected at construction
   instead of silently degrading to a literal.** Operonx wires one param
   to one state cell holding one pull-ref, so `my_op(cfg={"a": src["x"]})`
