@@ -188,11 +188,11 @@ Probe the row, then flip its light and link the test.
 | Structured LLM output (`LLMOp.of(fields=, validators=, max_retries=)`) | 🟢 after §16 F6/F7 — a missing field is now an error, so `max_retries` fires; a lone XML root is descended into. **The agent layer does not use `fields=`** | — |
 | Refusal vs parse failure (`_is_refusal` → `fallback=`) | 🟡 unverified — the agent layer does not rely on it | — |
 | LLM streaming (`stream=True` per-token frames) | 🟢 after three fixes — tool-call deltas are merged (F1), `stream(mode="updates")` is live for intermediate ops (F5), and the closing frame is marked `final=True` so joining deltas no longer double-counts (F8). Handle frames remain outputs-only, by design and now documented | P4 |
-| Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟡 | P2 |
+| Custom progress events (`EmitOp` + `stream(mode="custom", channels=)`) | 🟢 verified 12 Aug — events arrive, `channels=` filters, and an `EmitOp` inside a *nested* graph still reaches the top-level consumer | P2 |
 | Cross-run persistence (`Checkpointer`) | 🟢 works — but §2 named the wrong binding site and the wrong accessors (V11). `AgentSession` uses the real API | P2 ✅ |
 | Observability shaping (`@op(exclude=, include=, observe_max=)`) | 🟢 after §16 F3/F4 — `exclude=`/`include=` now filter the V3 trace, and `observe_max` is enforced on every run. The agent layer still uses its own `Redactor`, which is scoped to tool output rather than op vars | — |
-| Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟡 | P2 |
-| Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🟡 | P3 |
+| Per-run scratchpad (`SCRATCH[key]` through the observer bus) | 🟢 verified 12 Aug — cross-op reads, run isolation and the checkpointer bus all hold. The read *surface* was incomplete: no `.get()` on a self-described dict-like accessor, so the first idiom anyone tries raised `AttributeError` from inside an op body. Added | P2 |
+| Sub-agent isolation (nested `@graph`, hermetic parent refs, nested spans) | 🔴 **the claim was wrong** — child ops do *not* live at a deeper ctx. `outer.p` and `outer.sub.c` both run at `('main',)`; nesting is in the op **name**, ctx carries *iteration*. Hermeticity still holds, enforced by name at build time. `state-model.md`'s diagram was corrected | P3 |
 | Preemptive cancel (`yield Interrupt(ctx_to_cancel=…)`) | 🟢 after §16 F2 — a bare `Interrupt()` now cancels the emitter's branch; the whole run needs `Interrupt.ALL` | — |
 | Async I/O dispatch (`@op(bound=)`) | 🟢 — exercised throughout the existing suite | — |
 | Config + secrets (`ResourceHub`) | 🟢 — exercised throughout the existing suite | — |

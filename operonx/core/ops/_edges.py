@@ -258,5 +258,41 @@ class ScratchAccessor:
             return False
         return key in state._scratch
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """Read ``key``, or ``default`` when it is absent.
+
+        ``SCRATCH[key]`` already returns ``None`` for a missing key, so
+        this adds nothing but the idiom people reach for first. Without
+        it, ``SCRATCH.get("k")`` raised ``AttributeError`` from inside an
+        op body — where ``BaseOp.run`` records it into state rather than
+        raising, so it surfaced as an op error rather than an obvious typo.
+
+        Outside a run this returns ``default`` rather than a
+        :class:`ScratchRef`: a ref is a *wiring* marker and ``get()`` with
+        a default reads as a value lookup, so returning one would smuggle
+        a marker into a place expecting data.
+        """
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return default
+        return state._scratch.get(key, default)
+
+    def keys(self):
+        """Keys currently in scratch — empty outside a run."""
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return ()
+        return tuple(state._scratch)
+
+    def items(self):
+        """``(key, value)`` pairs — a snapshot, empty outside a run."""
+        try:
+            state = _current_state_var.get()
+        except LookupError:
+            return ()
+        return tuple(state._scratch.items())
+
 
 SCRATCH = ScratchAccessor()

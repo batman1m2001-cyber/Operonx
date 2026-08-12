@@ -110,6 +110,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapsed to `"b"` — the leaf branch reassigned where the nested branch
   built a list. Both now build a list.
 
+### Added
+
+- **`SCRATCH.get()`, `.keys()`, `.items()`.** `ScratchAccessor` documented
+  itself as "dict-like" and had none of them, so `SCRATCH.get("k")` — the
+  first idiom anyone reaches for — raised `AttributeError` from inside an
+  op body, where `BaseOp.run` records it into state rather than raising.
+  A typo therefore surfaced as an op failure. `SCRATCH["k"]` already
+  returned `None` for a missing key, so `get()` adds only the spelling.
+
+  Outside a run `get()` returns its default rather than a `ScratchRef`:
+  a ref is a *wiring* marker, and `get(key, default)` reads as a value
+  lookup, so returning one would smuggle a marker where data is expected.
+  `SCRATCH["k"]` keeps returning a `ScratchRef` at construction time.
+
 ### Breaking — `prompt=` no longer accepts a list; use `messages=`
 
 `LLMOp` treated its prompt as a template and ran `format_map` over every

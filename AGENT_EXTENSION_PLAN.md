@@ -88,8 +88,7 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 
 | | |
 |---|---|
-| **P5** | Deferred: learning loop, MCP client, heartbeat scheduler |
-| **Unverified primitives** | `EmitOp`/`stream(mode="custom")`, `SCRATCH`, sub-agent trace nesting — still 🟡 in the [archive](docs/design/AGENT_PLAN_ARCHIVE.md)'s §15.2 table |
+| **P5** | MCP client (the only piece with real pull) · heartbeat scheduler (no use case yet) · learning-loop pattern doc |
 
 ### 0.4 · Where the rest of the context lives
 
