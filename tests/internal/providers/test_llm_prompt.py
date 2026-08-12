@@ -220,3 +220,32 @@ class TestPromptViaBuildLLMParams:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestConstructionTimeChecks:
+    """A literal mistake should fail where it was written.
+
+    A `Ref` can only be checked at run time, but `LLMOp.of(prompt=[...])`
+    is knowable immediately — and one model call later is a much worse
+    place to find out.
+    """
+
+    def test_a_literal_list_prompt_raises_at_construction(self):
+        with pytest.raises(PromptError, match="messages="):
+            _make_llmop(prompt=[{"role": "user", "content": "hi"}])
+
+    def test_both_inputs_raise_at_construction(self):
+        with pytest.raises(PromptError, match="mutually exclusive"):
+            _make_llmop(prompt="hi", messages=[{"role": "user", "content": "hi"}])
+
+    def test_messages_alone_constructs(self):
+        node = _make_llmop(messages=[{"role": "user", "content": "hi"}])
+        assert "messages" in node.inputs
+
+    def test_a_ref_prompt_is_left_to_run_time(self):
+        """It could resolve to anything; rejecting it here would ban the
+        legitimate `prompt=PARENT["template"]` wiring."""
+        from operonx.core import PARENT
+
+        node = _make_llmop(prompt=PARENT["prompt"])
+        assert "prompt" in node.inputs

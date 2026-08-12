@@ -61,52 +61,52 @@ class LLMOp(BaseOp):
 
     Give it exactly one of ``prompt=`` or ``messages=``.
 
-        ``prompt=`` is a **template**, and every string in it is
-        ``str.format_map``-substituted with the non-reserved kwargs:
+    ``prompt=`` is a **template**, and every string in it is
+    ``str.format_map``-substituted with the non-reserved kwargs:
 
-        * **str** — one user message: ``"Hello {name}"``.
-        * **dict** with ``system`` / ``user`` keys — the standard two-message call.
+    * **str** — one user message: ``"Hello {name}"``.
+    * **dict** with ``system`` / ``user`` keys — the standard two-message call.
 
-        ``messages=`` is a **conversation**: a full OpenAI messages array, passed
-        through untouched. Use it whenever the content is data rather than a
-        template — an agent's history, a multimodal block assembled upstream,
-        anything past two messages.
+    ``messages=`` is a **conversation**: a full OpenAI messages array, passed
+    through untouched. Use it whenever the content is data rather than a
+    template — an agent's history, a multimodal block assembled upstream,
+    anything past two messages.
 
-        The split exists because formatting a conversation is destructive. Any
-        brace in any message — a tool returning ``{"city": "Hanoi"}``, a user
-        pasting CSS, the model's own tool-call arguments — becomes a template
-        variable that does not exist, and the run dies on the *next* model call.
-        ``prompt=`` used to accept a list, which made that the default outcome
-        for every agent.
+    The split exists because formatting a conversation is destructive. Any
+    brace in any message — a tool returning ``{"city": "Hanoi"}``, a user
+    pasting CSS, the model's own tool-call arguments — becomes a template
+    variable that does not exist, and the run dies on the *next* model call.
+    ``prompt=`` used to accept a list, which made that the default outcome
+    for every agent.
 
-        Inputs:
-            prompt (str | dict): Message template. Mutually exclusive with ``messages``.
-            messages (list): Ready OpenAI messages array, never formatted.
-            temperature (float): Sampling temperature. Default: 0.0.
-            max_tokens (int): Max output tokens. Default: None.
-            tools (list): Tool/function definitions. Default: None.
-            tool_choice (str | dict): Tool selection strategy. Default: None.
-            response_format (dict): Structured output format. Default: None.
-            <var> (any): Template variables (``{var}`` placeholders).
+    Inputs:
+        prompt (str | dict): Message template. Mutually exclusive with ``messages``.
+        messages (list): Ready OpenAI messages array, never formatted.
+        temperature (float): Sampling temperature. Default: 0.0.
+        max_tokens (int): Max output tokens. Default: None.
+        tools (list): Tool/function definitions. Default: None.
+        tool_choice (str | dict): Tool selection strategy. Default: None.
+        response_format (dict): Structured output format. Default: None.
+        <var> (any): Template variables (``{var}`` placeholders).
 
-        Outputs:
-            content (str): Generated text.
-            role (str): Message role (usually ``"assistant"``).
-            finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, ...).
-            model_used (str): Actual model that served the request.
-            tool_calls (list): Tool-call objects (empty list when absent).
-            usage (dict): Flat token-cost metrics.
-            extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``).
+    Outputs:
+        content (str): Generated text.
+        role (str): Message role (usually ``"assistant"``).
+        finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, ...).
+        model_used (str): Actual model that served the request.
+        tool_calls (list): Tool-call objects (empty list when absent).
+        usage (dict): Flat token-cost metrics.
+        extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``).
 
-        Example::
+    Example::
 
-            llm = LLMOp.of(
-                resource="gpt-4o",
-                prompt={"system": "You are {role}.", "user": "{query}"},
-                role="helpful", query=PARENT["query"],
-            )
+        llm = LLMOp.of(
+            resource="gpt-4o",
+            prompt={"system": "You are {role}.", "user": "{query}"},
+            role="helpful", query=PARENT["query"],
+        )
 
-            chat = LLMOp.of(resource="gpt-4o", messages=history["messages"])
+        chat = LLMOp.of(resource="gpt-4o", messages=history["messages"])
     """
 
     __slots__ = [
@@ -267,6 +267,10 @@ class LLMOp(BaseOp):
             for f in self._extract_fields:
                 output_schema[f.output_key] = Param(default=None)
             output_schema["error"] = Param(type=str, default=None)
+
+        # Checked on the *raw* mapping: _normalize_params wraps each value
+        # in a Param, so a literal list is no longer a list by then.
+        _check_prompt_inputs(inputs or {})
 
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)
@@ -1169,6 +1173,42 @@ def _extract_template_variables(template: Any) -> set:
             result |= _extract_template_variables(item)
         return result
     return set()
+
+
+def _check_prompt_inputs(inputs: Dict[str, Any]) -> None:
+    """Reject prompt/messages mistakes that are knowable at construction.
+
+    A ``Ref`` resolves at run time and can only be checked there — banning
+    it here would outlaw the legitimate ``prompt=PARENT["template"]``
+    wiring. A **literal** list, or both inputs at once, is knowable now,
+    and one model call later is a much worse place to find out.
+    """
+    prompt = inputs.get("prompt")
+    messages = inputs.get("messages")
+    if prompt is not None and messages is not None:
+        raise PromptError(
+            message=(
+                "prompt= and messages= are mutually exclusive. prompt= is a "
+                "template and is formatted; messages= is a conversation and is "
+                "not. Pass one."
+            ),
+            prompt=prompt,
+            original_error=ValueError("both prompt= and messages= were given"),
+        )
+    if isinstance(prompt, list):
+        raise PromptError(
+            message=(
+                "prompt= no longer accepts a list — pass it as messages=, which "
+                "is never formatted. Formatting a conversation turns every brace "
+                "in it (a JSON tool result, pasted code, the model's own "
+                "tool-call arguments) into a template variable that does not "
+                "exist. For a multi-message *template*, build the list in an "
+                "upstream @op; prompt={'system': …, 'user': …} covers the "
+                "two-message case."
+            ),
+            prompt=prompt,
+            original_error=TypeError("prompt=list is not supported; use messages="),
+        )
 
 
 def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any:
