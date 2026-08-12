@@ -103,6 +103,7 @@ nav:
       - Streaming: guide/06-streaming.md
       - Tracing: guide/07-tracing.md
       - Deployment: guide/08-deployment.md
+      - Learning loop: guide/09-learning-loop.md
   - Architecture:
       - Overview: architecture/overview.md
       - Execution flow: architecture/execution-flow.md

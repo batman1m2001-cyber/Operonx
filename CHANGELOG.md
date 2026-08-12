@@ -112,6 +112,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Heartbeat` — running an agent on a schedule.** A timer that calls
+  `session.send()`, for agents nobody is talking to: a monitor that polls
+  a queue, an agent that files a morning report. Three decisions are made
+  explicitly rather than left to chance, because each is a way a scheduler
+  fails *silently* — a stopped one, a skipping one and a backlogged one
+  all look identical from outside:
+
+  - **An overlapping beat is skipped and counted.** Queueing by default
+    builds a backlog that never drains; cancelling the live turn destroys
+    work mid-flight. `skipped` exists so 400 dropped beats do not read as
+    400 successful ones.
+  - **A failing beat does not stop the clock** — a scheduler that dies on
+    its first exception is indistinguishable from one with nothing to do.
+    A throwing `on_result` or `on_error` cannot stop it either.
+  - **`stop()` lets the current beat finish.** Cancelling mid-`send()`
+    leaves the conversation ending on an unanswered user turn, which the
+    next beat would build on.
+
 - **MCP client — `operonx.agents.mcp`.** Connect to a Model Context
   Protocol server and expose its tools as ordinary `@tool` ops, so the
   ReAct loop, the permission gate and the redactor treat them like local

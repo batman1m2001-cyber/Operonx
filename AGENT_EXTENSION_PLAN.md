@@ -21,9 +21,8 @@ we compose primitives already blessed by 1.0.0.
 
 ## 0 · State — read this first (11 Aug 2026)
 
-**P0–P3 are complete, merged to `main`, and verified against a live
-tool-calling model.** `main` is at `c328edb`. Nothing below is aspirational
-unless it says so.
+**P0–P5 are complete and verified against a live tool-calling model.**
+Nothing below is aspirational unless it says so.
 
 ### 0.1 · What exists
 
@@ -35,6 +34,8 @@ operonx/agents/
 ├── memory.py          MemoryProvider ABC + LocalMarkdownMemory
 ├── skills.py          SKILL.md loading, matching, injection
 ├── session.py         AgentSession — multi-turn
+├── mcp.py             MCP client — third-party tools as @tool ops
+├── heartbeat.py       Heartbeat — running an agent on a schedule
 ├── graphs/
 │   ├── dispatch.py    per-call subgraph: parse → route → approve → execute
 │   ├── react.py       build_react_agent + agent_result
@@ -55,7 +56,7 @@ count_turn → last_user → plan → apply → memory → skills
                     └──── gather ◀── dispatch ◀──────────────┘
 ```
 
-**Tests:** 1593 unit (`-m "not integration"`), 5 live. 15 test files under
+**Tests:** 1671 unit (`-m "not integration"`), 5 live. 15 test files under
 `tests/internal/agents/`, plus `tests/internal/core/ops/graph/test_loop_generator_backedge.py`
 and `tests/internal/providers/test_llm_stream_tool_calls.py` for the first
 two core fixes, and five more for §16 F2–F8:
@@ -86,9 +87,13 @@ Credentials live in `/home/thanglq/educa-reminder-agent/.env`, which uses
 
 ### 0.3 · What is NOT done
 
+**P0–P5 are all complete.** What remains is follow-up rather than plan:
+
 | | |
 |---|---|
-| **P5** | MCP client (the only piece with real pull) · heartbeat scheduler (no use case yet) · learning-loop pattern doc |
+| **`operonx-code` gaps** | `webfetch` has no live test · no sub-agent tool wired (`make_delegate_tool` exists and the harness does not use it) · the REPL renders the final answer only, though F5 makes token streaming possible |
+| **callbot migration** | needs `?` on the 11 union fields in `ahamove_hr`, and `prompt=`→`messages=` if it ever passes a list, before bumping the operonx pin |
+| **Never dogfooded** | the harness has only run against toy fixtures. Every live run so far found a defect a full unit suite missed |
 
 ### 0.4 · Where the rest of the context lives
 
@@ -727,7 +732,7 @@ Week 1   P0  P1                Tools + ReAct + HITL
 Week 2       P2                Memory + compaction + cache invariants
 Week 3            P3           Sub-agents + skills + policy modes
 Week 4                 P4      Reference harness (operonx-code)
-Later                       P5 Learning-loop pattern doc (defer)
+Week 5                      P5 MCP client · heartbeat · learning-loop doc
 ```
 
 | # | Phase | Deliverable | Size |
@@ -737,7 +742,7 @@ Later                       P5 Learning-loop pattern doc (defer)
 | **2** ✅ | Context lifecycle | `MemoryProvider` ABC + `LocalMarkdownMemory`; `memory_prefetch/sync` ops (generator+fan-out); prompt-cache invariants in `prompt_ops.py`; sessions via `Checkpointer` binding (no custom SessionStore). **Compaction is a subsystem, not one op** (§14.3) — trigger policy, what to summarise, what to drop, what to keep verbatim | 5–7d |
 | **3** ✅ | Safety + sub-agents + skills | Policy modes for `permission_check` (deny / ask / allow); **redaction at the same trust boundary** (§14.3); `subagent` `@graph` factory + delegate blocklist; `SkillLoader` + `inject_skills_as_user_msg` op; YAML prompt-file loader | 4–5d |
 | **4** ✅ | Reference harness | `packages/operonx-code/` — read/glob/grep/edit/write/bash/webfetch, persistent shell, rooted workspace with a read-before-edit ledger, REPL. 70 unit + 4 live tests. See §17 | 5–7d |
-| **5** ⬜ | Deferred | Learning-loop pattern doc (LLM-writes-SKILL.md fork) · MCP client · Heartbeat scheduler | — |
+| **5** ✅ | MCP · heartbeat · learning loop | `operonx/agents/mcp.py` — MCP client, 33 tests against a real server over stdio. `operonx/agents/heartbeat.py` — scheduled agent, 27 tests. `docs/guide/09-learning-loop.md` — the LLM-writes-SKILL.md pattern, with the four ways it goes wrong | — |
 
 **Estimate**: **P0–P3 in ~3 weeks**, P4 in another week.
 

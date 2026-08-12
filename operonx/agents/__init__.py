@@ -22,6 +22,7 @@ from __future__ import annotations
 from operonx.agents.graphs.dispatch import build_dispatch
 from operonx.agents.graphs.react import agent_result, build_react_agent
 from operonx.agents.graphs.subagent import describe_delegation, make_delegate_tool
+from operonx.agents.heartbeat import Heartbeat
 from operonx.agents.memory import LocalMarkdownMemory, MemoryEntry, MemoryProvider
 from operonx.agents.ops.compact_ops import (
     apply_compaction,
@@ -63,6 +64,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "Heartbeat",
     "MCPServer",
     "MCPClient",
     "MCPError",
