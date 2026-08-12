@@ -104,16 +104,61 @@ the branch reads the updated value, and decides to exit or loop again.
 
 ## Frame consumption
 
-Outside the engine, `engine.run(...)` returns the final state. To consume
-frames as they're emitted, use the streaming entry point:
+`engine.run(...)` returns the final result. To consume work as it happens,
+use `engine.stream(...)` — and **pick the mode by which ops you need to
+see**, because they do not all see the same thing.
 
 ```python
-async for frame in engine.stream(inputs={...}):
-    print(frame.op_name, frame.outputs)
+async for batch in engine.stream({"x": 1}, mode="updates"):
+    print(batch)          # {"g.produce": {"chunk": "he"}}
 ```
 
-A frame carries the op name, the outputs dict, span context, and timing.
-This is what tracers consume internally.
+| Mode | Yields | Sees |
+|---|---|---|
+| `"updates"` | `{op_name: {var: value}}` per op completion | **every op**, including generators in the middle of the graph |
+| `"frames"` | `(op, ctx, data)` | only ops writing a graph **output** |
+| `"values"` | full state snapshot per step | every op (needs a checkpointer; one is created if omitted) |
+| `"custom"` | `CustomEvent` from `EmitOp` | whatever you emit, filterable by `channels=` |
+
+### Why `"frames"` sees less
+
+Frames *are* the graph's outputs. `handle.result()` and `handle.collect()`
+are built from the same frames, so an op that only feeds a downstream
+consumer emits none — widening that would put every intermediate variable
+into the result.
+
+This is the shape that matters in practice:
+
+```python
+answer = llm(prompt=p)          # streams tokens
+shown  = render(text=answer)    # consumes them
+```
+
+`answer` writes no graph output, so `mode="frames"` shows nothing from it
+however much it yields. `mode="updates"` shows every token, as it lands.
+
+### Delivery is live
+
+`mode="updates"` is paced by the state write bus, so a yield is delivered
+when it happens — not batched until the graph's final output arrives.
+Measured on four yields 150 ms apart: they arrive at 185/336/487/640 ms.
+
+## Streamed LLM frames
+
+`LLMOp(stream=True)` emits one frame per token delta and **one closing
+frame carrying the whole accumulated `content`**. Both travel the same
+channel, so joining every frame's `content` emits the answer twice.
+
+`final` separates them:
+
+```python
+deltas = "".join(f["content"] for f in frames if not f["final"])
+whole  = next(f["content"] for f in frames if f["final"])
+assert deltas == whole
+```
+
+Join the deltas or read the final frame — never both. Batch (non-streaming)
+calls are always `final=True`.
 
 ## Performance notes
 

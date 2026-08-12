@@ -108,7 +108,9 @@ nav:
       - Execution flow: architecture/execution-flow.md
       - State model: architecture/state-model.md
       - Streaming: architecture/streaming.md
+      - Observability: architecture/observability.md
       - Resource hub: architecture/resource-hub.md
+      - Failure modes: architecture/failure-modes.md
   - API reference:
       - operonx.core: api/core.md
       - operonx.core.ops: api/ops.md
