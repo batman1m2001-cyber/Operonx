@@ -1,15 +1,44 @@
+"""Base class shared by every LLM backend.
+
+Import-time dependencies are kept to what is actually executed. ``httpx`` is
+real runtime use (``create_http_client`` below), so it stays eager. The
+OpenAI types are used **only in annotations**, so they load under
+``TYPE_CHECKING`` — this module is imported eagerly by
+``operonx.providers.llms``, and pulling the OpenAI SDK here would defeat the
+lazy-backend design that package documents, forcing a vector-search-only
+install (``operonx[faiss]``, ``[pgvector]``, ``[qdrant]``, ``[onnx]``,
+``[postgres]``) to depend on an LLM SDK it never calls.
+
+``from __future__ import annotations`` is load-bearing, not cosmetic:
+without it these signatures are evaluated at definition time and the
+deferred imports become ``NameError``.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import base64
 import mimetypes
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Union,
+)
 
 import httpx
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from operonx.providers.llms.config import LLMConfig
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+    from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 # ── Prompt caching thresholds ────────────────────────────────────────────
 # Anthropic silently refuses to cache prefixes shorter than these limits.

@@ -1,0 +1,18 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex06-state-and-streaming"
+description = "SCRATCH run-scoped state, EmitOp side channels, InterruptOp human-in-the-loop."
+
+[[graph]]
+name  = "scratch_flow"
+entry = "main:scratch_flow"
+
+[[graph]]
+name  = "progress_flow"
+entry = "main:progress_flow"
+
+[[graph]]
+name  = "approval_flow"
+entry = "main:approval_flow"

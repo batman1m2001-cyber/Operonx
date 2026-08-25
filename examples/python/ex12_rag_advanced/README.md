@@ -13,7 +13,7 @@ The `hybrid` scenario gracefully skips if no API key is present.
 
 ```
 ex12_rag_advanced/
-├── pyproject.toml      # operonx[providers]>=0.6.2 (numpy + openai)
+├── pyproject.toml      # operonx[providers]>=1.3.0 (numpy + openai)
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY (only for hybrid)
 ├── resources.yaml      # embedding:openai + llm:gpt-4o-mini

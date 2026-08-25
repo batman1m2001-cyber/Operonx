@@ -93,7 +93,7 @@ def rag(question):
     aligned with their scores. Getting that wrong by hand (SQL returns
     arbitrary order) silently pairs every document with the wrong score.
     """
-    q_emb = EmbeddingOp.of(resource="openai", texts=[question])
+    q_emb = EmbeddingOp.of(resource="openai", texts=question)
 
     hits = VectorSearchOp.of(
         resource="docs-faiss",

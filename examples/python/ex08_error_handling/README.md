@@ -15,7 +15,7 @@ The `llm_fallback` scenario gracefully skips if no API key is set.
 
 ```
 ex08_error_handling/
-├── pyproject.toml      # operonx[openai]>=0.6.2 (for the llm_fallback scenario)
+├── pyproject.toml      # operonx[openai]>=1.3.0 (for the llm_fallback scenario)
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY (only for llm_fallback)
 ├── resources.yaml      # llm:gpt-4o + llm:gpt-4o-mini

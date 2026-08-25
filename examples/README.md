@@ -61,4 +61,4 @@ that uses an LLM now documents its own tracing setup).
 | 1 | `pip install operonx` | Engine + ops DSL only (no provider SDKs). ~10 MB. |
 | 2 | `operonx[openai]` / `[anthropic]` / `[gemini]` / `[bedrock]` | Tier 1 + that one provider |
 | 3 | `operonx[langfuse]` / `[otel]` / `[serve]` / `[onnx]` | Feature extras, additive |
-| 4 | `operonx[providers]` / `[standard]` / `[all]` | Pre-bundled meta combos |
+| 4 | `operonx[standard]` / `[all]` | Pre-bundled meta combos |

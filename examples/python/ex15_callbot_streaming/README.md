@@ -16,7 +16,7 @@ and an async generator on the TTS tail.
 
 ```
 ex15_callbot_streaming/
-├── pyproject.toml    # operonx>=0.6.2 (tier 1)
+├── pyproject.toml    # operonx>=1.3.0 (tier 1)
 ├── README.md
 └── main.py
 ```

@@ -1,0 +1,21 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex04-llm-advanced"
+description = "Operonx LLM advanced — structured output, tool calling, multi-turn."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "structured_output"
+entry = "main:structured_output"
+
+[[graph]]
+name  = "tool_calling"
+entry = "main:tool_calling"
+
+[[graph]]
+name  = "multi_turn"
+entry = "main:multi_turn"

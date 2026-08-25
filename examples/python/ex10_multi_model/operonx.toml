@@ -1,0 +1,29 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex10-multi-model"
+description = "Operonx multi-model patterns — parallel, routing, load-balance, fallback, ensemble."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "parallel_comparison"
+entry = "main:parallel_comparison"
+
+[[graph]]
+name  = "cost_routing"
+entry = "main:cost_routing"
+
+[[graph]]
+name  = "load_balanced"
+entry = "main:load_balanced"
+
+[[graph]]
+name  = "fallback_chain"
+entry = "main:fallback_chain"
+
+[[graph]]
+name  = "ensemble"
+entry = "main:ensemble"

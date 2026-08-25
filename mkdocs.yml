@@ -106,6 +106,7 @@ nav:
       - Learning loop: guide/09-learning-loop.md
   - Architecture:
       - Overview: architecture/overview.md
+      - Core map: architecture/core-map.md
       - Execution flow: architecture/execution-flow.md
       - State model: architecture/state-model.md
       - Streaming: architecture/streaming.md

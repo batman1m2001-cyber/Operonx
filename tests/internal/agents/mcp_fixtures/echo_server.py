@@ -8,6 +8,7 @@ codebase already. This speaks actual MCP over actual stdio.
 import sys
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 mcp = MCPServer(name="echo")
@@ -27,8 +28,22 @@ def add(a: int, b: int) -> int:
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def explode(reason: str) -> str:
-    """Always fails — used to check that an in-band error is not read as an answer."""
-    raise RuntimeError(f"deliberate failure: {reason}")
+    """Always fails, with a message the client is meant to see.
+
+    ``ToolError`` is the SDK's way to say "a failure I anticipated": the call
+    returns ``is_error=True`` with this text in ``content``. A bare
+    ``RuntimeError`` would be treated as a crash and, since mcp 2.1,
+    deliberately masked as ``Error executing tool explode`` so nothing from
+    the original reaches the client. This fixture previously relied on that
+    leak, which is what `crash` below now covers on purpose.
+    """
+    raise ToolError(f"deliberate failure: {reason}")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def crash(reason: str) -> str:
+    """Fails the way an unanticipated bug does — the message must not leak."""
+    raise RuntimeError(f"internal detail: {reason}")
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
