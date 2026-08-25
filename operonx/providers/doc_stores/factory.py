@@ -34,18 +34,16 @@ def create_doc_store(config: DocStoreConfig) -> BaseDocStore:
         except ImportError as e:
             raise ImportError(_missing_extra_message("PostgresDocStore", "postgres", e)) from e
         return PostgresDocStore(config)
-    if config.api_type == DocStoreType.MONGO:
-        try:
-            from operonx.providers.doc_stores.mongo import MongoDocStore
-        except ImportError as e:
-            raise ImportError(_missing_extra_message("MongoDocStore", "mongo", e)) from e
-        return MongoDocStore(config)
-    if config.api_type == DocStoreType.REDIS:
-        try:
-            from operonx.providers.doc_stores.redis import RedisDocStore
-        except ImportError as e:
-            raise ImportError(_missing_extra_message("RedisDocStore", "redis", e)) from e
-        return RedisDocStore(config)
+    # MONGO and REDIS are declared in DocStoreType but no backend module
+    # exists yet. Reporting them as a missing *extra* sent users to
+    # ``pip install operonx[mongo]`` — an extra that has never existed — so
+    # the install appeared to be the fix for something no install provides.
+    if config.api_type in (DocStoreType.MONGO, DocStoreType.REDIS):
+        raise NotImplementedError(
+            f"Doc store backend '{config.api_type.value}' is declared in "
+            f"DocStoreType but not implemented. Available today: "
+            f"{DocStoreType.MEMORY.value}, {DocStoreType.POSTGRES.value}."
+        )
     raise ValueError(f"Unsupported doc store: {config.api_type}")
 
 
