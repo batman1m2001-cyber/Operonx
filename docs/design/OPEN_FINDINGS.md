@@ -286,3 +286,305 @@ assumed.
 - **Policy resolution, redaction ordering, empty-vs-`None` `tool_calls`,
   `add_messages` id handling, `memory_ops` gathering, skills parsing, and
   turn counting vs `max_turns`** were each checked and found correct.
+
+---
+
+## Sweep of 15 Aug 2026 — four readers over core
+
+Found while building Operon Scope (`tools/scope/`). Every claim below was
+re-verified against the source by hand; agent output was not taken at
+face value. Numbered `S*` to keep them distinct from the earlier set.
+
+### S1 — an op exception is silently swallowed by `run()`; three handlers, two dead
+
+An `@op` raising `ValueError` makes `engine.run()` return `{}` and
+`result()` return `{}`. The traceback is logged, written to the op's
+`error` cell (`base.py:1068`) and recorded as an `OpExecution` trace node
+— but never raised. Downstream ops never dispatch, because no `Frame` is
+emitted, so the branch stops silently rather than failing.
+
+Three nested handlers exist for this; only the first ever runs:
+
+| Handler | Fate |
+|---|---|
+| `base.py:1021` `except Exception:` | catches, logs, **never re-raises** |
+| `func_op.py:443-456` `CodeError` wrapper | **dead** — exception already consumed by the frame it delegates to. Its docstring claims it "re-raises any exception as a `CodeError`" |
+| `task_scheduler.py:384-387` `_pump`'s `except Exception` | **dead** on this path, along with its `state[op,"error"]` write |
+
+`docs/architecture/execution-flow.md:201` states an op raising surfaces
+as an `OpError` subclass. It does not. Either the doc or the code is
+wrong; the present behaviour — a bare `{}` indistinguishable from a
+legitimately empty result — is the shape this codebase keeps producing.
+
+Only `BaseException` (`ObserveBudgetExceeded`, `InterruptTargetError`)
+reaches the caller, via `fatal` → `engine.py:595`.
+
+### S2 — `loop_iters` is dead
+
+`task_scheduler.py:302-305`. Declared and documented, never written or
+read. `_on_eof` derives the iteration index by parsing the ctx tail
+(`:594-601`) instead.
+
+### S3 — `_stamped` is called twice on the same value
+
+`task_scheduler.py:427-437` and `:438-447` are a verbatim duplicated
+block, both `except InterruptTargetError` handlers included. Idempotent
+in effect (after the first stamp `ctx_to_cancel` is concrete), a
+copy-paste error in fact.
+
+### S4 — three per-run dicts have flat keys but nested comments
+
+`seq_queues` (`:277`), `seq_active` (`:282`), `collect_bufs` (`:292`) are
+documented as `[gen_ctx][dst_op]`. Every real write uses a flat
+`(src, dst)` edge key — e.g. `collect_bufs.setdefault((src, dst), [])`
+at `:523`. **Consequence: sequential gating is per-edge globally, not per
+generator context** — two different item contexts serialize against each
+other on the same edge. Either the comments or the design is wrong.
+
+### S5 — `fatal` from the final inline drain can be dropped
+
+`fatal` is checked at `:819` (after the first drain) and `:826` (after
+`queue.get()`). The drain at the end of the loop body (`:836`) has no
+check after it, so if it appends to `fatal` while `inflight` is already
+0, `while inflight > 0` exits and the error is lost.
+
+### S6 — `get_inputs` resolves differently on an op's first-ever call
+
+`self._input_cache` is set at the *end* of the slow path
+(`base.py:537`), so the first invocation takes the slow path and every
+later one takes the fast path. They disagree twice:
+
+| | first call (slow) | later calls (fast) |
+|---|---|---|
+| missing-context fallthrough | `cell.default_value`, **no hierarchy walk** (`state.py:441`) | `cell[context_id]`, **walks ancestors** (`base.py:508`) |
+| `_unwrap_media_in_place` | runs (`base.py:542`) | skipped |
+
+The second row is finding **C1**. The first row is its unrecorded twin.
+Code-verified; a triggering repro (unshared cell, no exact-ctx value, no
+pull ref, ancestor value present) has not yet been constructed.
+
+### S7 — Ref-vs-Ref in `if_()` always takes the first case
+
+Confirmed and worse than the existing note. `_wrap`'s comparison cases
+capture the right-hand side literally (`ref.py:264-275`); only
+`and_/or_/rand_/ror_` resolve a `Ref` operand (`:283-286`). So
+`Ref == Ref` produces a **truthy Ref**, and `BranchOp._evaluate_conditions`
+does `if result:` (`branch_op.py:140`) — the first case always wins,
+silently, with nothing for the `except` at `:149` to catch.
+
+Compounding: `get_all_vars` (`ref.py:333-352`) never recurses into
+comparison args, so the RHS Ref's variable is never declared as a
+BranchOp input and would resolve to `None` even if it were consulted.
+
+Workaround unchanged: compare against literals and combine with `&`/`|`.
+
+### S8 — `Ref._resolve` keys by var name alone
+
+`ref.py:330` does `ctx.get(self.var)`, not `(source_op, var)`. Two Refs
+from different source ops sharing a variable name collide in that flat
+dict. `BranchOp._parse_cases` dedupes the same way (`branch_op.py:90`).
+Latent; not demonstrated end to end.
+
+### S9 — `hasattr()` on a `Ref` is a side effect, not a question
+
+`Ref.__getattr__` (`ref.py:373-376`) is overloaded to build a new `Ref`
+carrying a `getattr` transform. So `hasattr(some_ref, "anything")` is
+always `True`, and *constructs an object* as a side effect.
+
+Any generic introspection — a debugger rendering locals, a serializer
+probing for fields, a logger sniffing attributes — silently fabricates
+Refs. Found the hard way: Operon Scope's value summariser probed unknown
+objects with `hasattr` to detect scheduler events, which turned a 0.17s
+capture into one that never terminated, because each probe created Refs
+whose construction the profiler then recorded, recursively.
+
+Not a crash, and arguably intended for the DSL. But it means `Ref` is
+hostile to every tool that inspects objects generically, and nothing
+says so. A `__getattr__` that raised `AttributeError` for dunder and
+underscore-prefixed names would keep the DSL and stop the bleeding.
+
+Workaround for tooling: never probe; match on `type(v).__name__` against
+a known list, and read fields with `object.__getattribute__`.
+
+---
+
+## Sweep of 18 Aug 2026 — extractor build-out
+
+Found while wiring `operonx-project`'s extractor against the tutorial.
+
+### S10 — `operonx[openai]` is broken against the current OpenAI SDK
+
+`operonx/providers/llms/base.py:8` does a module-scope `import httpx`, but
+the `openai` extra declares only `openai>=1.0` and has always relied on
+httpx arriving transitively through the SDK.
+
+**openai 3.x moved to `httpx2`:**
+
+```
+$ python -c "import importlib.metadata as m; print(m.requires('openai'))"
+openai 3.2.0 -> ['httpx2<3,>=2.7.0', ...]
+```
+
+So a fresh `pip install operonx[openai]` resolves openai 3.x, never installs
+`httpx`, and **`import operonx.providers` raises `ModuleNotFoundError`**.
+This is a shipped-package failure, not a test artefact — six of the eight
+provider tutorial examples reproduce it once their lockfiles are refreshed.
+Older locks that pinned openai 2.x mask it.
+
+`keycloak.py` imports `httpx` the same way and is exposed identically.
+
+Measured in clean venvs — **four of five extras tested were broken**, so
+this was never an `openai`-only problem:
+
+```
+operonx[openai]   -> ModuleNotFoundError: httpx
+operonx[faiss]    -> ModuleNotFoundError: httpx
+operonx[gemini]   -> OK
+operonx[bedrock]  -> ModuleNotFoundError: httpx
+operonx[pgvector] -> ModuleNotFoundError: httpx
+```
+
+**Fixed (metadata only).** `httpx>=0.24` added to every extra that reaches
+`operonx.providers`, honouring the invariant already stated above the extras
+block — *"each extra is self-contained... installing one extra cannot rely on
+another being present"* — and matching what `anthropic` always did.
+`operonx[openai]`, `[gemini]` and `[bedrock]` now import cleanly.
+
+### S10b — the lazy-backend design was defeated by its own base class · FIXED
+
+Fixing httpx exposed the next eager import. Retrieval-only extras still fail:
+
+```
+operonx[faiss] / [pgvector] / [qdrant] / [onnx] / [postgres]
+  -> ModuleNotFoundError: No module named 'openai'
+```
+
+`operonx/providers/llms/__init__.py` documents the right design — *"Backend
+classes are lazy-loaded via module-level `__getattr__` so this package can be
+imported with only core dependencies"* — and `embeddings/__init__.py` applies
+the same pattern deliberately. But `llms/base.py` is imported **eagerly** by
+that very module, and its lines 8–10 pull both SDKs:
+
+```python
+import httpx                                     # used at runtime (line 94-100)
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+```
+
+The two `openai` imports are **types used only in annotations** — all 14
+uses are signature annotations; the rest are docstrings. Three checks
+cleared the change: nothing in `operonx/` calls `get_type_hints`, `BaseLLM`
+is a plain ABC rather than a pydantic model, and nothing re-imports those
+names from `base.py`.
+
+**Fixed.** They now load under `if TYPE_CHECKING:`. The accompanying
+`from __future__ import annotations` is load-bearing rather than cosmetic:
+`base.py` did not have it, so its signatures were evaluated at definition
+time and the deferred imports would otherwise raise `NameError`.
+
+Verified in clean venvs — five extras now import `operonx.providers` with
+the OpenAI SDK entirely absent:
+
+```
+operonx[faiss] [pgvector] [qdrant] [onnx] [postgres]  -> OK  (no openai SDK)
+operonx[openai] [gemini] [bedrock]                    -> OK  (openai present)
+```
+
+Behaviour is unchanged with the SDK present: 1687 unit tests and 246 live
+integration tests pass, matching baseline exactly.
+
+The alternative — declaring `openai` in the retrieval extras — was rejected:
+it would make `pip install operonx[faiss]` pull an LLM SDK to do vector
+search, cementing the wrong architecture.
+
+*Caveat for later:* `from __future__ import annotations` applies file-wide.
+A pydantic model or runtime hint resolution added to `base.py` in future
+would need `get_type_hints()` with the right namespace rather than working
+by accident.
+
+### S12 — install hints pointed at extras that do not exist · FIXED
+
+`pyproject.toml`'s own install-tier comment listed
+`pip install operonx[providers]`, and `llms/__init__.py:22-23` still tells
+users to install it when a lazy backend is missing:
+
+```python
+"OpenAISDKModel": ("operonx.providers.llms.openai", "providers"),
+```
+
+**Root cause.** The extra was not merely undefined — it was *deleted* by
+commit 1f830c7 (Apr 2026, "examples: standalone per-example projects"),
+which kept both the install-tier comment and every in-code reference:
+
+```
+-providers = [
+```
+
+pip does not fail on an unknown extra; it warns and installs the base
+package. So the advice our own `ImportError` gave appeared to work, and then
+the same `ImportError` came back.
+
+**Scope was nine call sites, not two** — `llms/__init__.py`,
+`llms/factory.py` ×2, `embeddings/factory.py` ×2, `rerankers/factory.py` ×3,
+`auth/factory.py`. Two tutorial examples (`ex07`, `ex12`) pinned it, which
+is why they had no numpy despite importing it directly.
+
+**Fixed** by restoring the deleted extra verbatim, plus the `httpx` note
+from S10:
+
+```toml
+providers = [
+    "openai>=1.0",        # canonical ChatCompletion types
+    "aiohttp>=3.8",       # vLLM/TEI/Pinecone HTTP clients
+    "numpy>=2.2.6",       # vLLM embedding output type
+    "httpx>=0.24",        # Anthropic direct API client + operonx.providers import
+]
+```
+
+`ex07` and `ex12` are back on `operonx[providers]` — the pin they always
+wanted.
+
+### S12b — install hints for backends that were never implemented
+
+`DocStoreType.MONGO` and `.REDIS` are declared and have factory branches,
+but `doc_stores/mongo.py` and `redis.py` **do not exist**. Configuring one
+produced:
+
+```
+ImportError: MongoDocStore requires additional packages.
+  Install with: pip install operonx[mongo]      <- extra never existed either
+  Original error: No module named '...doc_stores.mongo'
+```
+
+Wrong twice: it blamed a missing install for something no install provides.
+Now raises `NotImplementedError` naming the backends that do exist. The
+`DocStoreType` members and the dangling `_LAZY_BACKENDS` entries are left
+alone — removing public enum members is an API decision.
+
+### Regression guard
+
+`tests/internal/cli/test_extras.py` scans every install hint in `operonx/`
+— string literals (comments excluded via `tokenize`), `_missing_extra_message`
+call sites, and `_LAZY_BACKENDS` tuples — and asserts each names a declared
+extra. 27 hints checked; verified to fail on an injected bad name.
+
+These paths only execute when a user hits a missing optional dependency,
+which is exactly why two of them rotted unnoticed for four months. Companion
+to `test_entry_points.py`, which guards the same class of bug for
+`[project.scripts]` after an identical migration-era regression.
+
+### S11 — `ex16_rag_pipeline` could never have run
+
+```python
+q_emb = EmbeddingOp.of(resource="openai", texts=[question])   # question is a Ref
+```
+
+Operonx wires one param to one state cell holding one ref, and rejects a Ref
+nested inside a list with a clear `TypeError`. The example's own
+`main.py` calls `rag(question=PARENT["question"])`, so construction fails
+before any resource is touched — the graph cannot be built at all.
+
+`ex07` shows the intended idiom: pass the Ref directly (`texts=query`).
+Fixed by matching it. The lesson is that nothing exercised these examples —
+worth a CI job that at minimum *constructs* every declared graph, which
+`operonx-extract` now does for free.
