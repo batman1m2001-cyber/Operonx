@@ -1,0 +1,14 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex02-data-pipeline"
+description = "Operonx data pipelines — pure compute, no API keys."
+
+[[graph]]
+name  = "data_pipeline"
+entry = "main:data_pipeline"
+
+[[graph]]
+name  = "text_pipeline"
+entry = "main:text_pipeline"

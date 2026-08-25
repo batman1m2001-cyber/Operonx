@@ -1,0 +1,21 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex07-embeddings-and-rag"
+description = "Operonx embeddings + RAG with optional reranker."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "basic_embedding"
+entry = "main:basic_embedding"
+
+[[graph]]
+name  = "simple_rag"
+entry = "main:simple_rag"
+
+[[graph]]
+name  = "rag_with_rerank"
+entry = "main:rag_with_rerank"

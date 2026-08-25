@@ -1,0 +1,14 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex15-callbot-streaming"
+description = "Operonx multi-level streaming callbot pipeline."
+
+[[graph]]
+name  = "llm_router"
+entry = "main:llm_router"
+
+[[graph]]
+name  = "callbot"
+entry = "main:callbot"

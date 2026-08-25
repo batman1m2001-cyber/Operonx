@@ -1,0 +1,18 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex01-hello-world"
+description = "Operonx hello-world — three tiny graphs, no API keys."
+
+[[graph]]
+name  = "hello_world"
+entry = "main:hello_world"
+
+[[graph]]
+name  = "two_steps"
+entry = "main:two_steps"
+
+[[graph]]
+name  = "fan_out_in"
+entry = "main:fan_out_in"

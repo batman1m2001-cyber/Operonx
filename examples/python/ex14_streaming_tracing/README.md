@@ -18,7 +18,7 @@ to see frame-by-frame spans.
 
 ```
 ex14_streaming_tracing/
-├── pyproject.toml    # operonx>=0.6.2 (tier 1)
+├── pyproject.toml    # operonx>=1.3.0 (tier 1)
 ├── README.md
 └── main.py
 ```

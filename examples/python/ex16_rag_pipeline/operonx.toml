@@ -1,0 +1,13 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex16-rag-pipeline"
+description = "Two-store RAG: VectorSearchOp for ids, DocFetchOp for content."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "rag"
+entry = "main:rag"

@@ -1,0 +1,42 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex13-graph"
+description = "Operonx @graph composition and nesting."
+
+[[graph]]
+name  = "double_flow"
+entry = "main:double_flow"
+
+[[graph]]
+name  = "double_renamed"
+entry = "main:double_renamed"
+
+[[graph]]
+name  = "add_and_double"
+entry = "main:add_and_double"
+
+[[graph]]
+name  = "quad_flow"
+entry = "main:quad_flow"
+
+[[graph]]
+name  = "basic"
+entry = "main:basic"
+
+[[graph]]
+name  = "chained"
+entry = "main:chained"
+
+[[graph]]
+name  = "renamed"
+entry = "main:renamed"
+
+[[graph]]
+name  = "multi_params"
+entry = "main:multi_params"
+
+[[graph]]
+name  = "nested"
+entry = "main:nested"

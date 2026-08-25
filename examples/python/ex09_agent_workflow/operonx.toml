@@ -1,0 +1,17 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex09-agent-workflow"
+description = "Operonx tool-calling agent on @graph with until= loop."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "agent_loop"
+entry = "main:agent_loop"
+
+[[graph]]
+name  = "agent"
+entry = "main:agent"

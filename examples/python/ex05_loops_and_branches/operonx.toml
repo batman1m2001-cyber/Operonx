@@ -1,0 +1,22 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex05-loops-and-branches"
+description = "Operonx generator ops + if_ branching — pure compute."
+
+[[graph]]
+name  = "for_loop"
+entry = "main:for_loop"
+
+[[graph]]
+name  = "map_op"
+entry = "main:map_op"
+
+[[graph]]
+name  = "while_loop"
+entry = "main:while_loop"
+
+[[graph]]
+name  = "branch"
+entry = "main:branch"

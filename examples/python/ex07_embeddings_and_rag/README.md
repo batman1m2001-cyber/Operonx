@@ -16,7 +16,7 @@ configured in `resources.yaml`.
 
 ```
 ex07_embeddings_and_rag/
-├── pyproject.toml      # operonx[providers]>=0.6.2 (tier 4 meta — pulls numpy + aiohttp)
+├── pyproject.toml      # operonx[providers]>=1.3.0
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY
 ├── resources.yaml      # embedding:openai + llm:gpt-4o-mini (+ optional reranker:bge-m3)
