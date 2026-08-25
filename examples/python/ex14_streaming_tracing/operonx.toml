@@ -1,0 +1,14 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex14-streaming-tracing"
+description = "Operonx generator pipelines + tracing hooks (no API keys)."
+
+[[graph]]
+name  = "text_pipeline"
+entry = "main:text_pipeline"
+
+[[graph]]
+name  = "async_pipeline"
+entry = "main:async_pipeline"

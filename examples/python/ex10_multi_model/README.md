@@ -14,7 +14,7 @@ Patterns for running multiple LLMs together.
 
 ```
 ex10_multi_model/
-├── pyproject.toml      # operonx[openai]>=0.6.2
+├── pyproject.toml      # operonx[openai]>=1.3.0
 ├── README.md
 ├── .env.example        # OPENAI_API_KEY
 ├── resources.yaml      # llm:gpt-4o + llm:gpt-4o-mini

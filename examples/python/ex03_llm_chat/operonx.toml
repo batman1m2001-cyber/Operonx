@@ -1,0 +1,17 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex03-llm-chat"
+description = "Operonx LLM chat — basic / chain / summarize via OpenAI."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "basic_chat"
+entry = "main:basic_chat"
+
+[[graph]]
+name  = "summarize_pipeline"
+entry = "main:summarize_pipeline"

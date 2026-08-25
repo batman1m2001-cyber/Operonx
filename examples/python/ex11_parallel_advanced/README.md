@@ -13,7 +13,7 @@ Tier 1 — pure compute, no API keys.
 
 ```
 ex11_parallel_advanced/
-├── pyproject.toml    # operonx>=0.6.2 (tier 1)
+├── pyproject.toml    # operonx>=1.3.0 (tier 1)
 ├── README.md
 └── main.py
 ```

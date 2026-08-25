@@ -1,0 +1,25 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex08-error-handling"
+description = "Operonx error handling — capture, route, retry, LLM fallback."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "error_capture"
+entry = "main:error_capture"
+
+[[graph]]
+name  = "error_routing"
+entry = "main:error_routing"
+
+[[graph]]
+name  = "retry_fallback"
+entry = "main:retry_fallback"
+
+[[graph]]
+name  = "llm_fallback"
+entry = "main:llm_fallback"

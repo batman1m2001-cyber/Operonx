@@ -1,0 +1,18 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex11-parallel-advanced"
+description = "Operonx fan-out/fan-in, generator iteration, partial failure."
+
+[[graph]]
+name  = "fan_out"
+entry = "main:fan_out"
+
+[[graph]]
+name  = "iteration"
+entry = "main:iteration"
+
+[[graph]]
+name  = "partial_failure"
+entry = "main:partial_failure"

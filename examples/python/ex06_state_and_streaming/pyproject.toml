@@ -1,0 +1,8 @@
+[project]
+name = "operonx-ex06-state-and-streaming"
+version = "0.1.0"
+description = "SCRATCH run-scoped state, EmitOp side channels, InterruptOp human-in-the-loop."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx>=1.3.0",
+]

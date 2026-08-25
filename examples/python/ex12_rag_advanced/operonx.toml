@@ -1,0 +1,21 @@
+# Operonx project manifest. Declares the graphs a tool can load,
+# and where resources come from. See docs/design/UI_PLATFORM_PLAN.md.
+
+[project]
+name = "ex12-rag-advanced"
+description = "Operonx keyword RRF + hybrid (vector + keyword) RAG."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "keyword_rrf"
+entry = "main:keyword_rrf"
+
+[[graph]]
+name  = "hybrid_rag"
+entry = "main:hybrid_rag"
+
+[[graph]]
+name  = "precompute_embeddings"
+entry = "main:precompute_embeddings"
