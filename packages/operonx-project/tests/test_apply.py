@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 _SEQ = itertools.count()
 
-WORKFLOW = '''\
+WORKFLOW = """\
 from operonx.core import END, PARENT, START, graph, op
 from operonx.providers import LLMOp
 
@@ -29,9 +29,9 @@ def chat(question):
     pre = clean(text=question)      # keep this
     llm = LLMOp.of(resource="gpt-4o-mini", q=pre["cleaned"])
     START >> pre >> llm >> END
-'''
+"""
 
-BUILDER = '''\
+BUILDER = """\
 from operonx.core import END, PARENT, START, graph
 
 
@@ -44,7 +44,7 @@ def build(agent):
 
 
 agent = object()
-'''
+"""
 
 
 @pytest.fixture
@@ -74,8 +74,9 @@ class TestPlanning:
 
     def test_a_no_op_plan_has_an_empty_diff(self, project):
         manifest, _ = project
-        plan = plan_edit(manifest, "Chat Flow", "set_resource", op_name="llm",
-                         resource="gpt-4o-mini")
+        plan = plan_edit(
+            manifest, "Chat Flow", "set_resource", op_name="llm", resource="gpt-4o-mini"
+        )
         assert not plan.changed and plan.diff == ""
 
     def test_the_label_is_resolved_not_the_function_name(self, project):
@@ -115,8 +116,9 @@ class TestApplying:
     def test_a_no_op_writes_nothing(self, project):
         manifest, path = project
         stamp = path.stat().st_mtime_ns
-        plan = plan_edit(manifest, "Chat Flow", "set_resource", op_name="llm",
-                         resource="gpt-4o-mini")
+        plan = plan_edit(
+            manifest, "Chat Flow", "set_resource", op_name="llm", resource="gpt-4o-mini"
+        )
         assert apply_plan(plan) is False
         assert path.stat().st_mtime_ns == stamp
 
@@ -161,8 +163,7 @@ class TestSourceRoots:
         (pkg / "__init__.py").write_text("", encoding="utf-8")
         (pkg / "flow.py").write_text(WORKFLOW, encoding="utf-8")
         (tmp_path / "operonx.toml").write_text(
-            '[project]\nname="d"\nsrc=["src","."]\n'
-            '[[graph]]\nname="C"\nentry="wf_pkg.flow:chat"\n',
+            '[project]\nname="d"\nsrc=["src","."]\n[[graph]]\nname="C"\nentry="wf_pkg.flow:chat"\n',
             encoding="utf-8",
         )
         manifest = Manifest.load(tmp_path)

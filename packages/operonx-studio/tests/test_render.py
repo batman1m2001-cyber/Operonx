@@ -33,8 +33,15 @@ def graph(name="flow", nodes=(), edges=(), **kw):
 
 
 def node(name, kind="FuncOp", **kw):
-    return {"id": f"flow.{name}", "name": name, "kind": kind,
-            "inputs": [], "outputs": [], "source": None, **kw}
+    return {
+        "id": f"flow.{name}",
+        "name": name,
+        "kind": kind,
+        "inputs": [],
+        "outputs": [],
+        "source": None,
+        **kw,
+    }
 
 
 class TestSelfContained:
@@ -46,28 +53,37 @@ class TestSelfContained:
 
     def test_single_file_with_inline_data(self):
         page = render_html(ir([graph(nodes=[node("a")])]))
-        assert "<script id=\"ir\"" in page and "</html>" in page
+        assert '<script id="ir"' in page and "</html>" in page
 
 
 class TestNothingIsLost:
     def test_every_node_reaches_the_payload(self):
         names = ["alpha", "beta", "orphan"]
-        payload = render_project(ir([graph(nodes=[node(n) for n in names],
-                                           edges=[{"from": "alpha", "to": "beta"}])]))
+        payload = render_project(
+            ir([graph(nodes=[node(n) for n in names], edges=[{"from": "alpha", "to": "beta"}])])
+        )
         assert {n["name"] for n in payload["graphs"][0]["nodes"]} == set(names)
 
     def test_edges_never_point_at_a_missing_node(self):
         """START/END are boundaries; they must not become phantom nodes."""
-        payload = render_project(ir([graph(
-            nodes=[node("a")],
-            edges=[{"from": "a", "to": "__END__"}, {"from": "__START__", "to": "a"}])]))
+        payload = render_project(
+            ir(
+                [
+                    graph(
+                        nodes=[node("a")],
+                        edges=[{"from": "a", "to": "__END__"}, {"from": "__START__", "to": "a"}],
+                    )
+                ]
+            )
+        )
         g = payload["graphs"][0]
         ids = {n["id"] for n in g["nodes"]}
         assert all(e["src"] in ids and e["dst"] in ids for e in g["edges"])
 
     def test_every_drawn_edge_has_a_path(self):
-        payload = render_project(ir([graph(
-            nodes=[node("a"), node("b")], edges=[{"from": "a", "to": "b"}])]))
+        payload = render_project(
+            ir([graph(nodes=[node("a"), node("b")], edges=[{"from": "a", "to": "b"}])])
+        )
         assert all(e["d"] for e in payload["graphs"][0]["edges"])
 
 
@@ -75,72 +91,134 @@ class TestInspectorData:
     """'What feeds this node?' is the question the graph is opened to answer."""
 
     def test_ref_binding_names_producer_and_output(self):
-        n = node("b", inputs=[{"name": "x", "required": True,
-                               "binding": {"kind": "ref", "from": "flow.a", "output": "y",
-                                           "transforms": 0}}])
+        n = node(
+            "b",
+            inputs=[
+                {
+                    "name": "x",
+                    "required": True,
+                    "binding": {"kind": "ref", "from": "flow.a", "output": "y", "transforms": 0},
+                }
+            ],
+        )
         payload = render_project(ir([graph(nodes=[node("a"), n])]))
         shown = payload["graphs"][0]["nodes"][-1]["inputs"][0]
         assert shown["kind"] == "ref" and shown["text"] == "a.y"
 
     def test_transform_count_is_surfaced(self):
-        n = node("b", inputs=[{"name": "x", "required": True,
-                               "binding": {"kind": "ref", "from": "flow.a", "output": "y",
-                                           "transforms": 2}}])
+        n = node(
+            "b",
+            inputs=[
+                {
+                    "name": "x",
+                    "required": True,
+                    "binding": {"kind": "ref", "from": "flow.a", "output": "y", "transforms": 2},
+                }
+            ],
+        )
         text = render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["inputs"][0]["text"]
         assert "2 transform" in text
 
     def test_scratch_binding(self):
-        n = node("a", inputs=[{"name": "log", "required": True,
-                               "binding": {"kind": "scratch", "key": "log"}}])
+        n = node(
+            "a",
+            inputs=[
+                {"name": "log", "required": True, "binding": {"kind": "scratch", "key": "log"}}
+            ],
+        )
         text = render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["inputs"][0]["text"]
         assert text == "SCRATCH['log']"
 
     def test_literal_and_unset(self):
-        n = node("a", inputs=[
-            {"name": "x", "binding": {"kind": "literal", "value": 7}},
-            {"name": "y", "binding": {"kind": "unset"}}])
+        n = node(
+            "a",
+            inputs=[
+                {"name": "x", "binding": {"kind": "literal", "value": 7}},
+                {"name": "y", "binding": {"kind": "unset"}},
+            ],
+        )
         shown = render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["inputs"]
         assert shown[0]["text"] == "7" and shown[1]["text"] == "—"
 
     def test_source_anchor_prefers_where_it_was_wired(self):
-        n = node("a", source={"defined_at": {"file": "ops.py", "line": 4},
-                              "wired_at": {"file": "wf.py", "line": 30}})
-        assert render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["source"] == "wf.py:30"
+        n = node(
+            "a",
+            source={
+                "defined_at": {"file": "ops.py", "line": 4},
+                "wired_at": {"file": "wf.py", "line": 30},
+            },
+        )
+        assert (
+            render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["source"] == "wf.py:30"
+        )
 
     def test_source_falls_back_to_definition(self):
         n = node("a", source={"defined_at": {"file": "ops.py", "line": 4}})
-        assert render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["source"] == "ops.py:4"
+        assert (
+            render_project(ir([graph(nodes=[n])]))["graphs"][0]["nodes"][0]["source"] == "ops.py:4"
+        )
 
 
 class TestEdgeSemantics:
     def test_auto_softened_edge_is_distinguishable_from_authored(self):
-        payload = render_project(ir([graph(
-            nodes=[node("a"), node("b"), node("c")],
-            edges=[{"from": "a", "to": "b", "soft": True, "origin": "auto_soft"},
-                   {"from": "a", "to": "c", "origin": "authored"}])]))
+        payload = render_project(
+            ir(
+                [
+                    graph(
+                        nodes=[node("a"), node("b"), node("c")],
+                        edges=[
+                            {"from": "a", "to": "b", "soft": True, "origin": "auto_soft"},
+                            {"from": "a", "to": "c", "origin": "authored"},
+                        ],
+                    )
+                ]
+            )
+        )
         edges = {e["dst"].split(".")[-1]: e for e in payload["graphs"][0]["edges"]}
         assert edges["b"]["dash"] and edges["b"]["origin"] == "auto_soft"
         assert not edges["c"]["dash"]
 
     def test_condition_edge_is_styled_apart(self):
-        payload = render_project(ir([graph(
-            nodes=[node("a"), node("b")],
-            edges=[{"from": "a", "to": "b", "type": "condition"}])]))
+        payload = render_project(
+            ir(
+                [
+                    graph(
+                        nodes=[node("a"), node("b")],
+                        edges=[{"from": "a", "to": "b", "type": "condition"}],
+                    )
+                ]
+            )
+        )
         assert payload["graphs"][0]["edges"][0]["colour"] == "var(--edge-cond)"
 
 
 class TestLoops:
     def test_rewritten_cycles_are_announced(self):
         """Back-edges are deleted from the built graph — say so, don't hide it."""
-        payload = render_project(ir([graph(
-            nodes=[node("a")],
-            rewritten_from={"__loop_0__": {"scc": ["a"], "back_edges": [["a", "a"]]}})]))
+        payload = render_project(
+            ir(
+                [
+                    graph(
+                        nodes=[node("a")],
+                        rewritten_from={"__loop_0__": {"scc": ["a"], "back_edges": [["a", "a"]]}},
+                    )
+                ]
+            )
+        )
         assert "__loop_0__" in payload["graphs"][0]["rewritten"]
 
     def test_loop_node_carries_its_mode(self):
-        g = graph(nodes=[node("__loop_0__", kind="GraphOp")],
-                  loops={"flow.__loop_0__": {"mode": "synthetic", "until": None,
-                                             "synthetic": True, "back_edges": []}})
+        g = graph(
+            nodes=[node("__loop_0__", kind="GraphOp")],
+            loops={
+                "flow.__loop_0__": {
+                    "mode": "synthetic",
+                    "until": None,
+                    "synthetic": True,
+                    "back_edges": [],
+                }
+            },
+        )
         shown = render_project(ir([g]))["graphs"][0]["nodes"][0]
         assert shown["loop"]["mode"] == "synthetic"
 
@@ -180,11 +258,13 @@ class TestMultipleGraphs:
 
 class TestResourcesAndDeps:
     def test_resources_and_dependencies_reach_the_page(self):
-        payload = render_project(ir(
-            [graph(nodes=[node("a")])],
-            resources={"keys": ["llm:gpt-4o"], "env": {"required": ["K"], "optional": {}}},
-            dependencies={"declared": True, "name": "demo", "dependencies": ["operonx>=1.3.0"]},
-        ))
+        payload = render_project(
+            ir(
+                [graph(nodes=[node("a")])],
+                resources={"keys": ["llm:gpt-4o"], "env": {"required": ["K"], "optional": {}}},
+                dependencies={"declared": True, "name": "demo", "dependencies": ["operonx>=1.3.0"]},
+            )
+        )
         assert payload["resources"]["keys"] == ["llm:gpt-4o"]
         assert payload["dependencies"]["dependencies"] == ["operonx>=1.3.0"]
 
@@ -223,13 +303,27 @@ class TestGeneratedScript:
         if node is None:
             pytest.skip("node not available")
 
-        page = render_html(ir(
-            [graph(nodes=[node_ := node_maker("a"), node_maker("b")],
-                   edges=[{"from": "a", "to": "b", "soft": True, "origin": "auto_soft"}])],
-            resources={"keys": ["llm:x"], "env": {"required": ["K"], "optional": {"L": "info"}}},
-            dependencies={"declared": True, "name": "d", "dependencies": ["operonx"],
-                          "extras": {"serve": ["fastapi"]}},
-        ), env_status={"K": {"set": False, "in_environment": False, "in_dotenv": False}})
+        page = render_html(
+            ir(
+                [
+                    graph(
+                        nodes=[node_ := node_maker("a"), node_maker("b")],
+                        edges=[{"from": "a", "to": "b", "soft": True, "origin": "auto_soft"}],
+                    )
+                ],
+                resources={
+                    "keys": ["llm:x"],
+                    "env": {"required": ["K"], "optional": {"L": "info"}},
+                },
+                dependencies={
+                    "declared": True,
+                    "name": "d",
+                    "dependencies": ["operonx"],
+                    "extras": {"serve": ["fastapi"]},
+                },
+            ),
+            env_status={"K": {"set": False, "in_environment": False, "in_dotenv": False}},
+        )
 
         script = re.findall(r"<script>(.*?)</script>", page, re.S)[0]
         target = tmp_path / "page.js"

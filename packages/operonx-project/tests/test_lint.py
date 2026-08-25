@@ -25,7 +25,8 @@ def only(src: str):
 
 class TestC3UnstableNames:
     def test_clean_assignment_is_fine(self):
-        assert rules("""
+        assert (
+            rules("""
 @op
 def step(x): ...
 
@@ -33,7 +34,9 @@ def step(x): ...
 def flow(v):
     a = step(x=v)
     START >> a >> END
-""") == []
+""")
+            == []
+        )
 
     def test_op_in_argument_position_is_flagged(self):
         f = only("""
@@ -62,25 +65,31 @@ def flow(v):
 """)
 
     def test_explicit_name_is_always_acceptable(self):
-        assert rules("""
+        assert (
+            rules("""
 @op
 def step(x): ...
 
 @graph
 def flow(v):
     items = [step(x=v, name="s1")]
-""") == []
+""")
+            == []
+        )
 
     def test_root_graph_in_main_is_not_flagged(self):
         """A throwaway instance handed to Operon() — nothing keys on its name."""
-        assert rules("""
+        assert (
+            rules("""
 @graph
 def flow(v):
     ...
 
 async def main():
     runs = [("a", flow(v=1)), ("b", flow(v=2))]
-""") == []
+""")
+            == []
+        )
 
     def test_reassignment_inside_graph_is_flagged(self):
         assert "C3" in rules("""
@@ -109,7 +118,8 @@ def flow(items):
 
     def test_wiring_over_a_literal_is_only_a_warning(self):
         """for leaf in (a, b): leaf >> PARENT — topology is still static."""
-        found = lint_source("""
+        found = lint_source(
+            """
 @op
 def step(x): ...
 
@@ -119,24 +129,32 @@ def flow(v):
     b = step(x=v)
     for leaf in (a, b):
         leaf >> PARENT
-""", HERE)
+""",
+            HERE,
+        )
         assert [f.severity for f in found] == ["warning"]
 
     def test_wiring_over_a_dynamic_iterable_is_an_error(self):
-        found = lint_source("""
+        found = lint_source(
+            """
 @graph
 def flow(nodes):
     for leaf in nodes:
         leaf >> PARENT
-""", HERE)
+""",
+            HERE,
+        )
         assert [f.severity for f in found] == ["error"]
 
     def test_loop_outside_a_graph_is_ignored(self):
-        assert rules("""
+        assert (
+            rules("""
 def helper(items):
     for i in items:
         print(i)
-""") == []
+""")
+            == []
+        )
 
 
 class TestC6Resources:
@@ -145,14 +163,16 @@ class TestC6Resources:
 
     def test_list_of_literals_is_fine(self):
         """Load balancing across declared keys is still fully resolvable."""
-        assert rules(
-            '@graph\ndef f(q):\n    x = LLMOp.of(resource=["a", "b"], ratios=[0.7, 0.3])\n'
-        ) == []
+        assert (
+            rules('@graph\ndef f(q):\n    x = LLMOp.of(resource=["a", "b"], ratios=[0.7, 0.3])\n')
+            == []
+        )
 
     def test_dynamic_resource_warns_rather_than_errors(self):
         """`resource=agent.llm_resource` is deliberate injection, not a defect."""
         found = lint_source(
-            "@graph\ndef f(q):\n    x = LLMOp.of(resource=agent.llm_resource)\n", HERE)
+            "@graph\ndef f(q):\n    x = LLMOp.of(resource=agent.llm_resource)\n", HERE
+        )
         assert [(f.rule, f.severity) for f in found] == [("C6", "warning")]
 
     def test_credential_read_directly_is_a_warning(self):
@@ -169,12 +189,15 @@ class TestRobustness:
         assert f.rule == "E00"
 
     def test_unrelated_calls_are_not_mistaken_for_ops(self):
-        assert rules("""
+        assert (
+            rules("""
 @graph
 def flow(v):
     x = str(v)
     y = compute(helper(v))
-""") == []
+""")
+            == []
+        )
 
 
 class TestSuggest:
@@ -185,12 +208,15 @@ class TestSuggest:
 
     def test_drafts_bind_for_builder_functions(self, tmp_path):
         """The callbot shape: a plain function returning a nested @graph."""
-        (tmp_path / "wf.py").write_text("""
+        (tmp_path / "wf.py").write_text(
+            """
 def build_pipeline(agent):
     @graph
     def pipeline(x): ...
     return pipeline
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
         out = suggest_manifest(tmp_path)
         assert 'entry = "wf:build_pipeline"' in out
         assert "[graph.bind]" in out and "agent =" in out
@@ -220,9 +246,7 @@ class TestCLI:
         assert main([str(tmp_path), "--no-manifest"]) == 0
 
     def test_warnings_alone_do_not_fail(self, tmp_path):
-        (tmp_path / "wf.py").write_text(
-            'import os\nk = os.getenv("API_KEY")\n', encoding="utf-8"
-        )
+        (tmp_path / "wf.py").write_text('import os\nk = os.getenv("API_KEY")\n', encoding="utf-8")
         assert main([str(tmp_path), "--no-manifest"]) == 0
 
     def test_missing_path_exits_two(self, tmp_path):

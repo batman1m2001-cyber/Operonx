@@ -89,10 +89,20 @@ def suggest_manifest(root: Path) -> str:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if "graph" in _decorators(node):
-                lines += ["", "[[graph]]", f'name  = "{node.name}"', f'entry = "{module}:{node.name}"']
+                lines += [
+                    "",
+                    "[[graph]]",
+                    f'name  = "{node.name}"',
+                    f'entry = "{module}:{node.name}"',
+                ]
             elif _returns_a_graph(node):
                 params = [a.arg for a in node.args.args]
-                lines += ["", "[[graph]]", f'name  = "{node.name}"', f'entry = "{module}:{node.name}"']
+                lines += [
+                    "",
+                    "[[graph]]",
+                    f'name  = "{node.name}"',
+                    f'entry = "{module}:{node.name}"',
+                ]
                 if params:
                     lines.append("[graph.bind]")
                     lines += [f'{p} = "module:provide_{p}"   # zero-arg provider' for p in params]
@@ -144,8 +154,10 @@ def _report_build(root: Path) -> int:
             print(f"  {r.graph:32} [C1] {r.error}")
     slowest = max((r.seconds for r in reports if r.ok), default=0.0)
     slow = [r for r in reports if r.slow]
-    print(f"\n{len(reports) - failed}/{len(reports)} graph(s) build offline; "
-          f"slowest {slowest * 1000:.0f}ms")
+    print(
+        f"\n{len(reports) - failed}/{len(reports)} graph(s) build offline; "
+        f"slowest {slowest * 1000:.0f}ms"
+    )
     if slow:
         print(
             f"{len(slow)} slow build(s). A cached load is paid once by whichever "
@@ -253,12 +265,7 @@ def new_main(argv: Sequence[str] | None = None) -> int:
     root = Path(args.path)
     for path in written:
         print(f"  created {path}")
-    print(
-        f"\nNext:\n"
-        f"  cd {root} && uv sync\n"
-        f"  operonx-lint --build .\n"
-        f"  operonx-studio . --serve"
-    )
+    print(f"\nNext:\n  cd {root} && uv sync\n  operonx-lint --build .\n  operonx-studio . --serve")
     return 0
 
 

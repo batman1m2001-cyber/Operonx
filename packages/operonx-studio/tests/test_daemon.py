@@ -15,7 +15,7 @@ from operonx_studio.daemon import ProjectWatcher, build_app, page_for
 
 pytestmark = pytest.mark.unit
 
-WORKFLOW = '''
+WORKFLOW = """
 from operonx.core import END, PARENT, START, graph, op
 
 @op
@@ -27,7 +27,7 @@ def flow(x):
     a = first(x=x)
     a["y"] >> PARENT["y"]
     START >> a >> END
-'''
+"""
 
 MANIFEST = '[project]\nname="live"\n[[graph]]\nname="flow"\nentry="{mod}:flow"\n'
 
@@ -224,8 +224,9 @@ class TestEditEndpoint:
         api, root = client
         source = next(root.glob("live_*.py"))
         before = source.read_text(encoding="utf-8")
-        body = api.post("/api/edit", json={"graph": "flow", "action": "rename",
-                                           "old": "a", "new": "renamed"}).json()
+        body = api.post(
+            "/api/edit", json={"graph": "flow", "action": "rename", "old": "a", "new": "renamed"}
+        ).json()
         assert body["changed"] is True and body["applied"] is False
         assert "+" in body["diff"] and "renamed" in body["diff"]
         assert source.read_text(encoding="utf-8") == before
@@ -233,23 +234,39 @@ class TestEditEndpoint:
     def test_applying_writes_the_file(self, client):
         api, root = client
         source = next(root.glob("live_*.py"))
-        body = api.post("/api/edit", json={"graph": "flow", "action": "rename",
-                                           "old": "a", "new": "renamed",
-                                           "dry_run": False}).json()
+        body = api.post(
+            "/api/edit",
+            json={
+                "graph": "flow",
+                "action": "rename",
+                "old": "a",
+                "new": "renamed",
+                "dry_run": False,
+            },
+        ).json()
         assert body["applied"] is True
         assert "renamed = first" in source.read_text(encoding="utf-8")
 
     def test_the_new_structure_is_visible_immediately_after(self, client):
         api, _ = client
-        api.post("/api/edit", json={"graph": "flow", "action": "rename", "old": "a",
-                                    "new": "renamed", "dry_run": False})
+        api.post(
+            "/api/edit",
+            json={
+                "graph": "flow",
+                "action": "rename",
+                "old": "a",
+                "new": "renamed",
+                "dry_run": False,
+            },
+        )
         names = [n["name"] for n in api.get("/api/ir").json()["graphs"][0]["nodes"]]
         assert names == ["renamed"]
 
     def test_a_no_op_reports_no_change(self, client):
         api, _ = client
-        body = api.post("/api/edit", json={"graph": "flow", "action": "rename",
-                                           "old": "a", "new": "a"}).json()
+        body = api.post(
+            "/api/edit", json={"graph": "flow", "action": "rename", "old": "a", "new": "a"}
+        ).json()
         assert body["changed"] is False and body["diff"] == ""
 
     def test_missing_arguments(self, client):
@@ -263,14 +280,14 @@ class TestEditEndpoint:
 
     def test_bad_arguments_for_a_known_action(self, client):
         api, _ = client
-        response = api.post("/api/edit", json={"graph": "flow", "action": "rename",
-                                               "nonsense": 1})
+        response = api.post("/api/edit", json={"graph": "flow", "action": "rename", "nonsense": 1})
         assert response.status_code == 400
 
     def test_an_inapplicable_edit_explains_itself(self, client):
         api, _ = client
-        response = api.post("/api/edit", json={"graph": "flow", "action": "rename",
-                                               "old": "absent", "new": "x"})
+        response = api.post(
+            "/api/edit", json={"graph": "flow", "action": "rename", "old": "absent", "new": "x"}
+        )
         assert response.status_code == 400 and "no name" in response.json()["error"]
 
 

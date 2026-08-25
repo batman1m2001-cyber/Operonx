@@ -11,7 +11,8 @@ pytestmark = pytest.mark.unit
 class TestDotenvNames:
     def test_reads_names_only(self, tmp_path):
         (tmp_path / ".env").write_text(
-            "A=1\nexport B=2\n# C=3\n\n  D  =4\nnot an assignment\n", encoding="utf-8")
+            "A=1\nexport B=2\n# C=3\n\n  D  =4\nnot an assignment\n", encoding="utf-8"
+        )
         assert dotenv_names(tmp_path / ".env") == {"A", "B", "D"}
 
     def test_commented_lines_do_not_count_as_set(self, tmp_path):
@@ -28,8 +29,12 @@ class TestStatus:
         (tmp_path / ".env").write_text("FROM_FILE=x\n", encoding="utf-8")
         monkeypatch.setenv("FROM_ENV", "y")
         out = env_status(tmp_path, ["FROM_FILE", "FROM_ENV", "NOWHERE"], [])
-        assert out["FROM_FILE"] == {"set": True, "in_environment": False,
-                                    "in_dotenv": True, "in_example": False}
+        assert out["FROM_FILE"] == {
+            "set": True,
+            "in_environment": False,
+            "in_dotenv": True,
+            "in_example": False,
+        }
         assert out["FROM_ENV"]["in_environment"] and not out["FROM_ENV"]["in_dotenv"]
         assert out["NOWHERE"]["set"] is False
 

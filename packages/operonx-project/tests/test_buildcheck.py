@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 _SEQ = itertools.count()
 
-CLEAN = '''
+CLEAN = """
 from operonx.core import END, PARENT, START, graph, op
 
 @op
@@ -26,10 +26,10 @@ def flow(x):
     a = first(x=x)
     a["y"] >> PARENT["y"]
     START >> a >> END
-'''
+"""
 
 # Reaching the network while *constructing* — the thing C2 forbids.
-PHONES_HOME = '''
+PHONES_HOME = """
 import socket
 from operonx.core import END, PARENT, START, graph, op
 
@@ -43,7 +43,7 @@ def flow(x):
     a = first(x=x)
     a["y"] >> PARENT["y"]
     START >> a >> END
-'''
+"""
 
 
 def project(tmp_path: Path, source: str) -> Manifest:

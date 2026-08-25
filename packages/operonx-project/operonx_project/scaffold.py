@@ -31,7 +31,7 @@ class ScaffoldError(Exception):
     """The target directory is unusable."""
 
 
-_PYPROJECT = '''\
+_PYPROJECT = """\
 [project]
 name = "{dist}"
 version = "0.1.0"
@@ -40,9 +40,9 @@ requires-python = ">=3.10"
 dependencies = [
     "operonx{extras}>={pin}",
 ]
-'''
+"""
 
-_MANIFEST = '''\
+_MANIFEST = """\
 # Declares the graphs a tool may load, and where resources come from.
 # `operonx-lint`, `operonx-extract` and `operonx-studio` all read this.
 
@@ -53,12 +53,12 @@ description = "An operonx workflow."
 [[graph]]
 name  = "flow"
 entry = "workflow:flow"
-'''
+"""
 
-_RESOURCES_BLOCK = '''
+_RESOURCES_BLOCK = """
 [resources]
 overlay = "resources.yaml"
-'''
+"""
 
 _WORKFLOW_PLAIN = '''\
 """The project\'s workflow.
@@ -129,7 +129,7 @@ def flow(text):
     START >> clean >> answer >> END
 '''
 
-_RESOURCES = '''\
+_RESOURCES = """\
 # Resource keys this project references by name. `${{VAR}}` is required,
 # `${{VAR:default}}` optional — the env contract is derived from these, so
 # there is no second list to keep in step.
@@ -139,15 +139,15 @@ llm:gpt-4o-mini:
   api_key: ${{OPENAI_API_KEY}}
   base_url: https://api.openai.com/v1
   model: gpt-4o-mini
-'''
+"""
 
-_ENV_EXAMPLE = '''\
+_ENV_EXAMPLE = """\
 # Copy to .env and fill in. Values are never read by the studio — only
 # whether a name is set.
 OPENAI_API_KEY=sk-...
-'''
+"""
 
-_README = '''\
+_README = """\
 # {name}
 
 ```bash
@@ -157,7 +157,7 @@ operonx-studio . --serve   # graph, resources, env and deps in a browser
 ```
 
 `workflow.py` holds the graph; `operonx.toml` declares what a tool may load.
-'''
+"""
 
 
 def scaffold(root: Path | str, name: str | None = None, *, with_llm: bool = False) -> List[Path]:
@@ -176,9 +176,7 @@ def scaffold(root: Path | str, name: str | None = None, *, with_llm: bool = Fals
         "pyproject.toml": _PYPROJECT.format(
             dist=dist, pin=OPERONX_PIN, extras="[openai]" if with_llm else ""
         ),
-        "operonx.toml": _MANIFEST.format(
-            name=name, resources=_RESOURCES_BLOCK if with_llm else ""
-        ),
+        "operonx.toml": _MANIFEST.format(name=name, resources=_RESOURCES_BLOCK if with_llm else ""),
         "workflow.py": (_WORKFLOW_LLM if with_llm else _WORKFLOW_PLAIN).format(),
         "README.md": _README.format(name=name),
     }

@@ -32,7 +32,10 @@ class TestLoad:
         assert m.graphs[0].bind == {} and m.graphs[0].inputs == {}
 
     def test_full(self, tmp_path):
-        m = Manifest.load(write(tmp_path, """
+        m = Manifest.load(
+            write(
+                tmp_path,
+                """
 [project]
 name = "callbot"
 description = "voice bot"
@@ -47,7 +50,9 @@ entry = "callbot.graph:build_pipeline"
 inputs = { turn_id = 0 }
 [graph.bind]
 agent = "agents.hr:HRAgent"
-"""))
+""",
+            )
+        )
         assert m.description == "voice bot"
         assert m.resources.base == "common.yaml"
         g = m.graph("pipeline")
@@ -79,11 +84,15 @@ agent = "agents.hr:HRAgent"
     def test_bad_entry_reference_fails_at_parse(self, tmp_path, ref):
         """A typo is a manifest error, not a confusing ImportError later."""
         with pytest.raises(ManifestError, match="module:attr"):
-            Manifest.load(write(tmp_path, f'[project]\nname="d"\n[[graph]]\nname="f"\nentry="{ref}"\n'))
+            Manifest.load(
+                write(tmp_path, f'[project]\nname="d"\n[[graph]]\nname="f"\nentry="{ref}"\n')
+            )
 
     def test_duplicate_graph_names_rejected(self, tmp_path):
         with pytest.raises(ManifestError, match="duplicate"):
-            Manifest.load(write(tmp_path, MINIMAL + '\n[[graph]]\nname="flow"\nentry="main:other"\n'))
+            Manifest.load(
+                write(tmp_path, MINIMAL + '\n[[graph]]\nname="flow"\nentry="main:other"\n')
+            )
 
     def test_graph_lookup_lists_alternatives(self, tmp_path):
         m = Manifest.load(write(tmp_path, MINIMAL))
@@ -94,23 +103,32 @@ agent = "agents.hr:HRAgent"
 class TestResolve:
     def test_resolves_from_project_root(self, tmp_path):
         (tmp_path / "mod_root.py").write_text("VALUE = 41\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_root:VALUE"\n'))
+        m = Manifest.load(
+            write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_root:VALUE"\n')
+        )
         assert m.graph("g").resolve(m.root) == 41
 
     def test_unimportable_module_names_the_graph(self, tmp_path):
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="nope_xyz:f"\n'))
+        m = Manifest.load(
+            write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="nope_xyz:f"\n')
+        )
         with pytest.raises(ManifestError, match="graph 'g' entry.*nope_xyz"):
             m.graph("g").resolve(m.root)
 
     def test_missing_attribute_names_the_graph(self, tmp_path):
         (tmp_path / "mod_attr.py").write_text("OTHER = 1\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_attr:absent"\n'))
+        m = Manifest.load(
+            write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_attr:absent"\n')
+        )
         with pytest.raises(ManifestError, match="no attribute 'absent'"):
             m.graph("g").resolve(m.root)
 
     def test_resolve_bind(self, tmp_path):
         (tmp_path / "dep.py").write_text("class Agent: pass\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, """
+        m = Manifest.load(
+            write(
+                tmp_path,
+                """
 [project]
 name = "d"
 [[graph]]
@@ -118,14 +136,18 @@ name  = "g"
 entry = "dep:Agent"
 [graph.bind]
 agent = "dep:Agent"
-"""))
+""",
+            )
+        )
         assert m.graph("g").resolve_bind(m.root)["agent"].__name__ == "Agent"
 
     def test_resolve_does_not_leak_sys_path(self, tmp_path):
         import sys
 
         (tmp_path / "mod_path.py").write_text("VALUE = 1\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_path:VALUE"\n'))
+        m = Manifest.load(
+            write(tmp_path, '[project]\nname="d"\n[[graph]]\nname="g"\nentry="mod_path:VALUE"\n')
+        )
         before = list(sys.path)
         m.graph("g").resolve(m.root)
         assert sys.path == before
@@ -134,7 +156,10 @@ agent = "dep:Agent"
 class TestResourceSpec:
     def test_files_in_merge_order_skipping_absent(self, tmp_path):
         (tmp_path / "resources.yaml").write_text("llm:x: {}\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, """
+        m = Manifest.load(
+            write(
+                tmp_path,
+                """
 [project]
 name = "d"
 [resources]
@@ -143,7 +168,9 @@ overlay = "resources.yaml"
 [[graph]]
 name  = "g"
 entry = "m:f"
-"""))
+""",
+            )
+        )
         assert [p.name for p in m.resources.files(m.root)] == ["resources.yaml"]
 
     def test_no_resources_declared(self, tmp_path):
@@ -194,7 +221,7 @@ class TestForeignModuleCollision:
         )
         m = Manifest.load(tmp_path)
         assert m.graph("g").resolve(m.root) == 3
-        assert m.graph("g").resolve(m.root) == 3   # second call uses the cache
+        assert m.graph("g").resolve(m.root) == 3  # second call uses the cache
 
 
 class TestSourceRoots:
@@ -209,25 +236,35 @@ class TestSourceRoots:
         pkg.mkdir(parents=True)
         (pkg / "__init__.py").write_text("", encoding="utf-8")
         (pkg / "mod.py").write_text("VALUE = 5\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, """
+        m = Manifest.load(
+            write(
+                tmp_path,
+                """
 [project]
 name = "d"
 src  = ["src", "."]
 [[graph]]
 name  = "g"
 entry = "deep_pkg.mod:VALUE"
-"""))
+""",
+            )
+        )
         assert m.src == ("src", ".")
         assert m.graph("g").resolve(m.root) == 5
 
     def test_a_single_string_is_accepted(self, tmp_path):
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\nsrc="src"\n'
-                                          '[[graph]]\nname="g"\nentry="m:f"\n'))
+        m = Manifest.load(
+            write(tmp_path, '[project]\nname="d"\nsrc="src"\n[[graph]]\nname="g"\nentry="m:f"\n')
+        )
         assert m.src == ("src",)
 
     def test_failure_reports_which_roots_were_tried(self, tmp_path):
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\nsrc=["src"]\n'
-                                          '[[graph]]\nname="g"\nentry="absent_pkg:f"\n'))
+        m = Manifest.load(
+            write(
+                tmp_path,
+                '[project]\nname="d"\nsrc=["src"]\n[[graph]]\nname="g"\nentry="absent_pkg:f"\n',
+            )
+        )
         with pytest.raises(ManifestError, match=r"Source roots tried: \['src'\]"):
             m.graph("g").resolve(m.root)
 
@@ -237,8 +274,12 @@ entry = "deep_pkg.mod:VALUE"
         pkg = tmp_path / "src"
         pkg.mkdir()
         (pkg / "mod_sp.py").write_text("VALUE = 1\n", encoding="utf-8")
-        m = Manifest.load(write(tmp_path, '[project]\nname="d"\nsrc=["src"]\n'
-                                          '[[graph]]\nname="g"\nentry="mod_sp:VALUE"\n'))
+        m = Manifest.load(
+            write(
+                tmp_path,
+                '[project]\nname="d"\nsrc=["src"]\n[[graph]]\nname="g"\nentry="mod_sp:VALUE"\n',
+            )
+        )
         before = list(sys.path)
         m.graph("g").resolve(m.root)
         assert sys.path == before

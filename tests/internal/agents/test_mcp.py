@@ -32,6 +32,23 @@ from operonx.agents.mcp import (  # noqa: E402
 SERVER = Path(__file__).parent / "mcp_fixtures" / "echo_server.py"
 
 
+def _mcp_version() -> tuple[int, ...]:
+    """The installed MCP SDK version, for behaviour that changed between them."""
+    import importlib.metadata as metadata
+
+    try:
+        raw = metadata.version("mcp")
+    except metadata.PackageNotFoundError:  # pragma: no cover
+        return (0,)
+    parts = []
+    for chunk in raw.split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
 def _server(**kw) -> MCPServer:
     kw.setdefault("name", "echo")
     return MCPServer(command=sys.executable, args=[str(SERVER)], **kw)
@@ -114,8 +131,30 @@ class TestCalling:
 
     @pytest.mark.asyncio
     async def test_the_error_carries_the_servers_message(self, client):
+        """An *anticipated* failure — the server raised ToolError, so its
+        text is meant for the client to read."""
         with pytest.raises(MCPError, match="boom"):
             await client.call("explode", {"reason": "boom"})
+
+    @pytest.mark.asyncio
+    async def test_an_unanticipated_crash_still_raises(self, client):
+        """Invariant across SDK versions: a crash must raise, never be
+        formatted as an answer."""
+        with pytest.raises(MCPError):
+            await client.call("crash", {"reason": "secret-internal-detail"})
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        _mcp_version() < (2, 1),
+        reason="masking unanticipated crashes landed in mcp 2.1",
+    )
+    async def test_an_unanticipated_crash_does_not_leak_its_message(self, client):
+        """mcp 2.1 masks a crash as `Error executing tool <name>` on purpose,
+        so internals never reach the model. Before 2.1 the text leaked, which
+        is what this fixture used to rely on."""
+        with pytest.raises(MCPError) as caught:
+            await client.call("crash", {"reason": "secret-internal-detail"})
+        assert "secret-internal-detail" not in str(caught.value)
 
     @pytest.mark.asyncio
     async def test_a_slow_call_times_out_and_names_the_tool(self):

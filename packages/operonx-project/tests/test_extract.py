@@ -38,13 +38,11 @@ def project(tmp_path: Path, source: str, manifest: str) -> Manifest:
     """
     module = f"wf_{next(_MODULE_SEQ)}"
     (tmp_path / f"{module}.py").write_text(source, encoding="utf-8")
-    (tmp_path / "operonx.toml").write_text(
-        manifest.replace("wf:", f"{module}:"), encoding="utf-8"
-    )
+    (tmp_path / "operonx.toml").write_text(manifest.replace("wf:", f"{module}:"), encoding="utf-8")
     return Manifest.load(tmp_path)
 
 
-LINEAR = '''
+LINEAR = """
 from operonx.core import END, PARENT, START, graph, op
 
 @op
@@ -61,7 +59,7 @@ def flow(x):
     b = second(y=a["y"])
     b["z"] >> PARENT["z"]
     START >> a >> b >> END
-'''
+"""
 
 LINEAR_MANIFEST = '[project]\nname="d"\n[[graph]]\nname="flow"\nentry="wf:flow"\n'
 
@@ -85,7 +83,9 @@ class TestShape:
 
     def test_graph_is_named_from_the_manifest_label(self, tmp_path):
         """auto_name reads the *caller's* frame — ours — unless we override."""
-        m = project(tmp_path, LINEAR, '[project]\nname="d"\n[[graph]]\nname="my_label"\nentry="wf:flow"\n')
+        m = project(
+            tmp_path, LINEAR, '[project]\nname="d"\n[[graph]]\nname="my_label"\nentry="wf:flow"\n'
+        )
         assert build_entry(m.graphs[0], m.root).name == "my_label"
 
     def test_input_provenance(self, tmp_path):
@@ -97,7 +97,7 @@ class TestShape:
 
     def test_json_serialisable(self, tmp_path):
         ir = extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))
-        json.dumps(ir)          # must not raise — Refs hold op objects, not names
+        json.dumps(ir)  # must not raise — Refs hold op objects, not names
 
 
 class TestDeterminism:
@@ -166,7 +166,7 @@ class TestEdgeOrigin:
         assert _edge_origin(edge) == expected
 
 
-CYCLIC = '''
+CYCLIC = """
 from operonx.core import END, PARENT, START, graph, op
 from operonx.core.ops.flow import if_
 
@@ -187,14 +187,16 @@ def looping(seed):
     START >> s >> gate
     gate >> [out, s]
     out >> END
-'''
+"""
 
 
 class TestLoops:
     """Cycle rewriting DELETES back-edges, so _rewritten_from is the only record."""
 
     def test_synthetic_loop_is_reported(self, tmp_path):
-        m = project(tmp_path, CYCLIC, '[project]\nname="d"\n[[graph]]\nname="looping"\nentry="wf:looping"\n')
+        m = project(
+            tmp_path, CYCLIC, '[project]\nname="d"\n[[graph]]\nname="looping"\nentry="wf:looping"\n'
+        )
         g = extract_project(m)["graphs"][0]
         loops = g.get("loops") or {}
         synthetic = [v for v in loops.values() if v["synthetic"]]
@@ -207,7 +209,9 @@ class TestLoops:
         assert loop["until"] is None
 
     def test_rewritten_from_is_preserved(self, tmp_path):
-        m = project(tmp_path, CYCLIC, '[project]\nname="d"\n[[graph]]\nname="looping"\nentry="wf:looping"\n')
+        m = project(
+            tmp_path, CYCLIC, '[project]\nname="d"\n[[graph]]\nname="looping"\nentry="wf:looping"\n'
+        )
         g = extract_project(m)["graphs"][0]
         assert g.get("rewritten_from"), "audit dict is the only decompile record"
 
@@ -221,7 +225,8 @@ class TestResources:
             encoding="utf-8",
         )
         m = project(
-            tmp_path, LINEAR,
+            tmp_path,
+            LINEAR,
             '[project]\nname="d"\n[resources]\noverlay="resources.yaml"\n'
             '[[graph]]\nname="flow"\nentry="wf:flow"\n',
         )
@@ -232,9 +237,11 @@ class TestResources:
 
     def test_secret_values_never_enter_the_ir(self, tmp_path):
         (tmp_path / "resources.yaml").write_text(
-            "llm:main:\n  api_key: sk-do-not-leak\n", encoding="utf-8")
+            "llm:main:\n  api_key: sk-do-not-leak\n", encoding="utf-8"
+        )
         m = project(
-            tmp_path, LINEAR,
+            tmp_path,
+            LINEAR,
             '[project]\nname="d"\n[resources]\noverlay="resources.yaml"\n'
             '[[graph]]\nname="flow"\nentry="wf:flow"\n',
         )
@@ -244,7 +251,7 @@ class TestResources:
 class TestFactories:
     def test_bind_supplies_a_factory_built_node(self, tmp_path):
         """The callbot shape: nodes that do not exist until something is injected."""
-        source = '''
+        source = """
 from operonx.core import END, PARENT, START, graph, op
 
 tag_value = "injected"
@@ -260,10 +267,13 @@ def build(tag):
         t["out"] >> PARENT["out"]
         START >> t >> END
     return flow
-'''
-        m = project(tmp_path, source,
-                    '[project]\nname="d"\n[[graph]]\nname="flow"\nentry="wf:build"\n'
-                    '[graph.bind]\ntag="wf:tag_value"\n')
+"""
+        m = project(
+            tmp_path,
+            source,
+            '[project]\nname="d"\n[[graph]]\nname="flow"\nentry="wf:build"\n'
+            '[graph.bind]\ntag="wf:tag_value"\n',
+        )
         g = extract_project(m)["graphs"][0]
         assert [n["name"] for n in g["nodes"]] == ["t"]
 
@@ -271,9 +281,12 @@ def build(tag):
 class TestFailures:
     def test_builder_error_names_the_graph(self, tmp_path):
         source = "def build(dep):\n    raise RuntimeError('boom')\n\nvalue = 1\n"
-        m = project(tmp_path, source,
-                    '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
-                    '[graph.bind]\ndep="wf:value"\n')
+        m = project(
+            tmp_path,
+            source,
+            '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
+            '[graph.bind]\ndep="wf:value"\n',
+        )
         with pytest.raises(ExtractError, match="graph 'g'.*boom"):
             extract_project(m)
 
@@ -304,7 +317,7 @@ def test_extracted_graph_still_runs(tmp_path):
 class TestBuilderAnchors:
     """A manifest entry names the builder; the body belongs to the graph inside it."""
 
-    BUILDER = '''
+    BUILDER = """
 from operonx.core import END, PARENT, START, graph, op
 
 @op
@@ -320,11 +333,14 @@ def build(tag):
     return inner
 
 tag_value = "t"
-'''
+"""
 
     def test_wired_at_resolves_through_the_builder(self, tmp_path):
-        m = project(tmp_path, self.BUILDER,
-                    '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
-                    '[graph.bind]\ntag="wf:tag_value"\n')
+        m = project(
+            tmp_path,
+            self.BUILDER,
+            '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
+            '[graph.bind]\ntag="wf:tag_value"\n',
+        )
         node = extract_project(m)["graphs"][0]["nodes"][0]
         assert node["source"]["wired_at"]["line"] > 0

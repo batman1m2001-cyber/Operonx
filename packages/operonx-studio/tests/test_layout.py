@@ -16,7 +16,9 @@ pytestmark = pytest.mark.unit
 def ir(nodes, edges, entries=(), exits=()):
     return {
         "nodes": [{"id": f"g.{n}", "name": n, "kind": "FuncOp"} for n in nodes],
-        "edges": [{"from": a, "to": b, **kw} for a, b, *rest in edges for kw in (rest[0] if rest else {},)],
+        "edges": [
+            {"from": a, "to": b, **kw} for a, b, *rest in edges for kw in (rest[0] if rest else {},)
+        ],
         "entries": list(entries),
         "exits": list(exits),
     }
@@ -36,16 +38,22 @@ class TestLayering:
     def test_diamond_uses_longest_path(self):
         """`d` must sit after `c`, not beside it — else the edge points backwards."""
         out = layout_graph(
-            ir(["a", "b", "c", "d"],
-               [("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")], entries=["a"])
+            ir(
+                ["a", "b", "c", "d"],
+                [("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")],
+                entries=["a"],
+            )
         )
         layers = {n.name: n.layer for n in out.nodes}
         assert layers["a"] < layers["b"] < layers["c"] < layers["d"]
 
     def test_every_edge_points_forward(self):
         out = layout_graph(
-            ir(["a", "b", "c", "d"],
-               [("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")], entries=["a"])
+            ir(
+                ["a", "b", "c", "d"],
+                [("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")],
+                entries=["a"],
+            )
         )
         depth = {n.id: n.layer for n in out.nodes}
         assert all(depth[e.src] < depth[e.dst] for e in out.edges)
@@ -72,8 +80,11 @@ class TestNothingIsDropped:
 class TestEdgeSemantics:
     def test_edge_carries_origin_and_softness(self):
         out = layout_graph(
-            ir(["a", "b"], [("a", "b", {"soft": True, "origin": "auto_soft", "type": "condition"})],
-               entries=["a"])
+            ir(
+                ["a", "b"],
+                [("a", "b", {"soft": True, "origin": "auto_soft", "type": "condition"})],
+                entries=["a"],
+            )
         )
         edge = out.edges[0]
         assert edge.soft and edge.origin == "auto_soft" and edge.type == "condition"
@@ -86,8 +97,11 @@ class TestEdgeSemantics:
 
 class TestDeterminism:
     def test_same_ir_gives_the_same_picture(self):
-        graph = ir(["a", "b", "c", "d", "e"],
-                   [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d"), ("d", "e")], entries=["a"])
+        graph = ir(
+            ["a", "b", "c", "d", "e"],
+            [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d"), ("d", "e")],
+            entries=["a"],
+        )
         first = layout_graph(graph)
         second = layout_graph(graph)
         assert [(n.id, n.x, n.y) for n in first.nodes] == [(n.id, n.x, n.y) for n in second.nodes]

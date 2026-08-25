@@ -84,9 +84,7 @@ def _module_file(manifest: Manifest, module: str) -> Path:
     package = (manifest.root / relative.with_suffix("") / "__init__.py").resolve()
     if package.exists():
         return package
-    raise PlanError(
-        f"cannot locate source for module {module!r} under {list(manifest.src)}"
-    )
+    raise PlanError(f"cannot locate source for module {module!r} under {list(manifest.src)}")
 
 
 def plan_edit(manifest: Manifest, graph_label: str, action: str, **kwargs: Any) -> EditPlan:

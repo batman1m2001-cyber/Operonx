@@ -31,7 +31,15 @@ SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "build", "dist", "site"}
 
 _SECRET_HINTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
 
-_LOOPS = (ast.For, ast.AsyncFor, ast.While, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_LOOPS = (
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
 
 
 @dataclass(frozen=True)
@@ -122,7 +130,9 @@ def _clean_assignment_values(tree: ast.Module) -> Set[int]:
     for n in ast.walk(tree):
         if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
             ok.add(id(n.value))
-        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+        elif (
+            isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None
+        ):
             ok.add(id(n.value))
     return ok
 

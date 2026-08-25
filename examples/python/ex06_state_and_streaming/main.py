@@ -120,10 +120,11 @@ def approval_flow(amount):
 
 
 async def run_scratch() -> None:
-    result = await Operon(scratch_flow(item=PARENT["item"], qty=PARENT["qty"],
-                                       unit_price=PARENT["unit_price"])).run(
+    result = await Operon(
+        scratch_flow(item=PARENT["item"], qty=PARENT["qty"], unit_price=PARENT["unit_price"])
+    ).run(
         inputs={"item": "widget", "qty": 3, "unit_price": 4.5},
-        scratch={"log": ["order opened"]},        # seed run-scoped state
+        scratch={"log": ["order opened"]},  # seed run-scoped state
     )
     print(f"[scratch]  {result['receipt']}")
 
@@ -144,7 +145,7 @@ async def run_approval() -> None:
 
     async def approve_when_asked():
         state = handle.state
-        for _ in range(200):                       # the node registers, then waits
+        for _ in range(200):  # the node registers, then waits
             if state._interrupt_responses:
                 break
             await asyncio.sleep(0.01)

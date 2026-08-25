@@ -176,7 +176,9 @@ class ProjectWatcher:
         stamp = time.time()
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip().splitlines()
-            self._last = ExtractResult(error="\n".join(detail[-12:]) or "extraction failed", stamp=stamp)
+            self._last = ExtractResult(
+                error="\n".join(detail[-12:]) or "extraction failed", stamp=stamp
+            )
             return self._last
         try:
             self._last = ExtractResult(ir=json.loads(proc.stdout), stamp=stamp)
@@ -223,9 +225,7 @@ def page_for(watcher: ProjectWatcher, result: ExtractResult) -> str:
         return _error_page(watcher.root, result.error or "unknown error", result.stamp)
     ir = result.ir or {}
     env = (ir.get("resources") or {}).get("env") or {}
-    status = env_status(
-        watcher.root, env.get("required") or [], (env.get("optional") or {}).keys()
-    )
+    status = env_status(watcher.root, env.get("required") or [], (env.get("optional") or {}).keys())
     page = render_html(ir, env_status=status)
     # Both flags are injected here rather than baked into the template: a
     # file written by `operonx-studio PATH` may be shared or committed, and
@@ -283,9 +283,7 @@ def build_app(root: Path):
         action = body.get("action")
         if not graph or not action:
             return JSONResponse({"error": "graph and action are required"}, status_code=400)
-        arguments = {
-            k: v for k, v in body.items() if k not in {"graph", "action", "dry_run"}
-        }
+        arguments = {k: v for k, v in body.items() if k not in {"graph", "action", "dry_run"}}
         try:
             manifest = Manifest.load(watcher.root)
             plan = plan_edit(manifest, graph, action, **arguments)
@@ -326,8 +324,7 @@ def serve(root: Path, host: str = "127.0.0.1", port: int = 8765) -> int:  # prag
         import uvicorn
     except ModuleNotFoundError:
         print(
-            "operonx-studio serve needs the web stack:\n"
-            "  pip install operonx-studio[serve]",
+            "operonx-studio serve needs the web stack:\n  pip install operonx-studio[serve]",
             file=sys.stderr,
         )
         return 1

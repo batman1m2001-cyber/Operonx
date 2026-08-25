@@ -74,9 +74,7 @@ class Layout:
         return {n.id: n for n in self.nodes}
 
 
-def _find_back_edges(
-    ids: Sequence[str], forward: Dict[str, List[str]]
-) -> Set[Tuple[str, str]]:
+def _find_back_edges(ids: Sequence[str], forward: Dict[str, List[str]]) -> Set[Tuple[str, str]]:
     """DFS-colour back-edge detection, mirroring the compiler's own.
 
     A cycle reaching the renderer is either a graph built with
@@ -162,9 +160,7 @@ def _order_layers(
             indices = list(reversed(indices))
         for depth in indices:
             neighbours = backward if downward else forward
-            positions = {
-                n: idx for d in layers for idx, n in enumerate(layers[d]) if d != depth
-            }
+            positions = {n: idx for d in layers for idx, n in enumerate(layers[d]) if d != depth}
             current = {n: i for i, n in enumerate(layers[depth])}
 
             def barycentre(node: str) -> Tuple[float, int]:

@@ -200,7 +200,9 @@ def collect_anchors(
     return out
 
 
-def _source_of(op: Any, root: Path, anchor_line: Optional[int], module: str) -> Optional[Dict[str, Any]]:
+def _source_of(
+    op: Any, root: Path, anchor_line: Optional[int], module: str
+) -> Optional[Dict[str, Any]]:
     """Where this node came from — two different questions, both useful.
 
     ``defined_at`` is where the op's body lives, available only for a
@@ -360,7 +362,9 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
     return instance
 
 
-def extract_graph(spec: GraphSpec, root: Path, anchors: Dict[str, Dict[str, Dict[str, int]]]) -> Dict[str, Any]:
+def extract_graph(
+    spec: GraphSpec, root: Path, anchors: Dict[str, Dict[str, Dict[str, int]]]
+) -> Dict[str, Any]:
     """Build one declared graph and serialise it."""
     instance = build_entry(spec, root)
     module, attr = spec.entry.split(":")

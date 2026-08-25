@@ -241,7 +241,6 @@ def op_names(text: str, graph: str) -> List[str]:
     return found
 
 
-
 # ── topology: chains of ``>>`` ───────────────────────────────────────────
 
 
@@ -359,9 +358,7 @@ def insert_op_after(text: str, graph: str, after: str, name: str, call: str) -> 
 
     start, end = _statement_lines(anchor, offsets, text)
     indent = text[offsets[anchor.lineno - 1] : offsets[anchor.lineno - 1] + anchor.col_offset]
-    edits: List[Tuple[int, int, str]] = [
-        (end, end, f"{indent}{name} = {call}\n")
-    ]
+    edits: List[Tuple[int, int, str]] = [(end, end, f"{indent}{name} = {call}\n")]
 
     for chain in _chains(body):
         operands = _flatten_rshift(chain)

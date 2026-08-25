@@ -45,9 +45,7 @@ class EditError(Exception):
 # The separator absorbs the whitespace around `=` so `NAME = value` keeps
 # its spacing, and the captured value never carries a stray leading space
 # that would then look like it needed quoting.
-_ENV_ASSIGNMENT = re.compile(
-    r"^(\s*)(?:(export)\s+)?([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*)$"
-)
+_ENV_ASSIGNMENT = re.compile(r"^(\s*)(?:(export)\s+)?([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*)$")
 
 
 def _split_env_comment(raw: str) -> tuple[str, str]:
@@ -59,7 +57,7 @@ def _split_env_comment(raw: str) -> tuple[str, str]:
     into nonsense. A ``#`` inside quotes belongs to the value.
     """
     body = raw.strip()
-    if body[:1] in ("\"", "'"):
+    if body[:1] in ('"', "'"):
         quote = body[0]
         end = body.find(quote, 1)
         while end != -1 and body[end - 1] == "\\":
@@ -116,7 +114,7 @@ def set_env_var(text: str, name: str, value: str) -> str:
         # is a real change to a shell-sourced file, not a formatting nicety.
         if len(old_body) >= 2 and old_body[0] == old_body[-1] and old_body[0] in "\"'":
             rendered = _render_env_value(value) if _needs_quoting(value) else f'"{value}"'
-        ending = line[len(line.rstrip("\n")):]
+        ending = line[len(line.rstrip("\n")) :]
         replacement = (
             f"{indent}{(export + ' ') if export else ''}{key}{eq}{rendered}{trailing}{ending}"
         )
@@ -220,8 +218,8 @@ def set_resource_field(text: str, resource: str, field: str, value: object) -> s
             # run of spaces so column-aligned comments stay aligned and the
             # diff stays one changed token wide.
             if body.rstrip() != body or not body.strip():
-                comment = body[len(body.rstrip()):] + "#" + tail
-        ending = line[len(line.rstrip("\n")):]
+                comment = body[len(body.rstrip()) :] + "#" + tail
+        ending = line[len(line.rstrip("\n")) :]
         replacement = f"{indent}{key}{sep}{_yaml_scalar(value)}{comment}{ending}"
         if replacement == line:
             return text
