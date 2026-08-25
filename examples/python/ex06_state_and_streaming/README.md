@@ -40,7 +40,7 @@ payload is dropped.
 
 ```python
 say = EmitOp(payload=a["note"], channel="progress")
-a >> say >> END          # no outputs, so it must still reach an exit
+a >> say >> END  # no outputs, so it must still reach an exit
 ```
 
 Consume with `mode="custom"`, optionally filtered:
@@ -60,7 +60,7 @@ the suspension point is visible in the graph and its answer is a normal ref:
 
 ```python
 approve = InterruptOp(payload=draft["plan"], timeout=5)
-final   = settle(plan=draft["plan"], response=approve["response"])
+final = settle(plan=draft["plan"], response=approve["response"])
 ```
 
 The caller answers from outside via the run handle's state:
