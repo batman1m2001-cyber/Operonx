@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-19
+
+### Fixed — `pip install operonx[...]` could not import `operonx.providers`
+
+A packaging fault, not a code one, and it affected most extras rather than
+one. `operonx/providers/llms/base.py` imports `httpx` at module scope while
+the extras relied on it arriving transitively through the OpenAI SDK. openai
+3.x moved to `httpx2`, so a fresh resolve stopped supplying it. Measured in
+clean virtualenvs, **four of five extras tested failed outright**:
+
+```
+operonx[openai]   -> ModuleNotFoundError: httpx
+operonx[faiss]    -> ModuleNotFoundError: httpx
+operonx[gemini]   -> OK
+operonx[bedrock]  -> ModuleNotFoundError: httpx
+operonx[pgvector] -> ModuleNotFoundError: httpx
+```
+
+- `httpx>=0.24` is now declared by every extra that reaches
+  `operonx.providers`, honouring the self-contained-extras rule stated above
+  the extras block.
+- The OpenAI **type** imports in `llms/base.py` moved under `TYPE_CHECKING`.
+  All fourteen uses are annotations; nothing in the package resolves hints
+  at runtime, `BaseLLM` is a plain ABC, and no module re-exports them. This
+  finally delivers what `llms/__init__.py` has always documented: a
+  retrieval-only install (`[faiss]`, `[pgvector]`, `[qdrant]`, `[onnx]`,
+  `[postgres]`) no longer drags in an LLM SDK to do vector search.
+
+### Fixed — install hints that pointed nowhere
+
+- **The `providers` extra was restored.** It was deleted in 1f830c7 (Apr
+  2026) while the install-tier comment and *nine* in-code references were
+  left pointing at it. pip does not fail on an unknown extra — it warns and
+  installs the base package — so the fix our own `ImportError` recommended
+  appeared to work and then failed again. Two tutorial examples pinned it
+  and silently got nothing.
+- `DocStoreType.MONGO` and `.REDIS` have no backend module, so configuring
+  one now raises `NotImplementedError` naming what does exist, instead of
+  blaming a missing `operonx[mongo]` extra that never existed either.
+- New regression guard, `tests/internal/cli/test_extras.py`: every install
+  hint in the codebase must name a declared extra. Twenty-seven checked.
+  Companion to `test_entry_points.py`, which guards the same class of rot
+  for `[project.scripts]` after an identical migration-era regression. Both
+  failure modes are only reachable when a user hits a missing dependency,
+  which is exactly why they went unnoticed for months.
+
+### Added — project tooling (separate distributions, not shipped with core)
+
+`packages/operonx-project` and `packages/operonx-studio`: project
+conventions, a manifest, deterministic graph extraction to a Project IR,
+surgical config and source editors, and a local studio that renders a
+project's graph, resources, env contract and dependencies. Neither is part
+of the `operonx` distribution. See
+[`docs/design/UI_PLATFORM_PLAN.md`](docs/design/UI_PLATFORM_PLAN.md).
+
 ## [1.3.0] - 2026-08-12
 
 ### Known issues
@@ -1030,7 +1085,9 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v0.7.0...v1.0.0
