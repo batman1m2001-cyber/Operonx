@@ -57,6 +57,7 @@ dependencies = [
 # Single-provider extras — each pins only the SDK that provider needs.
 openai = [
     "openai>=1.0",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 anthropic = [
     "openai>=1.0",        # ChatCompletion types (canonical message format)
@@ -66,35 +67,43 @@ gemini = [
     "google-cloud-aiplatform>=1.38",
     "requests>=2.32",
     "openai>=1.0",        # AsyncOpenAI client + types
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 bedrock = [
     "boto3>=1.28",
     "openai>=1.0",        # ChatCompletion types
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 onnx = [
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
     "numpy>=2.2.6",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 huggingface = [
     "transformers>=4.30",
     "torch>=2.0",
     "numpy>=2.2.6",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 faiss = [
     "faiss-cpu>=1.8",
     "numpy>=2.2.6",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 pgvector = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 postgres = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 qdrant = [
     "qdrant-client>=1.9",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
 langfuse = [
     "langfuse>=2.6.0,<3.0.0",
@@ -103,6 +112,15 @@ serve = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
+]
+# All HTTP-based LLM + embedding + reranker providers. Referenced by the
+# ImportError hints in llms/, embeddings/, rerankers/ and auth/ factories —
+# it was deleted in 1f830c7 while those references were left behind (S12).
+providers = [
+    "openai>=1.0",        # canonical ChatCompletion types (used by every LLM backend)
+    "aiohttp>=3.8",       # vLLM/TEI/Pinecone HTTP clients
+    "numpy>=2.2.6",       # vLLM embedding output type
+    "httpx>=0.24",        # Anthropic direct API client + operonx.providers import
 ]
 # Production bundle — everything except heavy local-ML deps. This is what
 # most users want.

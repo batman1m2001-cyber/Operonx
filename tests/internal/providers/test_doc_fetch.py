@@ -110,10 +110,21 @@ class TestConfigAndFactory:
             create_doc_store(DocStoreConfig(api_type=DocStoreType.POSTGRES))
 
     def test_missing_extra_message(self):
+        """The hint must name a real extra — 'mongo' never existed (S12)."""
+        from pathlib import Path
+
         from operonx.providers.doc_stores.factory import _missing_extra_message
 
-        msg = _missing_extra_message("MongoDocStore", "mongo", ImportError("no motor"))
-        assert "pip install operonx[mongo]" in msg
+        msg = _missing_extra_message("PostgresDocStore", "postgres", ImportError("no psycopg"))
+        assert "pip install operonx[postgres]" in msg
+
+        pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+        assert "\npostgres = [" in pyproject.read_text(encoding="utf-8")
+
+    def test_unimplemented_backends_do_not_advertise_an_install(self):
+        for api_type in (DocStoreType.MONGO, DocStoreType.REDIS):
+            with pytest.raises(NotImplementedError, match="not implemented"):
+                create_doc_store(DocStoreConfig(api_type=api_type))
 
 
 # =============================================================================
