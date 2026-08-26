@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `operonx.io`: ending a stream that feeds a graph
+
+Streaming into a graph was always possible — hand it an `asyncio.Queue` and
+write a generator op that drains it. What that left to every project was the
+*ending*: how a producer says "no more input, finish what you started".
+
+`handle.cancel()` does not answer it, and cannot be made to. Cancellation is
+abrupt by design. Measured on a graph whose downstream op takes 300 ms per
+item, with three items pushed and cancellation applied while the first is in
+flight:
+
+```
+sentinel  started=[0, 1, 2]  finished=[0, 1, 2]
+cancel    started=[0]        finished=[]
+```
+
+For a call that ends with a spoken goodbye, the second row is the goodbye cut
+off mid-sentence. So projects invent an in-band sentinel, usually `None`,
+which quietly makes `None` unsendable.
+
+- **`Channel`** — a bounded conduit. `push()` applies backpressure; `close()`
+  is a graceful end, so queued items still arrive and the graph completes on
+  its own. The end-of-stream marker is a private sentinel compared by
+  identity, so any value a producer legitimately sends passes through.
+  `close()` is idempotent and broadcasts to every consumer.
+- **`channel_source`** — the receiving half as an op, written once.
+- **`receive()`** — for sources that cannot use `async for` because they
+  interleave the read with a timeout. It raises `ChannelClosed` at
+  end-of-stream rather than returning `None`, for the same reason the marker
+  is private.
+
+No transport adapters ship, and none are planned: a WebSocket, an SSE
+stream, a Kafka consumer and a file are the same three lines against
+`Channel`, written where that transport's own concerns already live.
+
 ### Fixed — `handle.cancel()` left the ops it spawned running
 
 `ExecutionHandle.cancel()` cancelled the scheduler coroutine and the pump.
