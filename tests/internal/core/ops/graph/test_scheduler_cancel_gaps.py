@@ -286,3 +286,82 @@ class TestAReusedInterruptIsNotMutated:
             f"two emissions shared one resolved target: {targets}"
         )
         assert STOP.ctx_to_cancel is Interrupt.SELF, "the caller's object was mutated"
+
+
+class TestCancelReleasesOpsParkedOnAnExternalAwait:
+    """`handle.cancel()` cancelled the scheduler but not the ops it spawned.
+
+    `ExecutionHandle.cancel()` cancels the scheduler coroutine and the pump.
+    Neither touched `tasks_by_ctx`, so an op parked on something the
+    scheduler does not own — a queue it is draining, a socket read — kept
+    running after the run that owned it was gone, and its `finally` never
+    ran.
+
+    The practical consequence was that a streaming graph could not be
+    stopped from the outside at all. Every caller had to invent an in-band
+    sentinel value and push it through the same queue the op was reading.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_generator_parked_on_a_queue_is_released(self):
+        released = asyncio.Event()
+        consumed = []
+
+        @op
+        async def source(q):
+            try:
+                while True:
+                    item = await q.get()
+                    consumed.append(item)
+                    yield {"v": item}
+            finally:
+                released.set()
+
+        @op
+        async def sink(v: int):
+            await asyncio.sleep(0.01)
+            return {"v": v}
+
+        with GraphOp(name="parked") as g:
+            s = source(q=PARENT["q"])
+            w = sink(v=s["v"])
+            START >> s >> w >> END
+
+        queue: asyncio.Queue = asyncio.Queue()
+        handle = Operon(g).start(inputs={"q": queue})
+        for i in range(3):
+            queue.put_nowait(i)
+        await asyncio.sleep(0.15)
+        assert consumed == [0, 1, 2], "the source never ran"
+
+        handle.cancel()
+        await asyncio.wait_for(released.wait(), timeout=5)
+
+    @pytest.mark.asyncio
+    async def test_a_normal_run_is_unaffected(self):
+        """The sweep must be a no-op on the happy path.
+
+        Each `_pump` clears its own `tasks_by_ctx` entry, so by the time the
+        main loop exits normally there is nothing left to cancel. Guarding
+        that here because the sweep sits in a `finally` and therefore runs on
+        every exit, not just the cancelled one.
+        """
+
+        @op
+        def source(n: int):
+            for i in range(n):
+                yield {"i": i}
+
+        @op
+        async def double(i: int):
+            await asyncio.sleep(0.001)
+            return {"j": i * 2}
+
+        with GraphOp(name="clean_exit") as g:
+            s = source(n=PARENT["n"])
+            d = double(i=s["i"])
+            START >> s >> d >> END
+
+        handle = Operon(g).start(inputs={"n": 5})
+        out = await asyncio.wait_for(handle.collect(), timeout=25)
+        assert out, "a normal run returned nothing"

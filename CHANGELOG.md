@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `handle.cancel()` left the ops it spawned running
+
+`ExecutionHandle.cancel()` cancelled the scheduler coroutine and the pump.
+Neither touched `tasks_by_ctx`, so an op parked on something the scheduler
+does not own — a generator draining a queue, a socket read — outlived the
+run that owned it and never ran its `finally`.
+
+The practical consequence was that **a streaming graph could not be stopped
+from the outside at all**. Every caller had to invent an in-band sentinel
+value and push it through the same queue the op was reading:
+
+```python
+await utterance_queue.put(None)     # the workaround this forced
+```
+
+Measured before the fix, on a graph whose source op awaits a queue:
+
+```
+handle.cancel()  ->  generator's finally ran: False   (the op leaks)
+```
+
+The scheduler's main loop now runs under a `try/finally` that cancels any
+task still live in `tasks_by_ctx` and awaits it, reusing the same
+cancel-then-`gather` idiom `_sweep_ctx` already uses for `Interrupt`. On a
+normal exit it is a no-op — each `_pump` clears its own entry — and a
+regression test covers both paths.
+
 ## [1.3.1] - 2026-08-19
 
 ### Fixed — `pip install operonx[...]` could not import `operonx.providers`
