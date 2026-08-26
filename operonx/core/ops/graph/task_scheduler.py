@@ -810,30 +810,60 @@ class Scheduler:
                     if not _is_descendant_or_equal(ctx, ctx_prefix) or (op_name, ctx) == emitter
                 ]
 
-        # Seed entry ops.
-        for entry in g.entries:
-            dispatch(entry, context_id)
+        try:
+            # Seed entry ops.
+            for entry in g.entries:
+                dispatch(entry, context_id)
 
-        # Drain inline ops seeded above.
-        await _drain_inline()
-        if fatal:
-            raise fatal[0]
-
-        # Main event loop — only runs if task-based ops exist.
-        while inflight > 0:
-            event = await queue.get()
-            inflight -= 1
+            # Drain inline ops seeded above.
+            await _drain_inline()
             if fatal:
                 raise fatal[0]
-            if isinstance(event, Frame):
-                _on_frame(event)
-            elif isinstance(event, Interrupt):
-                await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
-                _report_interrupt(event, event.ctx)
-            else:
-                _on_eof(event)
-            # Drain any inline ops triggered by the queue event.
-            await _drain_inline()
+
+            # Main event loop — only runs if task-based ops exist.
+            while inflight > 0:
+                event = await queue.get()
+                inflight -= 1
+                if fatal:
+                    raise fatal[0]
+                if isinstance(event, Frame):
+                    _on_frame(event)
+                elif isinstance(event, Interrupt):
+                    await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
+                    _report_interrupt(event, event.ctx)
+                else:
+                    _on_eof(event)
+                # Drain any inline ops triggered by the queue event.
+                await _drain_inline()
+        finally:
+            # Cancelling the scheduler must also stop the op tasks it
+            # spawned. ``ExecutionHandle.cancel()`` cancels this coroutine
+            # and the pump; without the sweep below, every task in
+            # ``tasks_by_ctx`` kept running. An op parked on an external
+            # await — a generator draining a queue, a socket read — then
+            # outlived the run that owned it and never ran its ``finally``.
+            #
+            # Measured before this block: ``handle.cancel()`` left a parked
+            # generator alive, so a streaming graph could not be stopped
+            # from outside at all and every caller had to invent an in-band
+            # sentinel value instead.
+            #
+            # On a normal exit this is a no-op: each ``_pump`` clears its own
+            # entry in its ``finally``, so ``tasks_by_ctx`` is empty by here.
+            _leftover = [
+                t for bucket in tasks_by_ctx.values() for t in bucket.values() if not t.done()
+            ]
+            if _leftover:
+                for _t in _leftover:
+                    _t.cancel()
+                try:
+                    await asyncio.gather(*_leftover, return_exceptions=True)
+                except asyncio.CancelledError:
+                    # Our own cancellation, re-delivered while awaiting the
+                    # children. They are already cancelled; swallowing this
+                    # one does not suppress the original, which resumes
+                    # propagating once this ``finally`` completes.
+                    pass
 
         # Store graph-level metrics so TraceCollector can find this graph node.
         _end_time = datetime.now(timezone.utc)
