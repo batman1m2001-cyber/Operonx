@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-27
+
 ### Added — `operonx.io`: ending a stream that feeds a graph
 
 Streaming into a graph was always possible — hand it an `asyncio.Queue` and
@@ -1187,7 +1189,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.1.0...v1.2.0
