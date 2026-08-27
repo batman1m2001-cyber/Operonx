@@ -47,20 +47,53 @@ _BRACKET_RE = re.compile(r"\[(/?)([^\]]+)\]")
 
 
 def _escape_non_rich(text: str) -> str:
-    """Escape [brackets] that are not Rich markup tags."""
+    """Escape [brackets] that are not Rich markup tags.
 
-    def _replace(m: re.Match) -> str:
-        slash, content = m.group(1), m.group(2)
-        # Keep known Rich tags and closing tags
-        if content.strip() in _RICH_TAGS:
-            return m.group(0)
-        # Keep Rich style expressions (e.g. "bold red", "#ff0000", "dim #8b949e")
-        if slash == "/":
-            return m.group(0)
-        # Escape everything else as literal bracket
-        return f"\\[{slash}{content}]"
+    Scans each opening bracket rather than consuming whole ``[...]`` matches.
+    A regex match swallows its own contents, so a bracket nested inside
+    another was never examined and stayed unescaped — which then looked
+    like a tag to Rich::
 
-    return _BRACKET_RE.sub(_replace, text)
+        [[1,2],[3]]   ->   [,[3]]        (the first pair deleted)
+
+    Nested arrays are ordinary JSON, so this mattered for any structured
+    payload, not just a contrived string.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n and text[i + 1] == "[":
+            # Already escaped — pass both through untouched.
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if ch != "[":
+            out.append(ch)
+            i += 1
+            continue
+
+        close = text.find("]", i + 1)
+        if close == -1:
+            # Unclosed: nothing to confuse Rich, but escape so it renders.
+            out.append("\\[")
+            i += 1
+            continue
+
+        inner = text[i + 1 : close]
+        # A closing tag, or a tag/style Rich knows: leave it alone so
+        # markup keeps working.
+        if inner.startswith("/") or inner.strip() in _RICH_TAGS:
+            out.append(text[i : close + 1])
+            i = close + 1
+            continue
+
+        # Anything else is the message's own bracket.
+        out.append("\\[")
+        i += 1
+
+    return "".join(out)
 
 
 def get_template(name: str) -> str:
