@@ -42,6 +42,46 @@ No transport adapters ship, and none are planned: a WebSocket, an SSE
 stream, a Kafka consumer and a file are the same three lines against
 `Channel`, written where that transport's own concerns already live.
 
+### Fixed — a declared cell's mutable default leaked between runs
+
+`PARENT.declare(bag=set())` evaluates `set()` once — when the graph is
+**built**, at import — and that object becomes the cell's default in the
+schema. Every run then built its own `MemoryState` and its own `Cell`, but
+`Cell(v)` stored the reference, so both pointed at that one object:
+
+```
+schema default id : ...737216   built ONCE
+
+run 1:  MemoryState ...468896   Cell ...553472   VALUE ...737216   [1]
+run 2:  MemoryState ...469216   Cell ...556864   VALUE ...737216   [1, 2]
+                    ^ new             ^ new            ^ SAME
+```
+
+Per-run isolation was never missing — each run really does get its own
+state. What was shared is the value that state *starts from*, so an op
+mutating it in place wrote into every future run's starting point. A frozen
+default was always safe, because `replace()` rebinds the cell rather than
+editing what it points at; a `set` / `list` / `dict` was not.
+
+Found in a voice agent whose `committed_turns` cell holds the turn ids a
+call has already recorded. The first call filled it; the second found those
+ids already present, recorded nothing, and produced an empty transcript.
+The symptom appears on the **second** run, which is why no test caught it —
+none of the six test files using `declare()` starts the same engine twice.
+
+`list`, `dict` and `set` defaults are now copied per run, for declared
+cells. Deliberately **not** a blanket `deepcopy`: a default may legitimately
+hold a resource handle — an ONNX session, a Triton client — and those reject
+deepcopy with "no default `__reduce__`". Anything outside those three
+containers keeps its aliasing, and a test pins that so the fix is not later
+"improved" into a deepcopy.
+
+Cost is one shallow copy per declared cell per **run**, not per op: 1.8 µs
+across seven cells, against calls that last tens of seconds.
+
+Nested mutables inside a copied container are still shared — a shallow copy
+is what makes the common case correct without guessing at contents.
+
 ### Fixed — `handle.cancel()` left the ops it spawned running
 
 `ExecutionHandle.cancel()` cancelled the scheduler coroutine and the pump.
