@@ -33,6 +33,45 @@ class ReducerError(RuntimeError):
 _uuid4 = uuid.uuid4
 
 
+#: Container types a ``PARENT.declare()`` default is realistically written
+#: as, and the only ones copied per run. See :func:`_fresh_default`.
+_MUTABLE_DEFAULTS = (list, dict, set)
+
+
+def _fresh_default(value: "Any") -> "Any":
+    """A per-run copy of a declared cell's initial value, when it needs one.
+
+    ``PARENT.declare(bag=set())`` evaluates ``set()`` once — when the graph
+    is built, at import — and that one object becomes the cell's default in
+    the schema. Every run then starts its own ``MemoryState`` and its own
+    ``Cell``, but both pointed at *that* object, so an op mutating it in
+    place wrote into the value every future run would start from::
+
+        schema default id : 128853263737216   built ONCE
+
+        run 1:  MemoryState id ...468896   Cell id ...553472   VALUE id ...737216  [1]
+        run 2:  MemoryState id ...469216   Cell id ...556864   VALUE id ...737216  [1, 2]
+                              ^ new                ^ new                ^ SAME
+
+    A frozen default was always safe: ``replace()`` rebinds the cell rather
+    than editing what it points at. A ``set``/``list``/``dict`` was not.
+
+    Only those three are copied, and only shallowly. A blanket
+    ``deepcopy`` would be wrong: a default may hold a resource handle —
+    an ONNX session, a Triton client — and those reject deepcopy with
+    "no default ``__reduce__``". Anything that is not one of the three
+    containers keeps its existing aliasing, which is what callers who put
+    a handle in a default are relying on.
+
+    Nested mutables inside a copied container are still shared; a shallow
+    copy is what makes the common case correct without guessing at the
+    contents.
+    """
+    if type(value) in _MUTABLE_DEFAULTS:
+        return value.copy()
+    return value
+
+
 class MemoryState:
     """Workflow state with Cell-based storage and O(1) indexed access.
 
@@ -91,7 +130,10 @@ class MemoryState:
         """
         self.schema = schema
         self._cells: List[Cell] = [
-            Cell(v, is_shared=(idx in schema._shared_indices))
+            Cell(
+                _fresh_default(v) if idx in schema._shared_indices else v,
+                is_shared=(idx in schema._shared_indices),
+            )
             for idx, v in enumerate(schema._defaults)
         ]
         self._user_id = user_id or str(_uuid4())
