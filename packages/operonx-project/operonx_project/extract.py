@@ -473,6 +473,11 @@ def extract_project(manifest: Manifest) -> Dict[str, Any]:
         "project": manifest.name,
         "description": manifest.description,
         "graphs": [extract_graph(spec, manifest.root, anchors) for spec in manifest.graphs],
+        # What puts work into each graph. Declared rather than derived —
+        # the hop from a socket handler to `engine.start()` is not an op
+        # and cannot be discovered from the graph. Without it a served
+        # pipeline renders as beginning from nowhere.
+        "serves": [spec.as_dict() for spec in manifest.serves],
         "resources": extract_resources(manifest),
         "dependencies": extract_dependencies(manifest.root),
     }

@@ -181,6 +181,62 @@ class GraphSpec:
         }
 
 
+
+#: What a `[[serve]]` block may declare as its kind. Descriptive only —
+#: nothing here changes how anything runs.
+SERVE_KINDS = ("websocket", "http", "cron", "queue")
+
+
+@dataclass(frozen=True)
+class ServeSpec:
+    """What puts work into a graph.
+
+    The IR records nodes, edges and entries, all derived from the graph
+    itself. Nothing derived can say what *calls* it, so a served pipeline
+    renders as if it begins from nowhere — a socket handler and a cron job
+    look identical, and the environment contract cannot mention the port
+    the thing actually listens on.
+
+    This is the missing half, and it is a declaration rather than a
+    discovery because the answer is not in the code: uvicorn calls an ASGI
+    route, which starts a run. That hop is not an op and cannot be made
+    one, so it is written down instead.
+
+    Purely descriptive. Nothing reads it at runtime::
+
+        [[serve]]
+        kind  = "websocket"
+        path  = "/ws/call"
+        graph = "pipeline"
+
+    Attributes:
+        kind: One of :data:`SERVE_KINDS`.
+        graph: The name of a ``[[graph]]`` in the same manifest. Checked at
+            load time, so a typo is a manifest error rather than a blank
+            spot in the studio.
+        path: Route or queue name. Absent for a cron.
+        schedule: Cron expression. Absent for everything else.
+        description: One line, for the UI.
+    """
+
+    kind: str
+    graph: str
+    path: str | None = None
+    schedule: str | None = None
+    description: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """The IR form. Optional fields are omitted rather than null."""
+        out: Dict[str, Any] = {"kind": self.kind, "graph": self.graph}
+        if self.path:
+            out["path"] = self.path
+        if self.schedule:
+            out["schedule"] = self.schedule
+        if self.description:
+            out["description"] = self.description
+        return out
+
+
 @dataclass(frozen=True)
 class Manifest:
     """A parsed ``operonx.toml``."""
@@ -190,6 +246,7 @@ class Manifest:
     description: str = ""
     resources: ResourceSpec = field(default_factory=ResourceSpec)
     graphs: Tuple[GraphSpec, ...] = ()
+    serves: Tuple[ServeSpec, ...] = ()
     src: Tuple[str, ...] = (".",)
 
     @classmethod
@@ -248,12 +305,43 @@ class Manifest:
         if not graphs:
             raise ManifestError(f"{path}: at least one [[graph]] is required")
 
+        serves = []
+        for i, entry in enumerate(raw.get("serve") or []):
+            where = f"{path}: [[serve]] #{i + 1}"
+            kind = entry.get("kind")
+            if not kind:
+                raise ManifestError(f"{where} is missing 'kind'")
+            if kind not in SERVE_KINDS:
+                raise ManifestError(
+                    f"{where}: unknown kind {kind!r}. known: {', '.join(SERVE_KINDS)}"
+                )
+            target = entry.get("graph")
+            if not target:
+                raise ManifestError(f"{where} is missing 'graph'")
+            # Checked here so a typo is a manifest error, not a graph that
+            # silently renders as served by nothing.
+            if target not in seen:
+                raise ManifestError(
+                    f"{where}: graph {target!r} is not declared. "
+                    f"known: {', '.join(sorted(seen))}"
+                )
+            serves.append(
+                ServeSpec(
+                    kind=kind,
+                    graph=target,
+                    path=entry.get("path"),
+                    schedule=entry.get("schedule"),
+                    description=entry.get("description", ""),
+                )
+            )
+
         return cls(
             name=name,
             root=root,
             description=project.get("description", ""),
             resources=ResourceSpec(base=res.get("base"), overlay=res.get("overlay")),
             graphs=tuple(graphs),
+            serves=tuple(serves),
             src=src,
         )
 

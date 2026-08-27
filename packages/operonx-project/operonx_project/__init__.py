@@ -10,6 +10,7 @@ from operonx_project.manifest import (
     Manifest,
     ManifestError,
     ResourceSpec,
+    ServeSpec,
 )
 
 __version__ = "0.1.0"
@@ -20,5 +21,6 @@ __all__ = [
     "Manifest",
     "ManifestError",
     "ResourceSpec",
+    "ServeSpec",
     "__version__",
 ]
