@@ -13,6 +13,8 @@ from rich.console import Console
 from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
 
+from operonx.core.loggings.events import _escape_non_rich
+
 from ..config import HandlerConfig
 
 
@@ -93,22 +95,33 @@ class ColoredRichHandler(RichHandler):
         # Làm việc trên bản sao để không ảnh hưởng đến các handler khác
         record = copy.copy(record)
 
-        # Strip markup cho các level không phải INFO
-        # Phải format message trước rồi mới strip markup
-        if strip_markup:
-            # Format message với args trước
-            if record.args:
-                try:
-                    formatted_msg = record.msg % record.args
-                except (TypeError, ValueError):
-                    formatted_msg = record.msg
-                record.args = None  # Clear args vì đã format xong
-            else:
+        # Escape literal brackets so a log message keeps its own content.
+        #
+        # Both paths used to lose it. Non-INFO levels ran
+        # `_MARKUP_PATTERN.sub("", ...)`, which deletes every `[...]`
+        # whether or not it is markup; INFO passed the message through
+        # raw, so Rich parsed `[transcript]` as a tag and dropped it.
+        # Either way, logging a JSON array silently logged nothing:
+        #
+        #     LOGGER.info('%s', '{"transcript": [{"text": "hi"}]}')
+        #     ->  {"transcript": , }
+        #
+        # `_escape_non_rich` is the routine that already gets this right —
+        # it keeps known Rich tags and escapes everything else — and was
+        # only ever applied to templated events.
+        #
+        # Args are formatted first: the substitution has to see the final
+        # text, or a bracket arriving through `%s` is missed.
+        if record.args:
+            try:
+                formatted_msg = record.msg % record.args
+            except (TypeError, ValueError):
                 formatted_msg = record.msg
-            # Strip markup sau khi format
-            msg = _MARKUP_PATTERN.sub("", formatted_msg)
+            record.args = None
         else:
-            msg = record.msg
+            formatted_msg = record.msg
+
+        msg = _escape_non_rich(str(formatted_msg))
 
         if self.show_name:
             record.msg = (
@@ -124,10 +137,13 @@ class PlainTextFormatter(logging.Formatter):
     """Formatter strip Rich markup tags cho plain text output."""
 
     def format(self, record: logging.LogRecord) -> str:
-        # Format message trước
         result = super().format(record)
-        # Strip markup tags
-        return strip_markup(result)
+        # Escape the message's own brackets BEFORE stripping markup.
+        # `strip_markup` already restores `\[...]` escapes, but nothing
+        # was producing them for an ordinary log call, so a literal
+        # `[{"speaker": ...}]` looked exactly like a Rich tag and was
+        # deleted — logging a JSON array logged `{"transcript": , }`.
+        return strip_markup(_escape_non_rich(result))
 
 
 def create_console_handler(config: ConsoleHandlerConfig) -> logging.Handler:
