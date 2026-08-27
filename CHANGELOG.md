@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a log message kept losing its own square brackets
+
+Rich uses `[tag]` for markup, so any message carrying literal brackets —
+every JSON array — looked like markup and was deleted:
+
+```python
+LOGGER.info("%s", '{"transcript": [{"speaker": "agent"}], "a": 1}')
+#  ->  {"transcript": , "a": 1}
+```
+
+Silent data loss, on both console paths and for different reasons.
+`PlainTextFormatter` called `strip_markup()`, which *does* restore
+`\[...]` escapes — but nothing produced them for an ordinary log call, so
+the content was stripped first. `ColoredRichHandler` removed every `[...]`
+outright below INFO, and at INFO handed the raw message to Rich, which
+parsed the brackets as tags.
+
+`_escape_non_rich` is the routine that gets this right — it keeps known
+Rich tags and escapes the rest — and had only ever been applied to
+templated events. Both paths use it now.
+
+It was also wrong on nesting. Replacing whole `[...]` regex matches means
+a match swallows its own contents, so a bracket nested inside another was
+never examined:
+
+```
+[[1,2],[3]]   ->   [,[3]]
+```
+
+Nested arrays are ordinary JSON, so this affected real payloads. It now
+scans each opening bracket and decides individually, which also handles an
+unclosed `[`. Rich markup still renders: `[bold]hi[/bold]` gives `hi`.
+
+Found while moving a voice agent's per-call records off `print()` — the
+CRM payload it logs is a transcript array, and the logger was quietly
+dropping it.
+
 ## [1.4.0] - 2026-08-27
 
 ### Added — `operonx.io`: ending a stream that feeds a graph
