@@ -182,3 +182,35 @@ def test_json_object_passes_a_real_object_through():
 
     assert json_object('{"a": 1}') == {"a": 1}
     assert json_object({"already": "a dict"}) == {"already": "a dict"}
+
+
+def test_a_refused_connection_never_completes_the_handshake():
+    """Refusing is not accepting-then-closing.
+
+    A callbot's endpoint declared call_id, phone_number and customer_id as
+    required query params, so a bare connect was refused with 403. Moving
+    to the serve layer accepted every socket and only then asked
+    `on_session` — so a call with no identity at all got a successful
+    upgrade followed by silence. The peer cannot tell that from a server
+    that died.
+    """
+    pytest.importorskip("starlette")
+    import websockets.exceptions
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    from operonx.core.serve.app import build_app
+
+    spec = ServeSpec(name="w", kind="websocket", path="/ws",
+                     session="per_connection", max_inflight=8,
+                     graph="tests.internal.core.serve.test_lifecycle_hooks:tiny")
+    app = build_app((spec,), engines={"w": Operon(tiny)})
+    app.state.operonx_runners[0]._on_session = lambda session: None
+
+    with TestClient(app) as client:
+        with pytest.raises((WebSocketDisconnect, Exception)) as exc:
+            with client.websocket_connect("/ws"):
+                pass
+    # Starlette answers an un-accepted close with an HTTP rejection rather
+    # than a websocket close frame.
+    assert exc.value is not None

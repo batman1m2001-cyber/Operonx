@@ -140,6 +140,9 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
         runner = ServeRunner(engine, spec, transport=transport)
         if runner._on_session is None:
             runner._on_session = _default_on_session(spec)
+        # The websocket route needs to ask the same question the runner
+        # would, one step earlier — before the handshake is answered.
+        transport.gate = runner._request_for
         runners.append(runner)
 
     # Lifespan rather than `on_event`: Starlette 1.0 removed the latter.
@@ -198,14 +201,34 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
 
 
 def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
+    from .asgi import WebSocketSession
+
     async def endpoint(websocket):
-        await websocket.accept()
         meta = {
             "query": dict(websocket.query_params),
             "headers": dict(websocket.headers),
             "path": str(websocket.url.path),
         }
-        await transport.handle(websocket, meta=meta)
+        session = WebSocketSession(websocket, meta=meta,
+                                   max_inflight=spec.max_inflight)
+
+        # `on_session` decides before the handshake completes. Accepting and
+        # then closing is not the same thing as refusing: the peer sees a
+        # successful upgrade followed by silence, where a refusal is a 403
+        # it can act on. Closing an un-accepted socket is how Starlette
+        # sends that.
+        gate = getattr(transport, "gate", None)
+        if gate is not None:
+            request = gate(session)
+            if request is None:
+                LOGGER.info(f"[serve:{spec.name}] refused a connection at the door")
+                await websocket.close(code=4403)
+                return
+            session.run_request = request
+
+        await websocket.accept()
+        transport.offer(session)
+        await session.pump_inbound()
 
     return endpoint
 

@@ -73,6 +73,12 @@ class ServeRunner:
         self._runs: set = set()
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
+        # A transport that can refuse before completing its handshake asks
+        # this early and stores the answer, so the hook runs exactly once
+        # per connection however the transport is shaped.
+        decided = getattr(session, "run_request", None)
+        if decided is not None:
+            return decided
         if self._on_session is None:
             return RunRequest()
         request = self._on_session(session)
