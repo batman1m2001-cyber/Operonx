@@ -1,10 +1,10 @@
 # Serve layer — the transport belongs inside the graph's world
 
-Status: **in progress.** 2026-08-29. Steps 1-4 built — manifest parser,
-transport protocol, registry, in-memory transport, `ingress`/`egress` and
-the session runner, with the third-party-transport gate passing. Steps 5-8
-(the `http` and `websocket` built-ins, the `asgi` mount, the CLI, and the
-callbot migration) remain.
+Status: **in progress.** 2026-08-29. Steps 1-7 built — manifest parser,
+transport protocol, registry, in-memory transport, `ingress`/`egress`, the
+session runner, the `http` and `websocket` built-ins, the `asgi` mount and
+`operonx-serve`, with the third-party-transport gate passing. Step 8, the
+callbot migration, remains — and it is the one that proves the rest.
 
 Building it surfaced a data-loss bug in the transient-ports work this
 plan depends on — a chain of three ops lost every item but the first —

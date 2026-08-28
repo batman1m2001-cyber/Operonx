@@ -950,16 +950,50 @@ class Operon:
             backend: "python" (FastAPI/uvicorn) or "rust" (Axum).
             **kwargs: Extra arguments forwarded to ``OperonApp.serve()``.
         """
+        # This used to delegate to `operonx.serve.OperonApp` — a package
+        # that is not installed, not a dependency and not in this
+        # repository, so every call raised ImportError. Meanwhile
+        # `operonx.toml` had been declaring the same endpoint by hand for
+        # the studio's benefit. The two halves are joined now: this is the
+        # one-endpoint convenience form, and it builds the same ServeSpec
+        # the manifest would have produced.
+        from operonx.core.manifest import ServeSpec
+        from operonx.core.serve.app import build_app
+
+        # Both of these were arguments to a stub that never ran, so no
+        # caller can be relying on them. Saying so is better than accepting
+        # `backend="rust"` and quietly serving Python anyway — an ignored
+        # argument is a promise the caller thinks was kept.
+        if backend != "python":
+            raise NotImplementedError(
+                f"engine.serve(backend={backend!r}) is not implemented; "
+                f"only 'python' is available"
+            )
+        if stream is not None:
+            raise NotImplementedError(
+                "engine.serve(stream=...) is not implemented yet; a graph "
+                "streams by yielding to `egress`"
+            )
+
         try:
-            from operonx.serve import OperonApp
+            import uvicorn
         except ImportError:
             raise ImportError(
-                "operonx-serve is required for engine.serve(). Install it with: pip install operonx-serve"
+                'engine.serve() needs the serve extra: pip install "operonx[serve]"'
             ) from None
 
-        app = OperonApp()
-        app.endpoint(path, graph=self.graph, stream=stream, websocket=websocket)
-        app.serve(host=host, port=port, backend=backend, **kwargs)
+        spec = ServeSpec(
+            name=self.name or "serve",
+            kind="websocket" if websocket else "http",
+            graph="",                      # the engine is passed directly
+            path=path,
+            host=host,
+            port=port,
+            session="per_connection" if websocket else "per_request",
+            max_inflight=kwargs.pop("max_inflight", 4096) if websocket else None,
+        )
+        app = build_app((spec,), engines={spec.name: self})
+        uvicorn.run(app, host=host, port=port, **kwargs)
 
     async def batch(
         self,
