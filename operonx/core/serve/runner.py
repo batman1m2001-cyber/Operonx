@@ -9,6 +9,7 @@ project has to write it again. The callbot's version of it is 437 lines.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Optional
 
 from operonx.core.loggings import LOGGER
@@ -68,6 +69,7 @@ class ServeRunner:
         self.spec = spec
         self.transport = transport if transport is not None else resolve_transport(spec.kind)(spec)
         self._on_session = load_object(spec.on_session) if spec.on_session else None
+        self._on_close = load_object(spec.on_close) if spec.on_close else None
         self._runs: set = set()
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
@@ -83,14 +85,37 @@ class ServeRunner:
         if request is None:
             await session.close()
             return
+        handle = None
         try:
-            await serve_session(self.engine, session, request)
+            handle = await serve_session(self.engine, session, request)
         except Exception as exc:                          # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses
             # runs quietly is the failure nobody finds in production.
             LOGGER.error(
                 f"[serve:{self.spec.name}] session run failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        finally:
+            await self._close_one(session, handle)
+
+    async def _close_one(self, session: Session, handle: Any) -> None:
+        """Whatever `on_session` opened, close — even on the failure path.
+
+        Runs after the run has ended however it ended, which is the only
+        place a counter gets decremented and a record gets written exactly
+        once. Its own failure is contained: a teardown hook that raises
+        must not take out the accounting that follows it.
+        """
+        if self._on_close is None:
+            return
+        try:
+            result = self._on_close(session, handle)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:                          # noqa: BLE001
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_close failed: "
                 f"{type(exc).__name__}: {exc}"
             )
 

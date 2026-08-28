@@ -44,7 +44,7 @@ from typing import Any, Dict, Optional, Tuple
 try:                                                  # Python 3.11+
     import tomllib as _toml
 except ModuleNotFoundError:                           # 3.10
-    import tomli as _toml                             # type: ignore[no-redef]
+    import tomli as _toml  # type: ignore[no-redef]
 
 from operonx.core.loggings import LOGGER
 from operonx.core.registry.storage.yaml import _interpolate_env_vars
@@ -125,6 +125,11 @@ class ServeSpec:
         on_session: ``module:function`` returning a ``RunRequest`` from a
             connection. Where ``?call_id=&customer_info=`` becomes real
             inputs — project logic no amount of TOML expresses.
+        on_close: ``module:function(session, handle)`` run after the run
+            ends, however it ended. The symmetric half of ``on_session``:
+            whatever was opened at the door gets closed here — a counter
+            decremented, a record written, a last message sent to a peer
+            that may already be gone.
         app: For ``kind = "asgi"``: the foreign app to mount. Health,
             CRUD and admin routes stay someone else's code.
     """
@@ -139,6 +144,7 @@ class ServeSpec:
     session: str = "per_request"
     max_inflight: Optional[int] = None
     on_session: Optional[str] = None
+    on_close: Optional[str] = None
     app: Optional[str] = None
     description: str = ""
     options: Dict[str, Any] = field(default_factory=dict)
@@ -169,6 +175,7 @@ class Manifest:
     fixtures: Dict[str, Dict[str, Any]]
     resources_overlay: Optional[str]
     source: Optional[Path]
+    on_startup: Tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -236,6 +243,16 @@ class Manifest:
             raise ManifestError(f"{where}: `schema` must be 1 or greater, got {schema}")
 
         project = dict(raw.get("project") or {})
+        # `operonx serve` owns the process, so it owns what has to happen
+        # before the first request: sizing a thread pool, warming a model
+        # so the first caller does not pay for the connection setup. These
+        # are real work with nowhere else to live once the hand-written
+        # server is gone.
+        on_startup = tuple(str(h) for h in _as_list(project.get("on_startup")))
+        for hook in on_startup:
+            if not _ENTRY_RE.match(hook):
+                raise ManifestError(
+                    f"{where}: on_startup {hook!r} is not `module:function`")
         resources = raw.get("resources") or {}
         overlay = resources.get("overlay") if isinstance(resources, dict) else None
 
@@ -271,6 +288,7 @@ class Manifest:
             fixtures=fixtures,
             resources_overlay=overlay,
             source=source,
+            on_startup=on_startup,
         )
 
 
@@ -392,7 +410,7 @@ def _serve_spec(
 
     known_keys = {
         "name", "kind", "graph", "path", "method", "host", "port", "session",
-        "max_inflight", "on_session", "app", "description",
+        "max_inflight", "on_session", "on_close", "app", "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
 
@@ -407,6 +425,7 @@ def _serve_spec(
         session=session,
         max_inflight=max_inflight,
         on_session=(str(block["on_session"]) if block.get("on_session") else None),
+        on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
         description=str(block.get("description") or ""),
         options=options,

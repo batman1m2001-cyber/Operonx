@@ -45,7 +45,24 @@ def engine_for(spec: ServeSpec) -> Any:
         }
     except (TypeError, ValueError):
         params = {}
-    return Operon(graph_fn, params=params) if params else Operon(graph_fn)
+
+    # `trace` and `concurrency` ride in the spec's free-form options. They
+    # are engine settings rather than transport settings, but they have to
+    # be declarable: a manifest that boots the graph and silently drops its
+    # trace consumers would take a project's observability away as the
+    # price of adopting the serve layer.
+    kwargs = {}
+    if params:
+        kwargs["params"] = params
+    trace = spec.options.get("trace")
+    if trace:
+        kwargs["trace"] = list(trace) if isinstance(trace, (list, tuple)) else [str(trace)]
+
+    engine = Operon(graph_fn, **kwargs)
+    concurrency = spec.options.get("concurrency")
+    if concurrency:
+        engine.graph.concurrency = int(concurrency)
+    return engine
 
 
 def _meta_from_request(request: Any) -> Dict[str, Any]:
@@ -73,8 +90,14 @@ def _default_on_session(spec: ServeSpec):
     return build
 
 
-def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = None) -> Any:
-    """One ASGI app carrying every endpoint bound to a single listener."""
+def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = None,
+              on_startup: Tuple[str, ...] = ()) -> Any:
+    """One ASGI app carrying every endpoint bound to a single listener.
+
+    `on_startup` hooks run once, before any endpoint accepts, because
+    warming a model after the first caller has arrived is the same as not
+    warming it.
+    """
     try:
         from starlette.applications import Starlette
         from starlette.responses import JSONResponse
@@ -125,6 +148,12 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
     # them — the same reason a disconnect does not cancel a run.
     @asynccontextmanager
     async def lifespan(_app):
+        for hook_path in on_startup:
+            hook = load_object(hook_path)
+            result = hook()
+            if inspect.isawaitable(result):
+                await result
+            LOGGER.info(f"[serve] startup hook done: {hook_path}")
         tasks = [asyncio.ensure_future(r.run()) for r in runners]
         try:
             yield
@@ -183,7 +212,8 @@ def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
 
 def build_apps(manifest: Manifest) -> Dict[Tuple[str, int], Any]:
     """One app per listener the manifest declares."""
-    return {addr: build_app(specs) for addr, specs in manifest.listeners().items()}
+    return {addr: build_app(specs, on_startup=manifest.on_startup)
+            for addr, specs in manifest.listeners().items()}
 
 
 def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None:
@@ -214,7 +244,7 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
     async def run_all() -> None:
         servers = []
         for (host, port), group in grouped.items():
-            app = build_app(tuple(group))
+            app = build_app(tuple(group), on_startup=manifest.on_startup)
             config = uvicorn.Config(app, host=host, port=port, log_level="info")
             servers.append(uvicorn.Server(config).serve())
             LOGGER.info(

@@ -1,10 +1,8 @@
 # Serve layer — the transport belongs inside the graph's world
 
-Status: **in progress.** 2026-08-29. Steps 1-7 built — manifest parser,
-transport protocol, registry, in-memory transport, `ingress`/`egress`, the
-session runner, the `http` and `websocket` built-ins, the `asgi` mount and
-`operonx-serve`, with the third-party-transport gate passing. Step 8, the
-callbot migration, remains — and it is the one that proves the rest.
+Status: **built.** 2026-08-29. All eight steps. See "Outcome" at the end
+for the four things the callbot migration forced back into the framework,
+and the one gate this plan wrote that cannot be met as written.
 
 Building it surfaced a data-loss bug in the transient-ports work this
 plan depends on — a chain of three ops lost every item but the first —
@@ -371,3 +369,74 @@ above got wrong.
 **`max_inflight` is required from schema 2, not from schema 1.** A parser
 that refuses to read the manifests it was written to understand is no use;
 existing files keep working and get a warning instead.
+
+
+## Outcome, 2026-08-29
+
+Built, and the callbot serves from its manifest:
+
+```
+server/ws_server.py    437 -> 51 lines
+```
+
+The rest of those 437 lines did not vanish; they were separated by what
+they actually are. `server/startup.py` (121) is what must be true before
+the first call. `server/call_session.py` (205) is the door — `open_call`
+and `close_call`. What *did* vanish is the whole per-call lifecycle:
+accepting the socket, starting the engine, draining the run, cancelling
+the monitor, the orchestrated shutdown. That was never this project's
+code to write.
+
+### Four things the migration forced back into the framework
+
+None of these were in the plan. Every one turned up the moment the layer
+had to carry a real system instead of a graph written to suit it.
+
+**`on_close`.** `on_session` had no symmetric half, so nothing could
+decrement a CCU counter or write a CRM record exactly once on every path —
+including the paths where the run failed. Opening without closing is not
+a design.
+
+**`[project] on_startup`.** Once `operonx serve` owns the process, it owns
+process startup. The callbot warms its LLM connection at boot for a
+measured reason: without it the first call after a deploy pays 0.6-1.2 s
+for DNS, TLS and inference, and the first caller of the day hears it.
+There was nowhere for that to live.
+
+**`handle.graph_name`.** A teardown hook reads a declared cell to find out
+what the dialogue decided, and a cell key starts with the graph's name —
+which `on_close(session, handle)` has no way to know, because it does not
+hold the engine. Without it the callbot would file `ARId=UNKNOWN`, the
+exact bug that declaring the cell was meant to fix.
+
+**`trace` and `concurrency` on the spec.** `engine_for` silently dropped
+both. Adopting the serve layer at the price of a project's Langfuse
+tracing is a trade nobody would take knowingly, and one they would only
+discover in production.
+
+### A gate this plan got wrong
+
+> The two bugs fault injection found — non-object `customer_info`, and an
+> unbounded field reaching TTS — must be impossible to write in a project
+> built on this layer.
+
+Half of that was reasonable and is done. `serve.json_object()` returns a
+dict or the default and never anything else, so the trap that killed those
+calls — `JSONDecodeError` guards only malformed input, while `[1,2,3]`,
+`"hello"`, `42`, `true` and `null` all parse cleanly and are not objects —
+is now the framework's to remember rather than each project's to
+rediscover. The callbot uses it.
+
+The other half cannot be met and should not have been written. Only that
+project knows its TTS gateway answers 422 on a long body; a framework that
+clamped string lengths on the way into a graph would be guessing. The
+clamp stays local, and the plan was wrong to promise otherwise.
+
+### One deliberate compromise
+
+`play_frame` still writes to the socket through `SCRATCH["websocket"]`,
+because chunking and pacing a TTS frame with per-chunk audit fields is
+more than per-item `egress` expresses. What changed is where the socket
+comes from: the session, off the run that a transport minted, rather than
+from a hand-written server that had to remember to seed the key.
+Converting egress properly is separate work and was not step 8.

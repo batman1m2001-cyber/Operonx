@@ -14,8 +14,12 @@ from typing import Any, AsyncIterator
 import pytest
 
 from operonx.core import END, START, Operon, graph
-from operonx.core.manifest import _toml  # the tomllib/tomli pick that ships
-from operonx.core.manifest import Manifest, ManifestError, ServeSpec
+from operonx.core.manifest import (
+    Manifest,
+    ManifestError,
+    ServeSpec,
+    _toml,  # the tomllib/tomli pick that ships
+)
 from operonx.core.ops import op
 from operonx.core.serve import (
     MemoryTransport,
@@ -27,7 +31,6 @@ from operonx.core.serve import (
     resolve_transport,
     serve_session,
 )
-
 
 # -- manifest ------------------------------------------------------------
 

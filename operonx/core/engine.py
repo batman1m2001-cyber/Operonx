@@ -70,10 +70,17 @@ class ExecutionHandle:
         task: asyncio.Task,
         state: Any = None,
         trace: Any = None,
+        graph_name: str = "",
     ) -> None:
         self._queue = queue  # fed by root Scheduler
         self._scheduler_task = task  # task running the workflow
         self.state = state  # MemoryState for this execution (tracing access)
+        # The graph's name, which is the first half of every declared cell
+        # key. Reading `handle.state[name, "agent"]` from outside the run
+        # is the point of declaring a cell, and without this the caller has
+        # to already hold the engine to know the name — which a serve-layer
+        # `on_close(session, handle)` does not.
+        self.graph_name = graph_name
         # V3 tracing: WorkflowTrace populated live by BaseOp.run wrappers.
         # `None` when V3 tracing is disabled at import time (rare — kept
         # as an escape hatch for tests that don't want the buffer).
@@ -636,7 +643,8 @@ class Operon:
                 )
 
         scheduler_task = asyncio.create_task(_run())
-        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace)
+        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace,
+                               graph_name=self.name)
 
     async def run(
         self,

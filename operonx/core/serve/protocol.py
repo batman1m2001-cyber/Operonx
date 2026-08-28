@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator, Dict, Mapping, Optional, Protocol, runtim
 
 __all__ = [
     "Session",
+    "json_object",
     "Transport",
     "RunRequest",
     "BoundedSession",
@@ -59,6 +60,36 @@ class RunRequest:
     request_id: Optional[str] = None
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+
+
+def json_object(text: Any, default: Optional[Dict[str, Any]] = None,
+                on_reject=None) -> Dict[str, Any]:
+    """Parse untrusted JSON and guarantee a dict comes back.
+
+    A connection's query string and body are written by whoever dialled
+    in, and the obvious guard is the wrong one. Catching `JSONDecodeError`
+    catches only malformed input — but `[1,2,3]`, `"hello"`, `42`, `true`
+    and `null` all parse *cleanly* and are not objects, and each one goes
+    on to raise the first time anything treats the result as a mapping.
+    ``null`` is the worst of them: `json.loads` returns ``None``, which
+    slips past an ``is None`` check written before the parse.
+
+    A callbot shipped exactly that bug on all five values, and every one of
+    them killed the call at accept. What matters is the *type* that comes
+    back, never whether the parse threw — so this returns the default for
+    anything that is not an object, and tells `on_reject` what it saw.
+    """
+    import json as _json
+
+    try:
+        parsed = _json.loads(text) if isinstance(text, (str, bytes, bytearray)) else text
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    if on_reject is not None:
+        on_reject(parsed)
+    return dict(default or {})
 
 
 @runtime_checkable

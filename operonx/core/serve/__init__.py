@@ -16,6 +16,7 @@ from .protocol import (
     Session,
     Transport,
     current_session,
+    json_object,
 )
 from .registry import (
     load_object,
@@ -39,6 +40,7 @@ __all__ = [
     "current_session",
     "egress",
     "ingress",
+    "json_object",
     "load_object",
     "register_transport",
     "resolve_transport",
