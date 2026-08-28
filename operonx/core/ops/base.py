@@ -964,6 +964,10 @@ class BaseOp(ABC):
         # (streaming ops keep the same upstreams for all yields).
         _wf_trace = _current_trace.get()
         _v3_upstreams: List[UpstreamRef] = []
+        # A transient generator emits one span for the whole stream instead
+        # of one per yield; these carry the count to that span.
+        _transient_yields = 0
+        _transient_last_ctx = None
 
         try:
             if self.delay > 0:
@@ -1033,7 +1037,15 @@ class BaseOp(ABC):
                 # ctx already carries the yield sub-index (`("main","[T]","[i]")`),
                 # so op_id is unique per yield → downstream consumers of
                 # yield i produce matching UpstreamRef.from_op_id.
-                if _wf_trace is not None and self.is_gen:
+                if _wf_trace is not None and self.is_gen and self.transient:
+                    # A transient op is a stream: one node per yield means
+                    # 30,000 spans for a ten-minute call, and every one of
+                    # them holds its ctx for the life of the run. Count them
+                    # and emit a single span at EOF instead — see the summary
+                    # node below.
+                    _transient_yields += 1
+                    _transient_last_ctx = ctx
+                elif _wf_trace is not None and self.is_gen:
                     _wf_trace.nodes.append(
                         OpExecution(
                             op_id=make_op_id(self.full_name, ctx),
@@ -1144,7 +1156,38 @@ class BaseOp(ABC):
                         if op_cancelled
                         else (STATUS_ERROR if error_msg is not None else STATUS_OK)
                     )
-                    should_emit = (not self.is_gen) or v3_status != STATUS_OK
+                    if self.is_gen and self.transient and _transient_yields:
+                        # One span for the stream. `items` is the payload —
+                        # the values themselves were summarised or never
+                        # copied, which is the whole point.
+                        _wf_trace.nodes.append(
+                            OpExecution(
+                                op_id=make_op_id(self.full_name, ctx_for_end),
+                                op_name=self.name,
+                                op_full_name=self.full_name,
+                                ctx=ctx_for_end,
+                                start_time=perf_start,
+                                end_time=perf_start + duration_ms / 1000.0,
+                                inputs=self._filter_for_trace(_inputs),
+                                outputs={
+                                    "_transient_stream": True,
+                                    "items": _transient_yields,
+                                    "last_ctx": str(_transient_last_ctx),
+                                },
+                                upstreams=_v3_upstreams,
+                                status=v3_status,
+                                error=error_msg,
+                            )
+                        )
+                    # A transient op in a stream emits no per-item node on
+                    # success: at 30,000 items that is 30,000 spans, each
+                    # holding its ctx for the life of the run, and it is the
+                    # last linear term once the cells are released. Failures
+                    # always emit — a stream you cannot debug is worse than
+                    # one you cannot count.
+                    should_emit = (
+                        (not self.is_gen) and not self.transient
+                    ) or v3_status != STATUS_OK
                     if should_emit:
                         _wf_trace.nodes.append(
                             OpExecution(

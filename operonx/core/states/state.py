@@ -489,6 +489,28 @@ class MemoryState:
         """Get value with explicit parameters."""
         return self[op, var, ctx]
 
+    def release_context(self, ctx) -> int:
+        """Drop every non-shared cell entry for a finished context.
+
+        Used for contexts minted by a transient stream: the producer's
+        payload, the consumer's cached pull, and the consumer's own outputs
+        and metadata all belong to that one item and nothing outlives it.
+        Releasing only the marked cells left the consumer's five metadata
+        vars behind — six entries an item, which is still linear.
+
+        Shared cells are skipped: they are graph-level by definition and
+        outlive every context.
+        """
+        if ctx is None:
+            return 0
+        dropped = 0
+        for cell in self._cells:
+            if cell.is_shared:
+                continue
+            if cell.contexts.pop(ctx, _MISSING) is not _MISSING:
+                dropped += 1
+        return dropped
+
     def release_transient(self, ctx) -> int:
         """Drop this context's transient cell entries. Returns how many.
 

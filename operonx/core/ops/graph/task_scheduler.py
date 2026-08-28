@@ -282,6 +282,10 @@ class Scheduler:
         # seq_active[gen_ctx][dst_op] = True while an item is in flight for dst_op.
         # Guards against double-dispatch: next item only starts after current EOF.
         seq_active: Dict[tuple, Dict[str, bool]] = {}
+        # Contexts minted by a transient producer. Everything in them belongs
+        # to one item, so the whole context is released when its last op
+        # finishes rather than only the cells marked transient.
+        transient_ctxs: set = set()
 
         # seq_origins[(op_name, item_ctx)] = (src, dst) key.
         # When dst_op finishes at item_ctx (EOF arrives), we use this to find
@@ -402,12 +406,15 @@ class Scheduler:
                         bucket.pop(op_name, None)
                         if not bucket:
                             tasks_by_ctx.pop(ctx, None)
-                            # Last op in this context finished: release any
-                            # transient cells it held. Nothing else in the
-                            # package frees per-context state, so for a
-                            # streaming run this is the only thing between a
-                            # flat run and unbounded growth.
-                            state.release_transient(ctx)
+                            # Last op in this context finished. Nothing else
+                            # in the package frees per-context state, so for
+                            # a streaming run this is the only thing between
+                            # a flat run and unbounded growth.
+                            if ctx in transient_ctxs:
+                                transient_ctxs.discard(ctx)
+                                state.release_context(ctx)
+                            else:
+                                state.release_transient(ctx)
 
         async def _drain_inline() -> None:
             """Process all pending inline ops — no task creation, no queue.
@@ -514,6 +521,8 @@ class Scheduler:
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
             dst_op = g._ops[dst]
+            if getattr(g._ops.get(src), "transient", False):
+                transient_ctxs.add(ctx)
 
             # Resolve per-var stream policy from schema (O(1)).
             # Find which input var of dst references src, then look up its policy.
