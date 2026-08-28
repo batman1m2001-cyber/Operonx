@@ -1,6 +1,7 @@
 # Transient ports — streaming runs must stop retaining every item
 
-Status: **designed, measured, not built.** 2026-08-28.
+Status: **built.** 2026-08-28. See "Outcome" at the end — three things this
+plan got wrong are recorded there.
 
 ## The finding
 
