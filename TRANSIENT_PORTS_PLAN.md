@@ -156,6 +156,31 @@ wiring site.
 - Callbot `tests/test_vad_parity.py` identical, and both e2e calls passing,
   before any callbot change is considered.
 
+## Outcome, 2026-08-28
+
+Built, and the callbot's audio path is edges end to end as a result. Three
+things this document had wrong or did not know:
+
+**The callbot was never in the danger zone this plan claimed.** The
+"450 MB at 5 CCU" that motivated it came from multiplying two invented
+numbers — a ten-minute call, when the real p50 across 87 logged calls is
+35 s, and 3 KB/item extrapolated from 32 KB blobs when a telco packet is
+320 bytes. Real baseline is ~4.2 MB a call. The leak is real and worth
+fixing on its own terms; it was not the blocker for the thing it was
+justified by.
+
+**Eviction did not fire for `bound="sync"` consumers.** The hook lived in
+`_pump`, which inline ops never reach. Every measurement that showed the
+feature working used an `async def` consumer. Found by writing the tests
+this plan listed as gates and then skipped — 509 / 5009 / 50009 entries
+for 50 / 500 / 5000 items.
+
+**The intermittent ~50 ms loop spike is GC.** Measured at 5 CCU, four runs
+each: with GC on, maxima of 3.04 / 46.66 / 4.10 / 10.80 ms; with
+`gc.freeze()` + `gc.disable()`, 3.92 / 5.58 / 3.62 / 4.31 ms — the spike
+disappears entirely. It is per-item context churn, not anything inherent
+to edge dispatch, and it is mitigable at the application level.
+
 ## What it unlocks
 
 If this lands, high-rate edges become viable and the callbot's two Channels

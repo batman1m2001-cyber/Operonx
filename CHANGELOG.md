@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `@op(transient=True)`: streaming runs stop retaining every item
+
+A run never freed per-item state. `MemoryState._cells[idx]` is keyed by
+context, every dispatched item mints one, and nothing in the package
+removed an entry — the scheduler pops its own bookkeeping and leaves the
+cells alone. Request-response graphs never notice; a long-lived streaming
+run grew linearly with items forever.
+
+```
+generator -> one downstream op, 32 KB items
+
+  items     before      after
+    250     8.6 MB     1.0 MB
+   1000    33.6 MB     3.1 MB
+   4000   134.4 MB     2.0 MB      cells flat at 9
+```
+
+`@op(transient=True)` marks an op's per-item outputs store-deliver-evict:
+released when the consuming context finishes. Opt-in, because a general
+context GC would have to prove nobody else will read a value —
+`.collect()` buffers, push refs into shared cells, interrupt replay — and
+each is a way to be silently wrong.
+
+Transience propagates along pull refs. Reading an input caches it in the
+reader's own cell, and both cells hold the *same object*, so marking only
+the producer frees nothing. One flag on the producer covers the chain.
+
+The tracer had to learn it too: an `OpExecution` holds its inputs and
+outputs for the life of the run, so copying a transient payload there
+pinned exactly what the eviction released. Transient values are
+summarised, a transient generator emits one span for the whole stream
+rather than one per yield, and a transient op emits no per-item node on
+success. Failures always emit.
+
+Three compile-time guards, each naming the offending hop: `.collect()` on
+a transient chain, more than one consumer of a transient port, and a
+shared cell marked transient by propagation. Pushing a transient value
+*into* a declared cell stays legal — the shared cell keeps it.
+
+The trade, stated plainly: transient paths lose per-item observability.
+One span with a count, and every failure.
+
 ### Fixed — a log message kept losing its own square brackets
 
 Rich uses `[tag]` for markup, so any message carrying literal brackets —
