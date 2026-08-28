@@ -410,11 +410,25 @@ class Scheduler:
                             # in the package frees per-context state, so for
                             # a streaming run this is the only thing between
                             # a flat run and unbounded growth.
-                            if ctx in transient_ctxs:
-                                transient_ctxs.discard(ctx)
-                                state.release_context(ctx)
-                            else:
-                                state.release_transient(ctx)
+                            _release_if_done(ctx)
+
+        def _release_if_done(ctx: tuple) -> None:
+            """Free a context's cells once nothing is left to run in it.
+
+            Both dispatch paths have to call this. Ops with ``bound="sync"``
+            never reach ``_pump`` — they are drained inline and never enter
+            ``tasks_by_ctx`` — so a hook in ``_pump`` alone silently skipped
+            every context whose consumer was sync, which is most of them.
+            """
+            if tasks_by_ctx.get(ctx):
+                return
+            if any(pending_ctx == ctx for _, pending_ctx in inline_pending):
+                return
+            if ctx in transient_ctxs:
+                transient_ctxs.discard(ctx)
+                state.release_context(ctx)
+            else:
+                state.release_transient(ctx)
 
         async def _drain_inline() -> None:
             """Process all pending inline ops — no task creation, no queue.
@@ -463,9 +477,11 @@ class Scheduler:
                         else:
                             _on_frame(Frame(op_name, item_ctx, result))
                     _on_eof(EOF(op_name, ctx))
+                    _release_if_done(ctx)
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     _on_eof(EOF(op_name, ctx))
+                    _release_if_done(ctx)
 
         def _report_interrupt(event: Interrupt, ctx: tuple) -> None:
             """Forward the ``__interrupt__`` record to whoever is listening.
