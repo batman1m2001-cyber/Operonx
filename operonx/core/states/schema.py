@@ -39,6 +39,7 @@ class StateSchema:
         "_pull_refs",
         "_push_refs",
         "_shared_indices",
+        "_transient_indices",
         "_reducers",
         "_stream_policies",
     )
@@ -55,6 +56,11 @@ class StateSchema:
         self._pull_refs: List[Optional[Ref]] = []  # Pull data từ source khi đọc
         self._push_refs: List[Optional[Ref]] = []  # Push data đến target khi ghi
         self._shared_indices: set = set()  # indices of shared vars (graph-level, not per-context)
+        # Indices whose per-context values are dropped once the consuming
+        # context finishes, instead of being kept for the life of the run.
+        # Seeded from ``@op(transient=True)`` outputs, then grown along pull
+        # refs in ``_build`` — see TRANSIENT_PORTS_PLAN.md.
+        self._transient_indices: set = set()
         self._reducers: Dict[
             int, Any
         ] = {}  # {shared_idx: reducer_fn}; applied at cell-write in _write_cell
@@ -69,6 +75,7 @@ class StateSchema:
             self._register_ref_outputs()
             self._register_shared_vars(op)
             self._build()
+            self._stamp_transient_vars(op)
 
     # =========================================================================
     # Xây dựng Schema
@@ -106,6 +113,15 @@ class StateSchema:
             elif (op_name, var_name) not in self._var_to_idx:
                 # Không phải push ref, đăng ký với default
                 self._register(op_name, var_name, param.default)
+
+        # A transient op's declared outputs are the seeds. Metadata vars
+        # (start_time, error, ...) are deliberately NOT marked: the tracer
+        # reads them at EOF, and they are scalars rather than payloads.
+        if getattr(node, "transient", False):
+            for var_name in outputs:
+                idx = self._var_to_idx.get((op_name, var_name), -1)
+                if idx >= 0:
+                    self._transient_indices.add(idx)
 
         # Đăng ký các biến metadata
         for meta_var in ("start_time", "end_time", "duration_ms", "cost_usd", "error"):
@@ -224,6 +240,101 @@ class StateSchema:
                 target_key = (push_ref.source, push_ref.var)
                 target_idx = self._var_to_idx.get(target_key, -1)
                 push_ref.idx = target_idx
+
+        self._propagate_transient()
+
+    def _stamp_transient_vars(self, root_op) -> None:
+        """Tell each op which of its vars the tracer must not hold.
+
+        A trace node keeps its inputs and outputs for the life of the run, so
+        without this the tracer pins every payload the cells just released and
+        eviction frees nothing. Runs after propagation, so a consumer that
+        merely caches a transient pull is covered too.
+        """
+        if not self._transient_indices:
+            return
+        by_op: Dict[str, set] = {}
+        for (op_name, var_name), idx in self._var_to_idx.items():
+            if idx in self._transient_indices:
+                by_op.setdefault(op_name, set()).add(var_name)
+
+        def _walk(node):
+            names = by_op.get(node.full_name)
+            if names:
+                node._transient_vars = names
+            for child in (getattr(node, "_ops", None) or {}).values():
+                _walk(child)
+
+        _walk(root_op)
+
+    def _propagate_transient(self) -> None:
+        """Grow ``_transient_indices`` along pull refs, then validate.
+
+        Reading an input caches it in the reader's own cell
+        (``MemoryState.__getitem__``), so a payload is held by two cells per
+        hop — measured as the *same object*, not a copy, which means evicting
+        only the producer frees nothing. A cell that caches a pull from a
+        transient source is therefore transient itself, and one
+        ``@op(transient=True)`` on the producer stops the whole chain from
+        retaining.
+
+        Runs to a fixed point so chains of any length converge.
+        """
+        if not self._transient_indices:
+            return
+
+        changed = True
+        while changed:
+            changed = False
+            for idx, pull in enumerate(self._pull_refs):
+                if pull is None or idx in self._transient_indices:
+                    continue
+                if pull.idx in self._transient_indices:
+                    self._transient_indices.add(idx)
+                    changed = True
+
+        # A shared cell outlives every context by definition, so it cannot be
+        # transient. Marking one would silently drop graph-level state.
+        overlap = self._transient_indices & self._shared_indices
+        if overlap:
+            names = [k for k, i in self._var_to_idx.items() if i in overlap]
+            raise ValueError(
+                "transient port feeds a shared/declared cell, which outlives "
+                f"every context and cannot be evicted: {sorted(names)}. Write "
+                "the value through a non-transient op if it must persist."
+            )
+
+        # v1 is 1-1: eviction fires when a context's last op finishes, which
+        # is only safe if exactly one cell pulls the value. A second consumer
+        # would need refcounting before release — not built, so reject it at
+        # compile rather than silently hand the second reader a dropped cell.
+        readers: Dict[int, list] = {}
+        for idx, pull in enumerate(self._pull_refs):
+            if pull is not None and pull.idx in self._transient_indices:
+                readers.setdefault(pull.idx, []).append(idx)
+        for src_idx, dsts in readers.items():
+            if len(dsts) > 1:
+                src = [k for k, i in self._var_to_idx.items() if i == src_idx]
+                dst = [k for k, i in self._var_to_idx.items() if i in dsts]
+                raise ValueError(
+                    f"transient port {src} has {len(dsts)} consumers {sorted(dst)}; "
+                    "v1 supports exactly one. Drop transient=True, or fan out "
+                    "through a non-transient op."
+                )
+
+        # `.collect()` buffers until EOF, so a transient source would be
+        # evicted out from under it. Fail at compile, naming the hop.
+        for (op_name, var_name), policy in self._stream_policies.items():
+            if not policy.collect:
+                continue
+            idx = self._var_to_idx.get((op_name, var_name), -1)
+            pull = self._pull_refs[idx] if 0 <= idx < len(self._pull_refs) else None
+            if pull is not None and pull.idx in self._transient_indices:
+                raise ValueError(
+                    f"{op_name}.{var_name} uses .collect() on a transient source "
+                    f"({pull.source}.{pull.var}). collect() buffers every item "
+                    "until EOF, which is exactly what transient exists to avoid."
+                )
 
     # =========================================================================
     # Các Method Phân Giải Core (O(1))

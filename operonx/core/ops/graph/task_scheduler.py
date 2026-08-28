@@ -402,6 +402,12 @@ class Scheduler:
                         bucket.pop(op_name, None)
                         if not bucket:
                             tasks_by_ctx.pop(ctx, None)
+                            # Last op in this context finished: release any
+                            # transient cells it held. Nothing else in the
+                            # package frees per-context state, so for a
+                            # streaming run this is the only thing between a
+                            # flat run and unbounded growth.
+                            state.release_transient(ctx)
 
         async def _drain_inline() -> None:
             """Process all pending inline ops — no task creation, no queue.

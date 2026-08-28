@@ -147,6 +147,29 @@ def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
             inputs[k] = v.data
 
 
+
+def _summarise_transient(value: Any) -> Any:
+    """Describe a transient value without keeping a reference to it.
+
+    Scalars are cheap and identifying, so they pass through. Anything with a
+    size — an array, a buffer, a list — becomes a short string, because the
+    alternative is a trace node holding the payload for the whole run.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    n = getattr(value, "size", None)
+    if n is None:
+        try:
+            n = len(value)
+        except TypeError:
+            n = None
+    dtype = getattr(value, "dtype", None)
+    kind = type(value).__name__
+    if n is None:
+        return f"<{kind} transient>"
+    return f"<{kind}{f' {dtype}' if dtype is not None else ''} n={n} transient>"
+
+
 class BaseOp(ABC):
     """Base class for all ops in a workflow.
 
@@ -207,6 +230,12 @@ class BaseOp(ABC):
         "_obs_exclude",  # dict {"trace":[...], "checkpoint":[...]} or {"*":[...]}; empty = no exclude
         "_obs_include",  # dict {"trace":[...], "checkpoint":[...]} or {"*":[...]}; None = no allowlist
         "observe_max",  # int | None — per-op emit-event cap; raises ObserveBudgetExceeded on exceed
+        # Per-item outputs are evicted once the consuming context finishes,
+        # rather than kept for the life of the run. See TRANSIENT_PORTS_PLAN.md.
+        "transient",
+        # {var names} whose values this op must summarise rather than copy
+        # into a trace node. Stamped by StateSchema after propagation.
+        "_transient_vars",
     ]
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
@@ -235,6 +264,7 @@ class BaseOp(ABC):
         exclude=None,
         include=None,
         observe_max: Optional[int] = None,
+        transient: bool = False,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -246,6 +276,8 @@ class BaseOp(ABC):
         self._error_idx = None  # (schema, err_idx)
         self.cache = cache
         self.delay = delay
+        self.transient = transient
+        self._transient_vars = None  # stamped post-compile by StateSchema
 
         # Phase 2: observability filter. Normalised to dict form:
         #   {"*": [vars]}                  — apply to both observers
@@ -802,10 +834,25 @@ class BaseOp(ABC):
         durable log and printed in the trace.
 
         The no-filter path — every bare ``@op`` — is a plain dict copy.
+
+        Transient vars are summarised rather than copied. A trace node holds
+        its inputs and outputs for the life of the run, so copying a
+        transient payload here would pin exactly what ``transient=True``
+        exists to release — and the eviction would free nothing.
         """
+        transient_vars = getattr(self, "_transient_vars", None)
         if not self._obs_exclude and not self._obs_include:
-            return dict(values)
-        return {k: v for k, v in values.items() if should_emit_for_channel(self, k, "trace")}
+            if not transient_vars:
+                return dict(values)
+            return {
+                k: (_summarise_transient(v) if k in transient_vars else v)
+                for k, v in values.items()
+            }
+        return {
+            k: (_summarise_transient(v) if transient_vars and k in transient_vars else v)
+            for k, v in values.items()
+            if should_emit_for_channel(self, k, "trace")
+        }
 
     def _v3_infer_upstreams(
         self,

@@ -27,6 +27,10 @@ _BASE_INIT_KEYS = frozenset(
         "exclude",
         "include",
         "observe_max",
+        # Per-item output eviction — see TRANSIENT_PORTS_PLAN.md. An init
+        # kwarg so `my_op(x=..., transient=True)` overrides the decorator
+        # rather than landing in the input mapping as a function argument.
+        "transient",
         # Phase 3 graph-only kwargs — routed to GraphOp.__init__ instead of
         # silently landing in the input mapping (BUG 6 from Phase 3 review).
         "strict_dag",

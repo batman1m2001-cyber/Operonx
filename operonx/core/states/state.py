@@ -72,6 +72,9 @@ def _fresh_default(value: "Any") -> "Any":
     return value
 
 
+_MISSING = object()
+
+
 class MemoryState:
     """Workflow state with Cell-based storage and O(1) indexed access.
 
@@ -485,6 +488,30 @@ class MemoryState:
     def get(self, op: str, var: str, ctx=None) -> Any:
         """Get value with explicit parameters."""
         return self[op, var, ctx]
+
+    def release_transient(self, ctx) -> int:
+        """Drop this context's transient cell entries. Returns how many.
+
+        Called by the scheduler when a context's last op finishes. Only
+        indices in ``schema._transient_indices`` are touched, and those are
+        validated at compile to have exactly one consumer, so by the time the
+        context is done nothing will read them again.
+
+        Without this a run never frees per-item state: cells are keyed by
+        context and nothing else in the package removes an entry, so a
+        long-lived streaming run grows linearly with items forever.
+        """
+        transient = self.schema._transient_indices
+        if not transient or ctx is None:
+            return 0
+        dropped = 0
+        for idx in transient:
+            cell = self._cells[idx]
+            if cell.is_shared:
+                continue
+            if cell.contexts.pop(ctx, _MISSING) is not _MISSING:
+                dropped += 1
+        return dropped
 
     # =========================================================================
     # Properties

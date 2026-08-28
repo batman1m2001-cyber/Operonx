@@ -27,6 +27,7 @@ def op(
     exclude: Optional[Any] = None,
     include: Optional[Any] = None,
     observe_max: Optional[int] = None,
+    transient: bool = False,
 ) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -61,6 +62,16 @@ def op(
             Mutually exclusive with ``include=``.
         include: Vars to expose to observers (allowlist). Same shapes as ``exclude``.
             ``include=[]`` silences the op entirely.
+        transient: This op's per-item outputs are stored, delivered, then
+            evicted when the consuming context finishes, instead of being kept
+            for the life of the run. For high-rate streams — a socket reader,
+            an audio chunker — where retaining every item is the difference
+            between a flat run and one that grows without bound.
+
+            Transience propagates along pull refs: a cell that caches a pull
+            from a transient port is itself transient, so declaring it once on
+            the producer stops the whole chain from retaining. Incompatible
+            with ``Ref.collect()``, which buffers until EOF by definition.
         observe_max: Per-op circuit breaker. If the op emits more than this many
             events in a single run, :class:`ObserveBudgetExceeded` is raised so
             runaway generators (e.g. streaming frame sources) fail loudly instead
@@ -104,6 +115,7 @@ def op(
             call_exclude = init_kwargs.pop("exclude", None)
             call_include = init_kwargs.pop("include", None)
             call_observe_max = init_kwargs.pop("observe_max", observe_max)
+            op_transient = init_kwargs.pop("transient", transient)
             eff_exclude = call_exclude if call_exclude is not None else exclude
             eff_include = call_include if call_include is not None else include
             return FuncOp(
@@ -113,6 +125,7 @@ def op(
                 exclude=eff_exclude,
                 include=eff_include,
                 observe_max=call_observe_max,
+                transient=op_transient,
                 _mappings=mappings or None,
                 **init_kwargs,
             )
