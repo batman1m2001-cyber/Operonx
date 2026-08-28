@@ -424,6 +424,20 @@ class Scheduler:
                 return
             if any(pending_ctx == ctx for _, pending_ctx in inline_pending):
                 return
+            # A consumer parked in a sequential queue has not started yet, so
+            # it is neither a live task nor an inline pending — and streaming
+            # is sequential by default, which makes this the common case
+            # rather than the exotic one. Releasing here freed the cells it
+            # was still going to read: in a three-op chain the first item
+            # dispatched immediately and survived, while every later item
+            # arrived at the third op as None. A two-op chain never shows it,
+            # which is why the original transient-ports tests missed it.
+            for waiting in seq_queues.values():
+                if ctx in waiting:
+                    return
+            for buffered in collect_bufs.values():
+                if any(pending_ctx == ctx for pending_ctx, _ in buffered):
+                    return
             if ctx in transient_ctxs:
                 transient_ctxs.discard(ctx)
                 state.release_context(ctx)

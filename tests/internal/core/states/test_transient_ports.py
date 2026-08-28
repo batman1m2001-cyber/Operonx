@@ -136,3 +136,50 @@ async def test_transient_may_push_into_a_declared_cell():
     # Every yield pushed, and the shared cell kept them all — none was lost
     # to the eviction that released the transient side.
     assert result["total"] == list(range(20))
+
+
+# -- regression: the chain length that the original tests never reached --
+
+@pytest.mark.asyncio
+async def test_transient_survives_a_three_op_chain():
+    """A parked sequential consumer must not have its context freed.
+
+    The tests above use a two-op chain — producer straight into consumer —
+    and pass while a three-op chain silently loses data. Streaming is
+    sequential by default, so with a third op the second and later items
+    wait in `seq_queues`: not a live task, not an inline pending, and so
+    invisible to the release guard. The context was freed underneath them
+    and every item after the first arrived as None.
+    """
+    seen = []
+
+    @op(bound="io", transient=True)
+    async def produce(n: int = 0):
+        for i in range(n):
+            yield {"item": f"i{i}"}
+
+    @op(bound="sync")
+    def relay(item: str = "") -> dict:
+        return {"reply": f"{item}!"}
+
+    @op(bound="io")
+    async def collect(reply=None) -> dict:
+        seen.append(reply)
+        return {}
+
+    @graph
+    def chain(n=0):
+        a = produce(n=n)
+        b = relay(item=a["item"])
+        c = collect(reply=b["reply"])
+        START >> a >> b >> c >> END
+
+    engine = Operon(chain, params={"n": None})
+    for count in (3, 50):
+        seen.clear()
+        handle = engine.start(inputs={"n": count})
+        async for _ in handle:
+            pass
+        assert seen == [f"i{i}!" for i in range(count)], (
+            f"chain of {count} lost items: {seen[:5]}"
+        )
