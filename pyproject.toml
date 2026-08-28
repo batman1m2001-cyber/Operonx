@@ -26,6 +26,11 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13.0",
     "orjson>=3.9",
+    # `operonx.core.manifest` reads operonx.toml, and tomllib is stdlib
+    # only from 3.11. The floor here is 3.10, so older interpreters need
+    # the backport — core, not an extra, since the manifest is how a
+    # project declares what it serves.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 # Optional dependency extras. Each extra is **self-contained** — listing
