@@ -72,7 +72,7 @@ def test_several_entry_points_on_one_graph(tmp_path):
 
 def test_unknown_graph_is_a_manifest_error(tmp_path):
     """A typo must not render as a graph served by nothing."""
-    with pytest.raises(ManifestError, match="not declared"):
+    with pytest.raises(ManifestError, match="neither a `module:function`"):
         Manifest.load(
             _write(tmp_path, '\n[[serve]]\nkind = "websocket"\ngraph = "ppeline"\n')
         )
@@ -92,3 +92,130 @@ def test_unknown_kind_is_a_manifest_error(tmp_path):
 def test_required_fields(tmp_path, missing, body):
     with pytest.raises(ManifestError, match=f"missing '{missing}'"):
         Manifest.load(_write(tmp_path, body))
+
+
+# ── serve names its own graph ───────────────────────────────────────────
+# `[[graph]]` existed to give entry points names so `[[serve]]` could
+# refer to them. Once serve names one directly, that indirection is a
+# second place to keep in step for no benefit.
+
+def _write_whole(tmp_path, body: str):
+    """A complete manifest, not BASE plus a fragment.
+
+    These cases are about what a manifest may leave out, so they cannot
+    build on a BASE that already declares a `[[graph]]`.
+    """
+    (tmp_path / "operonx.toml").write_text(body, encoding="utf-8")
+    return Manifest.load(tmp_path)
+
+
+def test_serve_may_name_an_entry_point_with_no_graph_block(tmp_path):
+    m = _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[serve]]
+kind  = "websocket"
+path  = "/ws/call"
+graph = "demo.pipeline:main"
+""")
+    # The graph is synthesised, so lint, extract and the studio still see a
+    # GraphSpec and need no change of their own.
+    assert [g.name for g in m.graphs] == ["main"]
+    assert m.graphs[0].entry == "demo.pipeline:main"
+    assert m.serves[0].graph == "main"
+    assert m.graph("main").entry == "demo.pipeline:main"
+
+
+def test_two_serves_on_one_entry_point_synthesise_one_graph(tmp_path):
+    m = _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[serve]]
+kind  = "http"
+path  = "/a"
+graph = "demo.pipeline:main"
+
+[[serve]]
+kind  = "http"
+path  = "/b"
+graph = "demo.pipeline:main"
+""")
+    assert len(m.graphs) == 1
+    assert [s.graph for s in m.serves] == ["main", "main"]
+
+
+def test_the_older_form_still_works(tmp_path):
+    """Naming a [[graph]] keeps working — projects have these files today."""
+    m = _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[graph]]
+name  = "pipeline"
+entry = "demo.pipeline:main"
+
+[[serve]]
+kind  = "websocket"
+graph = "pipeline"
+""")
+    assert [g.name for g in m.graphs] == ["pipeline"]
+    assert m.serves[0].graph == "pipeline"
+
+
+def test_both_forms_in_one_manifest(tmp_path):
+    m = _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[graph]]
+name  = "extra"
+entry = "demo.extra:build"
+
+[[serve]]
+kind  = "websocket"
+graph = "extra"
+
+[[serve]]
+kind  = "http"
+path  = "/v1/asr"
+graph = "demo.pipeline:asr_flow"
+""")
+    assert sorted(g.name for g in m.graphs) == ["asr_flow", "extra"]
+
+
+def test_asgi_mounts_an_app_and_needs_no_graph(tmp_path):
+    """Health, CRUD and admin routes are not graphs and must not need one.
+
+    This kind was rejected outright before, so a manifest describing a
+    whole deployment could not be loaded by the tools at all.
+    """
+    m = _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[serve]]
+kind  = "websocket"
+graph = "demo.pipeline:main"
+
+[[serve]]
+kind = "asgi"
+path = "/"
+app  = "demo.admin:app"
+""")
+    assert [s.kind for s in m.serves] == ["websocket", "asgi"]
+    assert m.serves[1].graph == ""
+    assert [g.name for g in m.graphs] == ["main"]
+
+
+def test_a_malformed_entry_point_is_caught_at_parse(tmp_path):
+    with pytest.raises(ManifestError):
+        _write_whole(tmp_path, """
+[project]
+name = "demo"
+
+[[serve]]
+kind  = "websocket"
+graph = "demo.pipeline:"
+""")

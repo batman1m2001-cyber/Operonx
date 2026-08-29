@@ -71,7 +71,10 @@ agent = "agents.hr:HRAgent"
         "body, match",
         [
             ("[project]\n", "name is required"),
-            ('[project]\nname = "d"\n', "at least one"),
+            # `[[graph]]` is no longer required — a `[[serve]]` naming an
+            # entry point is enough — but a manifest with neither still has
+            # nothing anything could load.
+            ('[project]\nname = "d"\n', "nothing to load"),
             ('[project]\nname = "d"\n[[graph]]\nentry = "m:f"\n', "missing 'name'"),
             ('[project]\nname = "d"\n[[graph]]\nname = "f"\n', "missing 'entry'"),
         ],

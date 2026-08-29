@@ -184,7 +184,7 @@ class GraphSpec:
 
 #: What a `[[serve]]` block may declare as its kind. Descriptive only —
 #: nothing here changes how anything runs.
-SERVE_KINDS = ("websocket", "http", "cron", "queue")
+SERVE_KINDS = ("websocket", "http", "asgi", "cron", "queue")
 
 
 @dataclass(frozen=True)
@@ -202,11 +202,22 @@ class ServeSpec:
     route, which starts a run. That hop is not an op and cannot be made
     one, so it is written down instead.
 
-    Purely descriptive. Nothing reads it at runtime::
+    It is no longer only descriptive. `operonx.core.manifest` reads the
+    same block and boots from it, so this is now the one place a
+    deployment is defined — which is why `graph` may name an entry point
+    directly rather than pointing at a `[[graph]]` that exists only to
+    give it a name::
 
         [[serve]]
         kind  = "websocket"
         path  = "/ws/call"
+        graph = "pipeline.graph:ws_callbot_pipeline"
+
+    The older form, naming a `[[graph]]` in the same manifest, still
+    works::
+
+        [[serve]]
+        kind  = "websocket"
         graph = "pipeline"
 
     Attributes:
@@ -302,9 +313,6 @@ class Manifest:
                 )
             )
 
-        if not graphs:
-            raise ManifestError(f"{path}: at least one [[graph]] is required")
-
         serves = []
         for i, entry in enumerate(raw.get("serve") or []):
             where = f"{path}: [[serve]] #{i + 1}"
@@ -315,16 +323,52 @@ class Manifest:
                 raise ManifestError(
                     f"{where}: unknown kind {kind!r}. known: {', '.join(SERVE_KINDS)}"
                 )
+
+            if kind == "asgi":
+                # A mount point for an app somebody else wrote — health,
+                # CRUD, admin. There is no graph behind it and there should
+                # not be one; it is listed so the manifest describes the
+                # whole deployment rather than only the parts operonx runs.
+                serves.append(
+                    ServeSpec(
+                        kind=kind,
+                        graph="",
+                        path=entry.get("path"),
+                        schedule=entry.get("schedule"),
+                        description=entry.get("description", ""),
+                    )
+                )
+                continue
+
             target = entry.get("graph")
             if not target:
                 raise ManifestError(f"{where} is missing 'graph'")
-            # Checked here so a typo is a manifest error, not a graph that
-            # silently renders as served by nothing.
-            if target not in seen:
+
+            if ":" in target:
+                # An entry point named outright. `[[graph]]` existed to give
+                # entry points names so `[[serve]]` could refer to them, and
+                # once serve can name one directly that indirection is a
+                # second place to keep in step for no benefit. The graph is
+                # synthesised here so everything downstream — lint, extract,
+                # the studio — still sees a GraphSpec and needs no change.
+                _target(target, f"{where} graph")
+                g_name = target.rsplit(":", 1)[1]
+                if g_name not in seen:
+                    seen.add(g_name)
+                    graphs.append(
+                        GraphSpec(name=g_name, entry=target, bind={}, inputs={}, src=src)
+                    )
+                target = g_name
+            elif target not in seen:
+                # A name, and no `[[graph]]` declares it. Checked here so a
+                # typo is a manifest error rather than a graph that silently
+                # renders as served by nothing.
+                known = ", ".join(sorted(seen)) or "no [[graph]] blocks"
                 raise ManifestError(
-                    f"{where}: graph {target!r} is not declared. "
-                    f"known: {', '.join(sorted(seen))}"
+                    f"{where}: graph {target!r} is neither a `module:function` "
+                    f"entry point nor a declared graph ({known})"
                 )
+
             serves.append(
                 ServeSpec(
                     kind=kind,
@@ -333,6 +377,15 @@ class Manifest:
                     schedule=entry.get("schedule"),
                     description=entry.get("description", ""),
                 )
+            )
+
+        if not graphs:
+            # `[[graph]]` is no longer required, because a served graph
+            # names its own entry point. A manifest with neither is one
+            # nothing can be loaded from, which is still worth refusing.
+            raise ManifestError(
+                f"{path}: nothing to load — declare a [[graph]], or a "
+                f"[[serve]] naming a `module:function` entry point"
             )
 
         return cls(
