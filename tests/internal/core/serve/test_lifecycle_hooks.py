@@ -214,3 +214,29 @@ def test_a_refused_connection_never_completes_the_handshake():
     # Starlette answers an un-accepted close with an HTTP rejection rather
     # than a websocket close frame.
     assert exc.value is not None
+
+
+def test_send_reports_whether_the_item_reached_the_peer():
+    """`Session.send` returns a bool so a pacing caller can audit itself.
+
+    The callbot's `play_frame` sends forty-odd chunks per spoken frame and
+    reports chunks/ok/fail/failed-indices — the row you read when audio
+    sounds wrong. A fire-and-forget send would have forced that op to keep
+    talking to the socket directly, which is the exact coupling this
+    interface exists to remove.
+    """
+    import asyncio
+
+    from operonx.core.serve import MemoryTransport
+
+    class DeadPeer(MemoryTransport().open().__class__):
+        async def _send(self, item):
+            return False
+
+    async def check():
+        good = MemoryTransport().open()
+        assert await good.send("x") is True
+        bad = DeadPeer()
+        assert await bad.send("x") is False
+
+    asyncio.run(check())

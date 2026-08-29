@@ -108,7 +108,7 @@ class Session(Protocol):
 
     def recv(self) -> AsyncIterator[Any]: ...
 
-    async def send(self, item: Any) -> None: ...
+    async def send(self, item: Any) -> bool: ...
 
     async def close(self) -> None: ...
 
@@ -181,10 +181,24 @@ class BoundedSession:
                 return
             yield item
 
-    async def send(self, item: Any) -> None:
-        await self._send(item)
+    async def send(self, item: Any) -> bool:
+        """Write one item out. ``False`` means it did not reach the peer.
 
-    async def _send(self, item: Any) -> None:
+        A bool rather than ``None`` because a caller that paces audio has
+        to report what actually landed: the callbot's `play_frame` sends
+        forty-odd chunks per spoken frame and its audit line — chunks, ok,
+        fail, the indices that failed — is the row you read when audio
+        sounds wrong. Swallowing per-item failure here would have forced
+        that op to keep talking to the socket directly, which is the one
+        coupling the transport interface exists to remove.
+
+        Failure is reported, never raised: a peer that goes away mid-reply
+        is ordinary, and one lost frame must not tear down a run that still
+        has a record to write.
+        """
+        return await self._send(item)
+
+    async def _send(self, item: Any) -> bool:
         raise NotImplementedError
 
     async def close(self) -> None:

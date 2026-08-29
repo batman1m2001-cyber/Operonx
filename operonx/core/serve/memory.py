@@ -25,8 +25,9 @@ class MemorySession(BoundedSession):
         self.sent: List[Any] = []
         self.closed = False
 
-    async def _send(self, item: Any) -> None:
+    async def _send(self, item: Any) -> bool:
         self.sent.append(item)
+        return True
 
     async def close(self) -> None:
         self.closed = True

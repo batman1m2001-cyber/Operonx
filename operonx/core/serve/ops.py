@@ -73,5 +73,4 @@ async def egress(item=None) -> dict:
     if session is None:
         LOGGER.debug("[serve] egress with no session; item dropped")
         return {"sent": False}
-    await session.send(item)
-    return {"sent": True}
+    return {"sent": bool(await session.send(item))}

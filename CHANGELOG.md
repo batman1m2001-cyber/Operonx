@@ -48,6 +48,12 @@ describing the same thing, neither working, never connected.
   gate — a transport inheriting nothing and importing no internals,
   driving a real graph — were written *before* any network built-in, so
   the built-in could not quietly become the contract.
+* `Session.send()` returns a bool. A caller that paces audio has to report
+  what actually landed — the callbot's `play_frame` sends forty-odd chunks
+  per spoken frame and its audit line is the row you read when audio
+  sounds wrong. Fire-and-forget would have forced that op to keep talking
+  to a WebSocket directly, which is the one coupling this interface exists
+  to remove.
 * `ingress` / `egress` bind the transport as ops, so it keeps real spans
   and sweepable contexts instead of being an async seam beside the graph.
   Neither names a resource: the run was minted by a transport and already

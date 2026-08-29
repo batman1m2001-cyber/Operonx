@@ -432,11 +432,24 @@ project knows its TTS gateway answers 422 on a long body; a framework that
 clamped string lengths on the way into a graph would be guessing. The
 clamp stays local, and the plan was wrong to promise otherwise.
 
-### One deliberate compromise
+### The compromise, and then its removal
 
-`play_frame` still writes to the socket through `SCRATCH["websocket"]`,
-because chunking and pacing a TTS frame with per-chunk audit fields is
-more than per-item `egress` expresses. What changed is where the socket
-comes from: the session, off the run that a transport minted, rather than
-from a hand-written server that had to remember to seed the key.
-Converting egress properly is separate work and was not step 8.
+Step 8 left `play_frame` writing to the socket through
+`SCRATCH["websocket"]`, because chunking and pacing a TTS frame with
+per-chunk audit fields is more than a per-item `egress` expresses. That
+left the callbot half-migrated in a way worth naming: `receive_audio` read
+whatever the session gave it and did not care what was behind it, while
+every send path was wired to a Starlette WebSocket. A different transport
+would have driven audio in and broken on the way out.
+
+Finishing it was not a refactor but a protocol decision. `Session.send()`
+now returns a bool, because `play_frame` reports `chunks / ok / fail` and
+the failed indices — the row you read when audio sounds wrong — and a
+fire-and-forget send would have forced it to keep the socket. Every send
+path moved: `play_frame`, `terminal_events`, `_send_transfer`,
+`_send_call_result`, `_send_hangup`, `heartbeat`, and the teardown hook.
+
+`SCRATCH["websocket"]` no longer exists anywhere in the callbot. Both
+halves of a call reach the peer through `current_session()`, which makes
+the `'NoneType' object has no attribute 'send_json'` failure — hit twice
+during this migration — structurally impossible.

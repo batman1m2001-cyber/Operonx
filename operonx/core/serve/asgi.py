@@ -72,8 +72,9 @@ class HttpSession(BoundedSession):
         self.feed_nowait(payload)
         self.end_input()
 
-    async def _send(self, item: Any) -> None:
+    async def _send(self, item: Any) -> bool:
         self.replies.append(item)
+        return True
 
     async def close(self) -> None:
         await super().close()
@@ -113,7 +114,7 @@ class WebSocketSession(BoundedSession):
         self.sent = 0
         self.send_failures = 0
 
-    async def _send(self, item: Any) -> None:
+    async def _send(self, item: Any) -> bool:
         try:
             if isinstance(item, (bytes, bytearray)):
                 await self.websocket.send_bytes(item)
@@ -122,13 +123,15 @@ class WebSocketSession(BoundedSession):
             else:
                 await self.websocket.send_json(item)
             self.sent += 1
+            return True
         except Exception as exc:                       # noqa: BLE001
-            # The peer going away mid-reply is ordinary. It is counted
-            # rather than raised, because one failed frame should not tear
-            # down a run that still has a record to write.
+            # The peer going away mid-reply is ordinary. It is counted and
+            # reported rather than raised, because one failed frame should
+            # not tear down a run that still has a record to write.
             self.send_failures += 1
             if self.send_failures == 1:
                 LOGGER.info(f"[serve] websocket send failed: {type(exc).__name__}: {exc}")
+            return False
 
     async def pump_inbound(self) -> None:
         """Read the socket into the session until the peer stops.
