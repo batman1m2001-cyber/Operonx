@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx"
-version = "1.4.0"
+version = "1.5.0"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
 license = "Apache-2.0"

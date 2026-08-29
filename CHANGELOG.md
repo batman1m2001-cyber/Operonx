@@ -7,25 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — `@op(transient=True)` lost every item but the first past two ops
+## [1.5.0] - 2026-08-29
 
-Two ops were fine. Three silently dropped data:
+### Fixed — `@op(transient=True)` silently dropped data past two ops
+
+Two bugs, one cause. Anything longer than a producer wired straight into
+one consumer lost items, and an async consumer lost all of them:
 
 ```
-transient=False   src -> mid(sync) -> sink : ['i0!', 'i1!', 'i2!']
-transient=True    src -> mid(sync) -> sink : ['i0!', None, None]
+transient=False  mid=sync  ->  OK
+transient=False  mid=io    ->  OK
+transient=True   mid=sync  ->  ['i0', None, None]   only the first survived
+transient=True   mid=io    ->  [None, None, None]   nothing survived
 ```
 
-Streaming is sequential by default, so with a third op the consumers for
-later items wait in `seq_queues`. A parked consumer is neither a live task
-nor an inline pending — all the release guard looked at — so it judged the
-context finished and freed the cells that consumer was about to read. The
-first item survived only because it dispatched immediately.
+The release guard freed a context while a consumer still had to read from
+it. `tasks_by_ctx` sees dispatched work, `inline_pending` sees inline work,
+`seq_queues` sees work parked behind a sequential edge — and none of them
+sees a frame still sitting on the scheduler queue, whose consumer has
+therefore not been dispatched at all. A `bound="sync"` consumer is drained
+inline and so was usually visible by then; a `bound="io"` consumer never
+was.
 
-The guard now treats a context as busy while it waits in a sequential
-queue or a collect buffer. The tests that shipped with transient ports all
-wired a producer straight into one consumer, and no two-op chain can reach
-this; the regression test uses three and says why in its docstring.
+The guard now also counts, per context, the events enqueued but not yet
+handled, and release is re-attempted once each event has been processed.
+
+Both hid for the same reason: every test written for this feature used a
+`bound="sync"` consumer, and a two-op chain cannot reach either bug. The
+regression tests are parametrised over `bound` and chain length, and they
+assert the other direction too — retention stays flat at 9 cell entries
+from 50 items to 2000, against 60,009 for the same graph without
+`transient=True` — because every correctness test here would still pass if
+the guard simply stopped releasing anything.
+
+**Anyone using `@op(transient=True)` on 1.4.0 should upgrade.**
 
 ### Added — serve layer: a manifest that boots, not one that only describes
 
@@ -80,6 +95,24 @@ describing the same thing, neither working, never connected.
   parse.
 * `operonx-serve` boots every listener a manifest declares; `--list`
   prints what would run without booting anything.
+
+### Fixed — six quiet failures in the serve layer
+
+Found by an adversarial pass written to break the layer rather than
+confirm it. None of them raised anything a person would see.
+
+* A raising `on_session` leaked the socket, skipped teardown and logged
+  nothing — so a project counting active connections in that hook inflated
+  its counter for the life of the process.
+* A drained session blocked a second reader forever, with no error and no
+  log.
+* A `close()` that raised turned a completed run into a failed one.
+* A `send()` that raised killed the run instead of costing its item.
+* `on_session` returning the wrong type failed frames later, as an
+  `AttributeError` on `.inputs` from inside the run.
+* Ports were not range-checked, so 99999 parsed and failed at bind.
+
+Every unresolvable import now names the manifest entry that asked for it.
 
 ### Changed — `Operon.serve()` runs instead of raising
 
@@ -1353,7 +1386,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...v1.3.0
