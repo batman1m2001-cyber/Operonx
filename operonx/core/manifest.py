@@ -407,6 +407,13 @@ def _serve_spec(
         port = int(port)
     except (TypeError, ValueError):
         raise ManifestError(f"{where}: {label} has port {port!r}, which is not a number") from None
+    if not 1 <= port <= 65535:
+        # Caught here rather than at bind, where it surfaces as an OSError
+        # from deep inside the event loop after everything else has already
+        # started.
+        raise ManifestError(
+            f"{where}: {label} has port {port}, outside the range 1-65535"
+        )
 
     known_keys = {
         "name", "kind", "graph", "path", "method", "host", "port", "session",

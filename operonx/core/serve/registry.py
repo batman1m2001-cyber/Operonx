@@ -75,13 +75,23 @@ def resolve_transport(kind: str) -> Callable[..., Any]:
     return factory
 
 
-def load_object(path: str) -> Any:
-    """Import a ``module:attribute`` reference, for `graph`/`on_session`/`app`."""
+def load_object(path: str, field: str = "") -> Any:
+    """Import a ``module:attribute`` reference, for `graph`/`on_session`/`app`.
+
+    Every failure names the reference that caused it. A bare
+    ``ModuleNotFoundError: No module named 'no'`` tells you nothing about
+    which line of a manifest is wrong, and a manifest can name half a
+    dozen import paths.
+    """
+    where = f"{field} " if field else ""
     module_name, _, attr = path.partition(":")
     if not module_name or not attr:
-        raise ValueError(f"{path!r} is not `module:attribute`")
-    module = importlib.import_module(module_name)
+        raise ValueError(f"{where}{path!r} is not `module:attribute`")
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as exc:
+        raise ImportError(f"{where}{path!r}: cannot import {module_name!r} — {exc}") from exc
     try:
         return getattr(module, attr)
     except AttributeError:
-        raise ImportError(f"{module_name!r} has no {attr!r}") from None
+        raise ImportError(f"{where}{path!r}: {module_name!r} has no {attr!r}") from None

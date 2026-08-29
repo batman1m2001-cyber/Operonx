@@ -49,7 +49,13 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
         async for _op_name, _ctx, _data in handle:
             pass
     finally:
-        await session.close()
+        # A transport whose `close` raises must not turn a completed run
+        # into a failed one. Closing is teardown; its failure is reported
+        # where it happened rather than replacing whatever the run did.
+        try:
+            await session.close()
+        except Exception as exc:                          # noqa: BLE001
+            LOGGER.error(f"[serve] session close failed: {type(exc).__name__}: {exc}")
     return handle
 
 
@@ -68,8 +74,12 @@ class ServeRunner:
         self.engine = engine
         self.spec = spec
         self.transport = transport if transport is not None else resolve_transport(spec.kind)(spec)
-        self._on_session = load_object(spec.on_session) if spec.on_session else None
-        self._on_close = load_object(spec.on_close) if spec.on_close else None
+        self._on_session = (load_object(spec.on_session,
+                                        field=f"[[serve]] {spec.name!r} on_session")
+                            if spec.on_session else None)
+        self._on_close = (load_object(spec.on_close,
+                                      field=f"[[serve]] {spec.name!r} on_close")
+                          if spec.on_close else None)
         self._runs: set = set()
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
@@ -81,9 +91,33 @@ class ServeRunner:
             return decided
         if self._on_session is None:
             return RunRequest()
-        request = self._on_session(session)
+        try:
+            request = self._on_session(session)
+        except Exception as exc:                          # noqa: BLE001
+            # A hook that raises is a refusal, not a crash. Unprotected,
+            # the exception left `_run_one` before its try block: the task
+            # died with nobody retrieving the error, `on_close` never ran
+            # and the socket was never closed — so a project counting
+            # active calls in `on_session` inflated that counter
+            # permanently, and the count it reports on every log line
+            # became fiction. Silence was the worst part.
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_session raised, refusing the "
+                f"connection: {type(exc).__name__}: {exc}"
+            )
+            return None
         if request is None:
             LOGGER.info(f"[serve:{self.spec.name}] on_session refused a connection")
+        elif not isinstance(request, RunRequest):
+            # Without this the wrong type failed several frames later, as
+            # an AttributeError on `.inputs` from inside the run — far from
+            # the hook that actually returned it.
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_session returned "
+                f"{type(request).__name__}, expected RunRequest or None; "
+                f"refusing the connection"
+            )
+            return None
         return request
 
     async def _run_one(self, session: Session) -> None:

@@ -37,7 +37,15 @@ def engine_for(spec: ServeSpec) -> Any:
     """
     from operonx.core import Operon
 
-    graph_fn = load_object(spec.graph)
+    graph_fn = load_object(spec.graph, field=f"[[serve]] {spec.name!r} graph")
+    # `Operon(...)` on something that is not a graph fails as
+    # `AttributeError: 'str' object has no attribute 'name'`, which names
+    # neither the manifest entry nor what was actually wrong.
+    if not hasattr(graph_fn, "name") and not callable(graph_fn):
+        raise TypeError(
+            f"[[serve]] {spec.name!r} graph {spec.graph!r} resolved to a "
+            f"{type(graph_fn).__name__}, which is not a @graph"
+        )
     try:
         params = {
             name: None
@@ -117,7 +125,8 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
             # Health, CRUD, admin — not a graph, and operonx must never
             # pretend it is one. The manifest still describes it, so the
             # whole product is in one file.
-            routes.append(Mount(spec.path, app=load_object(spec.app)))
+            routes.append(Mount(spec.path, app=load_object(
+                spec.app, field=f"[[serve]] {spec.name!r} app")))
             LOGGER.info(f"[serve:{spec.name}] mounted {spec.app} at {spec.path}")
             continue
 

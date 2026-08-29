@@ -176,6 +176,14 @@ class BoundedSession:
 
     async def recv(self) -> AsyncIterator[Any]:
         while True:
+            # Ended and drained means ended, for every reader — not just
+            # the one that happened to take the sentinel. `end_input`
+            # queues a single EOF, so a second pass over a finished
+            # session used to park on an empty queue forever: a transport
+            # that offered the same session twice hung a task with no
+            # diagnostic at all, which is the worst way to fail.
+            if self._closed.is_set() and self._queue.empty():
+                return
             item = await self._queue.get()
             if item is _EOF:
                 return

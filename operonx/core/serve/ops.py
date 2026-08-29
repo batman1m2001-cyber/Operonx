@@ -73,4 +73,12 @@ async def egress(item=None) -> dict:
     if session is None:
         LOGGER.debug("[serve] egress with no session; item dropped")
         return {"sent": False}
-    return {"sent": bool(await session.send(item))}
+    try:
+        return {"sent": bool(await session.send(item))}
+    except Exception as exc:                              # noqa: BLE001
+        # `Session.send` is specified to report failure rather than raise,
+        # and a transport that breaks that promise should lose its item,
+        # not the run. A peer disappearing mid-reply is ordinary; the run
+        # may still have a record to write.
+        LOGGER.error(f"[serve] session.send raised: {type(exc).__name__}: {exc}")
+        return {"sent": False}
