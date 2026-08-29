@@ -263,6 +263,24 @@ class Scheduler:
         # outermost scheduler — a nested GraphOp runs its own with none.
         _is_root_scheduler = output_queue is not None
         inflight: int = 0
+        # Events enqueued for a context but not yet handled by the main
+        # loop. `tasks_by_ctx` and `inline_pending` only see work that has
+        # already been dispatched, and `seq_queues` only sees work parked
+        # behind a sequential edge — none of them sees a Frame sitting on
+        # the queue whose consumer has therefore not been dispatched at
+        # all. That blind spot is what freed a transient context out from
+        # under an async consumer: with a `bound="sync"` middle op the
+        # frame is handled inline before the release runs, so two ops and
+        # a sync consumer both looked fine while every async chain lost
+        # its data.
+        pending_events: Dict[tuple, int] = {}
+
+        def _note_event(ctx: tuple, delta: int) -> None:
+            n = pending_events.get(ctx, 0) + delta
+            if n > 0:
+                pending_events[ctx] = n
+            else:
+                pending_events.pop(ctx, None)
         # Set by _sweep_ctx when a cancellation covers this run's own root.
         root_interrupted: bool = False
         # BaseExceptions (ObserveBudgetExceeded) rescued from _pump so the
@@ -377,8 +395,10 @@ class Scheduler:
                             queue.put_nowait(result)
                         else:
                             queue.put_nowait(Frame(op_name, item_ctx, result))
+                            _note_event(item_ctx, 1)
                         inflight += 1
                     queue.put_nowait(EOF(op_name, ctx))
+                    _note_event(ctx, 1)
                     inflight += 1
                 except asyncio.CancelledError:
                     # Cancelled by _sweep_ctx — do not enqueue EOF (the
@@ -388,6 +408,7 @@ class Scheduler:
                 except Exception as e:
                     state[op_name, "error", ctx] = str(e)
                     queue.put_nowait(EOF(op_name, ctx))
+                    _note_event(ctx, 1)
                     inflight += 1  # account for the EOF we just put on queue
                 except BaseException as e:
                     # ObserveBudgetExceeded is a BaseException on purpose —
@@ -398,6 +419,7 @@ class Scheduler:
                     # retrieved. Hand it to the main loop as an event.
                     fatal.append(e)
                     queue.put_nowait(EOF(op_name, ctx))
+                    _note_event(ctx, 1)
                     inflight += 1
                 finally:
                     inflight -= 1
@@ -423,6 +445,8 @@ class Scheduler:
             if tasks_by_ctx.get(ctx):
                 return
             if any(pending_ctx == ctx for _, pending_ctx in inline_pending):
+                return
+            if pending_events.get(ctx):
                 return
             # A consumer parked in a sequential queue has not started yet, so
             # it is neither a live task nor an inline pending — and streaming
@@ -869,6 +893,7 @@ class Scheduler:
             while inflight > 0:
                 event = await queue.get()
                 inflight -= 1
+                _note_event(getattr(event, "ctx", ()), -1)
                 if fatal:
                     raise fatal[0]
                 if isinstance(event, Frame):
@@ -880,6 +905,10 @@ class Scheduler:
                     _on_eof(event)
                 # Drain any inline ops triggered by the queue event.
                 await _drain_inline()
+                # The event is handled and anything it dispatched is now
+                # registered, so this is the first moment its context can
+                # honestly be called finished.
+                _release_if_done(getattr(event, "ctx", ()))
         finally:
             # Cancelling the scheduler must also stop the op tasks it
             # spawned. ``ExecutionHandle.cancel()`` cancels this coroutine

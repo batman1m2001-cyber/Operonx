@@ -183,3 +183,109 @@ async def test_transient_survives_a_three_op_chain():
         assert seen == [f"i{i}!" for i in range(count)], (
             f"chain of {count} lost items: {seen[:5]}"
         )
+
+
+@pytest.mark.parametrize("mid_bound", ["sync", "io"])
+@pytest.mark.asyncio
+async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
+    """The middle op's `bound` decides which dispatch path the frame takes.
+
+    `sync` is drained inline, so by the time the release guard runs the
+    consumer is already dispatched or parked in a sequential queue — both
+    of which the guard learned to check. `io` is not: its frame sits on the
+    scheduler queue, unhandled, so nothing anywhere had dispatched the
+    consumer and the context looked idle. Every item was lost, not merely
+    the ones after the first.
+
+    Parametrised because a suite that only ever wrote `sync` middles is
+    exactly how this survived being found twice.
+    """
+    seen = []
+
+    @op(bound="io", transient=True)
+    async def produce(n: int = 0):
+        for i in range(n):
+            yield {"item": f"i{i}"}
+
+    if mid_bound == "sync":
+        @op(bound="sync")
+        def relay(item=None) -> dict:
+            return {"out": item}
+    else:
+        @op(bound="io")
+        async def relay(item=None) -> dict:
+            await asyncio.sleep(0)
+            return {"out": item}
+
+    @op(bound="io")
+    async def collect(out=None) -> dict:
+        seen.append(out)
+        return {}
+
+    @graph
+    def chain(n=0):
+        a = produce(n=n)
+        b = relay(item=a["item"])
+        c = collect(out=b["out"])
+        START >> a >> b >> c >> END
+
+    engine = Operon(chain, params={"n": None})
+    for count in (1, 3, 40):
+        seen.clear()
+        handle = engine.start(inputs={"n": count})
+        async for _ in handle:
+            pass
+        assert seen == [f"i{i}" for i in range(count)], (
+            f"{mid_bound} chain of {count} lost items: {seen[:5]}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_release_guard_did_not_become_a_no_op():
+    """Widening the guard must not stop it releasing anything.
+
+    Every correctness test above would still pass if contexts were simply
+    never freed — and the leak transient ports exist to fix would be back.
+    So this asserts the other direction: retention stays flat as the item
+    count grows by two orders of magnitude.
+    """
+    @op(bound="io", transient=True)
+    async def produce(n: int = 0):
+        for _ in range(n):
+            yield {"blob": bytes(4096)}
+
+    @op(bound="io")
+    async def relay(blob=None) -> dict:
+        return {"out": blob}
+
+    @op(bound="io")
+    async def collect(out=None) -> dict:
+        return {"size": len(out or b"")}
+
+    @graph
+    def chain(n=0):
+        a = produce(n=n)
+        b = relay(blob=a["blob"])
+        c = collect(out=b["out"])
+        START >> a >> b >> c >> END
+
+    engine = Operon(chain, params={"n": None})
+
+    def entries(state):
+        total = 0
+        for cells in state._cells:
+            for cell in (cells if isinstance(cells, list) else [cells]):
+                total += len(getattr(cell, "contexts", ()) or ())
+        return total
+
+    counts = []
+    for n in (50, 2000):
+        handle = engine.start(inputs={"n": n})
+        async for _ in handle:
+            pass
+        counts.append(entries(handle.state))
+
+    assert counts[0] == counts[1], (
+        f"retention grew with item count: {counts} — the guard is holding "
+        f"contexts it should have freed"
+    )
