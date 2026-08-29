@@ -35,7 +35,7 @@ def main(argv=None) -> int:
         return 2
 
     if args.list:
-        print(f"{manifest.name}  (schema {manifest.schema})")
+        print(manifest.name)
         if not manifest.serves:
             print("  no [[serve]] entries")
         for (host, port), specs in manifest.listeners().items():

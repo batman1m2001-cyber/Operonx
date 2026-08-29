@@ -52,10 +52,13 @@ operonx read the file. Meanwhile `engine.serve()` delegated to
 dependency and not in this repository, so every call raised. Two halves
 describing the same thing, neither working, never connected.
 
-* `operonx.core.manifest` parses `operonx.toml`. `schema = 2` names a
-  graph by entry point and carries session semantics; schema 1 still
-  parses and normalises into the same objects. `${VAR:default}` resolves
-  through the same code `resources.yaml` uses.
+* `operonx.core.manifest` parses `operonx.toml`. `[[serve]]` names the
+  graph it runs by entry point and carries session semantics;
+  `${VAR:default}` resolves through the same code `resources.yaml` uses.
+  `[[graph]]` remains, for graphs nothing serves. A stream transport must
+  declare `max_inflight` — there is no version key and no way to opt out,
+  because an unbounded queue behind a socket is how `operonx.io.Channel`
+  came to exist.
 * `operonx.core.serve` is a transport **interface**, with `http`,
   `websocket` and `asgi` as built-ins that register through the same call
   a project uses for its own. A SIP trunk or a Kafka consumer is two

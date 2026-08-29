@@ -184,7 +184,12 @@ class GraphSpec:
 
 #: What a `[[serve]]` block may declare as its kind. Descriptive only —
 #: nothing here changes how anything runs.
-SERVE_KINDS = ("websocket", "http", "asgi", "cron", "queue")
+#: What operonx ships a transport for. A project's own transport is named
+#: by `module:Class` instead and needs no entry here — see the check in
+#: `Manifest.load`. `cron` and `queue` were listed here for years with
+#: nothing implementing either, so a manifest naming one linted clean and
+#: then failed at boot.
+SERVE_KINDS = ("websocket", "http", "asgi")
 
 
 @dataclass(frozen=True)
@@ -213,12 +218,8 @@ class ServeSpec:
         path  = "/ws/call"
         graph = "pipeline.graph:ws_callbot_pipeline"
 
-    The older form, naming a `[[graph]]` in the same manifest, still
-    works::
-
-        [[serve]]
-        kind  = "websocket"
-        graph = "pipeline"
+    `[[graph]]` remains for graphs nothing serves — an example, an
+    experiment, a subgraph worth linting on its own.
 
     Attributes:
         kind: One of :data:`SERVE_KINDS`.
@@ -319,9 +320,15 @@ class Manifest:
             kind = entry.get("kind")
             if not kind:
                 raise ManifestError(f"{where} is missing 'kind'")
-            if kind not in SERVE_KINDS:
+            # A `module:Class` kind is a transport the project wrote
+            # itself. Rejecting those made the extension point invisible to
+            # the tools: a manifest operonx serves happily would not lint,
+            # would not extract and would not draw.
+            if ":" not in kind and kind not in SERVE_KINDS:
                 raise ManifestError(
-                    f"{where}: unknown kind {kind!r}. known: {', '.join(SERVE_KINDS)}"
+                    f"{where}: unknown kind {kind!r}. known: "
+                    f"{', '.join(SERVE_KINDS)}, or a `module:Class` path to "
+                    f"a transport of your own"
                 )
 
             if kind == "asgi":
@@ -344,30 +351,20 @@ class Manifest:
             if not target:
                 raise ManifestError(f"{where} is missing 'graph'")
 
-            if ":" in target:
-                # An entry point named outright. `[[graph]]` existed to give
-                # entry points names so `[[serve]]` could refer to them, and
-                # once serve can name one directly that indirection is a
-                # second place to keep in step for no benefit. The graph is
-                # synthesised here so everything downstream — lint, extract,
-                # the studio — still sees a GraphSpec and needs no change.
-                _target(target, f"{where} graph")
-                g_name = target.rsplit(":", 1)[1]
-                if g_name not in seen:
-                    seen.add(g_name)
-                    graphs.append(
-                        GraphSpec(name=g_name, entry=target, bind={}, inputs={}, src=src)
-                    )
-                target = g_name
-            elif target not in seen:
-                # A name, and no `[[graph]]` declares it. Checked here so a
-                # typo is a manifest error rather than a graph that silently
-                # renders as served by nothing.
-                known = ", ".join(sorted(seen)) or "no [[graph]] blocks"
-                raise ManifestError(
-                    f"{where}: graph {target!r} is neither a `module:function` "
-                    f"entry point nor a declared graph ({known})"
+            # A served graph names its entry point outright. `[[graph]]`
+            # used to exist to give entry points names so `[[serve]]` could
+            # refer to them; that was a second place to keep in step for no
+            # benefit, and it is gone. The GraphSpec is synthesised here, so
+            # everything downstream — lint, extract, the studio — still sees
+            # one and needs no change of its own.
+            _target(target, f"{where} graph")
+            g_name = target.rsplit(":", 1)[1]
+            if g_name not in seen:
+                seen.add(g_name)
+                graphs.append(
+                    GraphSpec(name=g_name, entry=target, bind={}, inputs={}, src=src)
                 )
+            target = g_name
 
             serves.append(
                 ServeSpec(

@@ -23,7 +23,8 @@ from operonx.core.ops.graph.task_scheduler import (
     Scheduler,
 )
 
-# Re-export validation types for backward compatibility
+# Live, not back-compat: the validation types are imported from here by
+# the graph_op tests, and `validate_graph` is called by this file.
 from operonx.core.ops.graph.validation import (  # noqa: E402, F401
     GraphValidationError,
     ValidationIssue,

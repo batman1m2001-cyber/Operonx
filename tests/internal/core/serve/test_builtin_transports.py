@@ -103,7 +103,7 @@ admin_app = Starlette(routes=[
 
 
 def test_endpoints_on_one_port_share_a_listener():
-    m = Manifest.from_dict({"schema": 2, "serve": [
+    m = Manifest.from_dict({"serve": [
         {"name": "a", "kind": "http", "path": "/a", "port": 8080,
          "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline"},
         {"name": "b", "kind": "http", "path": "/b", "port": 8080,

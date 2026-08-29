@@ -34,8 +34,7 @@ from operonx.core.serve import (
 
 # -- manifest ------------------------------------------------------------
 
-SCHEMA2 = """
-schema = 2
+MANIFEST = """
 [project]
 name = "demo"
 
@@ -57,9 +56,8 @@ graph = "demo.pipeline:predict"
 """
 
 
-def test_schema2_parses_and_defaults():
-    m = Manifest.from_dict(_toml.loads(SCHEMA2))
-    assert m.schema == 2
+def test_a_manifest_parses_and_fills_in_what_it_leaves_out():
+    m = Manifest.from_dict(_toml.loads(MANIFEST))
     call = m.serve("call")
     assert call.graph == "demo.pipeline:main"
     assert call.session == "per_connection"
@@ -69,50 +67,41 @@ def test_schema2_parses_and_defaults():
     assert m.serve("predict").session == "per_request"
 
 
-def test_schema1_still_parses_and_normalises():
-    """The historical layout keeps working, graph name resolved to entry."""
-    raw = _toml.loads("""
-[[graph]]
-name = "pipeline"
-entry = "demo.pipeline:main"
-[graph.inputs]
-sample = "hello"
+def test_graph_must_be_an_entry_point_not_a_name():
+    """A bare name used to mean "look it up in [[graph]]".
 
-[[serve]]
-kind = "websocket"
-path = "/ws/call"
-graph = "pipeline"
-""")
-    m = Manifest.from_dict(raw)
-    assert m.schema == 1
-    assert m.serves[0].graph == "demo.pipeline:main"   # name -> entry point
-    assert m.fixtures["pipeline"] == {"sample": "hello"}  # inputs are fixtures
+    That indirection existed so `[[serve]]` had something to refer to. Now
+    serve names its entry point outright, and a name is just wrong.
+    """
+    with pytest.raises(ManifestError, match="not a `module:function`"):
+        Manifest.from_dict({"serve": [
+            {"kind": "http", "path": "/x", "graph": "pipeline"}]})
 
 
-def test_newer_schema_is_refused_by_name():
-    """A stale build must say so, not report an empty project."""
-    with pytest.raises(ManifestError, match="needs a newer operonx"):
-        Manifest.from_dict({"schema": 99})
+def test_a_stream_kind_must_declare_a_bound():
+    """Required of everyone, always.
 
-
-def test_stream_kind_must_declare_a_bound_in_schema2():
-    raw = {"schema": 2, "serve": [
-        {"kind": "websocket", "path": "/ws", "graph": "m:g"}]}
+    A version key used to make this conditional so that older manifests
+    could skip it. That was the key's only real job, and letting an
+    unbounded queue sit behind a socket is not a kindness worth keeping —
+    it is how `operonx.io.Channel` came to exist.
+    """
     with pytest.raises(ManifestError, match="max_inflight"):
-        Manifest.from_dict(raw)
+        Manifest.from_dict({"serve": [
+            {"kind": "websocket", "path": "/ws", "graph": "m:g"}]})
 
 
 def test_asgi_mounts_an_app_and_takes_no_graph():
-    m = Manifest.from_dict({"schema": 2, "serve": [
+    m = Manifest.from_dict({"serve": [
         {"name": "admin", "kind": "asgi", "path": "/", "app": "demo.admin:app"}]})
     assert m.serve("admin").app == "demo.admin:app"
     with pytest.raises(ManifestError, match="cannot also name a `graph`"):
-        Manifest.from_dict({"schema": 2, "serve": [
+        Manifest.from_dict({"serve": [
             {"kind": "asgi", "app": "a:b", "graph": "m:g"}]})
 
 
 def test_endpoints_group_onto_listeners_by_address():
-    m = Manifest.from_dict({"schema": 2, "serve": [
+    m = Manifest.from_dict({"serve": [
         {"name": "a", "kind": "http", "path": "/a", "port": 8080, "graph": "m:g"},
         {"name": "b", "kind": "http", "path": "/b", "port": 8080, "graph": "m:g"},
         {"name": "c", "kind": "http", "path": "/c", "port": 9090, "graph": "m:g"}]})
@@ -123,7 +112,7 @@ def test_endpoints_group_onto_listeners_by_address():
 
 def test_duplicate_routes_are_refused():
     with pytest.raises(ManifestError, match="both serve"):
-        Manifest.from_dict({"schema": 2, "serve": [
+        Manifest.from_dict({"serve": [
             {"name": "a", "kind": "http", "path": "/x", "graph": "m:g"},
             {"name": "b", "kind": "http", "path": "/x", "graph": "m:g"}]})
 

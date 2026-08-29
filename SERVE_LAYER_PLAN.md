@@ -157,8 +157,6 @@ being a second path with its own semantics.
 endpoints, grouped onto listeners by port:
 
 ```toml
-schema = 2
-
 [project]
 name = "educa_reminder"
 
@@ -285,10 +283,18 @@ the socket in SCRATCH today and it works, but the binding is invisible to
 anything reading the graph. `Ingress` and `Egress` resolve their session
 from the run that the transport minted.
 
-**`schema = 2`.** Three external tools parse this file. A stamp means a
-stale `operonx-studio` says "this manifest is newer than me" rather than
-"this project has no graphs" — a loud failure instead of a silently wrong
-answer. Absent means version 1.
+**No version key, and the one that was tried is gone.** `schema = 2` was
+added on the theory that a stale `operonx-studio` would then say "this
+manifest is newer than me" rather than "this project has no graphs". It
+would not: a stamp only helps a tool that knows to check it, and those
+tools predate the key existing, so they would have skipped straight past
+it into the silently wrong answer it was supposed to prevent. The real fix
+was to teach the tools, which is done.
+
+That left the key with one job — letting manifests written before
+`max_inflight` existed skip declaring a bound. This project is still
+experimental and has no old manifests worth carrying, so the bound is now
+required of everyone, always, and the key is deleted.
 
 **Built-in transports ship as an extra, `operonx[serve]`.** FastAPI and
 uvicorn should not become core dependencies for users who never serve, or
@@ -297,9 +303,8 @@ beyond operonx itself.
 
 ## Sequence
 
-1. **Manifest parser in core**, reading `schema = 2` with `${VAR}`
-   substitution. No behaviour — just parse and validate. The current
-   format keeps working.
+1. **Manifest parser in core**, with `${VAR}` substitution. No behaviour
+   — just parse and validate.
 2. **The `Transport`/`Session` protocol and the registry hook**, with an
    in-memory transport as the first implementation and the only one used
    by tests.

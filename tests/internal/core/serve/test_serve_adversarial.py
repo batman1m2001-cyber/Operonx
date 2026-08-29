@@ -179,7 +179,7 @@ async def test_the_bound_releases_as_the_consumer_drains():
 
 @pytest.mark.asyncio
 async def test_an_unbounded_session_does_not_block():
-    """No bound declared means no ceiling — which is why schema 2 requires one."""
+    """No bound declared means no ceiling — which is why a manifest must set one."""
     session = MemorySession(max_inflight=None)
     for i in range(5000):
         await asyncio.wait_for(session.feed(i), timeout=0.5)
@@ -319,7 +319,7 @@ async def test_on_session_returning_a_non_runrequest_is_named_and_refused(bad):
     ({"kind": "http", "path": "/x", "graph": "m:g", "port": 0}, "1-65535"),
     ({"kind": "http", "path": "/x", "graph": "m:g", "session": "per_banana"}, "expected one of"),
     ({"kind": "websocket", "path": "/x", "graph": "m:g", "max_inflight": -5}, "positive integer"),
-    ({"kind": "http", "path": "/x", "graph": "not-an-entry"}, "neither a `module:function`"),
+    ({"kind": "http", "path": "/x", "graph": "not-an-entry"}, "not a `module:function`"),
     ({"kind": "http", "path": "/x"}, "has no `graph`"),
     ({"path": "/x", "graph": "m:g"}, "has no `kind`"),
 ])
@@ -329,7 +329,7 @@ def test_bad_serve_blocks_are_refused_at_parse(block, match):
     from operonx.core.manifest import Manifest, ManifestError
 
     with pytest.raises(ManifestError, match=match):
-        Manifest.from_dict({"schema": 2, "serve": [block]})
+        Manifest.from_dict({"serve": [block]})
 
 
 # -- import paths that name themselves -----------------------------------

@@ -37,25 +37,40 @@ def test_absent_serve_is_fine(tmp_path):
 
 def test_websocket_round_trips(tmp_path):
     m = Manifest.load(
-        _write(tmp_path, '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "pipeline"\n')
+        _write(tmp_path, '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "mod:build"\n')
     )
-    assert m.serves == (ServeSpec(kind="websocket", graph="pipeline", path="/ws/call"),)
+    assert m.serves == (ServeSpec(kind="websocket", graph="build", path="/ws/call"),)
     assert m.serves[0].as_dict() == {
         "kind": "websocket",
-        "graph": "pipeline",
+        "graph": "build",
         "path": "/ws/call",
     }
 
 
-def test_cron_carries_a_schedule_and_no_path(tmp_path):
+def test_a_custom_transport_is_named_by_import_path(tmp_path):
+    """A project's own transport must be as loadable as a built-in.
+
+    `kind` used to be checked against a fixed list, so a manifest operonx
+    serves happily would not lint, would not extract and would not draw —
+    the extension point was invisible to every tool.
+    """
     m = Manifest.load(
-        _write(tmp_path, '\n[[serve]]\nkind = "cron"\nschedule = "0 3 * * *"\ngraph = "pipeline"\n')
+        _write(tmp_path, '\n[[serve]]\nkind = "my_co.transports:SipTrunk"\ngraph = "mod:build"\n')
     )
-    assert m.serves[0].as_dict() == {
-        "kind": "cron",
-        "graph": "pipeline",
-        "schedule": "0 3 * * *",
-    }
+    assert m.serves[0].kind == "my_co.transports:SipTrunk"
+    assert m.serves[0].graph == "build"
+
+
+def test_a_kind_nothing_implements_is_still_refused(tmp_path):
+    """`cron` and `queue` were listed as known while nothing served them.
+
+    A manifest naming one linted clean and then failed at boot, which is
+    the worst order for those two things to happen in.
+    """
+    with pytest.raises(ManifestError, match="unknown kind"):
+        Manifest.load(
+            _write(tmp_path, '\n[[serve]]\nkind = "cron"\ngraph = "mod:build"\n')
+        )
 
 
 def test_several_entry_points_on_one_graph(tmp_path):
@@ -63,30 +78,30 @@ def test_several_entry_points_on_one_graph(tmp_path):
     m = Manifest.load(
         _write(
             tmp_path,
-            '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "pipeline"\n'
-            '\n[[serve]]\nkind = "http"\npath = "/v1/run"\ngraph = "pipeline"\n',
+            '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "mod:build"\n'
+            '\n[[serve]]\nkind = "http"\npath = "/v1/run"\ngraph = "mod:build"\n',
         )
     )
     assert [s.kind for s in m.serves] == ["websocket", "http"]
 
 
-def test_unknown_graph_is_a_manifest_error(tmp_path):
-    """A typo must not render as a graph served by nothing."""
-    with pytest.raises(ManifestError, match="neither a `module:function`"):
+def test_a_graph_that_is_not_an_entry_point_is_a_manifest_error(tmp_path):
+    """A bare name used to mean "look it up in [[graph]]". It no longer does."""
+    with pytest.raises(ManifestError):
         Manifest.load(
-            _write(tmp_path, '\n[[serve]]\nkind = "websocket"\ngraph = "ppeline"\n')
+            _write(tmp_path, '\n[[serve]]\nkind = "websocket"\ngraph = "pipeline"\n')
         )
 
 
 def test_unknown_kind_is_a_manifest_error(tmp_path):
     with pytest.raises(ManifestError, match="unknown kind"):
         Manifest.load(
-            _write(tmp_path, '\n[[serve]]\nkind = "carrier-pigeon"\ngraph = "pipeline"\n')
+            _write(tmp_path, '\n[[serve]]\nkind = "carrier-pigeon"\ngraph = "mod:build"\n')
         )
 
 
 @pytest.mark.parametrize("missing, body", [
-    ("kind", '\n[[serve]]\ngraph = "pipeline"\n'),
+    ("kind", '\n[[serve]]\ngraph = "mod:build"\n'),
     ("graph", '\n[[serve]]\nkind = "http"\n'),
 ])
 def test_required_fields(tmp_path, missing, body):
@@ -146,43 +161,27 @@ graph = "demo.pipeline:main"
     assert [s.graph for s in m.serves] == ["main", "main"]
 
 
-def test_the_older_form_still_works(tmp_path):
-    """Naming a [[graph]] keeps working — projects have these files today."""
+def test_graph_blocks_remain_for_graphs_nothing_serves(tmp_path):
+    """The sixteen examples in this repo are all of this shape.
+
+    `[[graph]]` lost its job of naming entry points for `[[serve]]`. It
+    keeps the one it always had: making a graph nobody serves visible to
+    lint, extract and the studio.
+    """
     m = _write_whole(tmp_path, """
 [project]
 name = "demo"
 
 [[graph]]
-name  = "pipeline"
-entry = "demo.pipeline:main"
+name  = "experiment"
+entry = "demo.lab:try_this"
 
 [[serve]]
 kind  = "websocket"
-graph = "pipeline"
+graph = "demo.pipeline:main"
 """)
-    assert [g.name for g in m.graphs] == ["pipeline"]
-    assert m.serves[0].graph == "pipeline"
-
-
-def test_both_forms_in_one_manifest(tmp_path):
-    m = _write_whole(tmp_path, """
-[project]
-name = "demo"
-
-[[graph]]
-name  = "extra"
-entry = "demo.extra:build"
-
-[[serve]]
-kind  = "websocket"
-graph = "extra"
-
-[[serve]]
-kind  = "http"
-path  = "/v1/asr"
-graph = "demo.pipeline:asr_flow"
-""")
-    assert sorted(g.name for g in m.graphs) == ["asr_flow", "extra"]
+    assert sorted(g.name for g in m.graphs) == ["experiment", "main"]
+    assert m.serves[0].graph == "main"
 
 
 def test_asgi_mounts_an_app_and_needs_no_graph(tmp_path):

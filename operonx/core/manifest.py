@@ -20,18 +20,26 @@ question people ask first:
   graphs, and how work arrives at them. Inbound. No op ever asks the hub
   for a serve entry.
 
-Schema
-------
-``schema = 2`` opts into the layout where ``[[serve]]`` names its graph by
-entry point and carries session semantics. A manifest with no ``schema``
-key is version 1 — the historical layout, where ``[[graph]]`` names entry
-points and ``[[serve]]`` refers to one of those names. Both parse here;
-version 1 is normalised into the same objects so callers never branch.
+Shape
+-----
+``[[serve]]`` names the graph it runs by entry point, directly::
 
-The stamp exists so that an *older* tool meeting a newer manifest fails
-loudly. Without it, a stale `operonx-studio` reading a schema-2 file finds
-no ``[[graph]]`` blocks and reports "this project has no graphs" — a
-silently wrong answer in place of "this manifest is newer than I am".
+    [[serve]]
+    kind         = "websocket"
+    path         = "/ws/call"
+    graph        = "pipeline.graph:ws_callbot_pipeline"
+    session      = "per_connection"
+    max_inflight = 4000
+
+``[[graph]]`` is for graphs nothing serves — an example, an experiment, a
+subgraph worth linting on its own. A served graph does not need one.
+
+There is deliberately no version key. One was tried and removed: its only
+real job was letting manifests written before ``max_inflight`` existed
+skip declaring a bound, which is a kindness to files that this project
+would rather just update. An unbounded queue behind a socket is how
+`operonx.io.Channel` came to exist, so the bound is required of everyone,
+always.
 """
 
 from __future__ import annotations
@@ -46,7 +54,6 @@ try:                                                  # Python 3.11+
 except ModuleNotFoundError:                           # 3.10
     import tomli as _toml  # type: ignore[no-redef]
 
-from operonx.core.loggings import LOGGER
 from operonx.core.registry.storage.yaml import _interpolate_env_vars
 
 __all__ = [
@@ -55,16 +62,11 @@ __all__ = [
     "GraphSpec",
     "ManifestError",
     "MANIFEST_FILENAME",
-    "SUPPORTED_SCHEMA",
     "STREAM_KINDS",
     "SESSION_MODES",
 ]
 
 MANIFEST_FILENAME = "operonx.toml"
-
-#: The highest schema this build understands. A manifest declaring more is
-#: refused by name rather than misread.
-SUPPORTED_SCHEMA = 2
 
 #: Kinds whose input arrives as a stream of items over time rather than as
 #: one request. These are the ones that need a bound: a producer that never
@@ -91,10 +93,10 @@ class ManifestError(ValueError):
 class GraphSpec:
     """A graph the project wants a tool to know about.
 
-    In schema 2 this is only for graphs *unreachable* from any endpoint —
-    an experiment kept under lint. Anything served names its own entry
-    point, and subgraphs are reachable by walking the root, so most
-    projects have none of these.
+    For graphs nothing serves — an example, an experiment, a subgraph
+    worth linting on its own. Anything served names its own entry point in
+    its ``[[serve]]`` block, and subgraphs are reachable by walking the
+    root, so a server project usually has none of these.
     """
 
     name: str
@@ -168,7 +170,6 @@ class ServeSpec:
 class Manifest:
     """A parsed, validated `operonx.toml`."""
 
-    schema: int
     project: Dict[str, Any]
     serves: Tuple[ServeSpec, ...]
     graphs: Tuple[GraphSpec, ...]
@@ -231,17 +232,6 @@ class Manifest:
         # the bindings.
         raw = _interpolate_env_vars(raw)
 
-        schema = raw.get("schema", 1)
-        if not isinstance(schema, int):
-            raise ManifestError(f"{where}: `schema` must be an integer, got {schema!r}")
-        if schema > SUPPORTED_SCHEMA:
-            raise ManifestError(
-                f"{where}: manifest schema {schema} needs a newer operonx "
-                f"(this build understands up to {SUPPORTED_SCHEMA})"
-            )
-        if schema < 1:
-            raise ManifestError(f"{where}: `schema` must be 1 or greater, got {schema}")
-
         project = dict(raw.get("project") or {})
         # `operonx serve` owns the process, so it owns what has to happen
         # before the first request: sizing a thread pool, warming a model
@@ -259,7 +249,6 @@ class Manifest:
         graphs = tuple(
             _graph_spec(entry, where, i) for i, entry in enumerate(_as_list(raw.get("graph")))
         )
-        by_name = {g.name: g for g in graphs}
 
         fixtures: Dict[str, Dict[str, Any]] = {}
         for i, block in enumerate(_as_list(raw.get("fixture"))):
@@ -275,13 +264,12 @@ class Manifest:
                 fixtures.setdefault(g.name, dict(g.inputs))
 
         serves = tuple(
-            _serve_spec(block, where, i, by_name, schema)
+            _serve_spec(block, where, i)
             for i, block in enumerate(_as_list(raw.get("serve")))
         )
         _reject_duplicates(serves, where)
 
         return cls(
-            schema=schema,
             project=project,
             serves=serves,
             graphs=graphs,
@@ -321,13 +309,7 @@ def _graph_spec(block: Any, where: str, index: int) -> GraphSpec:
     )
 
 
-def _serve_spec(
-    block: Any,
-    where: str,
-    index: int,
-    by_name: Dict[str, GraphSpec],
-    schema: int,
-) -> ServeSpec:
+def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
     if not isinstance(block, dict):
         raise ManifestError(f"{where}: [[serve]] #{index} is not a table")
 
@@ -355,19 +337,14 @@ def _serve_spec(
     else:
         if not graph:
             raise ManifestError(f"{where}: {label} has no `graph`")
-        # Schema 1 pointed at a `[[graph]]` by name; schema 2 names the
-        # entry point outright. Both normalise to an entry point here so
-        # nothing downstream has to know which file it came from.
+        # An entry point, named outright. `[[graph]]` used to exist to give
+        # entry points names so `[[serve]]` could refer to them; that was a
+        # second place to keep in step for no benefit, and it is gone.
         if not _ENTRY_RE.match(graph):
-            known = by_name.get(graph)
-            if known is None:
-                have = ", ".join(sorted(by_name)) or "no [[graph]] blocks"
-                raise ManifestError(
-                    f"{where}: {label} names graph {graph!r}, which is neither "
-                    f"a `module:function` entry point nor a declared graph "
-                    f"({have})"
-                )
-            graph = known.entry
+            raise ManifestError(
+                f"{where}: {label} graph {graph!r} is not a `module:function` "
+                f"entry point"
+            )
 
     session = str(block.get("session") or _default_session(kind))
     if session not in SESSION_MODES:
@@ -388,18 +365,9 @@ def _serve_spec(
         # one place that needs it most is a socket nobody can slow down.
         # A number nobody chose is how an unbounded queue gets shipped.
         #
-        # Required from schema 2 forward only. Schema 1 manifests exist and
-        # work today; a parser that refuses to read the files it was
-        # written for is no use to anyone, so those get the warning and the
-        # unbounded behaviour they already have.
-        if schema >= 2:
-            raise ManifestError(
-                f"{where}: {label} is kind {kind!r} and must set `max_inflight` — "
-                f"a stream transport needs a bound to push back against"
-            )
-        LOGGER.warning(
-            f"{where}: {label} is kind {kind!r} with no `max_inflight`; the "
-            f"input is unbounded. Set one when moving to schema 2."
+        raise ManifestError(
+            f"{where}: {label} is kind {kind!r} and must set `max_inflight` — "
+            f"a stream transport needs a bound to push back against"
         )
 
     port = block.get("port", 8000)

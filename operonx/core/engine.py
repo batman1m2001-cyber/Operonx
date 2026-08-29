@@ -530,9 +530,11 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
-        # Legacy ``state.tracing`` flag retained for back-compat with code
-        # that reads it (e.g. inside op.run() for per-op metric writes).
-        # No longer load-bearing for trace dispatch.
+        # `state.tracing` gates the per-op metric writes in `BaseOp.run`.
+        # It is not dead and it is not back-compat: `MemoryState` defaults
+        # it on, so an op driven directly — as several tests do — records
+        # metrics, while an engine run does not. Trace dispatch has not
+        # depended on it since V3.
         state.tracing = False
 
         # Seed scratch synchronously before the scheduler task is created.
@@ -939,24 +941,21 @@ class Operon:
         path: str = "/",
         host: str = "0.0.0.0",
         port: int = 8000,
-        stream: Optional[bool] = None,
         websocket: bool = False,
-        backend: str = "python",
         **kwargs: Any,
     ) -> None:
-        """Serve this workflow as an HTTP API.
+        """Serve this workflow over HTTP or a WebSocket.
 
-        Convenience wrapper around ``operonx.serve.OperonApp``. Requires operonx-serve
-        to be installed.
+        The one-endpoint convenience form. It builds the same ``ServeSpec``
+        an ``operonx.toml`` would and serves that, so a project outgrowing
+        it moves to the manifest without changing how anything runs.
 
         Args:
             path: URL path for the endpoint (default: "/").
             host: Bind address.
             port: Bind port.
-            stream: Enable SSE streaming endpoint. None = auto-detect.
-            websocket: Enable WebSocket endpoint.
-            backend: "python" (FastAPI/uvicorn) or "rust" (Axum).
-            **kwargs: Extra arguments forwarded to ``OperonApp.serve()``.
+            websocket: Serve a WebSocket endpoint instead of HTTP.
+            **kwargs: Extra arguments forwarded to ``uvicorn.run()``.
         """
         # This used to delegate to `operonx.serve.OperonApp` — a package
         # that is not installed, not a dependency and not in this
@@ -967,21 +966,6 @@ class Operon:
         # the manifest would have produced.
         from operonx.core.manifest import ServeSpec
         from operonx.core.serve.app import build_app
-
-        # Both of these were arguments to a stub that never ran, so no
-        # caller can be relying on them. Saying so is better than accepting
-        # `backend="rust"` and quietly serving Python anyway — an ignored
-        # argument is a promise the caller thinks was kept.
-        if backend != "python":
-            raise NotImplementedError(
-                f"engine.serve(backend={backend!r}) is not implemented; "
-                f"only 'python' is available"
-            )
-        if stream is not None:
-            raise NotImplementedError(
-                "engine.serve(stream=...) is not implemented yet; a graph "
-                "streams by yielding to `egress`"
-            )
 
         try:
             import uvicorn
