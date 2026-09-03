@@ -5,5 +5,8 @@ description = "Operonx keyword RRF + hybrid (vector + keyword) RAG."
 requires-python = ">=3.10"
 dependencies = [
     # numpy + openai for hybrid; keyword_rrf alone runs at tier 1.
-    "operonx[providers]>=1.3.0",
+    "operonx[providers]",
 ]
+
+[tool.uv.sources]
+operonx = { path = "../../..", editable = true }

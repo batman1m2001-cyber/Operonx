@@ -4,5 +4,8 @@ version = "0.1.0"
 description = "Two-store RAG: VectorSearchOp for ids, DocFetchOp for content."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx[openai,faiss]>=1.3.0",
+    "operonx[openai,faiss]",
 ]
+
+[tool.uv.sources]
+operonx = { path = "../../..", editable = true }

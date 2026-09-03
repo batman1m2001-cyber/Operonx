@@ -151,39 +151,19 @@ jobs:
       # `--build` constructs every declared graph with the network blocked,
       # which also holds C2: construction must not reach a service.
       - name: Lint and build every example
+        # The tooling lives in its own repo now (operonx-studio); this
+        # fetch is also the cross-repo integration gate — extraction reads
+        # operonx object internals across a subprocess seam, and this is
+        # where a core change that breaks the IR contract fails first.
         run: |
           set -e
+          uv pip install git+https://github.com/batman1m2001-cyber/operonx-studio
           failed=0
           for dir in examples/python/ex*/; do
             echo "── ${dir}"
-            PYTHONPATH=packages/operonx-project \
               uv run python -m operonx_project.cli "${dir%/}" --build || failed=1
           done
           exit $failed
-
-  # ── Project tooling packages ────────────────────────────────────────────
-  tooling:
-    name: pytest (operonx-project, operonx-studio)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run tooling tests
-        run: |
-          PYTHONPATH=packages/operonx-project:packages/operonx-studio \
-            uv run pytest packages/operonx-project/tests \
-                          packages/operonx-studio/tests --tb=short -q
 
   # ── Coverage upload to Codecov ──────────────────────────────────────────
   coverage:
