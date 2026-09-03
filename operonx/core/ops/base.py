@@ -35,13 +35,16 @@ if TYPE_CHECKING:
     from operonx.core.states import MemoryState
 
 
-# Re-export shorthand utilities for backward compatibility
+# Not "backward compatibility", whatever the old comment claimed: five
+# modules import `shorthand` and `split_shorthand_kwargs` from here,
+# `func_op` among them, and `_set_wildcard_outputs` is used below. This is
+# a live import surface.
 from operonx.core.ops._shortcuts import (  # noqa: F401, E402
     _BASE_INIT_KEYS,
     shorthand,
     split_shorthand_kwargs,
 )
-from operonx.core.ops._utils import _has_explicit_outputs, _set_wildcard_outputs  # noqa: F401, E402
+from operonx.core.ops._utils import _set_wildcard_outputs  # noqa: F401, E402
 
 _OBS_KEY_WILDCARD = "*"
 _OBS_VALID_CHANNELS = frozenset({"trace", "checkpoint", _OBS_KEY_WILDCARD})
@@ -1316,7 +1319,12 @@ class BaseOp(ABC):
         return result
 
 
-# Re-export edge classes and singletons for backward compatibility
+# Not a back-compat shim either. `START`, `END` and `PARENT` are imported
+# from here by nine modules, and the rest are used by this file: `SoftEdge`
+# implements `~op`, `DummyOp` and `ScratchAccessor` back the sentinels,
+# `SCRATCH` resolves refs. Deleting the four that no *other* module
+# imports breaks this one — which is what happens when you measure
+# `from X import Y` and call the answer "usage".
 from operonx.core.ops._edges import (  # noqa: E402, F401
     END,
     PARENT,

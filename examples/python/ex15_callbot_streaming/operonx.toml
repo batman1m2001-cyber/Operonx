@@ -12,3 +12,17 @@ entry = "main:llm_router"
 [[graph]]
 name  = "callbot"
 entry = "main:callbot"
+
+# ── the front door ──────────────────────────────────────────────────────
+# One socket, one long-lived run — the shape the real callbot uses. The
+# bound is mandatory for a stream: a peer that never slows down needs
+# something to push back against, and at the bound the transport simply
+# stops reading, which for TCP is the connection's own flow control.
+[[serve]]
+kind         = "websocket"
+path         = "/ws/call"
+graph        = "main:served_callbot"
+session      = "per_connection"
+max_inflight = 256
+description  = "Audio frames in ('payload@timestamp_ms'), TTS chunks out, per connection."
+

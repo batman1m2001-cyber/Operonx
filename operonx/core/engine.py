@@ -70,10 +70,17 @@ class ExecutionHandle:
         task: asyncio.Task,
         state: Any = None,
         trace: Any = None,
+        graph_name: str = "",
     ) -> None:
         self._queue = queue  # fed by root Scheduler
         self._scheduler_task = task  # task running the workflow
         self.state = state  # MemoryState for this execution (tracing access)
+        # The graph's name, which is the first half of every declared cell
+        # key. Reading `handle.state[name, "agent"]` from outside the run
+        # is the point of declaring a cell, and without this the caller has
+        # to already hold the engine to know the name — which a serve-layer
+        # `on_close(session, handle)` does not.
+        self.graph_name = graph_name
         # V3 tracing: WorkflowTrace populated live by BaseOp.run wrappers.
         # `None` when V3 tracing is disabled at import time (rare — kept
         # as an escape hatch for tests that don't want the buffer).
@@ -523,9 +530,11 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
-        # Legacy ``state.tracing`` flag retained for back-compat with code
-        # that reads it (e.g. inside op.run() for per-op metric writes).
-        # No longer load-bearing for trace dispatch.
+        # `state.tracing` gates the per-op metric writes in `BaseOp.run`.
+        # It is not dead and it is not back-compat: `MemoryState` defaults
+        # it on, so an op driven directly — as several tests do — records
+        # metrics, while an engine run does not. Trace dispatch has not
+        # depended on it since V3.
         state.tracing = False
 
         # Seed scratch synchronously before the scheduler task is created.
@@ -636,7 +645,8 @@ class Operon:
                 )
 
         scheduler_task = asyncio.create_task(_run())
-        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace)
+        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace,
+                               graph_name=self.name)
 
     async def run(
         self,
@@ -931,35 +941,51 @@ class Operon:
         path: str = "/",
         host: str = "0.0.0.0",
         port: int = 8000,
-        stream: Optional[bool] = None,
         websocket: bool = False,
-        backend: str = "python",
         **kwargs: Any,
     ) -> None:
-        """Serve this workflow as an HTTP API.
+        """Serve this workflow over HTTP or a WebSocket.
 
-        Convenience wrapper around ``operonx.serve.OperonApp``. Requires operonx-serve
-        to be installed.
+        The one-endpoint convenience form. It builds the same ``ServeSpec``
+        an ``operonx.toml`` would and serves that, so a project outgrowing
+        it moves to the manifest without changing how anything runs.
 
         Args:
             path: URL path for the endpoint (default: "/").
             host: Bind address.
             port: Bind port.
-            stream: Enable SSE streaming endpoint. None = auto-detect.
-            websocket: Enable WebSocket endpoint.
-            backend: "python" (FastAPI/uvicorn) or "rust" (Axum).
-            **kwargs: Extra arguments forwarded to ``OperonApp.serve()``.
+            websocket: Serve a WebSocket endpoint instead of HTTP.
+            **kwargs: Extra arguments forwarded to ``uvicorn.run()``.
         """
+        # This used to delegate to `operonx.serve.OperonApp` — a package
+        # that is not installed, not a dependency and not in this
+        # repository, so every call raised ImportError. Meanwhile
+        # `operonx.toml` had been declaring the same endpoint by hand for
+        # the studio's benefit. The two halves are joined now: this is the
+        # one-endpoint convenience form, and it builds the same ServeSpec
+        # the manifest would have produced.
+        from operonx.core.manifest import ServeSpec
+        from operonx.core.serve.app import build_app
+
         try:
-            from operonx.serve import OperonApp
+            import uvicorn
         except ImportError:
             raise ImportError(
-                "operonx-serve is required for engine.serve(). Install it with: pip install operonx-serve"
+                'engine.serve() needs the serve extra: pip install "operonx[serve]"'
             ) from None
 
-        app = OperonApp()
-        app.endpoint(path, graph=self.graph, stream=stream, websocket=websocket)
-        app.serve(host=host, port=port, backend=backend, **kwargs)
+        spec = ServeSpec(
+            name=self.name or "serve",
+            kind="websocket" if websocket else "http",
+            graph="",                      # the engine is passed directly
+            path=path,
+            host=host,
+            port=port,
+            session="per_connection" if websocket else "per_request",
+            max_inflight=kwargs.pop("max_inflight", 4096) if websocket else None,
+        )
+        app = build_app((spec,), engines={spec.name: self})
+        uvicorn.run(app, host=host, port=port, **kwargs)
 
     async def batch(
         self,

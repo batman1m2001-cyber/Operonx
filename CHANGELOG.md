@@ -7,6 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-29
+
+### Fixed — `@op(transient=True)` silently dropped data past two ops
+
+Two bugs, one cause. Anything longer than a producer wired straight into
+one consumer lost items, and an async consumer lost all of them:
+
+```
+transient=False  mid=sync  ->  OK
+transient=False  mid=io    ->  OK
+transient=True   mid=sync  ->  ['i0', None, None]   only the first survived
+transient=True   mid=io    ->  [None, None, None]   nothing survived
+```
+
+The release guard freed a context while a consumer still had to read from
+it. `tasks_by_ctx` sees dispatched work, `inline_pending` sees inline work,
+`seq_queues` sees work parked behind a sequential edge — and none of them
+sees a frame still sitting on the scheduler queue, whose consumer has
+therefore not been dispatched at all. A `bound="sync"` consumer is drained
+inline and so was usually visible by then; a `bound="io"` consumer never
+was.
+
+The guard now also counts, per context, the events enqueued but not yet
+handled, and release is re-attempted once each event has been processed.
+
+Both hid for the same reason: every test written for this feature used a
+`bound="sync"` consumer, and a two-op chain cannot reach either bug. The
+regression tests are parametrised over `bound` and chain length, and they
+assert the other direction too — retention stays flat at 9 cell entries
+from 50 items to 2000, against 60,009 for the same graph without
+`transient=True` — because every correctness test here would still pass if
+the guard simply stopped releasing anything.
+
+**Anyone using `@op(transient=True)` on 1.4.0 should upgrade.**
+
+### Added — serve layer: a manifest that boots, not one that only describes
+
+`operonx.toml` had declared `[[serve]]` all along, because nothing derived
+from a graph can say what puts work into it — uvicorn calls an ASGI route,
+which calls `engine.start()`, and that hop is not an op. Nothing in
+operonx read the file. Meanwhile `engine.serve()` delegated to
+`operonx.serve.OperonApp`, a package that is not installed, not a
+dependency and not in this repository, so every call raised. Two halves
+describing the same thing, neither working, never connected.
+
+* `operonx.core.manifest` parses `operonx.toml`. `[[serve]]` names the
+  graph it runs by entry point and carries session semantics;
+  `${VAR:default}` resolves through the same code `resources.yaml` uses.
+  `[[graph]]` remains, for graphs nothing serves. A stream transport must
+  declare `max_inflight` — there is no version key and no way to opt out,
+  because an unbounded queue behind a socket is how `operonx.io.Channel`
+  came to exist.
+* `operonx.core.serve` is a transport **interface**, with `http`,
+  `websocket` and `asgi` as built-ins that register through the same call
+  a project uses for its own. A SIP trunk or a Kafka consumer is two
+  methods and a registration. The in-memory transport and a third-party
+  gate — a transport inheriting nothing and importing no internals,
+  driving a real graph — were written *before* any network built-in, so
+  the built-in could not quietly become the contract.
+* `Session.send()` returns a bool. A caller that paces audio has to report
+  what actually landed — the callbot's `play_frame` sends forty-odd chunks
+  per spoken frame and its audit line is the row you read when audio
+  sounds wrong. Fire-and-forget would have forced that op to keep talking
+  to a WebSocket directly, which is the one coupling this interface exists
+  to remove.
+* `ingress` / `egress` bind the transport as ops, so it keeps real spans
+  and sweepable contexts instead of being an async seam beside the graph.
+  Neither names a resource: the run was minted by a transport and already
+  carries its session.
+* `session = "per_request"` answers 500 when a run produces nothing, never
+  200 with an empty body. Op exceptions are caught by the scheduler and
+  logged rather than raised, so from the transport's side that is what a
+  failure looks like — and for one caller waiting on one request, nothing
+  is a failure.
+* A run always finishes; a transport never cancels it. Work that has to
+  happen after the peer has gone — writing a call record — only survives
+  if the run is allowed to drain.
+* `on_session` / `on_close` are the door: a connection becomes a run, and
+  a run becomes a record, exactly once, on every path including failure.
+* `[project] on_startup` runs before any endpoint accepts. Once
+  `operonx serve` owns the process it owns process startup, and warming a
+  model after the first caller has arrived is the same as not warming it.
+* `handle.graph_name` — reading a declared cell from a teardown hook needs
+  the graph's name, and the caller does not hold the engine.
+* `serve.json_object()` returns a dict or the default, never anything
+  else. Guarding `JSONDecodeError` guards the wrong half: `[1,2,3]`,
+  `"hello"`, `42`, `true` and `null` all parse cleanly and are not
+  objects, and `null` slips past an `is None` check written before the
+  parse.
+* `operonx-serve` boots every listener a manifest declares; `--list`
+  prints what would run without booting anything.
+
+### Fixed — six quiet failures in the serve layer
+
+Found by an adversarial pass written to break the layer rather than
+confirm it. None of them raised anything a person would see.
+
+* A raising `on_session` leaked the socket, skipped teardown and logged
+  nothing — so a project counting active connections in that hook inflated
+  its counter for the life of the process.
+* A drained session blocked a second reader forever, with no error and no
+  log.
+* A `close()` that raised turned a completed run into a failed one.
+* A `send()` that raised killed the run instead of costing its item.
+* `on_session` returning the wrong type failed frames later, as an
+  `AttributeError` on `.inputs` from inside the run.
+* Ports were not range-checked, so 99999 parsed and failed at bind.
+
+Every unresolvable import now names the manifest entry that asked for it.
+
+### Changed — `Operon.serve()` runs instead of raising
+
+It builds the same `ServeSpec` the manifest would and serves it. Its two
+dead arguments now raise: no caller can depend on them, since every
+previous call raised `ImportError`, and accepting `backend="rust"` while
+quietly serving Python is a promise the caller thinks was kept.
+
+`tomli` moves from a dev extra to a core dependency — the manifest is how
+a project declares what it serves, and `tomllib` is stdlib only from 3.11
+while the floor here is 3.10.
+
 ### Added — `@op(transient=True)`: streaming runs stop retaining every item
 
 A run never freed per-item state. `MemoryState._cells[idx]` is keyed by
@@ -1268,7 +1389,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.2.0...v1.3.0

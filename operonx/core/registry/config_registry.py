@@ -73,7 +73,8 @@ class ConfigRegistry:
         # Register by category
         self._entries[category] = entry
 
-        # Also register by class name (for backward compat)
+        # The by-class-name index, read by `get_entry` and by resource
+        # type resolution below — not a compatibility shim.
         self._class_entries[config_class.__name__] = entry
 
         LOGGER.debug("Registered: %s -> %s", category, config_class.__name__)
