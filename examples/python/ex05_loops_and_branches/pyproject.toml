@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Operonx generator ops + if_ branching — pure compute."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx",
+    "operonx[serve]",
 ]
 
 [tool.uv.sources]

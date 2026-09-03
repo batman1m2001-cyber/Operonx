@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     # `[openai]` is only needed for the llm_fallback scenario; pure-compute
     # scenarios run with bare `operonx`.
-    "operonx[openai]",
+    "operonx[openai,serve]",
 ]
 
 [tool.uv.sources]

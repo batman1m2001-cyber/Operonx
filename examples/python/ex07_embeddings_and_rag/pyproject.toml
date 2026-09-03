@@ -5,7 +5,7 @@ description = "Operonx embeddings + RAG with optional reranker."
 requires-python = ">=3.10"
 dependencies = [
     # Tier 4 meta — pulls openai SDK, aiohttp (for vLLM/TEI clients), numpy.
-    "operonx[providers]",
+    "operonx[providers,serve]",
 ]
 
 [tool.uv.sources]

@@ -98,3 +98,40 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# ── the served front door ───────────────────────────────────────────────
+# The same pipeline behind a real socket. `[[serve]]` in operonx.toml
+# boots it with `session = "per_connection"`: one websocket, one
+# long-lived run, and the run always finishes — the peer disconnecting
+# ends `ingress`, the graph drains, and whatever must happen after the
+# caller is gone still happens.
+#
+# `customer_audio` is replaced by the connection itself: each websocket
+# message is one audio frame, "payload@timestamp_ms". TTS chunks go back
+# out the same socket through `egress`.
+from operonx.core.serve import egress, ingress
+
+
+@op
+def unpack_frame(item=None) -> dict:
+    """One websocket message → the audio chunk and when it was captured."""
+    audio, _, ts = str(item).partition("@")
+    return {"audio": audio, "timestamp_ms": int(ts or 0)}
+
+
+@graph
+def served_callbot():
+    frames = ingress()
+    unpack = unpack_frame(item=frames["item"])
+    v = vad(audio=unpack["audio"], timestamp_ms=unpack["timestamp_ms"])
+    transcribe = stt(
+        segment=v["segment"],
+        start_ms=v["start_ms"],
+        end_ms=v["end_ms"],
+    )
+    router = llm_router(transcript=transcribe["transcript"])
+    speak = tts(response=router["response"])
+    out = egress(item=speak["audio_out"])
+    START >> frames >> unpack >> v >> transcribe >> router >> speak >> out >> END
+

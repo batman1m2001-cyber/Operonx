@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Operonx tool-calling agent on @graph with until= loop."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx[openai]",
+    "operonx[openai,serve]",
 ]
 
 [tool.uv.sources]

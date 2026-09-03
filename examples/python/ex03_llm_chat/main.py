@@ -77,3 +77,30 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# ── the served front door ───────────────────────────────────────────────
+# Every operonx project serves. The [[serve]] block in operonx.toml names
+# this graph, `operonx-serve` boots it, and the studio draws it as the
+# entry node feeding the flow — no pipeline begins from nowhere.
+#
+# `ingress` yields one item per request payload and `egress` writes the
+# reply back to the caller. Neither names a resource: the run was minted
+# by a transport and already carries its session — and with no session the
+# same graph still runs under a plain `engine.start()`, so serving costs
+# the example nothing.
+from operonx.core.serve import egress, ingress
+
+
+@op
+def answer(item=None) -> dict:
+    """One request in, this example's reply out."""
+    return {"reply": f"ex03 saw: {item!r}"}
+
+
+@graph
+def served():
+    request = ingress()
+    a = answer(item=request["item"])
+    out = egress(item=a["reply"])
+    START >> request >> a >> out >> END
+

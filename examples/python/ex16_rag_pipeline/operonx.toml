@@ -11,3 +11,15 @@ overlay = "resources.yaml"
 [[graph]]
 name  = "rag"
 entry = "main:rag"
+
+# ── the front door ──────────────────────────────────────────────────────
+# What puts work into this project. `operonx-serve` boots it; the studio
+# draws it as the entry node feeding the graph.
+[[serve]]
+kind    = "http"
+method  = "POST"
+path    = "/run"
+graph   = "main:served"
+session = "per_request"
+description = "One request in, one reply out — the smallest served graph."
+

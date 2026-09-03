@@ -5,7 +5,7 @@ description = "Operonx keyword RRF + hybrid (vector + keyword) RAG."
 requires-python = ">=3.10"
 dependencies = [
     # numpy + openai for hybrid; keyword_rrf alone runs at tier 1.
-    "operonx[providers]",
+    "operonx[providers,serve]",
 ]
 
 [tool.uv.sources]

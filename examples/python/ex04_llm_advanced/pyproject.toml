@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Operonx LLM advanced — structured output, tool calling, multi-turn."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx[openai]",
+    "operonx[openai,serve]",
 ]
 
 [tool.uv.sources]

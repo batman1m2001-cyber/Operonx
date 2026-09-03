@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Two-store RAG: VectorSearchOp for ids, DocFetchOp for content."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx[openai,faiss]",
+    "operonx[openai,faiss,serve]",
 ]
 
 [tool.uv.sources]
