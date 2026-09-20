@@ -153,6 +153,8 @@ class LocalConsumer(Consumer):
                     "end_time": node.end_time,
                     "wall_start": trace.wall_of(node.start_time),
                     "duration_ms": node.duration_ms,
+                    "op_type": node.op_type,
+                    "is_yield": node.is_yield,
                     "status": node.status,
                     "error": node.error,
                     "inputs": clean_in,

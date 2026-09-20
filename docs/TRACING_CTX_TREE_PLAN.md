@@ -94,3 +94,16 @@ bump: `resources.yaml` loses `parent_strategy`.
 Live streaming of spans during the call (still one batch post-call),
 media upload to Langfuse (refs stay local), the V2 "explicit event()"
 plan in `TRACING_V2_PLAN.md` (superseded by this one).
+
+## Status log
+
+- 2026-09-20 — phase 1 (7b13fc8): `wall_started_at` anchor + `wall_of()`
+  + `run_id` on the trace; local consumer writes `wall_start`.
+- 2026-09-20 — phase 2: `OpExecution.op_type` / `is_yield` set at the
+  three append sites; `LangfuseConsumer` rewritten around
+  `build_tree()`; tests on real runs (nested generators, transient
+  stream, sub-graph) plus batch shape, generation, errors logged.
+  Learned: a GraphOp member's input crosses the boundary, so its
+  upstream names the GraphOp (never a record) and the container lands
+  under the yield of its ctx, a sibling of the feeder — accepted as the
+  rule, not special-cased.

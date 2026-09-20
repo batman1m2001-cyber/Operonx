@@ -148,6 +148,14 @@ class OpExecution:
     upstreams: List[UpstreamRef] = field(default_factory=list)
     status: str = STATUS_OK
     error: Optional[str] = None
+    # The op's kind ("code", "llm", "graph", "branch", …) so a consumer
+    # can type an observation (an LLM call is a generation) without
+    # reaching back into the graph.
+    op_type: str = ""
+    # True for the record of ONE generator yield. A yield record carries
+    # the ctx it dispatched, which makes it the container of everything
+    # that ran for that item; a batch op in the same ctx is not.
+    is_yield: bool = False
 
     @property
     def duration_ms(self) -> float:

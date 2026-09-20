@@ -1110,6 +1110,8 @@ class BaseOp(ABC):
                             else {"_": result},
                             upstreams=_v3_upstreams,
                             status=STATUS_OK,
+                            op_type=str(self.type),
+                            is_yield=True,
                         )
                     )
                 yield ctx, result
@@ -1222,6 +1224,7 @@ class BaseOp(ABC):
                                 upstreams=_v3_upstreams,
                                 status=v3_status,
                                 error=error_msg,
+                                op_type=str(self.type),
                             )
                         )
                     # A transient op in a stream emits no per-item node on
@@ -1249,6 +1252,7 @@ class BaseOp(ABC):
                                 upstreams=_v3_upstreams,
                                 status=v3_status,
                                 error=error_msg,
+                                op_type=str(self.type),
                             )
                         )
             if op_ctx_token is not None:

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Langfuse consumer ships the ctx tree, run-scoped ids, real dates
+
+`LangfuseConsumer` no longer guesses a parent from data edges
+(`parent_strategy` is accepted and ignored). The tree comes from `ctx`:
+a generator's yield record is the container of everything dispatched for
+that item, an op whose edges stop at a GraphOp boundary attaches to the
+yield of its ctx, GraphOp members nest under one container span per
+(graph, ctx), and a transient stream's unrecorded yields get one
+stand-in span each (`audio_in [357]`). Observation ids are
+`f"{run_id}/{op_id}"`, so a call no longer overwrites the spans of the
+call before it; times use the trace's wall anchor instead of a perf
+counter read as an epoch (every span used to date from January 1970).
+`LLMOp` records ship as `generation` with model and token usage. Names
+are op names; a yield is `synthesize [2]`. Per-event errors in the
+ingestion reply are logged. `OpExecution` gains `op_type` and
+`is_yield`; the local consumer writes both. `build_tree(trace)` is
+public for other viewers.
+
 ### Added — wall-clock anchor and run identity on the workflow trace
 
 `WorkflowTrace.wall_started_at` is `time.time()` taken with the
