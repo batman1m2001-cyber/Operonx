@@ -107,3 +107,14 @@ plan in `TRACING_V2_PLAN.md` (superseded by this one).
   upstream names the GraphOp (never a record) and the container lands
   under the yield of its ctx, a sibling of the feeder — accepted as the
   rule, not special-cased.
+- 2026-09-20 — phase 2 gate, live: two nested-generator runs sent to
+  the Edupia Langfuse; 12 sent / 12 stored each, no dangling parent,
+  no id shared between the runs. Stored times read +7 h against real
+  UTC, but so does the server's own `createdAt`: the self-hosted
+  instance's clock is offset, not our timestamps.
+- 2026-09-20 — phase 3 (studio 85cf816): the flow endpoint groups
+  executions into turns by ctx (yield record's name, else the stream's
+  stand-in name), the run canvas draws a band per turn, executions
+  carry `is_yield` / `wall_start`, the panel shows the wall time.
+  Branch rebased onto `feat/show-keys` so one line carries show_keys,
+  the 1.5.1 bump and this work; suites: operonx 1839, studio 371.
