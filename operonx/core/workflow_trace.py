@@ -179,10 +179,29 @@ class WorkflowTrace:
     ended_at: float
     nodes: List[OpExecution] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Wall-clock anchor (`time.time()` taken with `started_at`). Every
+    # perf timestamp in the run converts through it, so records keep
+    # their cheap monotonic clock and a consumer still gets real dates.
+    wall_started_at: float = 0.0
 
     @property
     def duration_ms(self) -> float:
         return (self.ended_at - self.started_at) * 1000.0
+
+    @property
+    def run_id(self) -> str:
+        """The run's identity for external ids: consumers scope every
+        observation id as ``f"{run_id}/{op_id}"`` so two runs of the same
+        graph never share one (``op_id`` alone repeats every run)."""
+        return self.trace_id
+
+    def wall_of(self, perf: float) -> float:
+        """Epoch seconds for a perf-counter timestamp taken in this run.
+        Without an anchor (a trace built by hand) the value passes
+        through unchanged."""
+        if not self.wall_started_at:
+            return perf
+        return self.wall_started_at + (perf - self.started_at)
 
     # ── grep-style helpers (consumers use these all the time) ────────
     def by_op(self, op_name: str) -> List[OpExecution]:

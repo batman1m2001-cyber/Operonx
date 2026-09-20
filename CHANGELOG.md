@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — wall-clock anchor and run identity on the workflow trace
+
+`WorkflowTrace.wall_started_at` is `time.time()` taken with the
+perf-counter `started_at`; `trace.wall_of(perf)` converts any record
+timestamp to epoch seconds, so a consumer writes real dates while the
+hot path keeps its single monotonic clock. `trace.run_id` names the run
+for external ids (`f"{run_id}/{op_id}"`), because `op_id` alone repeats
+in every run of the same graph. The local consumer writes `wall_start`
+per record and `wall_started_at` in `meta.json`. Groundwork for the
+Langfuse consumer rewrite in `docs/TRACING_CTX_TREE_PLAN.md`.
 ## [1.5.1] - 2026-09-20
 
 ### Added — `show_keys`: the outputs that stand for an op

@@ -24,6 +24,7 @@ Example:
 import asyncio
 import json
 import sys
+import time
 import uuid
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
@@ -578,6 +579,7 @@ class Operon:
             trace_id=trace_id or request_id,
             workflow_name=self.name,
             started_at=perf_counter(),
+            wall_started_at=time.time(),
             ended_at=0.0,
             metadata={
                 "request_id": request_id,
