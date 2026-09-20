@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-09-20
+
+### Changed — Langfuse consumer ships the ctx tree, run-scoped ids, real dates
+
+`LangfuseConsumer` no longer guesses a parent from data edges
+(`parent_strategy` is accepted and ignored). The tree comes from `ctx`:
+a generator's yield record is the container of everything dispatched for
+that item, an op whose edges stop at a GraphOp boundary attaches to the
+yield of its ctx, GraphOp members nest under one container span per
+(graph, ctx), and a transient stream's unrecorded yields get one
+stand-in span each (`audio_in [357]`). Observation ids are
+`f"{run_id}/{op_id}"`, so a call no longer overwrites the spans of the
+call before it; times use the trace's wall anchor instead of a perf
+counter read as an epoch (every span used to date from January 1970).
+`LLMOp` records ship as `generation` with model and token usage. Names
+are op names; a yield is `synthesize [2]`. Per-event errors in the
+ingestion reply are logged. `OpExecution` gains `op_type` and
+`is_yield`; the local consumer writes both. `build_tree(trace)` is
+public for other viewers.
+
+### Added — wall-clock anchor and run identity on the workflow trace
+
+`WorkflowTrace.wall_started_at` is `time.time()` taken with the
+perf-counter `started_at`; `trace.wall_of(perf)` converts any record
+timestamp to epoch seconds, so a consumer writes real dates while the
+hot path keeps its single monotonic clock. `trace.run_id` names the run
+for external ids (`f"{run_id}/{op_id}"`), because `op_id` alone repeats
+in every run of the same graph. The local consumer writes `wall_start`
+per record and `wall_started_at` in `meta.json`. Groundwork for the
+Langfuse consumer rewrite in `docs/TRACING_CTX_TREE_PLAN.md`.
+
+### Added — `show_keys`: the outputs that stand for an op
+
+An op can name the one or two outputs a viewer should print for it
+when it has room for a line instead of a port list (the studio card,
+zoomed in). Resolution, first hit wins: `my_op(..., show_keys="text")`
+at the call site (graphs and op classes too), `@op(show_keys="text")`
+on the function, then the class attribute `show_keys_default`. Unset
+is empty, and the viewer picks from the dataflow.
+
+Built-in defaults: `LLMOp` → its extracted field keys when
+`fields=[...]` is set, else `content`; `BranchOp` → `target`;
+`EmbeddingOp` → `embeddings`; `RerankOp` → `reranks`;
+`VectorSearchOp` → `ids`, `scores`; `DocFetchOp` → `rows`.
+
+`show_keys` is a reserved op keyword: an `@op` function with a
+parameter of that name gets the existing collision warning. Keys are
+not validated against the op's outputs.
+
 ## [1.5.0] - 2026-08-29
 
 ### Fixed — `@op(transient=True)` silently dropped data past two ops
@@ -1389,7 +1438,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.2
 [1.5.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1

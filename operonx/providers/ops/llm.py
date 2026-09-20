@@ -109,6 +109,8 @@ class LLMOp(BaseOp):
         chat = LLMOp.of(resource="gpt-4o", messages=history["messages"])
     """
 
+    show_keys_default = ("content",)
+
     __slots__ = [
         "resource",
         "batch_mode",
@@ -210,6 +212,10 @@ class LLMOp(BaseOp):
         self.max_retries = max_retries
         self.retry_hint = retry_hint
         self._extract_fields = [ExtractField.from_string(s) for s in fields] if fields else None
+        # Show keys: with extraction the parsed fields are the answer, not
+        # the raw content — unless the caller declared their own.
+        if kwargs.get("show_keys") is None and self._extract_fields:
+            self.show_keys = tuple(f.output_key for f in self._extract_fields)
 
         # Validate resource + ratios
         if isinstance(resource, list):

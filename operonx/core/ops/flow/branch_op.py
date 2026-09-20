@@ -39,6 +39,8 @@ class BranchOp(BaseOp):
 
     type: OpType = "branch"
 
+    show_keys_default = ("target",)
+
     __slots__ = [
         "given_candidates",
         "default",

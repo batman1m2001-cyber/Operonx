@@ -36,6 +36,8 @@ class RerankOp(BaseOp):
         )
     """
 
+    show_keys_default = ("reranks",)
+
     __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "rerank"

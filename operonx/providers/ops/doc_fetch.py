@@ -54,6 +54,8 @@ class DocFetchOp(BaseOp):
                              collection="docs", fields=["id", "title", "content"])
     """
 
+    show_keys_default = ("rows",)
+
     __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "doc-fetch"

@@ -27,6 +27,8 @@ class EmbeddingOp(BaseOp):
         embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
     """
 
+    show_keys_default = ("embeddings",)
+
     __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "embedding"

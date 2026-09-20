@@ -47,6 +47,8 @@ class VectorSearchOp(BaseOp):
         docs = DocFetchOp.of(resource="main", ids=hits["ids"], collection="docs")
     """
 
+    show_keys_default = ("ids", "scores")
+
     __slots__ = ["resource", "backend", "_initialized"]
 
     type: OpType = "vector-search"
