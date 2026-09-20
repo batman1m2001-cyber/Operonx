@@ -86,7 +86,7 @@ then the studio. The local consumer keeps its format.
 | 2 | Langfuse consumer rewrite; unit tests build the ctx tree from a recorded `nodes.jsonl` fixture (callbot run) and assert parents, ids, generation type; one integration test against Edupia Langfuse behind the existing marker | tree has no dangling parent, ids unique across two runs, dates current |
 | 3 | studio grouping by level-1 yield (turns), reading `wall_start` | studio suite green; a live callbot run shows turns in both Langfuse and the studio |
 
-Ships with operonx 1.6.0. The callbot needs no code change beyond the
+Ships with operonx 1.5.2. The callbot needs no code change beyond the
 bump: `resources.yaml` loses `parent_strategy`.
 
 ## 5. Out of scope

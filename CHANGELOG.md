@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-09-20
+
 ### Changed — Langfuse consumer ships the ctx tree, run-scoped ids, real dates
 
 `LangfuseConsumer` no longer guesses a parent from data edges
@@ -35,7 +37,6 @@ for external ids (`f"{run_id}/{op_id}"`), because `op_id` alone repeats
 in every run of the same graph. The local consumer writes `wall_start`
 per record and `wall_started_at` in `meta.json`. Groundwork for the
 Langfuse consumer rewrite in `docs/TRACING_CTX_TREE_PLAN.md`.
-## [1.5.1] - 2026-09-20
 
 ### Added — `show_keys`: the outputs that stand for an op
 
@@ -1437,8 +1438,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.1...HEAD
-[1.5.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.1
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.2
 [1.5.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.3.0...v1.3.1
