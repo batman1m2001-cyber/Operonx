@@ -31,6 +31,9 @@ _BASE_INIT_KEYS = frozenset(
         # kwarg so `my_op(x=..., transient=True)` overrides the decorator
         # rather than landing in the input mapping as a function argument.
         "transient",
+        # Show keys — the outputs a viewer prints for the op. An init
+        # kwarg so `my_op(x=..., show_keys="text")` reaches the constructor.
+        "show_keys",
         # Phase 3 graph-only kwargs — routed to GraphOp.__init__ instead of
         # silently landing in the input mapping (BUG 6 from Phase 3 review).
         "strict_dag",

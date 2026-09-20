@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `show_keys`: the outputs that stand for an op
+
+An op can name the one or two outputs a viewer should print for it
+when it has room for a line instead of a port list (the studio card,
+zoomed in). Resolution, first hit wins: `my_op(..., show_keys="text")`
+at the call site (graphs and op classes too), `@op(show_keys="text")`
+on the function, then the class attribute `show_keys_default`. Unset
+is empty, and the viewer picks from the dataflow.
+
+Built-in defaults: `LLMOp` → its extracted field keys when
+`fields=[...]` is set, else `content`; `BranchOp` → `target`;
+`EmbeddingOp` → `embeddings`; `RerankOp` → `reranks`;
+`VectorSearchOp` → `ids`, `scores`; `DocFetchOp` → `rows`.
+
+`show_keys` is a reserved op keyword: an `@op` function with a
+parameter of that name gets the existing collision warning. Keys are
+not validated against the op's outputs.
+
 ## [1.5.0] - 2026-08-29
 
 ### Fixed — `@op(transient=True)` silently dropped data past two ops

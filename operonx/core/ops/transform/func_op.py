@@ -28,6 +28,7 @@ def op(
     include: Optional[Any] = None,
     observe_max: Optional[int] = None,
     transient: bool = False,
+    show_keys: Optional[Any] = None,
 ) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -76,6 +77,11 @@ def op(
             events in a single run, :class:`ObserveBudgetExceeded` is raised so
             runaway generators (e.g. streaming frame sources) fail loudly instead
             of quietly bloating the checkpointer.
+        show_keys: The output key (or keys) that stand for this op — what a viewer
+            prints for it when it has room for one line instead of a port
+            list. ``@op(show_keys="text")`` declares it; ``my_op(..., show_keys="text")``
+            at the call site overrides. Unset, the viewer picks from the
+            dataflow.
     """
     # Validate observability config at decoration time so the raise
     # surfaces where the op is declared, not where it runs.
@@ -116,6 +122,7 @@ def op(
             call_include = init_kwargs.pop("include", None)
             call_observe_max = init_kwargs.pop("observe_max", observe_max)
             op_transient = init_kwargs.pop("transient", transient)
+            op_show_keys = init_kwargs.pop("show_keys", show_keys)
             eff_exclude = call_exclude if call_exclude is not None else exclude
             eff_include = call_include if call_include is not None else include
             return FuncOp(
@@ -126,6 +133,7 @@ def op(
                 include=eff_include,
                 observe_max=call_observe_max,
                 transient=op_transient,
+                show_keys=op_show_keys,
                 _mappings=mappings or None,
                 **init_kwargs,
             )

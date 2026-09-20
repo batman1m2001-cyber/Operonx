@@ -8,7 +8,18 @@ from abc import ABC
 from datetime import datetime, timezone
 from logging import ERROR, INFO, WARNING
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
@@ -48,6 +59,22 @@ from operonx.core.ops._utils import _set_wildcard_outputs  # noqa: F401, E402
 
 _OBS_KEY_WILDCARD = "*"
 _OBS_VALID_CHANNELS = frozenset({"trace", "checkpoint", _OBS_KEY_WILDCARD})
+
+
+def _normalise_show(value) -> Tuple[str, ...]:
+    """``show_keys=`` accepts one key or a sequence of keys; stored as a tuple."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    try:
+        keys = tuple(value)
+    except TypeError:
+        raise TypeError(f"show_keys must be a str or a sequence of str, got {type(value).__name__}")
+    for k in keys:
+        if not isinstance(k, str):
+            raise TypeError(f"show_keys entries must be str, got {type(k).__name__}: {k!r}")
+    return keys
 
 
 def _normalise_observability(exclude, include):
@@ -239,7 +266,15 @@ class BaseOp(ABC):
         # {var names} whose values this op must summarise rather than copy
         # into a trace node. Stamped by StateSchema after propagation.
         "_transient_vars",
+        # Show keys: the one or two outputs that stand for this op when a
+        # viewer has room for a line, not a port list. See show_keys_default.
+        "show_keys",
     ]
+
+    # The kind's show keys, used when an instance declares none. A
+    # subclass whose product is obvious sets it (LLMOp → "content");
+    # empty means "let the viewer pick from the dataflow".
+    show_keys_default: Tuple[str, ...] = ()
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
     _cache_stores: Dict[str, tuple] = {}
@@ -268,6 +303,7 @@ class BaseOp(ABC):
         include=None,
         observe_max: Optional[int] = None,
         transient: bool = False,
+        show_keys: Union[str, Sequence[str], None] = None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -281,6 +317,12 @@ class BaseOp(ABC):
         self.delay = delay
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
+        # Show keys: `show_keys="text"` or `show_keys=["a", "b"]` on the instance,
+        # else the class default. Not validated against outputs — a
+        # viewer that finds no such output simply has nothing to print.
+        self.show_keys = _normalise_show(
+            type(self).show_keys_default if show_keys is None else show_keys
+        )
 
         # Phase 2: observability filter. Normalised to dict form:
         #   {"*": [vars]}                  — apply to both observers
