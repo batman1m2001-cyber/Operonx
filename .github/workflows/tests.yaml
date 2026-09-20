@@ -155,9 +155,16 @@ jobs:
         # fetch is also the cross-repo integration gate — extraction reads
         # operonx object internals across a subprocess seam, and this is
         # where a core change that breaks the IR contract fails first.
+        # The studio's pyproject pins operonx to `../Operon` under
+        # `tool.uv.sources` for its own development; installed from git
+        # that path resolves inside the studio checkout and the install
+        # fails (red on every push since 2026-09-07). `--no-sources` takes
+        # operonx from PyPI instead, and the second install puts THIS
+        # checkout back — the thing under test — over the PyPI wheel.
         run: |
           set -e
-          uv pip install git+https://github.com/batman1m2001-cyber/operonx-studio
+          uv pip install --no-sources git+https://github.com/batman1m2001-cyber/operonx-studio
+          uv pip install --no-deps -e .
           failed=0
           for dir in examples/python/ex*/; do
             echo "── ${dir}"
