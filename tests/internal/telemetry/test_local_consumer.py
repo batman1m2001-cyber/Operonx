@@ -154,12 +154,12 @@ class TestFileLayout:
 class TestNodesJsonl:
     def test_one_line_per_node(self, tmp_path, synthetic_trace):
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
-        lines = (tmp_path / "t-123" / "nodes.jsonl").read_text().splitlines()
+        lines = (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
         assert len(lines) == len(synthetic_trace.nodes)
 
     def test_each_row_is_valid_json(self, tmp_path, synthetic_trace):
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
-        for line in (tmp_path / "t-123" / "nodes.jsonl").read_text().splitlines():
+        for line in (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             assert "op_id" in row and "op_name" in row and "ctx" in row
 
@@ -167,7 +167,7 @@ class TestNodesJsonl:
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
         rows = [
             json.loads(line)
-            for line in (tmp_path / "t-123" / "nodes.jsonl").read_text().splitlines()
+            for line in (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         classify = next(r for r in rows if r["op_name"] == "classify")
         assert len(classify["upstreams"]) == 1
@@ -193,7 +193,7 @@ class TestNodesJsonl:
         LocalConsumer(config={"root": tmp_path}).consume(trace)
         rows = [
             json.loads(line)
-            for line in (tmp_path / "t-media" / "nodes.jsonl").read_text().splitlines()
+            for line in (tmp_path / "t-media" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         assert "$media_ref" in rows[0]["inputs"]["audio"]
         # media file actually on disk
@@ -209,7 +209,7 @@ class TestNodesJsonl:
 class TestMetaJson:
     def test_metadata_and_timings(self, tmp_path, synthetic_trace):
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
-        meta = json.loads((tmp_path / "t-123" / "meta.json").read_text())
+        meta = json.loads((tmp_path / "t-123" / "meta.json").read_text(encoding="utf-8"))
         assert meta["trace_id"] == "t-123"
         assert meta["workflow_name"] == "callbot"
         assert meta["node_count"] == 4
@@ -226,12 +226,12 @@ class TestGoldenView:
         """If this fails and you meant to change the render format,
         overwrite `local_consumer_view.txt` with the actual output."""
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
-        actual = (tmp_path / "t-123" / "view.txt").read_text()
+        actual = (tmp_path / "t-123" / "view.txt").read_text(encoding="utf-8")
         if not GOLDEN.exists():
             GOLDEN.parent.mkdir(parents=True, exist_ok=True)
             GOLDEN.write_text(actual)
             pytest.skip("golden file created — rerun test to compare")
-        expected = GOLDEN.read_text()
+        expected = GOLDEN.read_text(encoding="utf-8")
         assert actual == expected, (
             "view.txt drifted from golden. If intentional, delete "
             f"{GOLDEN} and rerun to regenerate.\n"

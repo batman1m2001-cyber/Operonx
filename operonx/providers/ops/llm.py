@@ -6,6 +6,7 @@ messages array, never formatted). Calls the LLM via ResourceHub. Supports
 streaming, load balancing, fallback chains, and OpenAI Batch API mode.
 """
 
+import asyncio
 import random
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -18,7 +19,7 @@ from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 from operonx.providers.ops._utils import resolve_hub
-from operonx.providers.parsing import ExtractField, parse_and_extract
+from operonx.providers.parsing import ExtractField, Validators, parse_and_extract
 
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
@@ -54,6 +55,33 @@ def _mime_from_data_url(url: str) -> Optional[str]:
     if not head:
         return None
     return head.split(";", 1)[0] or None
+
+
+def _is_empty_completion(result: Any) -> bool:
+    """True when an LLM result's content slot is definitely empty.
+
+    Handles both shapes reaching :meth:`LLMOp._call_with_retry`: a raw
+    ChatCompletion (choices/message.content) and an already-extracted
+    dict. Unknown shapes return False — an unfamiliar-but-valid response
+    should not be retried into a rate limit.
+    """
+    if isinstance(result, dict):
+        content = result.get("content")
+        if content is None:
+            return True
+        return isinstance(content, str) and not content.strip()
+
+    try:
+        choice = result.choices[0]
+    except (AttributeError, IndexError, TypeError):
+        return False
+    message = getattr(choice, "message", None)
+    if message is None:
+        return False
+    content = getattr(message, "content", None)
+    if content is None:
+        return True
+    return isinstance(content, str) and not content.strip()
 
 
 class LLMOp(BaseOp):
@@ -142,7 +170,7 @@ class LLMOp(BaseOp):
         # ── Structured-output layer (merged from ask()/ParserOp in 1.0.0) ───
         fields: Optional[List[str]] = None,
         parser: Optional[str] = None,
-        validators: Optional[Dict[str, List[Any]]] = None,
+        validators: Optional["Validators"] = None,
         max_retries: int = 0,
         retry_hint: bool = True,
         inputs: Dict[str, Any] = None,
@@ -168,14 +196,17 @@ class LLMOp(BaseOp):
                 output of this op.
             parser: Parser format when ``fields`` is set: ``"xml"``, ``"json"``,
                 or ``"yaml"``. Defaults to ``"xml"`` when ``fields`` is provided.
-            validators: Optional per-field allow-list validators applied after
-                extraction. Format: ``{"field_name": [allowed_value, ...]}``.
-                A value prefixed with ``@`` in the list is used as a default
-                when the extracted value doesn't match the allow-list.
+            validators: Optional validation applied after extraction.
+                Either a per-field allow-list — ``{"field": [allowed, ...]}``,
+                where an ``"@default"`` entry stands in for an unrecognised
+                value — or a ``Callable[[dict], bool]`` over the whole parsed
+                dict, for structural checks an allow-list cannot state. A
+                callable that raises counts as a rejection, not a crash.
             max_retries: Max **semantic** retries when the parser or validators
                 report an error. Default 0 (no retry — first parse failure
-                surfaces as ``error`` in the output). Transport errors are the
-                SDK's responsibility and NOT counted here.
+                surfaces as ``error`` in the output). Transport failures are
+                handled separately by ``_call_with_retry``, driven by the
+                resource's own ``max_retries``, and are NOT counted here.
             retry_hint: When True (default) and retrying, append the previous
                 LLM response and a "that failed — <error>, try again" user turn
                 so the model sees what went wrong.
@@ -510,7 +541,11 @@ class LLMOp(BaseOp):
         resource = self._get_resource_key(selected)
 
         try:
-            completion = await selected.generate(**llm_params)
+            completion = await self._call_with_retry(
+                selected.generate,
+                llm=selected,
+                **self._merge_generation_extras(selected, llm_params),
+            )
             result = self._extract_completion(completion, resource)
         except Exception as e:
             if not self._fallback_llms:
@@ -543,7 +578,11 @@ class LLMOp(BaseOp):
             fallback_key = self.fallback[idx]
             try:
                 LOGGER.info(f"Trying fallback {fallback_key}...")
-                completion = await fallback_llm.generate(**llm_params)
+                completion = await self._call_with_retry(
+                    fallback_llm.generate,
+                    llm=fallback_llm,
+                    **self._merge_generation_extras(fallback_llm, llm_params),
+                )
                 result = self._extract_completion(completion, fallback_key)
                 if self._is_refusal(result):
                     last_refusal_reason = result.get("finish_reason")
@@ -559,6 +598,168 @@ class LLMOp(BaseOp):
         raise RuntimeError(
             f"All fallback models failed or refused (last_refusal_reason={last_refusal_reason!r})"
         )
+
+    # =========================================================================
+    # Transport retry + per-resource generation knobs
+    # =========================================================================
+
+    @staticmethod
+    def _merge_generation_extras(llm, llm_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Fold a resource's ``generation_extras`` into one call's params.
+
+        Per-attempt rather than global: each fallback resource may need
+        different vendor knobs (one Gemini variant wants
+        ``reasoning_effort``, an Anthropic one wants ``thinking``), and
+        the primary's must not leak onto the fallback.
+
+        ``setdefault`` gives the call site precedence — an argument passed
+        to ``LLMOp.of(...)`` beats the resource default. A ``None`` value
+        survives into the params dict and is then dropped by
+        ``_prepare_params``, which is how a resource strips a key it must
+        not send at all (Claude 4.6 rejects temperature+top_p together).
+        """
+        extras = getattr(getattr(llm, "config", None), "generation_extras", None)
+        # isinstance rather than truthiness: a config need not be a
+        # YamlModel — the hub stores a raw dict for an unregistered
+        # category — and an attribute that answers anything at all would
+        # otherwise reach `.items()` and fail there instead of here.
+        if not isinstance(extras, dict) or not extras:
+            return llm_params
+        per_call = dict(llm_params)
+        for key, value in extras.items():
+            per_call.setdefault(key, value)
+        return per_call
+
+    async def _call_with_retry(self, coro_fn, *, llm=None, **kwargs):
+        """Call ``coro_fn(**kwargs)`` with exponential backoff + full jitter.
+
+        This is the **transport** retry, driven by the resource's
+        ``max_retries`` / ``retry_*`` config. It is a different thing from
+        :attr:`max_retries` on the op, which re-asks the model when a
+        parser or validator rejects a well-formed answer.
+
+        Retries fire on four conditions:
+
+        1. ``RateLimitError`` - honours a ``retry-after`` header when sent.
+        2. ``APIConnectionError`` / ``APITimeoutError`` - transport level.
+        3. ``InternalServerError``, or any ``APIStatusError`` with a 5xx
+           code. 4xx propagates immediately; retrying a bad request only
+           wastes the quota.
+        4. A successful HTTP 200 whose content is empty, when
+           ``retry_on_empty`` is set. Anthropic answers this way under
+           transient overload - a failure wearing a success's clothes.
+
+        Args:
+            coro_fn: async callable to invoke.
+            llm: the LLM whose ``config`` supplies the retry policy. Pass
+                the specific client when walking a fallback chain so each
+                resource retries on its own terms.
+
+        Returns:
+            The last result. Exhausting the retries on *empty content*
+            returns that empty result rather than raising - the caller
+            (fallback chain, validator) decides what it means.
+        """
+        import openai
+
+        cfg = getattr(llm, "config", None)
+
+        def _num(name, default, cast):
+            """Read a retry knob, falling back when it is not a number.
+
+            Same reason as `_merge_generation_extras`: a config is not
+            guaranteed to be a typed model, and a non-numeric value here
+            would surface as a TypeError inside `range()` - far from the
+            config that caused it.
+            """
+            value = getattr(cfg, name, None)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return default
+            return cast(value)
+
+        max_retries = _num("max_retries", 0, int)
+        base_delay = _num("retry_base_delay", 5.0, float)
+        min_delay = _num("retry_min_delay", 0.0, float)
+        max_delay = _num("retry_max_delay", 60.0, float)
+        retry_on_empty = getattr(cfg, "retry_on_empty", True)
+        if not isinstance(retry_on_empty, bool):
+            retry_on_empty = True
+
+        result: Any = None
+        for attempt in range(max_retries + 1):
+            try:
+                result = await coro_fn(**kwargs)
+            except openai.RateLimitError as e:
+                if attempt >= max_retries:
+                    raise
+                sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
+                LOGGER.warning(
+                    "[%s] Rate limited (429). Attempt %d/%d. Retrying in %.2fs",
+                    self.name, attempt + 1, max_retries + 1, sleep_time,
+                )
+                await asyncio.sleep(sleep_time)
+                continue
+            except (
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.InternalServerError,
+            ) as e:
+                if attempt >= max_retries:
+                    raise
+                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
+                LOGGER.warning(
+                    "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
+                    self.name, type(e).__name__, attempt + 1, max_retries + 1, sleep_time,
+                )
+                await asyncio.sleep(sleep_time)
+                continue
+            except openai.APIStatusError as e:
+                # Some gateways raise the base class with a 5xx code
+                # rather than the specific subclass. Retry 5xx, let 4xx
+                # through.
+                status_code = getattr(e, "status_code", None)
+                if not status_code or status_code < 500 or attempt >= max_retries:
+                    raise
+                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
+                LOGGER.warning(
+                    "[%s] %s %s. Attempt %d/%d. Retrying in %.2fs",
+                    self.name, type(e).__name__, status_code,
+                    attempt + 1, max_retries + 1, sleep_time,
+                )
+                await asyncio.sleep(sleep_time)
+                continue
+
+            if retry_on_empty and _is_empty_completion(result) and attempt < max_retries:
+                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
+                LOGGER.warning(
+                    "[%s] Empty content response (HTTP 200, no exception). "
+                    "Attempt %d/%d. Retrying in %.2fs",
+                    self.name, attempt + 1, max_retries + 1, sleep_time,
+                )
+                await asyncio.sleep(sleep_time)
+                continue
+
+            return result
+
+        return result
+
+    @staticmethod
+    def _jitter(base_delay: float, min_delay: float, max_delay: float, attempt: int) -> float:
+        """Full jitter: uniform in ``[min_delay, min(max_delay, base*2^attempt)]``."""
+        cap = min(max_delay, base_delay * (2**attempt))
+        return random.uniform(min_delay, max(min_delay, cap))
+
+    @staticmethod
+    def _retry_delay(e, base_delay: float, min_delay: float, max_delay: float, attempt: int) -> float:
+        """``Retry-After`` header when the server sent one, else full jitter."""
+        try:
+            headers = e.response.headers
+            header = headers.get("retry-after") or headers.get("Retry-After")
+            if header:
+                return max(min_delay, float(header))
+        except Exception:
+            pass
+        return LLMOp._jitter(base_delay, min_delay, max_delay, attempt)
 
     def _is_refusal(self, result: Dict[str, Any]) -> bool:
         """Return True when the response looks like a provider-signalled refusal.
@@ -1057,7 +1258,7 @@ class LLMOp(BaseOp):
         # Structured-output layer (merged from ask()/ParserOp in 1.0.0).
         fields=None,
         parser=None,
-        validators=None,
+        validators: Optional["Validators"] = None,
         max_retries=0,
         retry_hint=True,
         **kwargs,

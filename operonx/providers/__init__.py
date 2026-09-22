@@ -48,6 +48,7 @@ _LAZY_BACKENDS = {
     "TEIEmbedding": "operonx.providers.embeddings",
     "HFEmbedding": "operonx.providers.embeddings",
     "ONNXEmbedding": "operonx.providers.embeddings",
+    "TritonEmbedding": "operonx.providers.embeddings",
     # LLMs (light surface)
     "BaseLLM": "operonx.providers.llms",
     "LLMConfig": "operonx.providers.llms",
@@ -62,6 +63,8 @@ _LAZY_BACKENDS = {
     "AzureSDKModel": "operonx.providers.llms",
     "AnthropicModel": "operonx.providers.llms",
     "GeminiOpenAISDKModel": "operonx.providers.llms",
+    "DatabricksAnthropic": "operonx.providers.llms",
+    "DatabricksGemini": "operonx.providers.llms",
     # Rerankers (light surface)
     "BaseReranker": "operonx.providers.rerankers",
     "RerankingConfig": "operonx.providers.rerankers",
@@ -146,6 +149,8 @@ __all__ = [
     "AzureSDKModel",
     "GeminiConfig",
     "GeminiOpenAISDKModel",
+    "DatabricksAnthropic",
+    "DatabricksGemini",
     "AnthropicConfig",
     "AnthropicModel",
     "create_llm",
@@ -157,6 +162,7 @@ __all__ = [
     "TEIEmbedding",
     "HFEmbedding",
     "ONNXEmbedding",
+    "TritonEmbedding",
     "create_embedding",
     # Reranking
     "BaseReranker",

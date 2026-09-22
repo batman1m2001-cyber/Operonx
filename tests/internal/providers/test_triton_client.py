@@ -41,6 +41,13 @@ class TestNumpyToTritonDtype:
             (np.int8, "INT8"),
             (np.uint8, "UINT8"),
             (np.bool_, "BOOL"),
+            # Text inputs. Matched by dtype *kind*, not equality — a
+            # parameterised dtype like `|S1` is never `== np.bytes_`, so
+            # an equality lookup silently misses every fixed-width string
+            # array and leaves text-input models unreachable.
+            (np.object_, "BYTES"),
+            (np.bytes_, "BYTES"),
+            (np.str_, "BYTES"),
         ],
     )
     def test_every_mapped_dtype(self, np_dtype, expected):
@@ -48,8 +55,17 @@ class TestNumpyToTritonDtype:
         assert numpy_to_triton_dtype(arr) == expected
 
     def test_map_covers_all_parametrized_cases(self):
-        # Guards against DTYPE_MAP growing without a matching test row.
-        assert len(DTYPE_MAP) == 9
+        """Guards against DTYPE_MAP growing without a matching test row.
+
+        Spells out the set rather than counting it: a literal count only
+        holds until someone bumps the number, whereas a missing dtype
+        names itself in the diff here.
+        """
+        assert set(DTYPE_MAP) == {
+            np.float32, np.float64, np.float16,
+            np.int32, np.int64, np.int16, np.int8, np.uint8, np.bool_,
+            np.object_, np.bytes_, np.str_,
+        }
 
     def test_unsupported_dtype_raises(self):
         arr = np.zeros(3, dtype=np.complex128)

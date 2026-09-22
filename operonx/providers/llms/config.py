@@ -11,6 +11,12 @@ class LLMType(Enum):
     VLLM = "vllm"
     GEMINI = "gemini"
     ANTHROPIC = "anthropic"
+    #: Claude behind Databricks ``/serving-endpoints`` — keeps Anthropic
+    #: content-parts and ``cache_control`` intact for prompt caching.
+    DB_ANTHROPIC = "db-anthropic"
+    #: Gemini behind Databricks ``/ai-gateway/mlflow/v1`` — a strict
+    #: OpenAI-compat surface that rejects Anthropic-only fields.
+    DB_GEMINI = "db-gemini"
 
 
 class CompletionConfig(YamlModel):
@@ -58,6 +64,35 @@ class LLMConfig(YamlModel):
     cost_per_input_token: float | None = None
     cost_per_output_token: float | None = None
 
+    # ---- Transport retry ---------------------------------------------------
+    #
+    # Applies to RateLimitError, APIConnectionError, APITimeoutError, 5xx,
+    # and — when `retry_on_empty` — an HTTP 200 whose message content is
+    # null/empty. That last case covers a known Anthropic quirk: on
+    # transient overload the API answers 200 with null content and
+    # stop_reason=null, which is a failure wearing a success's clothes.
+    #
+    # This is NOT `LLMOp.max_retries`, which is the *semantic* re-ask when
+    # a parser or validator rejects a well-formed response. A gateway that
+    # rate-limits needs backoff here, not a re-prompt.
+    max_retries: int = 0  # 0 = disabled; e.g. 10 to retry up to 10 times
+    retry_base_delay: float = 5.0  # seconds; doubles per attempt before jitter
+    retry_min_delay: float = 0.0  # floor on jitter (never sleep less than this)
+    retry_max_delay: float = 60.0  # cap on jitter range (one full QPM window)
+    retry_on_empty: bool = True  # retry a 200 that carries empty content
+
+    # ---- Per-resource generation knobs -------------------------------------
+    #
+    # Merged into every `generate()` call for this resource. Vendor params
+    # with no first-class field live here — `reasoning_effort: low` for
+    # Gemini, `thinking: {type: enabled, budget_tokens: N}` for Anthropic.
+    #
+    # A **null value removes the key** from the request rather than sending
+    # null, which is how a resource opts out of a default: Claude 4.6
+    # rejects a request carrying both `temperature` and `top_p`, so it
+    # declares `top_p: null`.
+    generation_extras: Optional[Dict] = None
+
     @classmethod
     def create_config(cls, config_data: Dict) -> "LLMConfig":
         """Create appropriate LLM config based on the api_type
@@ -100,6 +135,12 @@ class LLMConfig(YamlModel):
             return OpenAIConfig(**config_data)
         elif api_type == LLMType.ANTHROPIC:
             return AnthropicConfig(**config_data)
+        elif api_type in (LLMType.DB_ANTHROPIC, LLMType.DB_GEMINI):
+            # Both Databricks families speak the OpenAI wire format and
+            # need the same fields (api_key, base_url, model). Only the
+            # message normalisation differs, and that lives in the backend
+            # class rather than in config.
+            return OpenAIConfig(**config_data)
         else:
             raise ValueError(f"Unsupported api_type: {api_type}")
 

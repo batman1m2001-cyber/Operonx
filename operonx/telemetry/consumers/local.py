@@ -123,7 +123,10 @@ class LocalConsumer(Consumer):
         media_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. meta.json
-        (tmp / "meta.json").write_text(json.dumps(self._meta_dict(trace), indent=2, default=str))
+        (tmp / "meta.json").write_text(
+            json.dumps(self._meta_dict(trace), indent=2, default=str),
+            encoding="utf-8",
+        )
 
         # 2. nodes.jsonl — sanitize + media offload per row.
         # Hand-build the row instead of `asdict(node)` because asdict()
@@ -132,7 +135,7 @@ class LocalConsumer(Consumer):
         # sessions, etc.) that reject deepcopy with a cryptic
         # "no default __reduce__" error. sanitize() would strip these
         # to markers, but only if it runs FIRST on the raw dict.
-        with (tmp / "nodes.jsonl").open("w") as f:
+        with (tmp / "nodes.jsonl").open("w", encoding="utf-8") as f:
             for node in trace.nodes:
                 clean_in = self.offload_media(
                     self.sanitize(node.inputs),
@@ -166,7 +169,9 @@ class LocalConsumer(Consumer):
         # 3. view.txt — human-readable render (subclasses override
         # `_render_view` for domain-specific structure).
         if cfg["write_view_txt"]:
-            (tmp / "view.txt").write_text(self._render_view(trace, cfg["arrow_formatters"]))
+            (tmp / "view.txt").write_text(
+                self._render_view(trace, cfg["arrow_formatters"]), encoding="utf-8"
+            )
 
         # 4. atomic-ish rename + latest symlink
         if final.exists():

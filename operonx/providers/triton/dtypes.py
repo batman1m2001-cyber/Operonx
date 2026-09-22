@@ -22,7 +22,22 @@ DTYPE_MAP = {
     np.int8: "INT8",
     np.uint8: "UINT8",
     np.bool_: "BOOL",
+    # Triton's BYTES covers both binary blobs and strings. A model taking
+    # raw text declares a BYTES input, and the natural numpy carriers for
+    # that are an object array of `bytes` (what you get from
+    # `np.array([[t.encode()] for t in texts], dtype=object)`), a fixed-
+    # width `bytes_` array, or a `str_` array. All three map here.
+    np.object_: "BYTES",
+    np.bytes_: "BYTES",
+    np.str_: "BYTES",
 }
+
+
+#: dtype *kinds* that all mean BYTES on the wire. Matched before the
+#: table because these dtypes are parameterised by width — ``|S1`` is not
+#: ``==`` to ``np.bytes_``, so an equality lookup misses every fixed-width
+#: string array and only catches ``object``.
+_BYTES_KINDS = frozenset("OSU")
 
 
 def numpy_to_triton_dtype(arr: np.ndarray) -> str:
@@ -32,11 +47,13 @@ def numpy_to_triton_dtype(arr: np.ndarray) -> str:
         arr: Array whose dtype to translate.
 
     Returns:
-        Triton dtype string (e.g. ``"FP32"``).
+        Triton dtype string (e.g. ``"FP32"``, ``"BYTES"``).
 
     Raises:
-        ValueError: If the dtype has no Triton equivalent in DTYPE_MAP.
+        ValueError: If the dtype has no Triton equivalent.
     """
+    if arr.dtype.kind in _BYTES_KINDS:
+        return "BYTES"
     for np_dtype, triton_str in DTYPE_MAP.items():
         if arr.dtype == np_dtype:
             return triton_str

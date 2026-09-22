@@ -37,9 +37,12 @@ __all__ = ["TritonClient", "get_aio_grpcclient"]
 # Lazily imported ``tritonclient.grpc.aio`` module.
 _aio_grpcclient = None
 
-# Process-wide cache of TritonClient instances, keyed by URL. Holds the
-# gRPC channel open across calls — see module docstring.
-_clients: Dict[str, "TritonClient"] = {}
+# Process-wide cache of TritonClient instances, keyed by ``(url, ssl)``.
+# Holds the gRPC channel open across calls — see module docstring. The
+# key carries ``ssl`` because a plaintext and a TLS channel to the same
+# host:port are different connections, and returning the wrong one fails
+# at handshake time rather than at config time.
+_clients: Dict[tuple, "TritonClient"] = {}
 
 
 def get_aio_grpcclient():
@@ -73,29 +76,34 @@ class TritonClient:
         url: Triton gRPC endpoint (``host:port``).
     """
 
-    __slots__ = ("url", "_raw")
+    __slots__ = ("url", "ssl", "_raw")
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, ssl: bool = False):
         """Construct a client. Prefer :meth:`get` — see class docstring."""
         aio_grpc = get_aio_grpcclient()
         self.url = url
-        self._raw = aio_grpc.InferenceServerClient(url=url)
+        self.ssl = ssl
+        self._raw = aio_grpc.InferenceServerClient(url=url, ssl=ssl)
 
     @classmethod
-    def get(cls, url: str) -> "TritonClient":
+    def get(cls, url: str, ssl: bool = False) -> "TritonClient":
         """Return the process-cached client for ``url``, creating it once.
 
         Args:
-            url: Triton gRPC endpoint (``host:port``).
+            url: Triton gRPC endpoint as ``host:port`` — **no scheme**.
+                TLS is selected by ``ssl``, not by writing ``https://``.
+            ssl: Open the channel with TLS. Required by endpoints served
+                behind an ingress on 443.
 
         Returns:
             A shared :class:`TritonClient`. The same instance — and the
             same underlying gRPC channel — is returned for repeat calls
-            with the same URL.
+            with the same ``(url, ssl)``.
         """
-        if url not in _clients:
-            _clients[url] = cls(url)
-        return _clients[url]
+        key = (url, bool(ssl))
+        if key not in _clients:
+            _clients[key] = cls(url, ssl=bool(ssl))
+        return _clients[key]
 
     @property
     def raw(self):

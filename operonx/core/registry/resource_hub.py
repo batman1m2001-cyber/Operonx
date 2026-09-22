@@ -5,7 +5,7 @@ import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.core.utils.yaml_model import YamlModel
@@ -18,6 +18,7 @@ from .storage import ConfigStorage, YamlConfigStorage
 # Type hints for IDE support
 if TYPE_CHECKING:
     from operonx.providers.auth.keycloak import KeycloakTokenProvider
+    from operonx.providers.auth.oauth2 import OAuth2TokenProvider
     from operonx.providers.embeddings.base import BaseEmbedding
     from operonx.providers.llms.base import BaseLLM
     from operonx.providers.rerankers.base import BaseReranker
@@ -29,6 +30,28 @@ class CacheEntry:
 
     config: YamlModel
     instance: Any = None
+
+
+#: Resource categories whose instances expose ``get_token()``. An
+#: ``api_key: "<category>:<name>"`` on any other resource is resolved by
+#: fetching a bearer token from the named provider. Adding a category here
+#: plus a ``REGISTRY.register`` is all a new auth scheme needs.
+TOKEN_REF_PREFIXES = ("keycloak", "oauth2")
+
+
+def _split_token_ref(api_key: Any) -> Optional[Tuple[str, str]]:
+    """``"oauth2:databricks"`` -> ``("oauth2", "databricks")``, else None.
+
+    Returns None for a static key, a non-string, or a prefix that is not a
+    registered token provider — so ``"sk-proj:abc"`` stays a literal key
+    rather than being mistaken for a reference.
+    """
+    if not isinstance(api_key, str):
+        return None
+    category, sep, name = api_key.partition(":")
+    if not sep or not name or category not in TOKEN_REF_PREFIXES:
+        return None
+    return category, name
 
 
 class ResourceHub:
@@ -64,6 +87,8 @@ class ResourceHub:
         self._storage = storage
         self._cache: Dict[str, CacheEntry] = {}
         self._source_path: Optional[Path] = source_path
+        #: In-memory ``alias -> real key`` map. See :meth:`alias`.
+        self._aliases: Dict[str, str] = {}
 
     @property
     def source_path(self) -> Optional[Path]:
@@ -174,6 +199,7 @@ class ResourceHub:
 
     def _load_config(self, key: str) -> Optional[YamlModel]:
         """Load a config from storage (lazy, on demand)."""
+        key = self._resolve_alias(key)
         if key in self._cache:
             return self._cache[key].config
 
@@ -246,6 +272,63 @@ class ResourceHub:
     # Public API
     # ========================================================================
 
+    # ========================================================================
+    # Aliases
+    # ========================================================================
+
+    def alias(self, alias_key: str, target_key: str) -> None:
+        """Point ``alias_key`` at an existing resource, in memory only.
+
+        For naming a *role* at the call site while an operator still
+        chooses the resource that fills it::
+
+            hub.alias("llm:scanner", f"llm:{os.environ['LLM_RESOURCE_KEY']}")
+            # graph stays literal: LLMOp.of(resource="scanner", ...)
+
+        That keeps the wiring readable to tooling — which can only see a
+        literal — without freezing the model choice into the graph.
+
+        **Not** :meth:`register`: that persists through to storage and
+        rewrites ``resources.yaml``, losing its comments. This touches
+        nothing on disk and lasts for the life of the hub.
+
+        Resolution is one hop, applied on every lookup, so re-aliasing
+        later repoints existing call sites. A cached *instance* under the
+        old target is unaffected — it is keyed by the real name.
+
+        Args:
+            alias_key: The name call sites use, e.g. ``"llm:scanner"``.
+            target_key: An existing resource key, e.g. ``"llm:db-gemini-3-flash"``.
+
+        Raises:
+            ValueError: The alias would point at itself, or *target_key*
+                is itself an alias — one hop only, so a chain that could
+                silently become a cycle is refused at declaration time
+                rather than hanging at first use.
+        """
+        if alias_key == target_key:
+            raise ValueError(f"alias {alias_key!r} cannot point at itself")
+        if target_key in self._aliases:
+            raise ValueError(
+                f"alias target {target_key!r} is itself an alias "
+                f"(-> {self._aliases[target_key]!r}); point {alias_key!r} at the "
+                "real key instead — aliases resolve one hop only"
+            )
+        self._aliases[alias_key] = target_key
+        LOGGER.debug("Aliased: %s -> %s", alias_key, target_key)
+
+    def aliases(self) -> Dict[str, str]:
+        """A copy of the ``alias -> real key`` map."""
+        return dict(self._aliases)
+
+    def unalias(self, alias_key: str) -> bool:
+        """Drop an alias. Returns True if one was removed."""
+        return self._aliases.pop(alias_key, None) is not None
+
+    def _resolve_alias(self, key: str) -> str:
+        """One hop, or the key unchanged."""
+        return self._aliases.get(key, key)
+
     def keys(self) -> List[str]:
         """Return all registered keys (loads all configs from storage)."""
         all_configs = self._storage.load_all()
@@ -281,11 +364,13 @@ class ResourceHub:
                 whose env var is unset. Subclass of ``RuntimeError`` for
                 backwards compatibility.
         """
+        key = self._resolve_alias(key)
+
         # Return cached instance if available
         if key in self._cache and self._cache[key].instance is not None:
             instance = self._cache[key].instance
-            # Refresh keycloak token if applicable (LLM resources)
-            self._refresh_keycloak(instance)
+            # Refresh the bearer token if this resource carries a provider
+            self._refresh_token(instance)
             return instance
 
         # Load config from storage. ``EnvVarUnsetError`` from missing
@@ -295,8 +380,9 @@ class ResourceHub:
         if not config:
             raise KeyError(self._not_found_message(key))
 
-        # Resolve keycloak token if configured (api_key: "keycloak:xxx")
-        resolved_config = self._resolve_keycloak(config)
+        # Resolve a token reference if configured
+        # (api_key: "keycloak:xxx" or "oauth2:xxx")
+        resolved_config = self._resolve_token_ref(config)
         create_config = resolved_config or config
 
         # Lazy initialize resource
@@ -309,10 +395,14 @@ class ResourceHub:
         if instance is None:
             raise KeyError(f"Cannot create resource for '{key}': factory returned None")
 
-        # Attach keycloak provider for future token refresh
-        if resolved_config is not None:
-            keycloak_name = config.api_key[9:]
-            instance._keycloak_provider = self.keycloak(keycloak_name)
+        # Attach the provider so a later cache hit can refresh the token.
+        ref = _split_token_ref(getattr(config, "api_key", None))
+        if resolved_config is not None and ref is not None:
+            provider = self.get(f"{ref[0]}:{ref[1]}")
+            instance._token_provider = provider
+            # Back-compat alias: this attribute predates oauth2 and is
+            # asserted on by name, so both point at the same object.
+            instance._keycloak_provider = provider
             instance._original_config = config
 
         self._cache[key].instance = instance
@@ -418,32 +508,55 @@ class ResourceHub:
     # Internal helpers (keycloak token resolution)
     # ========================================================================
 
-    def _refresh_keycloak(self, instance) -> None:
-        """Refresh keycloak token on a cached instance (if applicable)."""
-        if not hasattr(instance, "_keycloak_provider"):
+    def _refresh_token(self, instance) -> None:
+        """Refresh the bearer token on a cached instance, if it has one.
+
+        Works for every provider in :data:`TOKEN_REF_PREFIXES` — each one
+        exposes ``get_token()`` and nothing here knows which scheme minted
+        it. Cheap on the hot path: the provider returns its cached token
+        until expiry, so this is a dict lookup plus a clock read.
+        """
+        provider = getattr(instance, "_token_provider", None)
+        if provider is None:
+            # Pre-oauth2 instances (and anything built by hand) may carry
+            # only the old attribute.
+            provider = getattr(instance, "_keycloak_provider", None)
+        if provider is None:
             return
-        fresh_token = instance._keycloak_provider.get_token()
+        fresh_token = provider.get_token()
         if hasattr(instance, "client"):
             instance.client.api_key = fresh_token
         if hasattr(instance, "config"):
             instance.config.api_key = fresh_token
 
-    def _resolve_keycloak(self, config: YamlModel) -> Optional[YamlModel]:
-        """If config has keycloak:xxx api_key, resolve token. Returns None if not keycloak."""
-        if not (hasattr(config, "api_key") and isinstance(config.api_key, str)):
-            return None
-        if not config.api_key.startswith("keycloak:"):
-            return None
+    #: Deprecated alias kept because the name was public in practice.
+    _refresh_keycloak = _refresh_token
 
-        keycloak_name = config.api_key[9:]
+    def _resolve_token_ref(self, config: YamlModel) -> Optional[YamlModel]:
+        """Swap an ``api_key: "<provider>:<name>"`` for a live token.
+
+        Returns a copy of *config* carrying the token, or None when the
+        api_key is a literal — which is also what a non-``api_key``
+        resource gets, so callers can pass any config in.
+        """
+        ref = _split_token_ref(getattr(config, "api_key", None))
+        if ref is None:
+            return None
+        category, name = ref
+
         try:
             resolved_token = self._resolve_api_key(config.api_key)
         except Exception as e:
-            raise KeyError(f"keycloak '{keycloak_name}' failed ({type(e).__name__}: {e})") from e
+            raise KeyError(
+                f"{category} '{name}' failed ({type(e).__name__}: {e})"
+            ) from e
 
         config_dict = config.model_dump()
         config_dict["api_key"] = resolved_token
         return type(config).model_validate(config_dict)
+
+    #: Deprecated alias — the method was keycloak-only before oauth2.
+    _resolve_keycloak = _resolve_token_ref
 
     def keycloak(self, key: str) -> "KeycloakTokenProvider":
         """Get KeycloakTokenProvider by key.
@@ -461,16 +574,18 @@ class ResourceHub:
     # ========================================================================
 
     def _resolve_api_key(self, api_key: str) -> str:
-        """Resolve api_key value, handling keycloak references.
+        """Resolve an api_key value, following token-provider references.
 
-        If api_key starts with 'keycloak:', fetch token from the referenced
-        KeycloakTokenProvider.
+        A value of the form ``"<provider>:<name>"`` where *provider* is one
+        of :data:`TOKEN_REF_PREFIXES` is replaced by a live bearer token
+        from that resource. Anything else is returned untouched.
 
         Args:
-            api_key: Either a static key or 'keycloak:<name>' reference
+            api_key: Either a static key or a ``'<provider>:<name>'``
+                reference.
 
         Returns:
-            Resolved API key string
+            Resolved API key string.
 
         Example:
             # Static key - returned as-is
@@ -478,12 +593,27 @@ class ResourceHub:
 
             # Keycloak reference - fetches token
             _resolve_api_key("keycloak:myapp") -> "eyJ..." (actual token)
+
+            # OAuth2 client_credentials reference - fetches token
+            _resolve_api_key("oauth2:databricks") -> "eyJ..." (actual token)
         """
-        if api_key.startswith("keycloak:"):
-            keycloak_name = api_key[9:]  # Remove "keycloak:" prefix
-            provider = self.keycloak(keycloak_name)
-            return provider.get_token()
-        return api_key
+        ref = _split_token_ref(api_key)
+        if ref is None:
+            return api_key
+        category, name = ref
+        provider = self.get(f"{category}:{name}")
+        return provider.get_token()
+
+    def oauth2(self, key: str) -> "OAuth2TokenProvider":  # noqa: F821
+        """Get an OAuth2TokenProvider by key.
+
+        Args:
+            key: OAuth2 config identifier (e.g. ``'databricks'``).
+
+        Returns:
+            OAuth2TokenProvider instance with a ``get_token()`` method.
+        """
+        return self.get(f"oauth2:{key}")
 
     # ========================================================================
     # Warmup

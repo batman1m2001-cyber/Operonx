@@ -19,6 +19,7 @@ _LAZY_BACKENDS = {
     "VLLMEmbedding": "operonx.providers.embeddings.vllm",
     "HFEmbedding": "operonx.providers.embeddings.huggingface",
     "ONNXEmbedding": "operonx.providers.embeddings.onnx",
+    "TritonEmbedding": "operonx.providers.embeddings.triton",
 }
 
 
@@ -47,4 +48,5 @@ __all__ = [
     "TEIEmbedding",
     "HFEmbedding",
     "ONNXEmbedding",
+    "TritonEmbedding",
 ]

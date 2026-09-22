@@ -7,6 +7,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-22
+
+Gateway-shaped deployments. Everything here came out of running operonx
+against a bank's Databricks + Triton stack, where the endpoint in front of
+a model shapes the request as much as the model does.
+
+### Added — `oauth2:` token provider
+
+The sibling of `keycloak:`, for endpoints issuing tokens from a plain
+`grant_type=client_credentials` POST (Databricks, Azure AD). Same shape:
+lazy first fetch, a daemon refreshing ahead of expiry, `get_token()`.
+
+`api_key: "oauth2:<name>"` now resolves the same way `keycloak:` always
+has, because the hub stopped hardcoding one prefix — `TOKEN_REF_PREFIXES`
+lists the categories whose instances expose `get_token()`, and adding an
+auth scheme is an entry there plus a `REGISTRY.register`. `_resolve_keycloak`
+and `_refresh_keycloak` remain as aliases; instances carry `_token_provider`
+with `_keycloak_provider` kept pointing at the same object.
+
+A key containing a colon is no longer mistaken for a reference:
+`sk-proj:abc` stays a literal, since only a registered category counts.
+
+`verify_ssl` on `OAuth2TokenConfig` defaults to **False**, matching where
+these endpoints usually sit (behind a TLS-inspecting proxy whose CA is not
+in the image). The request carries a client secret, so set it True wherever
+the chain does validate.
+
+### Added — Databricks LLM backends (`db-anthropic`, `db-gemini`)
+
+Two endpoints on one workspace host that do not accept the same body:
+
+* `/serving-endpoints` — Claude. `DatabricksAnthropic` keeps Anthropic
+  content-parts and `cache_control` intact so prompt caching works, and
+  enforces the 4-breakpoint limit locally, where the error can say so.
+* `/ai-gateway/mlflow/v1` — Gemini. `DatabricksGemini` flattens multi-part
+  text and strips `cache_control`. Sent unflattened, that endpoint answers
+  `401 - Credential was not sent or was of an unsupported type`, which
+  sends you to look at your token for a message-shape problem.
+
+The suffix belongs in `base_url`; neither class rewrites it.
+
+### Added — transport retry on `LLMOp`
+
+`LLMOp.max_retries` was the only retry operonx had, and it is *semantic* —
+it re-asks the model after a parser or validator rejects a well-formed
+answer. A rate-limited gateway needs backoff, not a re-prompt.
+
+`_call_with_retry` is that second thing, driven by the resource:
+`max_retries`, `retry_base_delay`, `retry_min_delay`, `retry_max_delay`,
+`retry_on_empty` on `LLMConfig`. It fires on 429 (honouring `retry-after`),
+`APIConnectionError` / `APITimeoutError`, any 5xx — 4xx propagates, since
+retrying a bad request only burns quota — and on an HTTP 200 whose content
+is empty, which is how Anthropic reports transient overload. Defaults to
+`max_retries: 0`, so nothing retries unless a resource asks.
+
+Both the primary and each fallback go through it, each on its own policy.
+
+### Added — `generation_extras` on `LLMConfig`
+
+Per-resource vendor knobs merged into every call for that resource:
+`reasoning_effort` for Gemini, `thinking` for Anthropic. Merged
+per-attempt, so a fallback gets its own and not the primary's; the call
+site wins over the resource default.
+
+**A null value removes the key** rather than sending null — which is how a
+resource opts out of something operonx would otherwise send. Claude 4.6
+rejects a request carrying both `temperature` and `top_p`, and declares
+`top_p: null`. `_prepare_params` makes `temperature` / `top_p` optional to
+complete that contract.
+
+### Added — Triton embedding backend (`api_type: triton`)
+
+`EmbeddingType.TRITON`, with the config fields that go with it:
+`max_length`, `output_name`, `tokenizer_path`, `input_name`, `ssl`.
+
+Two input contracts, selected by `input_name`: unset sends
+`input_ids` / `attention_mask` as INT64 and the client tokenises
+(`tokenizer_path` required); set, it sends that one input as utf-8 BYTES
+and the server tokenises — in which case `max_length` stops meaning
+anything, because the server decides where to cut.
+
+The op contract is `texts -> embeddings` in both modes. Token ids never
+appear in a signature, which is what keeps `triton` substitutable for
+`tei` / `vllm` / `onnx`.
+
+`output_name` is read directly, never pooled — BGE-M3 exports both
+`token_embeddings` and `sentence_embedding`, and mean-pooling the first
+gives a different vector from the second.
+
+### Added — `ResourceHub.alias(alias, target)`
+
+An in-memory `alias -> key` hop, so a graph can name a *role* at the call
+site (`resource="scanner"`) while an operator still chooses which resource
+fills it. Tooling that reads a graph without importing it can only see a
+literal, and this keeps the literal literal.
+
+Deliberately not `register()`, which persists through to storage and
+rewrites `resources.yaml` without its comments. One hop only: a chain is
+refused at declaration rather than left to become a cycle at first use.
+
+### Fixed — `LocalConsumer` crashed writing traces on Windows
+
+`meta.json`, `nodes.jsonl` and `view.txt` were written with no `encoding`,
+so on a cp1252 locale the arrow in `view.txt` raised
+`UnicodeEncodeError` and the whole trace was lost. All three now pin UTF-8.
+
+### Fixed — BYTES tensors were unmappable
+
+`numpy_to_triton_dtype` matched dtypes by equality, which never matches a
+parameterised string dtype: `|S1` is not `== np.bytes_`. Any model with a
+text input was unreachable. Matching is now by dtype *kind*, covering
+`object` / `bytes_` / `str_`.
+
+### Changed — `TritonClient.get()` takes `ssl`
+
+An endpoint behind an ingress on 443 needs a TLS channel, and TLS is not
+expressible in a `host:port` URL. The process-wide client cache is keyed by
+`(url, ssl)`, since a plaintext and a TLS channel to the same address are
+different connections and sharing one fails at handshake time.
+
+### Changed — `validators=` accepts a callable
+
+Alongside the per-field allow-list, `validators=` now takes a
+`Callable[[dict], bool]` over the whole parsed dict, for structural checks
+an allow-list cannot state ("`result` must be a dict containing
+`violation`"). It runs on model output, so a validator that raises counts
+as a rejection rather than taking the graph down.
+
+### Added — `tests/live/`
+
+Opt-in tests against real endpoints, off unless `OPERONX_LIVE=1`, so the
+default `pytest` run stays offline and CI-safe. Each test skips — naming
+the reason — when its resource is missing from `resources.yaml` or a
+`${VAR}` it needs is unset, so a partial `.env` runs the part it can and
+adding credentials later turns the rest on with no code change.
+
+Split by **network zone**, not by feature, because a corporate VPN and
+the public internet are usually mutually exclusive:
+
+* `-m public` — OpenRouter and OpenAI. Covers everything
+  provider-agnostic: transport retry (including that a 4xx is *not*
+  retried), the `generation_extras` merge and its null-strips-key rule,
+  callable validators, `ResourceHub.alias` routing a real call, and the
+  LLMOp path stringing them together.
+* `-m vpn` — the private half, limited to what a public endpoint cannot
+  prove: fetching a token from one specific OAuth2 issuer, the message
+  shaping the two Databricks proxies demand, and a Triton server whose
+  input contract differs by deployment.
+
+
 ## [1.5.2] - 2026-09-20
 
 ### Changed — Langfuse consumer ships the ctx tree, run-scoped ids, real dates

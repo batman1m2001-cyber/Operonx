@@ -44,6 +44,12 @@ def create_embedding(config: EmbeddingConfig) -> BaseEmbedder:
         except ImportError as e:
             raise ImportError(_missing_extra_message("HFEmbedding", "huggingface", e)) from e
         return HFEmbedding(config)
+    if config.api_type == EmbeddingType.TRITON:
+        try:
+            from operonx.providers.embeddings.triton import TritonEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("TritonEmbedding", "triton", e)) from e
+        return TritonEmbedding(config)
     if config.api_type == EmbeddingType.ONNX:
         try:
             from operonx.providers.embeddings.onnx import ONNXEmbedding

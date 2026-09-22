@@ -6,12 +6,24 @@
 # LLM Configurations
 # =============================================================================
 
-# OpenRouter - Claude Sonnet
+# OpenRouter - Claude Sonnet.
+#
+# Carries the transport-retry knobs because OpenRouter *is* a shared
+# gateway: it rate-limits, and a 429 wants backoff rather than a
+# re-prompt. This is also the public stand-in for the private gateways —
+# the retry layer is provider-agnostic, so it can be proven here without
+# reaching an internal network.
 llm:or-claude-4-sonnet:
   api_type: openai
   api_key: ${OPENROUTER_API_KEY}
   base_url: https://openrouter.ai/api/v1
   model: anthropic/claude-sonnet-4
+  cost_per_input_token: 0.000003
+  cost_per_output_token: 0.000015
+  max_retries: 5
+  retry_base_delay: 5.0
+  retry_min_delay: 1.0
+  retry_max_delay: 30.0
 
 # OpenAI GPT-4o
 llm:gpt-4o:
@@ -19,6 +31,23 @@ llm:gpt-4o:
   api_key: ${OPENAI_API_KEY}
   base_url: https://api.openai.com/v1
   model: gpt-4o
+
+# gpt-4o again, with a vendor knob that has no first-class field — the
+# same mechanism the private gateways use for `reasoning_effort` and
+# `thinking`, on an endpoint anyone can reach.
+#
+# Its own block on purpose. `llm:gpt-4o` is what most of the suite calls,
+# and json_object mode is not a neutral default: OpenAI rejects a request
+# for it unless the prompt itself contains the word "json", so setting it
+# there turns every unrelated test into a 400.
+llm:gpt-4o-json:
+  api_type: openai
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
+  generation_extras:
+    response_format:
+      type: json_object
 
 # OpenAI GPT-4o-mini (cheaper for testing)
 llm:gpt-4o-mini:
@@ -40,6 +69,96 @@ llm:claude-haiku:
   api_key: ${ANTHROPIC_API_KEY}
   base_url: ${ANTHROPIC_BASE_URL}
   model: ${ANTHROPIC_MODEL}
+
+# =============================================================================
+# Token providers
+# =============================================================================
+#
+# Both categories resolve an `api_key: "<category>:<name>"` on any other
+# resource into a live bearer token. Which one you need depends on what
+# the endpoint speaks, not on what it is.
+
+# Keycloak — a token endpoint returning {accessToken, expiresIn}.
+keycloak:aihub:
+  url: ${KEYCLOAK_AIHUB_URL}
+  name: ${KEYCLOAK_AIHUB_NAME}
+  secret: ${KEYCLOAK_AIHUB_SECRET}
+  token_path: accessToken
+  expires_in_path: expiresIn
+  refresh_interval: ${KEYCLOAK_AIHUB_REFRESH_INTERVAL:3600}
+
+# OAuth2 client_credentials — HTTP basic + grant_type, the shape
+# Databricks and Azure AD issue tokens with.
+#
+# `verify_ssl` defaults to false because these sit behind TLS-inspecting
+# proxies more often than not. The request carries the client secret, so
+# turn it on wherever the chain actually validates.
+# Empty defaults, not required vars: `hub.keys()` loads every block, so a
+# `${VAR}` with no default would make listing resources raise for anyone
+# who does not have a Databricks tenant. The live tests check the env
+# directly instead — see `tests/live/conftest.py::require_env`.
+oauth2:databricks:
+  token_url: ${DATABRICKS_HOST:}/oidc/v1/token
+  client_id: ${DATABRICKS_CLIENT_ID:}
+  client_secret: ${DATABRICKS_CLIENT_SECRET:}
+  scope: all-apis
+  refresh_interval: 1800
+
+# =============================================================================
+# Gateway-fronted LLMs
+# =============================================================================
+#
+# What these demonstrate is the request *shaping* a gateway imposes —
+# retry policy, vendor knobs, message format — none of which the model
+# behind it asks for.
+
+# Claude behind an AIHub-style proxy authenticated by Keycloak.
+# `max_retries` is the transport retry: a shared gateway rate-limits, and
+# a 429 wants backoff rather than a re-prompt.
+llm:aihub-claude:
+  api_type: openai
+  api_key: keycloak:aihub
+  base_url: ${AIHUB_BASE_URL}
+  model: ${AIHUB_CLAUDE_MODEL}
+  cost_per_input_token: 0.000003
+  cost_per_output_token: 0.000015
+  max_retries: 5
+  retry_base_delay: 10.0
+  retry_min_delay: 5.0
+  retry_max_delay: 60.0
+
+# Claude via Databricks /serving-endpoints — keeps Anthropic content
+# parts and cache_control intact so prompt caching works.
+llm:db-claude-4-sonnet:
+  api_type: db-anthropic
+  api_key: oauth2:databricks
+  base_url: ${DATABRICKS_HOST:}/ai-gateway/mlflow/v1
+  model: system.ai.claude-sonnet-4
+  cost_per_input_token: 0.000003
+  cost_per_output_token: 0.000015
+  max_retries: 10
+  retry_base_delay: 30.0
+  retry_min_delay: 10.0
+  retry_max_delay: 120.0
+
+# Gemini via Databricks AI Gateway. `reasoning_effort` has no first-class
+# field, so it rides in generation_extras; `top_p: null` removes the key
+# rather than sending null, which is how a model that rejects
+# temperature+top_p together opts out.
+llm:db-gemini-3-flash:
+  api_type: db-gemini
+  api_key: oauth2:databricks
+  base_url: ${DATABRICKS_HOST:}/ai-gateway/mlflow/v1
+  model: system.ai.gemini-3-flash
+  cost_per_input_token: 0.000000075
+  cost_per_output_token: 0.0000003
+  max_retries: 10
+  retry_base_delay: 30.0
+  retry_min_delay: 10.0
+  retry_max_delay: 120.0
+  generation_extras:
+    reasoning_effort: minimal
+    top_p: null
 
 # =============================================================================
 # Embedding Configurations
@@ -65,6 +184,31 @@ embedding:openai:
 embedding:bge-m3-onnx:
   api_type: onnx
   model: ${BGE_M3_EMBEDDING_PATH}
+  dimensions: 1024
+
+# Triton Inference Server over gRPC.
+#
+# `input_name` picks the contract, and it is the whole difference:
+#   set   — send that one input as utf-8 BYTES; the server tokenises,
+#           and `max_length` here means nothing because the server cuts.
+#   unset — send input_ids/attention_mask as INT64; this client
+#           tokenises, and `tokenizer_path` is required.
+#
+# `output_name` is read directly, never pooled: BGE-M3 exports both
+# `token_embeddings` and `sentence_embedding`, and mean-pooling the first
+# gives a different vector from the second. An index built with one
+# cannot be queried with the other.
+#
+# `base_url` is host:port with no scheme — TLS is `ssl`, not https://.
+embedding:triton-bge-m3:
+  api_type: triton
+  base_url: ${TRITON_EMBEDDING_URL:}
+  ssl: ${TRITON_EMBEDDING_SSL:false}
+  model: ${TRITON_EMBEDDING_MODEL:bge_m3_embed}
+  input_name: ${TRITON_EMBEDDING_INPUT:TEXT}
+  tokenizer_path: ${BGE_M3_TOKENIZER_PATH:}
+  output_name: sentence_embedding
+  embed_batch_size: ${TRITON_EMBEDDING_BATCH:8}
   dimensions: 1024
 
 # =============================================================================

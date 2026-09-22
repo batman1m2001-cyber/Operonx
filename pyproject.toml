@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx"
-version = "1.5.2"
+version = "1.6.0"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
 license = "Apache-2.0"
@@ -85,6 +85,15 @@ onnx = [
     "numpy>=2.2.6",
     "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
+triton = [
+    "tritonclient[grpc]>=2.41",
+    # Only needed in token-id mode, where the client tokenises. A
+    # deployment that has absorbed its tokeniser (input_name=) never
+    # loads this — but the extra cannot know which mode you run.
+    "tokenizers>=0.13",
+    "numpy>=2.2.6",
+    "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
+]
 huggingface = [
     "transformers>=4.30",
     "torch>=2.0",
@@ -152,6 +161,7 @@ all = [
     "boto3>=1.28",
     "onnxruntime>=1.15,<1.20",
     "tokenizers>=0.13",
+    "tritonclient[grpc]>=2.41",
     "faiss-cpu>=1.8",
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
@@ -240,4 +250,6 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (may require external services)",
     "unit: marks a provider test as a fast mock-only unit test (opts out of the default integration auto-mark in tests/internal/providers/conftest.py)",
+    "public: live test against a public endpoint — needs the open internet",
+    "vpn: live test against a private endpoint — needs the corporate VPN",
 ]

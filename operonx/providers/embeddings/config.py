@@ -12,6 +12,7 @@ class EmbeddingType(Enum):
     VLLM = "vllm"
     HF = "hf"  # HuggingFace Transformers
     ONNX = "onnx"  # ONNX Runtime
+    TRITON = "triton"  # Triton Inference Server (gRPC)
 
 
 class EmbeddingConfig(YamlModel):
@@ -36,6 +37,29 @@ class EmbeddingConfig(YamlModel):
             Default is None.
         dimensions (Optional[int]): The dimensionality of the generated embeddings.
             Required for OpenAI, Azure, and TEI. Default is None.
+        max_length (Optional[int]): Truncation length, in tokens. Used by
+            ONNX and by Triton in token-id mode. **Inert when the server
+            tokenises** (see ``input_name``) — it is the server's decision
+            there, and a value left in the resource means nothing.
+        output_name (Optional[str]): Which output tensor to read. Matters
+            for models exporting more than one: BGE-M3 emits both
+            ``token_embeddings`` and ``sentence_embedding``, and
+            mean-pooling the first gives a different vector from the
+            second. Pin it rather than trusting a default — an index built
+            with one cannot be queried with the other.
+        tokenizer_path (Optional[str]): Path to ``tokenizer.json``.
+            Required by Triton in token-id mode, where the client
+            tokenises. Cannot be derived from ``model``, which for Triton
+            is a *served model name*, not a directory.
+        input_name (Optional[str]): Triton only. Set it to the name of the
+            model's text input (e.g. ``"TEXT"``) when the deployment has
+            absorbed the tokeniser; the client then sends utf-8 strings as
+            BYTES and loads no tokeniser. Leave unset for the original
+            contract, where the client sends ``input_ids`` /
+            ``attention_mask`` as INT64.
+        ssl (bool): Triton only. Open the gRPC channel with TLS. Selected
+            here rather than by a scheme on ``base_url``, which is a bare
+            ``host:port``.
     """
 
     _category: ClassVar[str] = "embedding"
@@ -46,6 +70,11 @@ class EmbeddingConfig(YamlModel):
     embed_batch_size: Optional[int] = None
     model: Optional[str] = None
     dimensions: Optional[int] = None
+    max_length: Optional[int] = None
+    output_name: Optional[str] = None
+    tokenizer_path: Optional[str] = None
+    input_name: Optional[str] = None
+    ssl: bool = False
 
     @classmethod
     def default(cls) -> "EmbeddingConfig":

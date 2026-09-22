@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from openai import AsyncAzureOpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -29,11 +29,15 @@ class AzureSDKModel(OpenAISDKModel):
         model: str,
         messages: List[ChatCompletionMessageParam],
         stream: bool,
-        temperature: float,
-        top_p: float,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """Prepare API parameters for Azure OpenAI, filtering unsupported parameters."""
+        """Prepare API parameters for Azure OpenAI, filtering unsupported parameters.
+
+        Same ``None`` means omit-the-key rule as the base class — see
+        :meth:`BaseLLM._prepare_params`.
+        """
 
         # Azure OpenAI supported parameters
         AZURE_SUPPORTED_PARAMS = {
@@ -52,9 +56,11 @@ class AzureSDKModel(OpenAISDKModel):
             "model": model,
             "messages": [self.resolve_image_paths(msg) for msg in messages],
             "stream": stream,
-            "temperature": temperature,
-            "top_p": top_p,
         }
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
 
         # Handle special parameter mappings
         processed_messages = list(params["messages"])

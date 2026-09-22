@@ -460,16 +460,26 @@ class BaseLLM(ABC):
         model: str,
         messages: List[ChatCompletionMessageParam],
         stream: bool,
-        temperature: float,
-        top_p: float,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """Prepare API parameters, filtering None values and resolving image paths."""
-        return {
+        """Prepare API parameters, filtering None values and resolving image paths.
+
+        ``temperature`` / ``top_p`` are included only when set. A ``None``
+        is how a resource **removes** the key from the request rather than
+        sending a null — declare ``generation_extras: {top_p: null}`` for a
+        model that rejects both being present (Claude 4.6 with extended
+        thinking does). Same rule for every other key, via the filter below.
+        """
+        params: Dict[str, Any] = {
             "model": model,
             "messages": [self.resolve_image_paths(msg) for msg in messages],
             "stream": stream,
-            "temperature": temperature,
-            "top_p": top_p,
             **{k: v for k, v in kwargs.items() if v is not None},
         }
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        return params

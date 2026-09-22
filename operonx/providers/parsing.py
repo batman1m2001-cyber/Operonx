@@ -39,12 +39,13 @@ Two rules that are easy to get backwards:
 import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import yaml
 
 __all__ = [
     "ParserFormat",
+    "Validators",
     "ExtractField",
     "parse_json",
     "parse_xml",
@@ -57,6 +58,16 @@ __all__ = [
 ]
 
 ParserFormat = Literal["json", "xml", "yaml"]
+
+#: What ``validators=`` accepts.
+#:
+#: * ``{field: [allowed, ...]}`` — per-field allow-list, with an
+#:   ``"@default"`` entry standing in for an unrecognised value.
+#: * ``Callable[[dict], bool]`` — a predicate over the **whole** parsed
+#:   dict, for a shape no per-field list can express ("``result`` must
+#:   be a dict containing ``violation``"). Returning False fails the
+#:   parse, which is what drives the op's semantic retry.
+Validators = Union[Dict[str, List[Any]], Callable[[Dict[str, Any]], bool]]
 
 
 # ---------------------------------------------------------------------------
@@ -286,16 +297,31 @@ def convert_type(value: Any, type_hint: str) -> Any:
 
 def apply_validators(
     result: Dict[str, Any],
-    validators: Dict[str, List[Any]],
+    validators: "Validators",
 ) -> Optional[str]:
-    """Apply per-field validators. Returns None on success, error string on fail.
+    """Apply validators. Returns None on success, an error string on failure.
 
-    Values prefixed with ``@`` in the allowed list act as defaults — when the
-    validated value is missing or unrecognised, the ``@``-prefixed value is
-    substituted (with the ``@`` stripped). If no default is defined and the
-    value is invalid, this returns a human-readable error string and does
-    NOT mutate ``result``.
+    Two forms, see :data:`Validators`.
+
+    **Allow-list** — values prefixed with ``@`` act as defaults: when the
+    value is missing or unrecognised the ``@``-prefixed value is
+    substituted (``@`` stripped). Without a default, an invalid value
+    returns a human-readable error and does NOT mutate ``result``.
+
+    **Callable** — receives the whole parsed dict and returns a bool. Use
+    it for cross-field or structural checks an allow-list cannot state.
+    The predicate is called defensively: a raising validator is reported
+    as a failed validation rather than propagating, because it runs on
+    model output and a malformed answer must not crash the graph.
     """
+    if callable(validators):
+        name = getattr(validators, "__name__", type(validators).__name__)
+        try:
+            ok = validators(result)
+        except Exception as e:
+            return f"Validation failed: {name}() raised {type(e).__name__}: {e}"
+        return None if ok else f"Validation failed: {name}() rejected the parsed output"
+
     for field_name, allowed_values in validators.items():
         clean_values = [v.lstrip("@") if isinstance(v, str) else v for v in allowed_values]
         default_value = next(
@@ -320,7 +346,7 @@ def parse_and_extract(
     text: str,
     parser: ParserFormat,
     fields: List[ExtractField],
-    validators: Optional[Dict[str, List[Any]]] = None,
+    validators: Optional["Validators"] = None,
 ) -> Dict[str, Any]:
     """Parse ``text``, extract ``fields``, and optionally validate.
 
@@ -329,9 +355,12 @@ def parse_and_extract(
     Semantics match the old ``ParserOp._process`` exactly so the surface
     LLMOp exposes is a faithful merge of what ``ask()`` provided before.
     """
-    if validators is not None and not isinstance(validators, dict):
+    if validators is not None and not (isinstance(validators, dict) or callable(validators)):
         return {
-            "error": (f"validators must be a dict, got {type(validators).__name__}: {validators!r}")
+            "error": (
+                f"validators must be a dict or a callable, got "
+                f"{type(validators).__name__}: {validators!r}"
+            )
         }
     if not text:
         return {"error": "Empty input text"}
