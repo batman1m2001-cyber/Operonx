@@ -57,6 +57,63 @@ def _mime_from_data_url(url: str) -> Optional[str]:
     return head.split(";", 1)[0] or None
 
 
+def _textlike(content: Any) -> bool:
+    """Shapes `_content_to_text` can speak for. Anything else is unknown."""
+    return isinstance(content, (str, list))
+
+
+def _content_to_text(content: Any) -> str:
+    """Collapse a completion's content slot into the string we promise.
+
+    `content` is declared `Param(type=str, required=True)` and every
+    consumer treats it as one — `parse_and_extract` calls `.strip()` on
+    it first thing. Most providers oblige. Some do not: an endpoint
+    speaking the Anthropic/Gemini content-parts dialect answers with a
+    *list* of blocks, and the op handed that list straight on.
+
+        [{"type": "text", "text": "{...}", "thoughtSignature": "..."}]
+
+    The failure is worth describing because it looks like nothing. The
+    model answers correctly, the call returns 200, and parsing dies on
+    `'list' object has no attribute 'strip'`. That error becomes the
+    op's `error` field while `result` goes None, so a graph downstream
+    sees a well-formed "nothing found" and carries on. A scanner that
+    flagged a violation reads as a clean call.
+
+    Blocks without text — reasoning signatures, refusals, tool
+    payloads — are dropped rather than stringified: they are not the
+    generated text, and `reasoning_content` already carries thinking
+    into `extras`. A list with no text at all collapses to `""`, which
+    `_is_empty_completion` then treats as an empty completion, so the
+    transport retry can do its job instead of a parser reporting a
+    type error about it.
+
+    hush carried this same collapse, in this same method, naming the same
+    model in its comment. The port dropped it, so this is a regression
+    being repaid rather than a new capability — which is also why the
+    block reads `text` *then* `content`: a provider that labels the slot
+    the second way was already known to exist.
+    """
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+                continue
+            if isinstance(block, dict):
+                text = block.get("text") or block.get("content")
+            else:
+                text = getattr(block, "text", None)
+            if isinstance(text, str):
+                parts.append(text)
+        return "".join(parts)
+    return str(content)
+
+
 def _is_empty_completion(result: Any) -> bool:
     """True when an LLM result's content slot is definitely empty.
 
@@ -69,7 +126,7 @@ def _is_empty_completion(result: Any) -> bool:
         content = result.get("content")
         if content is None:
             return True
-        return isinstance(content, str) and not content.strip()
+        return not _content_to_text(content).strip() if _textlike(content) else False
 
     try:
         choice = result.choices[0]
@@ -81,7 +138,7 @@ def _is_empty_completion(result: Any) -> bool:
     content = getattr(message, "content", None)
     if content is None:
         return True
-    return isinstance(content, str) and not content.strip()
+    return not _content_to_text(content).strip() if _textlike(content) else False
 
 
 class LLMOp(BaseOp):
@@ -994,7 +1051,7 @@ class LLMOp(BaseOp):
 
         return {
             "role": "assistant",
-            "content": message.content or "",
+            "content": _content_to_text(message.content),
             "finish_reason": choice.finish_reason,
             "model_used": resource or completion.model,
             "tool_calls": tool_calls,

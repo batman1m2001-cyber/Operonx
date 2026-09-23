@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-09-23
+
+### Fixed — completion content arriving as blocks instead of a string
+
+`LLMOp` declares `content (str)` and `parse_and_extract` calls `.strip()`
+on it before anything else. Providers speaking the Anthropic/Gemini
+content-parts dialect answer with a list instead:
+
+    [{"type": "text", "text": "{...}", "thoughtSignature": "AY89..."}]
+
+`_extract_completion` passed that through untouched, so parsing raised
+`'list' object has no attribute 'strip'`.
+
+The raise is caught, which is what made it expensive: it lands in the
+op's `error` field, `result` becomes `None`, and downstream that is
+indistinguishable from "the model found nothing". A scanner op that had
+correctly flagged a violation reported a clean result. HTTP 200, right
+answer from the model, wrong answer from the pipeline.
+
+Content blocks are now collapsed to their text in `_extract_completion`,
+so every backend benefits rather than one. Blocks carrying no text —
+reasoning signatures, refusals — are dropped rather than stringified, and
+a list with no text at all collapses to `""` so `_is_empty_completion`
+can route it to the transport retry. That check now sees through blocks
+too.
+
+hush carried this same collapse in the same method; the Operon port
+dropped it. This restores it.
+
 ## [1.6.1] - 2026-09-23
 
 ### Fixed — auto-soften when the deciding branch is itself a predecessor
