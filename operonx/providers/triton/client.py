@@ -23,6 +23,7 @@ real-time paths. Always go through ``get()`` rather than constructing
 ``TritonClient`` directly.
 """
 
+import atexit
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -31,7 +32,7 @@ from operonx.providers.triton.dtypes import numpy_to_triton_dtype, to_infer_arra
 
 LOGGER = logging.getLogger(__name__)
 
-__all__ = ["TritonClient", "get_aio_grpcclient"]
+__all__ = ["TritonClient", "get_aio_grpcclient", "close_all"]
 
 
 # Lazily imported ``tritonclient.grpc.aio`` module.
@@ -64,6 +65,55 @@ def get_aio_grpcclient():
                 f"  Original error: {e}"
             ) from e
     return _aio_grpcclient
+
+
+def close_all() -> None:
+    """Close every cached channel, while grpc still has its globals.
+
+    Registered with :mod:`atexit`, and that timing is the whole point.
+    Left open, a channel is closed by ``AioChannel.__dealloc__`` during
+    interpreter shutdown — which runs *after* ``grpc_aio`` has cleared
+    its own module globals, so the teardown reaches for a ``POLLER`` that
+    is already ``None``::
+
+        Exception ignored in: 'grpc._cython.cygrpc.AioChannel.__dealloc__'
+        AttributeError: 'NoneType' object has no attribute 'POLLER'
+
+    Harmless — "Exception ignored" is the interpreter saying it already
+    swallowed it, and the exit code is untouched — but it prints twice
+    under the real result on every run that embedded anything, which
+    reads as a failed run to everyone who sees it. `atexit` fires early
+    enough that the channel is gone before that path is ever taken.
+
+    Every failure here is swallowed on purpose. This function exists to
+    remove noise at shutdown; it must not become a new source of it.
+    """
+    clients = list(_clients.values())
+    _clients.clear()
+    if not clients:
+        return
+
+    import asyncio
+
+    for client in clients:
+        try:
+            closer = getattr(client.raw, "close", None)
+            if closer is None:
+                continue
+            result = closer()
+            if asyncio.iscoroutine(result):
+                # At exit there is normally no loop left. A fresh one is
+                # enough to drive `close()` to completion, and the channel
+                # is released either way.
+                try:
+                    asyncio.run(result)
+                except RuntimeError:
+                    result.close()
+        except Exception:  # noqa: BLE001 — shutdown is not a place to raise
+            pass
+
+
+atexit.register(close_all)
 
 
 class TritonClient:

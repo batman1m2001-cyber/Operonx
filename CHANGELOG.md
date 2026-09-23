@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-09-23
+
+### Fixed — gRPC teardown noise after every Triton run
+
+`TritonClient.get()` caches a client per `(url, ssl)` and nothing ever
+closed the channel. An open aio channel is torn down by
+`AioChannel.__dealloc__` during interpreter shutdown — after `grpc_aio`
+has cleared its own globals — so it reaches for a `POLLER` that is
+already `None`:
+
+    Exception ignored in: 'grpc._cython.cygrpc.AioChannel.__dealloc__'
+    AttributeError: 'NoneType' object has no attribute 'POLLER'
+
+Harmless, and printed twice under the run's own result on every process
+that embedded anything, which reads as a failed run.
+
+`close_all()` is now registered with `atexit`, which fires while grpc
+still has its globals, so that path is never taken. Failures inside it
+are swallowed: the function exists to remove noise at shutdown and must
+not become a source of it.
+
 ## [1.6.2] - 2026-09-23
 
 ### Fixed — completion content arriving as blocks instead of a string
