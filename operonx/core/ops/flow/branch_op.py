@@ -46,6 +46,7 @@ class BranchOp(BaseOp):
         "default",
         "cases",
         "_case_descriptions",
+        "condition_ops",
     ]
 
     def __init__(
@@ -70,6 +71,10 @@ class BranchOp(BaseOp):
         self.given_candidates = candidates
         self.cases = cases or []
         self._case_descriptions = [ref.describe() for ref, _ in self.cases]
+        #: Predicate ops this branch tests — populated by `Branch._build()`
+        #: when a condition is an op rather than a Ref. Empty for the
+        #: classic `if_(op["field"], ...)` form.
+        self.condition_ops: List[BaseOp] = []
 
         self._set_core(self._create_core_function())
 
@@ -198,6 +203,40 @@ class BranchOp(BaseOp):
         }
 
 
+def _as_condition_ref(condition: Union[Ref, BaseOp]) -> Tuple[Ref, Optional[BaseOp]]:
+    """Normalise a branch condition to ``(ref, predicate_op)``.
+
+    A ``Ref`` passes through with no predicate — that is the original form,
+    ``if_(op["field"] == x, target)``.
+
+    A ``BaseOp`` is a predicate: the op runs, and the branch tests its
+    single output. It must declare exactly one, because ``if_(route_check,
+    ...)`` on an op returning ``{is_heavy_kw, keyword}`` has no defensible
+    answer — refuse it here rather than pick one and be wrong on a call
+    nobody is watching.
+    """
+    if isinstance(condition, Ref):
+        return condition, None
+
+    if not isinstance(condition, BaseOp):
+        raise TypeError(
+            f"branch condition must be a Ref or an op, got {type(condition).__name__}. "
+            f"Write if_(op['field'], target) or if_(predicate_op(...), target)."
+        )
+
+    outs = [k for k in (condition.outputs or {}) if not k.startswith("__")]
+    if len(outs) != 1:
+        detail = f"declares {len(outs)}: {outs}" if outs else "declares none"
+        raise ValueError(
+            f"if_({condition.name}, ...) needs an op with exactly one output; "
+            f"{condition.name} {detail}. Either name the field — "
+            f"if_({condition.name}['<field>'], target) — or give the function a "
+            f"scalar return annotation so it declares one."
+        )
+
+    return condition[outs[0]], condition
+
+
 class Branch:
     """Fluent builder for creating a BranchOp.
 
@@ -248,7 +287,7 @@ class Branch:
         self._inputs: Dict[str, Any] = {}
         self._kwargs = kwargs
 
-    def if_(self, condition: Ref, target: Union[str, BaseOp]) -> "Branch":
+    def if_(self, condition: Union[Ref, BaseOp], target: Union[str, BaseOp]) -> "Branch":
         """Add a condition–target case.
 
         Args:
@@ -293,6 +332,18 @@ class Branch:
         in cases/default (skipped for string targets — those are forward
         references the user wires manually).
         """
+        # Normalise conditions first: a Ref passes through, an op-condition
+        # becomes a Ref on its single output and hands back the predicate op
+        # so it can be wired below.
+        predicates: List[BaseOp] = []
+        normalised: List[Tuple[Ref, Any]] = []
+        for cond, target in self._cases:
+            ref, predicate = _as_condition_ref(cond)
+            if predicate is not None:
+                predicates.append(predicate)
+            normalised.append((ref, target))
+        self._cases = normalised
+
         # Resolve target names for BranchOp constructor (accepts strings only).
         case_names: List[Tuple[Ref, str]] = [
             (cond, t.name if isinstance(t, BaseOp) else t) for cond, t in self._cases
@@ -338,12 +389,19 @@ class Branch:
             inputs=all_inputs,
             **self._kwargs,
         )
+        # Ops whose output this branch tests. `__rshift__` reads these to
+        # route an incoming edge through them — see `condition_ops`.
+        branch.condition_ops = predicates
 
         # Auto-wire outgoing edges for op-instance targets. String targets are
         # forward refs — user still writes ``branch >> target`` manually for
         # those. This is the whole point of the inline form.
         current_graph = get_current()
         if current_graph is not None and hasattr(current_graph, "add_edge"):
+            # A predicate has to finish before the branch can read it. This
+            # is a normal edge, not a condition edge: the branch waits.
+            for predicate in predicates:
+                current_graph.add_edge(predicate.name, branch.name, type="normal")
             for _cond, target in self._cases:
                 if isinstance(target, BaseOp):
                     current_graph.add_edge(branch.name, target.name, type="condition")
@@ -353,7 +411,7 @@ class Branch:
         return branch
 
 
-def if_(condition: Ref, target: Union[str, BaseOp]) -> Branch:
+def if_(condition: Union[Ref, BaseOp], target: Union[str, BaseOp]) -> Branch:
     """Start a branch declaration with the first condition.
 
     Example (inline, auto-wired)::

@@ -5,12 +5,27 @@ import inspect
 import textwrap
 import warnings
 from functools import wraps
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    get_origin,
+)
 
 from operonx.core.configs.op_config import OpType
 from operonx.core.exceptions import CodeError
 from operonx.core.loggings import LOGGER
-from operonx.core.ops.base import _BASE_INIT_KEYS, BaseOp, split_shorthand_kwargs
+from operonx.core.ops.base import (
+    _BASE_INIT_KEYS,
+    SCALAR_OUTPUT,
+    BaseOp,
+    split_shorthand_kwargs,
+)
 from operonx.core.utils.auto_name import register_skip
 from operonx.core.utils.common import Param
 
@@ -273,6 +288,29 @@ def _extract_dict_keys(dict_node: ast.Dict, comment_map: Dict[str, str]) -> Dict
     return schema
 
 
+#: Annotations that mean "this returns a mapping, read its keys".
+_MAPPING_ANNOTATIONS = (dict, Dict)
+
+
+def _returns_scalar(func: Callable) -> bool:
+    """True when the return annotation promises something that is not a dict.
+
+    Conservative on purpose. No annotation, `Any`, or anything dict-shaped
+    returns False, leaving the AST-derived schema untouched.
+    """
+    try:
+        ann = inspect.signature(func).return_annotation
+    except (TypeError, ValueError):
+        return False
+    if ann is inspect.Signature.empty or ann is Any:
+        return False
+    if ann in _MAPPING_ANNOTATIONS:
+        return False
+    if get_origin(ann) in _MAPPING_ANNOTATIONS:
+        return False
+    return True
+
+
 def extract_return_schema(func: Callable) -> Dict[str, Param]:
     """Extract return schema from function source code using AST.
 
@@ -375,6 +413,11 @@ class FuncOp(BaseOp):
         # Parse inputs/outputs từ function signature/AST
         parsed_inputs, parsed_outputs = self._parse_function(code_fn, return_keys)
 
+        # The function's own name is the fallback when auto-naming cannot
+        # trust what it read off the calling line — an op built inline
+        # inside `if_(...)` has no assignment to read.
+        kwargs.setdefault("name_hint", getattr(code_fn, "__name__", None))
+
         # Split _mappings into inputs/outputs using parsed schema
         if _mappings:
             for key, value in _mappings.items():
@@ -447,6 +490,20 @@ class FuncOp(BaseOp):
         else:
             # Parse return schema từ source code (với type hints và descriptions)
             outputs = extract_return_schema(code_fn)
+
+        # A function that returns a bare value — `return n <= CAP` — has no
+        # dict literal to read keys from, so the AST pass finds nothing and
+        # the op would declare no outputs at all. Give it one, named
+        # `SCALAR_OUTPUT`, so a predicate can be written as the boolean it
+        # is instead of a dict with a single key nobody reads.
+        #
+        # Only when the annotation says the return is not a mapping. An
+        # unannotated function keeps the old empty-schema behaviour: we
+        # cannot tell a bare return from a dict built dynamically, and
+        # inventing an output for the latter would shadow its real keys.
+        if not outputs and _returns_scalar(code_fn):
+            ann = inspect.signature(code_fn).return_annotation
+            outputs = {SCALAR_OUTPUT: Param(type=None if ann is inspect.Signature.empty else ann)}
 
         return inputs, outputs
 

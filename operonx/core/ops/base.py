@@ -26,9 +26,14 @@ from operonx.core.media import Media
 from operonx.core.ops._events import Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.states.cell import DEFAULT_CONTEXT
+
+#: Output name for an op whose function returns a bare value rather than
+#: a dict. One fixed name because nothing should have to spell it: `if_`
+#: resolves an op-condition to its only output, whatever it is called.
+SCALAR_OUTPUT = "value"
 from operonx.core.states.ref import Ref
 from operonx.core.states.scratch_ref import ScratchRef
-from operonx.core.utils.auto_name import auto_name, unique_name
+from operonx.core.utils.auto_name import auto_name, register_skip, unique_name
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import get_current
 from operonx.core.workflow_trace import (
@@ -200,6 +205,48 @@ def _summarise_transient(value: Any) -> Any:
     return f"<{kind}{f' {dtype}' if dtype is not None else ''} n={n} transient>"
 
 
+def _is_valid_op_name(name: str) -> bool:
+    """The rule ``BaseOp.__init__`` enforces, asked before we commit to a name."""
+    return bool(name) and name.replace("_", "").replace("-", "").isalnum()
+
+
+@register_skip
+def _safe_auto_name(name_hint: Optional[str] = None) -> Optional[str]:
+    """``auto_name()``, minus the false positives that silently clobber an op.
+
+    ``auto_name()`` reads the calling line for an assignment target. An op
+    built inline — ``if_(is_short(n_turns=...), kid)`` — has no assignment,
+    so the source parser can latch onto a *nearby* line instead and hand
+    back a name that already belongs to another op. ``add_op`` then warns
+    and overwrites, and the graph quietly loses a node.
+
+    So: a detected name that is already taken in the current graph is not
+    our name. Fall back to the hint (the function's own name, for a
+    FuncOp), deduplicated, and finally to ``unique_name()`` upstream.
+    """
+    detected = auto_name()
+    graph = get_current()
+    taken = getattr(graph, "_ops", None) if graph is not None else None
+
+    # A name the op-name rule would reject is not a name we read correctly.
+    # pytest's assertion rewriting is the common source: an op built inside
+    # an `assert` sees `@py_assert4 = ...` on the calling line.
+    if detected and not _is_valid_op_name(detected):
+        detected = None
+
+    if detected and (taken is None or detected not in taken):
+        return detected
+
+    if not name_hint:
+        return None
+    if taken is None or name_hint not in taken:
+        return name_hint
+    n = 2
+    while f"{name_hint}_{n}" in taken:
+        n += 1
+    return f"{name_hint}_{n}"
+
+
 class BaseOp(ABC):
     """Base class for all ops in a workflow.
 
@@ -304,6 +351,7 @@ class BaseOp(ABC):
         observe_max: Optional[int] = None,
         transient: bool = False,
         show_keys: Union[str, Sequence[str], None] = None,
+        name_hint: Optional[str] = None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -332,7 +380,7 @@ class BaseOp(ABC):
         self.observe_max = observe_max
         self.id = id or uuid.uuid4().hex
         if name is None:
-            name = auto_name()
+            name = _safe_auto_name(name_hint)
         self.name = name or unique_name()
         self._full_name = None  # Cached at build time by GraphOp.build()
         self.description = description
@@ -357,7 +405,7 @@ class BaseOp(ABC):
             add_op(self)
 
         # Validate op name
-        if self.name and not self.name.replace("_", "").replace("-", "").isalnum():
+        if self.name and not _is_valid_op_name(self.name):
             raise ValueError(
                 f"Op name '{self.name}' may only contain alphanumeric characters, underscores, and hyphens"
             )
@@ -459,9 +507,37 @@ class BaseOp(ABC):
             if getattr(other, "name", None) == "__END__":
                 _set_wildcard_outputs(self)
             if add_edge is not None:
-                add_edge(self.name, other.name, edge_type)
+                entries = self._condition_entries(other)
+                if entries:
+                    # `source >> if_(predicate_op(...), a).else_(b)`. The
+                    # predicate was constructed inline, so it is registered
+                    # but has no incoming edge and would never run — the
+                    # branch would then read an unset cell and route on
+                    # None. Send the edge through it instead: the
+                    # predicate -> branch half was already added at build.
+                    for predicate in entries:
+                        add_edge(self.name, predicate.name, edge_type)
+                else:
+                    add_edge(self.name, other.name, edge_type)
             return other
         return NotImplemented
+
+    @staticmethod
+    def _condition_entries(other) -> list:
+        """Predicate ops of *other* that still need an incoming edge.
+
+        Empty unless *other* is a branch built from op-conditions. A
+        predicate that already has a predecessor was wired by hand and is
+        left alone — only the inline form needs adopting.
+        """
+        predicates = getattr(other, "condition_ops", None)
+        if not predicates:
+            return []
+        graph = getattr(other, "parent", None)
+        prevs = getattr(graph, "prevs", None)
+        if prevs is None:
+            return list(predicates)
+        return [p for p in predicates if not prevs.get(p.name)]
 
     def __rrshift__(self, other):
         """``[op1, op2] >> self``: connect a list of ops to this op."""
@@ -667,6 +743,19 @@ class BaseOp(ABC):
             _, normed = self.normalize_trace_io({}, side_dict)
         return extract_media(normed, root)
 
+    def _scalar_output_name(self) -> str:
+        """Output name to store a non-dict result under.
+
+        The single declared output when there is exactly one — so an op that
+        declares `return_keys=["is_short"]` and returns a bare bool lands on
+        `is_short`, not on a second name nobody declared. Otherwise the
+        conventional fallback.
+        """
+        outs = [k for k in (self.outputs or {}) if not k.startswith("__")]
+        if len(outs) == 1:
+            return outs[0]
+        return SCALAR_OUTPUT
+
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
         """Store result dict into state.
 
@@ -674,6 +763,12 @@ class BaseOp(ABC):
         Extracts $tags special key for dynamic tagging. After all writes
         commit, calls ``state.advance_step()`` so the checkpointer /
         tracer see a fresh ``step_id`` for the next op's writes.
+
+        A bare return value has already been wrapped into `{output: value}`
+        by `_as_result_dict`, so `return False` arrives here as a non-empty
+        dict and survives the falsy early-out below. That ordering matters:
+        skipping the write would leave the cell unset, which every reader
+        downstream sees as "the op did not run" rather than "it said no".
         """
         if not result:
             return
@@ -855,19 +950,36 @@ class BaseOp(ABC):
           - ``"cpu"``:  ``asyncio.to_thread()`` for sync, await for async
         """
         core_fn = self.core
+        _wrap = self._as_result_dict
         if self.bound == "sync":
             if self.is_gen:
                 for result in core_fn(**inputs):
-                    yield result
+                    yield _wrap(result)
             else:
-                yield core_fn(**inputs)
+                yield _wrap(core_fn(**inputs))
         elif self.bound == "cpu" and not self.is_gen and not inspect.iscoroutinefunction(core_fn):
-            yield await asyncio.to_thread(core_fn, **inputs)
+            yield _wrap(await asyncio.to_thread(core_fn, **inputs))
         elif self.is_gen:
             async for result in core_fn(**inputs):
-                yield result
+                yield _wrap(result)
         else:
-            yield await core_fn(**inputs)
+            yield _wrap(await core_fn(**inputs))
+
+    def _as_result_dict(self, result: Any) -> Any:
+        """Wrap a bare return value in the op's single output.
+
+        Every consumer downstream — `store_result`, the error bookkeeping,
+        the tracer — indexes the result as a mapping. Normalising once here,
+        at the only place a core function's value enters the framework,
+        beats teaching each of them about scalars.
+
+        `None` is left alone: it means the op produced nothing, which is
+        already what an empty result says. `Interrupt` is a scheduler
+        control event, not a value.
+        """
+        if result is None or isinstance(result, dict) or isinstance(result, Interrupt):
+            return result
+        return {self._scalar_output_name(): result}
 
     def _filter_for_trace(self, values: Dict[str, Any]) -> Dict[str, Any]:
         """Copy ``values``, dropping vars this op hides from the trace.
