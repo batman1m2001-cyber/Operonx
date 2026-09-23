@@ -6,7 +6,7 @@ disjoint first-hop children. This mirrors the manual ``~merge_op`` idiom users
 had to write on every branch-fan-in site.
 """
 
-from operonx.core.ops.base import END, START
+from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.ops.transform.func_op import FuncOp
@@ -254,3 +254,104 @@ def test_nested_branches():
     assert _edge(g, "x", "m").soft is True
     assert _edge(g, "y", "m").soft is True
     assert _edge(g, "z", "m").soft is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shape 9 — the branch itself is a predecessor of the merge.
+#
+#   B ──[cond]──> gate ──┐
+#     └─[else]───────────┴──> M
+#
+# Every "gate that can skip a step" has this shape. The forward walk cannot
+# attribute B to an arm of B — that would need a cycle — so before the
+# zero-hop case was recorded, B→M stayed hard and M waited forever for a
+# `gate` that never ran on the else path.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_shape9_branch_is_also_a_predecessor_of_the_merge():
+    with GraphOp(name="s9") as g:
+        seed = _mk("seed", out_key="is_short")
+        router = if_(seed["is_short"], "gate").else_("m")
+        gate = _mk("gate", out_key="y", is_short=router["target"])
+        m = _mk("m", out_key="z", y=gate["y"])
+        START >> seed >> router
+        router >> gate >> m
+        router >> m
+        m >> END
+
+    g.build()
+
+    assert _edge(g, "router", "m").soft is True, \
+        "the branch's own edge into the merge is one arm — it must soften"
+    assert _edge(g, "router", "m").auto_soft is True
+    assert _edge(g, "gate", "m").soft is True
+    assert _edge(g, "gate", "m").auto_soft is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shape 10 — same, with a second branch on the long arm.
+#
+#   B ──[cond]──> gate → B2 ──[cond]──> exit
+#     │                    └─[else]──┐
+#     └─[else]──────────────────────-┴──> M
+#
+# This is the shape that deadlocked a real pipeline: a kid-detector gate on
+# short calls, whose verdict rejoins the scanner that long calls reach
+# directly. Two branch ancestors, and one of them is a predecessor.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_shape10_nested_branch_rejoins_a_merge_the_outer_branch_also_feeds():
+    with GraphOp(name="s10") as g:
+        seed = _mk("seed", out_key="is_short")
+        outer = if_(seed["is_short"], "gate").else_("m")
+        gate = _mk("gate", out_key="is_kid", is_short=outer["target"])
+        inner = if_(gate["is_kid"], "bail").else_("m")
+        bail = _mk("bail", out_key="z", is_kid=inner["target"])
+        m = _mk("m", out_key="z", is_kid=inner["target"])
+        START >> seed >> outer
+        outer >> gate >> inner
+        inner >> bail >> END
+        inner >> m
+        outer >> m
+        m >> END
+
+    g.build()
+
+    assert _edge(g, "outer", "m").soft is True, \
+        "long-call arm: the outer branch feeds the merge directly"
+    assert _edge(g, "inner", "m").soft is True, \
+        "short-call arm: the merge is reached through the gate"
+
+
+async def test_shape10_merge_actually_fires_on_the_direct_arm():
+    """The regression this guards is a stall, not a wrong value.
+
+    Asserting on ``edge.soft`` says the pass ran; only executing says the
+    merge is reachable. Before the fix this graph produced no output at
+    all — the scheduler simply never dispatched ``m``.
+    """
+    from operonx.core import Operon
+
+    with GraphOp(name="s10run") as g:
+        seed = FuncOp(name="seed", code_fn=lambda: {"is_short": False}, inputs={})
+        outer = if_(seed["is_short"], "gate").else_("m")
+        gate = FuncOp(
+            name="gate",
+            code_fn=lambda **kw: {"is_kid": True},
+            inputs={"is_short": outer["target"]},
+        )
+        inner = if_(gate["is_kid"], "bail").else_("m")
+        bail = FuncOp(name="bail", code_fn=lambda **kw: {"z": "bailed"},
+                      inputs={"is_kid": inner["target"]})
+        m = FuncOp(name="m", code_fn=lambda **kw: {"z": "reached"},
+                   inputs={"is_kid": inner["target"]})
+        START >> seed >> outer
+        outer >> gate >> inner
+        inner >> bail >> END
+        inner >> m
+        outer >> m
+        m >> END
+        m["z"] >> PARENT["z"]
+
+    out = await Operon(g).run(inputs={})
+    assert out.get("z") == "reached", (
+        "the merge never ran — the branch's direct arm into it is still hard"
+    )
