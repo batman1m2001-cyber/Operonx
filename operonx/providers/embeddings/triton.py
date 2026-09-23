@@ -73,6 +73,10 @@ class TritonEmbedding(BaseEmbedder):
         "_max_length",
         "_batch_size",
         "_output_dim",
+        "_timeout",
+        "_retries",
+        "_retry_base_delay",
+        "_retry_max_delay",
     ]
 
     def __init__(self, config: EmbeddingConfig) -> None:
@@ -114,6 +118,14 @@ class TritonEmbedding(BaseEmbedder):
         self._max_length = config.max_length or _DEFAULT_MAX_LENGTH
         self._batch_size = config.embed_batch_size or _DEFAULT_BATCH
         self._output_dim = None
+        # Transport knobs, read once. The timeout used to be a literal in
+        # `run`, which meant a deployment that needed longer had to patch
+        # operonx; the retries cover the deadline that expires with the
+        # budget spent on something other than the model.
+        self._timeout = config.timeout
+        self._retries = config.max_retries
+        self._retry_base_delay = config.retry_base_delay
+        self._retry_max_delay = config.retry_max_delay
         self.tokenizer = None
 
         if self._input_name:
@@ -230,7 +242,7 @@ class TritonEmbedding(BaseEmbedder):
         if max_length and max_length != self._max_length and self.tokenizer:
             self._max_length = max_length
             self.tokenizer.enable_truncation(max_length=max_length)
-        timeout = kwargs.get("timeout", 30.0)
+        timeout = kwargs.get("timeout", self._timeout)
 
         client = TritonClient.get(self._url, ssl=self._ssl)
 
@@ -251,6 +263,9 @@ class TritonEmbedding(BaseEmbedder):
                 outputs=[self._output_name],
                 timeout=timeout,
                 decode=False,
+                retries=self._retries,
+                retry_base_delay=self._retry_base_delay,
+                retry_max_delay=self._retry_max_delay,
             )
 
             vec = result.get(self._output_name)

@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-09-23
+
+### Added — transient retry and a configurable timeout on Triton
+
+`TritonClient.infer` retries transport failures that say "no answer
+arrived" — `DEADLINE_EXCEEDED`, `UNAVAILABLE`, `RESOURCE_EXHAUSTED`,
+`ABORTED`, `INTERNAL` — with backoff and jitter. Refusals
+(`INVALID_ARGUMENT`, `NOT_FOUND`, ...) and unclassifiable errors are
+raised on the first attempt: a retry that cannot help still costs a full
+deadline.
+
+`EmbeddingConfig` gains `timeout`, `max_retries`, `retry_base_delay` and
+`retry_max_delay`. The timeout was a literal inside the op, so a
+deployment needing longer had to patch operonx.
+
+Why retry rather than a longer timeout: measured against a deployed
+bge-m3, a full batch of sentences at five-way concurrency answers in
+5.5s against a 30s deadline. Deadlines still expired — because the
+budget went somewhere other than inference, on a cold channel's TLS
+handshake or a response landing while the event loop was busy. Both
+succeed on the next attempt; no timeout value fixes either.
+
+Defaults are 2 retries and 30s, so existing behaviour is unchanged apart
+from one-off failures now recovering.
+
+## [1.6.3] - 2026-09-23
+
+### Fixed — gRPC teardown noise after every Triton run
+
+`TritonClient.get()` caches a client per `(url, ssl)` and nothing ever
+closed the channel. An open aio channel is torn down by
+`AioChannel.__dealloc__` during interpreter shutdown — after `grpc_aio`
+has cleared its own globals — so it reaches for a `POLLER` that is
+already `None`:
+
+    Exception ignored in: 'grpc._cython.cygrpc.AioChannel.__dealloc__'
+    AttributeError: 'NoneType' object has no attribute 'POLLER'
+
+Harmless, and printed twice under the run's own result on every process
+that embedded anything, which reads as a failed run.
+
+`close_all()` is now registered with `atexit`, which fires while grpc
+still has its globals, so that path is never taken. Failures inside it
+are swallowed: the function exists to remove noise at shutdown and must
+not become a source of it.
+
 ## [1.6.2] - 2026-09-23
 
 ### Fixed — completion content arriving as blocks instead of a string

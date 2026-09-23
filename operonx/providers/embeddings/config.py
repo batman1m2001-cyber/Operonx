@@ -75,6 +75,16 @@ class EmbeddingConfig(YamlModel):
     tokenizer_path: Optional[str] = None
     input_name: Optional[str] = None
     ssl: bool = False
+    # Triton only. `timeout` was hardcoded at 30s inside the op, so a
+    # deployment that needed longer had to edit operonx. `retries` covers
+    # the failure that a longer timeout cannot: a deadline that expired
+    # with the budget spent somewhere other than inference — a cold
+    # channel's TLS handshake, or a response that landed while the event
+    # loop was busy. Both succeed immediately on a second attempt.
+    timeout: float = 30.0
+    max_retries: int = 2
+    retry_base_delay: float = 0.5
+    retry_max_delay: float = 8.0
 
     @classmethod
     def default(cls) -> "EmbeddingConfig":
