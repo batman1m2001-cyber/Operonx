@@ -251,3 +251,57 @@ class TestRefFormStillWorks:
             b >> END
         out = await Operon(g).run(inputs={"n": n})
         assert out["w"] == want
+
+
+# ── a branch reaching another branch ──────────────────────────────────
+
+
+@op
+def is_small(n: int = 0) -> bool:
+    return n < 5
+
+
+class TestBranchTargetingBranch:
+    """`if_(...).else_(inner)` where `inner` is itself an op-condition branch.
+
+    Two ways this went wrong, both silent. The predicate never got an
+    incoming edge, so it could not run and the inner branch routed on an
+    unset cell — every call taking its else arm. And because the predicate
+    is built as an *argument*, it runs before the branch does, so on
+    `inner = if_(is_small(...), a).else_(b)` auto_name handed `inner` to
+    the predicate and left the branch as `route_N`.
+    """
+
+    def _graph(self, n):
+        with GraphOp(name="g") as g:
+            s = fmt_fn(n=n)
+            a = kid_path()
+            b = scanner()
+            c = kid_path()
+            inner = if_(is_small(n=s["n_turns"]), a).else_(b)  # noqa: F841
+            START >> s >> if_(s["n_turns"] == 99, c).else_(inner)
+            a >> END
+            b >> END
+            c >> END
+        return g
+
+    def test_the_predicate_is_fed_by_the_outer_branch(self):
+        g = self._graph(1)
+        assert ("route_2", "is_small") in _edges(g), (
+            "an unwired predicate cannot run, and the branch reads an unset cell"
+        )
+
+    def test_the_name_goes_to_the_branch_not_the_predicate(self):
+        g = self._graph(1)
+        assert g._ops["inner"].type == "branch", "`inner` must mean what it reads as"
+        assert g._ops["is_small"].type == "code"
+
+    def test_the_inner_branch_still_owns_its_arms(self):
+        g = self._graph(1)
+        assert ("inner", "a") in _edges(g)
+        assert ("inner", "b") in _edges(g)
+
+    @pytest.mark.parametrize("n,want", [(1, "kid"), (7, "scanner")])
+    async def test_it_routes(self, n, want):
+        out = await Operon(self._graph(n)).run(inputs={"n": n})
+        assert out["w"] == want

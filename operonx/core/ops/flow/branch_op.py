@@ -203,6 +203,55 @@ class BranchOp(BaseOp):
         }
 
 
+def _rename_op(op: BaseOp, new_name: str) -> None:
+    """Re-key an op in its graph. Only safe before any edge names it."""
+    graph = getattr(op, "parent", None)
+    ops = getattr(graph, "_ops", None)
+    if ops is None or ops.get(op.name) is not op:
+        op.name = new_name
+        return
+    if new_name in ops:
+        n = 2
+        while f"{new_name}_{n}" in ops:
+            n += 1
+        new_name = f"{new_name}_{n}"
+    del ops[op.name]
+    op.name = new_name
+    ops[new_name] = op
+
+
+def _entry_of(graph, target: BaseOp) -> str:
+    """The op a caller must route to in order to reach *target*.
+
+    Normally *target* itself. But a branch target can be another branch
+    whose condition is an op: that predicate is registered and unwired, so
+    routing straight at the branch leaves the predicate unable to run — the
+    inner branch then reads an unset cell and every call takes its else
+    arm, silently. Route at the predicate instead; it already has its own
+    edge onward to the branch.
+
+    A branch selects its successor *by name*, so the caller's recorded
+    target has to change with the edge. Returning the name keeps the two
+    in step — see `_build`, where both come from this one call.
+    """
+    predicates = getattr(target, "condition_ops", None)
+    if not predicates:
+        return target.name
+    prevs = getattr(graph, "prevs", None)
+    unwired = [p for p in predicates if prevs is None or not prevs.get(p.name)]
+    if len(unwired) != 1:
+        # Zero: already reachable. More than one: no single entry exists, so
+        # say so rather than pick one and route on a half-evaluated branch.
+        if len(unwired) > 1:
+            raise ValueError(
+                f"branch '{target.name}' tests {len(unwired)} ops and is itself a "
+                f"branch target; there is no single op to route through. Assign its "
+                f"predicates to names and wire them before the branch."
+            )
+        return target.name
+    return unwired[0].name
+
+
 def _as_condition_ref(condition: Union[Ref, BaseOp]) -> Tuple[Ref, Optional[BaseOp]]:
     """Normalise a branch condition to ``(ref, predicate_op)``.
 
@@ -363,6 +412,18 @@ class Branch:
         # rejecting a detected name that already exists as an op in the
         # current graph — that's a source-parser false positive, not our LHS.
         # Then fall through to a stable per-graph counter like ``route_1``.
+        # A predicate built inline as an argument runs BEFORE the branch, so
+        # on `inner = if_(is_small(...), a).else_(b)` it is the predicate that
+        # auto_name hands `inner` to — and the branch, finding the name taken,
+        # settles for `route_N`. The reader's `inner` then means the branch
+        # while the *op* called `inner` is the predicate. Give the name back.
+        for predicate in predicates:
+            if self._name or predicate._name_hint in (None, predicate.name):
+                continue
+            detected_for_branch = auto_name()
+            if detected_for_branch and detected_for_branch == predicate.name:
+                _rename_op(predicate, predicate._name_hint)
+
         name = self._name
         if not name:
             g = get_current()
@@ -402,11 +463,15 @@ class Branch:
             # is a normal edge, not a condition edge: the branch waits.
             for predicate in predicates:
                 current_graph.add_edge(predicate.name, branch.name, type="normal")
-            for _cond, target in self._cases:
+            for i, (_cond, target) in enumerate(self._cases):
                 if isinstance(target, BaseOp):
-                    current_graph.add_edge(branch.name, target.name, type="condition")
+                    entry = _entry_of(current_graph, target)
+                    current_graph.add_edge(branch.name, entry, type="condition")
+                    branch.cases[i] = (branch.cases[i][0], entry)
             if isinstance(self._default, BaseOp):
-                current_graph.add_edge(branch.name, self._default.name, type="condition")
+                entry = _entry_of(current_graph, self._default)
+                current_graph.add_edge(branch.name, entry, type="condition")
+                branch.default = entry
 
         return branch
 

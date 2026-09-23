@@ -281,6 +281,7 @@ class BaseOp(ABC):
     __slots__ = [
         "id",
         "name",
+        "_name_hint",
         "_full_name",
         "description",
         "type",
@@ -382,6 +383,9 @@ class BaseOp(ABC):
         if name is None:
             name = _safe_auto_name(name_hint)
         self.name = name or unique_name()
+        #: The function's own name, kept so a caller that discovers the
+        #: auto-detected name belonged to someone else can fall back to it.
+        self._name_hint = name_hint
         self._full_name = None  # Cached at build time by GraphOp.build()
         self.description = description
 
