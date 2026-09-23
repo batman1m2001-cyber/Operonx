@@ -350,6 +350,11 @@ class GraphOp(BaseOp):
           any softening is applied — flipping edges mid-analysis would erase
           branch attributions for downstream merges.
 
+        A predecessor may also *be* the deciding branch — ``B >> M`` on one
+        arm, ``B >> ... >> P >> M`` on another. See ``branch_sig``: the
+        direct edge's arm is ``M`` itself, and without recording that, the
+        pair shares no branch and ``M`` deadlocks.
+
         Known limitation: does not detect "sneak paths" (a predecessor
         reachable from a non-branch root that bypasses ``B`` entirely). In
         that case, the two predecessors may not truly be mutually exclusive
@@ -381,13 +386,35 @@ class GraphOp(BaseOp):
                             stack.append(nxt)
                 successor_reachable[b][succ] = seen
 
-        def branch_sig(target_op: str) -> Dict[str, set]:
-            """{branch_name: {first_hop_child_of_branch that can reach target_op}}."""
+        def branch_sig(target_op: str, merge_name: str) -> Dict[str, set]:
+            """{branch_name: {first_hop_child_of_branch that can reach target_op}}.
+
+            The forward walk answers "which arm of B did this predecessor
+            come through?", which needs the predecessor to be *downstream*
+            of B. One predecessor is not: the branch itself, when it feeds
+            the merge directly.
+
+                B ──[cond]──> gate → ... → P ──┐
+                  └─[else]─────────────────────┴──> M
+
+            `P` reports arm `gate`. `B` reports nothing — reaching `B` from
+            its own successors would need a cycle — so the pair shares no
+            branch, is never found exclusive, and `M` deadlocks waiting for
+            an arm that did not run. That is the shape of every "gate that
+            can skip a step", so it is worth naming rather than leaving to
+            a manual `~`.
+
+            `B`'s edge into `M` does have an arm: it is `M`. Zero hops, but
+            an arm all the same, and recording it makes the two signatures
+            disjoint exactly when they should be.
+            """
             sig: Dict[str, set] = {}
             for b, succ_reach in successor_reachable.items():
                 first_hops = {succ for succ, reach in succ_reach.items() if target_op in reach}
                 if first_hops:
                     sig[b] = first_hops
+            if target_op in successor_reachable and merge_name in self.nexts.get(target_op, []):
+                sig.setdefault(target_op, set()).add(merge_name)
             return sig
 
         audit_log = []
@@ -398,7 +425,7 @@ class GraphOp(BaseOp):
                 continue
 
             # Signatures per pred (computed against original edge structure).
-            sigs = {p: branch_sig(p) for p in preds}
+            sigs = {p: branch_sig(p, merge_name) for p in preds}
 
             for p in preds:
                 edge = self._edges.get((p, merge_name))

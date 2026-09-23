@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-23
+
+### Fixed — auto-soften when the deciding branch is itself a predecessor
+
+`_auto_soften_edges` proves two predecessors of a merge are mutually
+exclusive by asking each which arm of a shared branch it arrived through.
+That question has no answer when the predecessor *is* the branch:
+
+    B --[cond]--> gate -> ... -> P --+
+      \-[else]-----------------------+--> M
+
+`P` reports arm `gate`; `B` reports nothing, because reaching `B` from its
+own successors would need a cycle. With no shared ancestor the pair was
+never found exclusive, both edges stayed hard, and on a run down the else
+arm the scheduler never dispatched `M` — no error, no output, the graph
+simply stopped.
+
+`B`'s edge into `M` does have an arm: it is `M`. Recording that zero-hop
+case makes the signatures disjoint exactly when they should be.
+
+Every "gate that can skip a step" has this shape — a detector that runs
+on some inputs only, whose verdict rejoins the path the rest took
+directly.
+
 ## [1.6.0] - 2026-09-22
 
 Gateway-shaped deployments. Everything here came out of running operonx
