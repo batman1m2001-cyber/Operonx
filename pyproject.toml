@@ -247,6 +247,21 @@ known-first-party = ["operonx"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# Integration tests make real API calls. They dominated the wall clock —
+# 70s of a 70s run, ~35s of it `test_llm_op.py` alone — and they fail or
+# skip on whatever the machine happens to have configured, so a plain
+# `pytest` told you as much about your .env as about your change.
+#
+# Deselected by default; an explicit `-m` on the command line overrides
+# this one, so nothing is hidden:
+#
+#     pytest                      # 30s, offline, deterministic
+#     pytest -m integration       # the API-calling ones
+#     pytest -m ""                # everything
+#
+# `tests/live/` is separate again and needs OPERONX_LIVE=1 — see its
+# conftest.
+addopts = "-m 'not integration'"
 markers = [
     "integration: marks tests as integration tests (may require external services)",
     "unit: marks a provider test as a fast mock-only unit test (opts out of the default integration auto-mark in tests/internal/providers/conftest.py)",
