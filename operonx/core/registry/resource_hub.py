@@ -547,9 +547,7 @@ class ResourceHub:
         try:
             resolved_token = self._resolve_api_key(config.api_key)
         except Exception as e:
-            raise KeyError(
-                f"{category} '{name}' failed ({type(e).__name__}: {e})"
-            ) from e
+            raise KeyError(f"{category} '{name}' failed ({type(e).__name__}: {e})") from e
 
         config_dict = config.model_dump()
         config_dict["api_key"] = resolved_token
@@ -751,7 +749,5 @@ class ResourceHub:
         """
         result = self.health_check(list(keys) or None, probe=True, timeout=timeout)
         if not result.healthy:
-            raise ResourceUnreachable(
-                {k: result.errors.get(k, "unhealthy") for k in result.failed}
-            )
+            raise ResourceUnreachable({k: result.errors.get(k, "unhealthy") for k in result.failed})
         return result

@@ -39,13 +39,13 @@ def echo_graph():
 
 
 def spec(**kw) -> ServeSpec:
-    base = dict(name="t", kind="memory", graph="x:y",
-                session="per_connection", max_inflight=8)
+    base = dict(name="t", kind="memory", graph="x:y", session="per_connection", max_inflight=8)
     base.update(kw)
     return ServeSpec(**base)
 
 
 # -- hooks that raise ----------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_a_raising_on_session_refuses_and_closes_the_socket():
@@ -91,6 +91,7 @@ async def test_one_bad_connection_does_not_stop_the_next():
         if seen["n"] == 1:
             raise RuntimeError("first one explodes")
         from operonx.core.serve import RunRequest
+
         return RunRequest()
 
     runner._on_session = every_other
@@ -102,8 +103,8 @@ async def test_one_bad_connection_does_not_stop_the_next():
     transport.stop()
     await runner.run()
 
-    assert first.sent == []          # refused
-    assert second.sent == ["b"]      # served
+    assert first.sent == []  # refused
+    assert second.sent == ["b"]  # served
 
 
 @pytest.mark.asyncio
@@ -138,6 +139,7 @@ async def test_a_transport_that_dies_mid_accept_drains_what_it_started():
 
 # -- backpressure --------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_the_bound_actually_blocks_the_producer():
     """`max_inflight` has to push back, not just count.
@@ -171,7 +173,7 @@ async def test_the_bound_releases_as_the_consumer_drains():
             consumed.append(item)
 
     reader = asyncio.create_task(consume())
-    await asyncio.wait_for(session.feed("c"), timeout=1.0)   # room now
+    await asyncio.wait_for(session.feed("c"), timeout=1.0)  # room now
     session.end_input()
     await asyncio.wait_for(reader, timeout=1.0)
     assert consumed == ["a", "b", "c"]
@@ -187,6 +189,7 @@ async def test_an_unbounded_session_does_not_block():
 
 
 # -- things that are not there -------------------------------------------
+
 
 def test_an_unknown_transport_names_what_is_registered():
     with pytest.raises(LookupError, match="Registered:"):
@@ -206,7 +209,7 @@ async def test_a_session_that_yields_nothing_still_completes_its_run():
     transport = MemoryTransport()
     runner = ServeRunner(Operon(echo_graph), spec(), transport=transport)
     session = transport.open()
-    session.end_input()                      # not one item
+    session.end_input()  # not one item
     transport.stop()
     await asyncio.wait_for(runner.run(), timeout=10)
     assert session.closed and session.sent == []
@@ -223,6 +226,7 @@ def test_bounded_session_requires_a_send_implementation():
 
 
 # -- sessions whose own methods misbehave --------------------------------
+
 
 class RecvExplodes(MemorySession):
     async def recv(self):
@@ -295,6 +299,7 @@ async def test_a_drained_session_never_blocks_a_second_reader():
 
 # -- hooks that return the wrong thing -----------------------------------
 
+
 @pytest.mark.parametrize("bad", [{"not": "a request"}, "a string", 42, 0.5])
 @pytest.mark.asyncio
 async def test_on_session_returning_a_non_runrequest_is_named_and_refused(bad):
@@ -308,21 +313,31 @@ async def test_on_session_returning_a_non_runrequest_is_named_and_refused(bad):
     session.end_input()
     transport.stop()
     await asyncio.wait_for(runner.run(), timeout=8)
-    assert session.sent == []          # refused, not half-run
+    assert session.sent == []  # refused, not half-run
 
 
 # -- manifests that should be refused at parse ---------------------------
 
-@pytest.mark.parametrize("block, match", [
-    ({"kind": "http", "path": "/x", "graph": "m:g", "port": "nine"}, "not a number"),
-    ({"kind": "http", "path": "/x", "graph": "m:g", "port": 99999}, "1-65535"),
-    ({"kind": "http", "path": "/x", "graph": "m:g", "port": 0}, "1-65535"),
-    ({"kind": "http", "path": "/x", "graph": "m:g", "session": "per_banana"}, "expected one of"),
-    ({"kind": "websocket", "path": "/x", "graph": "m:g", "max_inflight": -5}, "positive integer"),
-    ({"kind": "http", "path": "/x", "graph": "not-an-entry"}, "not a `module:function`"),
-    ({"kind": "http", "path": "/x"}, "has no `graph`"),
-    ({"path": "/x", "graph": "m:g"}, "has no `kind`"),
-])
+
+@pytest.mark.parametrize(
+    "block, match",
+    [
+        ({"kind": "http", "path": "/x", "graph": "m:g", "port": "nine"}, "not a number"),
+        ({"kind": "http", "path": "/x", "graph": "m:g", "port": 99999}, "1-65535"),
+        ({"kind": "http", "path": "/x", "graph": "m:g", "port": 0}, "1-65535"),
+        (
+            {"kind": "http", "path": "/x", "graph": "m:g", "session": "per_banana"},
+            "expected one of",
+        ),
+        (
+            {"kind": "websocket", "path": "/x", "graph": "m:g", "max_inflight": -5},
+            "positive integer",
+        ),
+        ({"kind": "http", "path": "/x", "graph": "not-an-entry"}, "not a `module:function`"),
+        ({"kind": "http", "path": "/x"}, "has no `graph`"),
+        ({"path": "/x", "graph": "m:g"}, "has no `kind`"),
+    ],
+)
 def test_bad_serve_blocks_are_refused_at_parse(block, match):
     """At parse, not at bind: an OSError from inside the event loop after
     everything else has started is a much worse way to learn this."""
@@ -333,6 +348,7 @@ def test_bad_serve_blocks_are_refused_at_parse(block, match):
 
 
 # -- import paths that name themselves -----------------------------------
+
 
 def test_every_unresolvable_reference_names_the_manifest_entry():
     """A manifest can hold half a dozen import paths.
@@ -349,8 +365,7 @@ def test_every_unresolvable_reference_names_the_manifest_entry():
         engine_for(spec(name="t", kind="http", graph="operonx.core.serve:NotThere"))
 
     with pytest.raises(TypeError, match="is not a @graph"):
-        engine_for(spec(name="t", kind="http",
-                        graph="operonx.core.manifest:MANIFEST_FILENAME"))
+        engine_for(spec(name="t", kind="http", graph="operonx.core.manifest:MANIFEST_FILENAME"))
 
     with pytest.raises(ImportError, match=r"\[\[serve\]\] 'a' app"):
         build_app((ServeSpec(name="a", kind="asgi", path="/", app="no.mod:app"),))

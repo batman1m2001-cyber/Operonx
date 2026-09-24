@@ -156,9 +156,7 @@ class TritonEmbedding(BaseEmbedder):
         try:
             self.tokenizer = Tokenizer.from_file(str(config.tokenizer_path))
         except Exception as e:
-            raise ValueError(
-                f"Failed to load tokenizer from '{config.tokenizer_path}': {e}"
-            ) from e
+            raise ValueError(f"Failed to load tokenizer from '{config.tokenizer_path}': {e}") from e
         self.tokenizer.enable_truncation(max_length=self._max_length)
 
     # ── tensor construction ───────────────────────────────────────────

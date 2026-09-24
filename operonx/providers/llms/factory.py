@@ -36,17 +36,13 @@ def create_llm(config: LLMConfig) -> BaseLLM:
         try:
             from .databricks import DatabricksAnthropic
         except ImportError as e:
-            raise ImportError(
-                _missing_extra_message("DatabricksAnthropic", "providers", e)
-            ) from e
+            raise ImportError(_missing_extra_message("DatabricksAnthropic", "providers", e)) from e
         return DatabricksAnthropic(config=config)
     if config.api_type == LLMType.DB_GEMINI:
         try:
             from .databricks import DatabricksGemini
         except ImportError as e:
-            raise ImportError(
-                _missing_extra_message("DatabricksGemini", "providers", e)
-            ) from e
+            raise ImportError(_missing_extra_message("DatabricksGemini", "providers", e)) from e
         return DatabricksGemini(config=config)
     if config.api_type == LLMType.AZURE:
         try:

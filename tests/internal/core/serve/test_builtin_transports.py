@@ -75,8 +75,7 @@ def test_a_run_that_produces_nothing_is_a_500_not_an_empty_200():
 
 
 def test_websocket_connection_is_one_long_lived_run():
-    spec = _spec(name="w", kind="websocket", path="/ws", session="per_connection",
-                 max_inflight=64)
+    spec = _spec(name="w", kind="websocket", path="/ws", session="per_connection", max_inflight=64)
     app = build_app((spec,), engines={"w": ENGINE})
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
@@ -87,8 +86,12 @@ def test_websocket_connection_is_one_long_lived_run():
 
 def test_asgi_kind_mounts_a_foreign_app_untouched():
     """operonx must never implement CRUD — only mount someone who does."""
-    spec = ServeSpec(name="admin", kind="asgi", path="/admin",
-                     app="tests.internal.core.serve.test_builtin_transports:admin_app")
+    spec = ServeSpec(
+        name="admin",
+        kind="asgi",
+        path="/admin",
+        app="tests.internal.core.serve.test_builtin_transports:admin_app",
+    )
     with TestClient(build_app((spec,))) as client:
         assert client.get("/admin/healthz").json() == {"ok": True}
 
@@ -97,19 +100,35 @@ from starlette.applications import Starlette  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 
-admin_app = Starlette(routes=[
-    Route("/healthz", lambda request: JSONResponse({"ok": True})),
-])
+admin_app = Starlette(
+    routes=[
+        Route("/healthz", lambda request: JSONResponse({"ok": True})),
+    ]
+)
 
 
 def test_endpoints_on_one_port_share_a_listener():
-    m = Manifest.from_dict({"serve": [
-        {"name": "a", "kind": "http", "path": "/a", "port": 8080,
-         "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline"},
-        {"name": "b", "kind": "http", "path": "/b", "port": 8080,
-         "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline"},
-    ]})
-    (addr, specs), = m.listeners().items()
+    m = Manifest.from_dict(
+        {
+            "serve": [
+                {
+                    "name": "a",
+                    "kind": "http",
+                    "path": "/a",
+                    "port": 8080,
+                    "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline",
+                },
+                {
+                    "name": "b",
+                    "kind": "http",
+                    "path": "/b",
+                    "port": 8080,
+                    "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline",
+                },
+            ]
+        }
+    )
+    ((addr, specs),) = m.listeners().items()
     app = build_app(specs)
     with TestClient(app) as client:
         assert client.post("/a", json="x").json() == "X"

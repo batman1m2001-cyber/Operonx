@@ -76,9 +76,7 @@ class TestTransportRetry:
         started = time.monotonic()
         try:
             with pytest.raises(openai.APIStatusError) as exc:
-                await op._call_with_retry(
-                    llm.generate, llm=llm, messages=_user("hi"), max_tokens=8
-                )
+                await op._call_with_retry(llm.generate, llm=llm, messages=_user("hi"), max_tokens=8)
             assert 400 <= exc.value.status_code < 500
             # Five retries at retry_base_delay 5.0 would take far longer.
             assert time.monotonic() - started < 20
@@ -122,9 +120,7 @@ class TestGenerationExtras:
         from operonx.providers.ops.llm import LLMOp
 
         llm = require_key("llm:or-claude-4-sonnet")
-        merged = LLMOp._merge_generation_extras(
-            llm, {"messages": _user("hi"), "top_p": None}
-        )
+        merged = LLMOp._merge_generation_extras(llm, {"messages": _user("hi"), "top_p": None})
         params = llm._prepare_params(
             model=llm.config.model,
             messages=_user("hi"),
@@ -135,9 +131,7 @@ class TestGenerationExtras:
         assert "top_p" not in params
         assert params["temperature"] == 0.0
 
-        out = await llm.generate(
-            _user("Reply with exactly: OK"), top_p=None, max_tokens=16
-        )
+        out = await llm.generate(_user("Reply with exactly: OK"), top_p=None, max_tokens=16)
         assert out.choices[0].message.content is not None
 
 
@@ -178,9 +172,7 @@ class TestCallableValidator:
         assert result.get("error") is None, result.get("error")
         assert isinstance(result["answer"], str) and result["answer"]
 
-    async def test_a_rejecting_validator_surfaces_an_error(
-        self, live_hub, require_key
-    ):
+    async def test_a_rejecting_validator_surfaces_an_error(self, live_hub, require_key):
         """The other half of the contract: a predicate that never passes
         must exhaust the semantic retries and report, not hang or crash."""
         from operonx.core.registry import ResourceHub

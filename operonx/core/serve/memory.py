@@ -20,7 +20,9 @@ __all__ = ["MemorySession", "MemoryTransport"]
 class MemorySession(BoundedSession):
     """A session whose outbound side is a list you can assert against."""
 
-    def __init__(self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None):
+    def __init__(
+        self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None
+    ):
         super().__init__(meta=meta, max_inflight=max_inflight)
         self.sent: List[Any] = []
         self.closed = False

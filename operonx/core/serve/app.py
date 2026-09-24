@@ -47,10 +47,7 @@ def engine_for(spec: ServeSpec) -> Any:
             f"{type(graph_fn).__name__}, which is not a @graph"
         )
     try:
-        params = {
-            name: None
-            for name in inspect.signature(graph_fn).parameters
-        }
+        params = {name: None for name in inspect.signature(graph_fn).parameters}
     except (TypeError, ValueError):
         params = {}
 
@@ -98,8 +95,11 @@ def _default_on_session(spec: ServeSpec):
     return build
 
 
-def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = None,
-              on_startup: Tuple[str, ...] = ()) -> Any:
+def build_app(
+    specs: Tuple[ServeSpec, ...],
+    engines: Optional[Dict[str, Any]] = None,
+    on_startup: Tuple[str, ...] = (),
+) -> Any:
     """One ASGI app carrying every endpoint bound to a single listener.
 
     `on_startup` hooks run once, before any endpoint accepts, because
@@ -110,9 +110,9 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
         from starlette.applications import Starlette
         from starlette.responses import JSONResponse
         from starlette.routing import Mount, Route, WebSocketRoute
-    except ImportError as exc:                          # pragma: no cover
+    except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            'the built-in http/websocket transports need the serve extra: '
+            "the built-in http/websocket transports need the serve extra: "
             'pip install "operonx[serve]"'
         ) from exc
 
@@ -125,8 +125,9 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
             # Health, CRUD, admin — not a graph, and operonx must never
             # pretend it is one. The manifest still describes it, so the
             # whole product is in one file.
-            routes.append(Mount(spec.path, app=load_object(
-                spec.app, field=f"[[serve]] {spec.name!r} app")))
+            routes.append(
+                Mount(spec.path, app=load_object(spec.app, field=f"[[serve]] {spec.name!r} app"))
+            )
             LOGGER.info(f"[serve:{spec.name}] mounted {spec.app} at {spec.path}")
             continue
 
@@ -135,8 +136,11 @@ def build_app(specs: Tuple[ServeSpec, ...], engines: Optional[Dict[str, Any]] = 
 
         if spec.kind == "http":
             transport = HttpTransport(spec)
-            routes.append(Route(spec.path, _http_endpoint(spec, transport, JSONResponse),
-                                methods=[spec.method]))
+            routes.append(
+                Route(
+                    spec.path, _http_endpoint(spec, transport, JSONResponse), methods=[spec.method]
+                )
+            )
         elif spec.kind == "websocket":
             transport = WebSocketTransport(spec)
             routes.append(WebSocketRoute(spec.path, _ws_endpoint(spec, transport)))
@@ -185,7 +189,7 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
         try:
             payload = await request.json()
-        except Exception:                               # noqa: BLE001
+        except Exception:  # noqa: BLE001
             payload = (await request.body()).decode("utf-8", "replace")
 
         session = await transport.handle(payload, meta=_meta_from_request(request))
@@ -197,9 +201,7 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
             # raised, so "produced nothing" is what a failure looks like
             # from out here — and for one caller waiting on one request,
             # nothing is a failure.
-            LOGGER.error(
-                f"[serve:{spec.name}] run produced no output; answering 500"
-            )
+            LOGGER.error(f"[serve:{spec.name}] run produced no output; answering 500")
             return JSONResponse(
                 {"error": "the graph produced no output", "endpoint": spec.name},
                 status_code=500,
@@ -218,8 +220,7 @@ def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
             "headers": dict(websocket.headers),
             "path": str(websocket.url.path),
         }
-        session = WebSocketSession(websocket, meta=meta,
-                                   max_inflight=spec.max_inflight)
+        session = WebSocketSession(websocket, meta=meta, max_inflight=spec.max_inflight)
 
         # `on_session` decides before the handshake completes. Accepting and
         # then closing is not the same thing as refusing: the peer sees a
@@ -244,8 +245,10 @@ def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
 
 def build_apps(manifest: Manifest) -> Dict[Tuple[str, int], Any]:
     """One app per listener the manifest declares."""
-    return {addr: build_app(specs, on_startup=manifest.on_startup)
-            for addr, specs in manifest.listeners().items()}
+    return {
+        addr: build_app(specs, on_startup=manifest.on_startup)
+        for addr, specs in manifest.listeners().items()
+    }
 
 
 def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None:
@@ -256,7 +259,7 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
     """
     try:
         import uvicorn
-    except ImportError as exc:                          # pragma: no cover
+    except ImportError as exc:  # pragma: no cover
         raise ImportError('serving needs the extra: pip install "operonx[serve]"') from exc
 
     specs = manifest.serves
@@ -280,7 +283,8 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
             config = uvicorn.Config(app, host=host, port=port, log_level="info")
             servers.append(uvicorn.Server(config).serve())
             LOGGER.info(
-                f"[serve] {host}:{port} -> " + ", ".join(f"{s.name}({s.kind}){s.path}" for s in group)
+                f"[serve] {host}:{port} -> "
+                + ", ".join(f"{s.name}({s.kind}){s.path}" for s in group)
             )
         await asyncio.gather(*servers)
 

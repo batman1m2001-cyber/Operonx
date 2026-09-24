@@ -167,7 +167,9 @@ class TestNodesJsonl:
         LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
         rows = [
             json.loads(line)
-            for line in (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (tmp_path / "t-123" / "nodes.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
         ]
         classify = next(r for r in rows if r["op_name"] == "classify")
         assert len(classify["upstreams"]) == 1
@@ -193,7 +195,9 @@ class TestNodesJsonl:
         LocalConsumer(config={"root": tmp_path}).consume(trace)
         rows = [
             json.loads(line)
-            for line in (tmp_path / "t-media" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (tmp_path / "t-media" / "nodes.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
         ]
         assert "$media_ref" in rows[0]["inputs"]["audio"]
         # media file actually on disk

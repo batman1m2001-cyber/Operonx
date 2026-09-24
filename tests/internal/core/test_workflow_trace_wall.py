@@ -50,7 +50,9 @@ def test_trace_is_anchored_to_wall_time_and_records_convert():
     # yields are ordered in wall time exactly as in perf time
     yields = [n for n in trace.nodes if n.op_name == "t"]
     assert len(yields) == 3
-    assert [trace.wall_of(n.start_time) for n in yields] == sorted(trace.wall_of(n.start_time) for n in yields)
+    assert [trace.wall_of(n.start_time) for n in yields] == sorted(
+        trace.wall_of(n.start_time) for n in yields
+    )
     assert trace.wall_of(yields[1].start_time) - trace.wall_of(yields[0].start_time) >= 0.004
 
 
@@ -72,7 +74,9 @@ def test_local_consumer_writes_wall_time(tmp_path):
         await engine.start(inputs={}, trace_id="wall-2").result()
 
     asyncio.run(run())
-    rows = [json.loads(line) for line in (tmp_path / "wall-2" / "nodes.jsonl").read_text().splitlines()]
+    rows = [
+        json.loads(line) for line in (tmp_path / "wall-2" / "nodes.jsonl").read_text().splitlines()
+    ]
     assert rows and all(before <= r["wall_start"] <= time.time() for r in rows)
     meta = json.loads((tmp_path / "wall-2" / "meta.json").read_text())
     assert before <= meta["wall_started_at"] <= time.time()

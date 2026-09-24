@@ -239,7 +239,8 @@ def _entry_of(graph, source: str, target: BaseOp) -> str:
         return target.name
     prevs = getattr(graph, "prevs", None)
     unwired = [
-        p for p in predicates
+        p
+        for p in predicates
         if p.name != source
         and not getattr(p, "start", False)
         and (prevs is None or not prevs.get(p.name))

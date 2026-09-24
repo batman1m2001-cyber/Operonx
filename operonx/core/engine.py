@@ -647,8 +647,7 @@ class Operon:
                 )
 
         scheduler_task = asyncio.create_task(_run())
-        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace,
-                               graph_name=self.name)
+        return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace, graph_name=self.name)
 
     async def run(
         self,
@@ -979,7 +978,7 @@ class Operon:
         spec = ServeSpec(
             name=self.name or "serve",
             kind="websocket" if websocket else "http",
-            graph="",                      # the engine is passed directly
+            graph="",  # the engine is passed directly
             path=path,
             host=host,
             port=port,

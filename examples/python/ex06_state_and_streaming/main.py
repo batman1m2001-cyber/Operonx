@@ -191,8 +191,7 @@ def unpack(item=None) -> dict:
 def main_flow():
     request = ingress()
     fields = unpack(item=request["item"])
-    receipt = scratch_flow(item=fields["item"], qty=fields["qty"],
-                           unit_price=fields["unit_price"])
+    receipt = scratch_flow(item=fields["item"], qty=fields["qty"], unit_price=fields["unit_price"])
     progress = progress_flow(n=fields["n"])
     approval = approval_flow(amount=fields["amount"])
     out = egress(item=approval["outcome"])

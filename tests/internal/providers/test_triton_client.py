@@ -62,9 +62,18 @@ class TestNumpyToTritonDtype:
         names itself in the diff here.
         """
         assert set(DTYPE_MAP) == {
-            np.float32, np.float64, np.float16,
-            np.int32, np.int64, np.int16, np.int8, np.uint8, np.bool_,
-            np.object_, np.bytes_, np.str_,
+            np.float32,
+            np.float64,
+            np.float16,
+            np.int32,
+            np.int64,
+            np.int16,
+            np.int8,
+            np.uint8,
+            np.bool_,
+            np.object_,
+            np.bytes_,
+            np.str_,
         }
 
     def test_unsupported_dtype_raises(self):

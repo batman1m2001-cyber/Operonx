@@ -107,8 +107,12 @@ class WebSocketSession(BoundedSession):
     survives if the run is allowed to finish.
     """
 
-    def __init__(self, websocket: Any, meta: Optional[Dict[str, Any]] = None,
-                 max_inflight: Optional[int] = None):
+    def __init__(
+        self,
+        websocket: Any,
+        meta: Optional[Dict[str, Any]] = None,
+        max_inflight: Optional[int] = None,
+    ):
         super().__init__(meta=meta, max_inflight=max_inflight)
         self.websocket = websocket
         self.sent = 0
@@ -124,7 +128,7 @@ class WebSocketSession(BoundedSession):
                 await self.websocket.send_json(item)
             self.sent += 1
             return True
-        except Exception as exc:                       # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # The peer going away mid-reply is ordinary. It is counted and
             # reported rather than raised, because one failed frame should
             # not tear down a run that still has a record to write.
@@ -150,7 +154,7 @@ class WebSocketSession(BoundedSession):
                     await self.feed(message["text"])
                 elif message.get("bytes") is not None:
                     await self.feed(message["bytes"])
-        except Exception as exc:                       # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             LOGGER.debug(f"[serve] websocket recv ended: {type(exc).__name__}: {exc}")
         finally:
             self.end_input()
@@ -159,7 +163,9 @@ class WebSocketSession(BoundedSession):
 class WebSocketTransport(AsgiTransport):
     """`session = "per_connection"`: one socket, one long-lived run."""
 
-    async def handle(self, websocket: Any, meta: Optional[Dict[str, Any]] = None) -> WebSocketSession:
+    async def handle(
+        self, websocket: Any, meta: Optional[Dict[str, Any]] = None
+    ) -> WebSocketSession:
         session = WebSocketSession(websocket, meta=meta, max_inflight=self.max_inflight)
         self.offer(session)
         await session.pump_inbound()

@@ -134,4 +134,3 @@ def served_callbot():
     speak = tts(response=router["response"])
     out = egress(item=speak["audio_out"])
     START >> frames >> unpack >> v >> transcribe >> router >> speak >> out >> END
-

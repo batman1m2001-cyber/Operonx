@@ -10,6 +10,7 @@ it. Not a request: no auth, no model, no cost. Enough to separate "the
 network cannot see this" from "the service said no", which are different
 problems with different fixes.
 """
+
 from __future__ import annotations
 
 import socket

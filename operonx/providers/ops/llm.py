@@ -802,7 +802,10 @@ class LLMOp(BaseOp):
                 sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] Rate limited (429). Attempt %d/%d. Retrying in %.2fs",
-                    self.name, attempt + 1, max_retries + 1, sleep_time,
+                    self.name,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_time,
                 )
                 await asyncio.sleep(sleep_time)
                 continue
@@ -816,7 +819,11 @@ class LLMOp(BaseOp):
                 sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
-                    self.name, type(e).__name__, attempt + 1, max_retries + 1, sleep_time,
+                    self.name,
+                    type(e).__name__,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_time,
                 )
                 await asyncio.sleep(sleep_time)
                 continue
@@ -830,8 +837,12 @@ class LLMOp(BaseOp):
                 sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] %s %s. Attempt %d/%d. Retrying in %.2fs",
-                    self.name, type(e).__name__, status_code,
-                    attempt + 1, max_retries + 1, sleep_time,
+                    self.name,
+                    type(e).__name__,
+                    status_code,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_time,
                 )
                 await asyncio.sleep(sleep_time)
                 continue
@@ -841,7 +852,10 @@ class LLMOp(BaseOp):
                 LOGGER.warning(
                     "[%s] Empty content response (HTTP 200, no exception). "
                     "Attempt %d/%d. Retrying in %.2fs",
-                    self.name, attempt + 1, max_retries + 1, sleep_time,
+                    self.name,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_time,
                 )
                 await asyncio.sleep(sleep_time)
                 continue
@@ -857,7 +871,9 @@ class LLMOp(BaseOp):
         return random.uniform(min_delay, max(min_delay, cap))
 
     @staticmethod
-    def _retry_delay(e, base_delay: float, min_delay: float, max_delay: float, attempt: int) -> float:
+    def _retry_delay(
+        e, base_delay: float, min_delay: float, max_delay: float, attempt: int
+    ) -> float:
         """``Retry-After`` header when the server sent one, else full jitter."""
         try:
             headers = e.response.headers

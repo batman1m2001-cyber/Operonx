@@ -281,6 +281,7 @@ class Scheduler:
                 pending_events[ctx] = n
             else:
                 pending_events.pop(ctx, None)
+
         # Set by _sweep_ctx when a cancellation covers this run's own root.
         root_interrupted: bool = False
         # BaseExceptions (ObserveBudgetExceeded) rescued from _pump so the

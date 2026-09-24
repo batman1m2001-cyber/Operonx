@@ -92,10 +92,7 @@ class TestTokenIdTensors:
             self._lengths = lengths
 
         def encode_batch(self, texts):
-            return [
-                TestTokenIdTensors._FakeEncoding(list(range(1, n + 1)))
-                for n in self._lengths
-            ]
+            return [TestTokenIdTensors._FakeEncoding(list(range(1, n + 1))) for n in self._lengths]
 
         def enable_truncation(self, max_length):
             pass

@@ -151,15 +151,12 @@ class TestPrivateGatewayLLM:
         started = time.monotonic()
         try:
             with pytest.raises(openai.APIStatusError) as exc:
-                await op._call_with_retry(
-                    llm.generate, llm=llm, messages=_user("hi"), max_tokens=8
-                )
+                await op._call_with_retry(llm.generate, llm=llm, messages=_user("hi"), max_tokens=8)
             assert 400 <= exc.value.status_code < 500
             elapsed = time.monotonic() - started
             budget = llm.config.retry_base_delay * llm.config.max_retries
             assert elapsed < max(20.0, budget / 2), (
-                f"4xx took {elapsed:.1f}s — looks retried "
-                f"(backoff budget was {budget:.0f}s)"
+                f"4xx took {elapsed:.1f}s — looks retried (backoff budget was {budget:.0f}s)"
             )
         finally:
             llm.config.model = original_model
@@ -218,9 +215,7 @@ class TestDatabricksGemini:
         )
         assert "top_p" not in params, "null must strip the key, not send null"
 
-        out = await llm.generate(
-            _user("Say OK."), top_p=merged.get("top_p"), max_tokens=16
-        )
+        out = await llm.generate(_user("Say OK."), top_p=merged.get("top_p"), max_tokens=16)
         assert out.choices[0].message.content is not None
 
 
@@ -307,8 +302,7 @@ class TestTritonEmbedding:
         batched = (await emb.run(texts))["embeddings"]
         singles = [(await emb.run([t]))["embeddings"][0] for t in texts]
         drift = max(
-            float(np.abs(np.array(b) - np.array(s)).max())
-            for b, s in zip(batched, singles)
+            float(np.abs(np.array(b) - np.array(s)).max()) for b, s in zip(batched, singles)
         )
         assert drift < 1e-5, f"batch-vs-single drift {drift:.2e}"
 
@@ -324,9 +318,7 @@ class TestTritonEmbedding:
         model is the one expected, not merely *a* model."""
         emb = require_key("embedding:triton-bge-m3")
         vecs = (
-            await emb.run(
-                ["anh vui lòng thanh toán", "anh vui lòng trả tiền", "hôm nay trời mưa"]
-            )
+            await emb.run(["anh vui lòng thanh toán", "anh vui lòng trả tiền", "hôm nay trời mưa"])
         )["embeddings"]
         v = [np.array(x) for x in vecs]
         near, far = float(v[0] @ v[1]), float(v[0] @ v[2])
@@ -343,9 +335,7 @@ class TestTritonEmbedding:
 
 
 class TestLLMOpThroughTheHub:
-    async def test_structured_output_on_a_databricks_backend(
-        self, live_hub, require_key
-    ):
+    async def test_structured_output_on_a_databricks_backend(self, live_hub, require_key):
         """The private path end to end: hub -> oauth2 -> db-gemini
         message shaping -> transport retry -> parse -> validator."""
         from operonx.core.registry import ResourceHub

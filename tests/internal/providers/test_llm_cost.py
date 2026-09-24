@@ -71,9 +71,7 @@ class TestComputation:
     def test_none_token_counts_do_not_raise(self):
         """A provider that reports nulls should not take the call down."""
         op = _op(config=_Config(cost_in=0.000002, cost_out=0.000008))
-        assert op._cost_usd(
-            "primary", {"prompt_tokens": None, "completion_tokens": None}
-        ) == 0.0
+        assert op._cost_usd("primary", {"prompt_tokens": None, "completion_tokens": None}) == 0.0
 
 
 # ── absent is not zero ─────────────────────────────────────────────────

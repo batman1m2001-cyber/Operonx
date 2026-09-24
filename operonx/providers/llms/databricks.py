@@ -61,9 +61,7 @@ class DatabricksAnthropic(OpenAISDKModel):
                     n += 1
         return n
 
-    def _validate_cache_control(
-        self, messages: List[ChatCompletionMessageParam]
-    ) -> None:
+    def _validate_cache_control(self, messages: List[ChatCompletionMessageParam]) -> None:
         n = self._count_cache_breakpoints(messages)
         if n > ANTHROPIC_CACHE_CONTROL_LIMIT:
             raise ValueError(

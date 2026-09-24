@@ -27,8 +27,7 @@ def _cached(text, n=1):
     return {
         "role": "system",
         "content": [
-            {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
-            for _ in range(n)
+            {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}} for _ in range(n)
         ],
     }
 

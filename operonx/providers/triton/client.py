@@ -296,9 +296,7 @@ class TritonClient:
             except Exception as e:  # noqa: BLE001 — classified below
                 last_error = e
                 if attempt >= retries or not _is_transient(e):
-                    LOGGER.error(
-                        "Triton inference failed for model '%s': %s", model, e
-                    )
+                    LOGGER.error("Triton inference failed for model '%s': %s", model, e)
                     raise
                 delay = min(retry_base_delay * (2**attempt), retry_max_delay)
                 delay *= 0.5 + random.random()  # jitter; a burst retries together

@@ -174,7 +174,8 @@ def main_flow():
     request = ingress()
     fields = unpack(item=request["item"])
     vectors = basic_embedding(texts=fields["documents"])
-    plain = simple_rag(query=fields["query"], documents=fields["documents"],
-                       doc_vectors=vectors["vectors"])
+    plain = simple_rag(
+        query=fields["query"], documents=fields["documents"], doc_vectors=vectors["vectors"]
+    )
     out = egress(item=plain["content"])
     START >> request >> fields >> vectors >> plain >> out >> END

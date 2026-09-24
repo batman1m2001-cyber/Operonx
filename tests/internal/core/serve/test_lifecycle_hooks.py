@@ -65,8 +65,7 @@ def raising_close(session, handle):
 
 
 def _spec(**kw) -> ServeSpec:
-    base = dict(name="t", kind="memory", graph="x:y", session="per_connection",
-                max_inflight=16)
+    base = dict(name="t", kind="memory", graph="x:y", session="per_connection", max_inflight=16)
     base.update(kw)
     return ServeSpec(**base)
 
@@ -121,7 +120,7 @@ async def test_a_raising_on_close_does_not_take_out_the_server():
     await s.feed("x")
     s.end_input()
     transport.stop()
-    await runner.run()          # must not raise
+    await runner.run()  # must not raise
     assert s.sent == ["x"]
 
 
@@ -140,21 +139,21 @@ def test_on_startup_runs_before_any_endpoint_accepts():
     mod = importlib.import_module(here)
     mod.reset()
 
-    spec = ServeSpec(name="h", kind="http", path="/go", method="POST",
-                     graph=f"{here}:tiny")
-    app = build_app((spec,), engines={"h": Operon(tiny)},
-                    on_startup=(f"{here}:note_startup",))
-    assert mod.CALLS["started"] == 0          # not at build time
+    spec = ServeSpec(name="h", kind="http", path="/go", method="POST", graph=f"{here}:tiny")
+    app = build_app((spec,), engines={"h": Operon(tiny)}, on_startup=(f"{here}:note_startup",))
+    assert mod.CALLS["started"] == 0  # not at build time
     with TestClient(app) as client:
-        assert mod.CALLS["started"] == 1      # before the first request
+        assert mod.CALLS["started"] == 1  # before the first request
         assert client.post("/go", json="hi").json() == "hi"
-    assert mod.CALLS["started"] == 1          # once, not per request
+    assert mod.CALLS["started"] == 1  # once, not per request
 
 
 # -- the guard the callbot's worst bug asked for -------------------------
 
-@pytest.mark.parametrize("raw", ["[1,2,3]", '"hello"', "42", "true", "null",
-                                 "not json at all", "", "{"])
+
+@pytest.mark.parametrize(
+    "raw", ["[1,2,3]", '"hello"', "42", "true", "null", "not json at all", "", "{"]
+)
 def test_json_object_never_returns_a_non_dict(raw):
     """Five of these parse cleanly and are not objects.
 
@@ -201,9 +200,14 @@ def test_a_refused_connection_never_completes_the_handshake():
 
     from operonx.core.serve.app import build_app
 
-    spec = ServeSpec(name="w", kind="websocket", path="/ws",
-                     session="per_connection", max_inflight=8,
-                     graph="tests.internal.core.serve.test_lifecycle_hooks:tiny")
+    spec = ServeSpec(
+        name="w",
+        kind="websocket",
+        path="/ws",
+        session="per_connection",
+        max_inflight=8,
+        graph="tests.internal.core.serve.test_lifecycle_hooks:tiny",
+    )
     app = build_app((spec,), engines={"w": Operon(tiny)})
     app.state.operonx_runners[0]._on_session = lambda session: None
 
