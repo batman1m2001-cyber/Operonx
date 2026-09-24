@@ -63,7 +63,11 @@ class Job:
         session: ``"per_item"`` or ``"stream"`` (see :data:`SESSION_MODES`).
         concurrency: Items in flight at once (per_item).
         max_inflight: Items buffered ahead of the graph (stream).
-        on_error: ``"skip"``, ``"stop"`` or ``"retry:N"``.
+        on_error: ``"skip"``, ``"stop"`` or ``"retry:N"``. A timed-out item
+            counts as failed for the policy.
+        item_timeout: Seconds one item's run may take. Past it the run is
+            cancelled and the item recorded ``timeout``. A batch with no
+            deadline is the post-mortem everyone has read.
         trace: Trace consumers for the runs, as ``Operon(trace=...)``
             takes them. Ignored when ``graph`` is already an ``Operon``.
         inputs: Static inputs every run receives.
@@ -88,6 +92,7 @@ class Job:
         concurrency: int = 4,
         max_inflight: int = DEFAULT_MAX_INFLIGHT,
         on_error: str = "skip",
+        item_timeout: Optional[float] = None,
         trace: Any = None,
         inputs: Optional[Dict[str, Any]] = None,
         item_input: Optional[str] = None,
@@ -104,6 +109,8 @@ class Job:
         if int(max_inflight) < 1:
             raise ValueError(f"job {name!r}: max_inflight must be at least 1")
         parse_on_error(on_error)                          # fail at declaration, not at 2 a.m.
+        if item_timeout is not None and not float(item_timeout) > 0:
+            raise ValueError(f"job {name!r}: item_timeout must be a positive number of seconds")
         if key is not None and not (isinstance(key, str) or callable(key)):
             raise TypeError(f"job {name!r}: key must be a field name or a function of the item")
 
@@ -116,6 +123,7 @@ class Job:
         self.concurrency = int(concurrency)
         self.max_inflight = int(max_inflight)
         self.on_error = on_error
+        self.item_timeout = float(item_timeout) if item_timeout is not None else None
         self.trace = trace
         self.inputs: Dict[str, Any] = dict(inputs or {})
         self.item_input = item_input
@@ -219,6 +227,7 @@ class Job:
             concurrency=spec.concurrency,
             max_inflight=spec.max_inflight or DEFAULT_MAX_INFLIGHT,
             on_error=spec.on_error,
+            item_timeout=spec.item_timeout,
             trace=list(spec.trace) or None,
             inputs=dict(spec.inputs),
             item_input=spec.item_input,
@@ -249,10 +258,23 @@ class Job:
             "concurrency": self.concurrency if self.session == "per_item" else None,
             "max_inflight": self.max_inflight if self.session == "stream" else None,
             "on_error": self.on_error if self.session == "per_item" else None,
+            "item_timeout": self.item_timeout,
             "item_input": self.item_input,
             "schedule": self.schedule,
             "description": self.description,
         }
+
+    # -- composition: a runbook is `a >> b`, `a >> [b, c]` ---------------------
+
+    def __rshift__(self, other: Any) -> Any:
+        from .runbook import Sequential
+
+        return Sequential(self, other)
+
+    def __rrshift__(self, other: Any) -> Any:
+        from .runbook import Sequential
+
+        return Sequential(other, self)
 
     def __repr__(self) -> str:
         d = self.describe()

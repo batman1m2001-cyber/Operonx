@@ -27,7 +27,7 @@ __all__ = [
     "ItemResult",
     "JobRun",
     "RunRecord",
-    "ITEM_OK", "ITEM_FAILED", "ITEM_EMPTY", "ITEM_SKIPPED",
+    "ITEM_OK", "ITEM_FAILED", "ITEM_EMPTY", "ITEM_SKIPPED", "ITEM_TIMEOUT",
     "RUN_RUNNING", "RUN_OK", "RUN_FAILED", "RUN_STOPPED",
     "done_keys",
     "last_run",
@@ -41,6 +41,7 @@ ITEM_OK = "ok"
 ITEM_FAILED = "failed"
 ITEM_EMPTY = "empty"
 ITEM_SKIPPED = "skipped"       # already done in the run being resumed
+ITEM_TIMEOUT = "timeout"       # the run passed `item_timeout` and was cancelled
 
 #: Whole-run outcomes.
 RUN_RUNNING = "running"
@@ -48,7 +49,7 @@ RUN_OK = "ok"                  # no item failed
 RUN_FAILED = "failed"          # some item failed and the policy carried on
 RUN_STOPPED = "stopped"        # the policy was `stop` and something failed
 
-_COUNTED = (ITEM_OK, ITEM_FAILED, ITEM_EMPTY, ITEM_SKIPPED)
+_COUNTED = (ITEM_OK, ITEM_FAILED, ITEM_EMPTY, ITEM_SKIPPED, ITEM_TIMEOUT)
 
 
 def _now() -> str:
@@ -113,6 +114,10 @@ class JobRun:
     def skipped(self) -> List[ItemResult]:
         return [i for i in self.items if i.status == ITEM_SKIPPED]
 
+    @property
+    def timed_out(self) -> List[ItemResult]:
+        return [i for i in self.items if i.status == ITEM_TIMEOUT]
+
     @classmethod
     def load(cls, path: str | Path) -> "JobRun":
         path = Path(path)
@@ -144,9 +149,12 @@ class JobRun:
         c = self.counts
         if "fed" in c:                                     # a stream run: one run, no items
             return f"{self.job} {self.run_id} {self.status}  fed={c['fed']} sent={c.get('sent', 0)}"
-        return (f"{self.job} {self.run_id} {self.status}  "
+        text = (f"{self.job} {self.run_id} {self.status}  "
                 f"ok={c.get(ITEM_OK, 0)} failed={c.get(ITEM_FAILED, 0)} "
                 f"empty={c.get(ITEM_EMPTY, 0)} skipped={c.get(ITEM_SKIPPED, 0)}")
+        if c.get(ITEM_TIMEOUT):
+            text += f" timeout={c[ITEM_TIMEOUT]}"
+        return text
 
     def __repr__(self) -> str:
         return f"JobRun({self.summary()})"

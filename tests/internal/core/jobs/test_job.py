@@ -18,6 +18,7 @@ from operonx.core.jobs import (
     ITEM_FAILED,
     ITEM_OK,
     ITEM_SKIPPED,
+    ITEM_TIMEOUT,
     RUN_FAILED,
     RUN_OK,
     RUN_STOPPED,
@@ -129,7 +130,7 @@ async def test_per_item_runs_every_item_and_records_each(tmp_path):
     assert run.path.is_dir()
     meta = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
     assert meta["status"] == "failed" and meta["ended"]
-    assert meta["counts"] == {"ok": 2, "failed": 1, "empty": 0, "skipped": 0}
+    assert meta["counts"] == {"ok": 2, "failed": 1, "empty": 0, "skipped": 0, "timeout": 0}
     assert meta["graph"] == "score_flow" and meta["key"] == "id"
     rows = _lines(run.path / "items.jsonl")
     assert [(r["key"], r["status"]) for r in rows] == [("a", "ok"), ("b", "failed"), ("c", "ok")]
@@ -148,7 +149,7 @@ async def test_resume_runs_only_what_failed(tmp_path):
 
     assert second.status == RUN_OK
     assert second.resume_from == first.run_id
-    assert second.counts == {"ok": 1, "failed": 0, "empty": 0, "skipped": 2}
+    assert second.counts == {"ok": 1, "failed": 0, "empty": 0, "skipped": 2, "timeout": 0}
     assert ATTEMPTS == {"b": 1}                        # a and c never ran again
     assert last_run(tmp_path / "jobs", "score").run_id == second.run_id
 
@@ -375,3 +376,52 @@ async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
     assert t.metadata["job"] == "score" and t.metadata["job_run"] == run.run_id
     assert "key" not in t.metadata
     assert t.metadata["tags"] == ["job:score", f"job_run:{run.run_id}"]
+
+
+# -- a deadline per item --------------------------------------------------------------
+
+@op(bound="io")
+async def slow(item: dict = None) -> dict:
+    await asyncio.sleep(0.4)
+    return {"scored": item}
+
+
+@graph
+def slow_flow():
+    src = ingress()
+    s = slow(item=src["item"])
+    out = egress(item=s["scored"])
+    START >> src >> s >> out >> END
+
+
+async def test_an_item_past_its_deadline_is_recorded_timeout(tmp_path):
+    got: list = []
+    run = await make_job(tmp_path, graph=slow_flow, sink=got, item_timeout=0.05, concurrency=3).run()
+    assert run.status == RUN_FAILED
+    assert run.counts["timeout"] == 3 and run.counts["ok"] == 0
+    assert all(i.error == "run exceeded 0.05s" for i in run.timed_out)
+    assert "timeout=3" in run.summary()
+    assert got == []
+    assert all(i.ms < 300 for i in run.items)          # cancelled, not waited out
+
+
+async def test_a_timeout_is_retried_and_stops_like_a_failure(tmp_path):
+    run = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05, on_error="retry:1").run()
+    assert all(i.status == ITEM_TIMEOUT and i.attempts == 2 for i in run.items)
+
+    stopped = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05, on_error="stop").run()
+    assert stopped.status == RUN_STOPPED and len(stopped.items) == 1
+
+
+async def test_a_timed_out_item_runs_again_on_resume(tmp_path):
+    job = make_job(tmp_path, graph=slow_flow, item_timeout=0.05)
+    await job.run()
+    job.item_timeout = None                             # "fixed": no deadline
+    again = await job.run(resume=True)
+    assert again.counts["ok"] == 3 and again.counts["skipped"] == 0
+
+
+def test_item_timeout_must_be_positive(tmp_path):
+    with pytest.raises(ValueError, match="item_timeout"):
+        make_job(tmp_path, item_timeout=0)
+    assert make_job(tmp_path, item_timeout=2).describe()["item_timeout"] == 2.0

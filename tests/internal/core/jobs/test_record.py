@@ -35,7 +35,7 @@ def test_a_record_is_written_as_it_goes_and_finished_once(tmp_path):
 
     run = rec.finish(RUN_FAILED)
     assert run.status == RUN_FAILED and run.ended
-    assert run.counts == {"ok": 1, "failed": 1, "empty": 0, "skipped": 0}
+    assert run.counts == {"ok": 1, "failed": 1, "empty": 0, "skipped": 0, "timeout": 0}
     assert run.failed[0].error == "boom" and run.failed[0].attempts == 2
     assert run.ok[0].trace_id == "t1"
     assert "ok=1 failed=1" in run.summary() and "JobRun(" in repr(run)

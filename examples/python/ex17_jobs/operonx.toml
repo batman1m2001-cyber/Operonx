@@ -58,9 +58,26 @@ session     = "stream"
 record_dir  = "/tmp/operonx_jobs/ex17/jobs"
 description = "All calls through one run."
 
+# Many jobs, one command: `operonx-run nightly`. A runbook block names
+# its Runbook object; the jobs inside declare everything else.
+[[job]]
+name        = "nightly"
+runbook     = "main:nightly"
+record_dir  = "/tmp/operonx_jobs/ex17/jobs"
+schedule    = "0 3 * * *"
+description = "score_calls, then export_csv and summarise in parallel."
+
 [[graph]]
 name  = "score_call"
 entry = "main:score_call"
+
+[[graph]]
+name  = "passthrough"
+entry = "main:passthrough"
+
+[[graph]]
+name  = "summarise_flow"
+entry = "main:summarise_flow"
 
 [studio]
 traces = "/tmp/operonx_traces/ex17_jobs"

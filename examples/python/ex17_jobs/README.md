@@ -78,5 +78,32 @@ trace id; it cannot resume, because one run has no per-item outcomes.
 Every run's traces carry `job`, `job_run` and `key`, as fields and as
 tags, so a Langfuse filter finds one job, one run, or one item.
 
-Design and the phase still to come (the Runbook: many jobs, one
-command): `docs/JOB_PLAN.md` in the operonx repo.
+## Many jobs, one command: the Runbook
+
+```python
+nightly = Runbook("nightly", score_calls >> [export_csv, summarise])
+#                             >> = Sequential      [ ] = Parallel
+```
+
+```
+  score_calls ──► ┬─► export_csv  ─┐
+                  └─► summarise   ─┴─► done
+```
+
+```bash
+uv run operonx-run nightly            # or: operonx-run main:nightly
+uv run operonx-run nightly --show     # prints the tree
+```
+
+Hand-off is by naming the same file: `score_calls` writes `scores.jsonl`
+and the two readers read it. A failed step ends its sequence (`on_error
+= "continue"` runs on regardless); parallel branches always finish. The
+runbook's record, `jobs/nightly/<run>/run.json`, holds the tree with a
+status per node and each job's own run id. It is a record, never a
+span: traces stay one per graph run, tagged with the job.
+
+Every per-item job may set `item_timeout`: past it the run is cancelled
+and the item is recorded `timeout`, which `retry:N` and `--resume` treat
+like a failure.
+
+Design: `docs/JOB_PLAN.md` in the operonx repo.

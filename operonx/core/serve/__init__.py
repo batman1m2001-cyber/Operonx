@@ -24,7 +24,7 @@ from .registry import (
     resolve_transport,
     transport_names,
 )
-from .runner import ServeRunner, serve_session
+from .runner import RunTimeout, ServeRunner, serve_session
 
 __all__ = [
     "BoundedSession",
@@ -33,6 +33,7 @@ __all__ = [
     "MemorySession",
     "MemoryTransport",
     "RunRequest",
+    "RunTimeout",
     "SESSION_KEY",
     "ServeRunner",
     "Session",

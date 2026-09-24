@@ -45,6 +45,23 @@ trace, as fields and as tags, so Langfuse filters one job, one run or one
 item. A job is never a span. ``serve_session(metadata=…)`` is how they
 get there, and is open to any transport.
 
+**Runbook — many jobs, one command.** ``Runbook("nightly", extract >>
+[embed >> cluster, score])``: ``>>`` is `Sequential`, a list is
+`Parallel`, composed *above* the engine and walked by asyncio — never a
+graph of jobs, whose trace would nest a job inside a run inside a job.
+A failed step ends its sequence (``on_error="continue"`` runs on); a
+parallel branch always finishes; hand-off between stages is by naming
+the same resource. The record, ``jobs/<runbook>/<run>/run.json``, holds
+the tree with a status per node and each job's own run id. A runbook is
+never a span. In the manifest: ``[[job]] name = "nightly" runbook =
+"module:attr"``.
+
+**A deadline per item.** ``item_timeout`` on a Job (and in the manifest)
+cancels a run that overstays and records the item ``timeout``, which
+``retry:N``, ``stop`` and ``--resume`` treat like a failure.
+``serve_session(timeout=…)`` is the mechanism and raises ``RunTimeout``,
+the one case in which a transport cancels the run it minted.
+
 Example: ``examples/python/ex17_jobs``. Design: ``docs/JOB_PLAN.md``.
 
 ### Fixed — `BoundedSession.end_input()` on a full bound

@@ -12,7 +12,7 @@ from operonx.cli.run import main
 
 MODULE = '''
 from operonx.core import END, START, graph, op
-from operonx.core.jobs import Job
+from operonx.core.jobs import Job, Runbook
 from operonx.core.serve import egress, ingress
 
 
@@ -36,6 +36,7 @@ ITEMS = [{"id": "a", "text": "x"}, {"id": "b", "text": "y"}, {"id": "c", "text":
 job = Job("shout", graph=flow, source=ITEMS, key="id", description="says it louder")
 failing = Job("shout_bad", graph=flow, source=ITEMS + [{"id": "z", "text": "", "bad": True}], key="id")
 not_a_job = 42
+nightly = Runbook("nightly", job >> failing, on_error="continue", description="both, in order")
 '''
 
 
@@ -162,3 +163,44 @@ def test_an_unknown_name_and_a_missing_manifest_are_named(manifest_project, caps
     assert main(["shout", "-f", str(elsewhere / "operonx.toml")]) == 2
     with pytest.raises(SystemExit):                    # argparse: name a job, or --list
         main([])
+
+
+# -- runbooks -----------------------------------------------------------------------
+
+def test_a_runbook_runs_by_path_and_reports_its_jobs(project, capsys):
+    name, root = project
+    code = main([f"{name}:nightly", "--record-dir", str(root / "jobs")])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "nightly " in out and "jobs ok=1 failed=1 skipped=0" in out
+    assert "failed shout_bad: failed: 1 failed" in out
+    assert (root / "jobs" / "nightly").is_dir() and (root / "jobs" / "shout").is_dir()
+
+
+def test_show_prints_a_runbooks_tree(project, capsys):
+    name, root = project
+    assert main([f"{name}:nightly", "--show", "--record-dir", str(root / "jobs")]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "nightly"
+    assert "sequential" in out and "shout  (per_item)" in out and "shout_bad  (per_item)" in out
+    assert "both, in order" in out
+
+
+def test_a_runbook_runs_by_its_manifest_name(manifest_project, capsys):
+    name, root = manifest_project
+    (root / "operonx.toml").write_text(textwrap.dedent(f"""
+        [project]
+        name = "demo"
+
+        [[job]]
+        name    = "nightly"
+        runbook = "{name}:nightly"
+        record_dir = "runs"
+        schedule = "0 3 * * *"
+    """), encoding="utf-8")
+    assert main(["--list"]) == 0
+    listed = capsys.readouterr().out
+    assert "nightly" in listed and "runbook" in listed and "[0 3 * * *]" in listed
+    assert main(["nightly"]) == 1
+    assert "jobs ok=1 failed=1" in capsys.readouterr().out
+    assert (root / "runs" / "nightly").is_dir()

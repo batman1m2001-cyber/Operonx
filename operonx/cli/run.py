@@ -33,17 +33,21 @@ def _list(manifest: Manifest) -> int:
         print("  no [[job]] entries")
         return 0
     for j in manifest.jobs:
-        io = f"{j.source or '-'} -> {j.sink or '-'}"
         when = f"  [{j.schedule}]" if j.schedule else ""
-        print(f"  {j.name:18s} {j.session:9s} {j.graph:30s} {io}{when}")
+        if j.runbook:
+            print(f"  {j.name:18s} {'runbook':9s} {j.runbook:30s}{when}")
+        else:
+            io = f"{j.source or '-'} -> {j.sink or '-'}"
+            print(f"  {j.name:18s} {j.session:9s} {j.graph:30s} {io}{when}")
         if j.description:
             print(f"  {'':18s} {j.description}")
     return 0
 
 
 def _from_manifest(name: str, manifest: Manifest):
-    """A Job from its [[job]] block, importable and with its hub installed."""
-    from operonx.core.jobs import Job
+    """A Job (or Runbook) from its [[job]] block, importable and with its
+    hub installed."""
+    from operonx.core.jobs import Job, Runbook
 
     spec = manifest.job(name)
     root = str(manifest.root)
@@ -55,6 +59,15 @@ def _from_manifest(name: str, manifest: Manifest):
             import operonx
 
             operonx.bootstrap(resources=overlay)
+    if spec.runbook:
+        runbook = load_object(spec.runbook, field=f"[[job]] {name!r} runbook")
+        if not isinstance(runbook, Runbook):
+            raise ValueError(f"[[job]] {name!r} runbook {spec.runbook!r} is a "
+                             f"{type(runbook).__name__}, not a Runbook")
+        if spec.record_dir:
+            rd = Path(spec.record_dir)
+            runbook.record_dir = rd if rd.is_absolute() else manifest.root / rd
+        return runbook
     return Job.from_spec(spec, manifest.root)
 
 
@@ -81,7 +94,7 @@ def main(argv=None) -> int:
                         help="how many failed keys to print (default: 10)")
     args = parser.parse_args(argv)
 
-    from operonx.core.jobs import Job
+    from operonx.core.jobs import Job, Runbook
 
     try:
         if args.list:
@@ -95,8 +108,9 @@ def main(argv=None) -> int:
             if cwd not in sys.path:
                 sys.path.insert(0, cwd)
             job = load_object(args.job, field="job")
-            if not isinstance(job, Job):
-                print(f"error: {args.job!r} is a {type(job).__name__}, not a Job", file=sys.stderr)
+            if not isinstance(job, (Job, Runbook)):
+                print(f"error: {args.job!r} is a {type(job).__name__}, not a Job or a Runbook",
+                      file=sys.stderr)
                 return 2
         else:
             job = _from_manifest(args.job, _manifest(args.manifest))
@@ -106,14 +120,23 @@ def main(argv=None) -> int:
 
     if args.record_dir:
         job.record_dir = Path(args.record_dir)
-    if args.concurrency:
+        if isinstance(job, Runbook):
+            for j in job.jobs:
+                j.record_dir = Path(args.record_dir)
+    if args.concurrency and isinstance(job, Job):
         job.concurrency = args.concurrency
 
     if args.show:
         print(job.name)
-        for k, v in job.describe().items():
-            if v not in (None, "", {}):
-                print(f"  {k:12s} {v}")
+        if isinstance(job, Runbook):
+            for line in job.tree().splitlines():
+                print(f"  {line}")
+            if job.description:
+                print(f"  {'description':12s} {job.description}")
+        else:
+            for k, v in job.describe().items():
+                if v not in (None, "", {}):
+                    print(f"  {k:12s} {v}")
         print(f"  {'record_dir':12s} {job.record_dir}")
         return 0
 
@@ -124,11 +147,17 @@ def main(argv=None) -> int:
         return 2
     print(run.summary())
     print(f"  {run.path}")
-    failed = run.failed
-    for item in failed[: args.failures]:
-        print(f"  failed {item.key}: {item.error}")
-    if len(failed) > args.failures:
-        print(f"  … and {len(failed) - args.failures} more, in {run.path / 'items.jsonl'}")
+    if isinstance(job, Runbook):
+        for node in run.jobs:
+            if node.status != "ok":
+                print(f"  {node.status} {node.name}: {node.error or ''}".rstrip())
+        return 0 if run.status == "ok" else 1
+
+    bad = [i for i in run.items if i.status in ("failed", "timeout")]
+    for item in bad[: args.failures]:
+        print(f"  {item.status} {item.key}: {item.error}")
+    if len(bad) > args.failures:
+        print(f"  … and {len(bad) - args.failures} more, in {run.path / 'items.jsonl'}")
     if run.meta.get("error"):
         print(f"  {run.meta['error']}")
     return 0 if run.status == "ok" else 1

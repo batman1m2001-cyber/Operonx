@@ -32,7 +32,7 @@ from pathlib import Path
 
 import operonx
 from operonx.core import END, START, graph, op
-from operonx.core.jobs import Job
+from operonx.core.jobs import Job, Runbook
 from operonx.core.serve import egress, ingress
 
 HERE = Path(__file__).resolve().parent
@@ -90,6 +90,66 @@ score_from_resources = Job(
     on_error="retry:1",
     record_dir=OUT / "jobs",
     description="score_calls, with source and sink declared as resources.",
+)
+
+
+# ── after the scores: two more jobs, and a runbook that runs all three ─
+# Hand-off is by naming the same file: `score_calls` writes scores.jsonl,
+# the two below read it. Nothing is rewired at run time.
+
+@graph
+def passthrough():
+    """A graph that only moves items: here, from JSONL to CSV."""
+    src = ingress()
+    out = egress(item=src["item"])
+    START >> src >> out >> END
+
+
+@op(bound="sync")
+def bucket(row: dict = None) -> dict:
+    return {"line": {"call_id": row["call_id"], "bucket": row["verdict"], "words": row["words"]}}
+
+
+@graph
+def summarise_flow():
+    src = ingress()
+    b = bucket(row=src["item"])
+    out = egress(item=b["line"])
+    START >> src >> b >> out >> END
+
+
+export_csv = Job(
+    "export_csv",
+    graph=passthrough,
+    source=OUT / "scores.jsonl",
+    sink=OUT / "scores.csv",
+    key="call_id",
+    record_dir=OUT / "jobs",
+    description="scores.jsonl → scores.csv, one run per row.",
+)
+
+summarise = Job(
+    "summarise",
+    graph=summarise_flow,
+    source=OUT / "scores.jsonl",
+    sink=OUT / "summary.jsonl",
+    session="stream",
+    record_dir=OUT / "jobs",
+    description="All scores through one run.",
+)
+
+#: `>>` is Sequential, a list is Parallel: score first, then the two
+#: readers side by side. A runbook is a record (jobs/nightly/<run>/run.json
+#: holds the tree with each job's own run id), never a span.
+nightly = Runbook(
+    "nightly",
+    score_calls >> [export_csv, summarise],
+    # `score_calls` skips a bad call and reports the run as failed; the
+    # readers should still run over what it did score. `"stop"` (the
+    # default) would end the sequence there and mark both readers skipped.
+    on_error="continue",
+    record_dir=OUT / "jobs",
+    description="Score every call, then export and summarise in parallel.",
 )
 
 

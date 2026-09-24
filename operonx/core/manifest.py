@@ -192,10 +192,15 @@ class JobSpec:
         concurrency = 8
         on_error    = "skip"
         schedule    = "0 2 * * *"
+
+    A block naming ``runbook = "module:attr"`` instead of ``graph`` runs
+    a `Runbook` — many jobs, one command — and takes only ``name``,
+    ``schedule``, ``record_dir`` and ``description`` beside it.
     """
 
     name: str
-    graph: str
+    graph: str = ""
+    runbook: Optional[str] = None
     source: Optional[str] = None
     sink: Optional[str] = None
     key: Optional[str] = None
@@ -205,6 +210,7 @@ class JobSpec:
     trace: Tuple[str, ...] = ()
     inputs: Dict[str, Any] = field(default_factory=dict)
     item_input: Optional[str] = None
+    item_timeout: Optional[float] = None
     max_inflight: Optional[int] = None
     schedule: Optional[str] = None
     record_dir: Optional[str] = None
@@ -487,11 +493,37 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
     label = f"[[job]] {name!r}"
 
     graph = str(block.get("graph") or "")
+    runbook = str(block.get("runbook") or "")
+    if runbook:
+        if graph:
+            raise ManifestError(f"{where}: {label} names both `graph` and `runbook`")
+        if not _ENTRY_RE.match(runbook):
+            raise ManifestError(
+                f"{where}: {label} runbook {runbook!r} is not a `module:attr` entry point")
+        stray = sorted(k for k in block if k not in
+                       {"name", "runbook", "schedule", "record_dir", "description"})
+        if stray:
+            raise ManifestError(
+                f"{where}: {label} is a runbook and cannot set {', '.join(stray)} — "
+                "its jobs declare those")
+        return JobSpec(
+            name=name, runbook=runbook,
+            schedule=(str(block["schedule"]) if block.get("schedule") else None),
+            record_dir=(str(block["record_dir"]) if block.get("record_dir") else None),
+            description=str(block.get("description") or ""),
+        )
     if not graph:
-        raise ManifestError(f"{where}: {label} has no `graph`")
+        raise ManifestError(f"{where}: {label} has no `graph` (or `runbook`)")
     if not _ENTRY_RE.match(graph):
         raise ManifestError(
             f"{where}: {label} graph {graph!r} is not a `module:function` entry point")
+
+    item_timeout = block.get("item_timeout")
+    if item_timeout is not None and (
+            isinstance(item_timeout, bool) or not isinstance(item_timeout, (int, float))
+            or item_timeout <= 0):
+        raise ManifestError(
+            f"{where}: {label} has item_timeout={item_timeout!r}; expected seconds, > 0")
 
     session = str(block.get("session") or "per_item")
     if session not in JOB_SESSION_MODES:
@@ -519,8 +551,9 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         raise ManifestError(f"{where}: {label} `inputs` must be a table")
 
     known_keys = {
-        "name", "graph", "source", "sink", "key", "session", "concurrency", "on_error",
-        "trace", "inputs", "item_input", "max_inflight", "schedule", "record_dir", "description",
+        "name", "graph", "runbook", "source", "sink", "key", "session", "concurrency", "on_error",
+        "trace", "inputs", "item_input", "item_timeout", "max_inflight", "schedule", "record_dir",
+        "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
 
@@ -540,6 +573,7 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         trace=tuple(str(t) for t in _as_list(block.get("trace"))),
         inputs=dict(inputs),
         item_input=_opt("item_input"),
+        item_timeout=(float(item_timeout) if item_timeout is not None else None),
         max_inflight=max_inflight,
         schedule=_opt("schedule"),
         record_dir=_opt("record_dir"),

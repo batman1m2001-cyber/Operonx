@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from operonx.core.loggings import LOGGER
 from operonx.core.serve.protocol import RunRequest
-from operonx.core.serve.runner import serve_session
+from operonx.core.serve.runner import RunTimeout, serve_session
 from operonx.core.workflow_trace import STATUS_ERROR
 
 from .record import (
@@ -31,6 +31,7 @@ from .record import (
     ITEM_FAILED,
     ITEM_OK,
     ITEM_SKIPPED,
+    ITEM_TIMEOUT,
     RUN_FAILED,
     RUN_OK,
     RUN_STOPPED,
@@ -77,6 +78,10 @@ def parse_on_error(text: str) -> ErrorPolicy:
             raise ValueError(f"on_error {text!r}: retry wants at least 1")
         return ErrorPolicy("retry", retries)
     raise ValueError(f"on_error must be 'skip', 'stop' or 'retry:N', not {text!r}")
+
+
+#: The outcomes a policy acts on: retried under `retry`, fatal under `stop`.
+_RETRIABLE = (ITEM_FAILED, ITEM_TIMEOUT)
 
 
 def _first_error(trace: Any) -> Optional[str]:
@@ -127,7 +132,11 @@ async def _attempt(job: "Job", engine: Any, sink: Any, raw: Any, key: str, run_i
     started = perf_counter()
     try:
         handle = await serve_session(engine, session, RunRequest(inputs=inputs),
-                                     metadata=_trace_metadata(job, run_id, key))
+                                     metadata=_trace_metadata(job, run_id, key),
+                                     timeout=job.item_timeout)
+    except RunTimeout as exc:
+        return ItemResult(key, ITEM_TIMEOUT, error=str(exc),
+                          ms=(perf_counter() - started) * 1000, sent=session.sent)
     except Exception as exc:                              # noqa: BLE001
         return ItemResult(key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}",
                           ms=(perf_counter() - started) * 1000)
@@ -188,12 +197,12 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
             for attempt in range(1, policy.attempts + 1):
                 result = await _attempt(job, engine, sink, raw, key, record.run_id)
                 result.attempts = attempt
-                if result.status != ITEM_FAILED or attempt == policy.attempts:
+                if result.status not in _RETRIABLE or attempt == policy.attempts:
                     break
-                LOGGER.warning(f"[job:{job.name}] {key!r} failed ({result.error}); "
+                LOGGER.warning(f"[job:{job.name}] {key!r} {result.status} ({result.error}); "
                                f"retry {attempt}/{policy.retries}")
             record.item(result)
-            if result.status == ITEM_FAILED and policy.mode == "stop":
+            if result.status in _RETRIABLE and policy.mode == "stop":
                 stopped.set()
         finally:
             sem.release()
@@ -237,7 +246,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
 
     if stopped.is_set():
         status = RUN_STOPPED
-    elif source_error or record.counts.get(ITEM_FAILED, 0):
+    elif source_error or record.counts.get(ITEM_FAILED, 0) or record.counts.get(ITEM_TIMEOUT, 0):
         status = RUN_FAILED
     else:
         status = RUN_OK

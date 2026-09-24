@@ -1,6 +1,6 @@
 # Jobs — running Operons over data that does not talk back
 
-Status: **phases 1–2 built, 2026-09-24** (branch `feat/jobs`, §11). §8 holds the
+Status: **phases 1–3 built, 2026-09-24** (branch `feat/jobs`, §11). Phase 4 is per item, when wanted. §8 holds the
 decisions the user has made; §9 what is still open.
 
 ## 1. The idea in one picture
@@ -247,6 +247,25 @@ serve; the shared pieces are the session protocol and the two door ops.
 
 ## 9. Open
 
+**From the "Kafka is not a work queue" post (decided 2026-09-24):** a
+job queue is a service — Redis, SQS, Postgres `SKIP LOCKED` — and stays
+outside operonx; the Job object is not redesigned, because the record
+already answers the post's questions for a finite batch (which item,
+how long, where it stopped, retry, resume). Three additions instead:
+
+- **`item_timeout`** on Job (phase 3): a per-item deadline. The runner
+  cancels the run and records status `timeout`; retry applies. The
+  post's `max.poll.interval.ms` story is a job with no deadline.
+- **A queue is a source** (phase 4): `source:calls_queue` with
+  `kind: sqs | redis | postgres`, pulled by the same per_item runner.
+  The one protocol change: an optional `done(item, result)` on `Source`,
+  which a queue source uses to ack on ok and nack / dead-letter on
+  failed. File sources ignore it.
+- **Worker mode** (phase 4): a job over an endless source is a worker;
+  the record rolls (one run per hour or per N items) instead of one
+  `run.json` forever.
+
+
 - `engine.batch()`: keep as the no-record convenience, or make it a thin
   `Job` with a python source and a list sink. Lean: thin Job, one loop.
 - HTTP trigger: a `[[serve]]` http entry that *starts* a job and returns
@@ -260,8 +279,8 @@ serve; the shared pieces are the session protocol and the two door ops.
 |---|-----------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
 | 1 | `Job`, `JobSession`, per_item runner, jsonl/csv/python, record, `operonx-run` | 3-item jsonl → graph → jsonl, one item failing: record says 2 ok 1 failed; `--resume` runs only that one |
 | 2 | `[[job]]` in manifest; `stream` mode; `on_error=retry`; trace tags      | the same graph runs as `[[serve]]` http and as `[[job]]` unchanged; stream mode yields one trace |
-| 3 | `Runbook`, `Sequential`, `Parallel`, `>>`; `runbook =` in manifest      | `nightly` runs embed and score in parallel, cluster after embed; run.json shows the tree with per-node status; each job has its record; no new spans anywhere |
-| 4 | Studio Jobs tab; `sql` source/sink; HTTP trigger; `--daemon` schedule  | each if wanted                                                                          |
+| 3 | `Runbook`, `Sequential`, `Parallel`, `>>`; `runbook =` in manifest; `item_timeout` | `nightly` runs embed and score in parallel, cluster after embed; run.json shows the tree with per-node status; each job has its record; no new spans anywhere |
+| 4 | Studio Jobs tab; `sql` and queue sources/sinks with `Source.done()`; worker mode; HTTP trigger; `--daemon` schedule | each if wanted                                                            |
 
 ## 11. Log
 
@@ -294,3 +313,24 @@ serve; the shared pieces are the session protocol and the two door ops.
   served engine through a session and the job from the same manifest and
   gets identical outputs, then once more as one stream; stream mode
   yields exactly one trace. 162 tests across jobs, serve and cli.**
+- **2026-09-24 — phase 3.** `operonx/core/jobs/runbook.py`: `Runbook`,
+  `Sequential`, `Parallel`; `Job.__rshift__` / `__rrshift__` so
+  `a >> [b >> c, d]` and `[a, b] >> c` build the tree; `on_error =
+  stop | continue` (a parallel sibling always finishes; a stopped
+  sequence reports what it never reached as `skipped`); the record is
+  `jobs/<runbook>/<run>/run.json` holding the tree with a status, timing
+  and each job's own run id and path. `[[job]] name = … runbook =
+  "module:attr"` in the manifest (takes only schedule, record_dir,
+  description beside it); `operonx-run <name>`, `--show` prints the tree.
+  Pulled forward from the queue post: `item_timeout` on Job and in the
+  manifest — `serve_session(timeout=…)` cancels the run and raises
+  `RunTimeout`, the item is recorded `timeout`, which `retry:N`, `stop`
+  and `--resume` treat like a failure. ex17 gains `export_csv`,
+  `summarise` (stream) and `nightly = score_calls >> [export_csv,
+  summarise]`. **Gate: the four-job `nightly` in
+  `test_nightly_runs_the_tree_and_records_it` runs embed and score with
+  overlapping windows, cluster only after embed's last op, run.json shows
+  the tree with per-node status and each job's run id, and the only
+  traces are the 10 graph runs the jobs minted — none named after the
+  runbook. 185 tests across jobs, serve and cli; ex17 `operonx-run
+  nightly` from the manifest; studio extractor builds all three graphs.**

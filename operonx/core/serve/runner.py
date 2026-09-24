@@ -18,11 +18,21 @@ from operonx.core.manifest import ServeSpec
 from .protocol import SESSION_KEY, RunRequest, Session
 from .registry import load_object, resolve_transport
 
-__all__ = ["ServeRunner", "serve_session"]
+__all__ = ["RunTimeout", "ServeRunner", "serve_session"]
+
+
+class RunTimeout(TimeoutError):
+    """The run did not finish inside ``timeout``; it was cancelled."""
+
+
+async def _drain(handle: Any) -> None:
+    async for _op_name, _ctx, _data in handle:
+        pass
 
 
 async def serve_session(engine: Any, session: Session, request: Optional[RunRequest] = None,
-                        metadata: Optional[Dict[str, Any]] = None) -> Any:
+                        metadata: Optional[Dict[str, Any]] = None,
+                        timeout: Optional[float] = None) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
     The session is seeded into the run's scratch under a reserved key, so
@@ -39,6 +49,11 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
     ``key`` and the same three as ``tags``) and a transport could name
     its route the same way. ``tags`` extend the trace's list; other keys
     are set.
+
+    ``timeout`` is a deadline in seconds for the whole run. Past it the
+    run is cancelled and :class:`RunTimeout` is raised — the one case in
+    which a transport cancels the run it minted, and it does so because
+    the caller asked for exactly that. A job's ``item_timeout`` is this.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -61,8 +76,14 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
             have = list(trace.metadata.get("tags") or [])
             trace.metadata["tags"] = have + [t for t in tags if t not in have]
     try:
-        async for _op_name, _ctx, _data in handle:
-            pass
+        if timeout is None:
+            await _drain(handle)
+        else:
+            try:
+                await asyncio.wait_for(_drain(handle), timeout)
+            except asyncio.TimeoutError:
+                handle.cancel()
+                raise RunTimeout(f"run exceeded {timeout:g}s") from None
     finally:
         # A transport whose `close` raises must not turn a completed run
         # into a failed one. Closing is teardown; its failure is reported

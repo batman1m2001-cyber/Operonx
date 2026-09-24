@@ -217,3 +217,30 @@ async def test_the_same_graph_is_served_and_run_as_a_job_unchanged(project):
     srows = [json.loads(line) for line in (root / "out" / "stream.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [{k: v for k, v in r.items() if k != "_key"} for r in srows] == as_job
     assert [r["_key"] for r in srows] == ["0", "1"]            # outputs, by index: no item identity in a stream
+
+
+# -- runbooks and deadlines in the manifest ------------------------------------
+
+def test_a_runbook_block_names_its_object_and_nothing_else():
+    m = Manifest.from_dict({"job": [
+        {"name": "nightly", "runbook": "jobs.nightly:nightly", "schedule": "0 3 * * *",
+         "record_dir": "runs", "description": "all of it"},
+        {"name": "one", "graph": "m:g", "item_timeout": 2.5},
+    ]})
+    rb = m.job("nightly")
+    assert rb.runbook == "jobs.nightly:nightly" and rb.graph == ""
+    assert rb.schedule == "0 3 * * *" and rb.record_dir == "runs" and rb.description == "all of it"
+    assert m.job("one").item_timeout == 2.5 and m.job("one").runbook is None
+
+
+@pytest.mark.parametrize("block,message", [
+    ({"name": "n", "runbook": "a:b", "graph": "m:g"}, "both `graph` and `runbook`"),
+    ({"name": "n", "runbook": "nightly"}, "not a `module:attr`"),
+    ({"name": "n", "runbook": "a:b", "source": "x.jsonl"}, "cannot set source"),
+    ({"name": "n", "graph": "m:g", "item_timeout": 0}, "item_timeout"),
+    ({"name": "n", "graph": "m:g", "item_timeout": "2"}, "item_timeout"),
+    ({"name": "n", "graph": "m:g", "item_timeout": True}, "item_timeout"),
+])
+def test_bad_runbook_and_timeout_blocks_are_manifest_errors(block, message):
+    with pytest.raises(ManifestError, match=message):
+        Manifest.from_dict({"job": [block]})
