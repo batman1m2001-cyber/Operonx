@@ -44,6 +44,7 @@ operonx.bootstrap(resources=HERE / "resources.yaml")
 
 # ── the graph ────────────────────────────────────────────────────────────
 
+
 @op(bound="sync")
 def score(call: dict = None) -> dict:
     """A stand-in for the LLM: score a transcript by how much was said."""
@@ -51,8 +52,13 @@ def score(call: dict = None) -> dict:
     if not transcript.strip():
         raise ValueError("empty transcript")
     words = len(transcript.split())
-    return {"result": {"call_id": call["call_id"], "words": words,
-                       "verdict": "engaged" if words >= 5 else "brief"}}
+    return {
+        "result": {
+            "call_id": call["call_id"],
+            "words": words,
+            "verdict": "engaged" if words >= 5 else "brief",
+        }
+    }
 
 
 @graph
@@ -96,6 +102,7 @@ score_from_resources = Job(
 # ── after the scores: two more jobs, and a runbook that runs all three ─
 # Hand-off is by naming the same file: `score_calls` writes scores.jsonl,
 # the two below read it. Nothing is rewired at run time.
+
 
 @graph
 def passthrough():

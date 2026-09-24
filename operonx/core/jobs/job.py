@@ -103,12 +103,14 @@ class Job:
         if not name or not isinstance(name, str):
             raise ValueError("a job needs a name")
         if session not in SESSION_MODES:
-            raise ValueError(f"job {name!r}: session must be one of {SESSION_MODES}, not {session!r}")
+            raise ValueError(
+                f"job {name!r}: session must be one of {SESSION_MODES}, not {session!r}"
+            )
         if int(concurrency) < 1:
             raise ValueError(f"job {name!r}: concurrency must be at least 1")
         if int(max_inflight) < 1:
             raise ValueError(f"job {name!r}: max_inflight must be at least 1")
-        parse_on_error(on_error)                          # fail at declaration, not at 2 a.m.
+        parse_on_error(on_error)  # fail at declaration, not at 2 a.m.
         if item_timeout is not None and not float(item_timeout) > 0:
             raise ValueError(f"job {name!r}: item_timeout must be a positive number of seconds")
         if key is not None and not (isinstance(key, str) or callable(key)):
@@ -157,8 +159,10 @@ class Job:
                 params = {}
             self._engine = Operon(g, params=params or None, trace=self.trace)
         else:
-            raise TypeError(f"job {self.name!r}: graph is a {type(g).__name__}, "
-                            "not an Operon, a GraphOp or a @graph factory")
+            raise TypeError(
+                f"job {self.name!r}: graph is a {type(g).__name__}, "
+                "not an Operon, a GraphOp or a @graph factory"
+            )
         return self._engine
 
     # -- identity ----------------------------------------------------------
@@ -210,7 +214,7 @@ class Job:
             if value is None:
                 return None
             if ":" in value and not Path(value).exists():
-                return value                                  # a resource key
+                return value  # a resource key
             path = Path(value)
             return path if path.is_absolute() else root / path
 
@@ -242,7 +246,11 @@ class Job:
         """What the job is, for run.json and ``--list``. No secrets: only
         the names of things."""
         g = self.graph
-        graph_name = g if isinstance(g, str) else getattr(g, "name", None) or getattr(g, "__name__", type(g).__name__)
+        graph_name = (
+            g
+            if isinstance(g, str)
+            else getattr(g, "name", None) or getattr(g, "__name__", type(g).__name__)
+        )
 
         def shown(value: Any) -> Any:
             if value is None or isinstance(value, str):
@@ -253,7 +261,9 @@ class Job:
             "graph": graph_name,
             "source": shown(self.source),
             "sink": shown(self.sink),
-            "key": self.key if isinstance(self.key, str) else (getattr(self.key, "__name__", "fn") if self.key else None),
+            "key": self.key
+            if isinstance(self.key, str)
+            else (getattr(self.key, "__name__", "fn") if self.key else None),
             "session": self.session,
             "concurrency": self.concurrency if self.session == "per_item" else None,
             "max_inflight": self.max_inflight if self.session == "stream" else None,
@@ -278,6 +288,8 @@ class Job:
 
     def __repr__(self) -> str:
         d = self.describe()
-        return (f"Job({self.name!r}, graph={d['graph']!r}, source={d['source']!r}, "
-                f"sink={d['sink']!r}, key={d['key']!r}, {self.session}, "
-                f"concurrency={self.concurrency}, on_error={self.on_error!r})")
+        return (
+            f"Job({self.name!r}, graph={d['graph']!r}, source={d['source']!r}, "
+            f"sink={d['sink']!r}, key={d['key']!r}, {self.session}, "
+            f"concurrency={self.concurrency}, on_error={self.on_error!r})"
+        )

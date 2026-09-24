@@ -81,17 +81,20 @@ def test_job_blocks_parse_with_their_defaults():
     assert m.serve("score").graph == "pipeline:score_flow"
 
 
-@pytest.mark.parametrize("block,message", [
-    ({"graph": "m:g"}, "has no `name`"),
-    ({"name": "j"}, "has no `graph`"),
-    ({"name": "j", "graph": "pipeline"}, "not a `module:function`"),
-    ({"name": "j", "graph": "m:g", "session": "per_request"}, "session"),
-    ({"name": "j", "graph": "m:g", "concurrency": 0}, "concurrency"),
-    ({"name": "j", "graph": "m:g", "concurrency": True}, "concurrency"),
-    ({"name": "j", "graph": "m:g", "on_error": "ignore"}, "on_error"),
-    ({"name": "j", "graph": "m:g", "max_inflight": -1}, "max_inflight"),
-    ({"name": "j", "graph": "m:g", "inputs": [1]}, "`inputs` must be a table"),
-])
+@pytest.mark.parametrize(
+    "block,message",
+    [
+        ({"graph": "m:g"}, "has no `name`"),
+        ({"name": "j"}, "has no `graph`"),
+        ({"name": "j", "graph": "pipeline"}, "not a `module:function`"),
+        ({"name": "j", "graph": "m:g", "session": "per_request"}, "session"),
+        ({"name": "j", "graph": "m:g", "concurrency": 0}, "concurrency"),
+        ({"name": "j", "graph": "m:g", "concurrency": True}, "concurrency"),
+        ({"name": "j", "graph": "m:g", "on_error": "ignore"}, "on_error"),
+        ({"name": "j", "graph": "m:g", "max_inflight": -1}, "max_inflight"),
+        ({"name": "j", "graph": "m:g", "inputs": [1]}, "`inputs` must be a table"),
+    ],
+)
 def test_a_bad_job_block_is_a_manifest_error(block, message):
     with pytest.raises(ManifestError, match=message):
         Manifest.from_dict({"job": [block]})
@@ -112,10 +115,10 @@ def test_from_spec_resolves_paths_against_the_manifest_and_keeps_keys(tmp_path):
     assert job.record_dir == tmp_path / "jobs"
     assert job.key == "call_id" and job.concurrency == 8 and job.on_error == "retry:2"
     assert job.trace == ["trace_local:default"] and job.schedule == "0 2 * * *"
-    assert job.graph == "pipeline:score_flow"                # imported when it runs
+    assert job.graph == "pipeline:score_flow"  # imported when it runs
 
     stream = Job.from_spec(m.job("score_stream"), m.root)
-    assert stream.source == "source:calls"                     # a resource key, untouched
+    assert stream.source == "source:calls"  # a resource key, untouched
     assert stream.session == "stream" and stream.max_inflight == 64
 
     no_doors = Job.from_spec(m.job("no_doors"), m.root)
@@ -124,7 +127,7 @@ def test_from_spec_resolves_paths_against_the_manifest_and_keeps_keys(tmp_path):
 
 # -- the gate -------------------------------------------------------------
 
-PIPELINE = '''
+PIPELINE = """
 from operonx.core import END, START, graph, op
 from operonx.core.serve import egress, ingress
 
@@ -140,7 +143,7 @@ def score_flow():
     scored = score(call=src["item"])
     out = egress(item=scored["result"])
     START >> src >> scored >> out >> END
-'''
+"""
 
 CALLS = [{"call_id": "c1", "text": "one two three"}, {"call_id": "c2", "text": "four"}]
 
@@ -151,8 +154,10 @@ def project(tmp_path, monkeypatch):
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(PIPELINE), encoding="utf-8")
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "calls.jsonl").write_text(
-        "".join(json.dumps(c) + "\n" for c in CALLS), encoding="utf-8")
-    (tmp_path / "operonx.toml").write_text(textwrap.dedent(f"""
+        "".join(json.dumps(c) + "\n" for c in CALLS), encoding="utf-8"
+    )
+    (tmp_path / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "demo"
 
@@ -175,7 +180,9 @@ def project(tmp_path, monkeypatch):
         source  = "data/calls.jsonl"
         sink    = "out/stream.jsonl"
         session = "stream"
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     monkeypatch.syspath_prepend(str(tmp_path))
     yield name, tmp_path
     sys.modules.pop(name, None)
@@ -204,7 +211,10 @@ async def test_the_same_graph_is_served_and_run_as_a_job_unchanged(project):
     job = Job.from_spec(manifest.job("score_calls"), manifest.root)
     run = await job.run()
     assert run.status == RUN_OK and run.counts["ok"] == 2
-    rows = [json.loads(line) for line in (root / "out" / "scores.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = [
+        json.loads(line)
+        for line in (root / "out" / "scores.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     as_job = [{k: v for k, v in r.items() if k != "_key"} for r in rows]
 
     assert served == as_job == [{"call_id": "c1", "words": 3}, {"call_id": "c2", "words": 1}]
@@ -214,33 +224,52 @@ async def test_the_same_graph_is_served_and_run_as_a_job_unchanged(project):
     stream = Job.from_spec(manifest.job("score_stream"), manifest.root)
     srun = await stream.run()
     assert srun.status == RUN_OK and srun.counts["fed"] == 2 and srun.counts["sent"] == 2
-    srows = [json.loads(line) for line in (root / "out" / "stream.jsonl").read_text(encoding="utf-8").splitlines()]
+    srows = [
+        json.loads(line)
+        for line in (root / "out" / "stream.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     assert [{k: v for k, v in r.items() if k != "_key"} for r in srows] == as_job
-    assert [r["_key"] for r in srows] == ["0", "1"]            # outputs, by index: no item identity in a stream
+    assert [r["_key"] for r in srows] == [
+        "0",
+        "1",
+    ]  # outputs, by index: no item identity in a stream
 
 
 # -- runbooks and deadlines in the manifest ------------------------------------
 
+
 def test_a_runbook_block_names_its_object_and_nothing_else():
-    m = Manifest.from_dict({"job": [
-        {"name": "nightly", "runbook": "jobs.nightly:nightly", "schedule": "0 3 * * *",
-         "record_dir": "runs", "description": "all of it"},
-        {"name": "one", "graph": "m:g", "item_timeout": 2.5},
-    ]})
+    m = Manifest.from_dict(
+        {
+            "job": [
+                {
+                    "name": "nightly",
+                    "runbook": "jobs.nightly:nightly",
+                    "schedule": "0 3 * * *",
+                    "record_dir": "runs",
+                    "description": "all of it",
+                },
+                {"name": "one", "graph": "m:g", "item_timeout": 2.5},
+            ]
+        }
+    )
     rb = m.job("nightly")
     assert rb.runbook == "jobs.nightly:nightly" and rb.graph == ""
     assert rb.schedule == "0 3 * * *" and rb.record_dir == "runs" and rb.description == "all of it"
     assert m.job("one").item_timeout == 2.5 and m.job("one").runbook is None
 
 
-@pytest.mark.parametrize("block,message", [
-    ({"name": "n", "runbook": "a:b", "graph": "m:g"}, "both `graph` and `runbook`"),
-    ({"name": "n", "runbook": "nightly"}, "not a `module:attr`"),
-    ({"name": "n", "runbook": "a:b", "source": "x.jsonl"}, "cannot set source"),
-    ({"name": "n", "graph": "m:g", "item_timeout": 0}, "item_timeout"),
-    ({"name": "n", "graph": "m:g", "item_timeout": "2"}, "item_timeout"),
-    ({"name": "n", "graph": "m:g", "item_timeout": True}, "item_timeout"),
-])
+@pytest.mark.parametrize(
+    "block,message",
+    [
+        ({"name": "n", "runbook": "a:b", "graph": "m:g"}, "both `graph` and `runbook`"),
+        ({"name": "n", "runbook": "nightly"}, "not a `module:attr`"),
+        ({"name": "n", "runbook": "a:b", "source": "x.jsonl"}, "cannot set source"),
+        ({"name": "n", "graph": "m:g", "item_timeout": 0}, "item_timeout"),
+        ({"name": "n", "graph": "m:g", "item_timeout": "2"}, "item_timeout"),
+        ({"name": "n", "graph": "m:g", "item_timeout": True}, "item_timeout"),
+    ],
+)
 def test_bad_runbook_and_timeout_blocks_are_manifest_errors(block, message):
     with pytest.raises(ManifestError, match=message):
         Manifest.from_dict({"job": [block]})

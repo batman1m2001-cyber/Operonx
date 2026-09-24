@@ -115,11 +115,13 @@ async def _settle(handle: Any) -> None:
     """
     try:
         await handle.collect()
-    except Exception:                                     # noqa: BLE001
-        pass                                              # the record reads the trace, not this
+    except Exception:  # noqa: BLE001
+        pass  # the record reads the trace, not this
 
 
-async def _attempt(job: "Job", engine: Any, sink: Any, raw: Any, key: str, run_id: str) -> ItemResult:
+async def _attempt(
+    job: "Job", engine: Any, sink: Any, raw: Any, key: str, run_id: str
+) -> ItemResult:
     """One run for one item."""
     session = JobSession(sink, key, meta={"job": job.name, "job_run": run_id})
     inputs = dict(job.inputs)
@@ -131,15 +133,28 @@ async def _attempt(job: "Job", engine: Any, sink: Any, raw: Any, key: str, run_i
 
     started = perf_counter()
     try:
-        handle = await serve_session(engine, session, RunRequest(inputs=inputs),
-                                     metadata=_trace_metadata(job, run_id, key),
-                                     timeout=job.item_timeout)
+        handle = await serve_session(
+            engine,
+            session,
+            RunRequest(inputs=inputs),
+            metadata=_trace_metadata(job, run_id, key),
+            timeout=job.item_timeout,
+        )
     except RunTimeout as exc:
-        return ItemResult(key, ITEM_TIMEOUT, error=str(exc),
-                          ms=(perf_counter() - started) * 1000, sent=session.sent)
-    except Exception as exc:                              # noqa: BLE001
-        return ItemResult(key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}",
-                          ms=(perf_counter() - started) * 1000)
+        return ItemResult(
+            key,
+            ITEM_TIMEOUT,
+            error=str(exc),
+            ms=(perf_counter() - started) * 1000,
+            sent=session.sent,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ItemResult(
+            key,
+            ITEM_FAILED,
+            error=f"{type(exc).__name__}: {exc}",
+            ms=(perf_counter() - started) * 1000,
+        )
     ms = (perf_counter() - started) * 1000
     await _settle(handle)
     trace = getattr(handle, "trace", None)
@@ -147,19 +162,28 @@ async def _attempt(job: "Job", engine: Any, sink: Any, raw: Any, key: str, run_i
 
     error = _first_error(trace)
     if error:
-        return ItemResult(key, ITEM_FAILED, error=error, trace_id=trace_id, ms=ms, sent=session.sent)
+        return ItemResult(
+            key, ITEM_FAILED, error=error, trace_id=trace_id, ms=ms, sent=session.sent
+        )
     if session.sink_error:
-        return ItemResult(key, ITEM_FAILED, error=f"sink: {session.sink_error}",
-                          trace_id=trace_id, ms=ms, sent=session.sent)
+        return ItemResult(
+            key,
+            ITEM_FAILED,
+            error=f"sink: {session.sink_error}",
+            trace_id=trace_id,
+            ms=ms,
+            sent=session.sent,
+        )
 
     if job.item_input is not None:
         # No doors: the run's own result is the item's result.
         try:
             out = await handle.result()
             await sink.write(key, out)
-        except Exception as exc:                          # noqa: BLE001
-            return ItemResult(key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}",
-                              trace_id=trace_id, ms=ms)
+        except Exception as exc:  # noqa: BLE001
+            return ItemResult(
+                key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}", trace_id=trace_id, ms=ms
+            )
         session.sent += 1
 
     status = ITEM_OK if session.sent else ITEM_EMPTY
@@ -176,15 +200,20 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
 
     previous = last_run(root, job.name) if resume else None
     if resume and previous is None:
-        LOGGER.warning(f"[job:{job.name}] --resume: no earlier run under {root / job.name}; "
-                       "running everything")
+        LOGGER.warning(
+            f"[job:{job.name}] --resume: no earlier run under {root / job.name}; running everything"
+        )
     done = done_keys(previous)
 
-    record = RunRecord(root, job.name, meta=job.describe(),
-                       resume_from=previous.run_id if previous else None)
-    LOGGER.info(f"[job:{job.name}] {source!r} -> {job.engine().name} -> {sink!r} "
-                f"(per_item, concurrency={job.concurrency}, on_error={job.on_error}"
-                + (f", resume from {previous.run_id}" if previous else "") + ")")
+    record = RunRecord(
+        root, job.name, meta=job.describe(), resume_from=previous.run_id if previous else None
+    )
+    LOGGER.info(
+        f"[job:{job.name}] {source!r} -> {job.engine().name} -> {sink!r} "
+        f"(per_item, concurrency={job.concurrency}, on_error={job.on_error}"
+        + (f", resume from {previous.run_id}" if previous else "")
+        + ")"
+    )
 
     sem = asyncio.Semaphore(job.concurrency)
     stopped = asyncio.Event()
@@ -199,8 +228,10 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                 result.attempts = attempt
                 if result.status not in _RETRIABLE or attempt == policy.attempts:
                     break
-                LOGGER.warning(f"[job:{job.name}] {key!r} {result.status} ({result.error}); "
-                               f"retry {attempt}/{policy.retries}")
+                LOGGER.warning(
+                    f"[job:{job.name}] {key!r} {result.status} ({result.error}); "
+                    f"retry {attempt}/{policy.retries}"
+                )
             record.item(result)
             if result.status in _RETRIABLE and policy.mode == "stop":
                 stopped.set()
@@ -213,9 +244,14 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                 break
             try:
                 key = job.key_of(raw)
-            except Exception as exc:                      # noqa: BLE001
-                record.item(ItemResult(uuid.uuid4().hex[:12], ITEM_FAILED,
-                                       error=f"key: {type(exc).__name__}: {exc}"))
+            except Exception as exc:  # noqa: BLE001
+                record.item(
+                    ItemResult(
+                        uuid.uuid4().hex[:12],
+                        ITEM_FAILED,
+                        error=f"key: {type(exc).__name__}: {exc}",
+                    )
+                )
                 if policy.mode == "stop":
                     stopped.set()
                 continue
@@ -231,7 +267,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
             task.add_done_callback(tasks.discard)
         if tasks:
             await asyncio.gather(*list(tasks))
-    except Exception as exc:                              # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # The source itself broke — a bad line, a dead connection. What
         # was already in flight still finishes and is still recorded.
         source_error = f"source: {type(exc).__name__}: {exc}"
@@ -241,7 +277,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
     finally:
         try:
             await sink.close()
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             LOGGER.error(f"[job:{job.name}] sink close failed: {type(exc).__name__}: {exc}")
 
     if stopped.is_set():
@@ -264,17 +300,22 @@ async def run_stream(job: "Job", *, resume: bool = False) -> JobRun:
     egress ``sent``, holds the run's trace id, and cannot resume.
     """
     if resume:
-        raise ValueError(f"job {job.name!r}: a stream job cannot resume — one run, "
-                         "no per-item outcomes to skip; run it again")
+        raise ValueError(
+            f"job {job.name!r}: a stream job cannot resume — one run, "
+            "no per-item outcomes to skip; run it again"
+        )
     engine = job.engine()
     source = as_source(job.source)
     sink = as_sink(job.sink)
     record = RunRecord(Path(job.record_dir), job.name, meta=job.describe())
-    LOGGER.info(f"[job:{job.name}] {source!r} -> {engine.name} -> {sink!r} "
-                f"(stream, max_inflight={job.max_inflight})")
+    LOGGER.info(
+        f"[job:{job.name}] {source!r} -> {engine.name} -> {sink!r} "
+        f"(stream, max_inflight={job.max_inflight})"
+    )
 
-    session = JobSession(sink, None, meta={"job": job.name, "job_run": record.run_id},
-                         max_inflight=job.max_inflight)
+    session = JobSession(
+        sink, None, meta={"job": job.name, "job_run": record.run_id}, max_inflight=job.max_inflight
+    )
     fed = 0
     source_error: Optional[str] = None
 
@@ -282,39 +323,46 @@ async def run_stream(job: "Job", *, resume: bool = False) -> JobRun:
         nonlocal fed, source_error
         try:
             async for raw in source.items():
-                await session.feed(raw)                   # waits when the bound is reached
+                await session.feed(raw)  # waits when the bound is reached
                 fed += 1
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             source_error = f"source: {type(exc).__name__}: {exc}"
             LOGGER.error(f"[job:{job.name}] {source_error}")
         finally:
-            session.end_input()                           # the only end-of-input signal
+            session.end_input()  # the only end-of-input signal
 
     feeder = asyncio.create_task(feed())
     started = perf_counter()
     error: Optional[str] = None
     trace_id: Optional[str] = None
     try:
-        handle = await serve_session(engine, session, RunRequest(inputs=dict(job.inputs)),
-                                     metadata=_trace_metadata(job, record.run_id, None))
+        handle = await serve_session(
+            engine,
+            session,
+            RunRequest(inputs=dict(job.inputs)),
+            metadata=_trace_metadata(job, record.run_id, None),
+        )
         await _settle(handle)
         trace = getattr(handle, "trace", None)
         trace_id = getattr(trace, "trace_id", None)
         error = _first_error(trace)
-    except Exception as exc:                              # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
     finally:
         await feeder
         try:
             await sink.close()
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             LOGGER.error(f"[job:{job.name}] sink close failed: {type(exc).__name__}: {exc}")
 
     error = error or session.sink_error and f"sink: {session.sink_error}" or source_error
     status = RUN_FAILED if error else RUN_OK
-    run = record.finish(status, error=error,
-                        counts={"fed": fed, "sent": session.sent},
-                        extra={"trace_id": trace_id, "ms": (perf_counter() - started) * 1000})
+    run = record.finish(
+        status,
+        error=error,
+        counts={"fed": fed, "sent": session.sent},
+        extra={"trace_id": trace_id, "ms": (perf_counter() - started) * 1000},
+    )
     LOGGER.info(f"[job:{job.name}] {run.summary()}  {run.path}")
     return run
 

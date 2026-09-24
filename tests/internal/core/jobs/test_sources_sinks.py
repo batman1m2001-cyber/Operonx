@@ -31,6 +31,7 @@ async def _drain(source):
 
 # -- sources ----------------------------------------------------------------
 
+
 async def test_jsonl_source_skips_blank_lines_and_names_a_bad_one(tmp_path):
     p = tmp_path / "in.jsonl"
     p.write_text('{"id": 1}\n\n{"id": 2}\n', encoding="utf-8")
@@ -44,7 +45,10 @@ async def test_jsonl_source_skips_blank_lines_and_names_a_bad_one(tmp_path):
 async def test_csv_source_yields_dicts_of_strings(tmp_path):
     p = tmp_path / "in.csv"
     p.write_text("id,text\na,hello\nb,world\n", encoding="utf-8")
-    assert await _drain(CsvSource(p)) == [{"id": "a", "text": "hello"}, {"id": "b", "text": "world"}]
+    assert await _drain(CsvSource(p)) == [
+        {"id": "a", "text": "hello"},
+        {"id": "b", "text": "world"},
+    ]
 
 
 async def test_python_source_takes_every_shape_python_can_iterate(tmp_path, monkeypatch):
@@ -65,11 +69,14 @@ async def test_python_source_takes_every_shape_python_can_iterate(tmp_path, monk
     assert await _drain(PythonSource(agen)) == [7]
     assert await _drain(PythonSource(coro)) == [8, 9]
 
-    (tmp_path / "feeds.py").write_text(textwrap.dedent("""
+    (tmp_path / "feeds.py").write_text(
+        textwrap.dedent("""
         ITEMS = ["x", "y"]
         def rows():
             yield {"k": 1}
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     monkeypatch.syspath_prepend(str(tmp_path))
     assert await _drain(PythonSource("feeds:ITEMS")) == ["x", "y"]
     assert await _drain(PythonSource("feeds:rows")) == [{"k": 1}]
@@ -84,7 +91,7 @@ async def test_as_source_picks_by_shape(tmp_path):
     assert isinstance(as_source(str(p)), JsonlSource)
     assert isinstance(as_source(tmp_path / "b.csv"), CsvSource)
     assert isinstance(as_source([1]), PythonSource)
-    assert isinstance(as_source({"not": "a source"}), PythonSource)   # a dict has .items too
+    assert isinstance(as_source({"not": "a source"}), PythonSource)  # a dict has .items too
     src = JsonlSource(p)
     assert as_source(src) is src
     with pytest.raises(ValueError, match="expected .jsonl or .csv"):
@@ -104,6 +111,7 @@ def test_open_source_needs_what_each_kind_needs():
 
 # -- sinks ----------------------------------------------------------------------
 
+
 async def test_jsonl_sink_puts_the_key_first_and_appends(tmp_path):
     p = tmp_path / "out.jsonl"
     sink = JsonlSink(p)
@@ -114,7 +122,7 @@ async def test_jsonl_sink_puts_the_key_first_and_appends(tmp_path):
     assert rows == [{"_key": "k1", "score": 1}, {"_key": "k2", "item": "plain"}]
     assert list(rows[0]) == ["_key", "score"]
 
-    again = JsonlSink(p)                                # append is the default
+    again = JsonlSink(p)  # append is the default
     await again.write("k3", {})
     await again.close()
     assert len(p.read_text(encoding="utf-8").splitlines()) == 3
@@ -185,19 +193,21 @@ async def test_as_sink_picks_by_shape(tmp_path):
 
 # -- as resources ---------------------------------------------------------------
 
+
 @pytest.fixture
 def hub(tmp_path):
     (tmp_path / "calls.jsonl").write_text('{"id": "a"}\n', encoding="utf-8")
-    (tmp_path / "resources.yaml").write_text(textwrap.dedent(f"""
+    (tmp_path / "resources.yaml").write_text(
+        textwrap.dedent(f"""
         source:calls:
           kind: jsonl
-          path: {tmp_path / 'calls.jsonl'}
+          path: {tmp_path / "calls.jsonl"}
         source:feed:
           kind: python
           entry: feeds:ITEMS
         sink:scores:
           kind: jsonl
-          path: {tmp_path / 'scores.jsonl'}
+          path: {tmp_path / "scores.jsonl"}
           mode: overwrite
         sink:drop:
           kind: "null"
@@ -206,7 +216,9 @@ def hub(tmp_path):
           api_key: x
           base_url: http://localhost
           model: m
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     hub = ResourceHub.from_yaml(tmp_path / "resources.yaml")
     ResourceHub.set_instance(hub)
     try:
@@ -219,7 +231,7 @@ async def test_sources_and_sinks_resolve_through_the_hub(hub, tmp_path):
     src = as_source("source:calls")
     assert isinstance(src, JsonlSource) and src.path == tmp_path / "calls.jsonl"
     assert await _drain(src) == [{"id": "a"}]
-    assert as_source("source:calls") is src            # cached, like every resource
+    assert as_source("source:calls") is src  # cached, like every resource
 
     feed = as_source("source:feed")
     assert isinstance(feed, PythonSource)

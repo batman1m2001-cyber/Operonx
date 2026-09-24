@@ -66,7 +66,9 @@ class JsonlSink:
     a time: a run that is killed still leaves every item it finished.
     """
 
-    def __init__(self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD):
+    def __init__(
+        self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD
+    ):
         if mode not in ("append", "overwrite"):
             raise ValueError(f"mode must be 'append' or 'overwrite', not {mode!r}")
         self.path = Path(path)
@@ -102,7 +104,9 @@ class CsvSink:
     those columns and anything else is dropped rather than shifting a
     column — a CSV with a ragged row is worse than one with a hole."""
 
-    def __init__(self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD):
+    def __init__(
+        self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD
+    ):
         if mode not in ("append", "overwrite"):
             raise ValueError(f"mode must be 'append' or 'overwrite', not {mode!r}")
         self.path = Path(path)
@@ -116,9 +120,15 @@ class CsvSink:
         row = _as_row(key, item, self.key_field)
         if self._writer is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            fresh = self.mode == "overwrite" or not self.path.exists() or self.path.stat().st_size == 0
-            self._fh = self.path.open("a" if self.mode == "append" else "w", encoding="utf-8", newline="")
-            self._writer = csv.DictWriter(self._fh, fieldnames=list(row.keys()), extrasaction="ignore")
+            fresh = (
+                self.mode == "overwrite" or not self.path.exists() or self.path.stat().st_size == 0
+            )
+            self._fh = self.path.open(
+                "a" if self.mode == "append" else "w", encoding="utf-8", newline=""
+            )
+            self._writer = csv.DictWriter(
+                self._fh, fieldnames=list(row.keys()), extrasaction="ignore"
+            )
             if fresh:
                 self._writer.writeheader()
         self._writer.writerow(row)
@@ -188,7 +198,9 @@ class PythonSink:
 
     def __repr__(self) -> str:
         fn = self._fn
-        return f"python({fn if isinstance(fn, str) else getattr(fn, '__name__', type(fn).__name__)})"
+        return (
+            f"python({fn if isinstance(fn, str) else getattr(fn, '__name__', type(fn).__name__)})"
+        )
 
 
 class NullSink:
@@ -209,6 +221,7 @@ class NullSink:
 
 # -- as a resource ---------------------------------------------------------
 
+
 class SinkConfig(YamlModel):
     """A ``sink:<name>`` block in resources.yaml."""
 
@@ -221,8 +234,14 @@ class SinkConfig(YamlModel):
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
-def open_sink(kind: str, *, path: Optional[str] = None, entry: Optional[str] = None,
-              mode: str = "append", **options: Any) -> Sink:
+def open_sink(
+    kind: str,
+    *,
+    path: Optional[str] = None,
+    entry: Optional[str] = None,
+    mode: str = "append",
+    **options: Any,
+) -> Sink:
     if kind == "jsonl":
         if not path:
             raise ValueError("sink kind 'jsonl' needs `path`")
@@ -241,13 +260,17 @@ def open_sink(kind: str, *, path: Optional[str] = None, entry: Optional[str] = N
 
 
 def create_sink(config: SinkConfig) -> Sink:
-    return open_sink(config.kind, path=config.path, entry=config.entry, mode=config.mode,
-                     **config.options)
+    return open_sink(
+        config.kind, path=config.path, entry=config.entry, mode=config.mode, **config.options
+    )
 
 
 def _is_sink(obj: Any) -> bool:
-    return callable(getattr(obj, "write", None)) and callable(getattr(obj, "close", None)) \
+    return (
+        callable(getattr(obj, "write", None))
+        and callable(getattr(obj, "close", None))
         and not isinstance(obj, (str, bytes, Path))
+    )
 
 
 def _by_extension(path: Path) -> Sink:
@@ -256,8 +279,10 @@ def _by_extension(path: Path) -> Sink:
         return JsonlSink(path)
     if ext == ".csv":
         return CsvSink(path)
-    raise ValueError(f"cannot tell a sink from {path}: expected .jsonl or .csv, "
-                     "or declare it under `sink:` in resources.yaml")
+    raise ValueError(
+        f"cannot tell a sink from {path}: expected .jsonl or .csv, "
+        "or declare it under `sink:` in resources.yaml"
+    )
 
 
 def as_sink(obj: Any) -> Sink:
@@ -281,8 +306,9 @@ def as_sink(obj: Any) -> Sink:
             register()
             resolved = ResourceHub.instance().get(obj)
             if not _is_sink(resolved):
-                raise TypeError(f"{obj!r} resolved to {type(resolved).__name__}, "
-                                "which is not a sink")
+                raise TypeError(
+                    f"{obj!r} resolved to {type(resolved).__name__}, which is not a sink"
+                )
             return resolved
         return _by_extension(Path(obj))
     if isinstance(obj, Path):

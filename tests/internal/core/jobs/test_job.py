@@ -30,9 +30,9 @@ from operonx.core.serve import egress, ingress
 
 # -- the graph under test ---------------------------------------------------
 
-FAIL: set = set()            # item ids that raise every time
-FAIL_ONCE: set = set()       # item ids that raise on their first attempt only
-ATTEMPTS: dict = {}          # id -> how many times `score` ran for it
+FAIL: set = set()  # item ids that raise every time
+FAIL_ONCE: set = set()  # item ids that raise on their first attempt only
+ATTEMPTS: dict = {}  # id -> how many times `score` ran for it
 INFLIGHT = {"now": 0, "max": 0}
 
 
@@ -96,17 +96,26 @@ def _reset_op_state():
 
 
 def make_job(tmp_path, **overrides) -> Job:
-    kwargs = dict(graph=score_flow, source=list(ITEMS), sink=None, key="id",
-                  record_dir=tmp_path / "jobs", concurrency=1)
+    kwargs = dict(
+        graph=score_flow,
+        source=list(ITEMS),
+        sink=None,
+        key="id",
+        record_dir=tmp_path / "jobs",
+        concurrency=1,
+    )
     kwargs.update(overrides)
     return Job("score", **kwargs)
 
 
 def _lines(path):
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 # -- the record ---------------------------------------------------------------
+
 
 async def test_per_item_runs_every_item_and_records_each(tmp_path):
     FAIL.add("b")
@@ -122,7 +131,7 @@ async def test_per_item_runs_every_item_and_records_each(tmp_path):
     (failed,) = run.failed
     assert failed.key == "b"
     assert failed.error.startswith("scored: ") and "cannot score b" in failed.error
-    assert failed.trace_id                            # the run is findable in the traces
+    assert failed.trace_id  # the run is findable in the traces
     assert all(i.trace_id for i in run.items)
     assert all(i.sent == 1 for i in run.ok)
 
@@ -143,14 +152,14 @@ async def test_resume_runs_only_what_failed(tmp_path):
     first = await job.run()
     assert (first.counts[ITEM_OK], first.counts[ITEM_FAILED]) == (2, 1)
 
-    FAIL.clear()                                      # "fixed"
+    FAIL.clear()  # "fixed"
     ATTEMPTS.clear()
     second = await job.run(resume=True)
 
     assert second.status == RUN_OK
     assert second.resume_from == first.run_id
     assert second.counts == {"ok": 1, "failed": 0, "empty": 0, "skipped": 2, "timeout": 0}
-    assert ATTEMPTS == {"b": 1}                        # a and c never ran again
+    assert ATTEMPTS == {"b": 1}  # a and c never ran again
     assert last_run(tmp_path / "jobs", "score").run_id == second.run_id
 
 
@@ -174,6 +183,7 @@ async def test_a_resumed_run_is_itself_resumable(tmp_path):
 
 # -- failure policy -----------------------------------------------------------
 
+
 async def test_skip_carries_on_and_the_run_is_failed(tmp_path):
     FAIL.update({"a", "c"})
     run = await make_job(tmp_path, on_error="skip").run()
@@ -186,7 +196,7 @@ async def test_stop_starts_nothing_after_a_failure(tmp_path):
     run = await make_job(tmp_path, on_error="stop", concurrency=1).run()
     assert run.status == RUN_STOPPED
     assert [i.key for i in run.items] == ["a", "b"]
-    assert "c" not in ATTEMPTS                         # never dispatched
+    assert "c" not in ATTEMPTS  # never dispatched
 
 
 async def test_retry_tries_again_and_counts_the_attempts(tmp_path):
@@ -218,12 +228,13 @@ def test_a_bad_policy_is_refused_at_declaration(tmp_path):
 
 # -- what "nothing came out" looks like ---------------------------------------
 
+
 async def test_a_run_that_sends_nothing_is_empty_not_ok(tmp_path):
     """The Analyze bug: 90 of 90 wrote nothing and the runner said OK."""
     got: list = []
     run = await make_job(tmp_path, graph=no_egress_flow, sink=got).run()
-    assert run.status == RUN_OK                        # nothing failed…
-    assert run.counts[ITEM_EMPTY] == 3                 # …but the record says nothing came out
+    assert run.status == RUN_OK  # nothing failed…
+    assert run.counts[ITEM_EMPTY] == 3  # …but the record says nothing came out
     assert got == []
     assert all(i.sent == 0 for i in run.items)
 
@@ -242,6 +253,7 @@ async def test_a_sink_that_cannot_write_fails_the_item(tmp_path):
 
 
 # -- identity -------------------------------------------------------------------
+
 
 async def test_key_from_a_function_and_from_nothing(tmp_path):
     by_fn = await make_job(tmp_path, key=lambda it: it["id"].upper()).run()
@@ -263,6 +275,7 @@ async def test_an_item_without_its_key_is_a_failed_item(tmp_path):
 
 # -- concurrency and the no-door shape -------------------------------------------
 
+
 async def test_concurrency_bounds_items_in_flight(tmp_path):
     items = [{"id": str(n), "text": "t"} for n in range(8)]
     await make_job(tmp_path, source=items, concurrency=3).run()
@@ -272,8 +285,14 @@ async def test_concurrency_bounds_items_in_flight(tmp_path):
 async def test_a_graph_without_doors_takes_the_item_as_an_input(tmp_path):
     """`engine.batch()` as a Job: the run's result is the item's result."""
     got: list = []
-    job = Job("double", graph=doubling(val=PARENT["val"]), source=[1, 2, 3], sink=got,
-              item_input="val", record_dir=tmp_path / "jobs")
+    job = Job(
+        "double",
+        graph=doubling(val=PARENT["val"]),
+        source=[1, 2, 3],
+        sink=got,
+        item_input="val",
+        record_dir=tmp_path / "jobs",
+    )
     run = await job.run()
     assert run.status == RUN_OK and run.counts[ITEM_OK] == 3
     assert [g["result"] for g in got] == [2, 4, 6]
@@ -300,13 +319,14 @@ def test_describe_names_things_without_leaking_values(tmp_path):
 
 # -- stream mode ----------------------------------------------------------------
 
+
 async def test_stream_feeds_every_item_through_one_run(tmp_path):
     got: list = []
     run = await make_job(tmp_path, session="stream", sink=got).run()
     assert run.status == RUN_OK
     assert run.counts["fed"] == 3 and run.counts["sent"] == 3
-    assert run.items == []                             # no per-item outcomes in one run
-    assert run.meta["trace_id"]                        # …but the one trace is named
+    assert run.items == []  # no per-item outcomes in one run
+    assert run.meta["trace_id"]  # …but the one trace is named
     assert [g["id"] for g in got] == ["a", "b", "c"]
     assert set(ATTEMPTS) == {"a", "b", "c"}
     assert "fed=3 sent=3" in run.summary()
@@ -339,6 +359,7 @@ async def test_stream_bound_is_the_sessions_bound(tmp_path):
 
 # -- what the trace carries ----------------------------------------------------------
 
+
 class Capture:
     """A trace consumer that keeps every trace it is handed."""
 
@@ -358,10 +379,10 @@ class Capture:
 async def test_every_run_carries_the_job_on_its_trace(tmp_path):
     cap = Capture()
     run = await make_job(tmp_path, trace=[cap.consumer]).run()
-    assert len(cap.traces) == 3                        # one per item, and all of them flushed
+    assert len(cap.traces) == 3  # one per item, and all of them flushed
     by_id = {t.trace_id: t for t in cap.traces}
     for item in run.items:
-        t = by_id[item.trace_id]                       # the record's trace id is the trace's
+        t = by_id[item.trace_id]  # the record's trace id is the trace's
         md = t.metadata
         assert md["job"] == "score" and md["job_run"] == run.run_id and md["key"] == item.key
         assert md["tags"] == ["job:score", f"job_run:{run.run_id}", f"key:{item.key}"]
@@ -380,6 +401,7 @@ async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
 
 # -- a deadline per item --------------------------------------------------------------
 
+
 @op(bound="io")
 async def slow(item: dict = None) -> dict:
     await asyncio.sleep(0.4)
@@ -396,13 +418,15 @@ def slow_flow():
 
 async def test_an_item_past_its_deadline_is_recorded_timeout(tmp_path):
     got: list = []
-    run = await make_job(tmp_path, graph=slow_flow, sink=got, item_timeout=0.05, concurrency=3).run()
+    run = await make_job(
+        tmp_path, graph=slow_flow, sink=got, item_timeout=0.05, concurrency=3
+    ).run()
     assert run.status == RUN_FAILED
     assert run.counts["timeout"] == 3 and run.counts["ok"] == 0
     assert all(i.error == "run exceeded 0.05s" for i in run.timed_out)
     assert "timeout=3" in run.summary()
     assert got == []
-    assert all(i.ms < 300 for i in run.items)          # cancelled, not waited out
+    assert all(i.ms < 300 for i in run.items)  # cancelled, not waited out
 
 
 async def test_a_timeout_is_retried_and_stops_like_a_failure(tmp_path):
@@ -416,7 +440,7 @@ async def test_a_timeout_is_retried_and_stops_like_a_failure(tmp_path):
 async def test_a_timed_out_item_runs_again_on_resume(tmp_path):
     job = make_job(tmp_path, graph=slow_flow, item_timeout=0.05)
     await job.run()
-    job.item_timeout = None                             # "fixed": no deadline
+    job.item_timeout = None  # "fixed": no deadline
     again = await job.run(resume=True)
     assert again.counts["ok"] == 3 and again.counts["skipped"] == 0
 

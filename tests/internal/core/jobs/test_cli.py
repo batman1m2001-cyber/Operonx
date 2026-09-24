@@ -10,7 +10,7 @@ import pytest
 
 from operonx.cli.run import main
 
-MODULE = '''
+MODULE = """
 from operonx.core import END, START, graph, op
 from operonx.core.jobs import Job, Runbook
 from operonx.core.serve import egress, ingress
@@ -37,7 +37,7 @@ job = Job("shout", graph=flow, source=ITEMS, key="id", description="says it loud
 failing = Job("shout_bad", graph=flow, source=ITEMS + [{"id": "z", "text": "", "bad": True}], key="id")
 not_a_job = 42
 nightly = Runbook("nightly", job >> failing, on_error="continue", description="both, in order")
-'''
+"""
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def test_resume_reaches_the_runner(project, capsys):
     main([f"{name}:failing", "--record-dir", str(root / "jobs")])
     main([f"{name}:failing", "--record-dir", str(root / "jobs"), "--resume"])
     out = capsys.readouterr().out
-    assert "skipped=3" in out                        # the three that were fine
+    assert "skipped=3" in out  # the three that were fine
 
 
 def test_show_prints_what_would_run_and_runs_nothing(project, capsys):
@@ -101,14 +101,17 @@ def test_bad_targets_are_named_on_stderr(project, capsys):
 
 # -- from the manifest ------------------------------------------------------------
 
+
 @pytest.fixture
 def manifest_project(project):
     """The same module, declared as [[job]] blocks in operonx.toml."""
     name, root = project
     (root / "data.jsonl").write_text(
         '{"id": "a", "text": "x"}\n{"id": "b", "text": "y"}\n{"id": "c", "text": "z"}\n',
-        encoding="utf-8")
-    (root / "operonx.toml").write_text(textwrap.dedent(f"""
+        encoding="utf-8",
+    )
+    (root / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "demo"
 
@@ -126,23 +129,25 @@ def manifest_project(project):
         graph   = "{name}:flow"
         source  = "data.jsonl"
         session = "stream"
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     return name, root
 
 
 def test_a_job_runs_by_its_manifest_name(manifest_project, capsys):
     _, root = manifest_project
-    code = main(["shout"])                            # manifest found from the cwd
+    code = main(["shout"])  # manifest found from the cwd
     out = capsys.readouterr().out
     assert code == 0 and "shout " in out and "ok=3 failed=0" in out
-    assert (root / "jobs" / "shout").is_dir()          # record_dir defaults beside the manifest
+    assert (root / "jobs" / "shout").is_dir()  # record_dir defaults beside the manifest
     assert len((root / "out.jsonl").read_text(encoding="utf-8").splitlines()) == 3
 
 
 def test_a_stream_job_runs_and_refuses_to_resume(manifest_project, capsys):
     _, root = manifest_project
     assert main(["shout_stream", "-f", str(root / "operonx.toml")]) == 0
-    assert "fed=3 sent=3" in capsys.readouterr().out    # one run: what went in, what came out
+    assert "fed=3 sent=3" in capsys.readouterr().out  # one run: what went in, what came out
     assert main(["shout_stream", "--resume"]) == 2
     assert "cannot resume" in capsys.readouterr().err
 
@@ -156,16 +161,19 @@ def test_list_prints_every_job_with_its_schedule(manifest_project, capsys):
     assert "shout_stream" in out and "stream" in out and "louder, on a schedule" in out
 
 
-def test_an_unknown_name_and_a_missing_manifest_are_named(manifest_project, capsys, tmp_path_factory):
+def test_an_unknown_name_and_a_missing_manifest_are_named(
+    manifest_project, capsys, tmp_path_factory
+):
     assert main(["nope"]) == 2
     assert "no job named 'nope'" in capsys.readouterr().err
     elsewhere = tmp_path_factory.mktemp("empty")
     assert main(["shout", "-f", str(elsewhere / "operonx.toml")]) == 2
-    with pytest.raises(SystemExit):                    # argparse: name a job, or --list
+    with pytest.raises(SystemExit):  # argparse: name a job, or --list
         main([])
 
 
 # -- runbooks -----------------------------------------------------------------------
+
 
 def test_a_runbook_runs_by_path_and_reports_its_jobs(project, capsys):
     name, root = project
@@ -188,7 +196,8 @@ def test_show_prints_a_runbooks_tree(project, capsys):
 
 def test_a_runbook_runs_by_its_manifest_name(manifest_project, capsys):
     name, root = manifest_project
-    (root / "operonx.toml").write_text(textwrap.dedent(f"""
+    (root / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "demo"
 
@@ -197,7 +206,9 @@ def test_a_runbook_runs_by_its_manifest_name(manifest_project, capsys):
         runbook = "{name}:nightly"
         record_dir = "runs"
         schedule = "0 3 * * *"
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     assert main(["--list"]) == 0
     listed = capsys.readouterr().out
     assert "nightly" in listed and "runbook" in listed and "[0 3 * * *]" in listed

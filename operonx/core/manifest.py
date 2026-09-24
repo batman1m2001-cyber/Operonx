@@ -49,9 +49,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-try:                                                  # Python 3.11+
+try:  # Python 3.11+
     import tomllib as _toml
-except ModuleNotFoundError:                           # 3.10
+except ModuleNotFoundError:  # 3.10
     import tomli as _toml  # type: ignore[no-redef]
 
 from operonx.core.registry.storage.yaml import _interpolate_env_vars
@@ -270,7 +270,7 @@ class Manifest:
             raise ManifestError(f"no manifest at {path}")
         try:
             raw = _toml.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:                       # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             raise ManifestError(f"{path}: not valid TOML — {exc}") from exc
         return cls.from_dict(raw, source=path)
 
@@ -306,8 +306,7 @@ class Manifest:
         on_startup = tuple(str(h) for h in _as_list(project.get("on_startup")))
         for hook in on_startup:
             if not _ENTRY_RE.match(hook):
-                raise ManifestError(
-                    f"{where}: on_startup {hook!r} is not `module:function`")
+                raise ManifestError(f"{where}: on_startup {hook!r} is not `module:function`")
         resources = raw.get("resources") or {}
         overlay = resources.get("overlay") if isinstance(resources, dict) else None
 
@@ -329,20 +328,17 @@ class Manifest:
                 fixtures.setdefault(g.name, dict(g.inputs))
 
         serves = tuple(
-            _serve_spec(block, where, i)
-            for i, block in enumerate(_as_list(raw.get("serve")))
+            _serve_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("serve")))
         )
         _reject_duplicates(serves, where)
 
-        jobs = tuple(
-            _job_spec(block, where, i)
-            for i, block in enumerate(_as_list(raw.get("job")))
-        )
+        jobs = tuple(_job_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("job"))))
         seen_jobs: Dict[str, int] = {}
         for i, j in enumerate(jobs):
             if j.name in seen_jobs:
                 raise ManifestError(
-                    f"{where}: [[job]] #{seen_jobs[j.name]} and #{i} are both named {j.name!r}")
+                    f"{where}: [[job]] #{seen_jobs[j.name]} and #{i} are both named {j.name!r}"
+                )
             seen_jobs[j.name] = i
 
         return cls(
@@ -358,6 +354,7 @@ class Manifest:
 
 
 # -- parsing helpers -----------------------------------------------------
+
 
 def _as_list(value: Any) -> list:
     if value is None:
@@ -376,8 +373,7 @@ def _graph_spec(block: Any, where: str, index: int) -> GraphSpec:
         raise ManifestError(f"{where}: [[graph]] {name or index!r} has no `entry`")
     if not _ENTRY_RE.match(str(entry)):
         raise ManifestError(
-            f"{where}: [[graph]] {name or index!r} entry {entry!r} is not "
-            f"`module:function`"
+            f"{where}: [[graph]] {name or index!r} entry {entry!r} is not `module:function`"
         )
     return GraphSpec(
         name=str(name or entry),
@@ -408,9 +404,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         if not app:
             raise ManifestError(f"{where}: {label} is kind 'asgi' but has no `app`")
         if graph:
-            raise ManifestError(
-                f"{where}: {label} is kind 'asgi' and cannot also name a `graph`"
-            )
+            raise ManifestError(f"{where}: {label} is kind 'asgi' and cannot also name a `graph`")
     else:
         if not graph:
             raise ManifestError(f"{where}: {label} has no `graph`")
@@ -419,8 +413,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         # second place to keep in step for no benefit, and it is gone.
         if not _ENTRY_RE.match(graph):
             raise ManifestError(
-                f"{where}: {label} graph {graph!r} is not a `module:function` "
-                f"entry point"
+                f"{where}: {label} graph {graph!r} is not a `module:function` entry point"
             )
 
     session = str(block.get("session") or _default_session(kind))
@@ -433,8 +426,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
     max_inflight = block.get("max_inflight")
     if max_inflight is not None and (not isinstance(max_inflight, int) or max_inflight < 1):
         raise ManifestError(
-            f"{where}: {label} has max_inflight={max_inflight!r}; expected a "
-            f"positive integer"
+            f"{where}: {label} has max_inflight={max_inflight!r}; expected a positive integer"
         )
     if kind in STREAM_KINDS and max_inflight is None:
         # Deliberately not defaulted. operonx guards concurrency and, since
@@ -456,13 +448,22 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         # Caught here rather than at bind, where it surfaces as an OSError
         # from deep inside the event loop after everything else has already
         # started.
-        raise ManifestError(
-            f"{where}: {label} has port {port}, outside the range 1-65535"
-        )
+        raise ManifestError(f"{where}: {label} has port {port}, outside the range 1-65535")
 
     known_keys = {
-        "name", "kind", "graph", "path", "method", "host", "port", "session",
-        "max_inflight", "on_session", "on_close", "app", "description",
+        "name",
+        "kind",
+        "graph",
+        "path",
+        "method",
+        "host",
+        "port",
+        "session",
+        "max_inflight",
+        "on_session",
+        "on_close",
+        "app",
+        "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
 
@@ -499,15 +500,21 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
             raise ManifestError(f"{where}: {label} names both `graph` and `runbook`")
         if not _ENTRY_RE.match(runbook):
             raise ManifestError(
-                f"{where}: {label} runbook {runbook!r} is not a `module:attr` entry point")
-        stray = sorted(k for k in block if k not in
-                       {"name", "runbook", "schedule", "record_dir", "description"})
+                f"{where}: {label} runbook {runbook!r} is not a `module:attr` entry point"
+            )
+        stray = sorted(
+            k
+            for k in block
+            if k not in {"name", "runbook", "schedule", "record_dir", "description"}
+        )
         if stray:
             raise ManifestError(
                 f"{where}: {label} is a runbook and cannot set {', '.join(stray)} — "
-                "its jobs declare those")
+                "its jobs declare those"
+            )
         return JobSpec(
-            name=name, runbook=runbook,
+            name=name,
+            runbook=runbook,
             schedule=(str(block["schedule"]) if block.get("schedule") else None),
             record_dir=(str(block["record_dir"]) if block.get("record_dir") else None),
             description=str(block.get("description") or ""),
@@ -516,43 +523,65 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         raise ManifestError(f"{where}: {label} has no `graph` (or `runbook`)")
     if not _ENTRY_RE.match(graph):
         raise ManifestError(
-            f"{where}: {label} graph {graph!r} is not a `module:function` entry point")
+            f"{where}: {label} graph {graph!r} is not a `module:function` entry point"
+        )
 
     item_timeout = block.get("item_timeout")
     if item_timeout is not None and (
-            isinstance(item_timeout, bool) or not isinstance(item_timeout, (int, float))
-            or item_timeout <= 0):
+        isinstance(item_timeout, bool)
+        or not isinstance(item_timeout, (int, float))
+        or item_timeout <= 0
+    ):
         raise ManifestError(
-            f"{where}: {label} has item_timeout={item_timeout!r}; expected seconds, > 0")
+            f"{where}: {label} has item_timeout={item_timeout!r}; expected seconds, > 0"
+        )
 
     session = str(block.get("session") or "per_item")
     if session not in JOB_SESSION_MODES:
         raise ManifestError(
             f"{where}: {label} has session {session!r}; expected one of "
-            f"{', '.join(sorted(JOB_SESSION_MODES))}")
+            f"{', '.join(sorted(JOB_SESSION_MODES))}"
+        )
 
     concurrency = block.get("concurrency", 4)
     if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 1:
         raise ManifestError(
-            f"{where}: {label} has concurrency={concurrency!r}; expected a positive integer")
+            f"{where}: {label} has concurrency={concurrency!r}; expected a positive integer"
+        )
 
     on_error = str(block.get("on_error") or "skip").strip().lower()
     if not _ON_ERROR_RE.match(on_error):
         raise ManifestError(
-            f"{where}: {label} has on_error {on_error!r}; expected skip, stop or retry:N")
+            f"{where}: {label} has on_error {on_error!r}; expected skip, stop or retry:N"
+        )
 
     max_inflight = block.get("max_inflight")
     if max_inflight is not None and (not isinstance(max_inflight, int) or max_inflight < 1):
         raise ManifestError(
-            f"{where}: {label} has max_inflight={max_inflight!r}; expected a positive integer")
+            f"{where}: {label} has max_inflight={max_inflight!r}; expected a positive integer"
+        )
 
     inputs = block.get("inputs") or {}
     if not isinstance(inputs, dict):
         raise ManifestError(f"{where}: {label} `inputs` must be a table")
 
     known_keys = {
-        "name", "graph", "runbook", "source", "sink", "key", "session", "concurrency", "on_error",
-        "trace", "inputs", "item_input", "item_timeout", "max_inflight", "schedule", "record_dir",
+        "name",
+        "graph",
+        "runbook",
+        "source",
+        "sink",
+        "key",
+        "session",
+        "concurrency",
+        "on_error",
+        "trace",
+        "inputs",
+        "item_input",
+        "item_timeout",
+        "max_inflight",
+        "schedule",
+        "record_dir",
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}

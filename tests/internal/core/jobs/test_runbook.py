@@ -31,8 +31,8 @@ from operonx.telemetry.consumer import Consumer
 
 # -- four small jobs, handing off through shared lists -----------------------------
 
-FAIL: set = set()                    # (job, item id) pairs that raise
-WINDOWS: dict = {}                   # job -> [(start, end)] of every op run
+FAIL: set = set()  # (job, item id) pairs that raise
+WINDOWS: dict = {}  # job -> [(start, end)] of every op run
 
 
 def _record(job: str, t0: float) -> None:
@@ -82,6 +82,7 @@ def _flow(name, fn, out_key):
         step = fn(item=src["item"])
         out = egress(item=step[out_key])
         START >> src >> step >> out >> END
+
     return flow
 
 
@@ -111,13 +112,43 @@ def jobs(tmp_path):
     scores: list = []
     members: list = []
     common = dict(key="id", record_dir=tmp_path / "jobs", trace=[cap], concurrency=4)
-    extract = Job("extract", graph=_flow("extract_flow", extract_op, "doc"), source=raw, sink=docs, **common)
-    embed = Job("embed", graph=_flow("embed_flow", embed_op, "vec"), source=lambda: docs, sink=vecs, **common)
-    score = Job("score", graph=_flow("score_flow", score_op, "scored"), source=lambda: docs, sink=scores, **common)
-    cluster = Job("cluster", graph=_flow("cluster_flow", cluster_op, "member"), source=lambda: vecs,
-                  sink=members, session="stream", record_dir=tmp_path / "jobs", trace=[cap])
-    return dict(extract=extract, embed=embed, score=score, cluster=cluster, cap=cap,
-                docs=docs, vecs=vecs, scores=scores, members=members)
+    extract = Job(
+        "extract", graph=_flow("extract_flow", extract_op, "doc"), source=raw, sink=docs, **common
+    )
+    embed = Job(
+        "embed",
+        graph=_flow("embed_flow", embed_op, "vec"),
+        source=lambda: docs,
+        sink=vecs,
+        **common,
+    )
+    score = Job(
+        "score",
+        graph=_flow("score_flow", score_op, "scored"),
+        source=lambda: docs,
+        sink=scores,
+        **common,
+    )
+    cluster = Job(
+        "cluster",
+        graph=_flow("cluster_flow", cluster_op, "member"),
+        source=lambda: vecs,
+        sink=members,
+        session="stream",
+        record_dir=tmp_path / "jobs",
+        trace=[cap],
+    )
+    return dict(
+        extract=extract,
+        embed=embed,
+        score=score,
+        cluster=cluster,
+        cap=cap,
+        docs=docs,
+        vecs=vecs,
+        scores=scores,
+        members=members,
+    )
 
 
 def _overlap(a, b) -> bool:
@@ -126,9 +157,14 @@ def _overlap(a, b) -> bool:
 
 # -- the gate ----------------------------------------------------------------------
 
+
 async def test_nightly_runs_the_tree_and_records_it(tmp_path, jobs):
-    nightly = Runbook("nightly", jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
-                      record_dir=tmp_path / "jobs", description="the plan's example")
+    nightly = Runbook(
+        "nightly",
+        jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
+        record_dir=tmp_path / "jobs",
+        description="the plan's example",
+    )
     run = await nightly.run()
 
     assert run.status == RUN_OK
@@ -140,15 +176,23 @@ async def test_nightly_runs_the_tree_and_records_it(tmp_path, jobs):
     # Order: embed and score overlapped; cluster began after embed ended.
     assert _overlap(WINDOWS["embed"], WINDOWS["score"])
     assert min(s for s, _ in WINDOWS["cluster"]) > max(e for _, e in WINDOWS["embed"])
-    assert max(e for _, e in WINDOWS["extract"]) < min(s for s, _ in WINDOWS["embed"] + WINDOWS["score"])
+    assert max(e for _, e in WINDOWS["extract"]) < min(
+        s for s, _ in WINDOWS["embed"] + WINDOWS["score"]
+    )
 
     # The record: the tree, with a status per node and each job's own run.
     d = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
     assert d["runbook"] == "nightly" and d["status"] == "ok" and d["ended"]
     tree = d["tree"]
-    assert tree["kind"] == "sequential" and [c["kind"] for c in tree["children"]] == ["job", "parallel"]
+    assert tree["kind"] == "sequential" and [c["kind"] for c in tree["children"]] == [
+        "job",
+        "parallel",
+    ]
     branches = tree["children"][1]["children"]
-    assert branches[0]["kind"] == "sequential" and [c["name"] for c in branches[0]["children"]] == ["embed", "cluster"]
+    assert branches[0]["kind"] == "sequential" and [c["name"] for c in branches[0]["children"]] == [
+        "embed",
+        "cluster",
+    ]
     assert branches[1]["name"] == "score"
     for j in run.jobs:
         assert j.run_id and j.path
@@ -168,34 +212,46 @@ async def test_nightly_runs_the_tree_and_records_it(tmp_path, jobs):
 
 # -- failure policy ----------------------------------------------------------------
 
+
 async def test_stop_ends_the_sequence_but_a_parallel_sibling_finishes(tmp_path, jobs):
     FAIL.add(("embed", "b"))
-    nightly = Runbook("nightly", jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
-                      record_dir=tmp_path / "jobs")
+    nightly = Runbook(
+        "nightly",
+        jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
+        record_dir=tmp_path / "jobs",
+    )
     run = await nightly.run()
     assert run.status == RUN_STOPPED
     by = {j.name: j for j in run.jobs}
     assert by["extract"].status == "ok"
     assert by["embed"].status == "failed" and "1 failed" in by["embed"].error
     assert by["cluster"].status == "skipped" and by["cluster"].run_id is None
-    assert by["score"].status == "ok"                     # its branch, its business
+    assert by["score"].status == "ok"  # its branch, its business
     assert jobs["members"] == []
 
 
 async def test_continue_runs_every_step_and_the_run_is_failed(tmp_path, jobs):
     FAIL.add(("embed", "b"))
-    nightly = Runbook("nightly", jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
-                      record_dir=tmp_path / "jobs", on_error="continue")
+    nightly = Runbook(
+        "nightly",
+        jobs["extract"] >> [jobs["embed"] >> jobs["cluster"], jobs["score"]],
+        record_dir=tmp_path / "jobs",
+        on_error="continue",
+    )
     run = await nightly.run()
     assert run.status == RUN_FAILED
     by = {j.name: j for j in run.jobs}
     assert by["embed"].status == "failed" and by["cluster"].status == "ok"
-    assert len(jobs["members"]) == 2                      # clustered what embed managed
+    assert len(jobs["members"]) == 2  # clustered what embed managed
 
 
 async def test_a_job_that_raises_is_a_failed_node_not_a_crash(tmp_path):
-    broken = Job("broken", graph=_flow("broken_flow", extract_op, "doc"), source="/nonexistent/x.jsonl",
-                 record_dir=tmp_path / "jobs")
+    broken = Job(
+        "broken",
+        graph=_flow("broken_flow", extract_op, "doc"),
+        source="/nonexistent/x.jsonl",
+        record_dir=tmp_path / "jobs",
+    )
     run = await Runbook("rb", broken, record_dir=tmp_path / "jobs").run()
     assert run.status == RUN_FAILED
     assert run.jobs[0].status == "failed" and "FileNotFoundError" in run.jobs[0].error
@@ -203,8 +259,12 @@ async def test_a_job_that_raises_is_a_failed_node_not_a_crash(tmp_path):
 
 async def test_resume_reaches_per_item_jobs_and_leaves_streams_alone(tmp_path, jobs):
     FAIL.add(("extract", "b"))
-    nightly = Runbook("nightly", jobs["extract"] >> jobs["cluster"], record_dir=tmp_path / "jobs",
-                      on_error="continue")
+    nightly = Runbook(
+        "nightly",
+        jobs["extract"] >> jobs["cluster"],
+        record_dir=tmp_path / "jobs",
+        on_error="continue",
+    )
     first = await nightly.run()
     assert first.status == RUN_FAILED
     FAIL.clear()
@@ -214,11 +274,12 @@ async def test_resume_reaches_per_item_jobs_and_leaves_streams_alone(tmp_path, j
     extract_run = JobRun.load(second.jobs[0].path)
     assert extract_run.counts["skipped"] == 2 and extract_run.counts["ok"] == 1
     cluster_run = JobRun.load(second.jobs[1].path)
-    assert cluster_run.resume_from is None                # ran fresh, as a stream must
+    assert cluster_run.resume_from is None  # ran fresh, as a stream must
     assert cluster_run.counts["fed"] == len(jobs["vecs"]) == 2
 
 
 # -- composition -------------------------------------------------------------------
+
 
 def test_the_operators_build_the_same_tree_as_the_classes(tmp_path, jobs):
     a, b, c, d = jobs["extract"], jobs["embed"], jobs["cluster"], jobs["score"]

@@ -30,9 +30,13 @@ async def _drain(handle: Any) -> None:
         pass
 
 
-async def serve_session(engine: Any, session: Session, request: Optional[RunRequest] = None,
-                        metadata: Optional[Dict[str, Any]] = None,
-                        timeout: Optional[float] = None) -> Any:
+async def serve_session(
+    engine: Any,
+    session: Session,
+    request: Optional[RunRequest] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
     The session is seeded into the run's scratch under a reserved key, so
@@ -90,7 +94,7 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
         # where it happened rather than replacing whatever the run did.
         try:
             await session.close()
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             LOGGER.error(f"[serve] session close failed: {type(exc).__name__}: {exc}")
     return handle
 
@@ -110,12 +114,16 @@ class ServeRunner:
         self.engine = engine
         self.spec = spec
         self.transport = transport if transport is not None else resolve_transport(spec.kind)(spec)
-        self._on_session = (load_object(spec.on_session,
-                                        field=f"[[serve]] {spec.name!r} on_session")
-                            if spec.on_session else None)
-        self._on_close = (load_object(spec.on_close,
-                                      field=f"[[serve]] {spec.name!r} on_close")
-                          if spec.on_close else None)
+        self._on_session = (
+            load_object(spec.on_session, field=f"[[serve]] {spec.name!r} on_session")
+            if spec.on_session
+            else None
+        )
+        self._on_close = (
+            load_object(spec.on_close, field=f"[[serve]] {spec.name!r} on_close")
+            if spec.on_close
+            else None
+        )
         self._runs: set = set()
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
@@ -129,7 +137,7 @@ class ServeRunner:
             return RunRequest()
         try:
             request = self._on_session(session)
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # A hook that raises is a refusal, not a crash. Unprotected,
             # the exception left `_run_one` before its try block: the task
             # died with nobody retrieving the error, `on_close` never ran
@@ -164,13 +172,12 @@ class ServeRunner:
         handle = None
         try:
             handle = await serve_session(self.engine, session, request)
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses
             # runs quietly is the failure nobody finds in production.
             LOGGER.error(
-                f"[serve:{self.spec.name}] session run failed: "
-                f"{type(exc).__name__}: {exc}"
+                f"[serve:{self.spec.name}] session run failed: {type(exc).__name__}: {exc}"
             )
         finally:
             await self._close_one(session, handle)
@@ -189,11 +196,8 @@ class ServeRunner:
             result = self._on_close(session, handle)
             if inspect.isawaitable(result):
                 await result
-        except Exception as exc:                          # noqa: BLE001
-            LOGGER.error(
-                f"[serve:{self.spec.name}] on_close failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"[serve:{self.spec.name}] on_close failed: {type(exc).__name__}: {exc}")
 
     async def run(self) -> None:
         """Accept sessions until the transport stops, then drain."""

@@ -60,8 +60,16 @@ def test_done_keys_are_what_a_resume_may_skip():
         ItemResult("skipped", ITEM_SKIPPED),
         ItemResult("failed", ITEM_FAILED),
     ]
-    run = JobRun(job="j", run_id="r", path=None, status=RUN_FAILED, started="", ended="",
-                 counts={}, items=rec_items)
+    run = JobRun(
+        job="j",
+        run_id="r",
+        path=None,
+        status=RUN_FAILED,
+        started="",
+        ended="",
+        counts={},
+        items=rec_items,
+    )
     assert done_keys(run) == {"ok", "empty", "skipped"}
     assert done_keys(None) == set()
 

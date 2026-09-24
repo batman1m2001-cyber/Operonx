@@ -128,6 +128,7 @@ class PythonSource:
 
 # -- as a resource ---------------------------------------------------------
 
+
 class SourceConfig(YamlModel):
     """A ``source:<name>`` block in resources.yaml.
 
@@ -143,8 +144,9 @@ class SourceConfig(YamlModel):
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
-def open_source(kind: str, *, path: Optional[str] = None, entry: Optional[str] = None,
-                **options: Any) -> Source:
+def open_source(
+    kind: str, *, path: Optional[str] = None, entry: Optional[str] = None, **options: Any
+) -> Source:
     """Build a source by kind. The one place the names are spelled out."""
     if kind == "jsonl":
         if not path:
@@ -169,8 +171,11 @@ def create_source(config: SourceConfig) -> Source:
 def _is_source(obj: Any) -> bool:
     # `runtime_checkable` would accept a dict — it has `.items` — which is
     # exactly the value a caller most plausibly passes by mistake.
-    return not isinstance(obj, Mapping) and callable(getattr(obj, "items", None)) \
+    return (
+        not isinstance(obj, Mapping)
+        and callable(getattr(obj, "items", None))
         and not isinstance(obj, (str, bytes, Path))
+    )
 
 
 def _by_extension(path: Path) -> Source:
@@ -179,8 +184,10 @@ def _by_extension(path: Path) -> Source:
         return JsonlSource(path)
     if ext == ".csv":
         return CsvSource(path)
-    raise ValueError(f"cannot tell a source from {path}: expected .jsonl or .csv, "
-                     "or declare it under `source:` in resources.yaml")
+    raise ValueError(
+        f"cannot tell a source from {path}: expected .jsonl or .csv, "
+        "or declare it under `source:` in resources.yaml"
+    )
 
 
 def as_source(obj: Any) -> Source:
@@ -192,8 +199,9 @@ def as_source(obj: Any) -> Source:
     * anything else — :class:`PythonSource`.
     """
     if obj is None:
-        raise TypeError("a job needs a source: a `source:` resource key, a file path, "
-                        "or an iterable")
+        raise TypeError(
+            "a job needs a source: a `source:` resource key, a file path, or an iterable"
+        )
     if _is_source(obj):
         return obj
     if isinstance(obj, str):
@@ -204,8 +212,9 @@ def as_source(obj: Any) -> Source:
             register()
             resolved = ResourceHub.instance().get(obj)
             if not _is_source(resolved):
-                raise TypeError(f"{obj!r} resolved to {type(resolved).__name__}, "
-                                "which is not a source")
+                raise TypeError(
+                    f"{obj!r} resolved to {type(resolved).__name__}, which is not a source"
+                )
             return resolved
         return _by_extension(Path(obj))
     if isinstance(obj, Path):

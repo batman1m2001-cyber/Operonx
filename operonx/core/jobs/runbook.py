@@ -58,13 +58,13 @@ class NodeReport:
     """What one node of the tree did."""
 
     name: str
-    kind: str                                   # job | sequential | parallel
-    status: str                                 # ok | failed | skipped
+    kind: str  # job | sequential | parallel
+    status: str  # ok | failed | skipped
     started: Optional[str] = None
     ended: Optional[str] = None
     ms: float = 0.0
     error: Optional[str] = None
-    run_id: Optional[str] = None                # a job's own record
+    run_id: Optional[str] = None  # a job's own record
     path: Optional[str] = None
     children: List["NodeReport"] = field(default_factory=list)
 
@@ -82,9 +82,15 @@ class NodeReport:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "NodeReport":
         return cls(
-            name=d["name"], kind=d["kind"], status=d["status"],
-            started=d.get("started"), ended=d.get("ended"), ms=float(d.get("ms", 0.0)),
-            error=d.get("error"), run_id=d.get("run_id"), path=d.get("path"),
+            name=d["name"],
+            kind=d["kind"],
+            status=d["status"],
+            started=d.get("started"),
+            ended=d.get("ended"),
+            ms=float(d.get("ms", 0.0)),
+            error=d.get("error"),
+            run_id=d.get("run_id"),
+            path=d.get("path"),
             children=[cls.from_dict(c) for c in d.get("children", [])],
         )
 
@@ -114,8 +120,12 @@ class Node:
         raise NotImplementedError
 
     def _skipped(self) -> NodeReport:
-        return NodeReport(self.name, self.kind, NODE_SKIPPED,
-                          children=[c._skipped() for c in getattr(self, "children", ())])
+        return NodeReport(
+            self.name,
+            self.kind,
+            NODE_SKIPPED,
+            children=[c._skipped() for c in getattr(self, "children", ())],
+        )
 
     def jobs(self) -> List[Job]:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -164,8 +174,9 @@ class _JobNode(Node):
                 c = run.counts
                 report.error = run.meta.get("error") or (
                     f"{run.status}: {c.get('failed', 0)} failed"
-                    + (f", {c['timeout']} timed out" if c.get("timeout") else ""))
-        except Exception as exc:                          # noqa: BLE001
+                    + (f", {c['timeout']} timed out" if c.get("timeout") else "")
+                )
+        except Exception as exc:  # noqa: BLE001
             report.status = NODE_FAILED
             report.error = f"{type(exc).__name__}: {exc}"
             LOGGER.error(f"[runbook] job {self.name!r} raised: {report.error}")
@@ -265,6 +276,7 @@ class Parallel(Node):
 
 # -- the record --------------------------------------------------------------
 
+
 @dataclass
 class RunbookRun:
     """A finished runbook run, read back from its run.json."""
@@ -272,7 +284,7 @@ class RunbookRun:
     name: str
     run_id: str
     path: Path
-    status: str                                 # ok | failed | stopped
+    status: str  # ok | failed | stopped
     started: str
     ended: Optional[str]
     ms: float
@@ -291,19 +303,29 @@ class RunbookRun:
 
     def summary(self) -> str:
         c = self.counts()
-        return (f"{self.name} {self.run_id} {self.status}  "
-                f"jobs ok={c[NODE_OK]} failed={c[NODE_FAILED]} skipped={c[NODE_SKIPPED]}")
+        return (
+            f"{self.name} {self.run_id} {self.status}  "
+            f"jobs ok={c[NODE_OK]} failed={c[NODE_FAILED]} skipped={c[NODE_SKIPPED]}"
+        )
 
     @classmethod
     def load(cls, path: Union[str, Path]) -> "RunbookRun":
         path = Path(path)
         d = json.loads((path / "run.json").read_text(encoding="utf-8"))
         return cls(
-            name=d["runbook"], run_id=d["run_id"], path=path, status=d["status"],
-            started=d["started"], ended=d.get("ended"), ms=float(d.get("ms", 0.0)),
+            name=d["runbook"],
+            run_id=d["run_id"],
+            path=path,
+            status=d["status"],
+            started=d["started"],
+            ended=d.get("ended"),
+            ms=float(d.get("ms", 0.0)),
             report=NodeReport.from_dict(d["tree"]),
-            meta={k: v for k, v in d.items()
-                  if k not in ("runbook", "run_id", "status", "started", "ended", "ms", "tree")},
+            meta={
+                k: v
+                for k, v in d.items()
+                if k not in ("runbook", "run_id", "status", "started", "ended", "ms", "tree")
+            },
         )
 
     def __repr__(self) -> str:
@@ -324,12 +346,21 @@ class Runbook:
         description: One line, for ``--list`` and the studio.
     """
 
-    def __init__(self, name: str, root: Any, *, on_error: str = "stop",
-                 record_dir: Union[str, Path] = "jobs", description: str = ""):
+    def __init__(
+        self,
+        name: str,
+        root: Any,
+        *,
+        on_error: str = "stop",
+        record_dir: Union[str, Path] = "jobs",
+        description: str = "",
+    ):
         if not name or not isinstance(name, str):
             raise ValueError("a runbook needs a name")
         if on_error not in ("stop", "continue"):
-            raise ValueError(f"runbook {name!r}: on_error must be 'stop' or 'continue', not {on_error!r}")
+            raise ValueError(
+                f"runbook {name!r}: on_error must be 'stop' or 'continue', not {on_error!r}"
+            )
         self.name = name
         self.root: Node = _node(root)
         self.on_error = on_error
@@ -355,8 +386,10 @@ class Runbook:
         path.mkdir(parents=True, exist_ok=False)
         started = _now()
         t0 = perf_counter()
-        LOGGER.info(f"[runbook:{self.name}] {len(self.jobs)} job(s), on_error={self.on_error}"
-                    + (", resume" if resume else ""))
+        LOGGER.info(
+            f"[runbook:{self.name}] {len(self.jobs)} job(s), on_error={self.on_error}"
+            + (", resume" if resume else "")
+        )
         self._write(path, run_id, "running", started, None, 0.0, None)
 
         report = await self.root._run(ctx)
@@ -376,8 +409,16 @@ class Runbook:
     def run_sync(self, *, resume: bool = False) -> RunbookRun:
         return asyncio.run(self.run(resume=resume))
 
-    def _write(self, path: Path, run_id: str, status: str, started: str, ended: Optional[str],
-               ms: float, report: Optional[NodeReport]) -> None:
+    def _write(
+        self,
+        path: Path,
+        run_id: str,
+        status: str,
+        started: str,
+        ended: Optional[str],
+        ms: float,
+        report: Optional[NodeReport],
+    ) -> None:
         payload = {
             "runbook": self.name,
             "run_id": run_id,

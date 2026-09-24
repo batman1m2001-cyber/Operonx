@@ -62,8 +62,9 @@ class RunRequest:
     session_id: Optional[str] = None
 
 
-def json_object(text: Any, default: Optional[Dict[str, Any]] = None,
-                on_reject=None) -> Dict[str, Any]:
+def json_object(
+    text: Any, default: Optional[Dict[str, Any]] = None, on_reject=None
+) -> Dict[str, Any]:
     """Parse untrusted JSON and guarantee a dict comes back.
 
     A connection's query string and body are written by whoever dialled
@@ -145,7 +146,9 @@ class BoundedSession:
     and reported, never dropped in silence.
     """
 
-    def __init__(self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None):
+    def __init__(
+        self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None
+    ):
         self.meta: Mapping[str, Any] = dict(meta or {})
         self.max_inflight = max_inflight
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_inflight or 0)

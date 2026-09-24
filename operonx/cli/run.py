@@ -62,8 +62,10 @@ def _from_manifest(name: str, manifest: Manifest):
     if spec.runbook:
         runbook = load_object(spec.runbook, field=f"[[job]] {name!r} runbook")
         if not isinstance(runbook, Runbook):
-            raise ValueError(f"[[job]] {name!r} runbook {spec.runbook!r} is a "
-                             f"{type(runbook).__name__}, not a Runbook")
+            raise ValueError(
+                f"[[job]] {name!r} runbook {spec.runbook!r} is a "
+                f"{type(runbook).__name__}, not a Runbook"
+            )
         if spec.record_dir:
             rd = Path(spec.record_dir)
             runbook.record_dir = rd if rd.is_absolute() else manifest.root / rd
@@ -76,22 +78,33 @@ def main(argv=None) -> int:
         prog="operonx-run",
         description="Run a Job: one run per item, a record per run.",
     )
-    parser.add_argument("job", nargs="?",
-                        help="a [[job]] name from operonx.toml, or a Job as `module:attr`")
-    parser.add_argument("-f", "--manifest", default=None,
-                        help="path to operonx.toml (default: search upward from here)")
-    parser.add_argument("--list", action="store_true",
-                        help="print the manifest's jobs, and exit")
-    parser.add_argument("--resume", action="store_true",
-                        help="skip the keys the job's last run finished; rerun the rest")
-    parser.add_argument("--show", action="store_true",
-                        help="print what would run, and exit")
-    parser.add_argument("--record-dir", default=None,
-                        help="where to write the run record (default: the job's record_dir)")
-    parser.add_argument("--concurrency", type=int, default=None,
-                        help="items in flight at once (default: the job's)")
-    parser.add_argument("--failures", type=int, default=10,
-                        help="how many failed keys to print (default: 10)")
+    parser.add_argument(
+        "job", nargs="?", help="a [[job]] name from operonx.toml, or a Job as `module:attr`"
+    )
+    parser.add_argument(
+        "-f",
+        "--manifest",
+        default=None,
+        help="path to operonx.toml (default: search upward from here)",
+    )
+    parser.add_argument("--list", action="store_true", help="print the manifest's jobs, and exit")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip the keys the job's last run finished; rerun the rest",
+    )
+    parser.add_argument("--show", action="store_true", help="print what would run, and exit")
+    parser.add_argument(
+        "--record-dir",
+        default=None,
+        help="where to write the run record (default: the job's record_dir)",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=None, help="items in flight at once (default: the job's)"
+    )
+    parser.add_argument(
+        "--failures", type=int, default=10, help="how many failed keys to print (default: 10)"
+    )
     args = parser.parse_args(argv)
 
     from operonx.core.jobs import Job, Runbook
@@ -109,8 +122,10 @@ def main(argv=None) -> int:
                 sys.path.insert(0, cwd)
             job = load_object(args.job, field="job")
             if not isinstance(job, (Job, Runbook)):
-                print(f"error: {args.job!r} is a {type(job).__name__}, not a Job or a Runbook",
-                      file=sys.stderr)
+                print(
+                    f"error: {args.job!r} is a {type(job).__name__}, not a Job or a Runbook",
+                    file=sys.stderr,
+                )
                 return 2
         else:
             job = _from_manifest(args.job, _manifest(args.manifest))
@@ -142,7 +157,7 @@ def main(argv=None) -> int:
 
     try:
         run = job.run_sync(resume=args.resume)
-    except ValueError as exc:                             # a stream job asked to resume
+    except ValueError as exc:  # a stream job asked to resume
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(run.summary())

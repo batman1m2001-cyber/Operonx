@@ -27,8 +27,15 @@ __all__ = [
     "ItemResult",
     "JobRun",
     "RunRecord",
-    "ITEM_OK", "ITEM_FAILED", "ITEM_EMPTY", "ITEM_SKIPPED", "ITEM_TIMEOUT",
-    "RUN_RUNNING", "RUN_OK", "RUN_FAILED", "RUN_STOPPED",
+    "ITEM_OK",
+    "ITEM_FAILED",
+    "ITEM_EMPTY",
+    "ITEM_SKIPPED",
+    "ITEM_TIMEOUT",
+    "RUN_RUNNING",
+    "RUN_OK",
+    "RUN_FAILED",
+    "RUN_STOPPED",
     "done_keys",
     "last_run",
     "runs_of",
@@ -40,14 +47,14 @@ __all__ = [
 ITEM_OK = "ok"
 ITEM_FAILED = "failed"
 ITEM_EMPTY = "empty"
-ITEM_SKIPPED = "skipped"       # already done in the run being resumed
-ITEM_TIMEOUT = "timeout"       # the run passed `item_timeout` and was cancelled
+ITEM_SKIPPED = "skipped"  # already done in the run being resumed
+ITEM_TIMEOUT = "timeout"  # the run passed `item_timeout` and was cancelled
 
 #: Whole-run outcomes.
 RUN_RUNNING = "running"
-RUN_OK = "ok"                  # no item failed
-RUN_FAILED = "failed"          # some item failed and the policy carried on
-RUN_STOPPED = "stopped"        # the policy was `stop` and something failed
+RUN_OK = "ok"  # no item failed
+RUN_FAILED = "failed"  # some item failed and the policy carried on
+RUN_STOPPED = "stopped"  # the policy was `stop` and something failed
 
 _COUNTED = (ITEM_OK, ITEM_FAILED, ITEM_EMPTY, ITEM_SKIPPED, ITEM_TIMEOUT)
 
@@ -138,20 +145,31 @@ class JobRun:
         for item in items:
             counts[item.status] = counts.get(item.status, 0) + 1
         return cls(
-            job=meta["job"], run_id=meta["run_id"], path=path, status=meta["status"],
-            started=meta["started"], ended=meta.get("ended"), counts=counts, items=items,
+            job=meta["job"],
+            run_id=meta["run_id"],
+            path=path,
+            status=meta["status"],
+            started=meta["started"],
+            ended=meta.get("ended"),
+            counts=counts,
+            items=items,
             resume_from=meta.get("resume_from"),
-            meta={k: v for k, v in meta.items()
-                  if k not in ("job", "run_id", "status", "started", "ended", "resume_from")},
+            meta={
+                k: v
+                for k, v in meta.items()
+                if k not in ("job", "run_id", "status", "started", "ended", "resume_from")
+            },
         )
 
     def summary(self) -> str:
         c = self.counts
-        if "fed" in c:                                     # a stream run: one run, no items
+        if "fed" in c:  # a stream run: one run, no items
             return f"{self.job} {self.run_id} {self.status}  fed={c['fed']} sent={c.get('sent', 0)}"
-        text = (f"{self.job} {self.run_id} {self.status}  "
-                f"ok={c.get(ITEM_OK, 0)} failed={c.get(ITEM_FAILED, 0)} "
-                f"empty={c.get(ITEM_EMPTY, 0)} skipped={c.get(ITEM_SKIPPED, 0)}")
+        text = (
+            f"{self.job} {self.run_id} {self.status}  "
+            f"ok={c.get(ITEM_OK, 0)} failed={c.get(ITEM_FAILED, 0)} "
+            f"empty={c.get(ITEM_EMPTY, 0)} skipped={c.get(ITEM_SKIPPED, 0)}"
+        )
         if c.get(ITEM_TIMEOUT):
             text += f" timeout={c[ITEM_TIMEOUT]}"
         return text
@@ -163,8 +181,14 @@ class JobRun:
 class RunRecord:
     """The writer. Opened when the run starts, finished exactly once."""
 
-    def __init__(self, root: str | Path, job: str, *, meta: Optional[Dict[str, Any]] = None,
-                 resume_from: Optional[str] = None):
+    def __init__(
+        self,
+        root: str | Path,
+        job: str,
+        *,
+        meta: Optional[Dict[str, Any]] = None,
+        resume_from: Optional[str] = None,
+    ):
         self.job = job
         for _ in range(3):
             self.run_id = new_run_id()
@@ -206,9 +230,14 @@ class RunRecord:
         self._items.flush()
         self.counts[result.status] = self.counts.get(result.status, 0) + 1
 
-    def finish(self, status: str, error: Optional[str] = None, *,
-               counts: Optional[Dict[str, int]] = None,
-               extra: Optional[Dict[str, Any]] = None) -> JobRun:
+    def finish(
+        self,
+        status: str,
+        error: Optional[str] = None,
+        *,
+        counts: Optional[Dict[str, int]] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> JobRun:
         """Close the record. ``counts`` adds to the four item counts (a
         stream run reports ``fed`` and ``sent``); ``extra`` lands in
         run.json beside the job's description (a stream run's trace id)."""
@@ -224,6 +253,7 @@ class RunRecord:
 
 
 # -- reading back ----------------------------------------------------------
+
 
 def runs_of(root: str | Path, job: str) -> List[Path]:
     """Every run directory of *job*, oldest first."""
