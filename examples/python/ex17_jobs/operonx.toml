@@ -1,0 +1,16 @@
+# What this project is. No [[serve]]: nothing listens. The graph is run by
+# a Job (see main.py) — one run per line of data/calls.jsonl.
+#
+# `[[job]]` blocks land in the manifest in the next phase; until then the
+# jobs are declared in main.py and run with `operonx-run main:score_calls`.
+
+[project]
+name = "ex17-jobs"
+description = "One graph run over a JSONL file by a Job: a record per run, resume by key."
+
+[resources]
+overlay = "resources.yaml"
+
+[[graph]]
+name  = "score_call"
+entry = "main:score_call"

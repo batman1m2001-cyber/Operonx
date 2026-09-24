@@ -36,6 +36,8 @@ before `uv run`.
 | 13 | `ex13_graph` | `operonx` (tier 1) | `@graph` composition + nesting |
 | 14 | `ex14_streaming_tracing` | `operonx` (tier 1) | Generator pipelines, sync + async |
 | 15 | `ex15_callbot_streaming` | `operonx` (tier 1) | Multi-level streaming pipeline |
+| 16 | `ex16_rag_pipeline` | `operonx[faiss]` | Two-store RAG: vector index + document store |
+| 17 | `ex17_jobs` | `operonx` (tier 1) | A `Job`: one graph run over a JSONL file, record per run, resume by key |
 
 ex06 previously held a tracing tutorial, retired once every LLM example
 documented its own tracing setup; the slot now covers run-scoped state,
