@@ -702,11 +702,15 @@ class GraphOp(BaseOp):
         # while its children still ran — every op inside it, LLM calls and
         # all. A consumer switching a stage off to save the spend kept
         # paying for it and had no way to tell.
-        if not self.enabled:
-            return
-
         if context_id is None:
             context_id = DEFAULT_CONTEXT
+
+        if not self.enabled:
+            # Same contract as `BaseOp.run`: completed, produced nothing.
+            # Returning without a yield leaves every successor waiting
+            # forever — see the note there.
+            yield context_id, {}
+            return
 
         request_id = state.request_id
         start_time = datetime.now(timezone.utc)

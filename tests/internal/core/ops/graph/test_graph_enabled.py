@@ -114,3 +114,61 @@ class TestDisabledPlainOp:
 
         asyncio.run(Operon(g).run(inputs={"n": 1}))
         assert ran == []
+
+
+class TestDisabledDoesNotStallTheGraph:
+    """"Completed, produced nothing" — not "never completed".
+
+    The first attempt at the fix returned without yielding, which ends the
+    generator and leaves every successor waiting forever. Disabling one
+    stage then silently stalled everything downstream: in the pipeline this
+    surfaced as a scored batch producing no rows at all.
+
+    That failure mode already existed in `BaseOp.run` for plain ops and
+    nobody had hit it, because the only consumer disabling anything
+    disabled *subgraphs* — which ran regardless, thanks to the bug above.
+    Two defects cancelling out.
+    """
+
+    def _chain(self, ran: list):
+        @op
+        def inner() -> dict:
+            ran.append("inner")
+            return {"a": 1}
+
+        @graph
+        def child():
+            i = inner()
+            START >> i >> END
+
+        @op
+        def after(a=None) -> dict:
+            ran.append("after")
+            return {"out": a}
+
+        with GraphOp(name="g") as g:
+            c = child(name="child")
+            s = after(a=c["a"])
+            START >> c >> s >> END
+        return g, g._ops["child"]
+
+    def test_the_successor_still_runs(self):
+        import asyncio
+
+        ran = []
+        g, child = self._chain(ran)
+        child.enabled = False
+        out = asyncio.run(Operon(g).run(inputs={}))
+        assert "after" in ran, "a disabled op must not block what comes next"
+        assert "inner" not in ran, "...while still not running its own children"
+        assert "out" in out
+
+    def test_the_successor_reads_none_for_the_skipped_fields(self):
+        """Absent, not stale: nothing was written, so nothing is read."""
+        import asyncio
+
+        ran = []
+        g, child = self._chain(ran)
+        child.enabled = False
+        out = asyncio.run(Operon(g).run(inputs={}))
+        assert out.get("out") is None
