@@ -28,6 +28,7 @@ from .config_registry import (
     ConfigRegistry,
 )
 from .errors import (
+    ResourceUnreachable,
     BOOTSTRAP_ENV_PATHS,
     EnvVarUnsetError,
     ResourceHubWarning,
@@ -54,6 +55,7 @@ __all__ = [
     "ResourceHub",
     "CacheEntry",
     "HealthCheckResult",
+    "ResourceUnreachable",
     # Errors and warnings
     "ResourceHubWarning",
     "EnvVarUnsetError",
