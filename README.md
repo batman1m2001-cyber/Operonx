@@ -193,6 +193,28 @@ pip install "operonx[all]"           # Everything except torch / HuggingFace
 | `all`        | Every provider + tracer except `huggingface`      |
 | `dev`        | pytest, ruff, pre-commit                          |
 
+## Jobs: the same graph over a file
+
+A served graph gets its work from a listener. A `Job` gives it work from a
+source — a JSONL file, an iterable, a `source:` resource — one run per
+item, and leaves a record per run: which items were `ok`, `failed`,
+`empty` (ran, sent nothing) or timed out, each with its trace id.
+
+```python
+from operonx.core.jobs import Job, Runbook
+
+score = Job("score_calls", graph=score_call, source="data/calls.jsonl",
+            sink="out/scores.jsonl", key="call_id", on_error="retry:2")
+run = score.run_sync()                 # ok=98 failed=2 …; run.failed names them
+run = score.run_sync(resume=True)      # only the two
+
+nightly = Runbook("nightly", extract >> [embed >> cluster, score])   # >> sequential, [ ] parallel
+```
+
+`[[job]]` blocks live in `operonx.toml` beside `[[serve]]`;
+`operonx-run <name>` runs one from a shell with an exit status a cron
+can read. See the [guide](docs/guide/10-jobs.md) and `examples/python/ex17_jobs`.
+
 ## Tracing
 
 ```python
