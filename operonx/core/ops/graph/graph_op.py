@@ -697,6 +697,14 @@ class GraphOp(BaseOp):
     ) -> AsyncGenerator[Tuple[tuple, Dict[str, Any]], None]:
         """Execute graph: get inputs → schedule ops → loop if needed → store results."""
 
+        # `BaseOp.run` honours this and `GraphOp` overrides `run`, so without
+        # the same check here `enabled=False` silenced a subgraph's *output*
+        # while its children still ran — every op inside it, LLM calls and
+        # all. A consumer switching a stage off to save the spend kept
+        # paying for it and had no way to tell.
+        if not self.enabled:
+            return
+
         if context_id is None:
             context_id = DEFAULT_CONTEXT
 
