@@ -526,22 +526,38 @@ class BaseOp(ABC):
             return other
         return NotImplemented
 
-    @staticmethod
-    def _condition_entries(other) -> list:
+    def _condition_entries(self, other) -> list:
         """Predicate ops of *other* that still need an incoming edge.
 
         Empty unless *other* is a branch built from op-conditions. A
-        predicate that already has a predecessor was wired by hand and is
-        left alone — only the inline form needs adopting.
+        predicate is skipped when it can already run, which is three cases,
+        and the first two are the ones that bite:
+
+        * **It is the source.** ``check >> if_(check, a).else_(b)`` names the
+          same op as both the thing that runs and the thing tested.
+          Redirecting there produces ``check >> check`` — an op waiting on
+          itself, so the graph deadlocks and every downstream output is
+          silently absent. `_build` already wired predicate → branch.
+        * **It is a graph entry.** ``add_edge`` returns early for ``START``
+          without recording a predecessor, so a ``START >> check`` op looks
+          unwired while in fact it begins the graph.
+        * It already has a predecessor — wired by hand, leave it alone.
         """
         predicates = getattr(other, "condition_ops", None)
         if not predicates:
             return []
         graph = getattr(other, "parent", None)
         prevs = getattr(graph, "prevs", None)
-        if prevs is None:
-            return list(predicates)
-        return [p for p in predicates if not prevs.get(p.name)]
+        out = []
+        for p in predicates:
+            if p is self or p.name == self.name:
+                continue
+            if getattr(p, "start", False):
+                continue
+            if prevs is not None and prevs.get(p.name):
+                continue
+            out.append(p)
+        return out
 
     def __rrshift__(self, other):
         """``[op1, op2] >> self``: connect a list of ops to this op."""
