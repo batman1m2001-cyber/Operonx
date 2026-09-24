@@ -10,6 +10,7 @@ for the run still reached its model, which is a consumer paying for a
 stage it believed was off and having no way to notice. The verdict was
 discarded downstream, so the only visible symptom was the bill.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -117,7 +118,7 @@ class TestDisabledPlainOp:
 
 
 class TestDisabledDoesNotStallTheGraph:
-    """"Completed, produced nothing" — not "never completed".
+    """ "Completed, produced nothing" — not "never completed".
 
     The first attempt at the fix returned without yielding, which ends the
     generator and leaves every successor waiting forever. Disabling one

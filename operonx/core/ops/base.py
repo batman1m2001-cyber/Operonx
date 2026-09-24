@@ -182,7 +182,6 @@ def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
             inputs[k] = v.data
 
 
-
 def _summarise_transient(value: Any) -> Any:
     """Describe a transient value without keeping a reference to it.
 
