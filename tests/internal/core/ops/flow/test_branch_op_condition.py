@@ -305,3 +305,74 @@ class TestBranchTargetingBranch:
     async def test_it_routes(self, n, want):
         out = await Operon(self._graph(n)).run(inputs={"n": n})
         assert out["w"] == want
+
+
+# ── the predicate is the source ────────────────────────────────────────
+
+
+class TestPredicateIsTheSource:
+    """`check >> if_(check, a).else_(b)` — the same op runs and is tested.
+
+    This shipped broken. `__rshift__` redirected the incoming edge onto the
+    branch's predicate without checking whether the predicate *was* the
+    source, producing `check >> check`: an op waiting on itself. The graph
+    deadlocked, `finalize` never ran, and every call wrote an empty result
+    while reporting OK — 90 of 90 in a real selfcheck.
+
+    Nothing raised, which is why the unit tests passed and only an
+    end-to-end run showed it.
+    """
+
+    def _graph(self, n):
+        with GraphOp(name="g") as g:
+            s = fmt_fn(n=n)
+            check = is_small(n=s["n_turns"])
+            a = kid_path()
+            b = scanner()
+            START >> s >> check
+            check >> if_(check, a).else_(b)
+            a >> END
+            b >> END
+        return g
+
+    def test_no_self_edge(self):
+        g = self._graph(1)
+        loops = [(u, v) for u, v in _edges(g) if u == v]
+        assert loops == [], f"an op waiting on itself never runs: {loops}"
+
+    def test_the_predicate_still_reaches_the_branch(self):
+        g = self._graph(1)
+        assert any(u == "check" and v.startswith("route") for u, v in _edges(g))
+
+    @pytest.mark.parametrize("n,want", [(1, "kid"), (9, "scanner")])
+    async def test_it_routes(self, n, want):
+        out = await Operon(self._graph(n)).run(inputs={"n": n})
+        assert out["w"] == want, "a deadlocked graph returns nothing at all"
+
+
+class TestPredicateIsAGraphEntry:
+    """`START >> if_(check(...), a).else_(b)` with the predicate at the top.
+
+    `add_edge` returns early for START without recording a predecessor, so
+    a start op looks unwired. Redirecting onto it again is harmless but
+    pointless; what matters is that the graph still produces output.
+    """
+
+    def _graph(self, n):
+        with GraphOp(name="g") as g:
+            check = is_small(n=n)
+            a = kid_path()
+            b = scanner()
+            START >> check
+            check >> if_(check, a).else_(b)
+            a >> END
+            b >> END
+        return g
+
+    def test_no_self_edge(self):
+        assert [(u, v) for u, v in _edges(self._graph(1)) if u == v] == []
+
+    @pytest.mark.parametrize("n,want", [(1, "kid"), (9, "scanner")])
+    async def test_it_routes(self, n, want):
+        out = await Operon(self._graph(n)).run(inputs={"n": n})
+        assert out["w"] == want

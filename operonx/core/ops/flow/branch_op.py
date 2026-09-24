@@ -220,7 +220,7 @@ def _rename_op(op: BaseOp, new_name: str) -> None:
     ops[new_name] = op
 
 
-def _entry_of(graph, target: BaseOp) -> str:
+def _entry_of(graph, source: str, target: BaseOp) -> str:
     """The op a caller must route to in order to reach *target*.
 
     Normally *target* itself. But a branch target can be another branch
@@ -238,7 +238,12 @@ def _entry_of(graph, target: BaseOp) -> str:
     if not predicates:
         return target.name
     prevs = getattr(graph, "prevs", None)
-    unwired = [p for p in predicates if prevs is None or not prevs.get(p.name)]
+    unwired = [
+        p for p in predicates
+        if p.name != source
+        and not getattr(p, "start", False)
+        and (prevs is None or not prevs.get(p.name))
+    ]
     if len(unwired) != 1:
         # Zero: already reachable. More than one: no single entry exists, so
         # say so rather than pick one and route on a half-evaluated branch.
@@ -465,11 +470,11 @@ class Branch:
                 current_graph.add_edge(predicate.name, branch.name, type="normal")
             for i, (_cond, target) in enumerate(self._cases):
                 if isinstance(target, BaseOp):
-                    entry = _entry_of(current_graph, target)
+                    entry = _entry_of(current_graph, branch.name, target)
                     current_graph.add_edge(branch.name, entry, type="condition")
                     branch.cases[i] = (branch.cases[i][0], entry)
             if isinstance(self._default, BaseOp):
-                entry = _entry_of(current_graph, self._default)
+                entry = _entry_of(current_graph, branch.name, self._default)
                 current_graph.add_edge(branch.name, entry, type="condition")
                 branch.default = entry
 
