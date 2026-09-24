@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from operonx.core.loggings import LOGGER
 from operonx.core.manifest import ServeSpec
@@ -21,7 +21,8 @@ from .registry import load_object, resolve_transport
 __all__ = ["ServeRunner", "serve_session"]
 
 
-async def serve_session(engine: Any, session: Session, request: Optional[RunRequest] = None) -> Any:
+async def serve_session(engine: Any, session: Session, request: Optional[RunRequest] = None,
+                        metadata: Optional[Dict[str, Any]] = None) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
     The session is seeded into the run's scratch under a reserved key, so
@@ -32,6 +33,12 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
     the session's `recv` ending, which ends `ingress`, which drains the
     graph — one signal travelling one way, instead of a race between a
     cancel and a teardown.
+
+    ``metadata`` is merged onto the run's trace before it ends, so every
+    consumer sees it: a job tags its runs here (``job``, ``job_run``,
+    ``key`` and the same three as ``tags``) and a transport could name
+    its route the same way. ``tags`` extend the trace's list; other keys
+    are set.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -45,6 +52,14 @@ async def serve_session(engine: Any, session: Session, request: Optional[RunRequ
         session_id=request.session_id,
         trace_id=request.trace_id,
     )
+    trace = getattr(handle, "trace", None)
+    if metadata and trace is not None:
+        extra = dict(metadata)
+        tags = extra.pop("tags", None)
+        trace.metadata.update(extra)
+        if tags:
+            have = list(trace.metadata.get("tags") or [])
+            trace.metadata["tags"] = have + [t for t in tags if t not in have]
     try:
         async for _op_name, _ctx, _data in handle:
             pass

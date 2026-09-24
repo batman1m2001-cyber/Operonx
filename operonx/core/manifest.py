@@ -77,6 +77,11 @@ STREAM_KINDS = frozenset({"websocket", "file", "queue"})
 #: how failures map to a response, and when the run ends.
 SESSION_MODES = frozenset({"per_request", "per_connection", "per_message"})
 
+#: How many runs a job mints: one per item, or one fed every item.
+JOB_SESSION_MODES = frozenset({"per_item", "stream"})
+
+_ON_ERROR_RE = re.compile(r"^(skip|stop|retry(:\d+)?)$")
+
 _ENTRY_RE = re.compile(r"^[\w.]+:[\w.]+$")
 
 
@@ -167,6 +172,47 @@ class ServeSpec:
 
 
 @dataclass(frozen=True)
+class JobSpec:
+    """A `[[job]]` block: work put into a graph from a source, not a listener.
+
+    The `[[serve]]` of batch work. Names the graph, where items come from
+    (a ``source:`` resource key or a path relative to the manifest), where
+    results go, which item field is its identity, and how the run behaves.
+    ``operonx-run <name>`` runs it; ``schedule`` is cron text for whatever
+    calls that — recorded and listed, never executed here.
+
+    ::
+
+        [[job]]
+        name        = "score_calls"
+        graph       = "pipeline.score:score_call"
+        source      = "source:calls_today"
+        sink        = "sink:scores"
+        key         = "call_id"
+        concurrency = 8
+        on_error    = "skip"
+        schedule    = "0 2 * * *"
+    """
+
+    name: str
+    graph: str
+    source: Optional[str] = None
+    sink: Optional[str] = None
+    key: Optional[str] = None
+    session: str = "per_item"
+    concurrency: int = 4
+    on_error: str = "skip"
+    trace: Tuple[str, ...] = ()
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    item_input: Optional[str] = None
+    max_inflight: Optional[int] = None
+    schedule: Optional[str] = None
+    record_dir: Optional[str] = None
+    description: str = ""
+    options: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Manifest:
     """A parsed, validated `operonx.toml`."""
 
@@ -177,10 +223,16 @@ class Manifest:
     resources_overlay: Optional[str]
     source: Optional[Path]
     on_startup: Tuple[str, ...] = ()
+    jobs: Tuple[JobSpec, ...] = ()
 
     @property
     def name(self) -> str:
         return str(self.project.get("name") or "operonx")
+
+    @property
+    def root(self) -> Path:
+        """The directory the manifest lives in; relative paths resolve here."""
+        return self.source.parent if self.source else Path.cwd()
 
     def serve(self, name: str) -> ServeSpec:
         for spec in self.serves:
@@ -188,6 +240,13 @@ class Manifest:
                 return spec
         known = ", ".join(s.name for s in self.serves) or "none"
         raise ManifestError(f"no serve entry named {name!r} (have: {known})")
+
+    def job(self, name: str) -> JobSpec:
+        for spec in self.jobs:
+            if spec.name == name:
+                return spec
+        known = ", ".join(j.name for j in self.jobs) or "none"
+        raise ManifestError(f"no job named {name!r} (have: {known})")
 
     def listeners(self) -> Dict[Tuple[str, int], Tuple[ServeSpec, ...]]:
         """Endpoints grouped onto the servers that will carry them."""
@@ -269,6 +328,17 @@ class Manifest:
         )
         _reject_duplicates(serves, where)
 
+        jobs = tuple(
+            _job_spec(block, where, i)
+            for i, block in enumerate(_as_list(raw.get("job")))
+        )
+        seen_jobs: Dict[str, int] = {}
+        for i, j in enumerate(jobs):
+            if j.name in seen_jobs:
+                raise ManifestError(
+                    f"{where}: [[job]] #{seen_jobs[j.name]} and #{i} are both named {j.name!r}")
+            seen_jobs[j.name] = i
+
         return cls(
             project=project,
             serves=serves,
@@ -277,6 +347,7 @@ class Manifest:
             resources_overlay=overlay,
             source=source,
             on_startup=on_startup,
+            jobs=jobs,
         )
 
 
@@ -402,6 +473,76 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         on_session=(str(block["on_session"]) if block.get("on_session") else None),
         on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
+        description=str(block.get("description") or ""),
+        options=options,
+    )
+
+
+def _job_spec(block: Any, where: str, index: int) -> JobSpec:
+    if not isinstance(block, dict):
+        raise ManifestError(f"{where}: [[job]] #{index} is not a table")
+    name = str(block.get("name") or "").strip()
+    if not name:
+        raise ManifestError(f"{where}: [[job]] #{index} has no `name`")
+    label = f"[[job]] {name!r}"
+
+    graph = str(block.get("graph") or "")
+    if not graph:
+        raise ManifestError(f"{where}: {label} has no `graph`")
+    if not _ENTRY_RE.match(graph):
+        raise ManifestError(
+            f"{where}: {label} graph {graph!r} is not a `module:function` entry point")
+
+    session = str(block.get("session") or "per_item")
+    if session not in JOB_SESSION_MODES:
+        raise ManifestError(
+            f"{where}: {label} has session {session!r}; expected one of "
+            f"{', '.join(sorted(JOB_SESSION_MODES))}")
+
+    concurrency = block.get("concurrency", 4)
+    if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 1:
+        raise ManifestError(
+            f"{where}: {label} has concurrency={concurrency!r}; expected a positive integer")
+
+    on_error = str(block.get("on_error") or "skip").strip().lower()
+    if not _ON_ERROR_RE.match(on_error):
+        raise ManifestError(
+            f"{where}: {label} has on_error {on_error!r}; expected skip, stop or retry:N")
+
+    max_inflight = block.get("max_inflight")
+    if max_inflight is not None and (not isinstance(max_inflight, int) or max_inflight < 1):
+        raise ManifestError(
+            f"{where}: {label} has max_inflight={max_inflight!r}; expected a positive integer")
+
+    inputs = block.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        raise ManifestError(f"{where}: {label} `inputs` must be a table")
+
+    known_keys = {
+        "name", "graph", "source", "sink", "key", "session", "concurrency", "on_error",
+        "trace", "inputs", "item_input", "max_inflight", "schedule", "record_dir", "description",
+    }
+    options = {k: v for k, v in block.items() if k not in known_keys}
+
+    def _opt(key: str) -> Optional[str]:
+        value = block.get(key)
+        return str(value) if value not in (None, "") else None
+
+    return JobSpec(
+        name=name,
+        graph=graph,
+        source=_opt("source"),
+        sink=_opt("sink"),
+        key=_opt("key"),
+        session=session,
+        concurrency=concurrency,
+        on_error=on_error,
+        trace=tuple(str(t) for t in _as_list(block.get("trace"))),
+        inputs=dict(inputs),
+        item_input=_opt("item_input"),
+        max_inflight=max_inflight,
+        schedule=_opt("schedule"),
+        record_dir=_opt("record_dir"),
         description=str(block.get("description") or ""),
         options=options,
     )

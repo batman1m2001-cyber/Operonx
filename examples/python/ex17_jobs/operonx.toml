@@ -1,16 +1,66 @@
-# What this project is. No [[serve]]: nothing listens. The graph is run by
-# a Job (see main.py) — one run per line of data/calls.jsonl.
+# What this project is, and what puts work into it.
 #
-# `[[job]]` blocks land in the manifest in the next phase; until then the
-# jobs are declared in main.py and run with `operonx-run main:score_calls`.
+# The same graph twice: once behind an HTTP route ([[serve]]), once run
+# over a file by a job ([[job]]). Nothing in `score_call` knows which.
 
 [project]
 name = "ex17-jobs"
-description = "One graph run over a JSONL file by a Job: a record per run, resume by key."
+description = "One graph: served as HTTP, and run over a JSONL file by a Job with a record per run."
 
 [resources]
 overlay = "resources.yaml"
 
+# ── served ───────────────────────────────────────────────────────────────
+[[serve]]
+name    = "score"
+kind    = "http"
+method  = "POST"
+path    = "/score"
+port    = "${HTTP_PORT:8017}"
+graph   = "main:score_call"
+session = "per_request"
+description = "One call in, one score out."
+
+# ── run over a file ──────────────────────────────────────────────────────
+# `operonx-run score_calls` — paths are relative to this file. The same
+# jobs are declared in main.py in Python; this is the deployment's form.
+[[job]]
+name        = "score_calls"
+graph       = "main:score_call"
+source      = "data/calls.jsonl"
+sink        = "/tmp/operonx_jobs/ex17/scores.jsonl"
+key         = "call_id"
+concurrency = 2
+on_error    = "skip"
+record_dir  = "/tmp/operonx_jobs/ex17/jobs"
+schedule    = "0 2 * * *"
+description = "Score every call; one run per call, resumable by call_id."
+
+[[job]]
+name        = "score_from_resources"
+graph       = "main:score_call"
+source      = "source:calls"
+sink        = "sink:scores"
+key         = "call_id"
+on_error    = "retry:1"
+record_dir  = "/tmp/operonx_jobs/ex17/jobs"
+description = "The same, with source and sink named in resources.yaml."
+
+# One run fed every call through `ingress`: the callbot's shape. One
+# trace, shared state, and no per-item accounting — the record counts
+# what was fed and what egress sent.
+[[job]]
+name        = "score_stream"
+graph       = "main:score_call"
+source      = "data/calls.jsonl"
+sink        = "/tmp/operonx_jobs/ex17/scores_stream.jsonl"
+session     = "stream"
+record_dir  = "/tmp/operonx_jobs/ex17/jobs"
+description = "All calls through one run."
+
 [[graph]]
 name  = "score_call"
 entry = "main:score_call"
+
+[studio]
+traces = "/tmp/operonx_traces/ex17_jobs"

@@ -58,5 +58,25 @@ sink:scores:  {kind: jsonl, path: /tmp/operonx_jobs/ex17/scores_from_resources.j
 uv run operonx-run main:score_from_resources
 ```
 
-Design and the phases still to come (stream mode, `[[job]]` in the
-manifest, the Runbook): `docs/JOB_PLAN.md` in the operonx repo.
+## The manifest form
+
+`operonx.toml` declares the same jobs as `[[job]]` blocks — the
+deployment's form, next to the `[[serve]]` block that puts the *same*
+graph behind an HTTP route:
+
+```bash
+uv run operonx-run --list                     # every [[job]], with its schedule
+uv run operonx-run score_calls                # by name; paths relative to the manifest
+uv run operonx-run score_calls --resume
+uv run operonx-run score_stream               # session = "stream": one run, all calls
+uv run operonx-serve --only score             # the served form of the same graph
+```
+
+A stream job records what was fed and what egress sent, plus the one
+trace id; it cannot resume, because one run has no per-item outcomes.
+
+Every run's traces carry `job`, `job_run` and `key`, as fields and as
+tags, so a Langfuse filter finds one job, one run, or one item.
+
+Design and the phase still to come (the Runbook: many jobs, one
+command): `docs/JOB_PLAN.md` in the operonx repo.

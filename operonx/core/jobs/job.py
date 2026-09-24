@@ -31,8 +31,15 @@ __all__ = ["Job", "SESSION_MODES"]
 
 #: How many runs a job mints. ``per_item`` is one run per item, which is
 #: what makes failure, retry and resume honest. ``stream`` is one run fed
-#: every item through `ingress` — the callbot shape — and comes in phase 2.
-SESSION_MODES = ("per_item",)
+#: every item through `ingress` — the callbot shape: shared state, one
+#: trace, and no per-item accounting.
+SESSION_MODES = ("per_item", "stream")
+
+#: How far a stream job's source may run ahead of its graph. A file is
+#: pulled, not pushed, so this only caps what sits buffered; it is a
+#: default rather than a required choice because nothing here is a
+#: socket nobody can slow down.
+DEFAULT_MAX_INFLIGHT = 1024
 
 KeyFn = Callable[[Any], Any]
 
@@ -53,8 +60,9 @@ class Job:
         key: The item field that identifies it, or a function of the
             item. Without one every item gets a random id and the job
             cannot resume.
-        session: ``"per_item"`` (see :data:`SESSION_MODES`).
-        concurrency: Items in flight at once.
+        session: ``"per_item"`` or ``"stream"`` (see :data:`SESSION_MODES`).
+        concurrency: Items in flight at once (per_item).
+        max_inflight: Items buffered ahead of the graph (stream).
         on_error: ``"skip"``, ``"stop"`` or ``"retry:N"``.
         trace: Trace consumers for the runs, as ``Operon(trace=...)``
             takes them. Ignored when ``graph`` is already an ``Operon``.
@@ -78,6 +86,7 @@ class Job:
         key: Union[str, KeyFn, None] = None,
         session: str = "per_item",
         concurrency: int = 4,
+        max_inflight: int = DEFAULT_MAX_INFLIGHT,
         on_error: str = "skip",
         trace: Any = None,
         inputs: Optional[Dict[str, Any]] = None,
@@ -92,6 +101,8 @@ class Job:
             raise ValueError(f"job {name!r}: session must be one of {SESSION_MODES}, not {session!r}")
         if int(concurrency) < 1:
             raise ValueError(f"job {name!r}: concurrency must be at least 1")
+        if int(max_inflight) < 1:
+            raise ValueError(f"job {name!r}: max_inflight must be at least 1")
         parse_on_error(on_error)                          # fail at declaration, not at 2 a.m.
         if key is not None and not (isinstance(key, str) or callable(key)):
             raise TypeError(f"job {name!r}: key must be a field name or a function of the item")
@@ -103,6 +114,7 @@ class Job:
         self.key = key
         self.session = session
         self.concurrency = int(concurrency)
+        self.max_inflight = int(max_inflight)
         self.on_error = on_error
         self.trace = trace
         self.inputs: Dict[str, Any] = dict(inputs or {})
@@ -166,13 +178,54 @@ class Job:
 
     async def run(self, *, resume: bool = False) -> JobRun:
         """Run the job once and return its record."""
-        from .runner import run_per_item
+        from .runner import run_job
 
-        return await run_per_item(self, resume=resume)
+        return await run_job(self, resume=resume)
 
     def run_sync(self, *, resume: bool = False) -> JobRun:
         """`run()` from synchronous code — a script, a cron entry."""
         return asyncio.run(self.run(resume=resume))
+
+    # -- from the manifest ---------------------------------------------------
+
+    @classmethod
+    def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "Job":
+        """A Job from a ``[[job]]`` block (``operonx.core.manifest.JobSpec``).
+
+        Paths in the block are relative to *root*, the manifest's
+        directory; ``source:`` / ``sink:`` keys and ``module:attr`` graph
+        entries are left for the hub and the importer to resolve.
+        """
+        root = Path(root) if root is not None else Path.cwd()
+
+        def located(value: Optional[str]) -> Any:
+            if value is None:
+                return None
+            if ":" in value and not Path(value).exists():
+                return value                                  # a resource key
+            path = Path(value)
+            return path if path.is_absolute() else root / path
+
+        record_dir = Path(spec.record_dir) if spec.record_dir else Path("jobs")
+        if not record_dir.is_absolute():
+            record_dir = root / record_dir
+        return cls(
+            spec.name,
+            graph=spec.graph,
+            source=located(spec.source),
+            sink=located(spec.sink),
+            key=spec.key,
+            session=spec.session,
+            concurrency=spec.concurrency,
+            max_inflight=spec.max_inflight or DEFAULT_MAX_INFLIGHT,
+            on_error=spec.on_error,
+            trace=list(spec.trace) or None,
+            inputs=dict(spec.inputs),
+            item_input=spec.item_input,
+            schedule=spec.schedule,
+            record_dir=record_dir,
+            description=spec.description,
+        )
 
     # -- describing --------------------------------------------------------
 
@@ -193,8 +246,9 @@ class Job:
             "sink": shown(self.sink),
             "key": self.key if isinstance(self.key, str) else (getattr(self.key, "__name__", "fn") if self.key else None),
             "session": self.session,
-            "concurrency": self.concurrency,
-            "on_error": self.on_error,
+            "concurrency": self.concurrency if self.session == "per_item" else None,
+            "max_inflight": self.max_inflight if self.session == "stream" else None,
+            "on_error": self.on_error if self.session == "per_item" else None,
             "item_input": self.item_input,
             "schedule": self.schedule,
             "description": self.description,

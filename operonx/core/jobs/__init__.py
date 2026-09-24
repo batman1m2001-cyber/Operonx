@@ -37,7 +37,7 @@ from .record import (
     last_run,
     runs_of,
 )
-from .runner import ErrorPolicy, parse_on_error, run_per_item
+from .runner import ErrorPolicy, parse_on_error, run_job, run_per_item, run_stream
 from .session import JobSession
 from .sinks import (
     CsvSink,
@@ -64,7 +64,7 @@ from .sources import (
 
 __all__ = [
     "Job", "JobRun", "JobSession", "ItemResult", "RunRecord",
-    "SESSION_MODES", "ErrorPolicy", "parse_on_error", "run_per_item",
+    "SESSION_MODES", "ErrorPolicy", "parse_on_error", "run_job", "run_per_item", "run_stream",
     "ITEM_OK", "ITEM_FAILED", "ITEM_EMPTY", "ITEM_SKIPPED",
     "RUN_OK", "RUN_FAILED", "RUN_STOPPED",
     "done_keys", "last_run", "runs_of",

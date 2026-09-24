@@ -1,6 +1,6 @@
 # Jobs — running Operons over data that does not talk back
 
-Status: **phase 1 built, 2026-09-24** (branch `feat/jobs`, §11). §8 holds the
+Status: **phases 1–2 built, 2026-09-24** (branch `feat/jobs`, §11). §8 holds the
 decisions the user has made; §9 what is still open.
 
 ## 1. The idea in one picture
@@ -277,3 +277,20 @@ serve; the shared pieces are the session protocol and the two door ops.
   `ok=2 failed=1` naming `c3: scored: ValueError: empty transcript`;
   after the fix `--resume` gives `ok=1 skipped=2`; 76 new tests; studio
   extractor builds the example offline.**
+- **2026-09-24 — phase 2.** `[[job]]` in the manifest (`JobSpec`,
+  `Manifest.jobs`, `Manifest.root`; paths relative to the manifest,
+  `source:`/`sink:` keys left to the hub), `Job.from_spec`,
+  `operonx-run <name>` / `--list` / `-f`, `session = "stream"` (one run
+  fed through `ingress`, record counts `fed`/`sent` + the trace id, no
+  resume), and the three trace tags: `serve_session(metadata=…)` merges
+  `job`, `job_run`, `key` and the same as `tags` onto the run's trace,
+  which the Langfuse consumer already sends. Item runs now wait for the
+  run's teardown (`handle.collect()`) so trace consumers flush before the
+  item is recorded — a job is often the whole process. Found and fixed
+  in core: `BoundedSession.end_input()` raised `QueueFull` on a full
+  bound (a peer hanging up with packets still queued). **Gate: the ex17
+  manifest declares `[[serve]] http` and `[[job]]` over `main:score_call`;
+  `test_the_same_graph_is_served_and_run_as_a_job_unchanged` drives the
+  served engine through a session and the job from the same manifest and
+  gets identical outputs, then once more as one stream; stream mode
+  yields exactly one trace. 162 tests across jobs, serve and cli.**

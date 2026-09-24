@@ -212,7 +212,7 @@ def test_a_bad_policy_is_refused_at_declaration(tmp_path):
     with pytest.raises(ValueError, match="retry"):
         make_job(tmp_path, on_error="retry:x")
     with pytest.raises(ValueError, match="session"):
-        make_job(tmp_path, session="stream")
+        make_job(tmp_path, session="per_request")
 
 
 # -- what "nothing came out" looks like ---------------------------------------
@@ -295,3 +295,83 @@ def test_describe_names_things_without_leaking_values(tmp_path):
     assert d["graph"] == "score_flow" and d["source"] == "data/calls.jsonl"
     assert d["sink"] == "sink:scores" and d["key"] == "id" and d["description"] == "nightly"
     assert "Job('score'" in repr(job)
+
+
+# -- stream mode ----------------------------------------------------------------
+
+async def test_stream_feeds_every_item_through_one_run(tmp_path):
+    got: list = []
+    run = await make_job(tmp_path, session="stream", sink=got).run()
+    assert run.status == RUN_OK
+    assert run.counts["fed"] == 3 and run.counts["sent"] == 3
+    assert run.items == []                             # no per-item outcomes in one run
+    assert run.meta["trace_id"]                        # …but the one trace is named
+    assert [g["id"] for g in got] == ["a", "b", "c"]
+    assert set(ATTEMPTS) == {"a", "b", "c"}
+    assert "fed=3 sent=3" in run.summary()
+    meta = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
+    assert meta["counts"]["fed"] == 3 and meta["session"] == "stream"
+
+
+async def test_stream_failure_names_the_op_and_fails_the_run(tmp_path):
+    FAIL.add("b")
+    got: list = []
+    run = await make_job(tmp_path, session="stream", sink=got).run()
+    assert run.status == RUN_FAILED
+    assert run.meta["error"].startswith("scored: ") and "cannot score b" in run.meta["error"]
+    assert run.counts["fed"] == 3 and run.counts["sent"] == 2
+    assert [g["id"] for g in got] == ["a", "c"]
+
+
+async def test_stream_cannot_resume(tmp_path):
+    with pytest.raises(ValueError, match="cannot resume"):
+        await make_job(tmp_path, session="stream").run(resume=True)
+
+
+async def test_stream_bound_is_the_sessions_bound(tmp_path):
+    items = [{"id": str(n), "text": "t"} for n in range(20)]
+    run = await make_job(tmp_path, session="stream", source=items, max_inflight=2).run()
+    assert run.status == RUN_OK and run.counts["fed"] == 20 and run.counts["sent"] == 20
+    with pytest.raises(ValueError, match="max_inflight"):
+        make_job(tmp_path, session="stream", max_inflight=0)
+
+
+# -- what the trace carries ----------------------------------------------------------
+
+class Capture:
+    """A trace consumer that keeps every trace it is handed."""
+
+    def __init__(self):
+        from operonx.telemetry.consumer import Consumer
+
+        outer = self
+
+        class _C(Consumer):
+            def consume(self, trace):
+                outer.traces.append(trace)
+
+        self.traces: list = []
+        self.consumer = _C()
+
+
+async def test_every_run_carries_the_job_on_its_trace(tmp_path):
+    cap = Capture()
+    run = await make_job(tmp_path, trace=[cap.consumer]).run()
+    assert len(cap.traces) == 3                        # one per item, and all of them flushed
+    by_id = {t.trace_id: t for t in cap.traces}
+    for item in run.items:
+        t = by_id[item.trace_id]                       # the record's trace id is the trace's
+        md = t.metadata
+        assert md["job"] == "score" and md["job_run"] == run.run_id and md["key"] == item.key
+        assert md["tags"] == ["job:score", f"job_run:{run.run_id}", f"key:{item.key}"]
+
+
+async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
+    cap = Capture()
+    run = await make_job(tmp_path, session="stream", trace=[cap.consumer]).run()
+    assert len(cap.traces) == 1
+    (t,) = cap.traces
+    assert t.trace_id == run.meta["trace_id"]
+    assert t.metadata["job"] == "score" and t.metadata["job_run"] == run.run_id
+    assert "key" not in t.metadata
+    assert t.metadata["tags"] == ["job:score", f"job_run:{run.run_id}"]

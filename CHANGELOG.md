@@ -28,9 +28,33 @@ input (``item_input=``) and its result is the item's result — the
 
 ``source:`` and ``sink:`` are resource categories (``kind: jsonl | csv |
 python``), so resources.yaml names a job's inputs and outputs the way it
-names an LLM. ``operonx-run module:job [--resume | --show]`` runs one
-from the command line with an exit status a cron can read. Example:
-``examples/python/ex17_jobs``. Design: ``docs/JOB_PLAN.md``.
+names an LLM.
+
+``[[job]]`` in ``operonx.toml`` declares one beside the ``[[serve]]``
+blocks — the same graph served and run over a file from one manifest;
+paths are relative to the manifest, ``schedule`` is cron text that is
+listed, not executed. ``operonx-run <name>`` runs it, ``--list`` prints
+them, ``module:attr`` still names a Job object directly.
+
+``session = "stream"`` feeds every item through one run — the callbot's
+shape: shared state, one trace, no per-item accounting; the record counts
+``fed`` and ``sent`` and holds the trace id, and cannot resume.
+
+Every run a job mints carries ``job``, ``job_run`` and ``key`` on its
+trace, as fields and as tags, so Langfuse filters one job, one run or one
+item. A job is never a span. ``serve_session(metadata=…)`` is how they
+get there, and is open to any transport.
+
+Example: ``examples/python/ex17_jobs``. Design: ``docs/JOB_PLAN.md``.
+
+### Fixed — `BoundedSession.end_input()` on a full bound
+
+It put its end-of-input sentinel with ``put_nowait`` and raised
+``QueueFull`` when the bound was reached — a peer hanging up while its
+packets were still queued. The sentinel only wakes a reader parked in
+``get()``, and none is parked while the queue is full, so the case is now
+a no-op and ``recv`` ends once it has drained. Found by a stream job
+whose source outran its graph.
 
 ## [1.6.4] - 2026-09-23
 

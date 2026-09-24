@@ -125,7 +125,11 @@ class JobRun:
                     line = line.strip()
                     if line:
                         items.append(ItemResult.from_dict(json.loads(line)))
+        # The four item statuses are recounted from items.jsonl, which is
+        # the truth; anything else run.json counted (a stream run's `fed`
+        # and `sent`) is kept as written.
         counts = {s: 0 for s in _COUNTED}
+        counts.update({k: v for k, v in (meta.get("counts") or {}).items() if k not in _COUNTED})
         for item in items:
             counts[item.status] = counts.get(item.status, 0) + 1
         return cls(
@@ -138,6 +142,8 @@ class JobRun:
 
     def summary(self) -> str:
         c = self.counts
+        if "fed" in c:                                     # a stream run: one run, no items
+            return f"{self.job} {self.run_id} {self.status}  fed={c['fed']} sent={c.get('sent', 0)}"
         return (f"{self.job} {self.run_id} {self.status}  "
                 f"ok={c.get(ITEM_OK, 0)} failed={c.get(ITEM_FAILED, 0)} "
                 f"empty={c.get(ITEM_EMPTY, 0)} skipped={c.get(ITEM_SKIPPED, 0)}")
@@ -192,9 +198,18 @@ class RunRecord:
         self._items.flush()
         self.counts[result.status] = self.counts.get(result.status, 0) + 1
 
-    def finish(self, status: str, error: Optional[str] = None) -> JobRun:
+    def finish(self, status: str, error: Optional[str] = None, *,
+               counts: Optional[Dict[str, int]] = None,
+               extra: Optional[Dict[str, Any]] = None) -> JobRun:
+        """Close the record. ``counts`` adds to the four item counts (a
+        stream run reports ``fed`` and ``sent``); ``extra`` lands in
+        run.json beside the job's description (a stream run's trace id)."""
         if error:
             self.error = error
+        if counts:
+            self.counts.update(counts)
+        if extra:
+            self.meta.update(extra)
         self._items.close()
         self._write_run(status, ended=_now())
         return JobRun.load(self.path)

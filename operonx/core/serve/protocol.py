@@ -172,7 +172,15 @@ class BoundedSession:
     def end_input(self) -> None:
         """No more inbound items. `recv` drains what is left, then stops."""
         self._closed.set()
-        self._queue.put_nowait(_EOF)
+        try:
+            self._queue.put_nowait(_EOF)
+        except asyncio.QueueFull:
+            # The sentinel only exists to wake a reader parked in `get()`,
+            # and nothing is parked there while the queue is full. `recv`
+            # sees the closed flag once it has drained what is there. Found
+            # by a stream job whose source outran its graph: the same shape
+            # as a peer hanging up while its packets are still queued.
+            pass
 
     async def recv(self) -> AsyncIterator[Any]:
         while True:

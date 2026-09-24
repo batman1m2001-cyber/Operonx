@@ -1,22 +1,61 @@
 """`operonx-run` — run a Job from the command line.
 
-    operonx-run jobs:score_calls              # a Job, as module:attr
-    operonx-run jobs:score_calls --resume     # only what the last run did not finish
-    operonx-run jobs:score_calls --show       # what would run, and exit
+    operonx-run score_calls                   # a [[job]] in operonx.toml, by name
+    operonx-run score_calls --resume          # only what the last run did not finish
+    operonx-run --list                        # every [[job]], with its schedule
+    operonx-run jobs:score_calls              # a Job object, as module:attr
+    operonx-run score_calls --show            # what would run, and exit
 
-The command is what a cron entry calls; the job's own ``schedule`` is a
-declaration of when, not a scheduler. Exit status is 0 only when every
-item finished cleanly, so a cron mail or a CI step sees a failed batch.
+The command is what a cron entry calls; a job's ``schedule`` declares
+when, it does not run anything. Exit status is 0 only when every item
+finished cleanly, so a cron mail or a CI step sees a failed batch.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
+from pathlib import Path
+from typing import Optional
 
+from operonx.core.manifest import Manifest, ManifestError
 from operonx.core.serve.registry import load_object
+
+
+def _manifest(path: Optional[str]) -> Manifest:
+    return Manifest.from_file(path) if path else Manifest.find(Path.cwd())
+
+
+def _list(manifest: Manifest) -> int:
+    print(manifest.name)
+    if not manifest.jobs:
+        print("  no [[job]] entries")
+        return 0
+    for j in manifest.jobs:
+        io = f"{j.source or '-'} -> {j.sink or '-'}"
+        when = f"  [{j.schedule}]" if j.schedule else ""
+        print(f"  {j.name:18s} {j.session:9s} {j.graph:30s} {io}{when}")
+        if j.description:
+            print(f"  {'':18s} {j.description}")
+    return 0
+
+
+def _from_manifest(name: str, manifest: Manifest):
+    """A Job from its [[job]] block, importable and with its hub installed."""
+    from operonx.core.jobs import Job
+
+    spec = manifest.job(name)
+    root = str(manifest.root)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    if manifest.resources_overlay:
+        overlay = manifest.root / manifest.resources_overlay
+        if overlay.exists():
+            import operonx
+
+            operonx.bootstrap(resources=overlay)
+    return Job.from_spec(spec, manifest.root)
 
 
 def main(argv=None) -> int:
@@ -24,7 +63,12 @@ def main(argv=None) -> int:
         prog="operonx-run",
         description="Run a Job: one run per item, a record per run.",
     )
-    parser.add_argument("job", help="the Job, as `module:attr`, imported from the current directory")
+    parser.add_argument("job", nargs="?",
+                        help="a [[job]] name from operonx.toml, or a Job as `module:attr`")
+    parser.add_argument("-f", "--manifest", default=None,
+                        help="path to operonx.toml (default: search upward from here)")
+    parser.add_argument("--list", action="store_true",
+                        help="print the manifest's jobs, and exit")
     parser.add_argument("--resume", action="store_true",
                         help="skip the keys the job's last run finished; rerun the rest")
     parser.add_argument("--show", action="store_true",
@@ -37,25 +81,31 @@ def main(argv=None) -> int:
                         help="how many failed keys to print (default: 10)")
     args = parser.parse_args(argv)
 
-    # `module:attr` is relative to the project, the way `operonx-serve`
-    # resolves a manifest's entry points.
-    cwd = os.getcwd()
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
-
     from operonx.core.jobs import Job
 
     try:
-        job = load_object(args.job, field="job")
-    except (ImportError, ValueError) as exc:
+        if args.list:
+            return _list(_manifest(args.manifest))
+        if not args.job:
+            parser.error("name a job, or --list")
+        if ":" in args.job:
+            # `module:attr` is relative to the project, the way `operonx-serve`
+            # resolves a manifest's entry points.
+            cwd = os.getcwd()
+            if cwd not in sys.path:
+                sys.path.insert(0, cwd)
+            job = load_object(args.job, field="job")
+            if not isinstance(job, Job):
+                print(f"error: {args.job!r} is a {type(job).__name__}, not a Job", file=sys.stderr)
+                return 2
+        else:
+            job = _from_manifest(args.job, _manifest(args.manifest))
+    except (ManifestError, ImportError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 2
-    if not isinstance(job, Job):
-        print(f"error: {args.job!r} is a {type(job).__name__}, not a Job", file=sys.stderr)
         return 2
 
     if args.record_dir:
-        job.record_dir = args.record_dir
+        job.record_dir = Path(args.record_dir)
     if args.concurrency:
         job.concurrency = args.concurrency
 
@@ -67,7 +117,11 @@ def main(argv=None) -> int:
         print(f"  {'record_dir':12s} {job.record_dir}")
         return 0
 
-    run = job.run_sync(resume=args.resume)
+    try:
+        run = job.run_sync(resume=args.resume)
+    except ValueError as exc:                             # a stream job asked to resume
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(run.summary())
     print(f"  {run.path}")
     failed = run.failed

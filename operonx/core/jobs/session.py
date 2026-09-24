@@ -28,17 +28,21 @@ class JobSession(BoundedSession):
     item failed from it.
     """
 
-    def __init__(self, sink: Sink, key: str, *, meta: Optional[Mapping[str, Any]] = None,
+    def __init__(self, sink: Sink, key: Optional[str], *, meta: Optional[Mapping[str, Any]] = None,
                  max_inflight: Optional[int] = None):
         super().__init__(meta={"key": key, **dict(meta or {})}, max_inflight=max_inflight)
         self.sink = sink
+        #: The item's identity in per_item mode. ``None`` in stream mode,
+        #: where one run sends many things and nothing ties an output to
+        #: an input — so the sink gets the output's index instead.
         self.key = key
         self.sent = 0
         self.sink_error: Optional[str] = None
 
     async def _send(self, item: Any) -> bool:
+        key = self.key if self.key is not None else str(self.sent)
         try:
-            await self.sink.write(self.key, item)
+            await self.sink.write(key, item)
         except Exception as exc:                          # noqa: BLE001
             self.sink_error = f"{type(exc).__name__}: {exc}"
             LOGGER.error(f"[job] sink write failed for key {self.key!r}: {self.sink_error}")

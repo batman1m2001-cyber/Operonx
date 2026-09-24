@@ -182,6 +182,22 @@ async def test_bound_is_enforced_where_items_enter():
 
 
 @pytest.mark.asyncio
+async def test_ending_input_on_a_full_bound_does_not_raise():
+    """A peer that hangs up while its packets are still queued.
+
+    `end_input` used to `put_nowait` its sentinel unconditionally, so on
+    a full bound it raised QueueFull out of the transport's disconnect
+    path. The sentinel only wakes a reader parked in `get()`, and none is
+    parked while the queue is full — `recv` still ends once it drains.
+    """
+    session = MemoryTransport(max_inflight=2).open()
+    assert session.feed_nowait("1") and session.feed_nowait("2")
+    session.end_input()                                  # full, and must not raise
+    assert [item async for item in session.recv()] == ["1", "2"]
+    assert [item async for item in session.recv()] == []  # ended, for every reader
+
+
+@pytest.mark.asyncio
 async def test_on_session_hook_can_refuse_a_connection():
     spec = ServeSpec(name="t", kind="memory", graph="x:y", max_inflight=8)
     transport = MemoryTransport()
