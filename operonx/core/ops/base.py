@@ -182,7 +182,6 @@ def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
             inputs[k] = v.data
 
 
-
 def _summarise_transient(value: Any) -> Any:
     """Describe a transient value without keeping a reference to it.
 
@@ -1116,6 +1115,14 @@ class BaseOp(ABC):
             ``(context_id, result)`` — one tuple per item produced by the op.
         """
         if not self.enabled:
+            # Completed, produced nothing — not "never completed". A bare
+            # `return` ends the generator without yielding, and a successor
+            # waiting on this op never becomes ready, so disabling one stage
+            # silently stalls everything downstream of it. Yielding an empty
+            # result lets the graph flow; `store_result` skips a falsy
+            # payload, so the consumer reads None for every field this op
+            # would have written.
+            yield (context_id if context_id is not None else DEFAULT_CONTEXT), {}
             return
 
         _tracing = state.tracing

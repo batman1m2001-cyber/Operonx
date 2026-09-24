@@ -720,7 +720,8 @@ class ResourceHub:
 
     def _probe_endpoint(self, key: str, instance: Any, timeout: float) -> Optional[str]:
         """Why *key*'s address did not answer, or None. Local → None."""
-        from .shortcuts.reachability import endpoint_of, probe as _probe
+        from .shortcuts.reachability import endpoint_of
+        from .shortcuts.reachability import probe as _probe
 
         config = getattr(instance, "config", None) or self.get_config(key)
         if config is None:
