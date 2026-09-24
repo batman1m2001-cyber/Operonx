@@ -9,8 +9,7 @@ failure does.
 
 import pytest
 
-from operonx.providers.parsing import apply_validators, parse_and_extract
-from operonx.providers.parsing import ExtractField
+from operonx.providers.parsing import ExtractField, apply_validators, parse_and_extract
 
 
 def _scanner_shape_ok(parsed: dict) -> bool:

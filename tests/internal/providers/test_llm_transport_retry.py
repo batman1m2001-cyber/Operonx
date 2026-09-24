@@ -17,7 +17,6 @@ import pytest
 from operonx.providers.llms.config import LLMType, OpenAIConfig
 from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
-
 # ---------------------------------------------------------------------------
 # Doubles
 # ---------------------------------------------------------------------------

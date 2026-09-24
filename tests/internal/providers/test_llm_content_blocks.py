@@ -19,7 +19,6 @@ import pytest
 
 from operonx.providers.ops.llm import _content_to_text, _is_empty_completion
 
-
 #: What Gemini 3 Flash returns through Databricks' serving endpoint.
 GEMINI_BLOCKS = [
     {
