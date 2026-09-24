@@ -33,3 +33,23 @@ class EnvVarUnsetError(RuntimeError):
     continue to work — this preserves backwards-compatible behavior with
     the previous ``_raise_missing_env_vars`` helper.
     """
+
+
+class ResourceUnreachable(RuntimeError):
+    """A resource's endpoint did not accept a connection.
+
+    Distinct from a missing key or a bad config: the resource is declared
+    correctly and its client constructs fine — nothing answered at the
+    address. On a corporate setup that usually means the VPN is down, and
+    the symptom without this check is every call timing out one by one
+    instead of one error at the start.
+    """
+
+    def __init__(self, failures: dict):
+        self.failures = dict(failures)
+        lines = "\n".join(f"  {k}: {v}" for k, v in sorted(self.failures.items()))
+        super().__init__(
+            f"{len(self.failures)} resource(s) unreachable:\n{lines}\n"
+            "Check the VPN, or pass only the keys you need to "
+            "hub.require_reachable(...)."
+        )

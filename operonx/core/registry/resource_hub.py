@@ -11,7 +11,7 @@ from operonx.core.loggings import LOGGER
 from operonx.core.utils.yaml_model import YamlModel
 
 from .config_registry import REGISTRY
-from .errors import EnvVarUnsetError, ResourceHubWarning
+from .errors import EnvVarUnsetError, ResourceHubWarning, ResourceUnreachable
 from .shortcuts.health import HealthCheckResult
 from .storage import ConfigStorage, YamlConfigStorage
 
@@ -654,14 +654,36 @@ class ResourceHub:
     # Health Check
     # ========================================================================
 
-    def health_check(self, keys: Optional[List[str]] = None) -> HealthCheckResult:
-        """Check health of all or specified resources.
+    def health_check(
+        self,
+        keys: Optional[List[str]] = None,
+        *,
+        probe: bool = False,
+        timeout: float = 2.0,
+    ) -> HealthCheckResult:
+        """Check all or specified resources: does each build, and answer?
 
         Args:
-            keys: Optional list of keys to check. If None, checks all.
+            keys: Keys to check. None checks every configured resource.
+            probe: Also open a TCP connection to whatever address the
+                config points at. Building a client opens no socket, so
+                without this a hub full of corporate endpoints reports
+                healthy on a laptop with the VPN down — and the real
+                symptom arrives later as every call timing out one at a
+                time. Resources with no address (in-memory, filesystem)
+                are built and not probed.
+
+                Off by default: this method has always meant "does it
+                construct", and flipping that would quietly change the
+                answer for every existing caller. ``require_reachable``
+                turns it on.
+            timeout: Seconds to wait for the connection. Short on purpose:
+                the point is to fail at startup rather than across a batch,
+                so a slow answer is as useful to us as no answer.
 
         Returns:
-            HealthCheckResult with status of each resource
+            HealthCheckResult. Never raises for an unhealthy resource — see
+            ``require_reachable`` for the version that stops the flow.
 
         Example:
             result = hub.health_check()
@@ -674,15 +696,61 @@ class ResourceHub:
 
         for key in check_keys:
             try:
-                # Try to load the resource
-                self.get(key)
-                results[key] = True
+                instance = self.get(key)
             except Exception as e:
                 results[key] = False
                 errors[key] = str(e)
                 LOGGER.warning("Health check failed for '%s': %s", key, e)
+                continue
+
+            if not probe:
+                results[key] = True
+                continue
+
+            reason = self._probe_endpoint(key, instance, timeout)
+            results[key] = reason is None
+            if reason is not None:
+                errors[key] = reason
+                LOGGER.warning("Resource '%s' unreachable: %s", key, reason)
 
         return HealthCheckResult(
             results=results,
             errors=errors,
         )
+
+    def _probe_endpoint(self, key: str, instance: Any, timeout: float) -> Optional[str]:
+        """Why *key*'s address did not answer, or None. Local → None."""
+        from .shortcuts.reachability import endpoint_of, probe as _probe
+
+        config = getattr(instance, "config", None) or self.get_config(key)
+        if config is None:
+            return None
+        address = endpoint_of(config)
+        if address is None:
+            return None
+        return _probe(address[0], address[1], timeout=timeout)
+
+    def require_reachable(
+        self,
+        *keys: str,
+        timeout: float = 2.0,
+    ) -> HealthCheckResult:
+        """Check the named resources and **raise** if any cannot be reached.
+
+        No arguments checks every configured resource::
+
+            hub.require_reachable()                       # all of them
+            hub.require_reachable("llm:scorer", "embedding:corpus")
+
+        Every failure is collected before raising, so one run names
+        everything that is missing rather than the first thing.
+
+        Raises:
+            ResourceUnreachable: when any checked resource failed.
+        """
+        result = self.health_check(list(keys) or None, probe=True, timeout=timeout)
+        if not result.healthy:
+            raise ResourceUnreachable(
+                {k: result.errors.get(k, "unhealthy") for k in result.failed}
+            )
+        return result
