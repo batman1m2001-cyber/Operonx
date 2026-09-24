@@ -351,6 +351,7 @@ class LLMOp(BaseOp):
             "model_used": Param(type=str, required=True),
             "tool_calls": Param(type=list, default=[]),
             "usage": Param(type=dict, default={}),
+            "cost_usd": Param(type=float, default=None),
             "extras": Param(type=dict, default={}),
         }
         # When fields=[...] is set, extend the output schema with one Param
@@ -556,6 +557,55 @@ class LLMOp(BaseOp):
         if isinstance(self.resource, list):
             return self.resource[self._llms.index(llm)]
         return self.resource
+
+    def _llm_for_resource(self, resource: str) -> Optional["BaseLLM"]:
+        """Inverse of `_get_resource_key` — the LLM a key resolved to.
+
+        Searches fallbacks too, because a call that fell back reports the
+        fallback's key and must be priced at the fallback's rates.
+
+        `getattr` throughout rather than plain attribute access: these are
+        `__slots__`, and an unset slot raises. A half-built op is a normal
+        thing to meet in a unit test, and it must not be able to reach out
+        of a cost lookup and fail the call it was only annotating.
+        """
+        declared = getattr(self, "resource", None)
+        keys = declared if isinstance(declared, list) else [declared]
+        for key, llm in zip(keys, getattr(self, "_llms", None) or []):
+            if key == resource:
+                return llm
+        fallback_keys = getattr(self, "fallback", None) or []
+        for key, llm in zip(fallback_keys, getattr(self, "_fallback_llms", None) or []):
+            if key == resource:
+                return llm
+        return None
+
+    def _cost_usd(self, resource: str, usage: Dict[str, int]) -> Optional[float]:
+        """USD for one call, or None when the resource carries no prices.
+
+        `None`, never `0.0`. An unpriced resource has an *unknown* cost, and
+        a zero would sum into a batch total as though the call were free —
+        the difference between "we did not measure" and "it cost nothing".
+
+        Cached prompt tokens bill at the input rate: `prompt_tokens` already
+        includes them and operonx has no cached-rate field, so a cache-heavy
+        workload reads high. `usage` carries `cached_tokens` separately, so a
+        consumer that knows its cache price can recompute.
+        """
+        try:
+            config = getattr(self._llm_for_resource(resource), "config", None)
+            if config is None:
+                return None
+            cost_in = getattr(config, "cost_per_input_token", None)
+            cost_out = getattr(config, "cost_per_output_token", None)
+            if cost_in is None and cost_out is None:
+                return None
+            prompt = (usage or {}).get("prompt_tokens") or 0
+            completion = (usage or {}).get("completion_tokens") or 0
+            return prompt * (cost_in or 0.0) + completion * (cost_out or 0.0)
+        except Exception:  # pragma: no cover - annotation must never fail a call
+            LOGGER.debug("cost computation failed for %s", resource, exc_info=True)
+            return None
 
     # =========================================================================
     # Core: generate (non-streaming)
@@ -946,6 +996,7 @@ class LLMOp(BaseOp):
         Consumers should either join the ``final=False`` frames or read
         this one, never both.
         """
+        usage = self._normalize_usage(acc["usage_raw"])
         return {
             "role": "assistant",
             "final": True,
@@ -953,7 +1004,8 @@ class LLMOp(BaseOp):
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
             "tool_calls": acc["tool_calls"],
-            "usage": self._normalize_usage(acc["usage_raw"]),
+            "usage": usage,
+            "cost_usd": self._cost_usd(resource, usage),
             "extras": self._build_extras(
                 thinking_content=acc["thinking_content"] or None,
                 refusal=acc["refusal"],
@@ -1049,13 +1101,15 @@ class LLMOp(BaseOp):
                 else choice.logprobs
             )
 
+        usage = self._normalize_usage(usage_raw)
         return {
             "role": "assistant",
             "content": _content_to_text(message.content),
             "finish_reason": choice.finish_reason,
             "model_used": resource or completion.model,
             "tool_calls": tool_calls,
-            "usage": self._normalize_usage(usage_raw),
+            "usage": usage,
+            "cost_usd": self._cost_usd(resource, usage),
             "extras": self._build_extras(
                 thinking_content=thinking_content or None,
                 refusal=refusal,
