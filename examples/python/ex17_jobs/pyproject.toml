@@ -1,0 +1,11 @@
+[project]
+name = "operonx-ex17-jobs"
+version = "0.1.0"
+description = "One graph run over a JSONL file by a Job: a record per run, resume by key."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx",
+]
+
+[tool.uv.sources]
+operonx = { path = "../../..", editable = true }

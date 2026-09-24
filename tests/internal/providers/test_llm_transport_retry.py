@@ -24,9 +24,7 @@ from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
 def _completion(content):
     """A ChatCompletion-shaped object, minus the SDK."""
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def _config(**overrides):
@@ -57,9 +55,7 @@ def _rate_limit_error(retry_after=None):
 
 
 def _status_error(code):
-    response = httpx.Response(
-        code, request=httpx.Request("POST", "http://localhost")
-    )
+    response = httpx.Response(code, request=httpx.Request("POST", "http://localhost"))
     return openai.APIStatusError("boom", response=response, body=None)
 
 
@@ -182,9 +178,7 @@ class TestCallWithRetry:
         async def fn(**kw):
             attempts["n"] += 1
             if attempts["n"] == 1:
-                raise openai.APITimeoutError(
-                    request=httpx.Request("POST", "http://localhost")
-                )
+                raise openai.APITimeoutError(request=httpx.Request("POST", "http://localhost"))
             return _completion("ok")
 
         await _Op()._call_with_retry(fn, llm=_llm(_config()))
@@ -211,9 +205,7 @@ class TestCallWithRetry:
             attempts["n"] += 1
             return _completion(None)
 
-        out = await _Op()._call_with_retry(
-            fn, llm=_llm(_config(retry_on_empty=False))
-        )
+        out = await _Op()._call_with_retry(fn, llm=_llm(_config(retry_on_empty=False)))
         assert out.choices[0].message.content is None
         assert attempts["n"] == 1
 

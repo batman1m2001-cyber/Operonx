@@ -105,7 +105,8 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
                 return c.op_id, "fed by it"
         for k in range(len(ctx), 1, -1):
             cands = [
-                c for c in by_ctx.get(ctx[:k], [])
+                c
+                for c in by_ctx.get(ctx[:k], [])
                 if c is not r and c.start_time <= r.start_time and (k < len(ctx) or c.is_yield)
             ]
             if cands:
@@ -118,9 +119,14 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         ctx = tuple(r.ctx)
         if rule == "stand-in" and parent not in nodes:
             nodes[parent] = {
-                "id": parent, "kind": "stand-in", "parent": None, "rule": "stand-in",
+                "id": parent,
+                "kind": "stand-in",
+                "parent": None,
+                "rule": "stand-in",
                 "name": f"{stream or 'stream'} [{ctx[1].strip('[]')}]",
-                "start": r.start_time, "end": r.end_time, "record": None,
+                "start": r.start_time,
+                "end": r.end_time,
+                "record": None,
                 "ctx": format_ctx(ctx[:2]),
             }
         # GraphOp members nest under one container per (graph path, ctx),
@@ -137,16 +143,28 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
                     cid = f"graph:{'.'.join(graphs[:depth])}#{format_ctx(ctx)}"
                     if cid not in nodes:
                         nodes[cid] = {
-                            "id": cid, "kind": "container", "parent": above, "rule": "graph container",
-                            "name": graphs[depth - 1], "start": r.start_time, "end": r.end_time,
-                            "record": None, "ctx": format_ctx(ctx),
+                            "id": cid,
+                            "kind": "container",
+                            "parent": above,
+                            "rule": "graph container",
+                            "name": graphs[depth - 1],
+                            "start": r.start_time,
+                            "end": r.end_time,
+                            "record": None,
+                            "ctx": format_ctx(ctx),
                         }
                     above = cid
                 parent = above
         nodes[r.op_id] = {
-            "id": r.op_id, "kind": "record", "parent": parent, "rule": rule,
+            "id": r.op_id,
+            "kind": "record",
+            "parent": parent,
+            "rule": rule,
             "name": f"{r.op_name} [{_idx(ctx)}]" if r.is_yield else r.op_name,
-            "start": r.start_time, "end": r.end_time, "record": r, "ctx": format_ctx(ctx),
+            "start": r.start_time,
+            "end": r.end_time,
+            "record": r,
+            "ctx": format_ctx(ctx),
         }
     # synthetic nodes span their descendants
     children: Dict[Optional[str], List[str]] = defaultdict(list)
@@ -219,21 +237,27 @@ class LangfuseConsumer(Consumer):
             rec: Optional[OpExecution] = node["record"]
             kind = "span"
             if rec is not None:
-                body["input"] = self.offload_media(self.sanitize(rec.inputs), media_dir, cfg["media_threshold"])
-                body["output"] = self.offload_media(self.sanitize(rec.outputs), media_dir, cfg["media_threshold"])
+                body["input"] = self.offload_media(
+                    self.sanitize(rec.inputs), media_dir, cfg["media_threshold"]
+                )
+                body["output"] = self.offload_media(
+                    self.sanitize(rec.outputs), media_dir, cfg["media_threshold"]
+                )
                 body["level"] = "ERROR" if rec.status == STATUS_ERROR else "DEFAULT"
                 body["statusMessage"] = rec.error
-                body["metadata"].update({
-                    "op_full_name": rec.op_full_name,
-                    "op_type": rec.op_type,
-                    "is_yield": rec.is_yield,
-                    "status": rec.status,
-                    "duration_ms": rec.duration_ms,
-                    "upstreams": [
-                        {"from": ext(u.from_op_id), "from_key": u.from_key, "to_key": u.to_key}
-                        for u in rec.upstreams
-                    ],
-                })
+                body["metadata"].update(
+                    {
+                        "op_full_name": rec.op_full_name,
+                        "op_type": rec.op_type,
+                        "is_yield": rec.is_yield,
+                        "status": rec.status,
+                        "duration_ms": rec.duration_ms,
+                        "upstreams": [
+                            {"from": ext(u.from_op_id), "from_key": u.from_key, "to_key": u.to_key}
+                            for u in rec.upstreams
+                        ],
+                    }
+                )
                 if rec.op_type == "llm":
                     kind = "generation"
                     out = rec.outputs if isinstance(rec.outputs, dict) else {}
@@ -246,19 +270,24 @@ class LangfuseConsumer(Consumer):
                             "total": usage.get("total_tokens"),
                             "unit": "TOKENS",
                         }
-            batch.append({
-                "id": uuid.uuid4().hex,
-                "timestamp": body["startTime"],
-                "type": f"{kind}-create",
-                "body": body,
-            })
+            batch.append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "timestamp": body["startTime"],
+                    "type": f"{kind}-create",
+                    "body": body,
+                }
+            )
 
         reply = client.ingest(batch) or {}
         errors = reply.get("errors") or []
         if errors:
             LOGGER.warning(
                 "langfuse ingestion: %d of %d events rejected on trace %s; first: %s",
-                len(errors), len(batch), trace.trace_id, errors[0],
+                len(errors),
+                len(batch),
+                trace.trace_id,
+                errors[0],
             )
         return client.trace_url(trace.trace_id)
 
@@ -314,7 +343,9 @@ def _create_langfuse_consumer(cfg: LangfuseConsumerConfig) -> LangfuseConsumer:
 
     client = ResourceHub.instance().get(cfg.client_resource)
     if cfg.parent_strategy:
-        LOGGER.warning("trace_langfuse: parent_strategy is ignored since the ctx-tree consumer; remove it")
+        LOGGER.warning(
+            "trace_langfuse: parent_strategy is ignored since the ctx-tree consumer; remove it"
+        )
     return LangfuseConsumer(
         config={
             "client": client,

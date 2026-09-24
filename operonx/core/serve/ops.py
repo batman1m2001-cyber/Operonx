@@ -47,7 +47,7 @@ async def ingress(items=None):
     """
     session = current_session()
     if session is None:
-        for item in (items or ()):
+        for item in items or ():
             yield {"item": item}
         return
 
@@ -75,7 +75,7 @@ async def egress(item=None) -> dict:
         return {"sent": False}
     try:
         return {"sent": bool(await session.send(item))}
-    except Exception as exc:                              # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # `Session.send` is specified to report failure rather than raise,
         # and a transport that breaks that promise should lose its item,
         # not the run. A peer disappearing mid-reply is ordinary; the run

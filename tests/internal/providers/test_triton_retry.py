@@ -57,8 +57,10 @@ class TestClassification:
         assert _is_transient(_Err(f"[StatusCode.{code}] nope")) is False
 
     def test_the_real_message_shape_is_recognised(self):
-        real = ("Triton inference failed for model 'bge_m3_embed': "
-                "[StatusCode.DEADLINE_EXCEEDED] Deadline Exceeded")
+        real = (
+            "Triton inference failed for model 'bge_m3_embed': "
+            "[StatusCode.DEADLINE_EXCEEDED] Deadline Exceeded"
+        )
         assert _status_code(_Err(real)) == "DEADLINE_EXCEEDED"
         assert _is_transient(_Err(real)) is True
 
@@ -115,6 +117,7 @@ def _mock_grpc():
 @pytest.fixture(autouse=True)
 def _no_sleeping(monkeypatch):
     """Backoff is correctness elsewhere; here it is only slowness."""
+
     async def _instant(_seconds):
         return None
 
@@ -134,8 +137,11 @@ class TestRetry:
         raw = _FakeRaw(99, _Err("[StatusCode.UNAVAILABLE] gone"))
         with pytest.raises(_Err):
             await _client(raw).infer(
-                model="m", inputs={"TEXT": [["x"]]}, outputs=["v"],
-                retries=2, decode=False,
+                model="m",
+                inputs={"TEXT": [["x"]]},
+                outputs=["v"],
+                retries=2,
+                decode=False,
             )
         assert raw.calls == 3, "one initial attempt plus two retries"
 
@@ -143,8 +149,11 @@ class TestRetry:
         raw = _FakeRaw(99, _Err("[StatusCode.INVALID_ARGUMENT] bad shape"))
         with pytest.raises(_Err):
             await _client(raw).infer(
-                model="m", inputs={"TEXT": [["x"]]}, outputs=["v"],
-                retries=5, decode=False,
+                model="m",
+                inputs={"TEXT": [["x"]]},
+                outputs=["v"],
+                retries=5,
+                decode=False,
             )
         assert raw.calls == 1, "a refusal must cost exactly one attempt"
 
@@ -152,16 +161,17 @@ class TestRetry:
         raw = _FakeRaw(99, _Err("[StatusCode.DEADLINE_EXCEEDED] x"))
         with pytest.raises(_Err):
             await _client(raw).infer(
-                model="m", inputs={"TEXT": [["x"]]}, outputs=["v"],
-                retries=0, decode=False,
+                model="m",
+                inputs={"TEXT": [["x"]]},
+                outputs=["v"],
+                retries=0,
+                decode=False,
             )
         assert raw.calls == 1
 
     async def test_a_first_attempt_that_works_costs_nothing(self):
         raw = _FakeRaw(0, _Err("unused"))
-        await _client(raw).infer(
-            model="m", inputs={"TEXT": [["x"]]}, outputs=["v"], decode=False
-        )
+        await _client(raw).infer(model="m", inputs={"TEXT": [["x"]]}, outputs=["v"], decode=False)
         assert raw.calls == 1
 
 

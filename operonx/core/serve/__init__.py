@@ -24,7 +24,7 @@ from .registry import (
     resolve_transport,
     transport_names,
 )
-from .runner import ServeRunner, serve_session
+from .runner import RunTimeout, ServeRunner, serve_session
 
 __all__ = [
     "BoundedSession",
@@ -33,6 +33,7 @@ __all__ = [
     "MemorySession",
     "MemoryTransport",
     "RunRequest",
+    "RunTimeout",
     "SESSION_KEY",
     "ServeRunner",
     "Session",
@@ -48,6 +49,7 @@ __all__ = [
     "transport_names",
 ]
 
+
 def __getattr__(name):
     """`build_app` / `serve_manifest` need the serve extra; import them lazily.
 
@@ -57,6 +59,7 @@ def __getattr__(name):
     """
     if name in ("build_app", "build_apps", "serve_manifest", "engine_for"):
         from . import app as _app
+
         return getattr(_app, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -66,10 +69,12 @@ def __getattr__(name):
 def _register_builtins() -> None:
     def _http(spec):
         from .asgi import HttpTransport
+
         return HttpTransport(spec)
 
     def _websocket(spec):
         from .asgi import WebSocketTransport
+
         return WebSocketTransport(spec)
 
     register_transport("http", _http)

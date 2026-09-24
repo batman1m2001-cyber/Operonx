@@ -140,6 +140,7 @@ async def test_transient_may_push_into_a_declared_cell():
 
 # -- regression: the chain length that the original tests never reached --
 
+
 @pytest.mark.asyncio
 async def test_transient_survives_a_three_op_chain():
     """A parked sequential consumer must not have its context freed.
@@ -180,9 +181,7 @@ async def test_transient_survives_a_three_op_chain():
         handle = engine.start(inputs={"n": count})
         async for _ in handle:
             pass
-        assert seen == [f"i{i}!" for i in range(count)], (
-            f"chain of {count} lost items: {seen[:5]}"
-        )
+        assert seen == [f"i{i}!" for i in range(count)], f"chain of {count} lost items: {seen[:5]}"
 
 
 @pytest.mark.parametrize("mid_bound", ["sync", "io"])
@@ -208,10 +207,12 @@ async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
             yield {"item": f"i{i}"}
 
     if mid_bound == "sync":
+
         @op(bound="sync")
         def relay(item=None) -> dict:
             return {"out": item}
     else:
+
         @op(bound="io")
         async def relay(item=None) -> dict:
             await asyncio.sleep(0)
@@ -249,6 +250,7 @@ async def test_the_release_guard_did_not_become_a_no_op():
     So this asserts the other direction: retention stays flat as the item
     count grows by two orders of magnitude.
     """
+
     @op(bound="io", transient=True)
     async def produce(n: int = 0):
         for _ in range(n):
@@ -274,7 +276,7 @@ async def test_the_release_guard_did_not_become_a_no_op():
     def entries(state):
         total = 0
         for cells in state._cells:
-            for cell in (cells if isinstance(cells, list) else [cells]):
+            for cell in cells if isinstance(cells, list) else [cells]:
                 total += len(getattr(cell, "contexts", ()) or ())
         return total
 

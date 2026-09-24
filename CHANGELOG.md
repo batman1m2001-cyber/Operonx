@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Jobs: running Operons over data that does not talk back
+
+`operonx.core.jobs.Job` puts work into a graph from a *source* — a JSONL
+or CSV file, a Python iterable, or a ``source:`` resource — one run per
+item, writes what `egress` sends to a *sink*, and leaves a record per
+run (``run.json`` + ``items.jsonl``: key, status, error, trace id, ms,
+sent). The graph is the same graph `[[serve]]` would put behind a route:
+a ``JobSession`` is a ``Session`` over a source and a sink, so `ingress`
+and `egress` need no change and neither does anything between them.
+
+Per-item outcomes are ``ok``, ``failed``, ``empty`` (the run finished and
+sent nothing — the batch bug that otherwise reports OK) and ``skipped``
+(done in the run being resumed). ``on_error`` is ``skip``, ``stop`` or
+``retry:N``; ``concurrency`` bounds items in flight; ``key`` names the
+item field that identifies it, so ``run(resume=True)`` reruns only what
+the last run did not finish. A graph with no doors takes the item as an
+input (``item_input=``) and its result is the item's result — the
+``engine.batch()`` shape, with a record.
+
+``source:`` and ``sink:`` are resource categories (``kind: jsonl | csv |
+python``), so resources.yaml names a job's inputs and outputs the way it
+names an LLM.
+
+``[[job]]`` in ``operonx.toml`` declares one beside the ``[[serve]]``
+blocks — the same graph served and run over a file from one manifest;
+paths are relative to the manifest, ``schedule`` is cron text that is
+listed, not executed. ``operonx-run <name>`` runs it, ``--list`` prints
+them, ``module:attr`` still names a Job object directly.
+
+``session = "stream"`` feeds every item through one run — the callbot's
+shape: shared state, one trace, no per-item accounting; the record counts
+``fed`` and ``sent`` and holds the trace id, and cannot resume.
+
+Every run a job mints carries ``job``, ``job_run`` and ``key`` on its
+trace, as fields and as tags, so Langfuse filters one job, one run or one
+item. A job is never a span. ``serve_session(metadata=…)`` is how they
+get there, and is open to any transport.
+
+**Runbook — many jobs, one command.** ``Runbook("nightly", extract >>
+[embed >> cluster, score])``: ``>>`` is `Sequential`, a list is
+`Parallel`, composed *above* the engine and walked by asyncio — never a
+graph of jobs, whose trace would nest a job inside a run inside a job.
+A failed step ends its sequence (``on_error="continue"`` runs on); a
+parallel branch always finishes; hand-off between stages is by naming
+the same resource. The record, ``jobs/<runbook>/<run>/run.json``, holds
+the tree with a status per node and each job's own run id. A runbook is
+never a span. In the manifest: ``[[job]] name = "nightly" runbook =
+"module:attr"``.
+
+**A deadline per item.** ``item_timeout`` on a Job (and in the manifest)
+cancels a run that overstays and records the item ``timeout``, which
+``retry:N``, ``stop`` and ``--resume`` treat like a failure.
+``serve_session(timeout=…)`` is the mechanism and raises ``RunTimeout``,
+the one case in which a transport cancels the run it minted.
+
+Example: ``examples/python/ex17_jobs``. Design: ``docs/JOB_PLAN.md``.
+
+### Fixed — `BoundedSession.end_input()` on a full bound
+
+It put its end-of-input sentinel with ``put_nowait`` and raised
+``QueueFull`` when the bound was reached — a peer hanging up while its
+packets were still queued. The sentinel only wakes a reader parked in
+``get()``, and none is parked while the queue is full, so the case is now
+a no-op and ``recv`` ends once it has drained. Found by a stream job
+whose source outran its graph.
+
 ## [1.6.4] - 2026-09-23
 
 ### Added — transient retry and a configurable timeout on Triton

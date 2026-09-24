@@ -25,6 +25,7 @@ class _FakeRaw:
 
     def close(self):
         if self._coroutine:
+
             async def _aclose():
                 self.closed += 1
 

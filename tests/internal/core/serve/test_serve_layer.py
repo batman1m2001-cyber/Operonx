@@ -61,7 +61,7 @@ def test_a_manifest_parses_and_fills_in_what_it_leaves_out():
     call = m.serve("call")
     assert call.graph == "demo.pipeline:main"
     assert call.session == "per_connection"
-    assert call.port == 9922            # ${DEMO_PORT:9922} default applied
+    assert call.port == 9922  # ${DEMO_PORT:9922} default applied
     assert call.max_inflight == 4000
     # http defaults to per_request without being told
     assert m.serve("predict").session == "per_request"
@@ -74,8 +74,7 @@ def test_graph_must_be_an_entry_point_not_a_name():
     serve names its entry point outright, and a name is just wrong.
     """
     with pytest.raises(ManifestError, match="not a `module:function`"):
-        Manifest.from_dict({"serve": [
-            {"kind": "http", "path": "/x", "graph": "pipeline"}]})
+        Manifest.from_dict({"serve": [{"kind": "http", "path": "/x", "graph": "pipeline"}]})
 
 
 def test_a_stream_kind_must_declare_a_bound():
@@ -87,24 +86,28 @@ def test_a_stream_kind_must_declare_a_bound():
     it is how `operonx.io.Channel` came to exist.
     """
     with pytest.raises(ManifestError, match="max_inflight"):
-        Manifest.from_dict({"serve": [
-            {"kind": "websocket", "path": "/ws", "graph": "m:g"}]})
+        Manifest.from_dict({"serve": [{"kind": "websocket", "path": "/ws", "graph": "m:g"}]})
 
 
 def test_asgi_mounts_an_app_and_takes_no_graph():
-    m = Manifest.from_dict({"serve": [
-        {"name": "admin", "kind": "asgi", "path": "/", "app": "demo.admin:app"}]})
+    m = Manifest.from_dict(
+        {"serve": [{"name": "admin", "kind": "asgi", "path": "/", "app": "demo.admin:app"}]}
+    )
     assert m.serve("admin").app == "demo.admin:app"
     with pytest.raises(ManifestError, match="cannot also name a `graph`"):
-        Manifest.from_dict({"serve": [
-            {"kind": "asgi", "app": "a:b", "graph": "m:g"}]})
+        Manifest.from_dict({"serve": [{"kind": "asgi", "app": "a:b", "graph": "m:g"}]})
 
 
 def test_endpoints_group_onto_listeners_by_address():
-    m = Manifest.from_dict({"serve": [
-        {"name": "a", "kind": "http", "path": "/a", "port": 8080, "graph": "m:g"},
-        {"name": "b", "kind": "http", "path": "/b", "port": 8080, "graph": "m:g"},
-        {"name": "c", "kind": "http", "path": "/c", "port": 9090, "graph": "m:g"}]})
+    m = Manifest.from_dict(
+        {
+            "serve": [
+                {"name": "a", "kind": "http", "path": "/a", "port": 8080, "graph": "m:g"},
+                {"name": "b", "kind": "http", "path": "/b", "port": 8080, "graph": "m:g"},
+                {"name": "c", "kind": "http", "path": "/c", "port": 9090, "graph": "m:g"},
+            ]
+        }
+    )
     listeners = m.listeners()
     assert len(listeners) == 2
     assert [s.name for s in listeners[("0.0.0.0", 8080)]] == ["a", "b"]
@@ -112,12 +115,18 @@ def test_endpoints_group_onto_listeners_by_address():
 
 def test_duplicate_routes_are_refused():
     with pytest.raises(ManifestError, match="both serve"):
-        Manifest.from_dict({"serve": [
-            {"name": "a", "kind": "http", "path": "/x", "graph": "m:g"},
-            {"name": "b", "kind": "http", "path": "/x", "graph": "m:g"}]})
+        Manifest.from_dict(
+            {
+                "serve": [
+                    {"name": "a", "kind": "http", "path": "/x", "graph": "m:g"},
+                    {"name": "b", "kind": "http", "path": "/x", "graph": "m:g"},
+                ]
+            }
+        )
 
 
 # -- a graph that is served ---------------------------------------------
+
 
 @op(bound="sync")
 def shout(item: str = "") -> dict:
@@ -158,9 +167,9 @@ async def test_run_finishes_when_the_peer_vanishes():
     transport = MemoryTransport()
     session = transport.open()
     await session.feed("only")
-    session.end_input()                       # peer hung up
+    session.end_input()  # peer hung up
     await serve_session(ENGINE, session)
-    assert session.sent == ["only!"]          # the item still went through
+    assert session.sent == ["only!"]  # the item still went through
 
 
 @pytest.mark.asyncio
@@ -177,8 +186,24 @@ async def test_bound_is_enforced_where_items_enter():
     session = MemoryTransport(max_inflight=2).open()
     assert session.feed_nowait("1") is True
     assert session.feed_nowait("2") is True
-    assert session.feed_nowait("3") is False      # bound reached
-    assert session.overflowed == 1                # counted, never silent
+    assert session.feed_nowait("3") is False  # bound reached
+    assert session.overflowed == 1  # counted, never silent
+
+
+@pytest.mark.asyncio
+async def test_ending_input_on_a_full_bound_does_not_raise():
+    """A peer that hangs up while its packets are still queued.
+
+    `end_input` used to `put_nowait` its sentinel unconditionally, so on
+    a full bound it raised QueueFull out of the transport's disconnect
+    path. The sentinel only wakes a reader parked in `get()`, and none is
+    parked while the queue is full — `recv` still ends once it drains.
+    """
+    session = MemoryTransport(max_inflight=2).open()
+    assert session.feed_nowait("1") and session.feed_nowait("2")
+    session.end_input()  # full, and must not raise
+    assert [item async for item in session.recv()] == ["1", "2"]
+    assert [item async for item in session.recv()] == []  # ended, for every reader
 
 
 @pytest.mark.asyncio
@@ -186,7 +211,7 @@ async def test_on_session_hook_can_refuse_a_connection():
     spec = ServeSpec(name="t", kind="memory", graph="x:y", max_inflight=8)
     transport = MemoryTransport()
     runner = ServeRunner(ENGINE, spec, transport=transport)
-    runner._on_session = lambda session: None     # refuse everything
+    runner._on_session = lambda session: None  # refuse everything
 
     session = transport.open()
     transport.stop()
@@ -195,6 +220,7 @@ async def test_on_session_hook_can_refuse_a_connection():
 
 
 # -- the gate ------------------------------------------------------------
+
 
 class ThirdPartySession:
     """Implements the protocol. Inherits nothing, imports no internals."""
@@ -251,6 +277,5 @@ async def test_third_party_transport_drives_a_graph():
 
 def test_a_transport_can_be_named_by_import_path():
     """`kind = "module:Class"` needs no registration at all."""
-    resolved = resolve_transport(
-        "tests.internal.core.serve.test_serve_layer:ThirdPartyTransport")
+    resolved = resolve_transport("tests.internal.core.serve.test_serve_layer:ThirdPartyTransport")
     assert resolved.__name__ == "ThirdPartyTransport"

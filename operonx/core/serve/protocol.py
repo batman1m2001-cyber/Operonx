@@ -62,8 +62,9 @@ class RunRequest:
     session_id: Optional[str] = None
 
 
-def json_object(text: Any, default: Optional[Dict[str, Any]] = None,
-                on_reject=None) -> Dict[str, Any]:
+def json_object(
+    text: Any, default: Optional[Dict[str, Any]] = None, on_reject=None
+) -> Dict[str, Any]:
     """Parse untrusted JSON and guarantee a dict comes back.
 
     A connection's query string and body are written by whoever dialled
@@ -145,7 +146,9 @@ class BoundedSession:
     and reported, never dropped in silence.
     """
 
-    def __init__(self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None):
+    def __init__(
+        self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None
+    ):
         self.meta: Mapping[str, Any] = dict(meta or {})
         self.max_inflight = max_inflight
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_inflight or 0)
@@ -172,7 +175,15 @@ class BoundedSession:
     def end_input(self) -> None:
         """No more inbound items. `recv` drains what is left, then stops."""
         self._closed.set()
-        self._queue.put_nowait(_EOF)
+        try:
+            self._queue.put_nowait(_EOF)
+        except asyncio.QueueFull:
+            # The sentinel only exists to wake a reader parked in `get()`,
+            # and nothing is parked there while the queue is full. `recv`
+            # sees the closed flag once it has drained what is there. Found
+            # by a stream job whose source outran its graph: the same shape
+            # as a peer hanging up while its packets are still queued.
+            pass
 
     async def recv(self) -> AsyncIterator[Any]:
         while True:

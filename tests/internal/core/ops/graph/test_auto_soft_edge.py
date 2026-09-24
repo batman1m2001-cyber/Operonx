@@ -280,8 +280,9 @@ def test_shape9_branch_is_also_a_predecessor_of_the_merge():
 
     g.build()
 
-    assert _edge(g, "router", "m").soft is True, \
+    assert _edge(g, "router", "m").soft is True, (
         "the branch's own edge into the merge is one arm — it must soften"
+    )
     assert _edge(g, "router", "m").auto_soft is True
     assert _edge(g, "gate", "m").soft is True
     assert _edge(g, "gate", "m").auto_soft is True
@@ -315,10 +316,12 @@ def test_shape10_nested_branch_rejoins_a_merge_the_outer_branch_also_feeds():
 
     g.build()
 
-    assert _edge(g, "outer", "m").soft is True, \
+    assert _edge(g, "outer", "m").soft is True, (
         "long-call arm: the outer branch feeds the merge directly"
-    assert _edge(g, "inner", "m").soft is True, \
+    )
+    assert _edge(g, "inner", "m").soft is True, (
         "short-call arm: the merge is reached through the gate"
+    )
 
 
 async def test_shape10_merge_actually_fires_on_the_direct_arm():
@@ -339,10 +342,12 @@ async def test_shape10_merge_actually_fires_on_the_direct_arm():
             inputs={"is_short": outer["target"]},
         )
         inner = if_(gate["is_kid"], "bail").else_("m")
-        bail = FuncOp(name="bail", code_fn=lambda **kw: {"z": "bailed"},
-                      inputs={"is_kid": inner["target"]})
-        m = FuncOp(name="m", code_fn=lambda **kw: {"z": "reached"},
-                   inputs={"is_kid": inner["target"]})
+        bail = FuncOp(
+            name="bail", code_fn=lambda **kw: {"z": "bailed"}, inputs={"is_kid": inner["target"]}
+        )
+        m = FuncOp(
+            name="m", code_fn=lambda **kw: {"z": "reached"}, inputs={"is_kid": inner["target"]}
+        )
         START >> seed >> outer
         outer >> gate >> inner
         inner >> bail >> END

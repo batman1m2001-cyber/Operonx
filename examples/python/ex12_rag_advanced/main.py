@@ -191,7 +191,8 @@ def main_flow():
     fields = unpack(item=request["item"])
     vectors = precompute_embeddings(texts=fields["documents"])
     keywords = keyword_rrf(query=fields["query"], documents=fields["documents"])
-    hybrid = hybrid_rag(query=fields["query"], documents=fields["documents"],
-                        doc_vectors=vectors["vectors"])
+    hybrid = hybrid_rag(
+        query=fields["query"], documents=fields["documents"], doc_vectors=vectors["vectors"]
+    )
     out = egress(item=hybrid["content"])
     START >> request >> fields >> vectors >> keywords >> hybrid >> out >> END

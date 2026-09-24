@@ -13,6 +13,7 @@ different problems with different fixes.
 `require_reachable` is the version that stops the flow, because a warning
 nobody reads is how the minutes get wasted.
 """
+
 from __future__ import annotations
 
 import socket

@@ -196,6 +196,7 @@ mcp = [
 [project.scripts]
 operonx-pack = "operonx.cli.pack:main"
 operonx-serve = "operonx.cli.serve:main"
+operonx-run = "operonx.cli.run:main"
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operonx"

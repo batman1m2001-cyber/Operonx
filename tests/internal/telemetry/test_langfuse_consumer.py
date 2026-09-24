@@ -218,14 +218,29 @@ def client():
 
 
 def _anchored(nodes, trace_id="t"):
-    return WorkflowTrace(trace_id, "w", started_at=100.0, ended_at=101.0, nodes=nodes,
-                         wall_started_at=1_800_000_000.0, metadata={"user_id": "u", "session_id": "s"})
+    return WorkflowTrace(
+        trace_id,
+        "w",
+        started_at=100.0,
+        ended_at=101.0,
+        nodes=nodes,
+        wall_started_at=1_800_000_000.0,
+        metadata={"user_id": "u", "session_id": "s"},
+    )
 
 
 def _rec(op_id, name, start, end, ctx=("main",), **kw):
-    return OpExecution(op_id=op_id, op_name=name, op_full_name=f"engine.{name}", ctx=ctx,
-                       start_time=start, end_time=end, inputs=kw.pop("inputs", {}),
-                       outputs=kw.pop("outputs", {}), **kw)
+    return OpExecution(
+        op_id=op_id,
+        op_name=name,
+        op_full_name=f"engine.{name}",
+        ctx=ctx,
+        start_time=start,
+        end_time=end,
+        inputs=kw.pop("inputs", {}),
+        outputs=kw.pop("outputs", {}),
+        **kw,
+    )
 
 
 class TestBatch:
@@ -244,7 +259,9 @@ class TestBatch:
     def test_parent_ids_are_scoped_too(self, client):
         run = _run(Operon(nested, params={"n": 1}), "nest-ids")
         LangfuseConsumer(config={"client": client}).consume(run)
-        bodies = {e["body"]["id"]: e["body"] for e in client.calls[0] if e["type"] != "trace-create"}
+        bodies = {
+            e["body"]["id"]: e["body"] for e in client.calls[0] if e["type"] != "trace-create"
+        }
         child = _get(bodies, ".t#main.[0].[0]")
         parent = _get(bodies, ".c#main.[0]")
         assert child["id"].startswith("nest-ids/") and parent["id"].startswith("nest-ids/")
@@ -253,9 +270,18 @@ class TestBatch:
         assert child["metadata"]["upstreams"][0]["from"] == parent["id"]
 
     def test_llm_record_is_a_generation_with_model_and_usage(self, client):
-        rec = _rec("engine.ask#main", "ask", 100.0, 100.2, op_type="llm",
-                   outputs={"content": "yes", "model_used": "gpt-x",
-                            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}})
+        rec = _rec(
+            "engine.ask#main",
+            "ask",
+            100.0,
+            100.2,
+            op_type="llm",
+            outputs={
+                "content": "yes",
+                "model_used": "gpt-x",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            },
+        )
         LangfuseConsumer(config={"client": client}).consume(_anchored([rec]))
         ev = client.calls[0][1]
         assert ev["type"] == "generation-create"
@@ -264,7 +290,14 @@ class TestBatch:
         assert ev["body"]["output"]["content"] == "yes"
 
     def test_errored_record_carries_level_and_message(self, client):
-        rec = _rec("engine.boom#main", "boom", 100.0, 100.1, status=STATUS_ERROR, error="RuntimeError: kaput")
+        rec = _rec(
+            "engine.boom#main",
+            "boom",
+            100.0,
+            100.1,
+            status=STATUS_ERROR,
+            error="RuntimeError: kaput",
+        )
         LangfuseConsumer(config={"client": client}).consume(_anchored([rec]))
         body = client.calls[0][1]["body"]
         assert body["level"] == "ERROR" and "kaput" in body["statusMessage"]
@@ -277,21 +310,32 @@ class TestBatch:
         LOGGER.addHandler(caplog.handler)
         try:
             with caplog.at_level(logging.WARNING, logger=LOGGER.name):
-                LangfuseConsumer(config={"client": client}).consume(_anchored([_rec("engine.a#main", "a", 100.0, 100.5)]))
+                LangfuseConsumer(config={"client": client}).consume(
+                    _anchored([_rec("engine.a#main", "a", 100.0, 100.5)])
+                )
         finally:
             LOGGER.removeHandler(caplog.handler)
-        assert any("rejected" in r.getMessage() and "bad span" in r.getMessage() for r in caplog.records)
+        assert any(
+            "rejected" in r.getMessage() and "bad span" in r.getMessage() for r in caplog.records
+        )
 
     def test_missing_client_raises(self):
         with pytest.raises(ValueError, match="requires a `client`"):
             LangfuseConsumer(config={}).consume(_anchored([]))
 
     def test_returns_trace_url(self, client):
-        assert LangfuseConsumer(config={"client": client}).consume(_anchored([], "t-lin")) \
+        assert (
+            LangfuseConsumer(config={"client": client}).consume(_anchored([], "t-lin"))
             == "https://langfuse.test/trace/t-lin"
+        )
 
     def test_parent_strategy_is_accepted_and_ignored(self, client):
         run = _run(Operon(nested, params={"n": 1}), "ps")
         LangfuseConsumer(config={"client": client, "parent_strategy": "root_only"}).consume(run)
-        bodies = {e["body"]["id"]: e["body"] for e in client.calls[0] if e["type"] != "trace-create"}
-        assert _get(bodies, ".t#main.[0].[0]")["parentObservationId"] == _get(bodies, ".c#main.[0]")["id"]
+        bodies = {
+            e["body"]["id"]: e["body"] for e in client.calls[0] if e["type"] != "trace-create"
+        }
+        assert (
+            _get(bodies, ".t#main.[0].[0]")["parentObservationId"]
+            == _get(bodies, ".c#main.[0]")["id"]
+        )

@@ -9,13 +9,13 @@ class TestLLMOp:
         assert node.show_keys == ("content",)
 
     def test_extracted_fields_are_the_answer(self):
-        llm = LLMOp(resource="r", inputs={"prompt": "hi"},
-                    fields=["intent: str", "reason: str"])
+        llm = LLMOp(resource="r", inputs={"prompt": "hi"}, fields=["intent: str", "reason: str"])
         assert llm.show_keys == ("intent", "reason")
 
     def test_declared_beats_the_fields(self):
-        llm = LLMOp(resource="r", inputs={"prompt": "hi"},
-                    fields=["intent: str"], show_keys="content")
+        llm = LLMOp(
+            resource="r", inputs={"prompt": "hi"}, fields=["intent: str"], show_keys="content"
+        )
         assert llm.show_keys == ("content",)
 
 

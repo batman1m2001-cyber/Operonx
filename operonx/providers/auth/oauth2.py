@@ -79,9 +79,7 @@ class OAuth2TokenProvider:
 
             token = data.get(self.config.token_path)
             if not token:
-                raise ValueError(
-                    f"Token not found at '{self.config.token_path}' in response"
-                )
+                raise ValueError(f"Token not found at '{self.config.token_path}' in response")
 
             expires_in = None
             if self.config.expires_in_path:
