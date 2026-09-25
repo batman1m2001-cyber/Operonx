@@ -31,6 +31,8 @@ from pydantic import Field
 
 from operonx.core.utils import YamlModel
 
+from ._keys import is_resource_key
+
 __all__ = [
     "Source",
     "JsonlSource",
@@ -205,7 +207,7 @@ def as_source(obj: Any) -> Source:
     if _is_source(obj):
         return obj
     if isinstance(obj, str):
-        if ":" in obj and not Path(obj).exists():
+        if is_resource_key(obj):
             from operonx.core.jobs import register
             from operonx.core.registry import ResourceHub
 

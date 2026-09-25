@@ -186,7 +186,14 @@ class TestNestedGraph:
         handle = Operon(self._graph(seen)).start(inputs={"n": 1})
         out = await asyncio.wait_for(handle.collect(), timeout=30)
         assert sorted(seen) == [0, 1, 2, 3, 4, 5], "every branch should reach the guard"
-        assert out["k"] == [0, 1, 3, 4, 5], "the cancelled branch must not report a value"
+        # Sorted, because the claim is about *membership* — branch 2 cancelled
+        # itself and must not report a value. Six branches run concurrently, so
+        # completion order is the scheduler's business and asserting it made
+        # this fail on `[0, 1, 4, 5, 3]`: the right elements, arriving in the
+        # order they finished.
+        assert sorted(out["k"]) == [0, 1, 3, 4, 5], (
+            f"the cancelled branch must not report a value; got {out['k']}"
+        )
 
     @pytest.mark.asyncio
     async def test_the_interrupt_reaches_the_handle(self):
