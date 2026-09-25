@@ -1,0 +1,11 @@
+[project]
+name = "operonx-ex18-variants"
+version = "0.1.0"
+description = "One HTTP door, one compiled graph per variant; the session picks."
+requires-python = ">=3.10"
+dependencies = [
+    "operonx[serve]",
+]
+
+[tool.uv.sources]
+operonx = { path = "../../..", editable = true }

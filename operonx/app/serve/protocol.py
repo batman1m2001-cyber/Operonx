@@ -52,6 +52,10 @@ class RunRequest:
     instead.
 
     Returning ``None`` from the hook refuses the connection.
+
+    ``variant`` names one of the door's ``[serve.variants]`` — the compiled
+    graph this session runs. Required when the door declares variants,
+    refused when it names one the door does not have.
     """
 
     inputs: Dict[str, Any] = field(default_factory=dict)
@@ -60,6 +64,7 @@ class RunRequest:
     request_id: Optional[str] = None
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+    variant: Optional[str] = None
 
 
 def json_object(

@@ -62,6 +62,54 @@ For a static-binary edge deployment, the
 an equivalent Axum server (`operonx-serve` binary) that reads the same
 `graph.json` and `resources.yaml`.
 
+## One door, several graphs: variants
+
+A door whose graph differs by caller — one turn graph per agent, one
+pipeline per tenant tier — declares the variants instead of threading a
+"which am I" input through every op or listing one `[[serve]]` per kind:
+
+```toml
+[[serve]]
+name  = "call"
+kind  = "websocket"
+path  = "/ws/call"
+graph = "call.graph:build"                 # a plain function, not a @graph
+on_session = "app.door:open_call"
+[serve.variants]
+educa_hr  = { turn = "agents.educa_hr.graph:turn", config = "agents/educa_hr/prompts.yaml" }
+ahamove   = { turn = "agents.graph:turn",          config = "agents/ahamove/prompts.yaml" }
+```
+
+`graph` names a **factory**: a function that takes the bound parameters
+and returns a `@graph`. A bound value that reads as `module:attr` is
+loaded, anything else is a literal. `operonx-serve` compiles one engine
+per variant at boot, and `on_session` picks one per session:
+
+```python
+def open_call(session):
+    return RunRequest(variant=session.meta["query"]["agent_type"])
+```
+
+A door with variants has no default. A session that names none, or a
+name the door does not declare, is refused at the door with the declared
+names in the log — no run is minted. `Application.graphs` lists one
+graph per variant (`build[educa_hr]`, `build[ahamove]`) under the one
+service, each compilable on its own. Worked example:
+`examples/python/ex18_variants`.
+
+## A `src/` layout
+
+A project that keeps its packages under `src/` says so once, and every
+`module:attr` in the manifest resolves from there:
+
+```toml
+[project]
+src = ["src"]        # import roots, relative to the manifest; default ["."]
+```
+
+`Application.bootstrap()` puts each root on `sys.path`; `operonx-serve`,
+`operonx-run` and the studio all go through it.
+
 ## Configuration
 
 The server honours the standard Operonx setup:

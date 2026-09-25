@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-09-25
+
+### Added — `[serve.variants]`: one door, one compiled graph per variant
+
+A door whose graph differs by caller declares the variants. `graph`
+names a factory — a plain function that takes the bound parameters and
+returns a `@graph` — and each variant binds them (`module:attr` values
+are loaded, the rest are literals). `operonx-serve` compiles one engine
+per variant at boot; `on_session` picks with `RunRequest.variant`, and a
+session naming none or an unknown one is refused at the door.
+`compile_graph(entry, bind=…)` is the same thing from Python;
+`Application.graphs` lists one graph per variant (`build[formal]`) under
+the service; `describe()` carries `variants` per service and `bind` per
+graph. `examples/python/ex18_variants` is the worked example.
+
+### Added — `[project] src`
+
+Import roots relative to the manifest (default `["."]`).
+`Application.bootstrap()` puts each on `sys.path`, so a `src/` layout
+needs no path juggling in entry points.
+
 ## [1.7.1] - 2026-09-25
 
 ### Changed — the application layer is `operonx.app`
@@ -1777,7 +1798,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.2...v1.7.0
 [1.5.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.2

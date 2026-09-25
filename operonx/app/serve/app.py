@@ -16,7 +16,7 @@ import inspect
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-from operonx.app.manifest import Manifest, ManifestError, ServeSpec
+from operonx.app.manifest import _ENTRY_RE, Manifest, ManifestError, ServeSpec
 from operonx.core.loggings import LOGGER
 
 from .asgi import HttpTransport, WebSocketTransport
@@ -24,11 +24,23 @@ from .protocol import RunRequest
 from .registry import load_object, resolve_transport
 from .runner import ServeRunner
 
-__all__ = ["build_app", "build_apps", "compile_graph", "engine_for", "serve_manifest"]
+__all__ = [
+    "build_app",
+    "build_apps",
+    "compile_graph",
+    "engine_for",
+    "engines_for",
+    "serve_manifest",
+]
 
 
 def compile_graph(
-    entry: str, *, trace: Any = None, concurrency: Optional[int] = None, where: str = "graph"
+    entry: str,
+    *,
+    bind: Optional[Dict[str, Any]] = None,
+    trace: Any = None,
+    concurrency: Optional[int] = None,
+    where: str = "graph",
 ) -> Any:
     """An ``Operon`` from a ``module:attr`` entry point, the way anything
     declared in the manifest is compiled.
@@ -37,10 +49,17 @@ def compile_graph(
     graph compiled without declaring them keeps the literal defaults it
     was built with, which is the failure mode where a deep op holds
     ``None`` forever and every call fails on it.
+
+    With ``bind``, the entry point is a plain function that takes those
+    parameters and returns a ``@graph`` — a variant of one door. Each
+    value that reads as ``module:attr`` is loaded; anything else is passed
+    as a literal. The graph it returns is compiled as above.
     """
     from operonx.core import Operon
 
     graph_fn = load_object(entry, field=f"{where} graph")
+    if bind:
+        graph_fn = _bind_factory(graph_fn, entry, bind, where)
     # `Operon(...)` on something that is not a graph fails as
     # `AttributeError: 'str' object has no attribute 'name'`, which names
     # neither the manifest entry nor what was actually wrong.
@@ -66,8 +85,33 @@ def compile_graph(
     return engine
 
 
-def engine_for(spec: ServeSpec) -> Any:
-    """Compile the graph a `[[serve]]` entry names.
+def _bind_factory(factory: Any, entry: str, bind: Dict[str, Any], where: str) -> Any:
+    """Call a graph factory with a variant's bound parameters."""
+    if getattr(factory, "_operonx_graph", False):
+        # A `@graph` called with kwargs would be *instantiated* with them as
+        # wired inputs, which is not a variant and fails far from here.
+        raise TypeError(
+            f"{where} graph {entry!r} is a @graph, but variants need a plain "
+            f"function that takes the bound parameters and returns one"
+        )
+    resolved = {
+        name: load_object(value, field=f"{where} bind.{name}")
+        if isinstance(value, str) and _ENTRY_RE.match(value)
+        else value
+        for name, value in bind.items()
+    }
+    try:
+        result = factory(**resolved)
+    except TypeError as exc:
+        raise TypeError(f"{where} graph {entry!r} could not take {sorted(bind)}: {exc}") from exc
+    if not hasattr(result, "name") and not callable(result):
+        raise TypeError(f"{where} graph {entry!r} returned a {type(result).__name__}, not a @graph")
+    return result
+
+
+def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
+    """Compile the graph a `[[serve]]` entry names — one of its variants,
+    when it declares them.
 
     `trace` and `concurrency` ride in the spec's free-form options. They
     are engine settings rather than transport settings, but they have to
@@ -75,12 +119,33 @@ def engine_for(spec: ServeSpec) -> Any:
     trace consumers would take a project's observability away as the
     price of adopting the serve layer.
     """
+    where = f"[[serve]] {spec.name!r}"
+    bind = None
+    if variant is not None:
+        bind = spec.variants[variant]
+        where = f"{where} variant {variant!r}"
     return compile_graph(
         spec.graph,
+        bind=bind,
         trace=spec.options.get("trace"),
         concurrency=spec.options.get("concurrency"),
-        where=f"[[serve]] {spec.name!r}",
+        where=where,
     )
+
+
+def engines_for(spec: ServeSpec, have: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Every engine a door needs, keyed the way `build_app` keeps them:
+    the spec's name, or ``name/variant`` for each declared variant.
+    Engines already in ``have`` are reused."""
+    have = have or {}
+    if not spec.variants:
+        key = spec.name
+        return {key: have.get(key) or engine_for(spec)}
+    out = {}
+    for variant in spec.variants:
+        key = f"{spec.name}/{variant}"
+        out[key] = have.get(key) or engine_for(spec, variant)
+    return out
 
 
 def _meta_from_request(request: Any) -> Dict[str, Any]:
@@ -144,8 +209,14 @@ def build_app(
             LOGGER.info(f"[serve:{spec.name}] mounted {spec.app} at {spec.path}")
             continue
 
-        engine = engines.get(spec.name) or engine_for(spec)
-        engines[spec.name] = engine
+        built = engines_for(spec, engines)
+        engines.update(built)
+        if spec.variants:
+            engine = None
+            variants = {k.partition("/")[2]: e for k, e in built.items()}
+        else:
+            engine = built[spec.name]
+            variants = None
 
         if spec.kind == "http":
             transport = HttpTransport(spec)
@@ -163,7 +234,7 @@ def build_app(
             # this app simply carries the lifespan.
             transport = resolve_transport(spec.kind)(spec)
 
-        runner = ServeRunner(engine, spec, transport=transport)
+        runner = ServeRunner(engine, spec, transport=transport, variants=variants)
         if runner._on_session is None:
             runner._on_session = _default_on_session(spec)
         # The websocket route needs to ask the same question the runner

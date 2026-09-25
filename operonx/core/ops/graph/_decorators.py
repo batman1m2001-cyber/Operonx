@@ -127,6 +127,9 @@ def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
 
         register_skip(wrapper)
         wrapper.__wrapped__ = fn
+        # What tells a `@graph` apart from a plain function that returns
+        # one — the serve layer's variants need the difference.
+        wrapper._operonx_graph = True
         return wrapper
 
     if fn is not None:

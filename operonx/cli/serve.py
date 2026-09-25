@@ -46,6 +46,10 @@ def main(argv=None) -> int:
                 print(
                     f"    {s.name:14s} {s.kind:10s} {s.path:16s} -> {target}  [{s.session}{bound}]"
                 )
+                for v in s.variants:
+                    print(
+                        f"      [{v}]" + "".join(f" {k}={val}" for k, val in s.variants[v].items())
+                    )
         return 0
 
     try:

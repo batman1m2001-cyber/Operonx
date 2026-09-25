@@ -155,6 +155,7 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "port": 8123,
         "session": "per_request",
         "graph": f"{name}:score_flow",
+        "variants": [],
         "app": None,
         "description": "",
     }

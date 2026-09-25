@@ -20,6 +20,7 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10
 
 ## Services
 
+::: operonx.app.serve.app.compile_graph
 ::: operonx.app.serve.ingress
 ::: operonx.app.serve.egress
 ::: operonx.app.serve.current_session

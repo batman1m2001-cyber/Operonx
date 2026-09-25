@@ -39,13 +39,18 @@ class GraphRef:
     name: str
     entry: str
     used_by: Tuple[str, ...] = field(default_factory=tuple)
+    # A variant of a door: the factory's bound parameters (see
+    # `[serve.variants]`). Empty for a plain graph.
+    bind: Dict[str, Any] = field(default_factory=dict, compare=False)
 
     def compile(self, **kwargs: Any) -> Any:
         """An ``Operon`` for this graph, the way a served graph is compiled:
         every factory parameter becomes a runtime input."""
         from .serve.app import compile_graph
 
-        return compile_graph(self.entry, where=f"graph {self.name!r}", **kwargs)
+        return compile_graph(
+            self.entry, bind=self.bind or None, where=f"graph {self.name!r}", **kwargs
+        )
 
 
 class Application:
@@ -88,9 +93,10 @@ class Application:
         """
         if self._bootstrapped:
             return
-        root = str(self.root)
-        if root not in sys.path:
-            sys.path.insert(0, root)
+        for src in reversed(self.manifest.src):
+            root = str((self.root / src).resolve())
+            if root not in sys.path:
+                sys.path.insert(0, root)
         overlay = self.manifest.resources_overlay
         if overlay and (self.root / overlay).exists():
             import operonx
@@ -110,19 +116,26 @@ class Application:
     @property
     def graphs(self) -> List[GraphRef]:
         """Every graph the manifest names, once each, with who uses it:
-        the ``[[graph]]`` blocks, then whatever services and jobs point at."""
+        the ``[[graph]]`` blocks, then whatever services and jobs point at.
+        A door with variants contributes one graph per variant."""
         by_entry: Dict[str, Tuple[str, List[str]]] = {}
+        variants: List[GraphRef] = []
         for g in self.manifest.graphs:
             by_entry.setdefault(g.entry, (g.name, []))
         for s in self.services:
-            if s.graph:
+            if s.variants:
+                base = s.graph.rpartition(":")[2]
+                for v, bind in s.variants.items():
+                    variants.append(GraphRef(f"{base}[{v}]", s.graph, (f"serve:{s.name}",), bind))
+            elif s.graph:
                 name = by_entry.get(s.graph, (s.graph.rpartition(":")[2], []))[0]
                 by_entry.setdefault(s.graph, (name, []))[1].append(f"serve:{s.name}")
         for j in self.manifest.jobs:
             if j.graph:
                 name = by_entry.get(j.graph, (j.graph.rpartition(":")[2], []))[0]
                 by_entry.setdefault(j.graph, (name, []))[1].append(f"job:{j.name}")
-        return [GraphRef(name, entry, tuple(users)) for entry, (name, users) in by_entry.items()]
+        plain = [GraphRef(name, entry, tuple(users)) for entry, (name, users) in by_entry.items()]
+        return plain + variants
 
     @property
     def jobs(self) -> List[Any]:
@@ -201,7 +214,8 @@ class Application:
             "name": self.name,
             "root": str(self.root),
             "graphs": [
-                {"name": g.name, "entry": g.entry, "used_by": list(g.used_by)} for g in self.graphs
+                {"name": g.name, "entry": g.entry, "used_by": list(g.used_by), "bind": dict(g.bind)}
+                for g in self.graphs
             ],
             "services": [
                 {
@@ -211,6 +225,7 @@ class Application:
                     "port": s.port,
                     "session": s.session,
                     "graph": s.graph or None,
+                    "variants": list(s.variants),
                     "app": s.app,
                     "description": s.description,
                 }

@@ -155,6 +155,10 @@ class ServeSpec:
     app: Optional[str] = None
     description: str = ""
     options: Dict[str, Any] = field(default_factory=dict)
+    # One door, several compiled graphs: each variant binds the graph
+    # factory's parameters (`module:attr` values are loaded, the rest are
+    # literals) and `RunRequest.variant` picks one per session.
+    variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def is_stream(self) -> bool:
@@ -230,6 +234,10 @@ class Manifest:
     source: Optional[Path]
     on_startup: Tuple[str, ...] = ()
     jobs: Tuple[JobSpec, ...] = ()
+    # `[project] src = ["src"]`: the import roots, relative to `root`.
+    # A project that keeps its packages under `src/` says so once here
+    # instead of in every entry point.
+    src: Tuple[str, ...] = (".",)
 
     @property
     def name(self) -> str:
@@ -309,6 +317,7 @@ class Manifest:
                 raise ManifestError(f"{where}: on_startup {hook!r} is not `module:function`")
         resources = raw.get("resources") or {}
         overlay = resources.get("overlay") if isinstance(resources, dict) else None
+        src = tuple(str(x) for x in _as_list(project.get("src"))) or (".",)
 
         graphs = tuple(
             _graph_spec(entry, where, i) for i, entry in enumerate(_as_list(raw.get("graph")))
@@ -350,10 +359,30 @@ class Manifest:
             source=source,
             on_startup=on_startup,
             jobs=jobs,
+            src=src,
         )
 
 
 # -- parsing helpers -----------------------------------------------------
+
+
+def _variants(raw: Any, where: str, label: str, kind: str) -> Dict[str, Dict[str, Any]]:
+    """`[serve.variants]`: a table of tables, each binding the factory."""
+    if raw is None:
+        return {}
+    if kind == "asgi":
+        raise ManifestError(f"{where}: {label} is kind 'asgi' and cannot have variants")
+    if not isinstance(raw, dict) or not raw:
+        raise ManifestError(f"{where}: {label} variants must be a non-empty table of tables")
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, bind in raw.items():
+        if not isinstance(bind, dict):
+            raise ManifestError(
+                f"{where}: {label} variant {name!r} must be a table of factory "
+                f"parameters, got {type(bind).__name__}"
+            )
+        out[str(name)] = dict(bind)
+    return out
 
 
 def _as_list(value: Any) -> list:
@@ -450,10 +479,13 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         # started.
         raise ManifestError(f"{where}: {label} has port {port}, outside the range 1-65535")
 
+    variants = _variants(block.get("variants"), where, label, kind)
+
     known_keys = {
         "name",
         "kind",
         "graph",
+        "variants",
         "path",
         "method",
         "host",
@@ -478,6 +510,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         session=session,
         max_inflight=max_inflight,
         on_session=(str(block["on_session"]) if block.get("on_session") else None),
+        variants=variants,
         on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
         description=str(block.get("description") or ""),
