@@ -92,6 +92,16 @@ def _reject_nested_ref(key: str, value: Any) -> None:
     )
 
 
+def is_op_like(value: Any) -> bool:
+    """An op, a graph, or the PARENT marker — the things a param may
+    reference. Anything else with a ``name`` attribute is a literal: a
+    dataclass bound into a graph at build time is not an op because it
+    happens to be called something."""
+    if getattr(value, "name", None) == "__PARENT__":
+        return True
+    return hasattr(value, "name") and hasattr(value, "inputs") and hasattr(value, "outputs")
+
+
 def resolve_value(key: str, value: Any, parent) -> Any:
     """Convert value to a Ref or keep as a literal.
 
@@ -125,7 +135,7 @@ def resolve_value(key: str, value: Any, parent) -> Any:
         return new_ref
 
     # Handle op reference: some_op → Ref(some_op, key)
-    if hasattr(value, "name"):
+    if is_op_like(value):
         resolved = resolve_parent(value)
         return Ref(resolved, key)
 
@@ -159,7 +169,7 @@ def normalize_params(params: Any, parent) -> Dict[str, Param]:
             # Handle wildcard "*" key - store for later processing in merge_params
             if key == "*":
                 # Validate that value is an op reference (PARENT or another op)
-                if hasattr(value, "name"):
+                if is_op_like(value):
                     result["__FORWARD_WILDCARD__"] = value
                 else:
                     raise ValueError(

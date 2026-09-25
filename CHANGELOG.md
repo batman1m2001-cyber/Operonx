@@ -28,6 +28,14 @@ Import roots relative to the manifest (default `["."]`).
 `Application.bootstrap()` puts each on `sys.path`, so a `src/` layout
 needs no path juggling in entry points.
 
+### Fixed — a value with a `name` is not an op
+
+`resolve_value` took any object with a ``name`` attribute for an op
+reference, so a dataclass bound into a nested graph at build time — the
+thing a variant does — became a `Ref` to itself and failed the scope
+check with a message about PARENT. Only ops, graphs and `PARENT` are
+references now (`is_op_like`).
+
 ## [1.7.1] - 2026-09-25
 
 ### Changed — the application layer is `operonx.app`
