@@ -98,6 +98,21 @@ def plain():
     START >> src >> out >> END
 
 
+@graph
+def styled(style, suffix):
+    """A `@graph` whose build-time parts are its own parameters: a static
+    value lands in the body as-is, a `None` stays a runtime input."""
+    src = ingress()
+    loud = shout(item=src["item"], style=style, suffix=suffix)
+    out = egress(item=loud["reply"])
+    START >> src >> loud >> out >> END
+
+
+@op(bound="sync")
+def shout(item: str = "", style=None, suffix: str = "") -> dict:
+    return {"reply": style(item) + suffix}
+
+
 ME = __name__
 
 
@@ -109,8 +124,13 @@ def test_compile_graph_binds_the_factory_and_loads_entry_point_values():
     assert isinstance(engine, Operon)
 
 
-def test_a_graph_is_not_a_factory_and_says_so():
-    with pytest.raises(TypeError, match="is a @graph, but variants need a plain function"):
+def test_a_graph_binds_its_own_parameters():
+    engine = compile_graph(f"{ME}:styled", bind={"style": f"{ME}:LOUD", "suffix": "!"})
+    assert isinstance(engine, Operon)
+
+
+def test_binding_a_parameter_the_graph_does_not_have_says_so():
+    with pytest.raises(TypeError, match="has no parameter \\['style'\\]"):
         compile_graph(f"{ME}:plain", bind={"style": f"{ME}:LOUD"})
     with pytest.raises(TypeError, match="could not take \\['nope'\\]"):
         compile_graph(f"{ME}:build", bind={"nope": 1})

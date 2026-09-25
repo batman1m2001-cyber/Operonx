@@ -115,9 +115,8 @@ class Application:
 
     @property
     def graphs(self) -> List[GraphRef]:
-        """Every graph the manifest names, once each, with who uses it:
-        the ``[[graph]]`` blocks, then whatever services and jobs point at.
-        A door with variants contributes one graph per variant."""
+        """Every graph the manifest names, once each, with who uses it; a door
+        with variants contributes one graph per variant."""
         by_entry: Dict[str, Tuple[str, List[str]]] = {}
         variants: List[GraphRef] = []
         for g in self.manifest.graphs:
@@ -186,11 +185,10 @@ class Application:
         only: Optional[Sequence[str]] = None,
         startup: bool = True,
     ) -> Any:
-        """One listener's ASGI app — for a process that runs uvicorn itself,
-        or a test client. Picks the listener by *port*, or the only one.
-        ``startup=False`` leaves the manifest's ``on_startup`` hooks to
-        another process: an admin listener beside the call workers does
-        not warm the model twice."""
+        """One listener's ASGI app — for a process that runs uvicorn itself, or
+        a test client. By *port*, or the only one. ``startup=False`` leaves the
+        ``on_startup`` hooks to another process (an admin listener beside the
+        call workers does not warm the model twice)."""
         from .serve.app import build_app
 
         self.bootstrap()

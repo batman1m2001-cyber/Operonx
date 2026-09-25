@@ -50,16 +50,22 @@ def compile_graph(
     was built with, which is the failure mode where a deep op holds
     ``None`` forever and every call fails on it.
 
-    With ``bind``, the entry point is a plain function that takes those
-    parameters and returns a ``@graph`` — a variant of one door. Each
-    value that reads as ``module:attr`` is loaded; anything else is passed
-    as a literal. The graph it returns is compiled as above.
+    With ``bind`` — a variant of one door — the named parameters are
+    fixed at build time and the rest stay runtime inputs. Each bound
+    value that reads as ``module:attr`` is loaded; anything else is a
+    literal. A ``@graph`` takes them as its own parameters (the
+    decorator passes a static value into the body as-is); a plain
+    function is a factory that takes them and returns a ``@graph``.
     """
     from operonx.core import Operon
 
     graph_fn = load_object(entry, field=f"{where} graph")
+    bound: Dict[str, Any] = {}
     if bind:
-        graph_fn = _bind_factory(graph_fn, entry, bind, where)
+        if getattr(graph_fn, "_operonx_graph", False):
+            bound = _resolve_bind(bind, where)
+        else:
+            graph_fn = _bind_factory(graph_fn, entry, bind, where)
     # `Operon(...)` on something that is not a graph fails as
     # `AttributeError: 'str' object has no attribute 'name'`, which names
     # neither the manifest entry nor what was actually wrong.
@@ -72,6 +78,13 @@ def compile_graph(
         params = {name: None for name in inspect.signature(graph_fn).parameters}
     except (TypeError, ValueError):
         params = {}
+    unknown = set(bound) - set(params)
+    if unknown:
+        raise TypeError(
+            f"{where} graph {entry!r} has no parameter {sorted(unknown)}; "
+            f"it takes {sorted(params) or 'none'}"
+        )
+    params.update(bound)
 
     kwargs = {}
     if params:
@@ -85,21 +98,19 @@ def compile_graph(
     return engine
 
 
-def _bind_factory(factory: Any, entry: str, bind: Dict[str, Any], where: str) -> Any:
-    """Call a graph factory with a variant's bound parameters."""
-    if getattr(factory, "_operonx_graph", False):
-        # A `@graph` called with kwargs would be *instantiated* with them as
-        # wired inputs, which is not a variant and fails far from here.
-        raise TypeError(
-            f"{where} graph {entry!r} is a @graph, but variants need a plain "
-            f"function that takes the bound parameters and returns one"
-        )
-    resolved = {
+def _resolve_bind(bind: Dict[str, Any], where: str) -> Dict[str, Any]:
+    """A variant's values: ``module:attr`` loaded, the rest literal."""
+    return {
         name: load_object(value, field=f"{where} bind.{name}")
         if isinstance(value, str) and _ENTRY_RE.match(value)
         else value
         for name, value in bind.items()
     }
+
+
+def _bind_factory(factory: Any, entry: str, bind: Dict[str, Any], where: str) -> Any:
+    """Call a plain-function factory with a variant's bound parameters."""
+    resolved = _resolve_bind(bind, where)
     try:
         result = factory(**resolved)
     except TypeError as exc:
