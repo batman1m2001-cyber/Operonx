@@ -38,17 +38,30 @@ def main(argv=None) -> int:
         print(app.name)
         if not app.services:
             print("  no [[serve]] entries")
+        from operonx.app.declare import ref_name
+
+        described = {d["name"]: d for d in app.describe()["services"]}
         for (host, port), specs in app.manifest.listeners().items():
             print(f"  {host}:{port}")
             for s in specs:
-                target = s.app if s.kind == "asgi" else s.graph
+                d = described[s.name]
+                target = d["app"] if s.kind == "asgi" else d["graph"]
                 bound = f" max_inflight={s.max_inflight}" if s.max_inflight else ""
                 print(
                     f"    {s.name:14s} {s.kind:10s} {s.path:16s} -> {target}  [{s.session}{bound}]"
                 )
-                for v in s.variants:
+                doors = " ".join(
+                    f"{k}={','.join(d[k])}" for k in ("inputs", "ingress", "egress") if d[k]
+                )
+                if doors:
+                    print(f"      {doors}")
+                if d["on_session"] or d["on_close"]:
                     print(
-                        f"      [{v}]" + "".join(f" {k}={val}" for k, val in s.variants[v].items())
+                        f"      on_session={d['on_session'] or '-'} on_close={d['on_close'] or '-'}"
+                    )
+                for v, bind in s.variants.items():
+                    print(
+                        f"      [{v}]" + "".join(f" {k}={ref_name(val)}" for k, val in bind.items())
                     )
         return 0
 

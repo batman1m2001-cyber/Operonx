@@ -25,24 +25,41 @@ src/greet/
   ops.py       greeting                              the element op
   styles.py    formal, casual                        what the variants bind
   door.py      open(session) -> RunRequest(variant)  the pick
+app.py         APP = Application(...) — the door, the graph, the variants, in one place
+```
+
+```python
+# app.py — the application, in Python; operonx.toml only points at it
+APP = Application(
+    "ex18-variants",
+    services=[
+        Service(
+            "greet",
+            http("POST", "/greet", port=env("HTTP_PORT", 8018)),
+            graph=build,  # build(style, sign_off) -> @graph
+            variants={
+                "formal": dict(style=styles.formal, sign_off="Regards"),
+                "casual": dict(style=styles.casual, sign_off="Cheers"),
+            },
+            ingress=["request"],
+            egress=["out"],
+            on_session=door.open,
+        ),  # ?style=… -> RunRequest(variant=…)
+    ],
+)
 ```
 
 ```toml
 [project]
-src = ["src"]                       # import roots; operonx puts them on sys.path
-
-[[serve]]
-graph = "greet.graph:build"         # a plain function, not a @graph
-on_session = "greet.door:open"
-[serve.variants]
-formal = { style = "greet.styles:formal", sign_off = "Regards" }
-casual = { style = "greet.styles:casual", sign_off = "Cheers" }
+src = ["src"]       # import roots; operonx puts them on sys.path
+app = "app:APP"     # the declaration above
 ```
 
-A bound value that reads as `module:attr` is loaded; anything else is a
-literal. A `@graph` named where a factory is expected is refused with a
-message that says so. A session that names no variant, or one the door
-does not have, is refused at the door — no run is minted.
+The same door written in TOML — `[[serve]] graph = "greet.graph:build"`
+with a `[serve.variants]` table of `module:attr` strings — is equivalent
+and still works; the Python form is what a reader of the project sees.
+A session that names no variant, or one the door does not have, is
+refused at the door — no run is minted.
 
 ## Run it
 

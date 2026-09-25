@@ -156,6 +156,12 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "session": "per_request",
         "graph": f"{name}:score_flow",
         "variants": [],
+        "host": "0.0.0.0",
+        "inputs": [],
+        "ingress": [],
+        "egress": [],
+        "on_session": None,
+        "on_close": None,
         "app": None,
         "description": "",
     }

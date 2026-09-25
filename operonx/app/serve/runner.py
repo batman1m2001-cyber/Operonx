@@ -12,11 +12,12 @@ import asyncio
 import inspect
 from typing import Any, Dict, Optional
 
+from operonx.app.declare import ref_name
 from operonx.app.manifest import ServeSpec
 from operonx.core.loggings import LOGGER
 
 from .protocol import SESSION_KEY, RunRequest, Session
-from .registry import load_object, resolve_transport
+from .registry import resolve_ref, resolve_transport
 
 __all__ = ["RunTimeout", "ServeRunner", "serve_session"]
 
@@ -124,12 +125,12 @@ class ServeRunner:
         self.spec = spec
         self.transport = transport if transport is not None else resolve_transport(spec.kind)(spec)
         self._on_session = (
-            load_object(spec.on_session, field=f"[[serve]] {spec.name!r} on_session")
+            resolve_ref(spec.on_session, field=f"[[serve]] {spec.name!r} on_session")
             if spec.on_session
             else None
         )
         self._on_close = (
-            load_object(spec.on_close, field=f"[[serve]] {spec.name!r} on_close")
+            resolve_ref(spec.on_close, field=f"[[serve]] {spec.name!r} on_close")
             if spec.on_close
             else None
         )
@@ -172,6 +173,15 @@ class ServeRunner:
             )
             return None
         elif self._engine_for(request) is None:
+            return None
+        elif self.spec.inputs and set(request.inputs) != set(self.spec.inputs):
+            # The declared contract, at the door: the hook built something
+            # other than what it said it would.
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_session built inputs "
+                f"{sorted(request.inputs)}; declared {sorted(self.spec.inputs)} — "
+                f"refusing the connection"
+            )
             return None
         return request
 
@@ -233,7 +243,7 @@ class ServeRunner:
     async def run(self) -> None:
         """Accept sessions until the transport stops, then drain."""
         LOGGER.info(
-            f"[serve:{self.spec.name}] {self.spec.kind} -> {self.spec.graph} "
+            f"[serve:{self.spec.name}] {self.spec.kind} -> {ref_name(self.spec.graph)} "
             f"({self.spec.session}"
             + (f", max_inflight={self.spec.max_inflight}" if self.spec.max_inflight else "")
             + ")"
