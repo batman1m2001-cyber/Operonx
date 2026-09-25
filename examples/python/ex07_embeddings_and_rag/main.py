@@ -153,7 +153,7 @@ if __name__ == "__main__":
 # ── the served main flow ───────────────────────────────────────────────
 # One main graph, served — and the nested graphs genuinely feed each
 # other: basic_embedding's vectors are simple_rag's doc_vectors.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

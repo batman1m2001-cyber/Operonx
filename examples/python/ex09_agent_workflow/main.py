@@ -190,7 +190,7 @@ if __name__ == "__main__":
 # One main graph, served: ingress in, the full agent (init → tool loop)
 # as a nested graph, egress out. Open `runner` on the canvas, then
 # `loop` inside it, to see the ↺ authored cycle.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

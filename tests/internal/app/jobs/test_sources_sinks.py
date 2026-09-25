@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from operonx.core.jobs import (
+from operonx.app.jobs import (
     CsvSink,
     CsvSource,
     JsonlSink,

@@ -12,8 +12,8 @@ import asyncio
 import inspect
 from typing import Any, Dict, Optional
 
+from operonx.app.manifest import ServeSpec
 from operonx.core.loggings import LOGGER
-from operonx.core.manifest import ServeSpec
 
 from .protocol import SESSION_KEY, RunRequest, Session
 from .registry import load_object, resolve_transport

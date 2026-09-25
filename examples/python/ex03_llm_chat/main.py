@@ -82,7 +82,7 @@ if __name__ == "__main__":
 # One main graph, served: ingress in, the chat flows composed as nested
 # graphs, egress out. Open a nested graph on the studio canvas to see the
 # ops inside it.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

@@ -14,8 +14,7 @@ from time import perf_counter
 
 import pytest
 
-from operonx.core import END, START, graph, op
-from operonx.core.jobs import (
+from operonx.app.jobs import (
     RUN_FAILED,
     RUN_OK,
     RUN_STOPPED,
@@ -26,7 +25,8 @@ from operonx.core.jobs import (
     RunbookRun,
     Sequential,
 )
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
+from operonx.core import END, START, graph, op
 from operonx.telemetry.consumer import Consumer
 
 # -- four small jobs, handing off through shared lists -----------------------------

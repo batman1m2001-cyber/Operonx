@@ -110,7 +110,7 @@ if __name__ == "__main__":
 # One main graph, served: every composition scenario nested inside it.
 # This example IS nesting — open the containers on the studio canvas and
 # keep opening: quad_flow holds double_flow holds double.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

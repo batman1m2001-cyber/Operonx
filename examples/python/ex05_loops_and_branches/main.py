@@ -214,7 +214,7 @@ if __name__ == "__main__":
 # One main graph, served: ingress in, every loop-and-branch technique
 # composed as a nested graph, egress out. Open any nested graph on the
 # studio canvas — the agent_loop container shows the ↺ authored cycle.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

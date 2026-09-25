@@ -11,10 +11,8 @@ import asyncio
 
 import pytest
 
-from operonx.core import END, START, Operon, graph
-from operonx.core.manifest import ServeSpec
-from operonx.core.ops import op
-from operonx.core.serve import (
+from operonx.app.manifest import ServeSpec
+from operonx.app.serve import (
     BoundedSession,
     MemorySession,
     MemoryTransport,
@@ -23,6 +21,8 @@ from operonx.core.serve import (
     ingress,
     resolve_transport,
 )
+from operonx.core import END, START, Operon, graph
+from operonx.core.ops import op
 
 
 @op(bound="sync")
@@ -90,7 +90,7 @@ async def test_one_bad_connection_does_not_stop_the_next():
         seen["n"] += 1
         if seen["n"] == 1:
             raise RuntimeError("first one explodes")
-        from operonx.core.serve import RunRequest
+        from operonx.app.serve import RunRequest
 
         return RunRequest()
 
@@ -200,7 +200,7 @@ def test_a_transport_import_path_that_does_not_resolve_says_so():
     with pytest.raises(ImportError, match="cannot import"):
         resolve_transport("no.such.module:Thing")
     with pytest.raises(ImportError, match="has no"):
-        resolve_transport("operonx.core.serve.memory:NotAClass")
+        resolve_transport("operonx.app.serve.memory:NotAClass")
 
 
 @pytest.mark.asyncio
@@ -246,7 +246,7 @@ class CloseExplodes(MemorySession):
 
 @pytest.mark.asyncio
 async def test_a_session_whose_recv_raises_does_not_hang_the_run():
-    from operonx.core.serve import serve_session
+    from operonx.app.serve import serve_session
 
     session = RecvExplodes(max_inflight=8)
     await asyncio.wait_for(serve_session(Operon(echo_graph), session), timeout=8)
@@ -259,7 +259,7 @@ async def test_a_session_whose_send_raises_loses_the_item_not_the_run():
     A transport that breaks that promise should cost its item and nothing
     else — the run may still have a record to write.
     """
-    from operonx.core.serve import serve_session
+    from operonx.app.serve import serve_session
 
     session = SendExplodes(max_inflight=8)
     await session.feed("x")
@@ -270,7 +270,7 @@ async def test_a_session_whose_send_raises_loses_the_item_not_the_run():
 @pytest.mark.asyncio
 async def test_a_close_that_raises_does_not_fail_a_completed_run():
     """Teardown failing must not rewrite the outcome of the work."""
-    from operonx.core.serve import serve_session
+    from operonx.app.serve import serve_session
 
     session = CloseExplodes(max_inflight=8)
     await session.feed("x")
@@ -288,7 +288,7 @@ async def test_a_drained_session_never_blocks_a_second_reader():
     an empty queue forever, with no error and no log — the worst way for
     anything to fail.
     """
-    from operonx.core.serve import serve_session
+    from operonx.app.serve import serve_session
 
     session = MemorySession(max_inflight=8)
     await session.feed("x")
@@ -341,7 +341,7 @@ async def test_on_session_returning_a_non_runrequest_is_named_and_refused(bad):
 def test_bad_serve_blocks_are_refused_at_parse(block, match):
     """At parse, not at bind: an OSError from inside the event loop after
     everything else has started is a much worse way to learn this."""
-    from operonx.core.manifest import Manifest, ManifestError
+    from operonx.app.manifest import Manifest, ManifestError
 
     with pytest.raises(ManifestError, match=match):
         Manifest.from_dict({"serve": [block]})
@@ -356,16 +356,16 @@ def test_every_unresolvable_reference_names_the_manifest_entry():
     `ModuleNotFoundError: No module named 'no'` says which module is
     missing and nothing about which line asked for it.
     """
-    from operonx.core.serve.app import build_app, engine_for
+    from operonx.app.serve.app import build_app, engine_for
 
     with pytest.raises(ImportError, match=r"\[\[serve\]\] 't' graph"):
         engine_for(spec(name="t", kind="http", graph="no.such.module:g"))
 
     with pytest.raises(ImportError, match=r"\[\[serve\]\] 't' graph"):
-        engine_for(spec(name="t", kind="http", graph="operonx.core.serve:NotThere"))
+        engine_for(spec(name="t", kind="http", graph="operonx.app.serve:NotThere"))
 
     with pytest.raises(TypeError, match="is not a @graph"):
-        engine_for(spec(name="t", kind="http", graph="operonx.core.manifest:MANIFEST_FILENAME"))
+        engine_for(spec(name="t", kind="http", graph="operonx.app.manifest:MANIFEST_FILENAME"))
 
     with pytest.raises(ImportError, match=r"\[\[serve\]\] 'a' app"):
         build_app((ServeSpec(name="a", kind="asgi", path="/", app="no.mod:app"),))

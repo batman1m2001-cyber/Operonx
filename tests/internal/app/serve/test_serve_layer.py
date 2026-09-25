@@ -13,15 +13,13 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from operonx.core import END, START, Operon, graph
-from operonx.core.manifest import (
+from operonx.app.manifest import (
     Manifest,
     ManifestError,
     ServeSpec,
     _toml,  # the tomllib/tomli pick that ships
 )
-from operonx.core.ops import op
-from operonx.core.serve import (
+from operonx.app.serve import (
     MemoryTransport,
     RunRequest,
     ServeRunner,
@@ -31,6 +29,8 @@ from operonx.core.serve import (
     resolve_transport,
     serve_session,
 )
+from operonx.core import END, START, Operon, graph
+from operonx.core.ops import op
 
 # -- manifest ------------------------------------------------------------
 
@@ -277,5 +277,5 @@ async def test_third_party_transport_drives_a_graph():
 
 def test_a_transport_can_be_named_by_import_path():
     """`kind = "module:Class"` needs no registration at all."""
-    resolved = resolve_transport("tests.internal.core.serve.test_serve_layer:ThirdPartyTransport")
+    resolved = resolve_transport("tests.internal.app.serve.test_serve_layer:ThirdPartyTransport")
     assert resolved.__name__ == "ThirdPartyTransport"

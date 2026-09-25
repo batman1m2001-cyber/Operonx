@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from operonx.core.jobs import (
+from operonx.app.jobs import (
     ITEM_EMPTY,
     ITEM_FAILED,
     ITEM_OK,

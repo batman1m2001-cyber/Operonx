@@ -113,7 +113,7 @@ if __name__ == "__main__":
 # Every operonx project is ONE main graph, served: ingress is the door in,
 # egress the door out, and the pipelines above are composed in between as
 # nested graphs — open them on the studio canvas to see inside.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

@@ -12,8 +12,8 @@ from operonx.cli.run import main
 
 MODULE = """
 from operonx.core import END, START, graph, op
-from operonx.core.jobs import Job, Runbook
-from operonx.core.serve import egress, ingress
+from operonx.app.jobs import Job, Runbook
+from operonx.app.serve import egress, ingress
 
 
 @op(bound="sync")

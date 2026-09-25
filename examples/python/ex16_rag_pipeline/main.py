@@ -174,7 +174,7 @@ if __name__ == "__main__":
 # ── the served main flow ───────────────────────────────────────────────
 # One main graph, served: ingress in, the full RAG flow as a nested
 # graph, egress out.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

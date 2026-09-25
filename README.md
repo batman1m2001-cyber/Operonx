@@ -201,7 +201,7 @@ item, and leaves a record per run: which items were `ok`, `failed`,
 `empty` (ran, sent nothing) or timed out, each with its trace id.
 
 ```python
-from operonx.core.jobs import Job, Runbook
+from operonx.app.jobs import Job, Runbook
 
 score = Job("score_calls", graph=score_call, source="data/calls.jsonl",
             sink="out/scores.jsonl", key="call_id", on_error="retry:2")

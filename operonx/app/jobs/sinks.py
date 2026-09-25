@@ -179,7 +179,7 @@ class PythonSink:
 
     def _resolve(self) -> Callable[[str, Any], Any]:
         if isinstance(self._fn, str):
-            from operonx.core.serve.registry import load_object
+            from operonx.app.serve.registry import load_object
 
             self._fn = load_object(self._fn, field="sink")
         return self._fn
@@ -302,7 +302,7 @@ def as_sink(obj: Any) -> Sink:
         return ListSink(obj)
     if isinstance(obj, str):
         if is_resource_key(obj):
-            from operonx.core.jobs import register
+            from operonx.app.jobs import register
             from operonx.core.registry import ResourceHub
 
             register()

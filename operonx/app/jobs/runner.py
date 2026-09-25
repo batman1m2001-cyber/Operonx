@@ -21,9 +21,9 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Optional
 
+from operonx.app.serve.protocol import RunRequest
+from operonx.app.serve.runner import RunTimeout, serve_session
 from operonx.core.loggings import LOGGER
-from operonx.core.serve.protocol import RunRequest
-from operonx.core.serve.runner import RunTimeout, serve_session
 from operonx.core.workflow_trace import STATUS_ERROR
 
 from .record import (

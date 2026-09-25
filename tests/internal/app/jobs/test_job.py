@@ -12,8 +12,7 @@ import json
 
 import pytest
 
-from operonx.core import END, PARENT, START, graph, op
-from operonx.core.jobs import (
+from operonx.app.jobs import (
     ITEM_EMPTY,
     ITEM_FAILED,
     ITEM_OK,
@@ -26,7 +25,8 @@ from operonx.core.jobs import (
     ListSink,
     last_run,
 )
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
+from operonx.core import END, PARENT, START, graph, op
 
 # -- the graph under test ---------------------------------------------------
 

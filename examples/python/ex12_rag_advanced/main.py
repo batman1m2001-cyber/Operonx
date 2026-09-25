@@ -172,7 +172,7 @@ if __name__ == "__main__":
 # ── the served main flow ───────────────────────────────────────────────
 # One main graph, served — the nested graphs feed each other for real:
 # precompute_embeddings' vectors are hybrid_rag's doc_vectors.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

@@ -7,11 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the application layer is `operonx.app`
+
+`serve`, `jobs` and `manifest` move from `operonx.core` to `operonx.app`:
+they are what puts work *into* an Operon, not the Operon. The old paths
+keep working for one minor release with a `DeprecationWarning` and go in
+1.9.0; `sed 's/operonx\.core\.\(serve\|jobs\|manifest\)/operonx.app.\1/'`
+is the whole migration.
+
+### Added — `Application`
+
+The loaded manifest, with one method per thing production does:
+``Application.find().serve(only=…)``, ``.run("nightly", resume=…)``,
+``.asgi(port=…)`` for a process that runs uvicorn itself, and
+``.describe()`` — graphs, services and jobs as plain data, without
+importing the project. `operonx-serve` and `operonx-run` are now that
+object plus argument parsing; the three copies of "parse the manifest,
+bootstrap, resolve entry points" are one. `compile_graph(entry)` is the
+one way a manifest entry becomes an engine. A size test keeps the object
+under 200 lines: it is a composition root, not a framework object.
+
 ## [1.7.0] - 2026-09-24
 
 ### Added — Jobs: running Operons over data that does not talk back
 
-`operonx.core.jobs.Job` puts work into a graph from a *source* — a JSONL
+`operonx.app.jobs.Job` puts work into a graph from a *source* — a JSONL
 or CSV file, a Python iterable, or a ``source:`` resource — one run per
 item, writes what `egress` sends to a *sink*, and leaves a record per
 run (``run.json`` + ``items.jsonl``: key, status, error, trace id, ms,
@@ -418,14 +438,14 @@ operonx read the file. Meanwhile `engine.serve()` delegated to
 dependency and not in this repository, so every call raised. Two halves
 describing the same thing, neither working, never connected.
 
-* `operonx.core.manifest` parses `operonx.toml`. `[[serve]]` names the
+* `operonx.app.manifest` parses `operonx.toml`. `[[serve]]` names the
   graph it runs by entry point and carries session semantics;
   `${VAR:default}` resolves through the same code `resources.yaml` uses.
   `[[graph]]` remains, for graphs nothing serves. A stream transport must
   declare `max_inflight` — there is no version key and no way to opt out,
   because an unbounded queue behind a socket is how `operonx.io.Channel`
   came to exist.
-* `operonx.core.serve` is a transport **interface**, with `http`,
+* `operonx.app.serve` is a transport **interface**, with `http`,
   `websocket` and `asgi` as built-ins that register through the same call
   a project uses for its own. A SIP trunk or a Kafka consumer is two
   methods and a registration. The in-memory transport and a third-party

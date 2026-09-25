@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from operonx.core.jobs._keys import is_resource_key
-from operonx.core.jobs.sinks import CsvSink, JsonlSink, NullSink, as_sink
-from operonx.core.jobs.sources import JsonlSource, as_source
+from operonx.app.jobs._keys import is_resource_key
+from operonx.app.jobs.sinks import CsvSink, JsonlSink, NullSink, as_sink
+from operonx.app.jobs.sources import JsonlSource, as_source
 
 
 class TestTheKeyShape:
