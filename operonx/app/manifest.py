@@ -143,18 +143,30 @@ class ServeSpec:
 
     name: str
     kind: str
-    graph: str = ""
+    #: A ``module:attr`` string from the manifest, or the object itself
+    #: when the application is declared in Python (`operonx.app.Service`).
+    #: Same for ``on_session``, ``on_close`` and ``app``.
+    graph: Any = ""
     path: str = "/"
     method: str = "POST"
     host: str = "0.0.0.0"
     port: int = 8000
     session: str = "per_request"
     max_inflight: Optional[int] = None
-    on_session: Optional[str] = None
-    on_close: Optional[str] = None
-    app: Optional[str] = None
+    on_session: Any = None
+    on_close: Any = None
+    app: Any = None
     description: str = ""
     options: Dict[str, Any] = field(default_factory=dict)
+    # One door, several compiled graphs: each variant binds the graph's
+    # build-time parameters (`module:attr` values are loaded, the rest are
+    # literals or objects) and `RunRequest.variant` picks one per session.
+    variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: The graph's runtime inputs the door builds — checked at compile.
+    inputs: Tuple[str, ...] = ()
+    #: The door ops: where items enter the graph and where answers leave.
+    ingress: Tuple[str, ...] = ()
+    egress: Tuple[str, ...] = ()
 
     @property
     def is_stream(self) -> bool:
@@ -228,8 +240,15 @@ class Manifest:
     fixtures: Dict[str, Dict[str, Any]]
     resources_overlay: Optional[str]
     source: Optional[Path]
-    on_startup: Tuple[str, ...] = ()
+    on_startup: Tuple[Any, ...] = ()
     jobs: Tuple[JobSpec, ...] = ()
+    # `[project] src = ["src"]`: the import roots, relative to `root`.
+    # A project that keeps its packages under `src/` says so once here
+    # instead of in every entry point.
+    src: Tuple[str, ...] = (".",)
+    #: Where relative paths resolve when there is no file (an application
+    #: declared in Python): the directory the declaration was made in.
+    base: Optional[Path] = None
 
     @property
     def name(self) -> str:
@@ -238,7 +257,16 @@ class Manifest:
     @property
     def root(self) -> Path:
         """The directory the manifest lives in; relative paths resolve here."""
-        return self.source.parent if self.source else Path.cwd()
+        if self.source:
+            return self.source.parent
+        return self.base or Path.cwd()
+
+    @property
+    def app_entry(self) -> Optional[str]:
+        """``[project] app = "module:APP"`` — the application declared in
+        Python, which this file then only points at."""
+        value = self.project.get("app")
+        return str(value) if value else None
 
     def serve(self, name: str) -> ServeSpec:
         for spec in self.serves:
@@ -307,8 +335,12 @@ class Manifest:
         for hook in on_startup:
             if not _ENTRY_RE.match(hook):
                 raise ManifestError(f"{where}: on_startup {hook!r} is not `module:function`")
+        app_entry = project.get("app")
+        if app_entry is not None and not _ENTRY_RE.match(str(app_entry)):
+            raise ManifestError(f"{where}: [project] app {app_entry!r} is not `module:attr`")
         resources = raw.get("resources") or {}
         overlay = resources.get("overlay") if isinstance(resources, dict) else None
+        src = tuple(str(x) for x in _as_list(project.get("src"))) or (".",)
 
         graphs = tuple(
             _graph_spec(entry, where, i) for i, entry in enumerate(_as_list(raw.get("graph")))
@@ -350,10 +382,30 @@ class Manifest:
             source=source,
             on_startup=on_startup,
             jobs=jobs,
+            src=src,
         )
 
 
 # -- parsing helpers -----------------------------------------------------
+
+
+def _variants(raw: Any, where: str, label: str, kind: str) -> Dict[str, Dict[str, Any]]:
+    """`[serve.variants]`: a table of tables, each binding the factory."""
+    if raw is None:
+        return {}
+    if kind == "asgi":
+        raise ManifestError(f"{where}: {label} is kind 'asgi' and cannot have variants")
+    if not isinstance(raw, dict) or not raw:
+        raise ManifestError(f"{where}: {label} variants must be a non-empty table of tables")
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, bind in raw.items():
+        if not isinstance(bind, dict):
+            raise ManifestError(
+                f"{where}: {label} variant {name!r} must be a table of factory "
+                f"parameters, got {type(bind).__name__}"
+            )
+        out[str(name)] = dict(bind)
+    return out
 
 
 def _as_list(value: Any) -> list:
@@ -450,10 +502,22 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         # started.
         raise ManifestError(f"{where}: {label} has port {port}, outside the range 1-65535")
 
+    variants = _variants(block.get("variants"), where, label, kind)
+    doors = {}
+    for key in ("inputs", "ingress", "egress"):
+        values = _as_list(block.get(key))
+        if not all(isinstance(v, str) for v in values):
+            raise ManifestError(f"{where}: {label} {key} must be a list of op or input names")
+        doors[key] = tuple(str(v) for v in values)
+
     known_keys = {
         "name",
         "kind",
         "graph",
+        "variants",
+        "inputs",
+        "ingress",
+        "egress",
         "path",
         "method",
         "host",
@@ -478,6 +542,10 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         session=session,
         max_inflight=max_inflight,
         on_session=(str(block["on_session"]) if block.get("on_session") else None),
+        variants=variants,
+        inputs=doors["inputs"],
+        ingress=doors["ingress"],
+        egress=doors["egress"],
         on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
         description=str(block.get("description") or ""),

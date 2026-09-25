@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-09-25
+
+### Added — the application, declared in Python
+
+`Application("name", services=[Service(...)], jobs=[Job(...)],
+on_startup=[...])` with `websocket(...)`, `http(...)`, `asgi(...)`
+listeners and `env(NAME, default)`: the graph, the door hooks and the
+variants' bound objects in one place a reader can see, instead of
+`module:attr` strings in a file. `operonx.toml` then says only what is
+not code — `[project] name`, `src`, and `app = "module:APP"` — and
+`operonx-serve`, `operonx-run` and the studio read the object through
+`Application.find()`. TOML services keep working; `Service` builds the
+same `ServeSpec`, so nothing downstream knows which way it came.
+
+### Added — the door's contract, and the doors
+
+`inputs=` on a service (or `[[serve]]`) names the graph's runtime inputs
+the door builds. A graph that takes something else fails at boot naming
+the parameter; a hook that builds something else is refused at the
+door. `ingress=` / `egress=` name the door ops; `describe()` carries
+both, and `operonx-serve --list` prints them.
+
+### Changed
+
+`Application.graphs`, `describe()` and `operonx-serve --list` name
+objects as `module:qualname`. ex17 and ex18 are declared in Python.
+
+## [1.7.2] - 2026-09-25
+
+### Added — `[serve.variants]`: one door, one compiled graph per variant
+
+A door whose graph differs by caller declares the variants. `graph`
+names a factory — a plain function that takes the bound parameters and
+returns a `@graph` — and each variant binds them (`module:attr` values
+are loaded, the rest are literals). `operonx-serve` compiles one engine
+per variant at boot; `on_session` picks with `RunRequest.variant`, and a
+session naming none or an unknown one is refused at the door.
+`compile_graph(entry, bind=…)` is the same thing from Python;
+`Application.graphs` lists one graph per variant (`build[formal]`) under
+the service; `describe()` carries `variants` per service and `bind` per
+graph. `examples/python/ex18_variants` is the worked example.
+
+### Added — `[project] src`
+
+Import roots relative to the manifest (default `["."]`).
+`Application.bootstrap()` puts each on `sys.path`, so a `src/` layout
+needs no path juggling in entry points.
+
+### Fixed — a value with a `name` is not an op
+
+`resolve_value` took any object with a ``name`` attribute for an op
+reference, so a dataclass bound into a nested graph at build time — the
+thing a variant does — became a `Ref` to itself and failed the scope
+check with a message about PARENT. Only ops, graphs and `PARENT` are
+references now (`is_op_like`).
+
 ## [1.7.1] - 2026-09-25
 
 ### Changed — the application layer is `operonx.app`
@@ -1777,7 +1833,9 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.2...v1.7.0
 [1.5.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.2

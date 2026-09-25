@@ -214,6 +214,8 @@ nightly = Runbook("nightly", extract >> [embed >> cluster, score])   # >> sequen
 `[[job]]` blocks live in `operonx.toml` beside `[[serve]]`;
 `operonx-run <name>` runs one from a shell with an exit status a cron
 can read. See the [guide](docs/guide/10-jobs.md) and `examples/python/ex17_jobs`.
+A door whose graph differs by caller declares `[serve.variants]`: one
+compiled graph per variant, picked per session — `examples/python/ex18_variants`.
 
 ## Tracing
 

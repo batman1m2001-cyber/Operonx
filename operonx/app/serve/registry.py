@@ -75,6 +75,15 @@ def resolve_transport(kind: str) -> Callable[..., Any]:
     return factory
 
 
+def resolve_ref(value: Any, field: str = "") -> Any:
+    """A ``module:attr`` string loaded, anything else returned as it is —
+    the one seam that lets a manifest string and a Python object declare
+    the same thing."""
+    if isinstance(value, str):
+        return load_object(value, field=field)
+    return value
+
+
 def load_object(path: str, field: str = "") -> Any:
     """Import a ``module:attribute`` reference, for `graph`/`on_session`/`app`.
 

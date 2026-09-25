@@ -12,6 +12,14 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10
 ::: operonx.app.Application
 ::: operonx.app.GraphRef
 
+## Declaring it in Python
+
+::: operonx.app.Service
+::: operonx.app.websocket
+::: operonx.app.http
+::: operonx.app.asgi
+::: operonx.app.env
+
 ## The manifest
 
 ::: operonx.app.manifest.Manifest
@@ -20,6 +28,7 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10
 
 ## Services
 
+::: operonx.app.serve.app.compile_graph
 ::: operonx.app.serve.ingress
 ::: operonx.app.serve.egress
 ::: operonx.app.serve.current_session

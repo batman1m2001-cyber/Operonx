@@ -12,11 +12,12 @@ import asyncio
 import inspect
 from typing import Any, Dict, Optional
 
+from operonx.app.declare import ref_name
 from operonx.app.manifest import ServeSpec
 from operonx.core.loggings import LOGGER
 
 from .protocol import SESSION_KEY, RunRequest, Session
-from .registry import load_object, resolve_transport
+from .registry import resolve_ref, resolve_transport
 
 __all__ = ["RunTimeout", "ServeRunner", "serve_session"]
 
@@ -110,17 +111,26 @@ class ServeRunner:
     it into a status code.
     """
 
-    def __init__(self, engine: Any, spec: ServeSpec, transport: Any = None):
+    def __init__(
+        self,
+        engine: Any,
+        spec: ServeSpec,
+        transport: Any = None,
+        variants: Optional[Dict[str, Any]] = None,
+    ):
+        # One engine, or one per variant — never both. A door with
+        # variants has no default: `on_session` names one every time.
         self.engine = engine
+        self.variants: Dict[str, Any] = dict(variants or {})
         self.spec = spec
         self.transport = transport if transport is not None else resolve_transport(spec.kind)(spec)
         self._on_session = (
-            load_object(spec.on_session, field=f"[[serve]] {spec.name!r} on_session")
+            resolve_ref(spec.on_session, field=f"[[serve]] {spec.name!r} on_session")
             if spec.on_session
             else None
         )
         self._on_close = (
-            load_object(spec.on_close, field=f"[[serve]] {spec.name!r} on_close")
+            resolve_ref(spec.on_close, field=f"[[serve]] {spec.name!r} on_close")
             if spec.on_close
             else None
         )
@@ -162,7 +172,38 @@ class ServeRunner:
                 f"refusing the connection"
             )
             return None
+        elif self._engine_for(request) is None:
+            return None
+        elif self.spec.inputs and set(request.inputs) != set(self.spec.inputs):
+            # The declared contract, at the door: the hook built something
+            # other than what it said it would.
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_session built inputs "
+                f"{sorted(request.inputs)}; declared {sorted(self.spec.inputs)} — "
+                f"refusing the connection"
+            )
+            return None
         return request
+
+    def _engine_for(self, request: RunRequest) -> Any:
+        """The engine this request runs, or None (logged) when the variant
+        it names is not one the door has. Decided at the gate, so a
+        refusal is a refusal — not a run that fails on its first item."""
+        if not self.variants:
+            return self.engine
+        if request.variant is None:
+            LOGGER.error(
+                f"[serve:{self.spec.name}] on_session returned no variant; the door "
+                f"declares {sorted(self.variants)} — refusing the connection"
+            )
+            return None
+        engine = self.variants.get(request.variant)
+        if engine is None:
+            LOGGER.error(
+                f"[serve:{self.spec.name}] unknown variant {request.variant!r}; "
+                f"declared: {sorted(self.variants)} — refusing the connection"
+            )
+        return engine
 
     async def _run_one(self, session: Session) -> None:
         request = self._request_for(session)
@@ -171,7 +212,7 @@ class ServeRunner:
             return
         handle = None
         try:
-            handle = await serve_session(self.engine, session, request)
+            handle = await serve_session(self._engine_for(request), session, request)
         except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses
@@ -202,7 +243,7 @@ class ServeRunner:
     async def run(self) -> None:
         """Accept sessions until the transport stops, then drain."""
         LOGGER.info(
-            f"[serve:{self.spec.name}] {self.spec.kind} -> {self.spec.graph} "
+            f"[serve:{self.spec.name}] {self.spec.kind} -> {ref_name(self.spec.graph)} "
             f"({self.spec.session}"
             + (f", max_inflight={self.spec.max_inflight}" if self.spec.max_inflight else "")
             + ")"

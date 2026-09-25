@@ -155,6 +155,13 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "port": 8123,
         "session": "per_request",
         "graph": f"{name}:score_flow",
+        "variants": [],
+        "host": "0.0.0.0",
+        "inputs": [],
+        "ingress": [],
+        "egress": [],
+        "on_session": None,
+        "on_close": None,
         "app": None,
         "description": "",
     }
@@ -222,6 +229,8 @@ def test_asgi_gives_one_listeners_app(project):
         assert client.post("/echo", json="hi").json() == "hi"
     with pytest.raises(ManifestError, match="exactly one listener"):
         app.asgi(port=9999)
+    # a listener that leaves the startup hooks to another process
+    assert app.asgi(port=8123, startup=False).router.lifespan_context is not None
 
 
 def test_the_graph_ref_compiles_like_a_served_graph(project):

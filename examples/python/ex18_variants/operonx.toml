@@ -1,0 +1,10 @@
+# Where the project is, and where its application is declared.
+#
+# The services live in app.py — `Application(...)` with `Service(...)`
+# entries — where a reader sees the graph, the door and the bound objects
+# together. This file says only what is not code.
+
+[project]
+name = "ex18-variants"
+src  = ["src", "."]   # packages under src/; app.py at the root
+app  = "app:APP"

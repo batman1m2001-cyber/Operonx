@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import operonx
+from operonx.app import Application, Service, env, http
 from operonx.app.jobs import Job, Runbook
 from operonx.app.serve import egress, ingress
 from operonx.core import END, START, graph, op
@@ -157,6 +158,39 @@ nightly = Runbook(
     on_error="continue",
     record_dir=OUT / "jobs",
     description="Score every call, then export and summarise in parallel.",
+)
+
+
+# One run fed every call through `ingress`: the callbot's shape. One
+# trace, shared state, and no per-item accounting — the record counts
+# what was fed and what egress sent.
+score_stream = Job(
+    "score_stream",
+    graph=score_call,
+    source="data/calls.jsonl",
+    sink="/tmp/operonx_jobs/ex17/scores_stream.jsonl",
+    session="stream",
+    record_dir="/tmp/operonx_jobs/ex17/jobs",
+    description="All calls through one run.",
+)
+
+# The application: the same graph behind an HTTP route and under the
+# jobs above. `operonx.toml` points here; `operonx-serve` and
+# `operonx-run` read this object.
+APP = Application(
+    "ex17-jobs",
+    services=[
+        Service(
+            "score",
+            http("POST", "/score", port=env("HTTP_PORT", 8017)),
+            graph=score_call,
+            ingress=["src"],
+            egress=["out"],
+            description="One call in, one score out.",
+        ),
+    ],
+    jobs=[score_calls, score_from_resources, score_stream, nightly],
+    description="One graph: served as HTTP, and run over a JSONL file by a Job with a record per run.",
 )
 
 
