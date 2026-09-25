@@ -858,7 +858,11 @@ class TestDisambiguatedErrors:
         with pytest.raises(KeyError) as exc:
             hub.get("service:gamma")
 
-        msg = str(exc.value)
+        # `args[0]`, not `str(exc.value)`. `KeyError.__str__` is `repr` of its
+        # argument, which escapes every backslash — so a Windows path came back
+        # as `C:\Users\...` and could not match `str(cfg.resolve())`. On POSIX
+        # the assertion passed only because there were no backslashes to double.
+        msg = exc.value.args[0]
         assert str(cfg.resolve()) in msg
         assert "service:alpha" in msg
         assert "service:beta" in msg

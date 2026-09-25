@@ -11,6 +11,18 @@ import time
 from operonx.core import END, PARENT, START, Operon, graph, op
 from operonx.core.workflow_trace import WorkflowTrace
 
+#: How wrong a `time.time()` bound is allowed to be — its own resolution.
+#:
+#: The trace anchors once with `time.time()` and converts from
+#: `perf_counter`, and the two clocks are not equally precise: on Windows
+#: `time.time()` ticks every 15.6ms while `perf_counter` resolves to 0.1us.
+#: `before` is therefore quantised *down* to a tick boundary, so a converted
+#: node time can sit legitimately outside `[before, after]` — and this flow
+#: runs 3x5ms, about one tick end to end, so it straddles a boundary often.
+#: Asserting exact containment made this test fail on identical code roughly
+#: two runs in three.
+_TICK = time.get_clock_info("time").resolution
+
 
 @op
 async def ticks(n: int):
@@ -43,10 +55,13 @@ def test_trace_is_anchored_to_wall_time_and_records_convert():
 
     trace = asyncio.run(run())
     after = time.time()
-    assert before <= trace.wall_started_at <= after
+    assert before - _TICK <= trace.wall_started_at <= after + _TICK
     assert trace.run_id == "wall-1"
     walls = [trace.wall_of(n.start_time) for n in trace.nodes]
-    assert all(before <= w <= after for w in walls)
+    assert all(before - _TICK <= w <= after + _TICK for w in walls), (
+        f"converted wall times {walls} outside [{before}, {after}] by more "
+        f"than one {_TICK * 1000:.1f}ms clock tick"
+    )
     # yields are ordered in wall time exactly as in perf time
     yields = [n for n in trace.nodes if n.op_name == "t"]
     assert len(yields) == 3
@@ -77,6 +92,8 @@ def test_local_consumer_writes_wall_time(tmp_path):
     rows = [
         json.loads(line) for line in (tmp_path / "wall-2" / "nodes.jsonl").read_text().splitlines()
     ]
-    assert rows and all(before <= r["wall_start"] <= time.time() for r in rows)
+    # Same clock-tick tolerance as above: these are `time.time()` bounds on
+    # values converted from `perf_counter`.
+    assert rows and all(before - _TICK <= r["wall_start"] <= time.time() + _TICK for r in rows)
     meta = json.loads((tmp_path / "wall-2" / "meta.json").read_text())
-    assert before <= meta["wall_started_at"] <= time.time()
+    assert before - _TICK <= meta["wall_started_at"] <= time.time() + _TICK

@@ -26,6 +26,8 @@ from pydantic import Field
 
 from operonx.core.utils import YamlModel
 
+from ._keys import is_resource_key
+
 __all__ = [
     "Sink",
     "JsonlSink",
@@ -299,7 +301,7 @@ def as_sink(obj: Any) -> Sink:
     if isinstance(obj, list):
         return ListSink(obj)
     if isinstance(obj, str):
-        if ":" in obj and not Path(obj).exists():
+        if is_resource_key(obj):
             from operonx.core.jobs import register
             from operonx.core.registry import ResourceHub
 

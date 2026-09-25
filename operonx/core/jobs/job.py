@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from ._keys import is_resource_key
 from .record import JobRun
 from .runner import parse_on_error
 
@@ -213,8 +214,8 @@ class Job:
         def located(value: Optional[str]) -> Any:
             if value is None:
                 return None
-            if ":" in value and not Path(value).exists():
-                return value  # a resource key
+            if is_resource_key(value):
+                return value  # a resource key, left for the hub
             path = Path(value)
             return path if path.is_absolute() else root / path
 
