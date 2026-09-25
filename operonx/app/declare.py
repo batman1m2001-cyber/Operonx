@@ -164,15 +164,27 @@ def Service(  # noqa: N802 — reads as a declaration
 
 
 def ref_name(value: Union[str, Any]) -> str:
-    """How an object is written down: ``module:qualname`` for a function or
-    class, its ``repr`` otherwise. A string is already a reference."""
+    """How an object is written down: ``module:qualname`` for a function,
+    class or graph; ``Type('name')`` for an instance that has a name (a
+    loaded agent record); ``Type`` for any other instance; a string is
+    already a reference and a scalar is itself."""
     if isinstance(value, str):
         return value
-    module = getattr(value, "__module__", None)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return repr(value)
     qual = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
-    if module and qual:
+    module = getattr(value, "__module__", None)
+    if (
+        isinstance(qual, str)
+        and module
+        and not isinstance(getattr(type(value), "__qualname__", None), type(None))
+        and (callable(value) or isinstance(value, type))
+    ):
         return f"{module}:{qual}"
-    return repr(value)
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return f"{type(value).__name__}({name!r})"
+    return type(value).__name__
 
 
 # ── what `Application(...)` delegates to ────────────────────────────────
