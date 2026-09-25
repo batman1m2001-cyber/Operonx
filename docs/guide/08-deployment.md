@@ -1,8 +1,47 @@
 # Deployment
 
-A project is deployed from its manifest. `operonx.toml` declares what
-listens and what runs on a schedule; `operonx-serve` and `operonx-run`
-boot it, and `Application` is the same thing from Python.
+A project is deployed from its application: what listens, what runs on
+a schedule, on which graph. Declare it in Python where a reader sees
+the graph, the door and the bound objects together, and let
+`operonx.toml` point at it:
+
+```python
+# app/main.py
+from operonx.app import Application, Service, asgi, env, http, websocket
+
+APP = Application(
+    "callbot",
+    services=[
+        Service("call", websocket("/ws/call", port=env("WS_PORT", 9922)),
+                graph=ws_callbot_pipeline,             # (script_data, vad_state | agent, turn)
+                session="per_connection", max_inflight=4000,
+                inputs=["script_data", "vad_state"],   # what the door builds — checked at boot
+                variants={"educa_hr": dict(agent=educa_hr.AGENT, turn=educa_hr.graph.turn)},
+                ingress=["audio_in"], egress=["play", "store_record"],
+                on_session=open_call, on_close=close_call),
+        Service("admin", asgi("/", port=env("HTTP_PORT", 9923)), app=admin.app),
+    ],
+    jobs=[nightly],
+    on_startup=[startup.warmup],
+)
+```
+
+```toml
+# operonx.toml — what is not code
+[project]
+name = "callbot"
+src  = ["src"]
+app  = "app.main:APP"
+```
+
+`operonx-serve`, `operonx-run` and the studio find the file, then read
+the object. `inputs=` is the door's contract: the graph must take
+exactly those at run time, or boot fails naming the parameter, and a
+hook that builds anything else is refused at the door. `ingress=` /
+`egress=` name the door ops for whoever draws the graph.
+
+The same declarations in TOML keep working, with `module:attr` strings
+where Python has objects:
 
 ```toml
 [project]
@@ -95,7 +134,7 @@ name the door does not declare, is refused at the door with the declared
 names in the log — no run is minted. `Application.graphs` lists one
 graph per variant (`build[educa_hr]`, `build[ahamove]`) under the one
 service, each compilable on its own. Worked example:
-`examples/python/ex18_variants`.
+`examples/python/ex18_variants` (declared in Python, `app.py`).
 
 ## A `src/` layout
 

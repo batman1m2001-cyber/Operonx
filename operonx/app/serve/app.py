@@ -14,14 +14,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from operonx.app.declare import ref_name
 from operonx.app.manifest import _ENTRY_RE, Manifest, ManifestError, ServeSpec
 from operonx.core.loggings import LOGGER
 
 from .asgi import HttpTransport, WebSocketTransport
 from .protocol import RunRequest
-from .registry import load_object, resolve_transport
+from .registry import load_object, resolve_ref, resolve_transport
 from .runner import ServeRunner
 
 __all__ = [
@@ -35,9 +36,10 @@ __all__ = [
 
 
 def compile_graph(
-    entry: str,
+    entry: Any,
     *,
     bind: Optional[Dict[str, Any]] = None,
+    inputs: Optional[Sequence[str]] = None,
     trace: Any = None,
     concurrency: Optional[int] = None,
     where: str = "graph",
@@ -59,7 +61,8 @@ def compile_graph(
     """
     from operonx.core import Operon
 
-    graph_fn = load_object(entry, field=f"{where} graph")
+    graph_fn = resolve_ref(entry, field=f"{where} graph")
+    entry = ref_name(entry)
     bound: Dict[str, Any] = {}
     if bind:
         if getattr(graph_fn, "_operonx_graph", False):
@@ -85,6 +88,19 @@ def compile_graph(
             f"it takes {sorted(params) or 'none'}"
         )
     params.update(bound)
+    runtime = tuple(name for name in params if name not in bound)
+    if inputs is not None and set(inputs) != set(runtime):
+        # The door's contract, declared: what it will build must be what
+        # the graph takes at run time. A mismatch is a boot failure that
+        # names the parameter, not a None input on the first call.
+        missing = sorted(set(runtime) - set(inputs))
+        extra = sorted(set(inputs) - set(runtime))
+        raise ManifestError(
+            f"{where} declares inputs {sorted(inputs)} but graph {entry!r} takes "
+            f"{sorted(runtime)} at run time"
+            + (f" — not built by the door: {missing}" if missing else "")
+            + (f" — not a parameter: {extra}" if extra else "")
+        )
 
     kwargs = {}
     if params:
@@ -95,6 +111,10 @@ def compile_graph(
     engine = Operon(graph_fn, **kwargs)
     if concurrency:
         engine.graph.concurrency = int(concurrency)
+    try:
+        engine.inputs_expected = runtime  # what a RunRequest must carry
+    except Exception:  # noqa: BLE001 — an engine that refuses attributes still works
+        pass
     return engine
 
 
@@ -138,6 +158,7 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
     return compile_graph(
         spec.graph,
         bind=bind,
+        inputs=spec.inputs or None,
         trace=spec.options.get("trace"),
         concurrency=spec.options.get("concurrency"),
         where=where,
@@ -187,7 +208,7 @@ def _default_on_session(spec: ServeSpec):
 def build_app(
     specs: Tuple[ServeSpec, ...],
     engines: Optional[Dict[str, Any]] = None,
-    on_startup: Tuple[str, ...] = (),
+    on_startup: Tuple[Any, ...] = (),
 ) -> Any:
     """One ASGI app carrying every endpoint bound to a single listener.
 
@@ -215,9 +236,9 @@ def build_app(
             # pretend it is one. The manifest still describes it, so the
             # whole product is in one file.
             routes.append(
-                Mount(spec.path, app=load_object(spec.app, field=f"[[serve]] {spec.name!r} app"))
+                Mount(spec.path, app=resolve_ref(spec.app, field=f"[[serve]] {spec.name!r} app"))
             )
-            LOGGER.info(f"[serve:{spec.name}] mounted {spec.app} at {spec.path}")
+            LOGGER.info(f"[serve:{spec.name}] mounted {ref_name(spec.app)} at {spec.path}")
             continue
 
         built = engines_for(spec, engines)
@@ -259,12 +280,12 @@ def build_app(
     # them — the same reason a disconnect does not cancel a run.
     @asynccontextmanager
     async def lifespan(_app):
-        for hook_path in on_startup:
-            hook = load_object(hook_path)
+        for hook_ref in on_startup:
+            hook = resolve_ref(hook_ref, field="on_startup")
             result = hook()
             if inspect.isawaitable(result):
                 await result
-            LOGGER.info(f"[serve] startup hook done: {hook_path}")
+            LOGGER.info(f"[serve] startup hook done: {ref_name(hook_ref)}")
         tasks = [asyncio.ensure_future(r.run()) for r in runners]
         try:
             yield

@@ -1,26 +1,10 @@
-# One door, one compiled graph per caller kind.
+# Where the project is, and where its application is declared.
 #
-# `greet.graph:build` is not a graph — it is a function that takes the
-# part that differs (`style`, `sign_off`) and returns one. Each variant
-# below binds those once; `operonx-serve` compiles one engine per
-# variant at boot, and `on_session` names the one a request gets.
+# The services live in app.py — `Application(...)` with `Service(...)`
+# entries — where a reader sees the graph, the door and the bound objects
+# together. This file says only what is not code.
 
 [project]
 name = "ex18-variants"
-description = "One HTTP door, two compiled greeters: the session picks the variant."
 src  = ["src"]
-
-[[serve]]
-name    = "greet"
-kind    = "http"
-method  = "POST"
-path    = "/greet"
-port    = "${HTTP_PORT:8018}"
-graph   = "greet.graph:build"
-session = "per_request"
-on_session = "greet.door:open"
-description = "POST /greet?style=formal|casual with a JSON name; the reply is that style's greeting."
-
-[serve.variants]
-formal = { style = "greet.styles:formal", sign_off = "Regards" }
-casual = { style = "greet.styles:casual", sign_off = "Cheers" }
+app  = "app:APP"
