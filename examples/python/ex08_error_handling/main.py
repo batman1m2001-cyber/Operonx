@@ -145,7 +145,7 @@ if __name__ == "__main__":
 # One main graph, served: ingress in, the four error techniques composed
 # as nested graphs, egress out. error_capture fails on purpose — the run
 # records it and carries on, which is the lesson.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

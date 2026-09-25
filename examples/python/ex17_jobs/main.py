@@ -31,9 +31,9 @@ import sys
 from pathlib import Path
 
 import operonx
+from operonx.app.jobs import Job, Runbook
+from operonx.app.serve import egress, ingress
 from operonx.core import END, START, graph, op
-from operonx.core.jobs import Job, Runbook
-from operonx.core.serve import egress, ingress
 
 HERE = Path(__file__).resolve().parent
 OUT = Path("/tmp/operonx_jobs/ex17")

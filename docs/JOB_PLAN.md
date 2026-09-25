@@ -284,7 +284,7 @@ how long, where it stopped, retry, resume). Three additions instead:
 
 ## 11. Log
 
-- **2026-09-24 — phase 1.** `operonx/core/jobs/` (`Job`, `JobSession`,
+- **2026-09-24 — phase 1.** `operonx/app/jobs/` (`Job`, `JobSession`,
   per_item runner, record, jsonl/csv/python sources and sinks as
   `source:`/`sink:` resource categories), `operonx-run`, `ex17_jobs`.
   Two things learned building it: an op that raises does not raise out
@@ -313,7 +313,7 @@ how long, where it stopped, retry, resume). Three additions instead:
   served engine through a session and the job from the same manifest and
   gets identical outputs, then once more as one stream; stream mode
   yields exactly one trace. 162 tests across jobs, serve and cli.**
-- **2026-09-24 — phase 3.** `operonx/core/jobs/runbook.py`: `Runbook`,
+- **2026-09-24 — phase 3.** `operonx/app/jobs/runbook.py`: `Runbook`,
   `Sequential`, `Parallel`; `Job.__rshift__` / `__rrshift__` so
   `a >> [b >> c, d]` and `[a, b] >> c` build the tree; `on_error =
   stop | continue` (a parallel sibling always finishes; a stopped

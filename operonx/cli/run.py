@@ -19,58 +19,30 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from operonx.core.manifest import Manifest, ManifestError
-from operonx.core.serve.registry import load_object
+from operonx.app import Application, ManifestError
+from operonx.app.serve.registry import load_object
 
 
-def _manifest(path: Optional[str]) -> Manifest:
-    return Manifest.from_file(path) if path else Manifest.find(Path.cwd())
+def _application(path: Optional[str]) -> Application:
+    return Application.load(path) if path else Application.find(Path.cwd())
 
 
-def _list(manifest: Manifest) -> int:
-    print(manifest.name)
-    if not manifest.jobs:
+def _list(app: Application) -> int:
+    print(app.name)
+    jobs = app.describe()["jobs"]
+    if not jobs:
         print("  no [[job]] entries")
         return 0
-    for j in manifest.jobs:
-        when = f"  [{j.schedule}]" if j.schedule else ""
-        if j.runbook:
-            print(f"  {j.name:18s} {'runbook':9s} {j.runbook:30s}{when}")
+    for j in jobs:
+        when = f"  [{j['schedule']}]" if j["schedule"] else ""
+        if j["kind"] == "runbook":
+            print(f"  {j['name']:18s} {'runbook':9s} {j['runbook']:30s}{when}")
         else:
-            io = f"{j.source or '-'} -> {j.sink or '-'}"
-            print(f"  {j.name:18s} {j.session:9s} {j.graph:30s} {io}{when}")
-        if j.description:
-            print(f"  {'':18s} {j.description}")
+            io = f"{j['source'] or '-'} -> {j['sink'] or '-'}"
+            print(f"  {j['name']:18s} {j['session']:9s} {j['graph']:30s} {io}{when}")
+        if j["description"]:
+            print(f"  {'':18s} {j['description']}")
     return 0
-
-
-def _from_manifest(name: str, manifest: Manifest):
-    """A Job (or Runbook) from its [[job]] block, importable and with its
-    hub installed."""
-    from operonx.core.jobs import Job, Runbook
-
-    spec = manifest.job(name)
-    root = str(manifest.root)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    if manifest.resources_overlay:
-        overlay = manifest.root / manifest.resources_overlay
-        if overlay.exists():
-            import operonx
-
-            operonx.bootstrap(resources=overlay)
-    if spec.runbook:
-        runbook = load_object(spec.runbook, field=f"[[job]] {name!r} runbook")
-        if not isinstance(runbook, Runbook):
-            raise ValueError(
-                f"[[job]] {name!r} runbook {spec.runbook!r} is a "
-                f"{type(runbook).__name__}, not a Runbook"
-            )
-        if spec.record_dir:
-            rd = Path(spec.record_dir)
-            runbook.record_dir = rd if rd.is_absolute() else manifest.root / rd
-        return runbook
-    return Job.from_spec(spec, manifest.root)
 
 
 def main(argv=None) -> int:
@@ -107,11 +79,11 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    from operonx.core.jobs import Job, Runbook
+    from operonx.app.jobs import Job, Runbook
 
     try:
         if args.list:
-            return _list(_manifest(args.manifest))
+            return _list(_application(args.manifest))
         if not args.job:
             parser.error("name a job, or --list")
         if ":" in args.job:
@@ -128,7 +100,7 @@ def main(argv=None) -> int:
                 )
                 return 2
         else:
-            job = _from_manifest(args.job, _manifest(args.manifest))
+            job = _application(args.manifest).job(args.job)
     except (ManifestError, ImportError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

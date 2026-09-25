@@ -10,9 +10,9 @@ import uuid
 
 import pytest
 
-from operonx.core.jobs import RUN_OK, Job
-from operonx.core.manifest import Manifest, ManifestError, _toml
-from operonx.core.serve import MemoryTransport, serve_session
+from operonx.app.jobs import RUN_OK, Job
+from operonx.app.manifest import Manifest, ManifestError, _toml
+from operonx.app.serve import MemoryTransport, serve_session
 
 MANIFEST = """
 [project]
@@ -129,7 +129,7 @@ def test_from_spec_resolves_paths_against_the_manifest_and_keeps_keys(tmp_path):
 
 PIPELINE = """
 from operonx.core import END, START, graph, op
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op(bound="sync")
@@ -190,7 +190,7 @@ def project(tmp_path, monkeypatch):
 
 async def test_the_same_graph_is_served_and_run_as_a_job_unchanged(project):
     """The phase 2 gate."""
-    from operonx.core.serve.app import engine_for
+    from operonx.app.serve.app import engine_for
 
     name, root = project
     manifest = Manifest.from_file(root / "operonx.toml")

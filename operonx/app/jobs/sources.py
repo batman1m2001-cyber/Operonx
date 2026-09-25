@@ -105,7 +105,7 @@ class PythonSource:
     async def items(self) -> AsyncIterator[Any]:
         obj = self._obj
         if isinstance(obj, str):
-            from operonx.core.serve.registry import load_object
+            from operonx.app.serve.registry import load_object
 
             obj = load_object(obj, field="source")
         if callable(obj) and not hasattr(obj, "__iter__") and not hasattr(obj, "__aiter__"):
@@ -208,7 +208,7 @@ def as_source(obj: Any) -> Source:
         return obj
     if isinstance(obj, str):
         if is_resource_key(obj):
-            from operonx.core.jobs import register
+            from operonx.app.jobs import register
             from operonx.core.registry import ResourceHub
 
             register()

@@ -7,11 +7,11 @@ cannot have quietly defined the interface.
 
 import pytest
 
+from operonx.app.manifest import Manifest, ServeSpec
+from operonx.app.serve import egress, ingress
+from operonx.app.serve.app import build_app, engine_for
 from operonx.core import END, START, Operon, graph
-from operonx.core.manifest import Manifest, ServeSpec
 from operonx.core.ops import op
-from operonx.core.serve import egress, ingress
-from operonx.core.serve.app import build_app, engine_for
 
 starlette = pytest.importorskip("starlette")
 from starlette.testclient import TestClient  # noqa: E402
@@ -90,7 +90,7 @@ def test_asgi_kind_mounts_a_foreign_app_untouched():
         name="admin",
         kind="asgi",
         path="/admin",
-        app="tests.internal.core.serve.test_builtin_transports:admin_app",
+        app="tests.internal.app.serve.test_builtin_transports:admin_app",
     )
     with TestClient(build_app((spec,))) as client:
         assert client.get("/admin/healthz").json() == {"ok": True}
@@ -116,14 +116,14 @@ def test_endpoints_on_one_port_share_a_listener():
                     "kind": "http",
                     "path": "/a",
                     "port": 8080,
-                    "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline",
+                    "graph": "tests.internal.app.serve.test_builtin_transports:loud_pipeline",
                 },
                 {
                     "name": "b",
                     "kind": "http",
                     "path": "/b",
                     "port": 8080,
-                    "graph": "tests.internal.core.serve.test_builtin_transports:loud_pipeline",
+                    "graph": "tests.internal.app.serve.test_builtin_transports:loud_pipeline",
                 },
             ]
         }
@@ -141,5 +141,5 @@ def test_engine_for_declares_every_graph_parameter_as_an_input():
     That is the failure where a deep op holds None forever, so the
     parameters are declared rather than discovered at the first call.
     """
-    spec = _spec(graph="tests.internal.core.serve.test_builtin_transports:loud_pipeline")
+    spec = _spec(graph="tests.internal.app.serve.test_builtin_transports:loud_pipeline")
     assert isinstance(engine_for(spec), Operon)

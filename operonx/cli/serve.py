@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from operonx.core.manifest import Manifest, ManifestError
+from operonx.app import Application, ManifestError
 
 
 def main(argv=None) -> int:
@@ -29,16 +29,16 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        manifest = Manifest.from_file(args.manifest) if args.manifest else Manifest.find(Path.cwd())
+        app = Application.load(args.manifest) if args.manifest else Application.find(Path.cwd())
     except ManifestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     if args.list:
-        print(manifest.name)
-        if not manifest.serves:
+        print(app.name)
+        if not app.services:
             print("  no [[serve]] entries")
-        for (host, port), specs in manifest.listeners().items():
+        for (host, port), specs in app.manifest.listeners().items():
             print(f"  {host}:{port}")
             for s in specs:
                 target = s.app if s.kind == "asgi" else s.graph
@@ -48,10 +48,8 @@ def main(argv=None) -> int:
                 )
         return 0
 
-    from operonx.core.serve.app import serve_manifest
-
     try:
-        serve_manifest(manifest, only=args.only)
+        app.serve(only=args.only)
     except ManifestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

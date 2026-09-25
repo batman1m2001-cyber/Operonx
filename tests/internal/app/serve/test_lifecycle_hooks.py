@@ -13,10 +13,10 @@ carry a real system instead of a graph written to suit it:
 
 import pytest
 
+from operonx.app.manifest import ServeSpec
+from operonx.app.serve import MemoryTransport, ServeRunner, egress, ingress
 from operonx.core import END, START, Operon, graph
-from operonx.core.manifest import ServeSpec
 from operonx.core.ops import op
-from operonx.core.serve import MemoryTransport, ServeRunner, egress, ingress
 
 CALLS = {"opened": 0, "closed": 0, "started": 0, "handles": []}
 
@@ -130,12 +130,12 @@ def test_on_startup_runs_before_any_endpoint_accepts():
 
     from starlette.testclient import TestClient
 
-    from operonx.core.serve.app import build_app
+    from operonx.app.serve.app import build_app
 
     # `load_object` imports by path, and pytest may hold this module under
     # a different name — so the hook increments that copy's counter, not
     # necessarily this one. Assert against the copy the loader actually got.
-    here = "tests.internal.core.serve.test_lifecycle_hooks"
+    here = "tests.internal.app.serve.test_lifecycle_hooks"
     mod = importlib.import_module(here)
     mod.reset()
 
@@ -162,14 +162,14 @@ def test_json_object_never_returns_a_non_dict(raw):
     controls, and every one of `[1,2,3]`, `"hello"`, `42`, `true` and
     `null` killed the call at accept.
     """
-    from operonx.core.serve import json_object
+    from operonx.app.serve import json_object
 
     assert json_object(raw) == {}
 
 
 def test_json_object_reports_what_it_rejected():
     """Falling back silently is how the same input goes unnoticed twice."""
-    from operonx.core.serve import json_object
+    from operonx.app.serve import json_object
 
     seen = []
     assert json_object("[1,2,3]", default={"ok": 1}, on_reject=seen.append) == {"ok": 1}
@@ -177,7 +177,7 @@ def test_json_object_reports_what_it_rejected():
 
 
 def test_json_object_passes_a_real_object_through():
-    from operonx.core.serve import json_object
+    from operonx.app.serve import json_object
 
     assert json_object('{"a": 1}') == {"a": 1}
     assert json_object({"already": "a dict"}) == {"already": "a dict"}
@@ -198,7 +198,7 @@ def test_a_refused_connection_never_completes_the_handshake():
     from starlette.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
 
-    from operonx.core.serve.app import build_app
+    from operonx.app.serve.app import build_app
 
     spec = ServeSpec(
         name="w",
@@ -206,7 +206,7 @@ def test_a_refused_connection_never_completes_the_handshake():
         path="/ws",
         session="per_connection",
         max_inflight=8,
-        graph="tests.internal.core.serve.test_lifecycle_hooks:tiny",
+        graph="tests.internal.app.serve.test_lifecycle_hooks:tiny",
     )
     app = build_app((spec,), engines={"w": Operon(tiny)})
     app.state.operonx_runners[0]._on_session = lambda session: None
@@ -231,7 +231,7 @@ def test_send_reports_whether_the_item_reached_the_peer():
     """
     import asyncio
 
-    from operonx.core.serve import MemoryTransport
+    from operonx.app.serve import MemoryTransport
 
     class DeadPeer(MemoryTransport().open().__class__):
         async def _send(self, item):

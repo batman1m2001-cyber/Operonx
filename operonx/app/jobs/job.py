@@ -146,7 +146,7 @@ class Job:
 
         g = self.graph
         if isinstance(g, str):
-            from operonx.core.serve.registry import load_object
+            from operonx.app.serve.registry import load_object
 
             g = load_object(g, field=f"job {self.name!r} graph")
         if isinstance(g, Operon):
@@ -203,7 +203,7 @@ class Job:
 
     @classmethod
     def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "Job":
-        """A Job from a ``[[job]]`` block (``operonx.core.manifest.JobSpec``).
+        """A Job from a ``[[job]]`` block (``operonx.app.manifest.JobSpec``).
 
         Paths in the block are relative to *root*, the manifest's
         directory; ``source:`` / ``sink:`` keys and ``module:attr`` graph

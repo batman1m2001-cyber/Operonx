@@ -25,8 +25,8 @@ line per item saying what happened to it, and `--resume` reads that.
 
 ```python
 from operonx.core import END, START, graph, op
-from operonx.core.jobs import Job
-from operonx.core.serve import egress, ingress
+from operonx.app.jobs import Job
+from operonx.app.serve import egress, ingress
 
 
 @op(bound="sync")
@@ -235,7 +235,7 @@ composes jobs **above** the engine: a tree of `Sequential` and
 `Parallel`, walked by asyncio. Never a graph of jobs.
 
 ```python
-from operonx.core.jobs import Runbook
+from operonx.app.jobs import Runbook
 
 nightly = Runbook("nightly", extract >> [embed >> cluster, score])
 #                             >> = Sequential      [ ] = Parallel

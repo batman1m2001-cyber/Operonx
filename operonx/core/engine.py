@@ -965,8 +965,8 @@ class Operon:
         # the studio's benefit. The two halves are joined now: this is the
         # one-endpoint convenience form, and it builds the same ServeSpec
         # the manifest would have produced.
-        from operonx.core.manifest import ServeSpec
-        from operonx.core.serve.app import build_app
+        from operonx.app.manifest import ServeSpec
+        from operonx.app.serve.app import build_app
 
         try:
             import uvicorn

@@ -27,8 +27,8 @@ def register_transport(name: str, factory: Callable[..., Any], *, replace: bool 
 
     Args:
         name: What `[[serve]] kind = "..."` will say.
-        factory: Called with the :class:`~operonx.core.manifest.ServeSpec`
-            and returns a :class:`~operonx.core.serve.protocol.Transport`.
+        factory: Called with the :class:`~operonx.app.manifest.ServeSpec`
+            and returns a :class:`~operonx.app.serve.protocol.Transport`.
         replace: Permit overwriting an existing name. Off by default so a
             project shadowing a built-in has to mean it.
     """

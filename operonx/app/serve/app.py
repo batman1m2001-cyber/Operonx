@@ -16,34 +16,37 @@ import inspect
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
+from operonx.app.manifest import Manifest, ManifestError, ServeSpec
 from operonx.core.loggings import LOGGER
-from operonx.core.manifest import Manifest, ManifestError, ServeSpec
 
 from .asgi import HttpTransport, WebSocketTransport
 from .protocol import RunRequest
 from .registry import load_object, resolve_transport
 from .runner import ServeRunner
 
-__all__ = ["build_app", "build_apps", "engine_for", "serve_manifest"]
+__all__ = ["build_app", "build_apps", "compile_graph", "engine_for", "serve_manifest"]
 
 
-def engine_for(spec: ServeSpec) -> Any:
-    """Compile the graph a `[[serve]]` entry names.
+def compile_graph(
+    entry: str, *, trace: Any = None, concurrency: Optional[int] = None, where: str = "graph"
+) -> Any:
+    """An ``Operon`` from a ``module:attr`` entry point, the way anything
+    declared in the manifest is compiled.
 
-    Every parameter of the graph becomes a runtime input port. A graph
-    compiled without declaring them keeps the literal defaults it was
-    built with, which is the failure mode where a deep op holds ``None``
-    forever and every call fails on it.
+    Every parameter of the graph factory becomes a runtime input port. A
+    graph compiled without declaring them keeps the literal defaults it
+    was built with, which is the failure mode where a deep op holds
+    ``None`` forever and every call fails on it.
     """
     from operonx.core import Operon
 
-    graph_fn = load_object(spec.graph, field=f"[[serve]] {spec.name!r} graph")
+    graph_fn = load_object(entry, field=f"{where} graph")
     # `Operon(...)` on something that is not a graph fails as
     # `AttributeError: 'str' object has no attribute 'name'`, which names
     # neither the manifest entry nor what was actually wrong.
     if not hasattr(graph_fn, "name") and not callable(graph_fn):
         raise TypeError(
-            f"[[serve]] {spec.name!r} graph {spec.graph!r} resolved to a "
+            f"{where} graph {entry!r} resolved to a "
             f"{type(graph_fn).__name__}, which is not a @graph"
         )
     try:
@@ -51,23 +54,33 @@ def engine_for(spec: ServeSpec) -> Any:
     except (TypeError, ValueError):
         params = {}
 
-    # `trace` and `concurrency` ride in the spec's free-form options. They
-    # are engine settings rather than transport settings, but they have to
-    # be declarable: a manifest that boots the graph and silently drops its
-    # trace consumers would take a project's observability away as the
-    # price of adopting the serve layer.
     kwargs = {}
     if params:
         kwargs["params"] = params
-    trace = spec.options.get("trace")
     if trace:
         kwargs["trace"] = list(trace) if isinstance(trace, (list, tuple)) else [str(trace)]
 
     engine = Operon(graph_fn, **kwargs)
-    concurrency = spec.options.get("concurrency")
     if concurrency:
         engine.graph.concurrency = int(concurrency)
     return engine
+
+
+def engine_for(spec: ServeSpec) -> Any:
+    """Compile the graph a `[[serve]]` entry names.
+
+    `trace` and `concurrency` ride in the spec's free-form options. They
+    are engine settings rather than transport settings, but they have to
+    be declarable: a manifest that boots the graph and silently drops its
+    trace consumers would take a project's observability away as the
+    price of adopting the serve layer.
+    """
+    return compile_graph(
+        spec.graph,
+        trace=spec.options.get("trace"),
+        concurrency=spec.options.get("concurrency"),
+        where=f"[[serve]] {spec.name!r}",
+    )
 
 
 def _meta_from_request(request: Any) -> Dict[str, Any]:

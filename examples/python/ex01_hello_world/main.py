@@ -88,7 +88,7 @@ if __name__ == "__main__":
 # leaves, and the teaching flows above are composed in between as nested
 # graphs — open them on the studio canvas to see inside. `operonx-serve`
 # boots the [[serve]] block in operonx.toml that names this graph.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op
@@ -98,12 +98,47 @@ def unpack(item=None) -> dict:
     return {"who": item.get("who", "Operon")}
 
 
+@op
+def bye(who: str):
+    return {"farewell": f"Tạm biệt, {who}!"}
+
+
+@graph
+def farewell(who):
+    """A second branch — runs side by side with `hello`."""
+    b = bye(who=who)
+    START >> b >> END
+
+
+@op
+def compose(greeting: str, farewell: str, shouted: str, combined: str) -> dict:
+    """The last word: fold the flows' results into one reply."""
+    return {
+        "reply": {
+            "greeting": greeting,
+            "farewell": farewell,
+            "shouted": shouted,
+            "combined": combined,
+            "summary": f"{greeting} {shouted} ({combined}) {farewell}",
+        }
+    }
+
+
 @graph
 def main_flow():
     request = ingress()
     fields = unpack(item=request["item"])
     hello = hello_world(who=fields["who"])
+    goodbye = farewell(who=fields["who"])
     chain = two_steps(who=fields["who"])
     both = fan_out_in()
-    out = egress(item=both["combined"])
-    START >> request >> fields >> hello >> chain >> both >> out >> END
+    final = compose(
+        greeting=hello["greeting"],
+        farewell=goodbye["farewell"],
+        shouted=chain["result"],
+        combined=both["combined"],
+    )
+    out = egress(item=final["reply"])
+    # `hello` and `goodbye` both fan out from `fields` and fan back in at `final`.
+    START >> request >> fields >> hello >> chain >> both >> final >> out >> END
+    fields >> goodbye >> final

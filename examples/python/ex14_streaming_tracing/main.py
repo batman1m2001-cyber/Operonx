@@ -89,7 +89,7 @@ if __name__ == "__main__":
 # One main graph, served: ingress in, both streaming pipelines composed
 # as nested graphs, egress out — each of async_pipeline's yields leaves
 # through the door as it happens.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

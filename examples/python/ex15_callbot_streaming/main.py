@@ -110,7 +110,7 @@ if __name__ == "__main__":
 # `customer_audio` is replaced by the connection itself: each websocket
 # message is one audio frame, "payload@timestamp_ms". TTS chunks go back
 # out the same socket through `egress`.
-from operonx.core.serve import egress, ingress
+from operonx.app.serve import egress, ingress
 
 
 @op

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from operonx.app.serve.protocol import BoundedSession
 from operonx.core.loggings import LOGGER
-from operonx.core.serve.protocol import BoundedSession
 
 from .sinks import Sink
 
