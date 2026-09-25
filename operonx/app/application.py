@@ -222,7 +222,8 @@ class Application:
                     "kind": "runbook" if j.runbook else "job",
                     "graph": j.graph or None,
                     "runbook": j.runbook,
-                    "session": j.session,
+                    # a runbook has no session of its own; its jobs do
+                    "session": None if j.runbook else j.session,
                     "source": j.source,
                     "sink": j.sink,
                     "schedule": j.schedule,
