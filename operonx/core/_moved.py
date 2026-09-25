@@ -1,5 +1,5 @@
 """The application layer moved from ``operonx.core`` to ``operonx.app``
-(1.8.0). These shims keep the old import paths working for one minor
+(1.7.1). These shims keep the old import paths working for one minor
 release, with a warning, so a project can move at its own pace."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import warnings
 def alias(old: str, new: str, submodules: tuple = ()) -> None:
     """Register ``new`` (and its submodules) under ``old`` in ``sys.modules``."""
     warnings.warn(
-        f"`{old}` moved to `{new}` in operonx 1.8.0; the old path will go in 1.9.0",
+        f"`{old}` moved to `{new}` in operonx 1.7.1; the old path will go in 1.8.0",
         DeprecationWarning,
         stacklevel=3,
     )
