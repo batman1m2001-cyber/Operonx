@@ -51,7 +51,7 @@ APP = Application(
 
 ```toml
 [project]
-src = ["src"]       # import roots; operonx puts them on sys.path
+src = ["src", "."]  # import roots: packages under src/, app.py at the root
 app = "app:APP"     # the declaration above
 ```
 

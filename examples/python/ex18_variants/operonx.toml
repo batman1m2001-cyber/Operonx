@@ -6,5 +6,5 @@
 
 [project]
 name = "ex18-variants"
-src  = ["src"]
+src  = ["src", "."]   # packages under src/; app.py at the root
 app  = "app:APP"

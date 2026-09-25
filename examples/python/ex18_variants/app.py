@@ -5,10 +5,10 @@ a reader sees which graph runs behind which door, what the door binds per
 variant, and who picks the variant.
 """
 
-from operonx.app import Application, Service, env, http
-
 from greet import door, styles
 from greet.graph import build
+
+from operonx.app import Application, Service, env, http
 
 APP = Application(
     "ex18-variants",
