@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-25
+
 ### Changed — the application layer is `operonx.app`
 
 `serve`, `jobs` and `manifest` move from `operonx.core` to `operonx.app`:
@@ -1775,7 +1777,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.2...v1.7.0
 [1.5.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.5.0...v1.5.2
 [1.5.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.4.0...v1.5.0
