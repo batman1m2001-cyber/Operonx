@@ -163,6 +163,7 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         ("nightly", "runbook"),
     ]
     assert d["jobs"][0]["schedule"] == "0 2 * * *" and d["jobs"][1]["runbook"] == f"{name}:nightly"
+    assert d["jobs"][0]["session"] == "per_item" and d["jobs"][1]["session"] is None
     assert name not in sys.modules  # describe() did not import the project
 
 
