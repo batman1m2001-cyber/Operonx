@@ -107,6 +107,12 @@ def project(tmp_path, monkeypatch):
         [resources]
         overlay = "resources.yaml"
 
+        [[job]]
+        name   = "nightly"
+        graph  = "{name}:score_flow"
+        source = [{{call_id = "j1", text = "a b"}}]
+        key    = "call_id"
+
         [[serve]]
         name  = "score"
         kind  = "http"
@@ -272,9 +278,13 @@ def test_one_op_reruns_with_recorded_inputs_as_its_own_run(project):
         bad = await bridge.rerun({"service": "score", "op_name": "scored",
                                   "inputs": {"call": {"call_id": "c3", "text": ""}}, "of": "run-1"})
         ghost = await bridge.rerun({"service": "score", "op_name": "nope", "inputs": {}})
-        return ok, bad, ghost
+        job = await bridge.rerun({"job": "nightly", "op_name": "scored",
+                                  "inputs": {"call": {"call_id": "j1", "text": "x y"}}, "of": "job-run"})
+        return ok, bad, ghost, job
 
-    ok, bad, ghost = asyncio.run(go())
+    ok, bad, ghost, job = asyncio.run(go())
+    assert job["status"] == "ok" and job["outputs"] == {"result": {"call_id": "j1", "words": 2}}
+    assert _store(root).get_run(job["trace_id"]).summary.metadata["job"] == "nightly"
     assert ok["status"] == "ok" and ok["outputs"] == {"result": {"call_id": "c3", "words": 4}}
     assert bad["status"] == "error" and bad["error"] == "scored: ValueError: empty text"
     assert ghost["status"] == "error" and "no op 'nope'" in ghost["error"]

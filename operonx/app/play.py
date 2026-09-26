@@ -39,6 +39,7 @@ Requests (one JSON object per line; ``id`` is echoed back)::
     {"op": "send",  "sid": "s1", "msg": {"kind": "text", "text": "hi"}}
     {"op": "end",   "sid": "s1"}
     {"op": "rerun", "service": "chat", "op_name": "reply", "inputs": {...}, "of": "run-id"}
+    {"op": "rerun", "job": "score_calls", "op_name": "scored", "inputs": {...}}
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
 toy message), ``ended`` (status, error, duration), ``rerun``, ``error``.
@@ -338,20 +339,26 @@ class Bridge:
         from operonx.core.states import MemoryState, StateSchema
         from operonx.core.workflow_trace import WorkflowTrace, _current_trace, run_metadata
 
-        runner = await self._runner(str(msg.get("service") or ""))
-        engine = runner.engine or next(iter(runner.variants.values()))
-        if msg.get("variant") and runner.variants:
-            engine = runner.variants[str(msg["variant"])]
+        if msg.get("job"):
+            # a job's graph, compiled as the job compiles it
+            job = self.app.job(str(msg["job"]))
+            engine, owner, where = job.engine(), {"job": job.name}, f"job {job.name}"
+        else:
+            runner = await self._runner(str(msg.get("service") or ""))
+            engine = runner.engine or next(iter(runner.variants.values()))
+            if msg.get("variant") and runner.variants:
+                engine = runner.variants[str(msg["variant"])]
+            owner = {"service": runner.spec.name, "transport": runner.spec.kind, "variant": msg.get("variant")}
+            where = f"{runner.spec.name}'s graph"
         name = str(msg.get("op_name") or "")
         op = _find_op(engine.graph, name)
         if op is None:
-            return {"t": "rerun", "error": f"no op {name!r} in {runner.spec.name}'s graph", "status": "error"}
+            return {"t": "rerun", "error": f"no op {name!r} in {where}", "status": "error"}
         trace = WorkflowTrace(
             trace_id=str(uuid.uuid4()), workflow_name=engine.name, started_at=perf_counter(),
             wall_started_at=time.time(), ended_at=0.0,
             metadata={**run_metadata(), **origin_metadata(
-                ORIGIN_PLAYGROUND, service=runner.spec.name, transport=runner.spec.kind, toy="rerun",
-                rerun_of=msg.get("of"), op=op.name)},
+                ORIGIN_PLAYGROUND, **owner, toy="rerun", rerun_of=msg.get("of"), op=op.name)},
         )
         outputs: List[Any] = []
         token = _current_trace.set(trace)
