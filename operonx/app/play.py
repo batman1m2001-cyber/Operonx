@@ -26,6 +26,23 @@ protocol is its own declares ``Service(..., playground=MyCodec)`` (or
 offers no toy. Session hooks can tell a playground session apart by
 ``session.meta["playground"]``.
 
+**Audio.** A codec that sets ``audio = {"rate": 8000, …}`` offers the
+Voice toy: the browser sends ``{"kind": "audio", "b64": <pcm16 mono at that
+rate>}`` in short batches and plays what comes back the same way. The
+codec cuts a batch into the door's own frames (``to_door_items``).
+
+**Conditions.** A session can run in a worse world than the one it was
+built in: ``latency_ms`` before each inbound item, ``drop`` (the share of
+inbound items lost), ``noise_dbfs`` (white noise mixed into audio),
+``silence_ms`` (quiet audio before the first message) and ``fail`` (resource
+keys that raise for this session only — the resource objects are wrapped
+once and fail only where a session asked them to).
+
+**A simulated user.** ``simulate`` opens a session and lets an LLM persona
+play the other side for a number of turns: it waits for the service to go
+quiet, reads the conversation, answers in character, and ends it when the
+persona says so. The run records what the persona said, like any session.
+
 **Re-running one op.** ``rerun`` runs a single op of a service's graph
 with the inputs it had in a recorded run — a failing op deep inside a
 call retried in a second, without making the call. It is recorded as a
@@ -38,11 +55,14 @@ Requests (one JSON object per line; ``id`` is echoed back)::
                     "send": [msg, ...], "end": false}
     {"op": "send",  "sid": "s1", "msg": {"kind": "text", "text": "hi"}}
     {"op": "end",   "sid": "s1"}
+    {"op": "simulate", "sid": "s2", "service": "chat", "persona": "a busy parent…", "llm": "llm:x",
+                       "turns": 6, "first": "user", "conditions": {...}}
     {"op": "rerun", "service": "chat", "op_name": "reply", "inputs": {...}, "of": "run-id"}
     {"op": "rerun", "job": "score_calls", "op_name": "scored", "inputs": {...}}
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
-toy message), ``ended`` (status, error, duration), ``rerun``, ``error``.
+toy message), ``said`` (what a simulated user sent), ``ended`` (status,
+error, duration), ``rerun``, ``error``.
 """
 
 from __future__ import annotations
@@ -52,7 +72,11 @@ import asyncio
 import base64
 import inspect
 import json
+import contextvars
+import math
 import os
+import random
+import struct
 import sys
 import threading
 import time
@@ -66,7 +90,7 @@ from .origin import ORIGIN_PLAYGROUND, origin_metadata
 from .serve.protocol import BoundedSession, RunRequest
 from .serve.registry import resolve_ref
 
-__all__ = ["Bridge", "Codec", "JsonCodec", "TextCodec", "codec_for", "main", "toy_message"]
+__all__ = ["Bridge", "Codec", "JsonCodec", "PcmCodec", "TextCodec", "codec_for", "main", "toy_message"]
 
 PROTOCOL = 1
 #: A session's script (what the toy sent) is kept on the trace for replay,
@@ -99,6 +123,11 @@ class Codec:
     """
 
     toys: Tuple[str, ...] = ()
+    #: For a voice door: ``{"rate": 8000, "encoding": "pcm16", "frame_ms": 40}``
+    #: — the rate the toy captures and plays at.
+    audio: Optional[Dict[str, Any]] = None
+    #: Connection defaults the toy fills in (``{uuid}`` becomes a fresh id).
+    query: Dict[str, str] = {}
 
     def to_door(self, message: Dict[str, Any]) -> Any:
         kind = message.get("kind")
@@ -106,9 +135,14 @@ class Codec:
             return str(message.get("text", ""))
         if kind == "json":
             return message.get("value")
-        if kind == "bytes":
+        if kind in ("bytes", "audio"):
             return base64.b64decode(message.get("b64") or "")
-        raise ValueError(f"a toy message has kind text, json or bytes — got {kind!r}")
+        raise ValueError(f"a toy message has kind text, json, bytes or audio — got {kind!r}")
+
+    def to_door_items(self, message: Dict[str, Any]) -> List[Any]:
+        """The ingress items one toy message becomes — one, unless the door
+        takes audio in frames smaller than the toy's batches."""
+        return [self.to_door(message)]
 
     def from_door(self, item: Any) -> Dict[str, Any]:
         return toy_message(item)
@@ -127,6 +161,39 @@ class TextCodec(Codec):
     toys = ("chat", "form")
 
 
+class PcmCodec(Codec):
+    """A door that takes raw 16-bit mono PCM frames and sends them back —
+    the Voice toy. Declared, never guessed: ``Service(...,
+    playground=PcmCodec(rate=16000, frame_ms=20))``. What the door sends
+    that is not audio (a transcript, an event) still reaches the toy."""
+
+    toys = ("voice",)
+
+    def __init__(self, rate: int = 16000, frame_ms: int = 20):
+        self.audio = {"rate": int(rate), "encoding": "pcm16", "frame_ms": int(frame_ms)}
+
+    def to_door_items(self, message: Dict[str, Any]) -> List[Any]:
+        if message.get("kind") != "audio":
+            return [self.to_door(message)]
+        return list(pcm_frames(base64.b64decode(message.get("b64") or ""), self.audio["rate"],
+                               self.audio["frame_ms"]))
+
+    def from_door(self, item: Any) -> Dict[str, Any]:
+        if isinstance(item, (bytes, bytearray)):
+            return {"kind": "audio", "b64": base64.b64encode(bytes(item)).decode(), "rate": self.audio["rate"]}
+        return toy_message(item)
+
+
+def pcm_frames(pcm: bytes, rate: int, frame_ms: int) -> List[bytes]:
+    """*pcm* (16-bit mono) cut into frames of *frame_ms*; the last is padded
+    with silence, as a telco pads its final packet."""
+    size = max(2, int(rate * frame_ms / 1000) * 2)
+    out = [pcm[i:i + size] for i in range(0, len(pcm), size)]
+    if out and len(out[-1]) < size:
+        out[-1] = out[-1] + b"\x00" * (size - len(out[-1]))
+    return out
+
+
 BUILTIN_CODECS: Dict[str, Callable[[], Codec]] = {"http": JsonCodec, "websocket": TextCodec}
 
 
@@ -139,6 +206,92 @@ def codec_for(spec: Any) -> Optional[Codec]:
         return obj() if isinstance(obj, type) else obj
     make = BUILTIN_CODECS.get(spec.kind)
     return make() if make else None
+
+
+# ── conditions ────────────────────────────────────────────────────────────
+
+#: The resource keys failing for the session this task belongs to.
+_FAILING: contextvars.ContextVar = contextvars.ContextVar("operonx_play_failing", default=frozenset())
+_WRAPPED: set = set()
+
+
+class PlaygroundFault(RuntimeError):
+    """A resource failed because a playground session asked it to."""
+
+
+def _fail_resources(keys: List[str]) -> None:
+    """Make *keys* able to fail: wrap their resource objects' public methods
+    once, so a call raises when — and only when — the calling session lists
+    the key. Ops hold the same objects the hub hands out, so this reaches a
+    warmed op too."""
+    from operonx.core.registry import ResourceHub
+
+    hub = ResourceHub.instance()
+    for key in keys:
+        if key in _WRAPPED:
+            continue
+        obj = hub.get(key)
+        if obj is None:
+            raise KeyError(f"no resource {key!r} to fail")
+        for name in dir(obj):
+            if name.startswith("_"):
+                continue
+            try:
+                attr = getattr(obj, name)
+            except Exception:  # noqa: BLE001 — a property that raises is not a method
+                continue
+            if not inspect.ismethod(attr):
+                continue
+            setattr(obj, name, _faulty(key, attr))
+        _WRAPPED.add(key)
+
+
+def _faulty(key: str, method: Callable) -> Callable:
+    if inspect.iscoroutinefunction(method):
+        async def wrapped(*a: Any, **kw: Any) -> Any:
+            if key in _FAILING.get():
+                raise PlaygroundFault(f"{key} failed (a playground condition)")
+            return await method(*a, **kw)
+    elif inspect.isasyncgenfunction(method):
+        async def wrapped(*a: Any, **kw: Any) -> Any:  # type: ignore[misc]
+            if key in _FAILING.get():
+                raise PlaygroundFault(f"{key} failed (a playground condition)")
+            async for x in method(*a, **kw):
+                yield x
+    else:
+        def wrapped(*a: Any, **kw: Any) -> Any:  # type: ignore[misc]
+            if key in _FAILING.get():
+                raise PlaygroundFault(f"{key} failed (a playground condition)")
+            return method(*a, **kw)
+    wrapped.__name__ = getattr(method, "__name__", "method")
+    return wrapped
+
+
+def add_noise(pcm: bytes, dbfs: float, seed: Optional[int] = None) -> bytes:
+    """16-bit mono *pcm* with white noise at *dbfs* (e.g. -30) mixed in."""
+    rng = random.Random(seed)
+    amp = 32767 * (10 ** (float(dbfs) / 20))
+    n = len(pcm) // 2
+    samples = struct.unpack(f"<{n}h", pcm[: n * 2])
+    mixed = (max(-32768, min(32767, int(x + rng.gauss(0, amp)))) for x in samples)
+    return struct.pack(f"<{n}h", *mixed)
+
+
+def _conditions(raw: Any) -> Dict[str, Any]:
+    raw = raw if isinstance(raw, dict) else {}
+    out: Dict[str, Any] = {}
+    if raw.get("latency_ms"):
+        out["latency_ms"] = max(0.0, float(raw["latency_ms"]))
+    if raw.get("drop"):
+        out["drop"] = min(1.0, max(0.0, float(raw["drop"])))
+    if raw.get("noise_dbfs") not in (None, ""):
+        out["noise_dbfs"] = min(0.0, float(raw["noise_dbfs"]))
+    if raw.get("silence_ms"):
+        out["silence_ms"] = max(0.0, float(raw["silence_ms"]))
+    fail = [str(k) for k in raw.get("fail") or [] if str(k).strip()]
+    if fail:
+        out["fail"] = fail
+    return out
 
 
 # ── sessions ──────────────────────────────────────────────────────────────
@@ -155,6 +308,12 @@ class PlaySession(BoundedSession):
         #: (the list object itself), so the finished run carries it
         self.script: List[Dict[str, Any]] = []
         self.sent = 0
+        self.conditions: Dict[str, Any] = {}
+        self.dropped = 0
+        self.lock = asyncio.Lock()  # inbound order holds under latency
+        self.heard: List[Dict[str, Any]] = []  # what came back — a simulated user reads it
+        self.last_out = 0.0
+        self.first_in = True
 
     async def _send(self, item: Any) -> bool:
         try:
@@ -162,14 +321,17 @@ class PlaySession(BoundedSession):
         except Exception as exc:  # noqa: BLE001 — a codec bug is shown, not fatal
             message = {"kind": "error", "text": f"codec: {type(exc).__name__}: {exc}"}
         self.sent += 1
+        self.last_out = time.monotonic()
+        self.heard.append(message)
         self.emit({"t": "out", "sid": self.sid, "msg": message, "at": time.time()})
         return True
 
     def note(self, message: Dict[str, Any]) -> None:
         if len(self.script) < SCRIPT_LIMIT:
             kept = dict(message)
-            if kept.get("kind") == "bytes":
-                kept = {"kind": "bytes", "size": len(base64.b64decode(kept.get("b64") or ""))}
+            if kept.get("kind") in ("bytes", "audio"):
+                # audio and bytes are counted, never kept: a replay script is text
+                kept = {"kind": kept["kind"], "size": len(base64.b64decode(kept.get("b64") or ""))}
             self.script.append(kept)
 
 
@@ -223,6 +385,8 @@ class Bridge:
                 "inputs": params, "variants": list(spec.variants), "custom_hook": bool(spec.on_session),
                 "toys": list(codec.toys) if codec else [],
                 "codec": type(codec).__name__ if codec else None, "codec_error": codec_err,
+                "audio": getattr(codec, "audio", None) if codec else None,
+                "query": dict(getattr(codec, "query", None) or {}) if codec else {},
                 "description": spec.description,
             })
         return {"t": "doors", "protocol": PROTOCOL, "project": self.app.name, "doors": doors}
@@ -292,12 +456,24 @@ class Bridge:
         if not isinstance(request, RunRequest):  # pragma: no cover — the gate returns RunRequest|None
             return
         request.trace_id = request.trace_id or str(uuid.uuid4())
+        session.conditions = _conditions(msg.get("conditions"))
+        if session.conditions.get("fail"):
+            try:
+                _fail_resources(session.conditions["fail"])
+            except Exception as exc:  # noqa: BLE001
+                self.emit({"t": "refused", "sid": sid, "reason": f"cannot fail {exc}"})
+                return
         self._sessions[sid] = session
         toy = str(msg.get("toy") or (codec.toys[0] if codec.toys else "form"))
         metadata = origin_metadata(ORIGIN_PLAYGROUND, service=spec.name, transport=spec.kind,
                                    variant=request.variant, toy=toy)
         metadata["playground_script"] = session.script  # the same list: filled as the toy sends
         metadata["playground_query"] = dict(meta["query"])  # with the script, all a replay needs
+        if session.conditions:
+            metadata["playground_conditions"] = dict(session.conditions)
+        for key, value in (msg.get("meta") or {}).items():
+            if key in ("persona", "simulated_by"):
+                metadata[key] = str(value)[:2000]
         if msg.get("replay_of"):
             metadata["replay_of"] = str(msg["replay_of"])
         self.emit({"t": "opened", "sid": sid, "trace_id": request.trace_id, "service": spec.name,
@@ -305,6 +481,8 @@ class Bridge:
 
         async def run() -> None:
             t0, handle, error = perf_counter(), None, None
+            # the run's tasks inherit this: its failing resources fail here only
+            _FAILING.set(frozenset(session.conditions.get("fail") or ()))
             try:
                 handle = await serve_session(runner._engine_for(request), session, request,
                                              metadata=metadata)
@@ -314,9 +492,12 @@ class Bridge:
                 await runner._close_one(session, handle)
                 self._sessions.pop(sid, None)
             status, first = _status(getattr(handle, "trace", None))
-            self.emit({"t": "ended", "sid": sid, "trace_id": request.trace_id,
-                       "status": "error" if error else status, "error": error or first,
-                       "ms": round((perf_counter() - t0) * 1000, 2), "sent": session.sent})
+            ended = {"t": "ended", "sid": sid, "trace_id": request.trace_id,
+                     "status": "error" if error else status, "error": error or first,
+                     "ms": round((perf_counter() - t0) * 1000, 2), "sent": session.sent}
+            if session.dropped:
+                ended["dropped"] = session.dropped
+            self.emit(ended)
 
         task = asyncio.ensure_future(run())
         self._tasks.add(task)
@@ -332,14 +513,122 @@ class Bridge:
             self.emit({"t": "error", "sid": msg.get("sid"), "text": "no such open session"})
             return
         message = dict(msg.get("msg") or {})
-        item = session.codec.to_door(message)
-        session.note(message)
-        await session.feed(item)
+        cond = session.conditions
+        async with session.lock:  # one message at a time, in the order sent
+            if cond.get("latency_ms"):
+                await asyncio.sleep(cond["latency_ms"] / 1000)
+            if message.get("kind") == "audio" and cond.get("noise_dbfs") is not None:
+                noisy = add_noise(base64.b64decode(message.get("b64") or ""), cond["noise_dbfs"])
+                message = {**message, "b64": base64.b64encode(noisy).decode()}
+            items = session.codec.to_door_items(message)
+            if session.first_in and cond.get("silence_ms") and session.codec.audio:
+                # quiet before the first word, in the door's own framing
+                rate = int(session.codec.audio.get("rate") or 8000)
+                quiet = b"\x00\x00" * int(rate * cond["silence_ms"] / 1000)
+                items = session.codec.to_door_items({"kind": "audio", "b64": base64.b64encode(quiet).decode(),
+                                                     "rate": rate}) + items
+            session.first_in = False
+            session.note(message)
+            for item in items:
+                if cond.get("drop") and random.random() < cond["drop"]:
+                    session.dropped += 1
+                    continue
+                await session.feed(item)
 
     def end(self, msg: Dict[str, Any]) -> None:
         session = self._sessions.get(str(msg.get("sid")))
         if session is not None:
             session.end_input()
+
+    # -- a simulated user -------------------------------------------------
+
+    async def simulate(self, msg: Dict[str, Any]) -> None:
+        """An LLM persona plays the other side of a text session."""
+        sid = str(msg.get("sid") or uuid.uuid4().hex[:12])
+        persona = str(msg.get("persona") or "").strip()
+        llm = str(msg.get("llm") or "").strip()
+        if not persona or not llm:
+            self.emit({"t": "refused", "sid": sid, "reason": "a simulated user needs a persona and an llm"})
+            return
+        runner = await self._runner(str(msg.get("service") or ""))
+        codec = codec_for(runner.spec)
+        if codec is None or "chat" not in codec.toys:
+            self.emit({"t": "refused", "sid": sid, "reason": "a simulated user speaks text, and this door "
+                       f"takes {', '.join(codec.toys) if codec else 'no toy'}"})
+            return
+        turns = max(1, min(int(msg.get("turns") or 6), 50))
+        quiet = max(0.1, float(msg.get("quiet_ms") or 1200) / 1000)
+        wait_max = max(1.0, float(msg.get("wait_s") or 45))
+        await self.open({"sid": sid, "service": runner.spec.name, "toy": "simulated", "query": msg.get("query"),
+                         "conditions": msg.get("conditions"),
+                         "meta": {"persona": persona, "simulated_by": llm}})
+        session = self._sessions.get(sid)
+        if session is None:
+            return  # refused, and already said so
+        history: List[Tuple[str, str]] = []
+
+        async def replies() -> str:
+            """What the service says next: wait for it to start and then go
+            quiet; the text of everything it sent meanwhile."""
+            mark, start = len(session.heard), time.monotonic()
+            while time.monotonic() - start < wait_max and sid in self._sessions:
+                if len(session.heard) > mark and time.monotonic() - session.last_out >= quiet:
+                    break
+                await asyncio.sleep(0.03)
+            said = []
+            for m in session.heard[mark:]:
+                if m.get("kind") == "text" or m.get("text"):
+                    said.append(str(m.get("text") or ""))
+                elif m.get("kind") == "json":
+                    said.append(json.dumps(m.get("value"), ensure_ascii=False, default=str)[:600])
+            return " ".join(t for t in said if t).strip()
+
+        try:
+            if (msg.get("first") or "user") == "service":
+                heard = await replies()
+                if heard:
+                    history.append(("service", heard))
+            for turn in range(turns):
+                if sid not in self._sessions:
+                    break
+                line = await self._persona_line(llm, persona, history)
+                done = "[END]" in line
+                line = line.replace("[END]", "").strip()
+                if line:
+                    self.emit({"t": "said", "sid": sid, "text": line, "turn": turn + 1, "at": time.time()})
+                    history.append(("user", line))
+                    await self.send({"sid": sid, "msg": {"kind": "text", "text": line}})
+                if done or not line:
+                    break
+                heard = await replies()
+                history.append(("service", heard or "(silence)"))
+        except Exception as exc:  # noqa: BLE001 — the persona failing ends the session, says why
+            self.emit({"t": "error", "sid": sid, "text": f"simulated user: {type(exc).__name__}: {exc}"})
+        finally:
+            self.end({"sid": sid})
+
+    async def _persona_line(self, llm: str, persona: str, history: List[Tuple[str, str]]) -> str:
+        from operonx.core import END, START, Operon
+        from operonx.core.ops.graph.graph_op import GraphOp
+        from operonx.providers.ops import LLMOp
+
+        system = ("You are role-playing a person talking to an AI product, to test it. Stay in character.\n"
+                  f"Who you are and what you want:\n{persona}\n\n"
+                  "Reply with only your next message — no quotes, no narration. Keep it natural and short. "
+                  "When you have what you came for, or the conversation is over, reply with [END].")
+        messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
+        for who, text in history:
+            messages.append({"role": "user" if who == "service" else "assistant", "content": text})
+        if not history or history[-1][0] == "user":
+            messages.append({"role": "user", "content": "(The conversation starts. Say your first line.)"})
+        with GraphOp(name="simulated_user") as g:
+            node = LLMOp.of(resource=llm.partition(":")[2] if llm.startswith("llm:") else llm,
+                            messages=messages, temperature=0.7)
+            START >> node >> END
+        out = await Operon(g).run(inputs={})
+        if out.get("error"):
+            raise RuntimeError(str(out["error"]))
+        return str(out.get("content") or "").strip()
 
     # -- one op, again -----------------------------------------------------
 
@@ -407,6 +696,9 @@ class Bridge:
                 return
             elif kind == "end":
                 self.end(msg)
+                return
+            elif kind == "simulate":
+                await self.simulate(msg)
                 return
             elif kind == "rerun":
                 out = await self.rerun(msg)

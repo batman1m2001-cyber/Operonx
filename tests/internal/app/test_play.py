@@ -335,8 +335,8 @@ def test_toy_messages_for_any_item():
     assert toy_message({"a": [1]}) == {"kind": "json", "value": {"a": [1]}}
     assert toy_message({1, 2})["kind"] == "json"  # not JSON: shown as its repr
     assert Codec().to_door({"kind": "bytes", "b64": "AAE="}) == b"\x00\x01"
-    with pytest.raises(ValueError, match="text, json or bytes"):
-        TextCodec().to_door({"kind": "audio"})
+    with pytest.raises(ValueError, match="text, json, bytes or audio"):
+        TextCodec().to_door({"kind": "video"})
     assert JsonCodec.toys == ("form",) and TextCodec.toys == ("chat", "form")
 
 
