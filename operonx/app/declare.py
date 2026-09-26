@@ -328,8 +328,9 @@ def describe_job(job: Any) -> Dict[str, Any]:
         }
     d = job.describe()
     return {
+        **({k: d.get(k) for k in ("dataset", "evaluators", "threshold")} if d.get("kind") == "eval" else {}),
         "name": job.name,
-        "kind": "job",
+        "kind": d.get("kind") or "job",
         "graph": d.get("graph"),
         "runbook": None,
         "session": d.get("session"),
@@ -393,14 +394,22 @@ def build_job(spec: Any, root: Path) -> Any:
         if spec.schedule:
             runbook.schedule = spec.schedule
         return runbook
+    if (spec.options or {}).get("dataset") is not None:
+        from .evals import Eval
+
+        return Eval.from_spec(spec, root)
     return Job.from_spec(spec, root)
 
 
 def describe_jobspec(j: Any) -> Dict[str, Any]:
     """A ``[[job]]`` block as plain data, without importing the project."""
+    opts = j.options or {}
+    is_eval = opts.get("dataset") is not None
     return {
+        **({"dataset": opts.get("dataset"), "evaluators": [str(e) for e in opts.get("evaluators") or []],
+            "threshold": opts.get("threshold")} if is_eval else {}),
         "name": j.name,
-        "kind": "runbook" if j.runbook else "job",
+        "kind": "runbook" if j.runbook else "eval" if is_eval else "job",
         "graph": j.graph or None,
         "runbook": j.runbook,
         "session": None if j.runbook else j.session,

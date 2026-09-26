@@ -205,6 +205,14 @@ class Job:
 
     # -- identity ----------------------------------------------------------
 
+    #: What a run of this job carries as its origin (an `Eval` says "eval").
+    origin = "job"
+
+    def item_of(self, raw: Any) -> Any:
+        """What the graph receives for one source item — the item itself;
+        an `Eval` hands over a case's ``input``."""
+        return raw
+
     def key_of(self, item: Any) -> str:
         """The item's identity, as a non-empty string."""
         if self.key is None:
