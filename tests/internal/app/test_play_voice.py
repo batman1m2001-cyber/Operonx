@@ -296,3 +296,54 @@ def test_what_a_simulated_user_cannot_drive_it_refuses(project):
     refused = {e["sid"]: e["reason"] for e in events if e["t"] == "refused"}
     assert "needs a persona and an llm" in refused["a"]
     assert refused["b"] == "a simulated user speaks text, and this door takes voice"
+
+
+# ── where a playground run is recorded ────────────────────────────────────
+
+
+def test_playground_runs_stay_local_unless_asked(tmp_path, monkeypatch):
+    """A service that also ships to a remote tracer (Langfuse, say): a
+    playground session records locally only; `remote: true` sends it on."""
+    from operonx.app import Service, websocket
+    from operonx.app.play import _split_consumers
+    from operonx.app.serve import egress, ingress
+    from operonx.core import END, START, graph, op
+    from operonx.telemetry.consumer import Consumer
+    from operonx.telemetry.consumers.local import LocalConsumer
+
+    class Remote(Consumer):
+        def __init__(self):
+            self.got = []
+
+        def consume(self, trace):
+            self.got.append(trace.trace_id)
+
+    @op(bound="sync")
+    def up(item=None) -> dict:
+        return {"out": str(item).upper()}
+
+    @graph
+    def upper_flow():
+        src = ingress()
+        u = up(item=src["item"])
+        out = egress(item=u["out"])
+        START >> src >> u >> out >> END
+
+    monkeypatch.chdir(tmp_path)
+    remote, local = Remote(), LocalConsumer({"root": str(tmp_path / "runs")})
+    assert _split_consumers([local, remote]) == ([local], [remote])
+    app = Application("remote-demo", services=[Service(
+        "up", websocket("/up", port=8126), graph=upper_flow, max_inflight=8, trace=[local, remote])])
+    events = []
+    bridge = Bridge(app, events.append)
+    assert bridge.describe()["doors"][0]["remote_trace"] == ["Remote"]
+
+    async def go(sid, remote_flag):
+        await bridge.handle({"op": "open", "sid": sid, "service": "up", "remote": remote_flag,
+                             "send": [{"kind": "text", "text": "hi"}], "end": True})
+        return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == sid)
+
+    quiet = asyncio.run(go("q", False))
+    assert remote.got == [] and FilesRunStore(root=tmp_path / "runs", refresh_every=0).get_run(quiet["trace_id"])
+    loud = asyncio.run(go("l", True))
+    assert remote.got == [loud["trace_id"]]

@@ -43,6 +43,11 @@ play the other side for a number of turns: it waits for the service to go
 quiet, reads the conversation, answers in character, and ends it when the
 persona says so. The run records what the persona said, like any session.
 
+**Where it is recorded.** A playground run goes to the service's local
+consumers only — files and run stores in the project — so a test session
+never lands in a production Langfuse; ``"remote": true`` on a session
+sends it everywhere the service traces to.
+
 **Re-running one op.** ``rerun`` runs a single op of a service's graph
 with the inputs it had in a recorded run — a failing op deep inside a
 call retried in a second, without making the call. It is recorded as a
@@ -294,6 +299,39 @@ def _conditions(raw: Any) -> Dict[str, Any]:
     return out
 
 
+# ── where playground runs are recorded ──────────────────────────────────
+
+
+def _split_consumers(trace: Any) -> Tuple[List[Any], List[Any]]:
+    """A service's consumers as (local, remote): local ones write files or a
+    run store in the project; the rest (Langfuse…) ship somewhere else."""
+    from operonx.core.engine import Operon
+    from operonx.telemetry.consumers.local import LocalConsumer
+    from operonx.telemetry.runs.base import RunStore
+
+    consumers = Operon._resolve_trace_consumers(trace)
+    local = [c for c in consumers if isinstance(c, (LocalConsumer, RunStore))]
+    return local, [c for c in consumers if c not in local]
+
+
+def _remote_names(spec: Any) -> List[str]:
+    """The consumers a playground session leaves out unless asked — by the
+    names the service declared them with."""
+    names = []
+    for ref in spec.options.get("trace") or []:
+        if isinstance(ref, str):
+            if not (ref.startswith("trace_local:") or ref.startswith("run_store:")):
+                try:
+                    _, remote = _split_consumers([ref])
+                except Exception:  # noqa: BLE001 — unresolvable: not ours to judge here
+                    continue
+                if remote:
+                    names.append(ref)
+        elif not _split_consumers([ref])[0]:
+            names.append(type(ref).__name__)
+    return names
+
+
 # ── sessions ──────────────────────────────────────────────────────────────
 
 
@@ -386,6 +424,7 @@ class Bridge:
                 "toys": list(codec.toys) if codec else [],
                 "codec": type(codec).__name__ if codec else None, "codec_error": codec_err,
                 "audio": getattr(codec, "audio", None) if codec else None,
+                "remote_trace": _remote_names(spec),
                 "query": dict(getattr(codec, "query", None) or {}) if codec else {},
                 "description": spec.description,
             })
@@ -393,8 +432,12 @@ class Bridge:
 
     # -- engines, compiled once per service -------------------------------
 
-    async def _runner(self, service: str) -> Any:
-        runner = self._runners.get(service)
+    async def _runner(self, service: str, remote: bool = False) -> Any:
+        """The service's runner, its engines compiled once — tracing to the
+        service's local consumers only, unless *remote* (then to all of them:
+        a playground session lands in Langfuse only when asked to)."""
+        cache_key = (service, bool(remote))
+        runner = self._runners.get(cache_key)
         if runner is not None:
             return runner
         from .serve.app import _default_on_session, engines_for
@@ -411,6 +454,11 @@ class Bridge:
             from .declare import default_consumers
 
             spec = replace(spec, options={**spec.options, "trace": default_consumers()})
+        if not remote:
+            from dataclasses import replace
+
+            local, _held = _split_consumers(spec.options["trace"])
+            spec = replace(spec, options={**spec.options, "trace": local})
         built = engines_for(spec)
         if spec.variants:
             engine, variants = None, {k.partition("/")[2]: e for k, e in built.items()}
@@ -429,7 +477,7 @@ class Bridge:
             result = resolve_ref(hook_ref, field="on_startup")()
             if inspect.isawaitable(result):
                 await result
-        self._runners[service] = runner
+        self._runners[cache_key] = runner
         return runner
 
     # -- sessions ----------------------------------------------------------
@@ -439,7 +487,7 @@ class Bridge:
 
         sid = str(msg.get("sid") or uuid.uuid4().hex[:12])
         service = str(msg.get("service") or "")
-        runner = await self._runner(service)
+        runner = await self._runner(service, remote=bool(msg.get("remote")))
         spec = runner.spec
         codec = codec_for(spec)
         if codec is None:
@@ -560,7 +608,7 @@ class Bridge:
         quiet = max(0.1, float(msg.get("quiet_ms") or 1200) / 1000)
         wait_max = max(1.0, float(msg.get("wait_s") or 45))
         await self.open({"sid": sid, "service": runner.spec.name, "toy": "simulated", "query": msg.get("query"),
-                         "conditions": msg.get("conditions"),
+                         "conditions": msg.get("conditions"), "remote": msg.get("remote"),
                          "meta": {"persona": persona, "simulated_by": llm}})
         session = self._sessions.get(sid)
         if session is None:
