@@ -170,7 +170,8 @@ def test_a_voice_session_round_trips_audio(project):
     assert base64.b64decode(outs[0]["b64"]) == _pcm(320)
     run = FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0).get_run(ended["trace_id"])
     # the script counts audio, it never keeps it
-    assert run.summary.metadata["playground_script"] == [{"kind": "audio", "size": 1280}]
+    (sent,) = run.summary.metadata["playground_script"]
+    assert (sent["kind"], sent["size"]) == ("audio", 1280) and "b64" not in sent
 
 
 # ── conditions ────────────────────────────────────────────────────────────

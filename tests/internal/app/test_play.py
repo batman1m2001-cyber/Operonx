@@ -206,7 +206,8 @@ def test_a_form_request_runs_the_real_door_and_is_filed_as_playground(project):
     run = _store(root).get_run(opened["trace_id"])
     meta = run.summary.metadata
     assert meta["origin"] == "playground" and meta["service"] == "score" and meta["toy"] == "form"
-    assert meta["playground_script"] == [{"kind": "json", "value": {"call_id": "c1", "text": "one two three"}}]
+    (sent,) = meta["playground_script"]
+    assert sent["kind"] == "json" and sent["value"] == {"call_id": "c1", "text": "one two three"} and sent["at"] > 0
     assert "origin:playground" in meta["tags"] and meta.get("project") == "playdemo"
     assert (root / ".operonx" / "runs" / "playground").is_dir()
 

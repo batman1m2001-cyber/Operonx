@@ -370,6 +370,7 @@ class PlaySession(BoundedSession):
             if kept.get("kind") in ("bytes", "audio"):
                 # audio and bytes are counted, never kept: a replay script is text
                 kept = {"kind": kept["kind"], "size": len(base64.b64decode(kept.get("b64") or ""))}
+            kept["at"] = round(time.time(), 3)  # when it was said: a conversation reads in order
             self.script.append(kept)
 
 
