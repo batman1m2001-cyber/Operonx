@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-26
+
+### Fixed
+
+- A job whose source (or sink) is a function — a generator of items —
+  is described by where it is defined (`qc.cases:all_cases`) in
+  `describe()`, `operonx-run --list` and the studio, not by its
+  `<function … at 0x…>` repr.
+
 ## [1.8.0] - 2026-09-26
 
 ### Changed — declarations moved to where they are true
@@ -1909,7 +1918,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...v1.7.2
