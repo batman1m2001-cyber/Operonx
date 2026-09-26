@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .declare import (
-    build_job,
     describe_job,
     describe_jobspec,
     describe_service,
@@ -39,8 +38,10 @@ from .declare import (
     manifest_from,
     project_root,
     ref_name,
+    settle_jobs,
 )
 from .manifest import Manifest, ManifestError, ServeSpec
+from .origin import stamp_process
 
 __all__ = ["Application", "GraphRef"]
 
@@ -81,6 +82,7 @@ class Application:
         src: Sequence[str] = ("src", "."),
         resources: Optional[str] = "resources.yaml",
         description: str = "",
+        trace: Optional[Sequence[Any]] = None,
     ):
         if isinstance(manifest, Manifest):
             self.manifest = manifest
@@ -96,6 +98,7 @@ class Application:
                 src=src,
                 resources=resources,
                 description=description,
+                trace=trace,
             )
             self._jobs = {j.name: j for j in jobs}
         self._bootstrapped = False
@@ -145,6 +148,7 @@ class Application:
             import operonx
 
             operonx.bootstrap(resources=self.root / overlay)
+        stamp_process(self.root, self.name)  # every run: project + code version
         self._bootstrapped = True
 
     # -- the three lists ---------------------------------------------------
@@ -164,10 +168,9 @@ class Application:
 
     @property
     def jobs(self) -> List[Any]:
-        """The jobs — declared as objects, or built once from ``[[job]]``."""
-        if self._jobs is None:
-            self.bootstrap()
-            self._jobs = {spec.name: build_job(spec, self.root) for spec in self.manifest.jobs}
+        """The jobs — declared, or built once from ``[[job]]`` — tracing where the app says."""
+        self.bootstrap()
+        self._jobs = settle_jobs(self._jobs, self.manifest, self.root)
         return list(self._jobs.values())
 
     def job(self, name: str) -> Any:

@@ -118,7 +118,7 @@ def synthetic_trace():
 
 class TestFileLayout:
     def test_writes_expected_files(self, tmp_path, synthetic_trace):
-        c = LocalConsumer(config={"root": tmp_path})
+        c = LocalConsumer(config={"root": tmp_path, "layout": "flat"})
         out = c.consume(synthetic_trace)
         assert out == tmp_path / "t-123"
         assert (out / "meta.json").exists()
@@ -127,18 +127,18 @@ class TestFileLayout:
         assert (out / "media").is_dir()
 
     def test_no_tmp_dir_after_success(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         assert not (tmp_path / "t-123.tmp").exists()
 
     def test_latest_symlink_updated(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         latest = tmp_path / "latest"
         if latest.is_symlink():  # FS may not support symlinks
             assert latest.resolve().name == "t-123"
 
     def test_repeat_trace_id_replaces(self, tmp_path, synthetic_trace):
         """Re-running the same trace_id overwrites cleanly."""
-        c = LocalConsumer(config={"root": tmp_path})
+        c = LocalConsumer(config={"root": tmp_path, "layout": "flat"})
         c.consume(synthetic_trace)
         c.consume(synthetic_trace)  # second run
         # Only one trace dir exists (no leftover tmp).
@@ -153,18 +153,18 @@ class TestFileLayout:
 
 class TestNodesJsonl:
     def test_one_line_per_node(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         lines = (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines()
         assert len(lines) == len(synthetic_trace.nodes)
 
     def test_each_row_is_valid_json(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         for line in (tmp_path / "t-123" / "nodes.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             assert "op_id" in row and "op_name" in row and "ctx" in row
 
     def test_upstreams_preserved_inline(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         rows = [
             json.loads(line)
             for line in (tmp_path / "t-123" / "nodes.jsonl")
@@ -192,7 +192,7 @@ class TestNodesJsonl:
             ended_at=0.2,
             nodes=[node],
         )
-        LocalConsumer(config={"root": tmp_path}).consume(trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(trace)
         rows = [
             json.loads(line)
             for line in (tmp_path / "t-media" / "nodes.jsonl")
@@ -212,7 +212,7 @@ class TestNodesJsonl:
 
 class TestMetaJson:
     def test_metadata_and_timings(self, tmp_path, synthetic_trace):
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         meta = json.loads((tmp_path / "t-123" / "meta.json").read_text(encoding="utf-8"))
         assert meta["trace_id"] == "t-123"
         assert meta["workflow_name"] == "callbot"
@@ -229,7 +229,7 @@ class TestGoldenView:
     def test_view_matches_golden(self, tmp_path, synthetic_trace):
         """If this fails and you meant to change the render format,
         overwrite `local_consumer_view.txt` with the actual output."""
-        LocalConsumer(config={"root": tmp_path}).consume(synthetic_trace)
+        LocalConsumer(config={"root": tmp_path, "layout": "flat"}).consume(synthetic_trace)
         actual = (tmp_path / "t-123" / "view.txt").read_text(encoding="utf-8")
         if not GOLDEN.exists():
             GOLDEN.parent.mkdir(parents=True, exist_ok=True)

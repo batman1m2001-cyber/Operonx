@@ -157,7 +157,8 @@ def Service(  # noqa: N802 — reads as a declaration
     opts: Dict[str, Any] = dict(options)
     if concurrency is not None:
         opts["concurrency"] = int(concurrency)
-    if trace:
+    # None inherits the application's consumers; [] says "trace nothing"
+    if trace is not None:
         opts["trace"] = list(trace)
 
     return ServeSpec(
@@ -242,11 +243,12 @@ def manifest_from(
     src: Sequence[str],
     resources: Optional[str],
     description: str,
+    trace: Optional[Sequence[Any]] = None,
 ) -> Any:
     """The :class:`Manifest` a Python declaration amounts to — the same
     record ``operonx.toml`` parses to, so nothing downstream knows which
     way the application came."""
-    from .manifest import Manifest, _reject_duplicates
+    from .manifest import Manifest, _reject_duplicates, with_default_trace
 
     specs = tuple(services)
     for spec in specs:
@@ -254,8 +256,12 @@ def manifest_from(
             raise ManifestError(f"services= takes Service(...) entries, got {type(spec).__name__}")
     _reject_duplicates(specs, f"Application({name!r})")
     overlay = resources if resources and (root / resources).is_file() else None
+    project: Dict[str, Any] = {"name": name, "description": description}
+    if trace is not None:
+        project["trace"] = list(trace)
+        specs = with_default_trace(specs, project["trace"])
     return Manifest(
-        project={"name": name, "description": description},
+        project=project,
         serves=specs,
         graphs=(),
         fixtures={},
@@ -334,9 +340,14 @@ def load_declared(manifest: Any) -> Any:
             f"[project] app {manifest.app_entry!r} is a {type(obj).__name__}, not an Application"
         )
     project = {**manifest.project, **{k: v for k, v in obj.manifest.project.items() if v}}
+    from .manifest import with_default_trace
+
     obj.manifest = replace(
         obj.manifest,
         project=project,
+        # `[project] trace` in the file reaches services the object left
+        # without one (the object's own default was applied at declaration)
+        serves=with_default_trace(obj.manifest.serves, project.get("trace")),
         source=manifest.source,
         src=manifest.src,
         graphs=obj.manifest.graphs or manifest.graphs,
@@ -409,3 +420,37 @@ def graph_refs(manifest: Any) -> list:
             )
     plain = [(n, e, tuple(u), {}, obj) for e, (n, u, obj) in by_entry.items()]
     return plain + variants
+
+
+def settle_jobs(jobs: Optional[Dict[str, Any]], manifest: Any, root: Path) -> Dict[str, Any]:
+    """An application's jobs: the declared objects, or built from its
+    ``[[job]]`` blocks — each tracing to its own consumers, else the
+    application's (``trace=`` / ``[project] trace``), else locally.
+    Idempotent: a job that already has consumers keeps them."""
+    if jobs is None:
+        jobs = {spec.name: build_job(spec, root) for spec in manifest.jobs}
+    trace = manifest.project.get("trace")
+    for job in jobs.values():
+        inherit_trace(job, trace)
+    return jobs
+
+
+def inherit_trace(job: Any, trace: Optional[Sequence[Any]]) -> None:
+    """A job that names no consumers takes the application's; with none
+    there either, it records locally (``.operonx/runs``). A job's item
+    records point at traces — a job that silently recorded none left
+    every one of those links pointing nowhere — so a job is never
+    untraced by omission. ``trace=[]`` on the job is the explicit way to
+    trace nothing. A runbook passes the default to each of its jobs."""
+    members = getattr(job, "jobs", None) if not hasattr(job, "source") else None
+    for j in members if members is not None else [job]:
+        if getattr(j, "trace", None) is None:
+            j.trace = list(trace) if trace is not None else default_consumers()
+
+
+def default_consumers() -> list:
+    """What a job traces to when nothing says otherwise: the local
+    consumer, filed by origin under ``<project>/.operonx/runs``."""
+    from operonx.telemetry.consumers.local import LocalConsumer
+
+    return [LocalConsumer()]

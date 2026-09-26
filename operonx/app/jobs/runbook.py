@@ -36,7 +36,9 @@ time.
 **A runbook is a record, never a span.** ``jobs/<runbook>/<run>/run.json``
 holds the wires and, for each job, a status, timing and the run id and
 path of its own record. Traces stay what they are: one per graph run,
-tagged with the job that minted it.
+tagged with the job that minted it — and, when a runbook started that
+job, with ``runbook`` and ``runbook_run`` too, so a runbook run → its
+job runs → their items → their traces is one path without a span.
 """
 
 from __future__ import annotations
@@ -473,7 +475,11 @@ class Runbook:
             done[job.name].set_result(report)
             return report
 
-        reports = await asyncio.gather(*(one(j) for j in order))
+        from ..origin import in_runbook
+
+        # every run a job makes here carries this runbook run
+        with in_runbook(self.name, run_id):
+            reports = await asyncio.gather(*(one(j) for j in order))
 
         statuses = {r.status for r in reports}
         if NODE_SKIPPED in statuses:

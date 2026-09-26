@@ -226,7 +226,9 @@ class ServeRunner:
             return
         handle = None
         try:
-            handle = await serve_session(self._engine_for(request), session, request)
+            handle = await serve_session(
+                self._engine_for(request), session, request, metadata=self._origin(request)
+            )
         except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses
@@ -236,6 +238,18 @@ class ServeRunner:
             )
         finally:
             await self._close_one(session, handle)
+
+    def _origin(self, request: RunRequest) -> Dict[str, Any]:
+        """What this door's runs carry: the service, its transport, and
+        the variant the request chose — so a run is found by service."""
+        from ..origin import ORIGIN_SERVICE, origin_metadata
+
+        return origin_metadata(
+            ORIGIN_SERVICE,
+            service=self.spec.name,
+            transport=self.spec.kind,
+            variant=request.variant,
+        )
 
     async def _close_one(self, session: Session, handle: Any) -> None:
         """Whatever `on_session` opened, close — even on the failure path.

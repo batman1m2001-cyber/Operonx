@@ -385,7 +385,8 @@ async def test_every_run_carries_the_job_on_its_trace(tmp_path):
         t = by_id[item.trace_id]  # the record's trace id is the trace's
         md = t.metadata
         assert md["job"] == "score" and md["job_run"] == run.run_id and md["key"] == item.key
-        assert md["tags"] == ["job:score", f"job_run:{run.run_id}", f"key:{item.key}"]
+        assert md["origin"] == "job"
+        assert md["tags"] == ["origin:job", "job:score", f"job_run:{run.run_id}", f"key:{item.key}"]
 
 
 async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
@@ -396,7 +397,7 @@ async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
     assert t.trace_id == run.meta["trace_id"]
     assert t.metadata["job"] == "score" and t.metadata["job_run"] == run.run_id
     assert "key" not in t.metadata
-    assert t.metadata["tags"] == ["job:score", f"job_run:{run.run_id}"]
+    assert t.metadata["tags"] == ["origin:job", "job:score", f"job_run:{run.run_id}"]
 
 
 # -- a deadline per item --------------------------------------------------------------

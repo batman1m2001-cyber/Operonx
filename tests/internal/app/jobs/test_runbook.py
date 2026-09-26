@@ -205,7 +205,10 @@ async def test_nightly_runs_the_tree_and_records_it(tmp_path, jobs):
     traces = jobs["cap"].traces
     assert len(traces) == 10
     assert sorted({t.metadata["job"] for t in traces}) == ["cluster", "embed", "extract", "score"]
-    assert all("runbook" not in t.metadata for t in traces)
+    # a record, never a span: one trace per graph run, and each knows the
+    # runbook run it belongs to
+    assert all(t.metadata["runbook"] == "nightly" for t in traces)
+    assert {t.metadata["runbook_run"] for t in traces} == {run.run_id}
     assert not any(t.workflow_name == "nightly" for t in traces)
 
 

@@ -576,7 +576,7 @@ class Operon:
         # Always created — consumers read `handle.trace` after the run.
         # Ops append `OpExecution` records automatically via the
         # `BaseOp.run()` recording hook — no author code required.
-        from operonx.core.workflow_trace import WorkflowTrace
+        from operonx.core.workflow_trace import WorkflowTrace, run_metadata
         from operonx.core.workflow_trace import _current_trace as _v3_trace_var
 
         _wf_trace = WorkflowTrace(
@@ -586,6 +586,9 @@ class Operon:
             wall_started_at=time.time(),
             ended_at=0.0,
             metadata={
+                # process-wide facts first (the code's version…); the
+                # run's own ids and whatever its caller merges win
+                **run_metadata(),
                 "request_id": request_id,
                 "user_id": user_id,
                 "session_id": session_id,

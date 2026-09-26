@@ -107,6 +107,7 @@ class TestTraceParamResourceKey:
             trace_local:
               default:
                 root: {tmp_path}
+                layout: flat
                 show_io: false
         """)
         cfg = tmp_path / "resources.yaml"
@@ -135,6 +136,7 @@ class TestTraceParamMixed:
             trace_local:
               default:
                 root: {tmp_path}
+                layout: flat
                 show_io: false
         """)
         cfg = tmp_path / "resources.yaml"
