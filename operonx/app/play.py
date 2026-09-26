@@ -238,6 +238,15 @@ class Bridge:
         from .serve.runner import ServeRunner
 
         spec = self.app.service(service)
+        if spec.options.get("trace") is None:
+            # a playground session is always a run you can open: a door
+            # with no consumers declared records locally, as a job does
+            # (an explicit empty list still means "trace nothing")
+            from dataclasses import replace
+
+            from .declare import default_consumers
+
+            spec = replace(spec, options={**spec.options, "trace": default_consumers()})
         built = engines_for(spec)
         if spec.variants:
             engine, variants = None, {k.partition("/")[2]: e for k, e in built.items()}

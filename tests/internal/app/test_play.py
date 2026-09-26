@@ -259,6 +259,22 @@ def test_refusals_and_failures_say_why(project):
     assert errors[0]["sid"] == "ghost" and errors[1] == {"t": "error", "text": "unknown op 'fly'", "id": 9}
 
 
+def test_a_door_with_no_consumers_is_still_recorded(project, tmp_path, monkeypatch):
+    """No `trace` anywhere: the playground records locally, as a job does."""
+    name, root = project
+    toml = root / "operonx.toml"
+    toml.write_text(toml.read_text().replace('trace = ["trace_local:default"]\n', ""))
+    bridge, events = _bridge(root)
+
+    async def go():
+        await bridge.handle({"op": "open", "sid": "n", "service": "score", "end": True,
+                             "send": [{"kind": "json", "value": {"call_id": "n1", "text": "a"}}]})
+        return await _until(events, lambda e: e["t"] == "ended")
+
+    ended = asyncio.run(go())
+    assert _store(root).get_run(ended["trace_id"]).summary.origin == "playground"
+
+
 def test_a_declared_codec_translates_both_ways(project):
     name, root = project
     app = Application.find(root)
