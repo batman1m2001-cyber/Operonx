@@ -229,6 +229,7 @@ def test_a_chat_session_goes_through_the_gate_and_answers_in_order(project):
     assert next(e for e in events if e["t"] == "opened")["inputs"] == {"prefix": "bot:"}
     run = _store(root).get_run(ended["trace_id"])
     assert [m.get("text") for m in run.summary.metadata["playground_script"]] == ["hello", "how are you", None]
+    assert run.summary.metadata["playground_query"] == {"prefix": "bot:"}
 
 
 def test_refusals_and_failures_say_why(project):

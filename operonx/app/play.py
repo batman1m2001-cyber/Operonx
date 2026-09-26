@@ -287,6 +287,7 @@ class Bridge:
         metadata = origin_metadata(ORIGIN_PLAYGROUND, service=spec.name, transport=spec.kind,
                                    variant=request.variant, toy=toy)
         metadata["playground_script"] = session.script  # the same list: filled as the toy sends
+        metadata["playground_query"] = dict(meta["query"])  # with the script, all a replay needs
         if msg.get("replay_of"):
             metadata["replay_of"] = str(msg["replay_of"])
         self.emit({"t": "opened", "sid": sid, "trace_id": request.trace_id, "service": spec.name,
