@@ -168,3 +168,49 @@ class TestTraceParamBadType:
     def test_type_error_at_construction(self):
         with pytest.raises(TypeError, match="Consumer instance"):
             _mk_engine(trace=42)
+
+
+def test_a_trace_key_resolves_without_importing_telemetry_first(tmp_path):
+    """`trace_local:` in resources.yaml resolves from a fresh interpreter
+    that never imported operonx.telemetry — it used to fail as 'not
+    found' while listing the key as available."""
+    import subprocess
+    import sys
+
+    (tmp_path / "resources.yaml").write_text("trace_local:\n  default:\n    layout: flat\n")
+    script = textwrap.dedent(f"""
+        import asyncio, sys
+        from operonx.core import END, START, Operon, graph, op
+        from operonx.core.registry import ResourceHub
+        ResourceHub.set_instance(ResourceHub.from_yaml({str(tmp_path / "resources.yaml")!r}))
+        assert "operonx.telemetry" not in sys.modules
+
+        @op
+        def one(x: int = 1):
+            return {{"y": x}}
+
+        @graph
+        def g():
+            s = one()
+            START >> s >> END
+
+        engine = Operon(g, trace="trace_local:default")
+        print(type(engine._trace_consumers[0]).__name__)
+    """)
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-800:]
+    assert out.stdout.strip().endswith("LocalConsumer")
+
+
+def test_an_entry_with_every_field_at_its_default_resolves(tmp_path):
+    """`trace_local: {default: {}}` is a resource whose config is all
+    defaults — it resolved as "not found" before. (A blank `default:` is
+    ambiguous with a legacy flat block, so `{}` is the way to write it.)"""
+    import operonx.telemetry  # noqa: F401
+    from operonx.telemetry.consumers.local import LocalConsumer
+
+    (tmp_path / "resources.yaml").write_text("trace_local:\n  default: {}\n")
+    ResourceHub.set_instance(ResourceHub.from_yaml(str(tmp_path / "resources.yaml")))
+    assert isinstance(ResourceHub.instance().get("trace_local:default"), LocalConsumer)
+    with pytest.raises(KeyError):
+        ResourceHub.instance().get("trace_local:missing")

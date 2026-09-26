@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -142,8 +143,10 @@ class LangfuseRunStore(RunStore):
         if detail is None:
             try:
                 detail = self._get(f"/api/public/traces/{urllib.parse.quote(trace_id)}")
-            except Exception:  # noqa: BLE001 — no such trace, or the server is away
-                return None
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    return None  # no such trace; any other failure is the server's, and says so
+                raise
             self._detail[trace_id] = detail
         rows = list(records_of_langfuse_trace(detail))
         listing = self._summary_of_listing({**detail, "id": trace_id})

@@ -188,6 +188,11 @@ APP = Application(
         ),
     ],
     jobs=[score_calls, score_from_resources, score_stream, nightly],
+    # Every run — a request the service answered, an item a job scored —
+    # is recorded here unless it names its own consumers: one directory
+    # per run under .operonx/runs, filed by origin (services/score/<day>/…,
+    # jobs/score_calls/<run>/…). The studio's Runs screen reads it.
+    trace=["trace_local:default"],
     description="One graph: served as HTTP, and run over a JSONL file by a Job with a record per run.",
 )
 

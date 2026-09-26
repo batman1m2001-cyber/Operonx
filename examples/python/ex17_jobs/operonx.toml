@@ -25,6 +25,3 @@ entry = "main:passthrough"
 [[graph]]
 name  = "summarise_flow"
 entry = "main:summarise_flow"
-
-[studio]
-traces = "/tmp/operonx_traces/ex17_jobs"

@@ -9,3 +9,8 @@ sink:scores:
   kind: jsonl
   path: /tmp/operonx_jobs/ex17/scores_from_resources.jsonl
   mode: overwrite
+
+# The local trace consumer the application records every run with. An
+# unset root is <project>/.operonx/runs, filed by origin.
+trace_local:
+  default: {}

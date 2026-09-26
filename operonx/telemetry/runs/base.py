@@ -18,16 +18,37 @@ code wraps a call in ``asyncio.to_thread``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx.telemetry.consumer import Consumer
 
 from .model import OpRollup, OpStats, Page, RunFilter, RunRecord, RunSummary, percentile
 
-__all__ = ["ORDERS", "RunStore", "combine_rollups"]
+__all__ = ["GROUP_FIELDS", "ORDERS", "RunStore", "combine_rollups"]
 
 #: How :meth:`RunStore.list_runs` can order.
 ORDERS = ("started_desc", "started_asc", "duration_desc", "cost_desc", "errors_desc")
+#: What :meth:`RunStore.groups` can group by.
+GROUP_FIELDS = (
+    "origin",
+    "name",
+    "status",
+    "version",
+    "job_run",
+    "runbook",
+    "runbook_run",
+    "service",
+    "job",
+    "workflow",
+)
+
+
+def _check_by(by: Sequence[str]) -> Tuple[str, ...]:
+    by = tuple(by)
+    bad = [f for f in by if f not in GROUP_FIELDS]
+    if not by or bad:
+        raise ValueError(f"group by {bad or 'nothing'}; one or more of {', '.join(GROUP_FIELDS)}")
+    return by
 
 
 class RunStore(Consumer):
@@ -74,6 +95,44 @@ class RunStore(Consumer):
         Backends with a query engine may override; the default combines
         :meth:`rollups` in Python."""
         return combine_rollups(self.rollups(where))
+
+    def groups(
+        self, where: Optional[RunFilter] = None, by: Sequence[str] = ("origin", "name")
+    ) -> List[Dict[str, Any]]:
+        """Runs *where* matches, counted per group of *by* (columns from
+        :data:`GROUP_FIELDS`): ``runs``, ``errors``, ``first_started``,
+        ``last_started``, ``cost_usd`` (None when nothing was priced) and
+        ``duration_ms`` (summed). Newest group first. SQL backends
+        override; this default pages through :meth:`list_runs`."""
+        by = _check_by(by)
+        acc: Dict[tuple, Dict[str, Any]] = {}
+        cursor = None
+        while True:
+            page = self.list_runs(where, limit=500, cursor=cursor)
+            for s in page.items:
+                key = tuple(getattr(s, f) for f in by)
+                g = acc.get(key)
+                if g is None:
+                    g = acc[key] = {
+                        **dict(zip(by, key)),
+                        "runs": 0,
+                        "errors": 0,
+                        "first_started": s.started_at,
+                        "last_started": s.started_at,
+                        "cost_usd": None,
+                        "duration_ms": 0.0,
+                    }
+                g["runs"] += 1
+                g["errors"] += 1 if s.status == "error" else 0
+                g["first_started"] = min(g["first_started"], s.started_at)
+                g["last_started"] = max(g["last_started"], s.started_at)
+                g["duration_ms"] += s.duration_ms or 0.0
+                if s.cost_usd is not None:
+                    g["cost_usd"] = (g["cost_usd"] or 0.0) + s.cost_usd
+            cursor = page.next_cursor
+            if not cursor:
+                break
+        return sorted(acc.values(), key=lambda g: -g["last_started"])
 
     # -- housekeeping ------------------------------------------------------
 

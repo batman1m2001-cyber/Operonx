@@ -204,7 +204,7 @@ class ResourceHub:
             return self._cache[key].config
 
         config_data = self._storage.load_one(key)
-        if not config_data:
+        if config_data is None:
             return None
 
         # Extract category from key prefix: "llm:gpt-4" -> "llm"
@@ -377,7 +377,7 @@ class ResourceHub:
         # ``${VAR}`` interpolation propagates as-is (branch 4) — distinct
         # from the "key not found" path below.
         config = self._load_config(key)
-        if not config:
+        if config is None:
             raise KeyError(self._not_found_message(key))
 
         # Resolve a token reference if configured
@@ -423,7 +423,7 @@ class ResourceHub:
             KeyError: If key not found
         """
         config = self._load_config(key)
-        if not config:
+        if config is None:
             raise KeyError(self._not_found_message(key))
         return config
 

@@ -433,6 +433,13 @@ class Operon:
 
         if trace is None:
             return []
+        # The built-in consumer kinds (`trace_local:`, `trace_langfuse:`,
+        # `run_store:`) register when `operonx.telemetry` is imported. A
+        # resources.yaml naming one must not depend on some other module
+        # having imported it first — that failed as "not found" while the
+        # key was listed as available.
+        import operonx.telemetry  # noqa: F401
+
         items = trace if isinstance(trace, list) else [trace]
         resolved: List[Any] = []
         for item in items:

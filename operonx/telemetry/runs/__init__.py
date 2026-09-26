@@ -16,7 +16,7 @@ The contract is five methods on purpose; see :mod:`.base`.
 
 from operonx.core.registry import REGISTRY
 
-from .base import ORDERS, RunStore, combine_rollups
+from .base import GROUP_FIELDS, ORDERS, RunStore, combine_rollups
 from .config import BACKENDS, RunStoreConfig, create_run_store, open_run_store
 from .model import (
     OpRollup,
@@ -33,6 +33,7 @@ from .retention import DEFAULT_RETENTION, apply_retention
 __all__ = [
     "BACKENDS",
     "DEFAULT_RETENTION",
+    "GROUP_FIELDS",
     "ORDERS",
     "OpRollup",
     "OpStats",

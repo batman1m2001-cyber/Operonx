@@ -96,6 +96,11 @@ class FilesRunStore(RunStore):
         return self._index_dir(run_dir)
 
     def _index_dir(self, run_dir: Path) -> RunSummary:
+        summary, rollups = self._summarize_dir(run_dir)
+        self.index.put(summary, rollups)
+        return summary
+
+    def _summarize_dir(self, run_dir: Path):
         got = read_run_dir(run_dir)
         meta = got["meta"]
         trace_id = str(meta.get("trace_id") or run_dir.name)
@@ -106,8 +111,7 @@ class FilesRunStore(RunStore):
                 summary.started_at = (run_dir / "nodes.jsonl").stat().st_mtime
             except OSError:
                 pass
-        self.index.put(summary, rollups)
-        return summary
+        return summary, rollups
 
     # -- discovering runs other writers left ------------------------------
 
@@ -126,16 +130,22 @@ class FilesRunStore(RunStore):
         known = self.index.locations()
         seen = set()
         added = 0
+        batch: list = []
         for run_dir in self._run_dirs():
             loc = run_dir.relative_to(self.root).as_posix()
             seen.add(loc)
             if loc in known:
                 continue
             try:
-                self._index_dir(run_dir)
-                added += 1
+                batch.append(self._summarize_dir(run_dir))
             except Exception:  # noqa: BLE001 — one bad directory is not the store failing
                 continue
+            if len(batch) >= 200:
+                self.index.put_many(batch)
+                added += len(batch)
+                batch = []
+        self.index.put_many(batch)
+        added += len(batch)
         gone = [tid for loc, tid in known.items() if loc not in seen]
         if gone:
             self.index.delete(RunFilter(trace_ids=gone))
@@ -172,6 +182,14 @@ class FilesRunStore(RunStore):
         return RunRecord(
             summary=summary, nodes=got["nodes"], meta=got["meta"], media_root=str(run_dir)
         )
+
+    def groups(
+        self, where: Optional[RunFilter] = None, by=("origin", "name")
+    ) -> List[Dict[str, Any]]:
+        from .base import _check_by
+
+        self._maybe_refresh()
+        return self.index.groups(where, _check_by(by))
 
     def rollups(self, where: Optional[RunFilter] = None) -> List[OpRollup]:
         self._maybe_refresh()

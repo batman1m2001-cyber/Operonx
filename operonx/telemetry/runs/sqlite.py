@@ -14,7 +14,7 @@ import shutil
 import sqlite3
 import zlib
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from operonx.telemetry.consumers.local import resolve_root
 
@@ -106,6 +106,13 @@ class SqliteRunStore(RunStore):
             meta=json.loads(row[0] or "{}"),
             media_root=str(run_media) if run_media.is_dir() else None,
         )
+
+    def groups(
+        self, where: Optional[RunFilter] = None, by=("origin", "name")
+    ) -> List[Dict[str, Any]]:
+        from .base import _check_by
+
+        return self.index.groups(where, _check_by(by))
 
     def rollups(self, where: Optional[RunFilter] = None) -> List[OpRollup]:
         return self.index.rollups(where)

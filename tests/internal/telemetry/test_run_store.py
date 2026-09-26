@@ -487,3 +487,38 @@ def test_langfuse_store_lists_filters_and_reads(monkeypatch):
     assert store.delete_runs(RunFilter()) == 0 and not store.writable
     with pytest.raises(NotImplementedError):
         store.put_trace(object())
+
+
+# -- groups: the origin tree's counts --------------------------------------------------
+
+
+def test_groups_count_runs_errors_and_cost_per_origin_and_name(store):
+    from operonx.telemetry.runs import RunStore
+
+    got = {(g["origin"], g["name"]): g for g in store.groups()}
+    call = got[("service", "call")]
+    assert call["runs"] == 3 and call["errors"] == 1
+    assert call["cost_usd"] == pytest.approx(0.002)  # the unpriced run adds nothing
+    assert call["last_started"] == pytest.approx(NOW) and call["first_started"] == pytest.approx(
+        NOW - 2 * DAY
+    )
+    assert got[("job", "qc_cases")]["runs"] == 1 and got[("job", "qc_cases")]["cost_usd"] is None
+    # the SQL override and the contract's paging default agree
+    default = {(g["origin"], g["name"]): g["runs"] for g in RunStore.groups(store)}
+    assert default == {k: g["runs"] for k, g in got.items()}
+    # newest group first; filters apply; other fields group too
+    assert list(got)[0] == ("service", "call")
+    assert [g["runs"] for g in store.groups(RunFilter(since=NOW - DAY))] == [2]
+    assert store.groups(RunFilter(origin="job"), by=("job_run",)) == [
+        {
+            "job_run": "R1",
+            "runs": 1,
+            "errors": 0,
+            "first_started": pytest.approx(NOW - 40 * DAY),
+            "last_started": pytest.approx(NOW - 40 * DAY),
+            "cost_usd": None,
+            "duration_ms": pytest.approx(20.0),
+        }
+    ]
+    with pytest.raises(ValueError):
+        store.groups(by=("metadata; DROP TABLE runs",))
