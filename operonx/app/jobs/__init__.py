@@ -38,11 +38,12 @@ from .record import (
     last_run,
     runs_of,
 )
-from .runbook import NodeReport, Parallel, Runbook, RunbookRun, Sequential
+from .runbook import Flow, NodeReport, Parallel, Runbook, RunbookRun, Sequential
 from .runner import ErrorPolicy, parse_on_error, run_job, run_per_item, run_stream
 from .session import JobSession
 from .sinks import (
     CsvSink,
+    DirSink,
     JsonlSink,
     ListSink,
     NullSink,
@@ -55,6 +56,7 @@ from .sinks import (
 )
 from .sources import (
     CsvSource,
+    DirSource,
     JsonlSource,
     PythonSource,
     Source,
@@ -72,6 +74,7 @@ __all__ = [
     "RunRecord",
     "Runbook",
     "RunbookRun",
+    "Flow",
     "Sequential",
     "Parallel",
     "NodeReport",
@@ -96,6 +99,7 @@ __all__ = [
     "JsonlSource",
     "CsvSource",
     "PythonSource",
+    "DirSource",
     "SourceConfig",
     "as_source",
     "create_source",
@@ -106,6 +110,7 @@ __all__ = [
     "ListSink",
     "PythonSink",
     "NullSink",
+    "DirSink",
     "SinkConfig",
     "as_sink",
     "create_sink",

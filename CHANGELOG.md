@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a Runbook is wired like a graph body
+
+`with Runbook("nightly") as nightly:` then one `>>` statement per line —
+`fetch >> [score, audit]`, `score >> [report, export]`,
+`[report, audit] >> notify` — as many lines as the flow needs. The
+runbook is the set of wires from all its lines: a DAG, not a tree. A job
+starts when every job wired into it has finished; `on_error="stop"` now
+skips only what is downstream of a failed job (before, it stopped every
+sequence that had not started). A cycle is refused when the block
+closes, naming its jobs. `Runbook("nightly", a >> [b, c])` still works.
+`Runbook(schedule=...)` declares a runbook's schedule in Python (a
+`[[job]]` block's `schedule` reaches the object too). A runbook prints —
+`tree()`, `operonx-run --show` — as its wires (`a >> [b, c]`), and its
+record carries `wires` beside the per-job `tree`. `Sequential(...)` and
+`Parallel(...)` remain, as `a >> b >> c` and `[a, b]`.
+
+### Added — jobs for a whole project
+
+- `Job.main()` / `Runbook.main()`: any job is its own command line, with
+  `operonx-run`'s flags minus the name. `python -m jobs.x --resume`.
+- `operonx-run --set KEY=VALUE` (graph inputs, repeatable; JSON when it
+  parses), `--source`, `--sink`.
+- A job with no source runs its graph once, on one empty item.
+- `DirSource` (every matching file, `{"path", "name"}`) and `DirSink`
+  (one `<key>.json` per item, written whole; `skip_existing`). Kind `dir`
+  for both, and a directory path picks them.
+- `Job(preflight=[resource keys])`: the run fails in seconds, before any
+  item, when one of them does not answer.
+- `on_error="record"`: a failed item is recorded and handed to the sink,
+  but does not fail the run — for a job whose next step reads every outcome.
+- A graph with no `ingress` runs doorless: a job treats it as a function —
+  inputs in, the run's result is the item's result. `item_input` binds the
+  item when the graph wants it. Doors (`ingress`/`egress`) stay for graphs
+  that declare them and for `stream` jobs, which now refuse a graph
+  without `ingress`.
+
+### Changed
+
+- File sinks default to mode `auto`: a fresh job run starts the file
+  over, a `--resume` run adds to it. Before, every run appended, so
+  running a job twice doubled its output. Used directly, a sink still
+  appends; `mode="append"` keeps the old behaviour everywhere.
+
+### Fixed
+
+- `operonx-run` loads `.env` before reading `operonx.toml`, so a
+  `${VAR}` there that only `.env` sets is no longer read as unset.
+- A `[[job]]` key a Job does not read (a typo such as `concurency`) now
+  warns, naming the keys it does read. It is still kept in
+  `JobSpec.options`.
+
 ## [1.7.3] - 2026-09-25
 
 ### Added — the application, declared in Python

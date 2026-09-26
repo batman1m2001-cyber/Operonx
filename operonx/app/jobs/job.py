@@ -13,6 +13,11 @@ it was; the job is everything the graph should not know.
                 key="call_id", concurrency=8, on_error="skip")
     run = await score.run()             # JobRun: counts, per-item status, path
     run = await score.run(resume=True)  # only what the last run did not finish
+
+Every job is also its own command line — in a package's ``__main__.py``::
+
+    from .job import job
+    raise SystemExit(job.main())        # python -m jobs.score_calls --resume
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ import inspect
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from ._keys import is_resource_key
 from .record import JobRun
@@ -64,17 +69,26 @@ class Job:
         session: ``"per_item"`` or ``"stream"`` (see :data:`SESSION_MODES`).
         concurrency: Items in flight at once (per_item).
         max_inflight: Items buffered ahead of the graph (stream).
-        on_error: ``"skip"``, ``"stop"`` or ``"retry:N"``. A timed-out item
-            counts as failed for the policy.
+        on_error: ``"skip"``, ``"stop"``, ``"retry:N"`` or ``"record"`` (a
+            failed item is recorded and sunk but does not fail the run). A
+            timed-out item counts as failed for the policy.
         item_timeout: Seconds one item's run may take. Past it the run is
             cancelled and the item recorded ``timeout``. A batch with no
             deadline is the post-mortem everyone has read.
+        preflight: Resource keys (``"llm:x"``, ``"vector_store:y"``) that
+            must answer before any item runs. One unreachable key fails
+            the run in seconds instead of every item in turn.
+        on_item: Called with each item's ``ItemResult`` as it is recorded
+            (sync or async; per_item) — progress lines, events for a host.
+            An exception in it is logged, never fails the run.
         trace: Trace consumers for the runs, as ``Operon(trace=...)``
             takes them. Ignored when ``graph`` is already an ``Operon``.
         inputs: Static inputs every run receives.
-        item_input: For a graph with no doors: the input the item is
-            bound to. The run's result is then written to the sink as the
-            item's result. Leave unset for a graph with `ingress`/`egress`.
+        item_input: The graph input the item is bound to, for a graph
+            with no doors. A graph with no ``ingress`` is doorless whether
+            or not this is set: the run's result is the item's result and
+            goes to the sink. Leave it unset when the graph needs no item —
+            a job with no source runs such a graph once.
         schedule: Cron text. Declarative — recorded and listed, run by
             whatever calls ``operonx-run``.
         record_dir: Where runs are recorded; ``<record_dir>/<name>/<run>``.
@@ -94,6 +108,8 @@ class Job:
         max_inflight: int = DEFAULT_MAX_INFLIGHT,
         on_error: str = "skip",
         item_timeout: Optional[float] = None,
+        preflight: Optional[Sequence[str]] = None,
+        on_item: Optional[Callable[[Any], Any]] = None,
         trace: Any = None,
         inputs: Optional[Dict[str, Any]] = None,
         item_input: Optional[str] = None,
@@ -127,6 +143,8 @@ class Job:
         self.max_inflight = int(max_inflight)
         self.on_error = on_error
         self.item_timeout = float(item_timeout) if item_timeout is not None else None
+        self.preflight: List[str] = list(preflight or [])
+        self.on_item = on_item
         self.trace = trace
         self.inputs: Dict[str, Any] = dict(inputs or {})
         self.item_input = item_input
@@ -134,6 +152,7 @@ class Job:
         self.record_dir = Path(record_dir)
         self.description = description
         self._engine: Any = None
+        self._doors: Optional[bool] = None
 
     # -- the graph ---------------------------------------------------------
 
@@ -165,6 +184,24 @@ class Job:
                 "not an Operon, a GraphOp or a @graph factory"
             )
         return self._engine
+
+    def has_doors(self) -> bool:
+        """True when the graph reads items through ``ingress`` — the serving
+        shape. Without one the job runs it as a function: inputs in, the
+        run's result out. Checked once, anywhere in the graph."""
+        if self._doors is None:
+            from operonx.app.serve.ops import ingress
+
+            target = getattr(ingress, "__wrapped__", ingress)
+
+            def walk(g: Any) -> bool:
+                for op in (getattr(g, "_ops", None) or {}).values():
+                    if getattr(op, "core", None) is target or walk(op):
+                        return True
+                return False
+
+            self._doors = walk(self.engine().graph)
+        return self._doors
 
     # -- identity ----------------------------------------------------------
 
@@ -198,6 +235,18 @@ class Job:
     def run_sync(self, *, resume: bool = False) -> JobRun:
         """`run()` from synchronous code — a script, a cron entry."""
         return asyncio.run(self.run(resume=resume))
+
+    def main(self, argv: Optional[Sequence[str]] = None, *, doc: Optional[str] = None) -> int:
+        """This job as a command line; returns the exit status.
+
+        The flags ``operonx-run`` has, minus the job name — ``--resume``,
+        ``--show``, ``--source``, ``--sink``, ``--set key=value``,
+        ``--concurrency``, ``--record-dir``. *doc* (a module's
+        ``__doc__``) is what ``--help`` prints.
+        """
+        from operonx.cli.run import main_for
+
+        return main_for(self, argv, doc=doc)
 
     # -- from the manifest ---------------------------------------------------
 
@@ -270,12 +319,13 @@ class Job:
             "max_inflight": self.max_inflight if self.session == "stream" else None,
             "on_error": self.on_error if self.session == "per_item" else None,
             "item_timeout": self.item_timeout,
+            "preflight": list(self.preflight) or None,
             "item_input": self.item_input,
             "schedule": self.schedule,
             "description": self.description,
         }
 
-    # -- composition: a runbook is `a >> b`, `a >> [b, c]` ---------------------
+    # -- composition: `a >> b`, `a >> [b, c]`, `[a, b] >> c` wire a Runbook ------
 
     def __rshift__(self, other: Any) -> Any:
         from .runbook import Sequential
@@ -283,6 +333,7 @@ class Job:
         return Sequential(self, other)
 
     def __rrshift__(self, other: Any) -> Any:
+        # `[a, b] >> job`: a list has no `>>`, so Python asks the job.
         from .runbook import Sequential
 
         return Sequential(other, self)

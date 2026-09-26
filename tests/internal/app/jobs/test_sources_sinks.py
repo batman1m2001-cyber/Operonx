@@ -11,6 +11,7 @@ import pytest
 from operonx.app.jobs import (
     CsvSink,
     CsvSource,
+    DirSource,
     JsonlSink,
     JsonlSource,
     ListSink,
@@ -94,10 +95,9 @@ async def test_as_source_picks_by_shape(tmp_path):
     assert isinstance(as_source({"not": "a source"}), PythonSource)  # a dict has .items too
     src = JsonlSource(p)
     assert as_source(src) is src
-    with pytest.raises(ValueError, match="expected .jsonl or .csv"):
+    with pytest.raises(ValueError, match="expected a directory, .jsonl or .csv"):
         as_source(tmp_path / "c.parquet")
-    with pytest.raises(TypeError, match="needs a source"):
-        as_source(None)
+    assert isinstance(as_source(tmp_path), DirSource)
 
 
 def test_open_source_needs_what_each_kind_needs():

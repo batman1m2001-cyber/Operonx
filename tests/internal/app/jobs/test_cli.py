@@ -190,7 +190,9 @@ def test_show_prints_a_runbooks_tree(project, capsys):
     assert main([f"{name}:nightly", "--show", "--record-dir", str(root / "jobs")]) == 0
     out = capsys.readouterr().out
     assert out.splitlines()[0] == "nightly"
-    assert "sequential" in out and "shout  (per_item)" in out and "shout_bad  (per_item)" in out
+    # the runbook as its wires, never `|`; then its jobs
+    assert out.splitlines()[1] == "  shout >> shout_bad"
+    assert "shout (per_item), shout_bad (per_item)" in out and "|" not in out
     assert "both, in order" in out
 
 
@@ -215,3 +217,6 @@ def test_a_runbook_runs_by_its_manifest_name(manifest_project, capsys):
     assert main(["nightly"]) == 1
     assert "jobs ok=1 failed=1" in capsys.readouterr().out
     assert (root / "runs" / "nightly").is_dir()
+    # the block's schedule reaches the runbook object
+    assert main(["nightly", "--show"]) == 0
+    assert "schedule     0 3 * * *" in capsys.readouterr().out

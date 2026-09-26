@@ -653,6 +653,16 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
+    if options:
+        # Kept, for tools that read their own keys — but a Job ignores them,
+        # so a typo like `concurency = 8` would otherwise do nothing, quietly.
+        import warnings
+
+        warnings.warn(
+            f"{where}: {label} has keys a Job does not read: {sorted(options)} "
+            f"(Job settings: {sorted(known_keys)})",
+            stacklevel=2,
+        )
 
     def _opt(key: str) -> Optional[str]:
         value = block.get(key)

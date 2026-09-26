@@ -15,6 +15,7 @@ recorded as such, never mistaken for success.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,7 +55,9 @@ __all__ = ["ErrorPolicy", "parse_on_error", "run_job", "run_per_item", "run_stre
 @dataclass(frozen=True)
 class ErrorPolicy:
     """``skip`` carries on, ``stop`` starts nothing new, ``retry:N`` tries an
-    item N more times and then carries on."""
+    item N more times and then carries on. ``record`` carries on too, and a
+    failed item does not fail the run: the failure is data — recorded, and
+    handed to the sink — for a job whose next step reads every outcome."""
 
     mode: str
     retries: int = 0
@@ -66,7 +69,7 @@ class ErrorPolicy:
 
 def parse_on_error(text: str) -> ErrorPolicy:
     text = (text or "").strip().lower()
-    if text in ("skip", "stop"):
+    if text in ("skip", "stop", "record"):
         return ErrorPolicy(text)
     if text.startswith("retry"):
         _, _, n = text.partition(":")
@@ -77,7 +80,7 @@ def parse_on_error(text: str) -> ErrorPolicy:
         if retries < 1:
             raise ValueError(f"on_error {text!r}: retry wants at least 1")
         return ErrorPolicy("retry", retries)
-    raise ValueError(f"on_error must be 'skip', 'stop' or 'retry:N', not {text!r}")
+    raise ValueError(f"on_error must be 'skip', 'stop', 'record' or 'retry:N', not {text!r}")
 
 
 #: The outcomes a policy acts on: retried under `retry`, fatal under `stop`.
@@ -105,6 +108,60 @@ def _trace_metadata(job: "Job", run_id: str, key: Optional[str]) -> dict:
     return {**fields, "tags": [f"{k}:{v}" for k, v in fields.items()]}
 
 
+def _begin(sink: Any, resume: bool) -> None:
+    """Tell a file sink whether this run starts fresh or continues."""
+    begin = getattr(sink, "begin", None)
+    if callable(begin):
+        begin(resume=resume)
+
+
+def _already_there(sink: Any, key: str) -> bool:
+    """A sink that can say its output for *key* exists (``DirSink`` under
+    ``skip_existing``) lets the job skip that item without a record."""
+    exists = getattr(sink, "exists", None)
+    return bool(callable(exists) and exists(key))
+
+
+async def _report(job: "Job", sink: Any, result: ItemResult) -> None:
+    """After an item is recorded: a failure reaches a sink that asked for
+    it (``sink.fail(key, error)``), then the job's ``on_item`` hook sees
+    the outcome. Neither may break the run."""
+    if result.status in _RETRIABLE:
+        fail = getattr(sink, "fail", None)
+        if callable(fail):
+            try:
+                out = fail(result.key, result.error or result.status)
+                if inspect.isawaitable(out):
+                    await out
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error(f"[job:{job.name}] sink.fail({result.key!r}): {exc}")
+    if job.on_item is not None:
+        try:
+            out = job.on_item(result)
+            if inspect.isawaitable(out):
+                await out
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"[job:{job.name}] on_item hook raised: {type(exc).__name__}: {exc}")
+
+
+def preflight_error(keys: Any, timeout: float = 2.0) -> Optional[str]:
+    """Check the named resources answer before any item runs.
+
+    Returns the reason as text, or ``None`` when all of them answered. A
+    job whose endpoints are down should fail in two seconds, once — not
+    item by item, each waiting out its own deadline.
+    """
+    if not keys:
+        return None
+    from operonx.core.registry import ResourceHub
+
+    try:
+        ResourceHub.instance().require_reachable(*keys, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        return f"preflight: {type(exc).__name__}: {exc}"
+    return None
+
+
 async def _settle(handle: Any) -> None:
     """Wait for the run's teardown, not just its last frame.
 
@@ -125,9 +182,10 @@ async def _attempt(
     """One run for one item."""
     session = JobSession(sink, key, meta={"job": job.name, "job_run": run_id})
     inputs = dict(job.inputs)
-    if job.item_input is None:
+    doorless = not job.has_doors()
+    if not doorless:
         session.feed_nowait(raw)
-    else:
+    elif job.item_input is not None:
         inputs[job.item_input] = raw
     session.end_input()
 
@@ -175,16 +233,18 @@ async def _attempt(
             sent=session.sent,
         )
 
-    if job.item_input is not None:
-        # No doors: the run's own result is the item's result.
+    if doorless:
+        # No doors: the run's own result is the item's result. A run that
+        # returns nothing is recorded `empty`, never mistaken for success.
         try:
             out = await handle.result()
-            await sink.write(key, out)
+            if out:
+                await sink.write(key, out)
+                session.sent += 1
         except Exception as exc:  # noqa: BLE001
             return ItemResult(
                 key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}", trace_id=trace_id, ms=ms
             )
-        session.sent += 1
 
     status = ITEM_OK if session.sent else ITEM_EMPTY
     return ItemResult(key, status, trace_id=trace_id, ms=ms, sent=session.sent)
@@ -197,6 +257,12 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
     sink = as_sink(job.sink)
     policy = parse_on_error(job.on_error)
     root = Path(job.record_dir)
+
+    unreachable = preflight_error(job.preflight)
+    if unreachable:
+        LOGGER.error(f"[job:{job.name}] {unreachable}")
+        run = RunRecord(root, job.name, meta=job.describe()).finish(RUN_FAILED, error=unreachable)
+        return run
 
     previous = last_run(root, job.name) if resume else None
     if resume and previous is None:
@@ -215,6 +281,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
         + ")"
     )
 
+    _begin(sink, resume)
     sem = asyncio.Semaphore(job.concurrency)
     stopped = asyncio.Event()
     tasks: set = set()
@@ -233,6 +300,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                     f"retry {attempt}/{policy.retries}"
                 )
             record.item(result)
+            await _report(job, sink, result)
             if result.status in _RETRIABLE and policy.mode == "stop":
                 stopped.set()
         finally:
@@ -255,8 +323,10 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                 if policy.mode == "stop":
                     stopped.set()
                 continue
-            if key in done:
-                record.item(ItemResult(key, ITEM_SKIPPED))
+            if key in done or _already_there(sink, key):
+                skipped = ItemResult(key, ITEM_SKIPPED)
+                record.item(skipped)
+                await _report(job, sink, skipped)
                 continue
             await sem.acquire()
             if stopped.is_set():
@@ -282,7 +352,10 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
 
     if stopped.is_set():
         status = RUN_STOPPED
-    elif source_error or record.counts.get(ITEM_FAILED, 0) or record.counts.get(ITEM_TIMEOUT, 0):
+    elif source_error or (
+        policy.mode != "record"
+        and (record.counts.get(ITEM_FAILED, 0) or record.counts.get(ITEM_TIMEOUT, 0))
+    ):
         status = RUN_FAILED
     else:
         status = RUN_OK
@@ -304,10 +377,20 @@ async def run_stream(job: "Job", *, resume: bool = False) -> JobRun:
             f"job {job.name!r}: a stream job cannot resume — one run, "
             "no per-item outcomes to skip; run it again"
         )
+    if not job.has_doors():
+        raise ValueError(
+            f"job {job.name!r}: a stream job feeds every item through `ingress`, "
+            "and this graph has none — run it per_item instead"
+        )
     engine = job.engine()
     source = as_source(job.source)
     sink = as_sink(job.sink)
     record = RunRecord(Path(job.record_dir), job.name, meta=job.describe())
+    unreachable = preflight_error(job.preflight)
+    if unreachable:
+        LOGGER.error(f"[job:{job.name}] {unreachable}")
+        return record.finish(RUN_FAILED, error=unreachable)
+    _begin(sink, False)
     LOGGER.info(
         f"[job:{job.name}] {source!r} -> {engine.name} -> {sink!r} "
         f"(stream, max_inflight={job.max_inflight})"

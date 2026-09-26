@@ -67,10 +67,29 @@ From `async` code, `await score_calls.run()`. From a shell:
 operonx-run jobs:score_calls              # a Job object, as module:attr
 operonx-run jobs:score_calls --resume     # only the keys the last run did not finish
 operonx-run jobs:score_calls --show       # what would run, and exit
+operonx-run jobs:score_calls --set day=2026-09-25 --sink out/today.jsonl
 ```
 
 The exit status is 0 only when every item finished cleanly, so a cron
 mail or a CI step sees a failed batch.
+
+A job is also its own command line. `job.main()` takes the same flags,
+minus the name — so a package whose `__main__.py` is
+
+```python
+from .job import job
+raise SystemExit(job.main(doc=__doc__))
+```
+
+runs as `python -m jobs.score_calls --resume`, and `--help` prints the
+package's docstring. `Runbook.main()` is the same; its `--set` reaches
+every job.
+
+A job with **no source** runs its graph once, on one empty item — the
+shape of work done once rather than per item: create a table, write a
+report. `preflight=["llm:gpt", "vector_store:docs"]` checks those
+resources answer before any item runs, so a job whose endpoint is down
+fails in seconds, once, instead of item by item.
 
 ## What the record says
 
@@ -128,12 +147,14 @@ the others.
 ## Sources and sinks
 
 A source is anything with an async `items()`; a sink anything with
-`write(key, item)` and `close()`. Three of each ship, and `Job` takes
-them in whatever shape you have:
+`write(key, item)` and `close()`. `Job` takes them in whatever shape you
+have:
 
 | you pass                              | it becomes                              |
 |---------------------------------------|-----------------------------------------|
 | `"data/calls.jsonl"`, `Path(...)`     | `JsonlSource` / `CsvSource` by extension |
+| a directory                           | `DirSource` — `{"path", "name"}` per file (as a sink, an existing directory is a `DirSink`) |
+| `None` (as a source)                  | one empty item — the graph runs once    |
 | a list, an iterator, a generator function, an async generator | `PythonSource` |
 | `"source:calls_today"`                | resolved through the resource hub       |
 | a list (as a sink)                    | `ListSink`, appending to your list      |
@@ -145,7 +166,7 @@ project reaches out to, and a table or a folder is that.
 
 ```yaml
 source:calls_today:
-  kind: jsonl                 # jsonl | csv | python
+  kind: jsonl                 # jsonl | csv | dir | python
   path: data/calls.jsonl
 source:from_code:
   kind: python
@@ -153,11 +174,21 @@ source:from_code:
 sink:scores:
   kind: jsonl
   path: out/scores.jsonl
-  mode: overwrite             # append is the default
+  mode: overwrite             # auto (default) | append | overwrite
+sink:outputs:
+  kind: dir                   # one <key>.json per item
+  path: out/calls/
+  options: {skip_existing: true}
 ```
 
 A row written to a file sink carries the item's key first, as `_key`,
 so it can be joined back to the source.
+
+A file sink's default mode is `auto`: a fresh run starts the file over
+and a `--resume` run adds to it, so running a job twice never doubles
+its output. `DirSink(skip_existing=True)` skips any key whose file is
+already there — re-running over a directory does only what is missing,
+with no record needed.
 
 ## A graph without doors
 
@@ -227,42 +258,54 @@ trace id, and cannot resume. Outputs reach the sink keyed by their
 index, because nothing ties an output to an input inside one run.
 `max_inflight` caps how far the source runs ahead of the graph.
 
-## Runbooks: many jobs, one command
+## Runbooks: many jobs, one command, wired like a graph
 
 Stage 2 sometimes needs *all* of stage 1 first — embed everything, then
-cluster — and stages run in sequence or side by side. A `Runbook`
-composes jobs **above** the engine: a tree of `Sequential` and
-`Parallel`, walked by asyncio. Never a graph of jobs.
+cluster — and stages run in sequence or side by side. A `Runbook` states
+that the way a `@graph` body states its ops: `>>` statements, one per
+line, as many lines as the flow needs. A list on either side of `>>` is
+one wire per element. No branches.
 
 ```python
 from operonx.app.jobs import Runbook
 
-nightly = Runbook("nightly", extract >> [embed >> cluster, score])
-#                             >> = Sequential      [ ] = Parallel
+with Runbook("nightly", schedule="0 3 * * *") as nightly:
+    fetch >> [score, audit]          # one line, several wires
+    score >> [report, export]
+    [report, audit] >> notify        # notify waits for both
 ```
 
 ```
-  extract ──► ┬─► embed ──► cluster ─┐
-              └─► score ─────────────┴─► done
+fetch ─┬─► score ─┬─► report ─┐
+       │          └─► export  │
+       └─► audit ─────────────┴─► notify
 ```
 
-- A failed step ends its sequence; the steps it never reached are
-  recorded `skipped`. `Runbook(..., on_error="continue")` runs every
-  step regardless.
-- A parallel branch always finishes: a failure fails the node but never
-  cancels a sibling.
-- Hand-off between stages is by **naming the same resource** —
-  `extract`'s sink and `embed`'s source both point at the same file.
-  Nothing is rewired at run time.
+- The runbook is the set of wires from all its lines — a DAG, not a
+  tree. A job is one node however many wires touch it; a cycle is
+  refused when the block closes, naming its jobs.
+- A job starts when every job wired into it has finished. Jobs with no
+  incoming wire start first; jobs not wired together run side by side.
+- `on_error="stop"` (the default) skips every job **downstream** of a
+  failed one — the rest still runs. `on_error="continue"` runs
+  downstream anyway. A running job is never cancelled.
+- `Runbook("qc", a >> [b, c])` is the one-expression form of the same
+  thing. `>>` returns its right side, so `a >> [b, c] >> d` chains.
+- Hand-off between jobs is by **naming the same resource** — one job's
+  sink and the next job's source point at the same file. Nothing is
+  rewired at run time.
 - `runbook.run(resume=True)` reaches the per-item jobs; stream jobs run
   fresh.
 - A runbook that needs a condition is a Python function calling
   `run()` twice.
+- `schedule=` declares when the deployment's cron should run it; it
+  does not run anything.
 
-The record, `jobs/nightly/<run>/run.json`, holds the tree with a status
-per node, timing, and each job's own run id and path. A runbook is a
-record, never a span: traces stay one per graph run, tagged with the
-job that minted it.
+A runbook sits in `Application(jobs=[...])` beside plain jobs, run by
+name and listed by `--list` and the studio. The record,
+`jobs/nightly/<run>/run.json`, holds the wires and, per job, a status,
+timing and its own run id and path. A runbook is a record, never a
+span: traces stay one per graph run, tagged with the job that minted it.
 
 ```toml
 [[job]]
@@ -273,7 +316,7 @@ schedule   = "0 3 * * *"
 
 ```bash
 operonx-run nightly
-operonx-run nightly --show             # prints the tree
+operonx-run nightly --show             # prints the wires: fetch >> [score, audit] …
 ```
 
 ## What a job is not

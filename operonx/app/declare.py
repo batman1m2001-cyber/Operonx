@@ -263,7 +263,8 @@ def describe_job(job: Any) -> Dict[str, Any]:
             "name": job.name,
             "kind": "runbook",
             "graph": None,
-            "runbook": ref_name(job),
+            # its wiring, the way it was written: `a >> [b, c] ; c >> d`
+            "runbook": " ; ".join(job.tree().splitlines()),
             "session": None,
             "source": None,
             "sink": None,
@@ -329,6 +330,8 @@ def build_job(spec: Any, root: Path) -> Any:
         if spec.record_dir:
             rd = Path(spec.record_dir)
             runbook.record_dir = rd if rd.is_absolute() else root / rd
+        if spec.schedule:
+            runbook.schedule = spec.schedule
         return runbook
     return Job.from_spec(spec, root)
 

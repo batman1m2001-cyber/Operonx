@@ -18,6 +18,7 @@ from operonx.app.jobs import (
     RUN_FAILED,
     RUN_OK,
     RUN_STOPPED,
+    Flow,
     Job,
     JobRun,
     Parallel,
@@ -180,20 +181,18 @@ async def test_nightly_runs_the_tree_and_records_it(tmp_path, jobs):
         s for s, _ in WINDOWS["embed"] + WINDOWS["score"]
     )
 
-    # The record: the tree, with a status per node and each job's own run.
+    # The record: the wires, and a status per job with its own run.
     d = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
     assert d["runbook"] == "nightly" and d["status"] == "ok" and d["ended"]
+    assert d["wires"] == [["extract", "embed"], ["extract", "score"], ["embed", "cluster"]]
     tree = d["tree"]
-    assert tree["kind"] == "sequential" and [c["kind"] for c in tree["children"]] == [
-        "job",
-        "parallel",
-    ]
-    branches = tree["children"][1]["children"]
-    assert branches[0]["kind"] == "sequential" and [c["name"] for c in branches[0]["children"]] == [
+    assert tree["kind"] == "runbook" and [c["name"] for c in tree["children"]] == [
+        "extract",
         "embed",
         "cluster",
+        "score",
     ]
-    assert branches[1]["name"] == "score"
+    assert all(c["kind"] == "job" and c["status"] == "ok" for c in tree["children"])
     for j in run.jobs:
         assert j.run_id and j.path
         own = JobRun.load(j.path)
@@ -281,32 +280,41 @@ async def test_resume_reaches_per_item_jobs_and_leaves_streams_alone(tmp_path, j
 # -- composition -------------------------------------------------------------------
 
 
-def test_the_operators_build_the_same_tree_as_the_classes(tmp_path, jobs):
+def test_the_operators_and_the_classes_wire_the_same(tmp_path, jobs):
     a, b, c, d = jobs["extract"], jobs["embed"], jobs["cluster"], jobs["score"]
     spelled = Runbook("x", Sequential(a, Parallel(Sequential(b, c), d)), record_dir=tmp_path)
     sugared = Runbook("x", a >> [b >> c, d], record_dir=tmp_path)
-    assert spelled.tree() == sugared.tree()
-    assert sugared.tree().splitlines() == [
-        "sequential",
-        "  extract  (per_item)",
-        "  parallel",
-        "    sequential",
-        "      embed  (per_item)",
-        "      cluster  (stream)",
-        "    score  (per_item)",
-    ]
-    # `(a >> b) >> c` and `a >> (b >> c)` are one flat sequence.
-    assert ((a >> b) >> c).name == (a >> (b >> c)).name == "extract >> embed >> cluster"
-    # A list on the left fans in: everything, then c.
+    assert (
+        spelled.wires
+        == sugared.wires
+        == [("extract", "embed"), ("extract", "score"), ("embed", "cluster")]
+    )
+    # printed as its wires: one line per source, never `|`
+    assert sugared.tree().splitlines() == ["extract >> [embed, score]", "embed >> cluster"]
+
+    # `(a >> b) >> c` and `a >> (b >> c)` are one chain.
+    def pairs(flow):
+        return {(x.name, y.name) for x, y in flow.wires}
+
+    assert (
+        pairs((a >> b) >> c) == pairs(a >> (b >> c)) == {("extract", "embed"), ("embed", "cluster")}
+    )
+    # A list on the left fans in: both, then c.
     fan_in = [a, b] >> c
-    assert isinstance(fan_in, Sequential) and fan_in.children[0].kind == "parallel"
+    assert isinstance(fan_in, Flow) and [(x.name, y.name) for x, y in fan_in.wires] == [
+        ("extract", "cluster"),
+        ("embed", "cluster"),
+    ]
     assert [j.name for j in sugared.jobs] == ["extract", "embed", "cluster", "score"]
 
 
 def test_what_a_runbook_refuses(tmp_path, jobs):
-    a = jobs["extract"]
-    with pytest.raises(ValueError, match="appears twice"):
+    a, b, c = jobs["extract"], jobs["embed"], jobs["cluster"]
+    with pytest.raises(ValueError, match="cycle: extract >> extract"):
         Runbook("x", a >> a, record_dir=tmp_path)
+    twin = Job("extract", graph=_flow("twin", extract_op, "doc"), source=[], record_dir=tmp_path)
+    with pytest.raises(ValueError, match="appears twice: extract"):
+        Runbook("x", a >> twin, record_dir=tmp_path)
     with pytest.raises(TypeError, match="made of Jobs"):
         Runbook("x", a >> "embed", record_dir=tmp_path)
     with pytest.raises(ValueError, match="at least one"):
@@ -317,6 +325,15 @@ def test_what_a_runbook_refuses(tmp_path, jobs):
         Runbook("x", a, on_error="retry", record_dir=tmp_path)
     with pytest.raises(ValueError, match="needs a name"):
         Runbook("", a, record_dir=tmp_path)
+    # a cycle across lines of a block is refused when the block closes, naming its jobs
+    with pytest.raises(ValueError, match="cycle: extract >> embed >> cluster >> extract"):
+        with Runbook("x", record_dir=tmp_path):
+            a >> b
+            b >> c
+            c >> a
+    with pytest.raises(ValueError, match="wires no jobs"):
+        with Runbook("x", record_dir=tmp_path):
+            pass
 
 
 async def test_the_record_reads_back(tmp_path, jobs):
@@ -327,6 +344,9 @@ async def test_the_record_reads_back(tmp_path, jobs):
     assert again.meta["on_error"] == "stop"
     assert "RunbookRun(" in repr(again)
     assert rb.describe()["jobs"] == ["extract", "score"]
+    assert rb.describe()["wires"] == [["extract", "score"]] and again.wires == [
+        ("extract", "score")
+    ]
     assert "Runbook('rb'" in repr(rb)
 
 
