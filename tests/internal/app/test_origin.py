@@ -349,3 +349,12 @@ def test_an_applications_job_records_its_items_under_the_project(tmp_path, monke
     assert on_disk == sorted(i.trace_id for i in run.items)  # every item link resolves
     meta = json.loads((runs / run.items[0].trace_id / "meta.json").read_text())["metadata"]
     assert meta["origin"] == "job" and meta["project"] == "demo"
+
+
+def test_a_service_pins_its_key_ops_and_describes_them(tmp_path):
+    from operonx.app.declare import describe_service
+
+    spec = _svc("call", key_ops=["stt", "reply"])
+    assert spec.options["key_ops"] == ["stt", "reply"]
+    assert describe_service(spec)["key_ops"] == ["stt", "reply"]
+    assert describe_service(_svc("plain"))["key_ops"] == []

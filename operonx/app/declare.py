@@ -108,6 +108,7 @@ def Service(  # noqa: N802 — reads as a declaration
     on_close: Any = None,
     on_startup: Sequence[Any] = (),
     description: str = "",
+    key_ops: Optional[Sequence[str]] = None,
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -119,6 +120,10 @@ def Service(  # noqa: N802 — reads as a declaration
     model warmed for the call workers is not warmed again for an admin
     port. The door's inputs are the graph's own runtime parameters; the
     door ops declare themselves with ``@op(door=...)``.
+
+    ``key_ops`` names the ops whose latency the team watches first (time
+    to first audio, the LLM call) — a dashboard pins them above the rest,
+    the way ``show_keys`` names the outputs that stand for an op.
     """
     label = f"Service({name!r})"
     _refuse_moved(options, label)
@@ -160,6 +165,8 @@ def Service(  # noqa: N802 — reads as a declaration
     # None inherits the application's consumers; [] says "trace nothing"
     if trace is not None:
         opts["trace"] = list(trace)
+    if key_ops:
+        opts["key_ops"] = [str(k) for k in key_ops]
 
     return ServeSpec(
         name=name,
@@ -290,6 +297,7 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "on_close": ref_name(s.on_close) if s.on_close else None,
         "app": ref_name(s.app) if s.app else None,
         "description": s.description,
+        "key_ops": list(s.options.get("key_ops") or []),
     }
 
 
