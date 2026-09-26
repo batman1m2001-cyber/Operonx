@@ -433,3 +433,25 @@ def test_record_is_a_known_policy():
     assert parse_on_error("record").mode == "record"
     with pytest.raises(ValueError, match="record"):
         parse_on_error("ignore")
+
+
+def _named_source():
+    yield {"id": "x"}
+
+
+def test_a_function_source_is_described_by_its_name(tmp_path):
+    job = Job(
+        "named",
+        graph=plain_item,
+        source=_named_source,
+        item_input="item",
+        sink=[],
+        record_dir=tmp_path,
+    )
+    assert job.describe()["source"] == f"{__name__}:_named_source"
+    assert (
+        Job("listed", graph=plain_item, source=[1], sink=[], record_dir=tmp_path).describe()[
+            "source"
+        ]
+        == "[1]"
+    )
