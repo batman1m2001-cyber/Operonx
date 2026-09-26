@@ -305,7 +305,15 @@ class Job:
         def shown(value: Any) -> Any:
             if value is None or isinstance(value, str):
                 return value
-            return str(value) if isinstance(value, Path) else repr(value)
+            if isinstance(value, Path):
+                return str(value)
+            if callable(value) and hasattr(value, "__qualname__"):
+                # a generator function or a class, named where it is defined
+                # (`qc.cases:agent_cases`), not `<function … at 0x…>`
+                from operonx.app.declare import ref_name
+
+                return ref_name(value)
+            return repr(value)
 
         return {
             "graph": graph_name,
