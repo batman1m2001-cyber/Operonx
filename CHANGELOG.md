@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-26
+
+### Changed — declarations moved to where they are true
+
+- **A door op says what it is.** `@op(door="ingress")` / `@op(door="egress")`
+  (and `door_default` on an op class); the built-in `ingress()` /
+  `egress()` declare it. `Service(ingress=, egress=)` and the
+  `[[serve]]` keys are gone — using them is an error that says so.
+- **The graph's signature is the door's contract.** `Service(inputs=)`
+  and the `[[serve]]` key are gone. A declared `on_session` hook's
+  `RunRequest.inputs` must be exactly the graph's runtime parameters;
+  anything else is refused at the door, naming what is missing and what
+  is not a parameter. (Fixed on the way: `compile_graph` set
+  `engine.inputs_expected` inside a `try` that swallowed the failure —
+  `Operon` has slots — so it was never set. It is a slot now.)
+- **The process is shaped by the listeners.** `websocket(..., workers=4)`
+  (and `http`, `asgi`, `[[serve]] workers`) runs that listener as N
+  worker processes, each loading the application again from
+  `operonx.toml`; a one-worker listener runs in the main process.
+  `Service(on_startup=[...])` (`[[serve]] on_startup`) runs in that
+  listener's workers only; `Application(on_startup=)` still runs for
+  every listener. `Application.serve()` / `operonx-serve` do all of it,
+  and stop the workers on SIGTERM; services sharing an address must
+  agree on `workers`. `operonx-serve --list` prints workers and hooks.
+
+### Changed — a Runbook is wired like a graph body
+
+`with Runbook("nightly") as nightly:` then one `>>` statement per line —
+`fetch >> [score, audit]`, `score >> [report, export]`,
+`[report, audit] >> notify` — as many lines as the flow needs. The
+runbook is the set of wires from all its lines: a DAG, not a tree. A job
+starts when every job wired into it has finished; `on_error="stop"` now
+skips only what is downstream of a failed job (before, it stopped every
+sequence that had not started). A cycle is refused when the block
+closes, naming its jobs. `Runbook("nightly", a >> [b, c])` still works.
+`Runbook(schedule=...)` declares a runbook's schedule in Python (a
+`[[job]]` block's `schedule` reaches the object too). A runbook prints —
+`tree()`, `operonx-run --show` — as its wires (`a >> [b, c]`), and its
+record carries `wires` beside the per-job `tree`. `Sequential(...)` and
+`Parallel(...)` remain, as `a >> b >> c` and `[a, b]`.
+
+### Added — jobs for a whole project
+
+- `Job.main()` / `Runbook.main()`: any job is its own command line, with
+  `operonx-run`'s flags minus the name. `python -m jobs.x --resume`.
+- `operonx-run --set KEY=VALUE` (graph inputs, repeatable; JSON when it
+  parses), `--source`, `--sink`.
+- A job with no source runs its graph once, on one empty item.
+- `DirSource` (every matching file, `{"path", "name"}`) and `DirSink`
+  (one `<key>.json` per item, written whole; `skip_existing`). Kind `dir`
+  for both, and a directory path picks them.
+- `Job(preflight=[resource keys])`: the run fails in seconds, before any
+  item, when one of them does not answer.
+- `on_error="record"`: a failed item is recorded and handed to the sink,
+  but does not fail the run — for a job whose next step reads every outcome.
+- A graph with no `ingress` runs doorless: a job treats it as a function —
+  inputs in, the run's result is the item's result. `item_input` binds the
+  item when the graph wants it. Doors (`ingress`/`egress`) stay for graphs
+  that declare them and for `stream` jobs, which now refuse a graph
+  without `ingress`.
+
+### Changed
+
+- File sinks default to mode `auto`: a fresh job run starts the file
+  over, a `--resume` run adds to it. Before, every run appended, so
+  running a job twice doubled its output. Used directly, a sink still
+  appends; `mode="append"` keeps the old behaviour everywhere.
+
+### Fixed
+
+- `operonx-run` loads `.env` before reading `operonx.toml`, so a
+  `${VAR}` there that only `.env` sets is no longer read as unset.
+- A `[[job]]` key a Job does not read (a typo such as `concurency`) now
+  warns, naming the keys it does read. It is still kept in
+  `JobSpec.options`.
+
 ## [1.7.3] - 2026-09-25
 
 ### Added — the application, declared in Python
@@ -1833,7 +1909,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.0...v1.7.1

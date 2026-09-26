@@ -41,8 +41,6 @@ APP = Application(
                 "formal": dict(style=styles.formal, sign_off="Regards"),
                 "casual": dict(style=styles.casual, sign_off="Cheers"),
             },
-            ingress=["request"],
-            egress=["out"],
             on_session=door.open,
         ),  # ?style=… -> RunRequest(variant=…)
     ],

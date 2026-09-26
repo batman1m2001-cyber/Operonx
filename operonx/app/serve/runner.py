@@ -174,16 +174,30 @@ class ServeRunner:
             return None
         elif self._engine_for(request) is None:
             return None
-        elif self.spec.inputs and set(request.inputs) != set(self.spec.inputs):
-            # The declared contract, at the door: the hook built something
-            # other than what it said it would.
-            LOGGER.error(
-                f"[serve:{self.spec.name}] on_session built inputs "
-                f"{sorted(request.inputs)}; declared {sorted(self.spec.inputs)} — "
-                f"refusing the connection"
-            )
+        elif not self._inputs_fit(request):
             return None
         return request
+
+    def _inputs_fit(self, request: RunRequest) -> bool:
+        """The graph's runtime parameters are the door's contract: a
+        declared hook must build exactly them. A mismatch is refused here,
+        naming both sides, not a None deep in the first op that reads one.
+        The default hook (the query string as inputs) is not held to it."""
+        if self.spec.on_session is None:
+            return True
+        expected = getattr(self._engine_for(request), "inputs_expected", None)
+        if expected is None or set(request.inputs) == set(expected):
+            return True
+        missing = sorted(set(expected) - set(request.inputs))
+        extra = sorted(set(request.inputs) - set(expected))
+        LOGGER.error(
+            f"[serve:{self.spec.name}] on_session built inputs {sorted(request.inputs)}; "
+            f"the graph takes {sorted(expected)}"
+            + (f" — missing {missing}" if missing else "")
+            + (f" — not a parameter {extra}" if extra else "")
+            + " — refusing the connection"
+        )
+        return False
 
     def _engine_for(self, request: RunRequest) -> Any:
         """The engine this request runs, or None (logged) when the variant

@@ -146,15 +146,15 @@ summarise = Job(
     description="All scores through one run.",
 )
 
-#: `>>` is Sequential, a list is Parallel: score first, then the two
+#: `>>` wires, a list is one wire per element: score first, then the two
 #: readers side by side. A runbook is a record (jobs/nightly/<run>/run.json
-#: holds the tree with each job's own run id), never a span.
+#: holds the wires and each job's own run id), never a span.
 nightly = Runbook(
     "nightly",
     score_calls >> [export_csv, summarise],
     # `score_calls` skips a bad call and reports the run as failed; the
     # readers should still run over what it did score. `"stop"` (the
-    # default) would end the sequence there and mark both readers skipped.
+    # default) would skip both readers — they are downstream of it.
     on_error="continue",
     record_dir=OUT / "jobs",
     description="Score every call, then export and summarise in parallel.",
@@ -184,8 +184,6 @@ APP = Application(
             "score",
             http("POST", "/score", port=env("HTTP_PORT", 8017)),
             graph=score_call,
-            ingress=["src"],
-            egress=["out"],
             description="One call in, one score out.",
         ),
     ],

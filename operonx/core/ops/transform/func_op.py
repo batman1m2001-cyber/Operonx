@@ -44,6 +44,7 @@ def op(
     observe_max: Optional[int] = None,
     transient: bool = False,
     show_keys: Optional[Any] = None,
+    door: Optional[str] = None,
 ) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -97,7 +98,14 @@ def op(
             list. ``@op(show_keys="text")`` declares it; ``my_op(..., show_keys="text")``
             at the call site overrides. Unset, the viewer picks from the
             dataflow.
+        door: ``"ingress"`` or ``"egress"`` — this op is where a served graph
+            meets its caller: it reads the session (``current_session()``)
+            or writes to it. ``@op(door="egress")`` on a project's own door
+            op is all a service and the studio need to find it; the built-in
+            ``ingress()`` / ``egress()`` declare it the same way.
     """
+    if door not in (None, "ingress", "egress"):
+        raise ValueError(f"@op(door=...) must be 'ingress' or 'egress', got {door!r}")
     # Validate observability config at decoration time so the raise
     # surfaces where the op is declared, not where it runs.
     from operonx.core.ops.base import _normalise_observability
@@ -138,6 +146,7 @@ def op(
             call_observe_max = init_kwargs.pop("observe_max", observe_max)
             op_transient = init_kwargs.pop("transient", transient)
             op_show_keys = init_kwargs.pop("show_keys", show_keys)
+            op_door = init_kwargs.pop("door", door)
             eff_exclude = call_exclude if call_exclude is not None else exclude
             eff_include = call_include if call_include is not None else include
             return FuncOp(
@@ -149,6 +158,7 @@ def op(
                 observe_max=call_observe_max,
                 transient=op_transient,
                 show_keys=op_show_keys,
+                door=op_door,
                 _mappings=mappings or None,
                 **init_kwargs,
             )

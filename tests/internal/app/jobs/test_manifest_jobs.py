@@ -57,7 +57,8 @@ custom_knob = true
 
 
 def test_job_blocks_parse_with_their_defaults():
-    m = Manifest.from_dict(_toml.loads(MANIFEST))
+    with pytest.warns(UserWarning, match="custom_knob"):
+        m = Manifest.from_dict(_toml.loads(MANIFEST))
     assert [j.name for j in m.jobs] == ["score_calls", "score_stream", "no_doors"]
 
     j = m.job("score_calls")

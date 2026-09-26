@@ -345,7 +345,7 @@ class Operon:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_trace_consumers"]
+    __slots__ = ["graph", "name", "_schema", "_collector", "_trace_consumers", "inputs_expected"]
 
     def __init__(
         self,
@@ -393,6 +393,10 @@ class Operon:
         self.graph = graph
         self.name = graph.name
         self._trace_consumers = self._resolve_trace_consumers(trace)
+        #: The runtime inputs a caller must pass, when whoever compiled the
+        #: engine knows them (a served graph: its unbound parameters). The
+        #: serve layer checks a door's RunRequest against it; None = unchecked.
+        self.inputs_expected = None
 
         # Build graph and create schema immediately
         self.graph.build()

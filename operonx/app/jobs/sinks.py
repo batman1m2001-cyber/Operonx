@@ -35,6 +35,7 @@ __all__ = [
     "ListSink",
     "PythonSink",
     "NullSink",
+    "DirSink",
     "SinkConfig",
     "as_sink",
     "create_sink",
@@ -43,6 +44,15 @@ __all__ = [
 
 #: Where the item's key lands when it is written into a row.
 KEY_FIELD = "_key"
+
+#: File sink modes. ``auto`` is decided per run by ``begin()``.
+MODES = ("auto", "append", "overwrite")
+
+
+def _check_mode(mode: str) -> str:
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
+    return mode
 
 
 @runtime_checkable
@@ -61,28 +71,38 @@ def _as_row(key: str, item: Any, key_field: Optional[str]) -> Dict[str, Any]:
 
 
 class JsonlSink:
-    """One JSON object per line, opened on the first write.
+    """One JSON object per line, opened on the first write. Writes are
+    flushed one at a time: a run that is killed still leaves every item it
+    finished.
 
-    ``mode="append"`` is the default so two runs of the same job add to
-    one file; ``"overwrite"`` starts it fresh. Writes are flushed one at
-    a time: a run that is killed still leaves every item it finished.
+    ``mode``:
+
+    * ``"auto"`` (the default) — inside a job, a fresh run starts the file
+      over and a ``--resume`` run adds to it, so re-running a job never
+      doubles its output; used directly, it appends;
+    * ``"append"`` — always add;
+    * ``"overwrite"`` — always start fresh.
     """
 
     def __init__(
-        self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD
+        self, path: str | Path, *, mode: str = "auto", key_field: Optional[str] = KEY_FIELD
     ):
-        if mode not in ("append", "overwrite"):
-            raise ValueError(f"mode must be 'append' or 'overwrite', not {mode!r}")
         self.path = Path(path)
-        self.mode = mode
+        self.mode = _check_mode(mode)
+        self._append = mode != "overwrite"
         self.key_field = key_field
         self._fh = None
         self.written = 0
 
+    def begin(self, *, resume: bool) -> None:
+        """Called by the job before the first write."""
+        if self.mode == "auto":
+            self._append = resume
+
     def _open(self):
         if self._fh is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._fh = self.path.open("a" if self.mode == "append" else "w", encoding="utf-8")
+            self._fh = self.path.open("a" if self._append else "w", encoding="utf-8")
         return self._fh
 
     async def write(self, key: str, item: Any) -> None:
@@ -104,30 +124,39 @@ class JsonlSink:
 class CsvSink:
     """Header from the first item's fields; later items are written to
     those columns and anything else is dropped rather than shifting a
-    column — a CSV with a ragged row is worse than one with a hole."""
+    column — a CSV with a ragged row is worse than one with a hole.
+
+    ``mode``:
+
+    * ``"auto"`` (the default) — inside a job, a fresh run starts the file
+      over and a ``--resume`` run adds to it, so re-running a job never
+      doubles its output; used directly, it appends;
+    * ``"append"`` — always add;
+    * ``"overwrite"`` — always start fresh.
+    """
 
     def __init__(
-        self, path: str | Path, *, mode: str = "append", key_field: Optional[str] = KEY_FIELD
+        self, path: str | Path, *, mode: str = "auto", key_field: Optional[str] = KEY_FIELD
     ):
-        if mode not in ("append", "overwrite"):
-            raise ValueError(f"mode must be 'append' or 'overwrite', not {mode!r}")
         self.path = Path(path)
-        self.mode = mode
+        self.mode = _check_mode(mode)
+        self._append = mode != "overwrite"
         self.key_field = key_field
         self._fh = None
         self._writer = None
         self.written = 0
 
+    def begin(self, *, resume: bool) -> None:
+        """Called by the job before the first write."""
+        if self.mode == "auto":
+            self._append = resume
+
     async def write(self, key: str, item: Any) -> None:
         row = _as_row(key, item, self.key_field)
         if self._writer is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            fresh = (
-                self.mode == "overwrite" or not self.path.exists() or self.path.stat().st_size == 0
-            )
-            self._fh = self.path.open(
-                "a" if self.mode == "append" else "w", encoding="utf-8", newline=""
-            )
+            fresh = not self._append or not self.path.exists() or self.path.stat().st_size == 0
+            self._fh = self.path.open("a" if self._append else "w", encoding="utf-8", newline="")
             self._writer = csv.DictWriter(
                 self._fh, fieldnames=list(row.keys()), extrasaction="ignore"
             )
@@ -205,6 +234,72 @@ class PythonSink:
         )
 
 
+class DirSink:
+    """One JSON file per item: ``<path>/<key><suffix>``.
+
+    The shape a batch scorer writes — one output per input, named after
+    it. A file is written whole (to a temporary name, then renamed), so a
+    killed run never leaves half a file where a finished one is expected.
+
+    ``skip_existing=True`` makes the job skip any key whose file is
+    already there — re-running over a directory does only what is
+    missing, with no run record needed. ``write_errors=True`` writes a
+    failed item's file too, as ``{"error": "..."}``, so every input has
+    an output a reader can check. ``indent`` / ``ensure_ascii`` go to
+    ``json.dumps``.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        suffix: str = ".json",
+        skip_existing: bool = False,
+        write_errors: bool = False,
+        indent: Optional[int] = 2,
+        ensure_ascii: bool = False,
+    ):
+        self.path = Path(path)
+        self.suffix = suffix
+        self.skip_existing = skip_existing
+        self.write_errors = write_errors
+        self.indent = indent
+        self.ensure_ascii = ensure_ascii
+        self.written = 0
+
+    def file_for(self, key: str) -> Path:
+        return self.path / f"{key}{self.suffix}"
+
+    def exists(self, key: str) -> bool:
+        """True when the job should skip *key* — only under ``skip_existing``."""
+        return self.skip_existing and self.file_for(key).exists()
+
+    async def fail(self, key: str, error: str) -> None:
+        """A failed item's file, under ``write_errors``."""
+        if self.write_errors:
+            await self._put(key, {"error": error})
+
+    async def write(self, key: str, item: Any) -> None:
+        await self._put(key, item)
+        self.written += 1
+
+    async def _put(self, key: str, item: Any) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
+        target = self.file_for(key)
+        tmp = target.with_name(target.name + ".part")
+        tmp.write_text(
+            json.dumps(item, ensure_ascii=self.ensure_ascii, indent=self.indent, default=str),
+            encoding="utf-8",
+        )
+        tmp.replace(target)
+
+    async def close(self) -> None:
+        return None
+
+    def __repr__(self) -> str:
+        return f"dir({self.path}/*{self.suffix})"
+
+
 class NullSink:
     """Drops everything and counts it. What a job without a sink gets."""
 
@@ -232,7 +327,7 @@ class SinkConfig(YamlModel):
     kind: str
     path: Optional[str] = None
     entry: Optional[str] = None
-    mode: str = "append"
+    mode: str = "auto"
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -241,7 +336,7 @@ def open_sink(
     *,
     path: Optional[str] = None,
     entry: Optional[str] = None,
-    mode: str = "append",
+    mode: str = "auto",
     **options: Any,
 ) -> Sink:
     if kind == "jsonl":
@@ -258,7 +353,11 @@ def open_sink(
         return PythonSink(entry)
     if kind == "null":
         return NullSink()
-    raise ValueError(f"unknown sink kind {kind!r} (have: jsonl, csv, python, null)")
+    if kind == "dir":
+        if not path:
+            raise ValueError("sink kind 'dir' needs `path`")
+        return DirSink(path, **options)
+    raise ValueError(f"unknown sink kind {kind!r} (have: jsonl, csv, dir, python, null)")
 
 
 def create_sink(config: SinkConfig) -> Sink:
@@ -276,13 +375,15 @@ def _is_sink(obj: Any) -> bool:
 
 
 def _by_extension(path: Path) -> Sink:
+    if path.is_dir():
+        return DirSink(path)
     ext = path.suffix.lower()
     if ext == ".jsonl":
         return JsonlSink(path)
     if ext == ".csv":
         return CsvSink(path)
     raise ValueError(
-        f"cannot tell a sink from {path}: expected .jsonl or .csv, "
+        f"cannot tell a sink from {path}: expected an existing directory, .jsonl or .csv, "
         "or declare it under `sink:` in resources.yaml"
     )
 

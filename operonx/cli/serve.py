@@ -42,7 +42,8 @@ def main(argv=None) -> int:
 
         described = {d["name"]: d for d in app.describe()["services"]}
         for (host, port), specs in app.manifest.listeners().items():
-            print(f"  {host}:{port}")
+            workers = f"  x{specs[0].workers} workers" if specs[0].workers > 1 else ""
+            print(f"  {host}:{port}{workers}")
             for s in specs:
                 d = described[s.name]
                 target = d["app"] if s.kind == "asgi" else d["graph"]
@@ -50,11 +51,8 @@ def main(argv=None) -> int:
                 print(
                     f"    {s.name:14s} {s.kind:10s} {s.path:16s} -> {target}  [{s.session}{bound}]"
                 )
-                doors = " ".join(
-                    f"{k}={','.join(d[k])}" for k in ("inputs", "ingress", "egress") if d[k]
-                )
-                if doors:
-                    print(f"      {doors}")
+                if d["on_startup"]:
+                    print(f"      on_startup={','.join(d['on_startup'])}")
                 if d["on_session"] or d["on_close"]:
                     print(
                         f"      on_session={d['on_session'] or '-'} on_close={d['on_close'] or '-'}"

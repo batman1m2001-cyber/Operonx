@@ -1,9 +1,9 @@
 """Where a job's items come from.
 
-A source is anything with an async ``items()``. Three ship — a JSONL
-file, a CSV file, and "whatever Python hands me" — and they are enough
-to prove the seam: a table or a queue is one more class against the same
-one-method protocol, added where that backend's client already lives.
+A source is anything with an async ``items()``. Four ship — a JSONL
+file, a CSV file, a directory of files, and "whatever Python hands me".
+A table or a queue is one more class against the same one-method
+protocol, added where that backend's client already lives.
 
 A source is a *resource*. ``resources.yaml`` declares what a project
 reaches out to, and a folder or a table is that::
@@ -38,6 +38,7 @@ __all__ = [
     "JsonlSource",
     "CsvSource",
     "PythonSource",
+    "DirSource",
     "SourceConfig",
     "as_source",
     "create_source",
@@ -128,6 +129,32 @@ class PythonSource:
         return f"python({name})"
 
 
+class DirSource:
+    """Every file in a directory that matches ``pattern``, in name order.
+
+    An item is ``{"path": "<absolute path>", "name": "<file stem>"}`` — the
+    file is not opened, so a graph that loads it itself (and a job whose
+    items are large) does not pay for reading twice. ``key="name"`` is
+    the natural key: stable across runs, so a job over a directory can
+    resume. ``recursive`` walks sub-directories.
+    """
+
+    def __init__(self, path: str | Path, *, pattern: str = "*", recursive: bool = False):
+        self.path = Path(path)
+        self.pattern = pattern
+        self.recursive = recursive
+
+    async def items(self) -> AsyncIterator[Dict[str, str]]:
+        if not self.path.is_dir():
+            raise FileNotFoundError(f"{self.path} is not a directory")
+        found = self.path.rglob(self.pattern) if self.recursive else self.path.glob(self.pattern)
+        for p in sorted(f for f in found if f.is_file()):
+            yield {"path": str(p.resolve()), "name": p.stem}
+
+    def __repr__(self) -> str:
+        return f"dir({self.path}/{self.pattern})"
+
+
 # -- as a resource ---------------------------------------------------------
 
 
@@ -162,7 +189,11 @@ def open_source(
         if not entry:
             raise ValueError("source kind 'python' needs `entry` (module:attr)")
         return PythonSource(entry)
-    raise ValueError(f"unknown source kind {kind!r} (have: jsonl, csv, python)")
+    if kind == "dir":
+        if not path:
+            raise ValueError("source kind 'dir' needs `path`")
+        return DirSource(path, **options)
+    raise ValueError(f"unknown source kind {kind!r} (have: jsonl, csv, dir, python)")
 
 
 def create_source(config: SourceConfig) -> Source:
@@ -181,13 +212,15 @@ def _is_source(obj: Any) -> bool:
 
 
 def _by_extension(path: Path) -> Source:
+    if path.is_dir():
+        return DirSource(path)
     ext = path.suffix.lower()
     if ext == ".jsonl":
         return JsonlSource(path)
     if ext == ".csv":
         return CsvSource(path)
     raise ValueError(
-        f"cannot tell a source from {path}: expected .jsonl or .csv, "
+        f"cannot tell a source from {path}: expected a directory, .jsonl or .csv, "
         "or declare it under `source:` in resources.yaml"
     )
 
@@ -195,15 +228,15 @@ def _by_extension(path: Path) -> Source:
 def as_source(obj: Any) -> Source:
     """Turn what a Job was given into a source.
 
+    * ``None`` — one empty item: a job that does one thing once (create a
+      table, write a report) runs its graph a single time;
     * a :class:`Source` — as is;
     * ``"source:name"`` — resolved through the resource hub;
-    * a path (str or Path) — by extension;
+    * a path (str or Path) — a directory, or a file by extension;
     * anything else — :class:`PythonSource`.
     """
     if obj is None:
-        raise TypeError(
-            "a job needs a source: a `source:` resource key, a file path, or an iterable"
-        )
+        return PythonSource([{}])
     if _is_source(obj):
         return obj
     if isinstance(obj, str):

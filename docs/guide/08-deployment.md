@@ -12,18 +12,18 @@ from operonx.app import Application, Service, asgi, env, http, websocket
 APP = Application(
     "callbot",
     services=[
-        Service("call", websocket("/ws/call", port=env("WS_PORT", 9922)),
-                graph=ws_callbot_pipeline,             # (script_data, vad_state | agent, turn)
+        Service("call", websocket("/ws/call", port=env("WS_PORT", 9922), workers=4),
+                graph=ws_callbot_pipeline,             # (script_data, agent_type)
                 session="per_connection", max_inflight=4000,
-                inputs=["script_data", "vad_state"],   # what the door builds — checked at boot
-                variants={"educa_hr": dict(agent=educa_hr.AGENT, turn=educa_hr.graph.turn)},
-                ingress=["audio_in"], egress=["play", "store_record"],
-                on_session=open_call, on_close=close_call),
+                on_session=open_call, on_close=close_call,
+                on_startup=[startup.warmup]),          # in each call worker, nowhere else
         Service("admin", asgi("/", port=env("HTTP_PORT", 9923)), app=admin.app),
     ],
     jobs=[nightly],
-    on_startup=[startup.warmup],
 )
+
+if __name__ == "__main__":
+    APP.serve()                                        # every listener, in the shape it declares
 ```
 
 ```toml
@@ -35,10 +35,24 @@ app  = "app.main:APP"
 ```
 
 `operonx-serve`, `operonx-run` and the studio find the file, then read
-the object. `inputs=` is the door's contract: the graph must take
-exactly those at run time, or boot fails naming the parameter, and a
-hook that builds anything else is refused at the door. `ingress=` /
-`egress=` name the door ops for whoever draws the graph.
+the object.
+
+- **The graph's signature is the door's contract.** What `on_session`
+  builds (`RunRequest.inputs`) must be exactly the graph's runtime
+  parameters; anything else is refused at the door, naming what is
+  missing and what is not a parameter. There is no second list to keep
+  in step.
+- **A door op says what it is.** `@op(door="ingress")` /
+  `@op(door="egress")` on an op that reads or writes the session; the
+  built-in `ingress()` / `egress()` declare it the same way. The studio
+  draws them as doors; the service names none.
+- **The process is shaped by the listeners.** `workers=4` on a listener
+  runs it as four worker processes (each loads the application again from
+  `operonx.toml`, so it compiles its own engines); a listener with one
+  worker runs in the main process. `on_startup=` on a service runs in
+  that listener's workers only — the model warmed for the call workers is
+  not warmed again for the admin port. `on_startup=` on the
+  `Application` runs for every listener.
 
 The same declarations in TOML keep working, with `module:attr` strings
 where Python has objects:
@@ -73,7 +87,7 @@ schedule = "0 3 * * *"
 ```bash
 pip install "operonx[serve]"
 operonx-serve --list          # what would run, and where
-operonx-serve                 # every listener, in one process
+operonx-serve                 # every listener, each with its workers
 operonx-run --list            # every job, with its schedule
 operonx-run nightly           # what the deployment's cron calls
 ```

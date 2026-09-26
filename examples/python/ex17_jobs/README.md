@@ -82,25 +82,37 @@ tags, so a Langfuse filter finds one job, one run, or one item.
 
 ```python
 nightly = Runbook("nightly", score_calls >> [export_csv, summarise])
-#                             >> = Sequential      [ ] = Parallel
+#                  a list beside `>>` is one wire per element
 ```
 
 ```
-  score_calls ──► ┬─► export_csv  ─┐
-                  └─► summarise   ─┴─► done
+  score_calls ──► ┬─► export_csv
+                  └─► summarise
+```
+
+A flow that needs more than one line is written the way a graph body
+is — a `with` block, one `>>` statement per line; the runbook is the
+union of the wires:
+
+```python
+with Runbook("nightly") as nightly:
+    fetch >> [score, audit]
+    score >> [report, export]
+    [report, audit] >> notify  # notify waits for both
 ```
 
 ```bash
 uv run operonx-run nightly            # or: operonx-run main:nightly
-uv run operonx-run nightly --show     # prints the tree
+uv run operonx-run nightly --show     # prints the wires: score_calls >> [export_csv, summarise]
 ```
 
 Hand-off is by naming the same file: `score_calls` writes `scores.jsonl`
-and the two readers read it. A failed step ends its sequence (`on_error
-= "continue"` runs on regardless); parallel branches always finish. The
-runbook's record, `jobs/nightly/<run>/run.json`, holds the tree with a
-status per node and each job's own run id. It is a record, never a
-span: traces stay one per graph run, tagged with the job.
+and the two readers read it. A job starts when every job wired into it
+has finished. `on_error="stop"` (the default) skips what is downstream
+of a failed job; this example sets `"continue"` so the readers run over
+what was scored. The runbook's record, `jobs/nightly/<run>/run.json`,
+holds the wires and each job's status and own run id. It is a record,
+never a span: traces stay one per graph run, tagged with the job.
 
 Every per-item job may set `item_timeout`: past it the run is cancelled
 and the item is recorded `timeout`, which `retry:N` and `--resume` treat

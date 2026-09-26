@@ -26,7 +26,7 @@ from .protocol import current_session
 __all__ = ["ingress", "egress"]
 
 
-@op(bound="io", transient=True)
+@op(bound="io", transient=True, door="ingress")
 async def ingress(items=None):
     """Yield each item the session receives, one per item.
 
@@ -60,7 +60,7 @@ async def ingress(items=None):
         LOGGER.debug(f"[serve] ingress ended after {count} item(s)")
 
 
-@op(bound="io")
+@op(bound="io", door="egress")
 async def egress(item=None) -> dict:
     """Write one item back to the session that minted this run.
 

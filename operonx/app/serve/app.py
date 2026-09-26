@@ -39,7 +39,6 @@ def compile_graph(
     entry: Any,
     *,
     bind: Optional[Dict[str, Any]] = None,
-    inputs: Optional[Sequence[str]] = None,
     trace: Any = None,
     concurrency: Optional[int] = None,
     where: str = "graph",
@@ -89,18 +88,6 @@ def compile_graph(
         )
     params.update(bound)
     runtime = tuple(name for name in params if name not in bound)
-    if inputs is not None and set(inputs) != set(runtime):
-        # The door's contract, declared: what it will build must be what
-        # the graph takes at run time. A mismatch is a boot failure that
-        # names the parameter, not a None input on the first call.
-        missing = sorted(set(runtime) - set(inputs))
-        extra = sorted(set(inputs) - set(runtime))
-        raise ManifestError(
-            f"{where} declares inputs {sorted(inputs)} but graph {entry!r} takes "
-            f"{sorted(runtime)} at run time"
-            + (f" — not built by the door: {missing}" if missing else "")
-            + (f" — not a parameter: {extra}" if extra else "")
-        )
 
     kwargs = {}
     if params:
@@ -111,10 +98,9 @@ def compile_graph(
     engine = Operon(graph_fn, **kwargs)
     if concurrency:
         engine.graph.concurrency = int(concurrency)
-    try:
-        engine.inputs_expected = runtime  # what a RunRequest must carry
-    except Exception:  # noqa: BLE001 — an engine that refuses attributes still works
-        pass
+    # What a door's RunRequest must carry: the graph's signature is the
+    # contract, checked at the gate (`ServeRunner._inputs_fit`).
+    engine.inputs_expected = runtime
     return engine
 
 
@@ -158,7 +144,6 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
     return compile_graph(
         spec.graph,
         bind=bind,
-        inputs=spec.inputs or None,
         trace=spec.options.get("trace"),
         concurrency=spec.options.get("concurrency"),
         where=where,
@@ -209,6 +194,7 @@ def build_app(
     specs: Tuple[ServeSpec, ...],
     engines: Optional[Dict[str, Any]] = None,
     on_startup: Tuple[Any, ...] = (),
+    startup: bool = True,
 ) -> Any:
     """One ASGI app carrying every endpoint bound to a single listener.
 
@@ -274,13 +260,21 @@ def build_app(
         transport.gate = runner._request_for
         runners.append(runner)
 
+    # The application's hooks, then each service's own — once each, in
+    # declaration order. A service's hooks run only where it is served.
+    hooks: List[Any] = []
+    declared = (*on_startup, *(h for spec in specs for h in spec.on_startup)) if startup else ()
+    for hook in declared:
+        if not any(hook is h or hook == h for h in hooks):
+            hooks.append(hook)
+
     # Lifespan rather than `on_event`: Starlette 1.0 removed the latter.
     # The runners start when the server does and are drained on the way
     # out, so a shutdown lets in-flight runs finish rather than killing
     # them — the same reason a disconnect does not cancel a run.
     @asynccontextmanager
     async def lifespan(_app):
-        for hook_ref in on_startup:
+        for hook_ref in hooks:
             hook = resolve_ref(hook_ref, field="on_startup")
             result = hook()
             if inspect.isawaitable(result):
@@ -367,17 +361,17 @@ def build_apps(manifest: Manifest) -> Dict[Tuple[str, int], Any]:
     }
 
 
-def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None:
-    """Boot every listener the manifest declares, and block.
+#: What a worker process reads to load its listener (see `worker_app`).
+_ROOT_ENV = "OPERONX_SERVE_ROOT"
+_LISTENER_ENV = "OPERONX_SERVE_LISTENER"
+_ONLY_ENV = "OPERONX_SERVE_ONLY"
 
-    More than one listener means more than one uvicorn server in the same
-    process, which is why they are gathered rather than run in turn.
-    """
-    try:
-        import uvicorn
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError('serving needs the extra: pip install "operonx[serve]"') from exc
 
+def plan(
+    manifest: Manifest, only: Optional[List[str]] = None
+) -> List[Tuple[Tuple[str, int], Tuple[ServeSpec, ...], int]]:
+    """What `serve_manifest` will start: each listener, its services and
+    its worker count, in declaration order."""
     specs = manifest.serves
     if only:
         wanted = set(only)
@@ -387,15 +381,69 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
             raise ManifestError(f"no serve entry named: {', '.join(sorted(missing))}")
     if not specs:
         raise ManifestError("nothing to serve — the manifest declares no [[serve]] entries")
-
     grouped: Dict[Tuple[str, int], List[ServeSpec]] = {}
     for spec in specs:
         grouped.setdefault(spec.listener, []).append(spec)
+    return [(addr, tuple(group), group[0].workers) for addr, group in grouped.items()]
 
-    async def run_all() -> None:
+
+def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None:
+    """Boot every listener the manifest declares, and block.
+
+    A listener with one worker runs in this process — several of them as
+    several uvicorn servers gathered on one loop. A listener with
+    ``workers=N`` runs in a child process as uvicorn with N workers; each
+    worker loads the application again from ``operonx.toml``
+    (`worker_app`), so it compiles its own engines and runs its own
+    service's startup hooks. When this process ends, the children do.
+    """
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError('serving needs the extra: pip install "operonx[serve]"') from exc
+
+    listeners = plan(manifest, only)
+    pooled = [entry for entry in listeners if entry[2] > 1]
+    here = [entry for entry in listeners if entry[2] == 1]
+    root = manifest.root
+    if pooled and not (root / "operonx.toml").is_file():
+        names = ", ".join(s.name for _, group, _ in pooled for s in group)
+        raise ManifestError(
+            f"{names}: workers > 1 needs an operonx.toml at {root} — each worker "
+            "process loads the application from it (`[project] app` for one declared in Python)"
+        )
+
+    import multiprocessing
+    import signal
+    import threading
+
+    if pooled and threading.current_thread() is threading.main_thread():
+        # SIGTERM (a container stop, a supervisor) ends Python without
+        # running `finally`, which would leave the worker processes
+        # serving. As an exception, it unwinds through the cleanup below.
+        def _stop(signum, frame):  # noqa: ARG001
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, _stop)
+
+    children = []
+    for (host, port), group, workers in pooled:
+        proc = multiprocessing.Process(
+            target=_run_pooled,
+            args=(str(root), host, port, [s.name for s in group], workers),
+            name=f"operonx-serve-{port}",
+        )
+        proc.start()
+        children.append(proc)
+        LOGGER.info(
+            f"[serve] {host}:{port} x{workers} workers -> "
+            + ", ".join(f"{s.name}({s.kind}){s.path}" for s in group)
+        )
+
+    async def run_here() -> None:
         servers = []
-        for (host, port), group in grouped.items():
-            app = build_app(tuple(group), on_startup=manifest.on_startup)
+        for (host, port), group, _ in here:
+            app = build_app(group, on_startup=manifest.on_startup)
             config = uvicorn.Config(app, host=host, port=port, log_level="info")
             servers.append(uvicorn.Server(config).serve())
             LOGGER.info(
@@ -404,4 +452,54 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
             )
         await asyncio.gather(*servers)
 
-    asyncio.run(run_all())
+    try:
+        if here:
+            asyncio.run(run_here())
+        else:
+            for proc in children:
+                proc.join()
+    finally:
+        for proc in children:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+
+
+def _run_pooled(root: str, host: str, port: int, names: List[str], workers: int) -> None:
+    """A child process: uvicorn, `workers` processes, each loading the app."""
+    import os
+
+    import uvicorn
+
+    os.environ[_ROOT_ENV] = root
+    os.environ[_LISTENER_ENV] = f"{host}:{port}"
+    os.environ[_ONLY_ENV] = ",".join(names)
+    uvicorn.run(
+        "operonx.app.serve.app:worker_app",
+        factory=True,
+        host=host,
+        port=port,
+        workers=workers,
+        log_level="info",
+    )
+
+
+def worker_app() -> Any:
+    """The ASGI app one worker serves — what uvicorn's factory calls in
+    each worker process `serve_manifest` starts for a pooled listener.
+    It loads the application from the project root it was handed, builds
+    its listener, and runs the application's and those services' startup
+    hooks there."""
+    import os
+
+    from ..application import Application
+
+    root = os.environ.get(_ROOT_ENV)
+    if not root:
+        raise RuntimeError(
+            f"worker_app() runs in a worker `serve_manifest` started ({_ROOT_ENV} unset)"
+        )
+    host, _, port = os.environ[_LISTENER_ENV].rpartition(":")
+    only = [n for n in os.environ.get(_ONLY_ENV, "").split(",") if n]
+    app = Application.find(root)
+    return app.asgi(port=int(port), only=only or None)
