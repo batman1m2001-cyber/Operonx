@@ -442,7 +442,10 @@ class Eval(Job):
 
     def describe(self) -> Dict[str, Any]:
         out = super().describe()
-        out.update({"kind": "eval", "dataset": str(self.dataset.path),
+        # the cases come from the dataset and the outputs go to the verdicts:
+        # the source and sink underneath are plumbing, not what the eval is
+        out.update({"kind": "eval", "source": str(self.dataset.path), "sink": None,
+                    "dataset": str(self.dataset.path),
                     "evaluators": [_name(e) for e in self.evaluators], "threshold": self.threshold})
         return out
 

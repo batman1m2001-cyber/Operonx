@@ -273,6 +273,8 @@ def test_a_job_block_with_a_dataset_is_an_eval(project):
     assert described["evaluators"] == [f"{name}:label_ok"]
     ev = app.job("labels")
     assert isinstance(ev, Eval) and ev.threshold == 0.5 and ev.dataset.path == root / "datasets" / "labels.jsonl"
+    d = ev.describe()
+    assert d["source"] == str(root / "datasets" / "labels.jsonl") and d["sink"] is None
     run = app.run_sync("labels")
     assert run.status == "ok" and run.meta["eval"]["passed"] == 2  # 2/3 ≥ 0.5
     assert run.path.parent == root / "evals" / "labels"
