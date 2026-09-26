@@ -21,8 +21,6 @@ APP = Application(
                 "formal": dict(style=styles.formal, sign_off="Regards"),
                 "casual": dict(style=styles.casual, sign_off="Cheers"),
             },
-            ingress=["request"],
-            egress=["out"],
             on_session=door.open,  # ?style=formal|casual -> RunRequest(variant=…)
             description="POST /greet?style=formal|casual with a JSON name; the reply is that style's greeting.",
         ),

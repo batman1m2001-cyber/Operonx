@@ -98,7 +98,7 @@ union of the wires:
 with Runbook("nightly") as nightly:
     fetch >> [score, audit]
     score >> [report, export]
-    [report, audit] >> notify        # notify waits for both
+    [report, audit] >> notify  # notify waits for both
 ```
 
 ```bash

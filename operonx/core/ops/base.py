@@ -316,12 +316,22 @@ class BaseOp(ABC):
         # Show keys: the one or two outputs that stand for this op when a
         # viewer has room for a line, not a port list. See show_keys_default.
         "show_keys",
+        # "ingress" | "egress" | None — this op is where a served graph meets
+        # its caller. See door_default.
+        "door",
     ]
 
     # The kind's show keys, used when an instance declares none. A
     # subclass whose product is obvious sets it (LLMOp → "content");
     # empty means "let the viewer pick from the dataflow".
     show_keys_default: Tuple[str, ...] = ()
+
+    # The kind's door, used when an instance declares none: "ingress" for an
+    # op that takes the caller's items into a served graph, "egress" for one
+    # that hands answers back. The op says so itself — a viewer draws it as
+    # a door and a service needs no list of door names.
+    door_default: Optional[str] = None
+    _VALID_DOORS = (None, "ingress", "egress")
 
     # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
     _cache_stores: Dict[str, tuple] = {}
@@ -352,6 +362,7 @@ class BaseOp(ABC):
         transient: bool = False,
         show_keys: Union[str, Sequence[str], None] = None,
         name_hint: Optional[str] = None,
+        door: Optional[str] = None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -371,6 +382,10 @@ class BaseOp(ABC):
         self.show_keys = _normalise_show(
             type(self).show_keys_default if show_keys is None else show_keys
         )
+        door = type(self).door_default if door is None else door
+        if door not in self._VALID_DOORS:
+            raise ValueError(f"door must be 'ingress', 'egress' or None, got {door!r}")
+        self.door = door
 
         # Phase 2: observability filter. Normalised to dict form:
         #   {"*": [vars]}                  — apply to both observers

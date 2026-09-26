@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — declarations moved to where they are true
+
+- **A door op says what it is.** `@op(door="ingress")` / `@op(door="egress")`
+  (and `door_default` on an op class); the built-in `ingress()` /
+  `egress()` declare it. `Service(ingress=, egress=)` and the
+  `[[serve]]` keys are gone — using them is an error that says so.
+- **The graph's signature is the door's contract.** `Service(inputs=)`
+  and the `[[serve]]` key are gone. A declared `on_session` hook's
+  `RunRequest.inputs` must be exactly the graph's runtime parameters;
+  anything else is refused at the door, naming what is missing and what
+  is not a parameter. (Fixed on the way: `compile_graph` set
+  `engine.inputs_expected` inside a `try` that swallowed the failure —
+  `Operon` has slots — so it was never set. It is a slot now.)
+- **The process is shaped by the listeners.** `websocket(..., workers=4)`
+  (and `http`, `asgi`, `[[serve]] workers`) runs that listener as N
+  worker processes, each loading the application again from
+  `operonx.toml`; a one-worker listener runs in the main process.
+  `Service(on_startup=[...])` (`[[serve]] on_startup`) runs in that
+  listener's workers only; `Application(on_startup=)` still runs for
+  every listener. `Application.serve()` / `operonx-serve` do all of it,
+  and stop the workers on SIGTERM; services sharing an address must
+  agree on `workers`. `operonx-serve --list` prints workers and hooks.
+
 ### Changed — a Runbook is wired like a graph body
 
 `with Runbook("nightly") as nightly:` then one `>>` statement per line —

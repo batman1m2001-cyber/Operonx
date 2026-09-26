@@ -184,8 +184,6 @@ APP = Application(
             "score",
             http("POST", "/score", port=env("HTTP_PORT", 8017)),
             graph=score_call,
-            ingress=["src"],
-            egress=["out"],
             description="One call in, one score out.",
         ),
     ],

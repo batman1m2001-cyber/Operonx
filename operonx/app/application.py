@@ -195,8 +195,8 @@ class Application:
     ) -> Any:
         """One listener's ASGI app — for a process that runs uvicorn itself, or
         a test client. By *port*, or the only one. ``startup=False`` leaves the
-        ``on_startup`` hooks to another process (an admin listener beside the
-        call workers does not warm the model twice)."""
+        ``on_startup`` hooks — the application's and the services' — to
+        another process."""
         from .serve.app import build_app
 
         self.bootstrap()
@@ -211,7 +211,7 @@ class Application:
                 f"asgi() needs exactly one listener; {self.name} has "
                 f"{sorted(listeners) or 'none'} — pass port= or only="
             )
-        return build_app(tuple(specs), on_startup=self.manifest.on_startup if startup else ())
+        return build_app(tuple(specs), on_startup=self.manifest.on_startup, startup=startup)
 
     async def run(self, name: str, *, resume: bool = False) -> Any:
         """Run a job or runbook once and return its record."""

@@ -162,11 +162,12 @@ class ServeSpec:
     # build-time parameters (`module:attr` values are loaded, the rest are
     # literals or objects) and `RunRequest.variant` picks one per session.
     variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    #: The graph's runtime inputs the door builds — checked at compile.
-    inputs: Tuple[str, ...] = ()
-    #: The door ops: where items enter the graph and where answers leave.
-    ingress: Tuple[str, ...] = ()
-    egress: Tuple[str, ...] = ()
+    #: Worker processes behind this endpoint's address. Services sharing an
+    #: address share its workers, so they must agree.
+    workers: int = 1
+    #: Hooks run before the listener accepts, in each of its workers — and
+    #: only its: ``module:attr`` strings, or the callables themselves.
+    on_startup: Tuple[Any, ...] = ()
 
     @property
     def is_stream(self) -> bool:
@@ -503,21 +504,42 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         raise ManifestError(f"{where}: {label} has port {port}, outside the range 1-65535")
 
     variants = _variants(block.get("variants"), where, label, kind)
-    doors = {}
-    for key in ("inputs", "ingress", "egress"):
-        values = _as_list(block.get(key))
-        if not all(isinstance(v, str) for v in values):
-            raise ManifestError(f"{where}: {label} {key} must be a list of op or input names")
-        doors[key] = tuple(str(v) for v in values)
+    if "inputs" in block:
+        raise ManifestError(
+            f"{where}: {label} `inputs` is gone — the graph's own runtime parameters are "
+            "the door's contract; on_session's RunRequest.inputs is checked against them"
+        )
+    moved = [k for k in ("ingress", "egress") if k in block]
+    if moved:
+        raise ManifestError(
+            f"{where}: {label} `{'`/`'.join(moved)}` is gone — a door op says what it is "
+            'itself: @op(door="ingress") / @op(door="egress")'
+        )
+    workers = block.get("workers", 1)
+    try:
+        workers = int(workers)
+    except (TypeError, ValueError):
+        raise ManifestError(
+            f"{where}: {label} has workers {workers!r}, which is not a number"
+        ) from None
+    if workers < 1:
+        raise ManifestError(
+            f"{where}: {label} has workers {workers}; a listener needs at least one"
+        )
+    on_startup = _as_list(block.get("on_startup"))
+    for hook in on_startup:
+        if not isinstance(hook, str) or not _ENTRY_RE.match(hook):
+            raise ManifestError(
+                f"{where}: {label} on_startup {hook!r} is not a `module:attr` entry point"
+            )
 
     known_keys = {
         "name",
         "kind",
         "graph",
         "variants",
-        "inputs",
-        "ingress",
-        "egress",
+        "workers",
+        "on_startup",
         "path",
         "method",
         "host",
@@ -543,9 +565,8 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         max_inflight=max_inflight,
         on_session=(str(block["on_session"]) if block.get("on_session") else None),
         variants=variants,
-        inputs=doors["inputs"],
-        ingress=doors["ingress"],
-        egress=doors["egress"],
+        workers=workers,
+        on_startup=tuple(str(h) for h in on_startup),
         on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
         description=str(block.get("description") or ""),
@@ -712,3 +733,12 @@ def _reject_duplicates(serves: Tuple[ServeSpec, ...], where: str) -> None:
                 f"{spec.path} on {spec.host}:{spec.port}"
             )
         seen_routes[route] = spec.name
+    # Services on one address are one server, so one set of processes.
+    workers: Dict[Tuple[str, int], ServeSpec] = {}
+    for spec in serves:
+        first = workers.setdefault(spec.listener, spec)
+        if first.workers != spec.workers:
+            raise ManifestError(
+                f"{where}: {first.name!r} and {spec.name!r} share {spec.host}:{spec.port} "
+                f"but declare workers={first.workers} and workers={spec.workers}"
+            )

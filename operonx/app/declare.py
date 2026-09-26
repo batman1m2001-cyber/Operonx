@@ -6,16 +6,19 @@ and the two door hooks, written where a reader can see all three.
     APP = Application(
         "callbot",
         services=[
-            Service("call", websocket("/ws/call", port=env("WS_PORT", 9922)),
+            Service("call", websocket("/ws/call", port=env("WS_PORT", 9922), workers=4),
                     graph=ws_callbot_pipeline, session="per_connection", max_inflight=4000,
-                    inputs=["script_data", "vad_state"],
-                    variants={"educa_hr": dict(agent=educa_hr.AGENT, turn=educa_hr.graph.turn)},
-                    ingress=["audio_in"], egress=["play", "store_record"],
-                    on_session=open_call, on_close=close_call),
+                    on_session=open_call, on_close=close_call,
+                    on_startup=[startup.warmup]),
             Service("admin", asgi("/", port=9923), app=admin.app),
         ],
-        on_startup=[startup.warmup],
     )
+
+    APP.serve()     # every listener, each in the shape it declares
+
+The graph's own parameters are the door's contract — what `on_session`
+builds is checked against them at the door — and the door ops say what
+they are themselves (`@op(door="ingress")`), so a service names neither.
 
 `operonx.toml` then says only what is not code — the project's name, its
 import roots, and ``app = "app.main:APP"`` so ``operonx-serve``, the
@@ -60,18 +63,34 @@ class Listener:
     port: int = 8000
     host: str = "0.0.0.0"
     method: str = "POST"
+    #: Worker processes behind this address. More than one needs an
+    #: ``operonx.toml`` at the project root: each worker loads the
+    #: application from it.
+    workers: int = 1
 
 
-def websocket(path: str, port: int = 8000, host: str = "0.0.0.0") -> Listener:
-    return Listener("websocket", path, int(port), host)
+def _workers(workers: Any) -> int:
+    try:
+        n = int(workers)
+    except (TypeError, ValueError):
+        raise ManifestError(f"workers={workers!r} is not a number") from None
+    if n < 1:
+        raise ManifestError(f"workers={n}; a listener needs at least one")
+    return n
 
 
-def http(method: str, path: str, port: int = 8000, host: str = "0.0.0.0") -> Listener:
-    return Listener("http", path, int(port), host, str(method).upper())
+def websocket(path: str, port: int = 8000, host: str = "0.0.0.0", workers: int = 1) -> Listener:
+    return Listener("websocket", path, int(port), host, workers=_workers(workers))
 
 
-def asgi(path: str = "/", port: int = 8000, host: str = "0.0.0.0") -> Listener:
-    return Listener("asgi", path, int(port), host)
+def http(
+    method: str, path: str, port: int = 8000, host: str = "0.0.0.0", workers: int = 1
+) -> Listener:
+    return Listener("http", path, int(port), host, str(method).upper(), _workers(workers))
+
+
+def asgi(path: str = "/", port: int = 8000, host: str = "0.0.0.0", workers: int = 1) -> Listener:
+    return Listener("asgi", path, int(port), host, workers=_workers(workers))
 
 
 def Service(  # noqa: N802 — reads as a declaration
@@ -84,12 +103,10 @@ def Service(  # noqa: N802 — reads as a declaration
     max_inflight: Optional[int] = None,
     concurrency: Optional[int] = None,
     trace: Optional[Sequence[str]] = None,
-    inputs: Optional[Sequence[str]] = None,
     variants: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    ingress: Sequence[str] = (),
-    egress: Sequence[str] = (),
     on_session: Any = None,
     on_close: Any = None,
+    on_startup: Sequence[Any] = (),
     description: str = "",
     **options: Any,
 ) -> ServeSpec:
@@ -97,12 +114,14 @@ def Service(  # noqa: N802 — reads as a declaration
     parses to, with objects where the manifest has ``module:attr``.
 
     ``graph`` is a ``@graph`` (or a factory, with ``variants``), ``app`` an
-    ASGI app for an ``asgi`` listener. ``inputs`` names the graph's runtime
-    inputs the door will build — checked against the graph when it is
-    compiled, so a mismatch fails at boot and names the parameter.
-    ``ingress`` / ``egress`` name the door ops, for whoever draws the graph.
+    ASGI app for an ``asgi`` listener. ``on_startup`` hooks run before the
+    listener accepts, in each of its worker processes and nowhere else — a
+    model warmed for the call workers is not warmed again for an admin
+    port. The door's inputs are the graph's own runtime parameters; the
+    door ops declare themselves with ``@op(door=...)``.
     """
     label = f"Service({name!r})"
+    _refuse_moved(options, label)
     kind = listener.kind
     if kind == "asgi":
         if app is None:
@@ -157,10 +176,24 @@ def Service(  # noqa: N802 — reads as a declaration
         description=description,
         options=opts,
         variants=variants_out,
-        inputs=tuple(inputs or ()),
-        ingress=tuple(ingress),
-        egress=tuple(egress),
+        workers=listener.workers,
+        on_startup=tuple(on_startup),
     )
+
+
+def _refuse_moved(options: Mapping[str, Any], label: str) -> None:
+    """What moved out of the service, named where it went."""
+    if "inputs" in options:
+        raise ManifestError(
+            f"{label}: inputs= is gone — the graph's own runtime parameters are the "
+            "door's contract; on_session's RunRequest.inputs is checked against them"
+        )
+    doors = [k for k in ("ingress", "egress") if k in options]
+    if doors:
+        raise ManifestError(
+            f"{label}: {'/'.join(doors)}= is gone — a door op says what it is itself: "
+            '@op(door="ingress") / @op(door="egress")'
+        )
 
 
 def ref_name(value: Union[str, Any]) -> str:
@@ -245,9 +278,8 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "session": s.session,
         "graph": ref_name(s.graph) if s.graph else None,
         "variants": list(s.variants),
-        "inputs": list(s.inputs),
-        "ingress": list(s.ingress),
-        "egress": list(s.egress),
+        "workers": s.workers,
+        "on_startup": [ref_name(h) for h in s.on_startup],
         "on_session": ref_name(s.on_session) if s.on_session else None,
         "on_close": ref_name(s.on_close) if s.on_close else None,
         "app": ref_name(s.app) if s.app else None,
