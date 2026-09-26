@@ -115,6 +115,9 @@ postgres = [
     "psycopg-pool>=3.2",
     "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
 ]
+mongo = [
+    "pymongo>=4.6",
+]
 qdrant = [
     "qdrant-client>=1.9",
     "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
@@ -166,6 +169,7 @@ all = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
     "qdrant-client>=1.9",
+    "pymongo>=4.6",
     "langfuse>=2.6.0,<3.0.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
@@ -180,6 +184,9 @@ dev = [
     "httpx>=0.24",
     "ruff>=0.1",
     "pre-commit",
+    # the Mongo run store's tests run against an in-memory Mongo
+    "mongomock>=4.1",
+    "pymongo>=4.6",
     # tests/internal/cli/ parses pyproject.toml to verify every
     # [project.scripts] target resolves; tomllib is stdlib only on 3.11+.
     "tomli>=2.0; python_version < '3.11'",

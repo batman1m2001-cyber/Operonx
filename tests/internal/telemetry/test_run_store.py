@@ -17,8 +17,10 @@ The gates:
 from __future__ import annotations
 
 import asyncio
+import os
 import textwrap
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -204,12 +206,39 @@ def _row(n: OpExecution) -> dict:
 # -- the contract, per backend --------------------------------------------------------
 
 
-@pytest.fixture(params=["files", "sqlite"])
+#: A real Postgres for the postgres store — e.g. a throwaway container:
+#: docker run --rm -d -p 127.0.0.1:55439:5432 -e POSTGRES_PASSWORD=x pgvector/pgvector:pg16
+#: OPERONX_TEST_PG_DSN=postgresql://postgres:x@127.0.0.1:55439/postgres
+_PG_DSN = os.environ.get("OPERONX_TEST_PG_DSN", "")
+
+
+@pytest.fixture(params=[
+    "files", "sqlite", "mongo",
+    pytest.param("postgres", marks=pytest.mark.skipif(not _PG_DSN, reason="set OPERONX_TEST_PG_DSN")),
+])
 def store(request, tmp_path):
     if request.param == "files":
         s = FilesRunStore(root=tmp_path / "runs", refresh_every=0)
-    else:
+    elif request.param == "sqlite":
         s = SqliteRunStore(path=tmp_path / "runs.sqlite")
+    elif request.param == "mongo":
+        mongomock = pytest.importorskip("mongomock")
+        from operonx.telemetry.runs.mongo import MongoRunStore
+
+        s = MongoRunStore(client=mongomock.MongoClient(), database=f"t{uuid.uuid4().hex[:8]}",
+                          media_dir=tmp_path / "media")
+    else:
+        from operonx.telemetry.runs.postgres import PostgresRunStore
+
+        prefix = f"t{uuid.uuid4().hex[:8]}_"
+        s = PostgresRunStore(_PG_DSN, prefix=prefix, media_dir=tmp_path / "media")
+
+        def drop():
+            with s.index._tx() as cur:
+                for table in ("runs", "op_rollups", "records"):
+                    cur.execute(f"DROP TABLE IF EXISTS {prefix}{table}")
+
+        request.addfinalizer(drop)
     for t in _calls():
         s.consume(t)
     return s
@@ -522,3 +551,23 @@ def test_groups_count_runs_errors_and_cost_per_origin_and_name(store):
     ]
     with pytest.raises(ValueError):
         store.groups(by=("metadata; DROP TABLE runs",))
+
+
+def test_start_times_keep_their_precision(store):
+    """Postgres's REAL is 4 bytes — an epoch start time would round to
+    minutes; every backend keeps it to the millisecond."""
+    t = WorkflowTrace(trace_id="precise", workflow_name="flow", started_at=10.0, ended_at=10.5,
+                      nodes=[], metadata={"origin": "adhoc"}, wall_started_at=1790467200.123)
+    store.consume(t)
+    assert store.list_runs(RunFilter(trace_ids=["precise"])).items[0].started_at == pytest.approx(1790467200.123, abs=1e-3)
+
+
+def test_the_team_backends_say_what_they_need():
+    from operonx.telemetry.runs import open_run_store
+
+    with pytest.raises(ValueError, match="needs dsn"):
+        open_run_store({"backend": "postgres"})
+    with pytest.raises(ValueError, match="needs uri"):
+        open_run_store({"backend": "mongo"})
+    with pytest.raises(ValueError, match="postgres, mongo"):
+        open_run_store({"backend": "cassandra"})

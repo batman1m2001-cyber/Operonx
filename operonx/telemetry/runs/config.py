@@ -4,11 +4,18 @@
 
     run_store:
       default:
-        backend: files            # files | sqlite | langfuse
+        backend: files            # files | sqlite | postgres | mongo | langfuse
         root: ""                  # files: unset → <project>/.operonx/runs
       archive:
         backend: sqlite
         path: /data/runs.sqlite
+      team:
+        backend: postgres         # one database every service and the studio share
+        dsn: ${RUNS_PG_DSN}
+      docs:
+        backend: mongo
+        uri: ${RUNS_MONGO_URI}
+        database: operonx
       remote:
         backend: langfuse
         host: ${LANGFUSE_HOST}
@@ -30,7 +37,7 @@ from .base import RunStore
 
 __all__ = ["BACKENDS", "RunStoreConfig", "create_run_store", "open_run_store"]
 
-BACKENDS = ("files", "sqlite", "langfuse")
+BACKENDS = ("files", "sqlite", "postgres", "mongo", "langfuse")
 
 
 class RunStoreConfig(YamlModel):
@@ -44,6 +51,14 @@ class RunStoreConfig(YamlModel):
     layout: str = "origin"
     # sqlite
     path: str = ""
+    # postgres
+    dsn: str = ""
+    prefix: str = ""
+    # mongo
+    uri: str = ""
+    database: str = "operonx"
+    # postgres, mongo: where large payloads go
+    media_dir: str = ""
     # langfuse (read-only)
     host: str = ""
     public_key: str = ""
@@ -63,6 +78,20 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
         from .sqlite import SqliteRunStore
 
         return SqliteRunStore(path=spec.get("path") or "")
+    if backend == "postgres":
+        from .postgres import PostgresRunStore
+
+        if not spec.get("dsn"):
+            raise ValueError("run_store backend 'postgres' needs dsn")
+        return PostgresRunStore(spec["dsn"], prefix=spec.get("prefix") or "operonx_",
+                                media_dir=spec.get("media_dir") or "")
+    if backend == "mongo":
+        from .mongo import MongoRunStore
+
+        if not spec.get("uri"):
+            raise ValueError("run_store backend 'mongo' needs uri")
+        return MongoRunStore(spec["uri"], database=spec.get("database") or "operonx",
+                             prefix=spec.get("prefix") or "", media_dir=spec.get("media_dir") or "")
     if backend == "langfuse":
         from .langfuse import LangfuseRunStore
 
@@ -81,6 +110,11 @@ def create_run_store(cfg: RunStoreConfig) -> RunStore:
             "root": cfg.root,
             "layout": cfg.layout,
             "path": cfg.path,
+            "dsn": cfg.dsn,
+            "prefix": cfg.prefix,
+            "uri": cfg.uri,
+            "database": cfg.database,
+            "media_dir": cfg.media_dir,
             "host": cfg.host,
             "public_key": cfg.public_key,
             "secret_key": cfg.secret_key,

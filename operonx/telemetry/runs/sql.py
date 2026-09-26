@@ -76,11 +76,11 @@ _ORDER_SQL = {
 }
 
 
-def _coltype(col: str) -> str:
+def _coltype(col: str, real: str = "REAL") -> str:
     if col in _TEXT:
         return "TEXT"
     if col in _REAL:
-        return "REAL"
+        return real
     return "INTEGER"
 
 
@@ -96,10 +96,14 @@ class SqlIndex:
         ph: str = "?",
         json_get: Callable[[str, str], str] = lambda col, key: f"json_extract({col}, '$.{key}')",
         prefix: str = "",
+        real_type: str = "REAL",
     ):
         self._connect = connect
         self.ph = ph
         self._json_get = json_get
+        #: SQLite's REAL is 8 bytes; Postgres's is 4, which would round an
+        #: epoch-seconds start time to minutes — it passes DOUBLE PRECISION
+        self.real_type = real_type
         self.runs = f"{prefix}runs"
         self.ops = f"{prefix}op_rollups"
 
@@ -107,11 +111,11 @@ class SqlIndex:
 
     def create(self) -> None:
         cols = ",\n  ".join(
-            f"{c} {_coltype(c)}" + (" PRIMARY KEY" if c == "trace_id" else "")
+            f"{c} {_coltype(c, self.real_type)}" + (" PRIMARY KEY" if c == "trace_id" else "")
             for c in SUMMARY_COLUMNS
         )
         ops = ",\n  ".join(
-            f"{c} {'TEXT' if c in ('trace_id', 'op', 'op_type', 'samples') else ('REAL' if c in ('total_ms', 'max_ms', 'cost_usd') else 'INTEGER')}"
+            f"{c} {'TEXT' if c in ('trace_id', 'op', 'op_type', 'samples') else (self.real_type if c in ('total_ms', 'max_ms', 'cost_usd') else 'INTEGER')}"
             for c in ROLLUP_COLUMNS
         )
         statements = [
