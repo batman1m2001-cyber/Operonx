@@ -651,7 +651,9 @@ class Bridge:
                 heard = await replies()
                 history.append(("service", heard or "(silence)"))
         except Exception as exc:  # noqa: BLE001 — the persona failing ends the session, says why
-            self.emit({"t": "error", "sid": sid, "text": f"simulated user: {type(exc).__name__}: {exc}"})
+            # a KeyError's str() is its repr — quotes and escaped newlines; say the message itself
+            text = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
+            self.emit({"t": "error", "sid": sid, "text": f"simulated user: {type(exc).__name__}: {text}"})
         finally:
             self.end({"sid": sid})
 
