@@ -212,6 +212,56 @@ def test_a_form_request_runs_the_real_door_and_is_filed_as_playground(project):
     assert (root / ".operonx" / "runs" / "playground").is_dir()
 
 
+def test_a_session_streams_its_ops_as_they_finish(project):
+    """A canvas follows a playground session live: every op execution the
+    run records arrives in an ``ops`` batch (op, status, ms), and all of
+    them before ``ended``."""
+    name, root = project
+    bridge, events = _bridge(root)
+
+    async def go():
+        await bridge.handle({"op": "open", "sid": "o1", "service": "score", "toy": "form",
+                             "send": [{"kind": "json", "value": {"call_id": "c1", "text": "a b"}}], "end": True})
+        return await _until(events, lambda e: e["t"] == "ended")
+
+    ended = asyncio.run(go())
+    batches = [e for e in events if e["t"] == "ops"]
+    assert batches and all(b["sid"] == "o1" and b["trace_id"] == ended["trace_id"] for b in batches)
+    assert events.index(batches[-1]) < events.index(ended)
+    ops = [o for b in batches for o in b["ops"]]
+    recorded = _store(root).get_run(ended["trace_id"]).nodes
+    assert sorted(o["op"] for o in ops) == sorted(n["op_name"] for n in recorded)
+    assert all(o["status"] == "ok" and o["ms"] >= 0 for o in ops)
+
+
+def test_a_failing_on_start_never_stops_the_run():
+    """serve_session's follower is a courtesy: if it raises, the run runs."""
+    from operonx.app.serve.runner import serve_session
+
+    class Handle:
+        trace = None
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class Engine:
+        def start(self, **kw):
+            return Handle()
+
+    class Session:
+        async def close(self):
+            pass
+
+    def boom(handle):
+        raise RuntimeError("follower fell over")
+
+    got = asyncio.run(serve_session(Engine(), Session(), on_start=boom))
+    assert isinstance(got, Handle)
+
+
 def test_a_chat_session_goes_through_the_gate_and_answers_in_order(project):
     name, root = project
     bridge, events = _bridge(root)

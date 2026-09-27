@@ -66,8 +66,11 @@ Requests (one JSON object per line; ``id`` is echoed back)::
     {"op": "rerun", "job": "score_calls", "op_name": "scored", "inputs": {...}}
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
-toy message), ``said`` (what a simulated user sent), ``ended`` (status,
-error, duration), ``rerun``, ``error``.
+toy message), ``said`` (what a simulated user sent), ``ops`` (the op
+executions that finished since the last batch — ``{"op", "status",
+"ms"}`` each — so a canvas can follow the run live; the last batch comes
+before ``ended``), ``ended`` (status, error, duration), ``rerun``,
+``error``.
 """
 
 from __future__ import annotations
@@ -374,6 +377,15 @@ class PlaySession(BoundedSession):
             self.script.append(kept)
 
 
+def _op_event(node: Any) -> Dict[str, Any]:
+    """One finished op execution, as the playground's ``ops`` event carries it."""
+    start, end = getattr(node, "start_time", None), getattr(node, "end_time", None)
+    out: Dict[str, Any] = {"op": node.op_name, "status": getattr(node, "status", None) or "ok"}
+    if start is not None and end is not None:
+        out["ms"] = round((end - start) * 1000, 2)
+    return out
+
+
 def _status(trace: Any) -> Tuple[str, Optional[str]]:
     """A finished trace's status and its first error, as one line."""
     for node in getattr(trace, "nodes", None) or []:
@@ -528,18 +540,44 @@ class Bridge:
         self.emit({"t": "opened", "sid": sid, "trace_id": request.trace_id, "service": spec.name,
                    "variant": request.variant, "inputs": _jsonable(request.inputs)})
 
+        # The run's ops as they finish, so a canvas can follow the session
+        # live: serve_session hands over the handle as the run starts, and
+        # this watches its trace grow. Batches go out every ~120 ms; the
+        # last one before "ended".
+        follow: Dict[str, Any] = {"trace": None, "sent": 0, "done": False}
+
+        async def watch() -> None:
+            while True:
+                trace = follow["trace"]
+                nodes = trace.nodes if trace is not None else []
+                if len(nodes) > follow["sent"]:
+                    batch = nodes[follow["sent"]:follow["sent"] + 200]
+                    follow["sent"] += len(batch)
+                    self.emit({"t": "ops", "sid": sid, "trace_id": request.trace_id,
+                               "ops": [_op_event(n) for n in batch]})
+                    continue
+                if follow["done"]:
+                    return
+                await asyncio.sleep(0.12)
+
         async def run() -> None:
             t0, handle, error = perf_counter(), None, None
             # the run's tasks inherit this: its failing resources fail here only
             _FAILING.set(frozenset(session.conditions.get("fail") or ()))
+            watcher = asyncio.ensure_future(watch())
             try:
-                handle = await serve_session(runner._engine_for(request), session, request,
-                                             metadata=metadata)
+                handle = await serve_session(runner._engine_for(request), session, request, metadata=metadata,
+                                             on_start=lambda h: follow.__setitem__("trace", getattr(h, "trace", None)))
             except Exception as exc:  # noqa: BLE001 — reported as the session's end
                 error = f"{type(exc).__name__}: {exc}"
             finally:
                 await runner._close_one(session, handle)
                 self._sessions.pop(sid, None)
+                follow["done"] = True
+                try:
+                    await asyncio.wait_for(watcher, 5)
+                except (asyncio.TimeoutError, Exception):  # noqa: BLE001 — following is best-effort
+                    watcher.cancel()
             status, first = _status(getattr(handle, "trace", None))
             ended = {"t": "ended", "sid": sid, "trace_id": request.trace_id,
                      "status": "error" if error else status, "error": error or first,

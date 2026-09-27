@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from operonx.app.declare import ref_name
 from operonx.app.manifest import ServeSpec
@@ -37,6 +37,7 @@ async def serve_session(
     request: Optional[RunRequest] = None,
     metadata: Optional[Dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    on_start: Optional[Callable[[Any], None]] = None,
 ) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
@@ -59,6 +60,12 @@ async def serve_session(
     run is cancelled and :class:`RunTimeout` is raised — the one case in
     which a transport cancels the run it minted, and it does so because
     the caller asked for exactly that. A job's ``item_timeout`` is this.
+
+    ``on_start`` is called with the run's handle as soon as the run has
+    started, before it is drained — for a caller that follows the run
+    while it happens (the playground watches ``handle.trace`` grow, so
+    a canvas can light each op as it finishes). A callback that raises
+    is logged; it never stops the run.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -80,6 +87,11 @@ async def serve_session(
         if tags:
             have = list(trace.metadata.get("tags") or [])
             trace.metadata["tags"] = have + [t for t in tags if t not in have]
+    if on_start is not None:
+        try:
+            on_start(handle)
+        except Exception as exc:  # noqa: BLE001 — a follower's failure is its own
+            LOGGER.error(f"[serve] on_start failed: {type(exc).__name__}: {exc}")
     try:
         if timeout is None:
             await _drain(handle)
