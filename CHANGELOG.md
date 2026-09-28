@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Application(trace=[])` survives `operonx.toml`.** Loading the app
+  through `[project] app = "module:APP"` merged only the object's truthy
+  project values, so an explicit empty `trace` was dropped and every job
+  without consumers of its own fell back to the local consumer, recording
+  whole runs under `.operonx/runs`. The object's `trace` now wins even when
+  empty; its empty default description still gives way to the file's.
+
 ## [1.10.0] - 2026-09-28
 
 ### Added — replaying real sessions

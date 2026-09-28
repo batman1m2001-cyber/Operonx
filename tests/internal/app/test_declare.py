@@ -392,6 +392,46 @@ def test_a_pointer_to_something_else_is_a_manifest_error(pointed, tmp_path):
         Application.find(root)
 
 
+def test_an_empty_trace_on_the_object_survives_the_manifest(tmp_path, monkeypatch):
+    """`Application(trace=[])` means "trace nothing", and loading it through
+    the toml's `app =` must keep that. 1.10.0 merged only the object's truthy
+    values, dropped the empty list, and every job fell back to the local
+    consumer. The object's empty default description still gives way to the
+    file's."""
+    name = f"quiet_{uuid.uuid4().hex[:6]}"
+    (tmp_path / f"{name}.py").write_text(
+        textwrap.dedent("""
+        from operonx.app import Application
+        from operonx.app.jobs import Job
+        from operonx.core import END, START, graph, op
+
+        @op
+        def one() -> dict:
+            return {"n": 1}
+
+        @graph
+        def flow():
+            o = one()
+            START >> o >> END
+
+        APP = Application("quiet", jobs=[Job("j", graph=flow)], resources=None, src=["."], trace=[])
+        """),
+        encoding="utf-8",
+    )
+    (tmp_path / "operonx.toml").write_text(
+        f'[project]\nname = "quiet"\ndescription = "from the file"\nsrc = ["."]\napp = "{name}:APP"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    try:
+        app = Application.find(tmp_path)
+        assert app.manifest.project["trace"] == [] and app.job("j").trace == []
+        assert app.manifest.project["description"] == "from the file"
+    finally:
+        sys.modules.pop(name, None)
+        sys.path[:] = [p for p in sys.path if not p.startswith(str(tmp_path))]
+
+
 def test_env_reads_the_variable_in_the_defaults_type(monkeypatch):
     monkeypatch.setenv("OPX_T_PORT", "9001")
     monkeypatch.setenv("OPX_T_FLAG", "yes")

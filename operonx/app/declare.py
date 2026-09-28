@@ -370,7 +370,11 @@ def load_declared(manifest: Any) -> Any:
         raise ManifestError(
             f"[project] app {manifest.app_entry!r} is a {type(obj).__name__}, not an Application"
         )
-    project = {**manifest.project, **{k: v for k, v in obj.manifest.project.items() if v}}
+    # The object's values win, except an empty one — its default description
+    # must not blank the file's. `trace` is there only when the object gave
+    # one, and then `[]` is a choice ("trace nothing"), not an empty default.
+    mine = {k: v for k, v in obj.manifest.project.items() if v or k == "trace"}
+    project = {**manifest.project, **mine}
     from .manifest import with_default_trace
 
     obj.manifest = replace(
