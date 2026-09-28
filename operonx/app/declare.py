@@ -110,6 +110,7 @@ def Service(  # noqa: N802 — reads as a declaration
     description: str = "",
     key_ops: Optional[Sequence[str]] = None,
     playground: Any = None,
+    replay: bool = False,
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -130,6 +131,11 @@ def Service(  # noqa: N802 — reads as a declaration
     with (:class:`operonx.app.play.Codec`, or ``"module:attr"``) — needed
     only when the door's protocol is its own; http and websocket doors have
     built-in ones.
+
+    ``replay=True`` records what clients send this door — text and JSON as
+    they are, audio and bytes only counted — on each run, so a real session
+    can be replayed in the playground later. Off by default: a script holds
+    what users typed, and lives as long as the run.
     """
     label = f"Service({name!r})"
     _refuse_moved(options, label)
@@ -175,6 +181,8 @@ def Service(  # noqa: N802 — reads as a declaration
         opts["key_ops"] = [str(k) for k in key_ops]
     if playground is not None:
         opts["playground"] = playground
+    if replay:
+        opts["replay"] = True
 
     return ServeSpec(
         name=name,
@@ -307,6 +315,7 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "description": s.description,
         "key_ops": list(s.options.get("key_ops") or []),
         "playground": ref_name(s.options["playground"]) if s.options.get("playground") else None,
+        "replay": bool(s.options.get("replay")),
     }
 
 

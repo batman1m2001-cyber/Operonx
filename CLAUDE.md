@@ -1,5 +1,11 @@
 # Operonx
 
+> **How to use operonx** (its API, as it is now) is in
+> [`operonx/guide/`](operonx/guide/README.md), whose examples run in CI
+> (`tests/guide/`). Where this file disagrees with the guide, the guide is
+> right — some examples below (`ask()`, `chat()`, `GraphOp.loop`) predate
+> the current API.
+
 Operonx is a high-performance workflow engine that runs anything as a workflow — from IO-bound AI tasks like LLMs and agents to CPU-bound workloads needing native performance. Inspired by Airflow operators, it enforces clear, consistent conventions for building scalable async workflows.
 
 ## Repository Structure

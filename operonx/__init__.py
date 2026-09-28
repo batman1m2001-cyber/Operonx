@@ -1,5 +1,9 @@
 """Operon — high-performance workflow engine for AI applications.
 
+Writing code that uses operonx (you, or a coding assistant)? Read the guide
+shipped with this package first: ``python -m operonx.guide`` prints where it
+is (``operonx/guide/README.md``). Its examples are tested against this version.
+
 Operon runs anything as a workflow — from IO-bound tasks like LLMs and
 agents to CPU-bound workloads. Inspired by Airflow operators, it enforces
 clear, consistent conventions for building scalable async workflows.
