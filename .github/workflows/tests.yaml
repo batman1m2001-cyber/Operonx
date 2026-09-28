@@ -57,6 +57,7 @@ jobs:
           - faiss
           - pgvector
           - postgres
+          - mongo
           - qdrant
           - providers
           - langfuse
@@ -118,6 +119,14 @@ jobs:
           elif extra == "serve":
               import fastapi  # noqa: F401
               import uvicorn  # noqa: F401
+
+          # the run stores import their drivers lazily: import both here
+          if extra == "postgres":
+              import psycopg  # noqa: F401
+              from operonx.telemetry.runs.postgres import PostgresRunStore  # noqa: F401
+          if extra == "mongo":
+              import pymongo  # noqa: F401
+              from operonx.telemetry.runs.mongo import MongoRunStore  # noqa: F401
 
           if extra in ("openai", "standard", "all", "providers"):
               from operonx.providers.llms.openai import OpenAISDKModel  # noqa: F401
