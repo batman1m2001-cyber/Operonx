@@ -107,6 +107,27 @@ production Langfuse. `"remote": true` on `open` sends it everywhere the
 service traces to. The run carries what the toy sent, and when, so a
 session reads back as a conversation and can be replayed.
 
+## Replaying real sessions
+
+A playground session keeps what the toy sent, so it can be replayed. A
+real client's session can keep the same, when its service opts in:
+
+```python
+Service("summary", http("/summary"), graph=summary_graph, replay=True)
+```
+
+(or `replay = true` in a `[[serve]]` block). Each run of that door then
+carries what the client sent, in order and stamped (`replay_script`), and
+the connection's query (`replay_query`). On Monday a request crashes; on
+Tuesday you fix the code and replay that very request in the playground.
+
+- **Text and JSON are kept; audio and bytes are only counted.** A door
+  whose JSON frames carry audio overrides its codec's `to_toy` to say
+  which ones are audio, and those are counted too. So is any message over
+  64 KB.
+- **Off by default.** A script holds what users typed, and lives as long
+  as its run (see [Retention](11-runs.md#retention)).
+
 ## Re-running one op
 
 ```json

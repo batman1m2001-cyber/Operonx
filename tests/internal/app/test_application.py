@@ -165,6 +165,7 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "description": "",
         "key_ops": [],
         "playground": None,
+        "replay": False,
     }
     assert [(j["name"], j["kind"]) for j in d["jobs"]] == [
         ("score_calls", "job"),

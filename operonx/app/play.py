@@ -113,6 +113,28 @@ PROTOCOL = 1
 #: A session's script (what the toy sent) is kept on the trace for replay,
 #: up to this many messages; bytes are counted, never stored.
 SCRIPT_LIMIT = 500
+#: A message bigger than this (as JSON) is counted in a script, not kept.
+SCRIPT_MESSAGE_LIMIT = 64 * 1024
+
+
+def script_entry(message: Dict[str, Any]) -> Dict[str, Any]:
+    """One toy message as a replay script keeps it: text and JSON as they
+    are; audio and bytes counted, never kept (a script is text); anything
+    over :data:`SCRIPT_MESSAGE_LIMIT` counted too. Stamped with when it was
+    said, so a session reads back in order."""
+    kind = message.get("kind")
+    if kind in ("bytes", "audio"):
+        size = message.get("size")
+        if size is None:
+            size = len(base64.b64decode(message.get("b64") or ""))
+        kept: Dict[str, Any] = {"kind": kind, "size": int(size)}
+    else:
+        kept = dict(message)
+        size = len(json.dumps(kept, ensure_ascii=False, default=str))
+        if size > SCRIPT_MESSAGE_LIMIT:
+            kept = {"kind": "large", "size": size}
+    kept["at"] = round(time.time(), 3)
+    return kept
 
 
 # ── codecs ────────────────────────────────────────────────────────────────
@@ -166,6 +188,16 @@ class Codec:
         return [self.to_door(message)]
 
     def from_door(self, item: Any) -> Dict[str, Any]:
+        return toy_message(item)
+
+    def to_toy(self, item: Any) -> Dict[str, Any]:
+        """What a client sent the door, as a toy message — the inverse of
+        :meth:`to_door`, for recording a real session so it can be replayed
+        (``Service(replay=True)``). A door whose items carry audio inside
+        JSON overrides this to say so (``{"kind": "audio", "size": …}``):
+        audio is never kept."""
+        if isinstance(item, (bytes, bytearray)):
+            return {"kind": "bytes", "size": len(item)}
         return toy_message(item)
 
 
@@ -403,12 +435,7 @@ class PlaySession(BoundedSession):
 
     def note(self, message: Dict[str, Any]) -> None:
         if len(self.script) < SCRIPT_LIMIT:
-            kept = dict(message)
-            if kept.get("kind") in ("bytes", "audio"):
-                # audio and bytes are counted, never kept: a replay script is text
-                kept = {"kind": kept["kind"], "size": len(base64.b64decode(kept.get("b64") or ""))}
-            kept["at"] = round(time.time(), 3)  # when it was said: a conversation reads in order
-            self.script.append(kept)
+            self.script.append(script_entry(message))
 
 
 def _op_event(node: Any) -> Dict[str, Any]:

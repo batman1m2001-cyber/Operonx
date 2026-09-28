@@ -237,9 +237,11 @@ class ServeRunner:
             await session.close()
             return
         handle = None
+        metadata = self._origin(request)
+        served = self._recorded(session, metadata) if self.spec.options.get("replay") else session
         try:
             handle = await serve_session(
-                self._engine_for(request), session, request, metadata=self._origin(request)
+                self._engine_for(request), served, request, metadata=metadata
             )
         except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
@@ -250,6 +252,23 @@ class ServeRunner:
             )
         finally:
             await self._close_one(session, handle)
+
+    def _recorded(self, session: Session, metadata: Dict[str, Any]) -> Session:
+        """``Service(replay=True)``: what the client sends is written down
+        on the run — a script of toy messages and the connection's query,
+        the same shape a playground session keeps — so a real session can
+        be replayed later. Text and JSON are kept; audio and bytes counted."""
+        from operonx.app.play import Codec, codec_for
+
+        try:
+            codec = codec_for(self.spec)
+        except Exception as exc:  # noqa: BLE001 — a broken codec records nothing, loudly
+            LOGGER.error(f"[serve:{self.spec.name}] replay: no codec ({type(exc).__name__}: {exc})")
+            return session
+        script: list = []
+        metadata["replay_script"] = script  # the same list: filled as the client sends
+        metadata["replay_query"] = dict((getattr(session, "meta", None) or {}).get("query") or {})
+        return _Recorded(session, codec or Codec(), script)
 
     def _origin(self, request: RunRequest) -> Dict[str, Any]:
         """What this door's runs carry: the service, its transport, and
@@ -299,3 +318,34 @@ class ServeRunner:
 
     async def close(self) -> None:
         await self.transport.close()
+
+
+class _Recorded:
+    """A session whose inbound items are written down as they are read.
+
+    Only the reading side is wrapped: the transport keeps feeding its own
+    session object, and everything else is that session's."""
+
+    def __init__(self, inner: Session, codec: Any, script: list):
+        self._inner, self._codec, self._script = inner, codec, script
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def recv(self):  # noqa: ANN201 — an async iterator, as Session.recv
+        from operonx.app.play import SCRIPT_LIMIT, script_entry
+
+        async for item in self._inner.recv():
+            if len(self._script) < SCRIPT_LIMIT:
+                try:
+                    message = self._codec.to_toy(item)
+                except Exception:  # noqa: BLE001 — a codec that cannot say is counted as bytes
+                    message = {"kind": "bytes", "size": len(repr(item))}
+                self._script.append(script_entry(message))
+            yield item
+
+    async def send(self, item: Any) -> bool:
+        return await self._inner.send(item)
+
+    async def close(self) -> None:
+        await self._inner.close()
