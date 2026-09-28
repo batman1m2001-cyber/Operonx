@@ -334,3 +334,4 @@ what is still to come: `docs/JOB_PLAN.md` in the repository.
   stream job, a runbook, the manifest form of each.
 - [Deployment](08-deployment.md) — the served side of the same graph.
 - [Tracing](07-tracing.md) — where a job's runs land.
+- [Evals](13-evals.md) — a job that judges its graph against a dataset.
