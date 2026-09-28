@@ -1,0 +1,22 @@
+# operonx
+
+> An async graph engine for AI products: ops (Python functions) wired into graphs, run as one-off
+> calls, batch jobs, or HTTP/websocket services. Streaming ops (`yield`), loops, branches, LLM and
+> agent ops, run stores and replay.
+
+The usage guide for coding assistants ships inside the package (`python -m operonx.guide` prints
+its path) and every example in it is run by the test suite.
+
+## Guide
+
+- [Start here](operonx/guide/README.md): what operonx is, imports, the ten rules
+- [Op types](operonx/guide/01-ops.md): @op, generators, @graph, LLMOp, agents, flow and retrieval ops
+- [Composition](operonx/guide/02-composition.md): op → operon → Job / Runbook / Service → Application → operonx.toml
+- [Control flow](operonx/guide/03-control-flow.md): streaming, loops, if/else, the ~ soft edge
+- [Gotchas](operonx/guide/04-gotchas.md): failures that raise nothing
+- [Project layout](operonx/guide/05-project-layout.md): how to lay out a product
+
+## Optional
+
+- [Changelog](CHANGELOG.md)
+- [API reference](https://batman1m2001-cyber.github.io/Operonx/)

@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `to_door`). A door whose JSON frames carry audio overrides it so
   that audio is counted, never kept. `describe_service` says `replay`.
 
+### Added — a guide for coding assistants
+
+- `operonx/guide/` ships with the package (`python -m operonx.guide` prints
+  where): op types, the composition ladder (op → operon → Job / Runbook /
+  Service → Application → `operonx.toml`), control flow, the failures that
+  raise nothing, and a project layout. Every example is a complete program
+  that `tests/guide/` runs. Pointed to from `llms.txt`, the README and the
+  package docstring.
+
 ## [1.9.0] - 2026-09-28
 
 ### Changed — where local runs go

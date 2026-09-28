@@ -10,6 +10,10 @@
   <a href="https://github.com/batman1m2001-cyber/Operonx/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
 </p>
 
+> **Coding assistant, or building on operonx?** Start with the guide in
+> [`operonx/guide/`](operonx/guide/README.md) — it ships with the package
+> (`python -m operonx.guide`), and every example in it runs in CI.
+
 **Operonx** is a workflow engine where ops can `yield` — so the same async DAG handles **batch jobs** (Airflow-style) and **event-driven streaming pipelines** (pipecat-style callbot / voice / STT → LLM → TTS).
 
 > The Rust execution backend now lives in its own repo:
