@@ -27,7 +27,16 @@ from typing import Any, Dict, List, Optional
 from operonx.telemetry.consumers.local import resolve_root
 
 from .base import RunStore
-from .model import OpRollup, Page, RunFilter, RunRecord, RunSummary, meta_of_trace, rows_of_trace, summarize
+from .model import (
+    OpRollup,
+    Page,
+    RunFilter,
+    RunRecord,
+    RunSummary,
+    meta_of_trace,
+    rows_of_trace,
+    summarize,
+)
 from .sql import SqlIndex
 
 __all__ = ["PostgresRunStore"]
@@ -38,8 +47,9 @@ _PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
 class PostgresRunStore(RunStore):
     """See the module docstring."""
 
-    def __init__(self, dsn: str, prefix: str = "operonx_", media_dir: Any = "",
-                 media_threshold: int = 1024):
+    def __init__(
+        self, dsn: str, prefix: str = "operonx_", media_dir: Any = "", media_threshold: int = 1024
+    ):
         if not dsn:
             raise ValueError("the postgres run store needs a dsn (postgresql://user:pass@host/db)")
         if prefix and not _PREFIX_RE.match(prefix):
@@ -48,7 +58,9 @@ class PostgresRunStore(RunStore):
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover — exercised by the extra's absence
-            raise ImportError('the postgres run store needs: pip install "operonx[postgres]"') from exc
+            raise ImportError(
+                'the postgres run store needs: pip install "operonx[postgres]"'
+            ) from exc
         self.dsn = dsn
         self.prefix = prefix
         self.media_dir = Path(media_dir) if media_dir else resolve_root("") / "pg-media"
@@ -58,12 +70,19 @@ class PostgresRunStore(RunStore):
         def connect() -> Any:
             return psycopg.connect(dsn)
 
-        self.index = SqlIndex(connect, ph="%s", json_get=lambda col, key: f"({col}::jsonb ->> '{key}')",
-                              prefix=prefix, real_type="DOUBLE PRECISION")
+        self.index = SqlIndex(
+            connect,
+            ph="%s",
+            json_get=lambda col, key: f"({col}::jsonb ->> '{key}')",
+            prefix=prefix,
+            real_type="DOUBLE PRECISION",
+        )
         self.index.create()
         with self.index._tx() as cur:
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {self.records} "
-                        "(trace_id TEXT PRIMARY KEY, meta TEXT, nodes BYTEA)")
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {self.records} "
+                "(trace_id TEXT PRIMARY KEY, meta TEXT, nodes BYTEA)"
+            )
 
     def put_trace(self, trace: Any) -> RunSummary:
         run_media = self.media_dir / str(trace.trace_id)
@@ -77,12 +96,19 @@ class PostgresRunStore(RunStore):
         self.index.put(summary, rollups)
         with self.index._tx() as cur:
             cur.execute(f"DELETE FROM {self.records} WHERE trace_id = %s", (summary.trace_id,))
-            cur.execute(f"INSERT INTO {self.records} (trace_id, meta, nodes) VALUES (%s, %s, %s)",
-                        (summary.trace_id, json.dumps(meta, default=str), blob))
+            cur.execute(
+                f"INSERT INTO {self.records} (trace_id, meta, nodes) VALUES (%s, %s, %s)",
+                (summary.trace_id, json.dumps(meta, default=str), blob),
+            )
         return summary
 
-    def list_runs(self, where: Optional[RunFilter] = None, order: str = "started_desc", limit: int = 50,
-                  cursor: Optional[str] = None) -> Page:
+    def list_runs(
+        self,
+        where: Optional[RunFilter] = None,
+        order: str = "started_desc",
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> Page:
         return self.index.list(where, order, limit, cursor)
 
     def get_run(self, trace_id: str) -> Optional[RunRecord]:
@@ -95,11 +121,16 @@ class PostgresRunStore(RunStore):
         if row is None:
             return None
         run_media = self.media_dir / trace_id
-        return RunRecord(summary=summary, nodes=json.loads(zlib.decompress(bytes(row[1])).decode("utf-8")),
-                         meta=json.loads(row[0] or "{}"),
-                         media_root=str(run_media) if run_media.is_dir() else None)
+        return RunRecord(
+            summary=summary,
+            nodes=json.loads(zlib.decompress(bytes(row[1])).decode("utf-8")),
+            meta=json.loads(row[0] or "{}"),
+            media_root=str(run_media) if run_media.is_dir() else None,
+        )
 
-    def groups(self, where: Optional[RunFilter] = None, by=("origin", "name")) -> List[Dict[str, Any]]:
+    def groups(
+        self, where: Optional[RunFilter] = None, by=("origin", "name")
+    ) -> List[Dict[str, Any]]:
         from .base import _check_by
 
         return self.index.groups(where, _check_by(by))

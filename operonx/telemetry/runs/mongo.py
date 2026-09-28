@@ -24,7 +24,16 @@ from typing import Any, Dict, List, Optional
 from operonx.telemetry.consumers.local import resolve_root
 
 from .base import RunStore
-from .model import OpRollup, Page, RunFilter, RunRecord, RunSummary, meta_of_trace, rows_of_trace, summarize
+from .model import (
+    OpRollup,
+    Page,
+    RunFilter,
+    RunRecord,
+    RunSummary,
+    meta_of_trace,
+    rows_of_trace,
+    summarize,
+)
 
 __all__ = ["MongoRunStore"]
 
@@ -41,8 +50,15 @@ _SORTS = {
 class MongoRunStore(RunStore):
     """See the module docstring."""
 
-    def __init__(self, uri: str = "", database: str = "operonx", prefix: str = "", media_dir: Any = "",
-                 media_threshold: int = 1024, client: Any = None):
+    def __init__(
+        self,
+        uri: str = "",
+        database: str = "operonx",
+        prefix: str = "",
+        media_dir: Any = "",
+        media_threshold: int = 1024,
+        client: Any = None,
+    ):
         super().__init__(config={"database": database, "prefix": prefix})
         if client is None:
             if not uri:
@@ -50,7 +66,9 @@ class MongoRunStore(RunStore):
             try:
                 import pymongo
             except ImportError as exc:  # pragma: no cover
-                raise ImportError('the mongo run store needs: pip install "operonx[mongo]"') from exc
+                raise ImportError(
+                    'the mongo run store needs: pip install "operonx[mongo]"'
+                ) from exc
             client = pymongo.MongoClient(uri)
         db = client[database]
         self.runs = db[f"{prefix}runs"]
@@ -75,21 +93,37 @@ class MongoRunStore(RunStore):
         summary, rollups = summarize(str(trace.trace_id), rows, meta, location=None)
         doc = summary.to_dict()
         doc["_id"] = summary.trace_id
-        doc["search"] = " ".join([summary.trace_id, summary.key or "",
-                                  json.dumps(summary.metadata or {}, default=str, sort_keys=True)]).lower()
+        doc["search"] = " ".join(
+            [
+                summary.trace_id,
+                summary.key or "",
+                json.dumps(summary.metadata or {}, default=str, sort_keys=True),
+            ]
+        ).lower()
         self.runs.replace_one({"_id": summary.trace_id}, _plain(doc), upsert=True)
         self.ops.delete_many({"trace_id": summary.trace_id})
         if rollups:
             self.ops.insert_many([_plain(r.__dict__.copy()) for r in rollups])
-        self.records.replace_one({"_id": summary.trace_id}, {
-            "_id": summary.trace_id, "meta": json.dumps(meta, default=str),
-            "nodes": zlib.compress(json.dumps(rows, default=str).encode("utf-8"))}, upsert=True)
+        self.records.replace_one(
+            {"_id": summary.trace_id},
+            {
+                "_id": summary.trace_id,
+                "meta": json.dumps(meta, default=str),
+                "nodes": zlib.compress(json.dumps(rows, default=str).encode("utf-8")),
+            },
+            upsert=True,
+        )
         return summary
 
     # -- read ------------------------------------------------------------------
 
-    def list_runs(self, where: Optional[RunFilter] = None, order: str = "started_desc", limit: int = 50,
-                  cursor: Optional[str] = None) -> Page:
+    def list_runs(
+        self,
+        where: Optional[RunFilter] = None,
+        order: str = "started_desc",
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> Page:
         if order not in _SORTS:
             raise ValueError(f"unknown order {order!r}; one of {', '.join(_SORTS)}")
         limit = max(1, min(int(limit), 5000))
@@ -107,9 +141,12 @@ class MongoRunStore(RunStore):
         if rec is None:
             return None
         run_media = self.media_dir / trace_id
-        return RunRecord(summary=_summary(doc), nodes=json.loads(zlib.decompress(bytes(rec["nodes"])).decode("utf-8")),
-                         meta=json.loads(rec.get("meta") or "{}"),
-                         media_root=str(run_media) if run_media.is_dir() else None)
+        return RunRecord(
+            summary=_summary(doc),
+            nodes=json.loads(zlib.decompress(bytes(rec["nodes"])).decode("utf-8")),
+            meta=json.loads(rec.get("meta") or "{}"),
+            media_root=str(run_media) if run_media.is_dir() else None,
+        )
 
     def count(self, where: Optional[RunFilter] = None) -> int:
         return self.runs.count_documents(self._query(where))
@@ -117,35 +154,50 @@ class MongoRunStore(RunStore):
     def rollups(self, where: Optional[RunFilter] = None) -> List[OpRollup]:
         ids = [d["_id"] for d in self.runs.find(self._query(where), {"_id": 1})]
         fields = set(OpRollup.__dataclass_fields__)  # type: ignore[attr-defined]
-        return [OpRollup(**{k: v for k, v in d.items() if k in fields})
-                for d in self.ops.find({"trace_id": {"$in": ids}})]
+        return [
+            OpRollup(**{k: v for k, v in d.items() if k in fields})
+            for d in self.ops.find({"trace_id": {"$in": ids}})
+        ]
 
-    def groups(self, where: Optional[RunFilter] = None, by=("origin", "name")) -> List[Dict[str, Any]]:
+    def groups(
+        self, where: Optional[RunFilter] = None, by=("origin", "name")
+    ) -> List[Dict[str, Any]]:
         from .base import _check_by
 
         by = _check_by(by)
         pipeline = [
             {"$match": self._query(where)},
-            {"$group": {
-                "_id": {b: f"${b}" for b in by},
-                "runs": {"$sum": 1},
-                "errors": {"$sum": {"$cond": [{"$eq": ["$status", "error"]}, 1, 0]}},
-                "first_started": {"$min": "$started_at"},
-                "last_started": {"$max": "$started_at"},
-                "cost_usd": {"$sum": {"$ifNull": ["$cost_usd", 0]}},
-                "priced": {"$sum": {"$cond": [{"$eq": [{"$ifNull": ["$cost_usd", None]}, None]}, 0, 1]}},
-                "duration_ms": {"$sum": {"$ifNull": ["$duration_ms", 0]}},
-            }},
+            {
+                "$group": {
+                    "_id": {b: f"${b}" for b in by},
+                    "runs": {"$sum": 1},
+                    "errors": {"$sum": {"$cond": [{"$eq": ["$status", "error"]}, 1, 0]}},
+                    "first_started": {"$min": "$started_at"},
+                    "last_started": {"$max": "$started_at"},
+                    "cost_usd": {"$sum": {"$ifNull": ["$cost_usd", 0]}},
+                    "priced": {
+                        "$sum": {"$cond": [{"$eq": [{"$ifNull": ["$cost_usd", None]}, None]}, 0, 1]}
+                    },
+                    "duration_ms": {"$sum": {"$ifNull": ["$duration_ms", 0]}},
+                }
+            },
             {"$sort": {"last_started": -1}},
         ]
         out = []
         for g in self.runs.aggregate(pipeline):
             key = g["_id"] or {}
-            out.append({**{b: key.get(b) for b in by}, "runs": int(g["runs"]), "errors": int(g["errors"]),
-                        "first_started": g["first_started"], "last_started": g["last_started"],
-                        # nothing priced is unknown, not $0
-                        "cost_usd": g["cost_usd"] if g["priced"] else None,
-                        "duration_ms": float(g["duration_ms"] or 0.0)})
+            out.append(
+                {
+                    **{b: key.get(b) for b in by},
+                    "runs": int(g["runs"]),
+                    "errors": int(g["errors"]),
+                    "first_started": g["first_started"],
+                    "last_started": g["last_started"],
+                    # nothing priced is unknown, not $0
+                    "cost_usd": g["cost_usd"] if g["priced"] else None,
+                    "duration_ms": float(g["duration_ms"] or 0.0),
+                }
+            )
         return out
 
     # -- delete ----------------------------------------------------------------

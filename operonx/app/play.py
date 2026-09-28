@@ -78,9 +78,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextvars
 import inspect
 import json
-import contextvars
 import math
 import os
 import random
@@ -98,7 +98,16 @@ from .origin import ORIGIN_PLAYGROUND, origin_metadata
 from .serve.protocol import BoundedSession, RunRequest
 from .serve.registry import resolve_ref
 
-__all__ = ["Bridge", "Codec", "JsonCodec", "PcmCodec", "TextCodec", "codec_for", "main", "toy_message"]
+__all__ = [
+    "Bridge",
+    "Codec",
+    "JsonCodec",
+    "PcmCodec",
+    "TextCodec",
+    "codec_for",
+    "main",
+    "toy_message",
+]
 
 PROTOCOL = 1
 #: A session's script (what the toy sent) is kept on the trace for replay,
@@ -115,7 +124,11 @@ def toy_message(item: Any) -> Dict[str, Any]:
     if isinstance(item, str):
         return {"kind": "text", "text": item}
     if isinstance(item, (bytes, bytearray)):
-        return {"kind": "bytes", "size": len(item), "b64": base64.b64encode(bytes(item[:65536])).decode()}
+        return {
+            "kind": "bytes",
+            "size": len(item),
+            "b64": base64.b64encode(bytes(item[:65536])).decode(),
+        }
     try:
         json.dumps(item)
         return {"kind": "json", "value": item}
@@ -183,12 +196,21 @@ class PcmCodec(Codec):
     def to_door_items(self, message: Dict[str, Any]) -> List[Any]:
         if message.get("kind") != "audio":
             return [self.to_door(message)]
-        return list(pcm_frames(base64.b64decode(message.get("b64") or ""), self.audio["rate"],
-                               self.audio["frame_ms"]))
+        return list(
+            pcm_frames(
+                base64.b64decode(message.get("b64") or ""),
+                self.audio["rate"],
+                self.audio["frame_ms"],
+            )
+        )
 
     def from_door(self, item: Any) -> Dict[str, Any]:
         if isinstance(item, (bytes, bytearray)):
-            return {"kind": "audio", "b64": base64.b64encode(bytes(item)).decode(), "rate": self.audio["rate"]}
+            return {
+                "kind": "audio",
+                "b64": base64.b64encode(bytes(item)).decode(),
+                "rate": self.audio["rate"],
+            }
         return toy_message(item)
 
 
@@ -196,7 +218,7 @@ def pcm_frames(pcm: bytes, rate: int, frame_ms: int) -> List[bytes]:
     """*pcm* (16-bit mono) cut into frames of *frame_ms*; the last is padded
     with silence, as a telco pads its final packet."""
     size = max(2, int(rate * frame_ms / 1000) * 2)
-    out = [pcm[i:i + size] for i in range(0, len(pcm), size)]
+    out = [pcm[i : i + size] for i in range(0, len(pcm), size)]
     if out and len(out[-1]) < size:
         out[-1] = out[-1] + b"\x00" * (size - len(out[-1]))
     return out
@@ -219,7 +241,9 @@ def codec_for(spec: Any) -> Optional[Codec]:
 # ── conditions ────────────────────────────────────────────────────────────
 
 #: The resource keys failing for the session this task belongs to.
-_FAILING: contextvars.ContextVar = contextvars.ContextVar("operonx_play_failing", default=frozenset())
+_FAILING: contextvars.ContextVar = contextvars.ContextVar(
+    "operonx_play_failing", default=frozenset()
+)
 _WRAPPED: set = set()
 
 
@@ -256,21 +280,25 @@ def _fail_resources(keys: List[str]) -> None:
 
 def _faulty(key: str, method: Callable) -> Callable:
     if inspect.iscoroutinefunction(method):
+
         async def wrapped(*a: Any, **kw: Any) -> Any:
             if key in _FAILING.get():
                 raise PlaygroundFault(f"{key} failed (a playground condition)")
             return await method(*a, **kw)
     elif inspect.isasyncgenfunction(method):
+
         async def wrapped(*a: Any, **kw: Any) -> Any:  # type: ignore[misc]
             if key in _FAILING.get():
                 raise PlaygroundFault(f"{key} failed (a playground condition)")
             async for x in method(*a, **kw):
                 yield x
     else:
+
         def wrapped(*a: Any, **kw: Any) -> Any:  # type: ignore[misc]
             if key in _FAILING.get():
                 raise PlaygroundFault(f"{key} failed (a playground condition)")
             return method(*a, **kw)
+
     wrapped.__name__ = getattr(method, "__name__", "method")
     return wrapped
 
@@ -341,8 +369,14 @@ def _remote_names(spec: Any) -> List[str]:
 class PlaySession(BoundedSession):
     """A session whose peer is a toy: egress items become ``out`` events."""
 
-    def __init__(self, sid: str, meta: Dict[str, Any], emit: Callable[[Dict[str, Any]], None],
-                 codec: Codec, max_inflight: Optional[int] = None):
+    def __init__(
+        self,
+        sid: str,
+        meta: Dict[str, Any],
+        emit: Callable[[Dict[str, Any]], None],
+        codec: Codec,
+        max_inflight: Optional[int] = None,
+    ):
         super().__init__(meta=meta, max_inflight=max_inflight)
         self.sid, self.emit, self.codec = sid, emit, codec
         #: what the toy sent, in order — shared with the trace's metadata
@@ -396,8 +430,12 @@ def _status(trace: Any) -> Tuple[str, Optional[str]]:
 
 
 def _jsonable(value: Any) -> Any:
-    return json.loads(json.dumps(value, default=lambda v: f"<{len(v)} bytes>" if isinstance(v, (bytes, bytearray))
-                                  else repr(v)))
+    return json.loads(
+        json.dumps(
+            value,
+            default=lambda v: f"<{len(v)} bytes>" if isinstance(v, (bytes, bytearray)) else repr(v),
+        )
+    )
 
 
 # ── the bridge ────────────────────────────────────────────────────────────
@@ -431,16 +469,24 @@ class Bridge:
                 params = list(inspect.signature(graph_fn).parameters)
             except Exception:  # noqa: BLE001
                 params = []
-            doors.append({
-                "service": spec.name, "kind": spec.kind, "session": spec.session, "path": spec.path,
-                "inputs": params, "variants": list(spec.variants), "custom_hook": bool(spec.on_session),
-                "toys": list(codec.toys) if codec else [],
-                "codec": type(codec).__name__ if codec else None, "codec_error": codec_err,
-                "audio": getattr(codec, "audio", None) if codec else None,
-                "remote_trace": _remote_names(spec),
-                "query": dict(getattr(codec, "query", None) or {}) if codec else {},
-                "description": spec.description,
-            })
+            doors.append(
+                {
+                    "service": spec.name,
+                    "kind": spec.kind,
+                    "session": spec.session,
+                    "path": spec.path,
+                    "inputs": params,
+                    "variants": list(spec.variants),
+                    "custom_hook": bool(spec.on_session),
+                    "toys": list(codec.toys) if codec else [],
+                    "codec": type(codec).__name__ if codec else None,
+                    "codec_error": codec_err,
+                    "audio": getattr(codec, "audio", None) if codec else None,
+                    "remote_trace": _remote_names(spec),
+                    "query": dict(getattr(codec, "query", None) or {}) if codec else {},
+                    "description": spec.description,
+                }
+            )
         return {"t": "doors", "protocol": PROTOCOL, "project": self.app.name, "doors": doors}
 
     # -- engines, compiled once per service -------------------------------
@@ -506,15 +552,27 @@ class Bridge:
         if codec is None:
             self.emit({"t": "refused", "sid": sid, "reason": f"{service} has no playground codec"})
             return
-        meta = {"query": {str(k): str(v) for k, v in (msg.get("query") or {}).items()},
-                "headers": {}, "path": spec.path, "client": "playground", "playground": True}
+        meta = {
+            "query": {str(k): str(v) for k, v in (msg.get("query") or {}).items()},
+            "headers": {},
+            "path": spec.path,
+            "client": "playground",
+            "playground": True,
+        }
         session = PlaySession(sid, meta, self.emit, codec, spec.max_inflight)
         request = runner._request_for(session)
         if request is None:
-            self.emit({"t": "refused", "sid": sid,
-                       "reason": "the service's on_session refused the session (see the bridge log)"})
+            self.emit(
+                {
+                    "t": "refused",
+                    "sid": sid,
+                    "reason": "the service's on_session refused the session (see the bridge log)",
+                }
+            )
             return
-        if not isinstance(request, RunRequest):  # pragma: no cover — the gate returns RunRequest|None
+        if not isinstance(
+            request, RunRequest
+        ):  # pragma: no cover — the gate returns RunRequest|None
             return
         request.trace_id = request.trace_id or str(uuid.uuid4())
         session.conditions = _conditions(msg.get("conditions"))
@@ -526,8 +584,13 @@ class Bridge:
                 return
         self._sessions[sid] = session
         toy = str(msg.get("toy") or (codec.toys[0] if codec.toys else "form"))
-        metadata = origin_metadata(ORIGIN_PLAYGROUND, service=spec.name, transport=spec.kind,
-                                   variant=request.variant, toy=toy)
+        metadata = origin_metadata(
+            ORIGIN_PLAYGROUND,
+            service=spec.name,
+            transport=spec.kind,
+            variant=request.variant,
+            toy=toy,
+        )
         metadata["playground_script"] = session.script  # the same list: filled as the toy sends
         metadata["playground_query"] = dict(meta["query"])  # with the script, all a replay needs
         if session.conditions:
@@ -537,8 +600,16 @@ class Bridge:
                 metadata[key] = str(value)[:2000]
         if msg.get("replay_of"):
             metadata["replay_of"] = str(msg["replay_of"])
-        self.emit({"t": "opened", "sid": sid, "trace_id": request.trace_id, "service": spec.name,
-                   "variant": request.variant, "inputs": _jsonable(request.inputs)})
+        self.emit(
+            {
+                "t": "opened",
+                "sid": sid,
+                "trace_id": request.trace_id,
+                "service": spec.name,
+                "variant": request.variant,
+                "inputs": _jsonable(request.inputs),
+            }
+        )
 
         # The run's ops as they finish, so a canvas can follow the session
         # live: serve_session hands over the handle as the run starts, and
@@ -551,10 +622,16 @@ class Bridge:
                 trace = follow["trace"]
                 nodes = trace.nodes if trace is not None else []
                 if len(nodes) > follow["sent"]:
-                    batch = nodes[follow["sent"]:follow["sent"] + 200]
+                    batch = nodes[follow["sent"] : follow["sent"] + 200]
                     follow["sent"] += len(batch)
-                    self.emit({"t": "ops", "sid": sid, "trace_id": request.trace_id,
-                               "ops": [_op_event(n) for n in batch]})
+                    self.emit(
+                        {
+                            "t": "ops",
+                            "sid": sid,
+                            "trace_id": request.trace_id,
+                            "ops": [_op_event(n) for n in batch],
+                        }
+                    )
                     continue
                 if follow["done"]:
                     return
@@ -566,8 +643,13 @@ class Bridge:
             _FAILING.set(frozenset(session.conditions.get("fail") or ()))
             watcher = asyncio.ensure_future(watch())
             try:
-                handle = await serve_session(runner._engine_for(request), session, request, metadata=metadata,
-                                             on_start=lambda h: follow.__setitem__("trace", getattr(h, "trace", None)))
+                handle = await serve_session(
+                    runner._engine_for(request),
+                    session,
+                    request,
+                    metadata=metadata,
+                    on_start=lambda h: follow.__setitem__("trace", getattr(h, "trace", None)),
+                )
             except Exception as exc:  # noqa: BLE001 — reported as the session's end
                 error = f"{type(exc).__name__}: {exc}"
             finally:
@@ -579,9 +661,15 @@ class Bridge:
                 except (asyncio.TimeoutError, Exception):  # noqa: BLE001 — following is best-effort
                     watcher.cancel()
             status, first = _status(getattr(handle, "trace", None))
-            ended = {"t": "ended", "sid": sid, "trace_id": request.trace_id,
-                     "status": "error" if error else status, "error": error or first,
-                     "ms": round((perf_counter() - t0) * 1000, 2), "sent": session.sent}
+            ended = {
+                "t": "ended",
+                "sid": sid,
+                "trace_id": request.trace_id,
+                "status": "error" if error else status,
+                "error": error or first,
+                "ms": round((perf_counter() - t0) * 1000, 2),
+                "sent": session.sent,
+            }
             if session.dropped:
                 ended["dropped"] = session.dropped
             self.emit(ended)
@@ -612,8 +700,12 @@ class Bridge:
                 # quiet before the first word, in the door's own framing
                 rate = int(session.codec.audio.get("rate") or 8000)
                 quiet = b"\x00\x00" * int(rate * cond["silence_ms"] / 1000)
-                items = session.codec.to_door_items({"kind": "audio", "b64": base64.b64encode(quiet).decode(),
-                                                     "rate": rate}) + items
+                items = (
+                    session.codec.to_door_items(
+                        {"kind": "audio", "b64": base64.b64encode(quiet).decode(), "rate": rate}
+                    )
+                    + items
+                )
             session.first_in = False
             session.note(message)
             for item in items:
@@ -635,20 +727,40 @@ class Bridge:
         persona = str(msg.get("persona") or "").strip()
         llm = str(msg.get("llm") or "").strip()
         if not persona or not llm:
-            self.emit({"t": "refused", "sid": sid, "reason": "a simulated user needs a persona and an llm"})
+            self.emit(
+                {
+                    "t": "refused",
+                    "sid": sid,
+                    "reason": "a simulated user needs a persona and an llm",
+                }
+            )
             return
         runner = await self._runner(str(msg.get("service") or ""))
         codec = codec_for(runner.spec)
         if codec is None or "chat" not in codec.toys:
-            self.emit({"t": "refused", "sid": sid, "reason": "a simulated user speaks text, and this door "
-                       f"takes {', '.join(codec.toys) if codec else 'no toy'}"})
+            self.emit(
+                {
+                    "t": "refused",
+                    "sid": sid,
+                    "reason": "a simulated user speaks text, and this door "
+                    f"takes {', '.join(codec.toys) if codec else 'no toy'}",
+                }
+            )
             return
         turns = max(1, min(int(msg.get("turns") or 6), 50))
         quiet = max(0.1, float(msg.get("quiet_ms") or 1200) / 1000)
         wait_max = max(1.0, float(msg.get("wait_s") or 45))
-        await self.open({"sid": sid, "service": runner.spec.name, "toy": "simulated", "query": msg.get("query"),
-                         "conditions": msg.get("conditions"), "remote": msg.get("remote"),
-                         "meta": {"persona": persona, "simulated_by": llm}})
+        await self.open(
+            {
+                "sid": sid,
+                "service": runner.spec.name,
+                "toy": "simulated",
+                "query": msg.get("query"),
+                "conditions": msg.get("conditions"),
+                "remote": msg.get("remote"),
+                "meta": {"persona": persona, "simulated_by": llm},
+            }
+        )
         session = self._sessions.get(sid)
         if session is None:
             return  # refused, and already said so
@@ -682,7 +794,9 @@ class Bridge:
                 done = "[END]" in line
                 line = line.replace("[END]", "").strip()
                 if line:
-                    self.emit({"t": "said", "sid": sid, "text": line, "turn": turn + 1, "at": time.time()})
+                    self.emit(
+                        {"t": "said", "sid": sid, "text": line, "turn": turn + 1, "at": time.time()}
+                    )
                     history.append(("user", line))
                     await self.send({"sid": sid, "msg": {"kind": "text", "text": line}})
                 if done or not line:
@@ -692,7 +806,9 @@ class Bridge:
         except Exception as exc:  # noqa: BLE001 — the persona failing ends the session, says why
             # a KeyError's str() is its repr — quotes and escaped newlines; say the message itself
             text = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
-            self.emit({"t": "error", "sid": sid, "text": f"simulated user: {type(exc).__name__}: {text}"})
+            self.emit(
+                {"t": "error", "sid": sid, "text": f"simulated user: {type(exc).__name__}: {text}"}
+            )
         finally:
             self.end({"sid": sid})
 
@@ -701,18 +817,25 @@ class Bridge:
         from operonx.core.ops.graph.graph_op import GraphOp
         from operonx.providers.ops import LLMOp
 
-        system = ("You are role-playing a person talking to an AI product, to test it. Stay in character.\n"
-                  f"Who you are and what you want:\n{persona}\n\n"
-                  "Reply with only your next message — no quotes, no narration. Keep it natural and short. "
-                  "When you have what you came for, or the conversation is over, reply with [END].")
+        system = (
+            "You are role-playing a person talking to an AI product, to test it. Stay in character.\n"
+            f"Who you are and what you want:\n{persona}\n\n"
+            "Reply with only your next message — no quotes, no narration. Keep it natural and short. "
+            "When you have what you came for, or the conversation is over, reply with [END]."
+        )
         messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
         for who, text in history:
             messages.append({"role": "user" if who == "service" else "assistant", "content": text})
         if not history or history[-1][0] == "user":
-            messages.append({"role": "user", "content": "(The conversation starts. Say your first line.)"})
+            messages.append(
+                {"role": "user", "content": "(The conversation starts. Say your first line.)"}
+            )
         with GraphOp(name="simulated_user") as g:
-            node = LLMOp.of(resource=llm.partition(":")[2] if llm.startswith("llm:") else llm,
-                            messages=messages, temperature=0.7)
+            node = LLMOp.of(
+                resource=llm.partition(":")[2] if llm.startswith("llm:") else llm,
+                messages=messages,
+                temperature=0.7,
+            )
             START >> node >> END
         out = await Operon(g).run(inputs={})
         if out.get("error"):
@@ -735,17 +858,28 @@ class Bridge:
             engine = runner.engine or next(iter(runner.variants.values()))
             if msg.get("variant") and runner.variants:
                 engine = runner.variants[str(msg["variant"])]
-            owner = {"service": runner.spec.name, "transport": runner.spec.kind, "variant": msg.get("variant")}
+            owner = {
+                "service": runner.spec.name,
+                "transport": runner.spec.kind,
+                "variant": msg.get("variant"),
+            }
             where = f"{runner.spec.name}'s graph"
         name = str(msg.get("op_name") or "")
         op = _find_op(engine.graph, name)
         if op is None:
             return {"t": "rerun", "error": f"no op {name!r} in {where}", "status": "error"}
         trace = WorkflowTrace(
-            trace_id=str(uuid.uuid4()), workflow_name=engine.name, started_at=perf_counter(),
-            wall_started_at=time.time(), ended_at=0.0,
-            metadata={**run_metadata(), **origin_metadata(
-                ORIGIN_PLAYGROUND, **owner, toy="rerun", rerun_of=msg.get("of"), op=op.name)},
+            trace_id=str(uuid.uuid4()),
+            workflow_name=engine.name,
+            started_at=perf_counter(),
+            wall_started_at=time.time(),
+            ended_at=0.0,
+            metadata={
+                **run_metadata(),
+                **origin_metadata(
+                    ORIGIN_PLAYGROUND, **owner, toy="rerun", rerun_of=msg.get("of"), op=op.name
+                ),
+            },
         )
         outputs: List[Any] = []
         token = _current_trace.set(trace)
@@ -766,8 +900,15 @@ class Bridge:
             except Exception:  # noqa: BLE001
                 LOGGER.exception("trace consumer failed on a playground rerun")
         status, error = _status(trace)
-        return {"t": "rerun", "trace_id": trace.trace_id, "op": op.name, "status": status, "error": error,
-                "ms": round(ms, 3), "outputs": _jsonable(outputs[-1] if len(outputs) == 1 else outputs)}
+        return {
+            "t": "rerun",
+            "trace_id": trace.trace_id,
+            "op": op.name,
+            "status": status,
+            "error": error,
+            "ms": round(ms, 3),
+            "outputs": _jsonable(outputs[-1] if len(outputs) == 1 else outputs),
+        }
 
     # -- the loop ----------------------------------------------------------
 

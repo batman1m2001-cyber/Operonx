@@ -328,7 +328,11 @@ def describe_job(job: Any) -> Dict[str, Any]:
         }
     d = job.describe()
     return {
-        **({k: d.get(k) for k in ("dataset", "evaluators", "threshold")} if d.get("kind") == "eval" else {}),
+        **(
+            {k: d.get(k) for k in ("dataset", "evaluators", "threshold")}
+            if d.get("kind") == "eval"
+            else {}
+        ),
         "name": job.name,
         "kind": d.get("kind") or "job",
         "graph": d.get("graph"),
@@ -406,8 +410,15 @@ def describe_jobspec(j: Any) -> Dict[str, Any]:
     opts = j.options or {}
     is_eval = opts.get("dataset") is not None
     return {
-        **({"dataset": opts.get("dataset"), "evaluators": [str(e) for e in opts.get("evaluators") or []],
-            "threshold": opts.get("threshold")} if is_eval else {}),
+        **(
+            {
+                "dataset": opts.get("dataset"),
+                "evaluators": [str(e) for e in opts.get("evaluators") or []],
+                "threshold": opts.get("threshold"),
+            }
+            if is_eval
+            else {}
+        ),
         "name": j.name,
         "kind": "runbook" if j.runbook else "eval" if is_eval else "job",
         "graph": j.graph or None,

@@ -25,7 +25,15 @@ from unittest.mock import Mock, patch
 import pytest
 
 from operonx.app import Application, Dataset, Eval
-from operonx.app.evals import contains, dataset_path, exact, fuzzy, json_match, llm_judge, verdict_of
+from operonx.app.evals import (
+    contains,
+    dataset_path,
+    exact,
+    fuzzy,
+    json_match,
+    llm_judge,
+    verdict_of,
+)
 from operonx.app.jobs import Job
 from operonx.core import END, START, graph, op
 from operonx.telemetry.runs.files import FilesRunStore
@@ -55,7 +63,11 @@ def _cases(path: Path, rows) -> Path:
 CASES = [
     {"id": "a", "input": "I want my money back", "expected": {"label": "refund"}},
     {"id": "b", "input": "hello", "expected": {"label": "other"}},
-    {"id": "c", "input": "give money back now", "expected": {"label": "other"}},  # the system is wrong here
+    {
+        "id": "c",
+        "input": "give money back now",
+        "expected": {"label": "other"},
+    },  # the system is wrong here
 ]
 
 
@@ -66,7 +78,9 @@ def test_a_dataset_is_a_file_of_cases(tmp_path):
     ds = Dataset(_cases(tmp_path / "d.jsonl", [{"id": "x", "input": 1}, {"plain": "row"}]))
     rows = ds.rows()
     assert rows[0] == {"id": "x", "input": 1}
-    assert rows[1]["input"] == {"plain": "row"} and len(rows[1]["id"]) == 12  # a bare line is its input
+    assert (
+        rows[1]["input"] == {"plain": "row"} and len(rows[1]["id"]) == 12
+    )  # a bare line is its input
     assert Dataset(ds.path).rows()[1]["id"] == rows[1]["id"]  # ids are stable
 
     added = ds.add([{"input": "new", "expected": "N", "tags": ["t"]}, {"id": "x", "input": 9}])
@@ -87,7 +101,11 @@ def test_any_result_becomes_a_verdict():
     assert verdict_of(True) == {"passed": True}
     assert verdict_of(0.7) == {"passed": True, "score": 0.7}
     assert verdict_of(0.2) == {"passed": False, "score": 0.2}
-    assert verdict_of({"score": 0.9, "reason": "ok"}) == {"score": 0.9, "reason": "ok", "passed": True}
+    assert verdict_of({"score": 0.9, "reason": "ok"}) == {
+        "score": 0.9,
+        "reason": "ok",
+        "passed": True,
+    }
     assert verdict_of(None)["passed"] is False
 
 
@@ -107,9 +125,16 @@ def test_the_built_in_evaluators():
 
 
 def _eval(tmp_path, evaluators, rows=CASES, **kw):
-    return Eval("classify_eval", graph=classify_flow, item_input="text",
-                dataset=_cases(tmp_path / "cases.jsonl", rows), evaluators=evaluators,
-                record_dir=tmp_path / "evals", trace=[_consumer(tmp_path)], **kw)
+    return Eval(
+        "classify_eval",
+        graph=classify_flow,
+        item_input="text",
+        dataset=_cases(tmp_path / "cases.jsonl", rows),
+        evaluators=evaluators,
+        record_dir=tmp_path / "evals",
+        trace=[_consumer(tmp_path)],
+        **kw,
+    )
 
 
 def _consumer(tmp_path):
@@ -123,7 +148,9 @@ def test_each_case_is_judged_and_the_record_says_so(tmp_path):
     assert run.status == "failed"  # case c fails: the eval fails
     ev = run.meta["eval"]
     assert (ev["cases"], ev["passed"], ev["failed"], ev["errored"]) == (3, 2, 1, 0)
-    assert ev["pass_rate"] == pytest.approx(2 / 3, abs=1e-4) and ev["checks"] == {"exact(label)": {"passed": 2, "cases": 3}}
+    assert ev["pass_rate"] == pytest.approx(2 / 3, abs=1e-4) and ev["checks"] == {
+        "exact(label)": {"passed": 2, "cases": 3}
+    }
     assert "passed=2/3" in run.summary()
 
     items = {i.key: i for i in run.items}
@@ -163,10 +190,17 @@ def test_a_broken_case_or_evaluator_fails_its_case_only(tmp_path):
     rows = CASES[:2] + [{"id": "boom", "input": "boom", "expected": {"label": "other"}}]
     run = _eval(tmp_path, [slow_ok, as_op], rows=rows).run_sync()
     items = {i.key: i for i in run.items}
-    assert items["a"].verdict["passed"] and items["a"].verdict["checks"]["slow_ok"]["reason"] == "row a"
+    assert (
+        items["a"].verdict["passed"]
+        and items["a"].verdict["checks"]["slow_ok"]["reason"] == "row a"
+    )
     assert items["a"].verdict["checks"]["as_op"]["passed"]  # an @op is called for its body
     boom = items["boom"].verdict
-    assert not boom["passed"] and "cannot classify" in boom["error"] and run.meta["eval"]["errored"] == 1
+    assert (
+        not boom["passed"]
+        and "cannot classify" in boom["error"]
+        and run.meta["eval"]["errored"] == 1
+    )
 
     run = _eval(tmp_path, [raises], rows=CASES[:1]).run_sync()
     check = run.items[0].verdict["checks"]["raises"]
@@ -185,11 +219,19 @@ def test_an_eval_of_a_graph_with_doors(tmp_path):
         out = egress(item=c["label"])
         START >> src >> c >> out >> END
 
-    run = Eval("door_eval", graph=door_flow, dataset=_cases(tmp_path / "d.jsonl", CASES),
-               evaluators=[lambda output=None, expected=None: output == expected["label"]],
-               record_dir=tmp_path / "evals", trace=[]).run_sync()
+    run = Eval(
+        "door_eval",
+        graph=door_flow,
+        dataset=_cases(tmp_path / "d.jsonl", CASES),
+        evaluators=[lambda output=None, expected=None: output == expected["label"]],
+        record_dir=tmp_path / "evals",
+        trace=[],
+    ).run_sync()
     assert [(i.key, i.verdict["passed"], i.verdict["output"]) for i in run.items] == [
-        ("a", True, "refund"), ("b", True, "other"), ("c", False, "refund")]
+        ("a", True, "refund"),
+        ("b", True, "other"),
+        ("c", False, "refund"),
+    ]
 
 
 def test_the_llm_judge_parses_a_verdict_and_keeps_its_cost(tmp_path):
@@ -201,10 +243,23 @@ def test_the_llm_judge_parses_a_verdict_and_keeps_its_cost(tmp_path):
 
     async def generate(messages, **kwargs):
         seen.append(messages)
-        return ChatCompletion(id="m", created=1, model="judge", object="chat.completion", choices=[
-            Choice(index=0, finish_reason="stop", message=ChatCompletionMessage(
-                role="assistant", content='{"passed": false, "score": 0.25, "reason": "wrong label"}'))],
-            usage=CompletionUsage(prompt_tokens=40, completion_tokens=12, total_tokens=52))
+        return ChatCompletion(
+            id="m",
+            created=1,
+            model="judge",
+            object="chat.completion",
+            choices=[
+                Choice(
+                    index=0,
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content='{"passed": false, "score": 0.25, "reason": "wrong label"}',
+                    ),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=40, completion_tokens=12, total_tokens=52),
+        )
 
     llm = Mock()
     llm.generate = generate
@@ -218,7 +273,10 @@ def test_the_llm_judge_parses_a_verdict_and_keeps_its_cost(tmp_path):
     assert v["passed"] is False and v["score"] == 0.25 and v["reason"] == "wrong label"
     system = seen[0][0]["content"]
     assert "{be strict}" in system  # the rubric's braces are text, not template slots
-    assert "I want my money back" in seen[0][1]["content"] and '"label": "refund"' in seen[0][1]["content"]
+    assert (
+        "I want my money back" in seen[0][1]["content"]
+        and '"label": "refund"' in seen[0][1]["content"]
+    )
 
 
 # ── declared in operonx.toml ──────────────────────────────────────────────
@@ -246,7 +304,8 @@ def project(tmp_path, monkeypatch):
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(MOD), encoding="utf-8")
     (tmp_path / "datasets").mkdir()
     _cases(tmp_path / "datasets" / "labels.jsonl", CASES)
-    (tmp_path / "operonx.toml").write_text(textwrap.dedent(f"""
+    (tmp_path / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "evdemo"
 
@@ -257,7 +316,9 @@ def project(tmp_path, monkeypatch):
         dataset    = "dataset:labels"
         evaluators = ["{name}:label_ok"]
         threshold  = 0.5
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     monkeypatch.chdir(tmp_path)
     yield name, tmp_path
     sys.modules.pop(name, None)
@@ -272,7 +333,11 @@ def test_a_job_block_with_a_dataset_is_an_eval(project):
     assert described["kind"] == "eval" and described["dataset"] == "dataset:labels"
     assert described["evaluators"] == [f"{name}:label_ok"]
     ev = app.job("labels")
-    assert isinstance(ev, Eval) and ev.threshold == 0.5 and ev.dataset.path == root / "datasets" / "labels.jsonl"
+    assert (
+        isinstance(ev, Eval)
+        and ev.threshold == 0.5
+        and ev.dataset.path == root / "datasets" / "labels.jsonl"
+    )
     d = ev.describe()
     assert d["source"] == str(root / "datasets" / "labels.jsonl") and d["sink"] is None
     run = app.run_sync("labels")
@@ -286,14 +351,25 @@ def test_operonx_run_gates_on_an_eval(project):
     name, root = project
     toml = root / "operonx.toml"
     toml.write_text(toml.read_text().replace("threshold  = 0.5", "threshold  = 0.9"))
-    proc = subprocess.run([sys.executable, "-m", "operonx.cli.run", "labels"], cwd=root,
-                          capture_output=True, text=True, timeout=120)
+    proc = subprocess.run(
+        [sys.executable, "-m", "operonx.cli.run", "labels"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     assert proc.returncode == 1, proc.stderr
     assert "passed=2/3" in proc.stdout + proc.stderr
 
 
 def test_a_plain_job_record_is_unchanged(tmp_path):
-    run = Job("plain", graph=classify_flow, item_input="text", source=["hello"],
-              record_dir=tmp_path / "jobs", trace=[]).run_sync()
+    run = Job(
+        "plain",
+        graph=classify_flow,
+        item_input="text",
+        source=["hello"],
+        record_dir=tmp_path / "jobs",
+        trace=[],
+    ).run_sync()
     line = json.loads((run.path / "items.jsonl").read_text().splitlines()[0])
     assert "verdict" not in line and "eval" not in run.meta

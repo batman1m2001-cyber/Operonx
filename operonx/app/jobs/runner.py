@@ -314,7 +314,9 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                 try:
                     await judge(raw, result)
                 except Exception as exc:  # noqa: BLE001
-                    LOGGER.error(f"[job:{job.name}] judging {key!r} failed: {type(exc).__name__}: {exc}")
+                    LOGGER.error(
+                        f"[job:{job.name}] judging {key!r} failed: {type(exc).__name__}: {exc}"
+                    )
             record.item(result)
             await _report(job, sink, result)
             if result.status in _RETRIABLE and policy.mode == "stop":

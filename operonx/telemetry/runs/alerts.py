@@ -29,8 +29,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .base import RunStore
-from .model import percentile
-from .model import RunFilter
+from .model import RunFilter, percentile
 
 __all__ = ["METRICS", "Alert", "AlertState", "deliver", "evaluate", "message", "step"]
 
@@ -156,25 +155,56 @@ def _fmt(metric: str, value: Optional[float]) -> str:
     return f"{value:g}"
 
 
-def message(alert: Alert, st: AlertState, kind: str, *, project: str = "", link: str = "") -> Dict[str, Any]:
+def message(
+    alert: Alert, st: AlertState, kind: str, *, project: str = "", link: str = ""
+) -> Dict[str, Any]:
     """The webhook body: a ``text`` line people read, and the fields."""
-    what = f"p95 of {alert.op}" if alert.op else {"error_rate": "error rate", "p95_ms": "p95 duration",
-                                                  "cost_per_hour": "cost per hour", "runs": "runs"}[alert.metric]
-    head = {"firing": "FIRING", "reminder": "STILL FIRING", "resolved": "RESOLVED", "test": "TEST"}[kind]
+    what = (
+        f"p95 of {alert.op}"
+        if alert.op
+        else {
+            "error_rate": "error rate",
+            "p95_ms": "p95 duration",
+            "cost_per_hour": "cost per hour",
+            "runs": "runs",
+        }[alert.metric]
+    )
+    head = {"firing": "FIRING", "reminder": "STILL FIRING", "resolved": "RESOLVED", "test": "TEST"}[
+        kind
+    ]
     cmp = "<" if alert.metric == "runs" else ">"
-    text = (f"[{head}] {project + ' · ' if project else ''}{alert.origin} {alert.target}: {what} "
-            f"{_fmt(alert.metric, st.value)} ({cmp} {_fmt(alert.metric, alert.threshold)}) over the last "
-            f"{alert.window_min:g} min, {st.runs} runs" + (f" — {link}" if link else ""))
-    return {"text": text, "alert": alert.name, "state": kind, "metric": alert.metric, "op": alert.op,
-            "value": st.value, "threshold": alert.threshold, "runs": st.runs, "since": st.since, "until": st.until,
-            "origin": alert.origin, "target": alert.target, "project": project, "link": link}
+    text = (
+        f"[{head}] {project + ' · ' if project else ''}{alert.origin} {alert.target}: {what} "
+        f"{_fmt(alert.metric, st.value)} ({cmp} {_fmt(alert.metric, alert.threshold)}) over the last "
+        f"{alert.window_min:g} min, {st.runs} runs" + (f" — {link}" if link else "")
+    )
+    return {
+        "text": text,
+        "alert": alert.name,
+        "state": kind,
+        "metric": alert.metric,
+        "op": alert.op,
+        "value": st.value,
+        "threshold": alert.threshold,
+        "runs": st.runs,
+        "since": st.since,
+        "until": st.until,
+        "origin": alert.origin,
+        "target": alert.target,
+        "project": project,
+        "link": link,
+    }
 
 
 def deliver(webhook: str, body: Dict[str, Any], timeout: float = 5.0) -> int:
     """POST *body* as JSON to *webhook*; the HTTP status."""
     if not webhook.startswith(("http://", "https://")):
         raise ValueError("a webhook is an http(s) URL")
-    req = urllib.request.Request(webhook, data=json.dumps(body).encode("utf-8"), method="POST",
-                                 headers={"content-type": "application/json"})
+    req = urllib.request.Request(
+        webhook,
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=timeout) as res:
         return int(res.status)

@@ -83,15 +83,22 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
 
         if not spec.get("dsn"):
             raise ValueError("run_store backend 'postgres' needs dsn")
-        return PostgresRunStore(spec["dsn"], prefix=spec.get("prefix") or "operonx_",
-                                media_dir=spec.get("media_dir") or "")
+        return PostgresRunStore(
+            spec["dsn"],
+            prefix=spec.get("prefix") or "operonx_",
+            media_dir=spec.get("media_dir") or "",
+        )
     if backend == "mongo":
         from .mongo import MongoRunStore
 
         if not spec.get("uri"):
             raise ValueError("run_store backend 'mongo' needs uri")
-        return MongoRunStore(spec["uri"], database=spec.get("database") or "operonx",
-                             prefix=spec.get("prefix") or "", media_dir=spec.get("media_dir") or "")
+        return MongoRunStore(
+            spec["uri"],
+            database=spec.get("database") or "operonx",
+            prefix=spec.get("prefix") or "",
+            media_dir=spec.get("media_dir") or "",
+        )
     if backend == "langfuse":
         from .langfuse import LangfuseRunStore
 

@@ -700,8 +700,11 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         # an eval: `operonx.app.evals.Eval.from_spec` reads these three
         if not isinstance(options.get("evaluators", []), list):
             raise ManifestError(f"{where}: {label} `evaluators` must be a list of module:attr")
-    unread = {k: v for k, v in options.items()
-              if not (options.get("dataset") is not None and k in ("dataset", "evaluators", "threshold"))}
+    unread = {
+        k: v
+        for k, v in options.items()
+        if not (options.get("dataset") is not None and k in ("dataset", "evaluators", "threshold"))
+    }
     if unread:
         # Kept, for tools that read their own keys — but a Job ignores them,
         # so a typo like `concurency = 8` would otherwise do nothing, quietly.

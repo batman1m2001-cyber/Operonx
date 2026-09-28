@@ -26,30 +26,69 @@ NOW = 1_790_500_000.0
 def _run(tid, age_s, *, ms=100.0, error=False, cost=0.001, llm_ms=50.0, service="call"):
     t0 = 10.0
     nodes = [
-        OpExecution(op_id=f"g.llm#{tid}", op_name="llm", op_full_name="g.llm", ctx=("main",), start_time=t0,
-                    end_time=t0 + llm_ms / 1000, inputs={}, upstreams=[], op_type="llm",
-                    outputs={"content": "x", "cost_usd": cost, "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
-        OpExecution(op_id=f"g.out#{tid}", op_name="out", op_full_name="g.out", ctx=("main",), start_time=t0,
-                    end_time=t0 + ms / 1000, inputs={}, outputs={}, upstreams=[],
-                    status="error" if error else "ok", error="boom" if error else None),
+        OpExecution(
+            op_id=f"g.llm#{tid}",
+            op_name="llm",
+            op_full_name="g.llm",
+            ctx=("main",),
+            start_time=t0,
+            end_time=t0 + llm_ms / 1000,
+            inputs={},
+            upstreams=[],
+            op_type="llm",
+            outputs={
+                "content": "x",
+                "cost_usd": cost,
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        ),
+        OpExecution(
+            op_id=f"g.out#{tid}",
+            op_name="out",
+            op_full_name="g.out",
+            ctx=("main",),
+            start_time=t0,
+            end_time=t0 + ms / 1000,
+            inputs={},
+            outputs={},
+            upstreams=[],
+            status="error" if error else "ok",
+            error="boom" if error else None,
+        ),
     ]
-    return WorkflowTrace(trace_id=tid, workflow_name="flow", started_at=t0, ended_at=t0 + ms / 1000, nodes=nodes,
-                         metadata={"origin": "service", "service": service}, wall_started_at=NOW - age_s)
+    return WorkflowTrace(
+        trace_id=tid,
+        workflow_name="flow",
+        started_at=t0,
+        ended_at=t0 + ms / 1000,
+        nodes=nodes,
+        metadata={"origin": "service", "service": service},
+        wall_started_at=NOW - age_s,
+    )
 
 
 @pytest.fixture()
 def store(tmp_path):
     s = SqliteRunStore(path=tmp_path / "runs.sqlite")
-    for i in range(8):   # the last 15 minutes: 8 calls, 2 failing, one slow LLM
-        s.consume(_run(f"c{i}", 60 * (i + 1), error=i in (1, 5), llm_ms=900 if i == 3 else 50,
-                       cost=None if i == 7 else 0.002))
-    s.consume(_run("old", 3600, error=True))          # outside the window
+    for i in range(8):  # the last 15 minutes: 8 calls, 2 failing, one slow LLM
+        s.consume(
+            _run(
+                f"c{i}",
+                60 * (i + 1),
+                error=i in (1, 5),
+                llm_ms=900 if i == 3 else 50,
+                cost=None if i == 7 else 0.002,
+            )
+        )
+    s.consume(_run("old", 3600, error=True))  # outside the window
     s.consume(_run("x", 60, error=True, service="other"))  # another service
     return s
 
 
 def _alert(**kw):
-    base = dict(name="a", origin="service", target="call", metric="error_rate", threshold=0.1, window_min=15)
+    base = dict(
+        name="a", origin="service", target="call", metric="error_rate", threshold=0.1, window_min=15
+    )
     base.update(kw)
     return Alert(**base)
 
@@ -105,10 +144,17 @@ def test_messages_and_webhooks():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         a = _alert()
-        body = message(a, AlertState(firing=True, value=0.25, runs=8), "firing", project="callbot",
-                       link="http://studio/p/x")
-        assert body["text"] == ("[FIRING] callbot · service call: error rate 25.0% (> 10.0%) over the last 15 min, "
-                                "8 runs — http://studio/p/x")
+        body = message(
+            a,
+            AlertState(firing=True, value=0.25, runs=8),
+            "firing",
+            project="callbot",
+            link="http://studio/p/x",
+        )
+        assert body["text"] == (
+            "[FIRING] callbot · service call: error rate 25.0% (> 10.0%) over the last 15 min, "
+            "8 runs — http://studio/p/x"
+        )
         assert deliver(f"http://127.0.0.1:{srv.server_port}/hook", body) == 200
         assert got[0]["alert"] == "a" and got[0]["state"] == "firing"
     finally:

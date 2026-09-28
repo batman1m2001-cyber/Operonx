@@ -81,7 +81,8 @@ def project(tmp_path, monkeypatch):
     name = f"voice_{uuid.uuid4().hex[:6]}"
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(PROJECT), encoding="utf-8")
     (tmp_path / "resources.yaml").write_text("trace_local:\n  default: {}\n", encoding="utf-8")
-    (tmp_path / "operonx.toml").write_text(textwrap.dedent(f"""
+    (tmp_path / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "voicedemo"
         trace = ["trace_local:default"]
@@ -105,11 +106,16 @@ def project(tmp_path, monkeypatch):
         port  = 8125
         max_inflight = 64
         graph = "{name}:chat_flow"
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     monkeypatch.chdir(tmp_path)
     real_get = ResourceHub.get
-    monkeypatch.setattr(ResourceHub, "get",
-                        lambda self, key: GREETER if key == "tool:greeter" else real_get(self, key))
+    monkeypatch.setattr(
+        ResourceHub,
+        "get",
+        lambda self, key: GREETER if key == "tool:greeter" else real_get(self, key),
+    )
     yield name, tmp_path
     sys.modules.pop(name, None)
     ResourceHub.reset_instance()
@@ -160,8 +166,16 @@ def test_a_voice_session_round_trips_audio(project):
     assert door["toys"] == ["voice"] and door["audio"]["rate"] == 8000
 
     async def go():
-        await bridge.handle({"op": "open", "sid": "v", "service": "voice", "toy": "voice",
-                             "send": [_audio(_pcm(640))], "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "v",
+                "service": "voice",
+                "toy": "voice",
+                "send": [_audio(_pcm(640))],
+                "end": True,
+            }
+        )
         return await _until(events, lambda e: e["t"] == "ended")
 
     ended = asyncio.run(go())
@@ -183,10 +197,22 @@ def test_latency_drop_noise_and_silence(project):
 
     async def session(sid, conditions, msgs):
         t0 = time.monotonic()
-        await bridge.handle({"op": "open", "sid": sid, "service": "voice", "conditions": conditions,
-                             "send": msgs, "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": sid,
+                "service": "voice",
+                "conditions": conditions,
+                "send": msgs,
+                "end": True,
+            }
+        )
         ended = await _until(events, lambda e: e["t"] == "ended" and e["sid"] == sid)
-        return ended, time.monotonic() - t0, [e["msg"] for e in events if e["t"] == "out" and e["sid"] == sid]
+        return (
+            ended,
+            time.monotonic() - t0,
+            [e["msg"] for e in events if e["t"] == "out" and e["sid"] == sid],
+        )
 
     async def go():
         slow = await session("slow", {"latency_ms": 150}, [_audio(_pcm(320)), _audio(_pcm(320))])
@@ -200,8 +226,14 @@ def test_latency_drop_noise_and_silence(project):
     assert lost[2] == [] and lost[0]["dropped"] == 2
     noise = struct.unpack("<320h", base64.b64decode(noisy[2][0]["b64"]))
     assert max(abs(x) for x in noise) > 100  # silence in, noise out
-    assert [set(struct.unpack("<320h", base64.b64decode(m["b64"]))) for m in quiet[2]] == [{0}, {0}, {1000}]
-    run = FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0).get_run(slow[0]["trace_id"])
+    assert [set(struct.unpack("<320h", base64.b64decode(m["b64"]))) for m in quiet[2]] == [
+        {0},
+        {0},
+        {1000},
+    ]
+    run = FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0).get_run(
+        slow[0]["trace_id"]
+    )
     assert run.summary.metadata["playground_conditions"] == {"latency_ms": 150.0}
 
 
@@ -216,9 +248,23 @@ def test_a_resource_fails_for_its_session_only(project):
     bridge, events = _bridge(root)
 
     async def go():
-        await bridge.handle({"op": "open", "sid": "bad", "service": "chat", "conditions": {"fail": ["tool:greeter"]},
-                             "send": [{"kind": "text", "text": "x"}]})
-        await bridge.handle({"op": "open", "sid": "good", "service": "chat", "send": [{"kind": "text", "text": "y"}]})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "bad",
+                "service": "chat",
+                "conditions": {"fail": ["tool:greeter"]},
+                "send": [{"kind": "text", "text": "x"}],
+            }
+        )
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "good",
+                "service": "chat",
+                "send": [{"kind": "text", "text": "y"}],
+            }
+        )
         await _until(events, lambda e: e["t"] == "out" and e["sid"] == "good")
         await bridge.handle({"op": "end", "sid": "bad"})
         await bridge.handle({"op": "end", "sid": "good"})
@@ -227,9 +273,14 @@ def test_a_resource_fails_for_its_session_only(project):
 
     good = asyncio.run(go())
     bad = next(e for e in events if e["t"] == "ended" and e["sid"] == "bad")
-    assert bad["status"] == "error" and "tool:greeter failed (a playground condition)" in bad["error"]
+    assert (
+        bad["status"] == "error" and "tool:greeter failed (a playground condition)" in bad["error"]
+    )
     assert good["status"] == "ok"
-    assert next(e for e in events if e["t"] == "out" and e["sid"] == "good")["msg"]["text"] == "hi, you said y"
+    assert (
+        next(e for e in events if e["t"] == "out" and e["sid"] == "good")["msg"]["text"]
+        == "hi, you said y"
+    )
     # and the resource is itself again outside that session
     assert asyncio.run(GREETER.greet("z")) == "hi, you said z"
 
@@ -247,9 +298,20 @@ def _persona(lines):
     async def generate(messages, **kwargs):
         seen.append(messages)
         text = lines[min(len(seen) - 1, len(lines) - 1)]
-        return ChatCompletion(id="p", created=1, model="persona", object="chat.completion", choices=[
-            Choice(index=0, finish_reason="stop", message=ChatCompletionMessage(role="assistant", content=text))],
-            usage=CompletionUsage(prompt_tokens=20, completion_tokens=6, total_tokens=26))
+        return ChatCompletion(
+            id="p",
+            created=1,
+            model="persona",
+            object="chat.completion",
+            choices=[
+                Choice(
+                    index=0,
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(role="assistant", content=text),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=20, completion_tokens=6, total_tokens=26),
+        )
 
     llm = Mock()
     llm.generate = generate
@@ -266,9 +328,17 @@ def test_a_simulated_user_holds_a_conversation(project):
     async def go():
         with patch("operonx.providers.ops._utils.ResourceHub") as cls:
             cls.instance.return_value = hub
-            await bridge.handle({"op": "simulate", "sid": "sim", "service": "chat", "llm": "llm:persona",
-                                 "persona": "A busy parent who wants to reschedule a class.",
-                                 "turns": 5, "quiet_ms": 100})
+            await bridge.handle(
+                {
+                    "op": "simulate",
+                    "sid": "sim",
+                    "service": "chat",
+                    "llm": "llm:persona",
+                    "persona": "A busy parent who wants to reschedule a class.",
+                    "turns": 5,
+                    "quiet_ms": 100,
+                }
+            )
         return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == "sim")
 
     ended = asyncio.run(go())
@@ -280,8 +350,16 @@ def test_a_simulated_user_holds_a_conversation(project):
     assert seen[1][0]["role"] == "system" and "busy parent" in seen[1][0]["content"]
     assert seen[1][1] == {"role": "assistant", "content": "I need to move my class"}
     assert seen[1][2] == {"role": "user", "content": "hi, you said I need to move my class"}
-    md = FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0).get_run(ended["trace_id"]).summary.metadata
-    assert md["toy"] == "simulated" and md["persona"].startswith("A busy parent") and md["simulated_by"] == "llm:persona"
+    md = (
+        FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0)
+        .get_run(ended["trace_id"])
+        .summary.metadata
+    )
+    assert (
+        md["toy"] == "simulated"
+        and md["persona"].startswith("A busy parent")
+        and md["simulated_by"] == "llm:persona"
+    )
     assert [m["text"] for m in md["playground_script"]] == said
 
 
@@ -291,7 +369,9 @@ def test_what_a_simulated_user_cannot_drive_it_refuses(project):
 
     async def go():
         await bridge.handle({"op": "simulate", "sid": "a", "service": "chat", "llm": "llm:x"})
-        await bridge.handle({"op": "simulate", "sid": "b", "service": "voice", "llm": "llm:x", "persona": "p"})
+        await bridge.handle(
+            {"op": "simulate", "sid": "b", "service": "voice", "llm": "llm:x", "persona": "p"}
+        )
 
     asyncio.run(go())
     refused = {e["sid"]: e["reason"] for e in events if e["t"] == "refused"}
@@ -333,18 +413,38 @@ def test_playground_runs_stay_local_unless_asked(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     remote, local = Remote(), LocalConsumer({"root": str(tmp_path / "runs")})
     assert _split_consumers([local, remote]) == ([local], [remote])
-    app = Application("remote-demo", services=[Service(
-        "up", websocket("/up", port=8126), graph=upper_flow, max_inflight=8, trace=[local, remote])])
+    app = Application(
+        "remote-demo",
+        services=[
+            Service(
+                "up",
+                websocket("/up", port=8126),
+                graph=upper_flow,
+                max_inflight=8,
+                trace=[local, remote],
+            )
+        ],
+    )
     events = []
     bridge = Bridge(app, events.append)
     assert bridge.describe()["doors"][0]["remote_trace"] == ["Remote"]
 
     async def go(sid, remote_flag):
-        await bridge.handle({"op": "open", "sid": sid, "service": "up", "remote": remote_flag,
-                             "send": [{"kind": "text", "text": "hi"}], "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": sid,
+                "service": "up",
+                "remote": remote_flag,
+                "send": [{"kind": "text", "text": "hi"}],
+                "end": True,
+            }
+        )
         return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == sid)
 
     quiet = asyncio.run(go("q", False))
-    assert remote.got == [] and FilesRunStore(root=tmp_path / "runs", refresh_every=0).get_run(quiet["trace_id"])
+    assert remote.got == [] and FilesRunStore(root=tmp_path / "runs", refresh_every=0).get_run(
+        quiet["trace_id"]
+    )
     loud = asyncio.run(go("l", True))
     assert remote.got == [loud["trace_id"]]

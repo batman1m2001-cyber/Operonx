@@ -98,7 +98,8 @@ def project(tmp_path, monkeypatch):
     name = f"play_{uuid.uuid4().hex[:6]}"
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(PROJECT), encoding="utf-8")
     (tmp_path / "resources.yaml").write_text("trace_local:\n  default: {}\n", encoding="utf-8")
-    (tmp_path / "operonx.toml").write_text(textwrap.dedent(f"""
+    (tmp_path / "operonx.toml").write_text(
+        textwrap.dedent(f"""
         [project]
         name = "playdemo"
         trace = ["trace_local:default"]
@@ -144,7 +145,9 @@ def project(tmp_path, monkeypatch):
         max_inflight = 4
         graph = "{name}:score_flow"
         playground = "{name}:Upper"
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPERONX_RUNS_DIR", raising=False)
     yield name, tmp_path
@@ -183,7 +186,7 @@ def test_doors_are_described_with_their_toys(project):
     assert doors["score"]["toys"] == ["form"] and doors["score"]["codec"] == "JsonCodec"
     assert doors["chat"]["toys"] == ["chat", "form"] and doors["chat"]["inputs"] == ["prefix"]
     assert doors["chat"]["custom_hook"] and doors["chat"]["session"] == "per_connection"
-    assert doors["raw"]["toys"] == [] and doors["raw"]["codec"] is None   # no codec, no toy
+    assert doors["raw"]["toys"] == [] and doors["raw"]["codec"] is None  # no codec, no toy
     assert doors["custom"]["toys"] == ["chat"] and doors["custom"]["codec"] == "Upper"
 
 
@@ -193,21 +196,35 @@ def test_a_form_request_runs_the_real_door_and_is_filed_as_playground(project):
 
     async def go():
         payload = {"call_id": "c1", "text": "one two three"}
-        await bridge.handle({"op": "open", "sid": "f1", "service": "score", "toy": "form",
-                             "send": [{"kind": "json", "value": payload}], "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "f1",
+                "service": "score",
+                "toy": "form",
+                "send": [{"kind": "json", "value": payload}],
+                "end": True,
+            }
+        )
         return await _until(events, lambda e: e["t"] == "ended")
 
     ended = asyncio.run(go())
     opened = next(e for e in events if e["t"] == "opened")
     (out,) = [e for e in events if e["t"] == "out"]
     assert out["msg"] == {"kind": "json", "value": {"call_id": "c1", "words": 3}}
-    assert ended["status"] == "ok" and ended["trace_id"] == opened["trace_id"] and ended["sent"] == 1
+    assert (
+        ended["status"] == "ok" and ended["trace_id"] == opened["trace_id"] and ended["sent"] == 1
+    )
 
     run = _store(root).get_run(opened["trace_id"])
     meta = run.summary.metadata
     assert meta["origin"] == "playground" and meta["service"] == "score" and meta["toy"] == "form"
     (sent,) = meta["playground_script"]
-    assert sent["kind"] == "json" and sent["value"] == {"call_id": "c1", "text": "one two three"} and sent["at"] > 0
+    assert (
+        sent["kind"] == "json"
+        and sent["value"] == {"call_id": "c1", "text": "one two three"}
+        and sent["at"] > 0
+    )
     assert "origin:playground" in meta["tags"] and meta.get("project") == "playdemo"
     assert (root / ".operonx" / "runs" / "playground").is_dir()
 
@@ -220,8 +237,16 @@ def test_a_session_streams_its_ops_as_they_finish(project):
     bridge, events = _bridge(root)
 
     async def go():
-        await bridge.handle({"op": "open", "sid": "o1", "service": "score", "toy": "form",
-                             "send": [{"kind": "json", "value": {"call_id": "c1", "text": "a b"}}], "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "o1",
+                "service": "score",
+                "toy": "form",
+                "send": [{"kind": "json", "value": {"call_id": "c1", "text": "a b"}}],
+                "end": True,
+            }
+        )
         return await _until(events, lambda e: e["t"] == "ended")
 
     ended = asyncio.run(go())
@@ -267,10 +292,14 @@ def test_a_chat_session_goes_through_the_gate_and_answers_in_order(project):
     bridge, events = _bridge(root)
 
     async def go():
-        await bridge.handle({"op": "open", "sid": "c1", "service": "chat", "query": {"prefix": "bot:"}})
+        await bridge.handle(
+            {"op": "open", "sid": "c1", "service": "chat", "query": {"prefix": "bot:"}}
+        )
         for text in ("hello", "how are you"):
             await bridge.handle({"op": "send", "sid": "c1", "msg": {"kind": "text", "text": text}})
-        await bridge.handle({"op": "send", "sid": "c1", "msg": {"kind": "json", "value": {"a": 1, "b": 2}}})
+        await bridge.handle(
+            {"op": "send", "sid": "c1", "msg": {"kind": "json", "value": {"a": 1, "b": 2}}}
+        )
         await _until(events, lambda e: e["t"] == "out" and e["msg"]["kind"] == "json")
         await bridge.handle({"op": "end", "sid": "c1"})
         return await _until(events, lambda e: e["t"] == "ended")
@@ -278,14 +307,21 @@ def test_a_chat_session_goes_through_the_gate_and_answers_in_order(project):
     ended = asyncio.run(go())
     mod = sys.modules[name]
     outs = [e["msg"] for e in events if e["t"] == "out"]
-    assert outs == [{"kind": "text", "text": "bot: HELLO"}, {"kind": "text", "text": "bot: HOW ARE YOU"},
-                    {"kind": "json", "value": {"event": "got_json", "keys": ["a", "b"]}}]
+    assert outs == [
+        {"kind": "text", "text": "bot: HELLO"},
+        {"kind": "text", "text": "bot: HOW ARE YOU"},
+        {"kind": "json", "value": {"event": "got_json", "keys": ["a", "b"]}},
+    ]
     assert ended["status"] == "ok"
     # the service's own hook saw a playground session, and its on_close ran
     assert mod.SEEN["sessions"][-1]["playground"] is True and mod.SEEN["closed"] == 1
     assert next(e for e in events if e["t"] == "opened")["inputs"] == {"prefix": "bot:"}
     run = _store(root).get_run(ended["trace_id"])
-    assert [m.get("text") for m in run.summary.metadata["playground_script"]] == ["hello", "how are you", None]
+    assert [m.get("text") for m in run.summary.metadata["playground_script"]] == [
+        "hello",
+        "how are you",
+        None,
+    ]
     assert run.summary.metadata["playground_query"] == {"prefix": "bot:"}
 
 
@@ -296,8 +332,15 @@ def test_refusals_and_failures_say_why(project):
     async def go():
         await bridge.handle({"op": "open", "sid": "no", "service": "chat", "query": {"deny": "1"}})
         await bridge.handle({"op": "open", "sid": "raw", "service": "raw"})
-        await bridge.handle({"op": "open", "sid": "bad", "service": "score",
-                             "send": [{"kind": "json", "value": {"call_id": "c2", "text": ""}}], "end": True})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "bad",
+                "service": "score",
+                "send": [{"kind": "json", "value": {"call_id": "c2", "text": ""}}],
+                "end": True,
+            }
+        )
         await bridge.handle({"op": "send", "sid": "ghost", "msg": {"kind": "text", "text": "x"}})
         await bridge.handle({"id": 9, "op": "fly"})
         return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == "bad")
@@ -307,7 +350,11 @@ def test_refusals_and_failures_say_why(project):
     assert "on_session refused" in refused["no"] and "no playground codec" in refused["raw"]
     assert ended["status"] == "error" and ended["error"] == "scored: ValueError: empty text"
     errors = [e for e in events if e["t"] == "error"]
-    assert errors[0]["sid"] == "ghost" and errors[1] == {"t": "error", "text": "unknown op 'fly'", "id": 9}
+    assert errors[0]["sid"] == "ghost" and errors[1] == {
+        "t": "error",
+        "text": "unknown op 'fly'",
+        "id": 9,
+    }
 
 
 def test_a_door_with_no_consumers_is_still_recorded(project, tmp_path, monkeypatch):
@@ -318,8 +365,15 @@ def test_a_door_with_no_consumers_is_still_recorded(project, tmp_path, monkeypat
     bridge, events = _bridge(root)
 
     async def go():
-        await bridge.handle({"op": "open", "sid": "n", "service": "score", "end": True,
-                             "send": [{"kind": "json", "value": {"call_id": "n1", "text": "a"}}]})
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "n",
+                "service": "score",
+                "end": True,
+                "send": [{"kind": "json", "value": {"call_id": "n1", "text": "a"}}],
+            }
+        )
         return await _until(events, lambda e: e["t"] == "ended")
 
     ended = asyncio.run(go())
@@ -340,13 +394,31 @@ def test_one_op_reruns_with_recorded_inputs_as_its_own_run(project):
     bridge, _ = _bridge(root)
 
     async def go():
-        ok = await bridge.rerun({"service": "score", "op_name": "scored",
-                                 "inputs": {"call": {"call_id": "c3", "text": "a b c d"}}, "of": "run-1"})
-        bad = await bridge.rerun({"service": "score", "op_name": "scored",
-                                  "inputs": {"call": {"call_id": "c3", "text": ""}}, "of": "run-1"})
+        ok = await bridge.rerun(
+            {
+                "service": "score",
+                "op_name": "scored",
+                "inputs": {"call": {"call_id": "c3", "text": "a b c d"}},
+                "of": "run-1",
+            }
+        )
+        bad = await bridge.rerun(
+            {
+                "service": "score",
+                "op_name": "scored",
+                "inputs": {"call": {"call_id": "c3", "text": ""}},
+                "of": "run-1",
+            }
+        )
         ghost = await bridge.rerun({"service": "score", "op_name": "nope", "inputs": {}})
-        job = await bridge.rerun({"job": "nightly", "op_name": "scored",
-                                  "inputs": {"call": {"call_id": "j1", "text": "x y"}}, "of": "job-run"})
+        job = await bridge.rerun(
+            {
+                "job": "nightly",
+                "op_name": "scored",
+                "inputs": {"call": {"call_id": "j1", "text": "x y"}},
+                "of": "job-run",
+            }
+        )
         return ok, bad, ghost, job
 
     ok, bad, ghost, job = asyncio.run(go())
@@ -356,10 +428,16 @@ def test_one_op_reruns_with_recorded_inputs_as_its_own_run(project):
     assert bad["status"] == "error" and bad["error"] == "scored: ValueError: empty text"
     assert ghost["status"] == "error" and "no op 'nope'" in ghost["error"]
     run = _store(root).get_run(ok["trace_id"])
-    assert run.summary.metadata["toy"] == "rerun" and run.summary.metadata["rerun_of"] == "run-1" and run.summary.metadata["op"] == "scored"
+    assert (
+        run.summary.metadata["toy"] == "rerun"
+        and run.summary.metadata["rerun_of"] == "run-1"
+        and run.summary.metadata["op"] == "scored"
+    )
     # recorded as the graph records it: this input is fed from the door's
     # transient stream, so its value is summarised, never kept
-    assert [n["op_name"] for n in run.nodes] == ["scored"] and "transient" in run.nodes[0]["inputs"]["call"]
+    assert [n["op_name"] for n in run.nodes] == ["scored"] and "transient" in run.nodes[0][
+        "inputs"
+    ]["call"]
     assert _store(root).get_run(bad["trace_id"]).nodes[0]["status"] == "error"
 
 
@@ -369,9 +447,18 @@ def test_startup_hooks_run_once_however_many_sessions(project):
 
     async def go():
         for i in range(3):
-            await bridge.handle({"op": "open", "sid": f"s{i}", "service": "score",
-                                 "send": [{"kind": "json", "value": {"call_id": f"c{i}", "text": "x"}}], "end": True})
-        await bridge.handle({"op": "open", "sid": "chat", "service": "chat", "send": [], "end": True})
+            await bridge.handle(
+                {
+                    "op": "open",
+                    "sid": f"s{i}",
+                    "service": "score",
+                    "send": [{"kind": "json", "value": {"call_id": f"c{i}", "text": "x"}}],
+                    "end": True,
+                }
+            )
+        await bridge.handle(
+            {"op": "open", "sid": "chat", "service": "chat", "send": [], "end": True}
+        )
         await _until(events, lambda e: e["t"] == "ended" and e["sid"] == "chat")
         await bridge.drain()
 
@@ -392,10 +479,15 @@ def test_toy_messages_for_any_item():
 
 
 def test_service_declares_its_playground_codec():
-    spec = Service("door", Listener(kind="memory"), graph="m:g", max_inflight=2, playground="m:Codec")
+    spec = Service(
+        "door", Listener(kind="memory"), graph="m:g", max_inflight=2, playground="m:Codec"
+    )
     assert spec.options["playground"] == "m:Codec"
     assert describe_service(spec)["playground"] == "m:Codec"
-    assert describe_service(Service("h", Listener(kind="http", path="/h"), graph="m:g"))["playground"] is None
+    assert (
+        describe_service(Service("h", Listener(kind="http", path="/h"), graph="m:g"))["playground"]
+        is None
+    )
 
 
 def test_the_stdio_bridge_keeps_its_stream_clean(project):
@@ -404,20 +496,34 @@ def test_the_stdio_bridge_keeps_its_stream_clean(project):
     name, root = project
     requests = [
         {"id": 1, "op": "describe"},
-        {"op": "open", "sid": "a", "service": "score",
-         "send": [{"kind": "json", "value": {"call_id": "c1", "text": "a b"}}], "end": True},
+        {
+            "op": "open",
+            "sid": "a",
+            "service": "score",
+            "send": [{"kind": "json", "value": {"call_id": "c1", "text": "a b"}}],
+            "end": True,
+        },
     ]
     proc = subprocess.run(
-        [sys.executable, "-c",
-         "import sys, time, threading\n"
-         "from operonx.app.play import main\n"
-         "sys.exit(main(['--root', '.']))"],
+        [
+            sys.executable,
+            "-c",
+            "import sys, time, threading\n"
+            "from operonx.app.play import main\n"
+            "sys.exit(main(['--root', '.']))",
+        ],
         input="".join(json.dumps(r) + "\n" for r in requests),
-        capture_output=True, text=True, timeout=60, cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=root,
     )
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
     events = [json.loads(ln) for ln in lines]  # every line is protocol
     kinds = [e["t"] for e in events]
     assert kinds[0] == "ready" and "doors" in kinds and "ended" in kinds, (proc.stdout, proc.stderr)
-    assert next(e for e in events if e["t"] == "out")["msg"]["value"] == {"call_id": "c1", "words": 2}
+    assert next(e for e in events if e["t"] == "out")["msg"]["value"] == {
+        "call_id": "c1",
+        "words": 2,
+    }
     assert "scoring c1" in proc.stderr and "scoring" not in proc.stdout

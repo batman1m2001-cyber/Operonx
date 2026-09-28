@@ -212,10 +212,16 @@ def _row(n: OpExecution) -> dict:
 _PG_DSN = os.environ.get("OPERONX_TEST_PG_DSN", "")
 
 
-@pytest.fixture(params=[
-    "files", "sqlite", "mongo",
-    pytest.param("postgres", marks=pytest.mark.skipif(not _PG_DSN, reason="set OPERONX_TEST_PG_DSN")),
-])
+@pytest.fixture(
+    params=[
+        "files",
+        "sqlite",
+        "mongo",
+        pytest.param(
+            "postgres", marks=pytest.mark.skipif(not _PG_DSN, reason="set OPERONX_TEST_PG_DSN")
+        ),
+    ]
+)
 def store(request, tmp_path):
     if request.param == "files":
         s = FilesRunStore(root=tmp_path / "runs", refresh_every=0)
@@ -225,8 +231,11 @@ def store(request, tmp_path):
         mongomock = pytest.importorskip("mongomock")
         from operonx.telemetry.runs.mongo import MongoRunStore
 
-        s = MongoRunStore(client=mongomock.MongoClient(), database=f"t{uuid.uuid4().hex[:8]}",
-                          media_dir=tmp_path / "media")
+        s = MongoRunStore(
+            client=mongomock.MongoClient(),
+            database=f"t{uuid.uuid4().hex[:8]}",
+            media_dir=tmp_path / "media",
+        )
     else:
         from operonx.telemetry.runs.postgres import PostgresRunStore
 
@@ -556,10 +565,19 @@ def test_groups_count_runs_errors_and_cost_per_origin_and_name(store):
 def test_start_times_keep_their_precision(store):
     """Postgres's REAL is 4 bytes — an epoch start time would round to
     minutes; every backend keeps it to the millisecond."""
-    t = WorkflowTrace(trace_id="precise", workflow_name="flow", started_at=10.0, ended_at=10.5,
-                      nodes=[], metadata={"origin": "adhoc"}, wall_started_at=1790467200.123)
+    t = WorkflowTrace(
+        trace_id="precise",
+        workflow_name="flow",
+        started_at=10.0,
+        ended_at=10.5,
+        nodes=[],
+        metadata={"origin": "adhoc"},
+        wall_started_at=1790467200.123,
+    )
     store.consume(t)
-    assert store.list_runs(RunFilter(trace_ids=["precise"])).items[0].started_at == pytest.approx(1790467200.123, abs=1e-3)
+    assert store.list_runs(RunFilter(trace_ids=["precise"])).items[0].started_at == pytest.approx(
+        1790467200.123, abs=1e-3
+    )
 
 
 def test_the_team_backends_say_what_they_need():
