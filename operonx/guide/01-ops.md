@@ -112,7 +112,7 @@ def label(value: int) -> dict:
 
 @graph
 def inner(x):
-    d = double(x=x)
+    d = double(x=x)  # `x` already is PARENT["x"] here: use the parameter
     START >> d >> END
 
 
@@ -135,6 +135,14 @@ asyncio.run(main())
 
 - A graph parameter becomes a runtime input only when you pass `None`
   (or a Ref) for it in `params=`. Omitting it raises `TypeError`.
+- **Use a parameter by its name.** Inside the body a runtime-input
+  parameter already is `PARENT["x"]`, so `double(x=x)` is the whole of it;
+  `double(x=PARENT["x"])` beside a parameter `x` says the same thing twice.
+  Keep `PARENT[...]` for what the graph does not declare: a loop cell
+  (`PARENT.declare`) or a write-back (`op["n"] >> PARENT["n"]`).
+- A `Job` given a `@graph` builds it with every parameter as a runtime
+  input (`params={name: None}`), so a default in the signature never
+  applies there. Give the value in `Job(inputs=...)`.
 - `run()` returns the outputs of the ops wired `>> END`, plus `"$state"`.
   A key that got several values (streaming, loops) holds a list.
 - The graph takes the name of the variable its engine is assigned to

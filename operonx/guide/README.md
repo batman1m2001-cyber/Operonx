@@ -47,7 +47,8 @@ from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
    op's outputs.
 2. **`a >> b` orders; `b(x=a["y"])` only reads.** Always draw the edge.
 3. **A graph parameter is a runtime input only with
-   `Operon(g, params={"x": None})`.**
+   `Operon(g, params={"x": None})`** — and inside the body it already is
+   `PARENT["x"]`: use it by name, never `PARENT["x"]` beside it.
 4. **An op that raises does not raise.** Its outputs are just missing;
    check for the key.
 5. **Streaming is sequential per item by default.** `.parallel()` to fan

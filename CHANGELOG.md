@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-28
+
+### Fixed
+
+- **`Application(trace=[])` survives `operonx.toml`.** Loading the app
+  through `[project] app = "module:APP"` merged only the object's truthy
+  project values, so an explicit empty `trace` was dropped and every job
+  without consumers of its own fell back to the local consumer, recording
+  whole runs under `.operonx/runs`. The object's `trace` now wins even when
+  empty; its empty default description still gives way to the file's.
+
+### Docs
+
+- The guide says how to use a `@graph` parameter: by its name. In the
+  body it already is `PARENT["x"]`, so `PARENT["x"]` beside a parameter
+  `x` says the same thing twice; `PARENT[...]` is for what the graph does
+  not declare (a loop cell, a write-back). And a `Job` given a `@graph`
+  makes every parameter a runtime input, so a signature default never
+  applies there — the value goes in `Job(inputs=...)`.
+
 ## [1.10.0] - 2026-09-28
 
 ### Added — replaying real sessions
@@ -2053,7 +2073,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...v1.8.1
