@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-28
+
+### Added — replaying real sessions
+
+- `Service(..., replay=True)` (`[[serve]] replay = true`): each run of the
+  door carries what the client sent — a script of toy messages, in order
+  and stamped (`replay_script`), and the connection's query
+  (`replay_query`), the same shape a playground session keeps — so a real
+  session can be replayed in the playground after a fix. Text and JSON
+  are kept; audio, bytes and messages over 64 KB are only counted. Off by
+  default.
+- `Codec.to_toy(item)`: what a client sent, as a toy message (the inverse
+  of `to_door`). A door whose JSON frames carry audio overrides it so
+  that audio is counted, never kept. `describe_service` says `replay`.
+
 ## [1.9.0] - 2026-09-28
 
 ### Changed — where local runs go
@@ -2029,7 +2044,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...v1.8.0
