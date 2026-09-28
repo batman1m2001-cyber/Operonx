@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole runs under `.operonx/runs`. The object's `trace` now wins even when
   empty; its empty default description still gives way to the file's.
 
+### Docs
+
+- The guide says how to use a `@graph` parameter: by its name. In the
+  body it already is `PARENT["x"]`, so `PARENT["x"]` beside a parameter
+  `x` says the same thing twice; `PARENT[...]` is for what the graph does
+  not declare (a loop cell, a write-back). And a `Job` given a `@graph`
+  makes every parameter a runtime input, so a signature default never
+  applies there — the value goes in `Job(inputs=...)`.
+
 ## [1.10.0] - 2026-09-28
 
 ### Added — replaying real sessions
