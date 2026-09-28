@@ -364,6 +364,11 @@ class Manifest:
             _serve_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("serve")))
         )
         _reject_duplicates(serves, where)
+        # `[project] trace = [...]`: the consumers every service and job
+        # uses unless it declares its own
+        if "trace" in project:
+            project["trace"] = [str(t) for t in _as_list(project.get("trace"))]
+        serves = with_default_trace(serves, project.get("trace"))
 
         jobs = tuple(_job_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("job"))))
         seen_jobs: Dict[str, int] = {}
@@ -385,6 +390,23 @@ class Manifest:
             jobs=jobs,
             src=src,
         )
+
+
+def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["ServeSpec", ...]:
+    """Services that declare no ``trace`` take the application's.
+
+    A service that says ``trace=[]`` keeps its silence: ``None`` inherits,
+    an empty list is a decision."""
+    if trace is None:
+        return tuple(serves)
+    from dataclasses import replace
+
+    out = []
+    for spec in serves:
+        if spec.kind != "asgi" and "trace" not in spec.options:
+            spec = replace(spec, options={**spec.options, "trace": list(trace)})
+        out.append(spec)
+    return tuple(out)
 
 
 # -- parsing helpers -----------------------------------------------------
@@ -674,13 +696,22 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
-    if options:
+    if options.get("dataset") is not None:
+        # an eval: `operonx.app.evals.Eval.from_spec` reads these three
+        if not isinstance(options.get("evaluators", []), list):
+            raise ManifestError(f"{where}: {label} `evaluators` must be a list of module:attr")
+    unread = {
+        k: v
+        for k, v in options.items()
+        if not (options.get("dataset") is not None and k in ("dataset", "evaluators", "threshold"))
+    }
+    if unread:
         # Kept, for tools that read their own keys — but a Job ignores them,
         # so a typo like `concurency = 8` would otherwise do nothing, quietly.
         import warnings
 
         warnings.warn(
-            f"{where}: {label} has keys a Job does not read: {sorted(options)} "
+            f"{where}: {label} has keys a Job does not read: {sorted(unread)} "
             f"(Job settings: {sorted(known_keys)})",
             stacklevel=2,
         )

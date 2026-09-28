@@ -105,6 +105,9 @@ nav:
       - Deployment: guide/08-deployment.md
       - Learning loop: guide/09-learning-loop.md
       - Jobs and runbooks: guide/10-jobs.md
+      - "Runs: stores, retention and alerts": guide/11-runs.md
+      - The playground bridge: guide/12-playground.md
+      - Evals: guide/13-evals.md
   - Architecture:
       - Overview: architecture/overview.md
       - Core map: architecture/core-map.md
@@ -122,7 +125,9 @@ nav:
       - operonx.providers: api/providers.md
       - operonx.telemetry: api/telemetry.md
       - operonx.core.registry: api/registry.md
+      - operonx.app: api/app.md
       - operonx.app.jobs: api/jobs.md
+      - operonx.telemetry.runs: api/runs.md
 
 # Mermaid loader — Material renders any <pre class="mermaid"> block
 # (produced by the pymdownx.superfences custom fence above) once this

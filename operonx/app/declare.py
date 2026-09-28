@@ -108,6 +108,8 @@ def Service(  # noqa: N802 — reads as a declaration
     on_close: Any = None,
     on_startup: Sequence[Any] = (),
     description: str = "",
+    key_ops: Optional[Sequence[str]] = None,
+    playground: Any = None,
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -119,6 +121,15 @@ def Service(  # noqa: N802 — reads as a declaration
     model warmed for the call workers is not warmed again for an admin
     port. The door's inputs are the graph's own runtime parameters; the
     door ops declare themselves with ``@op(door=...)``.
+
+    ``key_ops`` names the ops whose latency the team watches first (time
+    to first audio, the LLM call) — a dashboard pins them above the rest,
+    the way ``show_keys`` names the outputs that stand for an op.
+
+    ``playground`` is the codec the studio's playground drives this door
+    with (:class:`operonx.app.play.Codec`, or ``"module:attr"``) — needed
+    only when the door's protocol is its own; http and websocket doors have
+    built-in ones.
     """
     label = f"Service({name!r})"
     _refuse_moved(options, label)
@@ -157,8 +168,13 @@ def Service(  # noqa: N802 — reads as a declaration
     opts: Dict[str, Any] = dict(options)
     if concurrency is not None:
         opts["concurrency"] = int(concurrency)
-    if trace:
+    # None inherits the application's consumers; [] says "trace nothing"
+    if trace is not None:
         opts["trace"] = list(trace)
+    if key_ops:
+        opts["key_ops"] = [str(k) for k in key_ops]
+    if playground is not None:
+        opts["playground"] = playground
 
     return ServeSpec(
         name=name,
@@ -242,11 +258,12 @@ def manifest_from(
     src: Sequence[str],
     resources: Optional[str],
     description: str,
+    trace: Optional[Sequence[Any]] = None,
 ) -> Any:
     """The :class:`Manifest` a Python declaration amounts to — the same
     record ``operonx.toml`` parses to, so nothing downstream knows which
     way the application came."""
-    from .manifest import Manifest, _reject_duplicates
+    from .manifest import Manifest, _reject_duplicates, with_default_trace
 
     specs = tuple(services)
     for spec in specs:
@@ -254,8 +271,12 @@ def manifest_from(
             raise ManifestError(f"services= takes Service(...) entries, got {type(spec).__name__}")
     _reject_duplicates(specs, f"Application({name!r})")
     overlay = resources if resources and (root / resources).is_file() else None
+    project: Dict[str, Any] = {"name": name, "description": description}
+    if trace is not None:
+        project["trace"] = list(trace)
+        specs = with_default_trace(specs, project["trace"])
     return Manifest(
-        project={"name": name, "description": description},
+        project=project,
         serves=specs,
         graphs=(),
         fixtures={},
@@ -284,6 +305,8 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "on_close": ref_name(s.on_close) if s.on_close else None,
         "app": ref_name(s.app) if s.app else None,
         "description": s.description,
+        "key_ops": list(s.options.get("key_ops") or []),
+        "playground": ref_name(s.options["playground"]) if s.options.get("playground") else None,
     }
 
 
@@ -305,8 +328,13 @@ def describe_job(job: Any) -> Dict[str, Any]:
         }
     d = job.describe()
     return {
+        **(
+            {k: d.get(k) for k in ("dataset", "evaluators", "threshold")}
+            if d.get("kind") == "eval"
+            else {}
+        ),
         "name": job.name,
-        "kind": "job",
+        "kind": d.get("kind") or "job",
         "graph": d.get("graph"),
         "runbook": None,
         "session": d.get("session"),
@@ -334,9 +362,14 @@ def load_declared(manifest: Any) -> Any:
             f"[project] app {manifest.app_entry!r} is a {type(obj).__name__}, not an Application"
         )
     project = {**manifest.project, **{k: v for k, v in obj.manifest.project.items() if v}}
+    from .manifest import with_default_trace
+
     obj.manifest = replace(
         obj.manifest,
         project=project,
+        # `[project] trace` in the file reaches services the object left
+        # without one (the object's own default was applied at declaration)
+        serves=with_default_trace(obj.manifest.serves, project.get("trace")),
         source=manifest.source,
         src=manifest.src,
         graphs=obj.manifest.graphs or manifest.graphs,
@@ -365,14 +398,29 @@ def build_job(spec: Any, root: Path) -> Any:
         if spec.schedule:
             runbook.schedule = spec.schedule
         return runbook
+    if (spec.options or {}).get("dataset") is not None:
+        from .evals import Eval
+
+        return Eval.from_spec(spec, root)
     return Job.from_spec(spec, root)
 
 
 def describe_jobspec(j: Any) -> Dict[str, Any]:
     """A ``[[job]]`` block as plain data, without importing the project."""
+    opts = j.options or {}
+    is_eval = opts.get("dataset") is not None
     return {
+        **(
+            {
+                "dataset": opts.get("dataset"),
+                "evaluators": [str(e) for e in opts.get("evaluators") or []],
+                "threshold": opts.get("threshold"),
+            }
+            if is_eval
+            else {}
+        ),
         "name": j.name,
-        "kind": "runbook" if j.runbook else "job",
+        "kind": "runbook" if j.runbook else "eval" if is_eval else "job",
         "graph": j.graph or None,
         "runbook": j.runbook,
         "session": None if j.runbook else j.session,
@@ -409,3 +457,37 @@ def graph_refs(manifest: Any) -> list:
             )
     plain = [(n, e, tuple(u), {}, obj) for e, (n, u, obj) in by_entry.items()]
     return plain + variants
+
+
+def settle_jobs(jobs: Optional[Dict[str, Any]], manifest: Any, root: Path) -> Dict[str, Any]:
+    """An application's jobs: the declared objects, or built from its
+    ``[[job]]`` blocks — each tracing to its own consumers, else the
+    application's (``trace=`` / ``[project] trace``), else locally.
+    Idempotent: a job that already has consumers keeps them."""
+    if jobs is None:
+        jobs = {spec.name: build_job(spec, root) for spec in manifest.jobs}
+    trace = manifest.project.get("trace")
+    for job in jobs.values():
+        inherit_trace(job, trace)
+    return jobs
+
+
+def inherit_trace(job: Any, trace: Optional[Sequence[Any]]) -> None:
+    """A job that names no consumers takes the application's; with none
+    there either, it records locally (``.operonx/runs``). A job's item
+    records point at traces — a job that silently recorded none left
+    every one of those links pointing nowhere — so a job is never
+    untraced by omission. ``trace=[]`` on the job is the explicit way to
+    trace nothing. A runbook passes the default to each of its jobs."""
+    members = getattr(job, "jobs", None) if not hasattr(job, "source") else None
+    for j in members if members is not None else [job]:
+        if getattr(j, "trace", None) is None:
+            j.trace = list(trace) if trace is not None else default_consumers()
+
+
+def default_consumers() -> list:
+    """What a job traces to when nothing says otherwise: the local
+    consumer, filed by origin under ``<project>/.operonx/runs``."""
+    from operonx.telemetry.consumers.local import LocalConsumer
+
+    return [LocalConsumer()]

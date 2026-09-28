@@ -5,7 +5,8 @@ The application layer: what puts work into an Operon. Services listen
 both, and `Application` is that declaration loaded. Graphs never import
 this package; the dependency runs one way.
 
-Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10-jobs.md).
+Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10-jobs.md),
+[The playground bridge](../guide/12-playground.md), [Evals](../guide/13-evals.md).
 
 ## Application
 
@@ -37,4 +38,37 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10
 ::: operonx.app.serve.protocol.RunRequest
 ::: operonx.app.serve.protocol.BoundedSession
 
+## Evals
+
+::: operonx.app.evals.Eval
+::: operonx.app.evals.Dataset
+::: operonx.app.evals.exact
+::: operonx.app.evals.contains
+::: operonx.app.evals.fuzzy
+::: operonx.app.evals.json_match
+::: operonx.app.evals.llm_judge
+
+## The playground bridge
+
+::: operonx.app.play
+    options:
+      members: false
+
+::: operonx.app.play.Codec
+::: operonx.app.play.JsonCodec
+::: operonx.app.play.TextCodec
+::: operonx.app.play.PcmCodec
+::: operonx.app.play.codec_for
+
+## Where a run came from
+
+::: operonx.app.origin
+    options:
+      members: false
+
+::: operonx.app.origin.origin_metadata
+::: operonx.app.origin.in_runbook
+::: operonx.app.origin.code_version
+
 Jobs and runbooks are on their own page: [operonx.app.jobs](jobs.md).
+Run stores, retention and alerts: [operonx.telemetry.runs](runs.md).

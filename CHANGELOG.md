@@ -7,6 +7,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-28
+
+### Changed — where local runs go
+
+- **`trace_local` files runs by where they came from:**
+  `services/<service>/<day>/<run>`, `jobs/<job>/<job run>/<run>`,
+  `evals/…`, `playground/<day>/<run>`, `adhoc/<workflow>/<day>/<run>`.
+  The root is `root:` when set (a relative one now resolves against the
+  project), else `$OPERONX_RUNS_DIR`, else `<project>/.operonx/runs`,
+  else `/tmp/operonx_traces`. Before, a run went to `<root>/<run>/`, and
+  the root defaulted to `/tmp/operonx_traces`. `layout: flat` keeps the
+  old shape; any
+  other string is a template over `{origin}`, `{name}`, `{group}`,
+  `{day}`, `{trace_id}` and the run's metadata keys. **This is the change
+  an upgrade notices:** a reader of the old flat directory sets
+  `layout: flat` (and `root: /tmp/operonx_traces`) or follows the new tree.
+
+### Added — every run knows where it came from
+
+- **Origins.** A service's runs carry `origin=service` with `service`,
+  `transport` and `variant`; a job's carry `origin=job` with `job`,
+  `job_run` and `key`, plus `runbook` and `runbook_run` inside a
+  runbook; an eval's `origin=eval`; the playground's `origin=playground`;
+  anything else `adhoc`. Consumers read them: the local consumer files
+  by them, Langfuse receives them as tags, a run store indexes them.
+  `operonx.app.origin` holds the vocabulary.
+- **Default consumers.** `Application(trace=[...])` (or
+  `[project] trace = [...]`) reaches every service and job that names
+  none; `trace=[]` stays an explicit "trace nothing". A job with no
+  consumers anywhere records locally, so its item records never point at
+  traces that were not written.
+- **The code's version.** `Application.bootstrap()` stamps the project
+  and the git commit (with a dirty flag) once per process; every trace
+  carries them.
+
+### Added — run stores (`operonx.telemetry.runs`)
+
+- **`RunStore`**, one contract for where finished runs live: `put_trace`,
+  `list_runs` (a `RunFilter`, an order, a cursor), `get_run`, `rollups` /
+  `op_stats`, `delete_runs`, plus `groups`, `count` and `refresh`. A
+  store keeps each run in full and as a summary with per-op rollups, so
+  one run opens fully and a month of runs summarises without opening any.
+  A store is a trace consumer: `trace=["run_store:default"]` records into
+  it.
+- **Backends:** `files` (the local consumer's directories plus a SQLite
+  index; indexing is batched — 376 runs 8.9 s → 0.54 s cold), `sqlite`,
+  `postgres` (`operonx[postgres]`), `mongo` (`operonx[mongo]`, new extra),
+  and `langfuse` (read-only). `run_store:` in `resources.yaml`;
+  `open_run_store()` for tools that must not import the project.
+- **`summarize()`**, the one definition of a run's numbers. A priced zero
+  is a price; an unpriced call is never $0 — a run's cost is `None` only
+  when nothing in it was priced, and unpriced calls are counted.
+- **Retention:** `DEFAULT_RETENTION` (services 30 days, jobs and evals
+  forever, playground 7 days, ad hoc 30 days), `plan_retention`,
+  `apply_retention`.
+- **Alerts** (`operonx.telemetry.runs.alerts`): `error_rate`, `p95_ms`
+  (of runs, or of one op), `cost_per_hour` and `runs` (too few) over a
+  trailing window, from what the store already keeps; `step` turns an
+  evaluation into firing / reminder / resolved, `deliver` posts it to a
+  webhook in the shape Slack and Teams take.
+
+### Added — the playground bridge (`operonx.app.play`, `operonx-play`)
+
+- A service's doors driven from outside, over JSON lines on stdio, in
+  the project's own interpreter — through the same gate, hooks, door ops
+  and consumers as production, with `origin=playground`.
+- **Codecs** translate toy messages (text, JSON, bytes, audio) to door
+  items and back: built-ins for http (`JsonCodec`) and websocket
+  (`TextCodec`) doors, `Service(playground=...)` (or `[[serve]]
+  playground = "module:attr"`) for a door with its own protocol, and
+  `PcmCodec` for raw PCM frames — the Voice toy.
+- **Conditions** per session: latency, dropped items, noise, leading
+  silence, and resources that fail for that session only.
+- **A simulated user:** an LLM persona holds the conversation for a
+  number of turns.
+- **Re-run one op** of a service's graph or a job's, with the inputs it
+  had in a recorded run, as a run of its own.
+- A playground run records to the service's **local** consumers only,
+  unless the session asks for `remote: true`; it carries its connection
+  query and what the toy sent, and when — all a replay needs.
+- A session's **ops stream as they finish** (`ops` events), so a canvas
+  can follow the run live; `serve_session` hands the handle to
+  `on_start` as the run begins.
+- `Service(key_ops=[...])`: the ops a dashboard pins first;
+  `describe_service` carries them.
+
+### Added — evals (`operonx.app.Eval`)
+
+- A dataset of cases, the graph under test and evaluators, run as a job
+  with `origin=eval`. Evaluators are plain, async or `@op` functions
+  taking `input`, `output`, `expected`, `row` or `outputs`; built-ins
+  `exact`, `contains`, `fuzzy`, `json_match` and `llm_judge`. Each case's
+  verdict is on its item record, the pass rate in `run.json`, and a
+  `threshold` (or any failing case) fails `operonx-run` — a CI gate. In
+  the manifest, a `[[job]]` with `dataset`, `evaluators` and `threshold`.
+
+### Fixed
+
+- A resource entry with every field at its default
+  (`trace_local: {default: {}}`) resolved as "not found" while listed as
+  available.
+- `trace="trace_local:…"` no longer depends on something else having
+  imported `operonx.telemetry` first.
+
+### Docs
+
+- New guides: *Runs: stores, retention and alerts*, *The playground
+  bridge*, *Evals*. The *Tracing* guide is rewritten for the consumer
+  API (it still described tracer classes removed in the V3 rework). API
+  pages for `operonx.app` (now in the nav) and `operonx.telemetry.runs`.
+
 ## [1.8.1] - 2026-09-26
 
 ### Fixed
@@ -1918,7 +2029,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.7.2...v1.7.3

@@ -81,9 +81,14 @@ class ItemResult:
     ms: float = 0.0
     sent: int = 0
     attempts: int = 1
+    #: An eval's judgement of the case (`operonx.app.evals`); absent for a job.
+    verdict: Optional[Dict[str, Any]] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        if out["verdict"] is None:
+            del out["verdict"]
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ItemResult":
@@ -172,6 +177,9 @@ class JobRun:
         )
         if c.get(ITEM_TIMEOUT):
             text += f" timeout={c[ITEM_TIMEOUT]}"
+        ev = self.meta.get("eval")
+        if ev and ev.get("cases"):
+            text += f"  passed={ev['passed']}/{ev['cases']} ({100 * ev['pass_rate']:.1f}%)"
         return text
 
     def __repr__(self) -> str:

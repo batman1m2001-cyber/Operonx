@@ -32,6 +32,11 @@ __all__ = [
     "STATUS_OK",
     "STATUS_ERROR",
     "STATUS_CANCELLED",
+    # What every run in this process carries (the code's version, ...).
+    "set_run_metadata",
+    "run_metadata",
+    "set_project_root",
+    "project_root",
     # Engine-internal ContextVars — not for author use.
     "_current_trace",
     "_current_op_ctx",
@@ -263,3 +268,44 @@ _current_op_ctx: ContextVar[Optional[tuple]] = ContextVar(
     "operonx_op_ctx",
     default=None,
 )
+
+
+# ---------------------------------------------------------------------------
+# Process-wide run defaults
+# ---------------------------------------------------------------------------
+#
+# Some facts are true of every run a process makes: which commit of the
+# code is running, which project it belongs to. `Application.bootstrap()`
+# states them once here; `Operon.start()` merges the metadata into every
+# trace it creates, so a consumer — local, Langfuse, a run store — sees
+# the version without any author passing it along. The project root is
+# where consumers resolve a relative directory (``.operonx/runs``).
+
+_RUN_METADATA: Dict[str, Any] = {}
+_PROJECT_ROOT: List[Any] = [None]
+
+
+def set_run_metadata(**fields: Any) -> None:
+    """Set metadata every later run in this process carries. A ``None``
+    value removes the key."""
+    for key, value in fields.items():
+        if value is None:
+            _RUN_METADATA.pop(key, None)
+        else:
+            _RUN_METADATA[key] = value
+
+
+def run_metadata() -> Dict[str, Any]:
+    """A copy of the process-wide run metadata."""
+    return dict(_RUN_METADATA)
+
+
+def set_project_root(path: Any) -> None:
+    """The project this process runs — where relative consumer paths
+    resolve. ``None`` forgets it."""
+    _PROJECT_ROOT[0] = path
+
+
+def project_root() -> Any:
+    """The project root set by `set_project_root`, or ``None``."""
+    return _PROJECT_ROOT[0]

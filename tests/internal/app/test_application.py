@@ -163,6 +163,8 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "on_close": None,
         "app": None,
         "description": "",
+        "key_ops": [],
+        "playground": None,
     }
     assert [(j["name"], j["kind"]) for j in d["jobs"]] == [
         ("score_calls", "job"),

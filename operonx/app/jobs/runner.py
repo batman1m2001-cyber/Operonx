@@ -98,14 +98,23 @@ def _first_error(trace: Any) -> Optional[str]:
 
 
 def _trace_metadata(job: "Job", run_id: str, key: Optional[str]) -> dict:
-    """What a job's run carries on its trace: three fields, and the same
-    three as tags so Langfuse can filter one job, one run, one item. A
-    job is never a span — the trace is the graph run's, exactly as when
+    """What a job's run carries on its trace: its origin (``job``, or
+    ``eval`` for an eval), ``job``, ``job_run`` and ``key`` — plus
+    ``runbook`` and ``runbook_run`` when a runbook started it — and the
+    same pairs as tags so Langfuse can filter one job, one run, one item.
+    A job is never a span — the trace is the graph run's, exactly as when
     served — so this is the whole join between record and trace."""
-    fields = {"job": job.name, "job_run": run_id}
-    if key is not None:
-        fields["key"] = key
-    return {**fields, "tags": [f"{k}:{v}" for k, v in fields.items()]}
+    from ..origin import current_runbook, origin_metadata
+
+    runbook = current_runbook()
+    return origin_metadata(
+        getattr(job, "origin", "job"),
+        job=job.name,
+        job_run=run_id,
+        key=key,
+        runbook=runbook[0] if runbook else None,
+        runbook_run=runbook[1] if runbook else None,
+    )
 
 
 def _begin(sink: Any, resume: bool) -> None:
@@ -183,10 +192,11 @@ async def _attempt(
     session = JobSession(sink, key, meta={"job": job.name, "job_run": run_id})
     inputs = dict(job.inputs)
     doorless = not job.has_doors()
+    item = job.item_of(raw)
     if not doorless:
-        session.feed_nowait(raw)
+        session.feed_nowait(item)
     elif job.item_input is not None:
-        inputs[job.item_input] = raw
+        inputs[job.item_input] = item
     session.end_input()
 
     started = perf_counter()
@@ -299,6 +309,14 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                     f"[job:{job.name}] {key!r} {result.status} ({result.error}); "
                     f"retry {attempt}/{policy.retries}"
                 )
+            judge = getattr(job, "judge", None)  # an Eval judges the case here
+            if judge is not None:
+                try:
+                    await judge(raw, result)
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.error(
+                        f"[job:{job.name}] judging {key!r} failed: {type(exc).__name__}: {exc}"
+                    )
             record.item(result)
             await _report(job, sink, result)
             if result.status in _RETRIABLE and policy.mode == "stop":
@@ -359,7 +377,11 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
         status = RUN_FAILED
     else:
         status = RUN_OK
-    run = record.finish(status, error=source_error)
+    extra = None
+    summarize = getattr(job, "summarize", None)  # an Eval's pass rate, and its gate
+    if summarize is not None:
+        extra, status = summarize(status)
+    run = record.finish(status, error=source_error, extra=extra)
     LOGGER.info(f"[job:{job.name}] {run.summary()}  {run.path}")
     return run
 

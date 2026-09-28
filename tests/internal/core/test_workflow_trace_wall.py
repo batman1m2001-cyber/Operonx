@@ -82,7 +82,9 @@ def test_local_consumer_writes_wall_time(tmp_path):
 
     from operonx.telemetry.consumers.local import LocalConsumer
 
-    engine = Operon(flow, params={"n": 2}, trace=LocalConsumer(config={"root": str(tmp_path)}))
+    engine = Operon(
+        flow, params={"n": 2}, trace=LocalConsumer(config={"root": str(tmp_path), "layout": "flat"})
+    )
     before = time.time()
 
     async def run():

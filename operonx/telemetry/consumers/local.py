@@ -1,19 +1,28 @@
 """LocalConsumer — generic disk-based V3 workflow-trace consumer.
 
-Writes each run to ``<root>/<trace_id>/`` in a layout designed to be
-read by humans (``view.txt``) and machines (``nodes.jsonl``) with zero
-tooling:
+Writes each run to its own directory under ``<root>``, filed by where
+the run came from (its **origin**, see :mod:`operonx.app.origin`), in a
+layout designed to be read by humans (``view.txt``) and machines
+(``nodes.jsonl``) with zero tooling:
 
-    <root>/
-      <trace_id>/
-        meta.json         — workflow name, timings, tags
+    <root>/                              default: <project>/.operonx/runs
+      services/<service>/<YYYY-MM-DD>/<trace_id>/
+      jobs/<job>/<job_run>/<trace_id>/
+      evals/<job>/<job_run>/<trace_id>/
+      playground/<YYYY-MM-DD>/<trace_id>/
+      adhoc/<workflow>/<YYYY-MM-DD>/<trace_id>/
+        meta.json         — workflow name, timings, metadata (origin…)
         nodes.jsonl       — source of truth (one OpExecution per line,
                             media offloaded to refs)
         view.txt          — human-readable chronological rendering
                             (regeneratable from nodes.jsonl at any time)
         media/            — content-addressed offload store
           <sha256>.<ext>
-      latest -> <trace_id> — symlink to the most-recent call
+      latest -> <the most recent run's directory>
+
+``layout: flat`` keeps the old ``<root>/<trace_id>/`` shape; any other
+string is a template over ``{origin}``, ``{name}``, ``{group}``,
+``{day}``, ``{trace_id}`` and the run's metadata keys. Days are UTC.
 
 Nothing here is callbot-specific — a subclass (`CallbotLocalConsumer`)
 overrides `_render_view` to add turn-grouped headers derived from
@@ -56,7 +65,86 @@ def _upstream_to_dict(u: UpstreamRef) -> Dict[str, str]:
     }
 
 
-__all__ = ["LocalConsumer", "FORMATTERS", "default_arrow"]
+__all__ = ["LocalConsumer", "FORMATTERS", "default_arrow", "resolve_root", "run_path"]
+
+
+# ---------------------------------------------------------------------------
+# Where a run is filed
+# ---------------------------------------------------------------------------
+
+#: The folder each origin's runs live in, under the root.
+ORIGIN_DIRS = {
+    "service": "services",
+    "job": "jobs",
+    "eval": "evals",
+    "playground": "playground",
+    "adhoc": "adhoc",
+}
+_FALLBACK_ROOT = "/tmp/operonx_traces"
+
+
+def resolve_root(configured: Any = "") -> Path:
+    """The directory runs are written under — see ``root`` in
+    :class:`LocalConsumer`."""
+    import os
+
+    from operonx.core.workflow_trace import project_root
+
+    project = project_root()
+    if configured:
+        path = Path(str(configured)).expanduser()
+        if not path.is_absolute() and project is not None:
+            path = Path(project) / path
+        return path
+    env = os.environ.get("OPERONX_RUNS_DIR")
+    if env:
+        return Path(env).expanduser()
+    if project is not None:
+        return Path(project) / ".operonx" / "runs"
+    return Path(_FALLBACK_ROOT)
+
+
+def _safe(part: Any) -> str:
+    """One path component: no separators, no parent hops, never empty."""
+    text = str(part if part is not None else "").strip()
+    text = text.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    if text in ("", ".", ".."):
+        return "_"
+    return text[:120]
+
+
+def run_path(trace: WorkflowTrace, layout: str = "origin") -> Path:
+    """The run's directory relative to the root, from its metadata."""
+    import time as _time
+
+    meta = trace.metadata or {}
+    origin = str(meta.get("origin") or "adhoc")
+    wall = trace.wall_started_at or _time.time()
+    day = _time.strftime("%Y-%m-%d", _time.gmtime(wall))
+    if origin in ("job", "eval"):
+        name, group = meta.get("job") or trace.workflow_name, meta.get("job_run") or day
+    elif origin == "service":
+        name, group = meta.get("service") or trace.workflow_name, day
+    elif origin == "playground":
+        name, group = meta.get("service") or trace.workflow_name, day
+    else:
+        name, group = trace.workflow_name, day
+    if layout == "flat":
+        return Path(_safe(trace.trace_id))
+    if layout == "origin":
+        folder = ORIGIN_DIRS.get(origin, _safe(origin))
+        if origin == "playground":
+            parts = [folder, group, trace.trace_id]
+        else:
+            parts = [folder, name, group, trace.trace_id]
+        return Path(*[_safe(p) for p in parts])
+    fields = {k: v for k, v in meta.items() if not isinstance(v, (dict, list))}
+    fields.update(origin=origin, name=name, group=group, day=day, trace_id=trace.trace_id)
+    try:
+        rendered = layout.format(**fields)
+    except (KeyError, IndexError, ValueError):
+        rendered = f"{origin}/{name}/{group}/{trace.trace_id}"
+    return Path(*[_safe(p) for p in rendered.split("/") if p])
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +176,13 @@ class LocalConsumer(Consumer):
 
     Config keys (all optional, sensible defaults):
 
-    * ``root`` (``str | Path``) — base directory; defaults to
-      ``/tmp/operonx_traces``.
+    * ``root`` (``str | Path``) — base directory. Unset (or empty), it is
+      ``$OPERONX_RUNS_DIR``, else ``<project>/.operonx/runs`` for a
+      process an `Application` bootstrapped, else
+      ``/tmp/operonx_traces``. A relative root resolves against the
+      project root.
+    * ``layout`` (``str``) — ``origin`` (default), ``flat``, or a
+      template; see the module docstring.
     * ``media_threshold`` (``int``) — bytes; payloads at or above this
       get offloaded to ``media/``. Defaults to ``1024``.
     * ``write_view_txt`` (``bool``) — set False to skip the
@@ -103,7 +196,8 @@ class LocalConsumer(Consumer):
     """
 
     DEFAULT_CONFIG: Dict[str, Any] = {
-        "root": "/tmp/operonx_traces",
+        "root": "",
+        "layout": "origin",
         "media_threshold": 1024,
         "write_view_txt": True,
         "arrow_formatters": {},
@@ -111,9 +205,9 @@ class LocalConsumer(Consumer):
 
     def consume(self, trace: WorkflowTrace) -> Path:
         cfg = {**self.DEFAULT_CONFIG, **self.config}
-        root = Path(cfg["root"])
-        tmp = root / f"{trace.trace_id}.tmp"
-        final = root / trace.trace_id
+        root = resolve_root(cfg["root"])
+        final = root / run_path(trace, cfg["layout"])
+        tmp = final.parent / f"{final.name}.tmp"
         media_dir = tmp / "media"
 
         # Fresh tmp dir on every write — a rerun with the same trace_id
@@ -177,7 +271,7 @@ class LocalConsumer(Consumer):
         if final.exists():
             shutil.rmtree(final)
         tmp.rename(final)
-        self._update_latest_symlink(root, trace.trace_id)
+        self._update_latest_symlink(root, final.relative_to(root).as_posix())
         return final
 
     # ------------------------------------------------------------------
@@ -300,8 +394,8 @@ class LocalConsumer(Consumer):
             "metadata": trace.metadata,
         }
 
-    def _update_latest_symlink(self, root: Path, trace_id: str) -> None:
-        """Best-effort ``latest -> <trace_id>`` symlink.
+    def _update_latest_symlink(self, root: Path, target: str) -> None:
+        """Best-effort ``latest -> <the run's directory>`` symlink.
 
         Silently skipped when the FS doesn't support symlinks (Windows
         without dev-mode, some FUSE mounts). Failure here isn't fatal —
@@ -311,7 +405,7 @@ class LocalConsumer(Consumer):
         try:
             if latest.is_symlink() or latest.exists():
                 latest.unlink()
-            latest.symlink_to(trace_id)
+            latest.symlink_to(target)
         except OSError:
             pass
 
@@ -340,7 +434,8 @@ class LocalConsumerConfig(YamlModel):
 
     _category: ClassVar[str] = "trace_local"
 
-    root: str = "/tmp/operonx_traces"
+    root: str = ""
+    layout: str = "origin"
     media_threshold: int = 1024
     write_view_txt: bool = True
     show_io: bool = True
@@ -350,6 +445,7 @@ def _create_local_consumer(cfg: LocalConsumerConfig) -> LocalConsumer:
     return LocalConsumer(
         config={
             "root": cfg.root,
+            "layout": cfg.layout,
             "media_threshold": cfg.media_threshold,
             "write_view_txt": cfg.write_view_txt,
             "show_io": cfg.show_io,

@@ -41,6 +41,7 @@ Prompt management (uses the Langfuse SDK directly)::
 # Import consumers first so their config types register with REGISTRY
 # before anything else reads it.
 import operonx.telemetry.consumers  # noqa: F401
+import operonx.telemetry.runs  # noqa: F401  — `run_store:` resources
 from operonx.core.registry import REGISTRY
 from operonx.telemetry.backends import (
     LangfuseClient,

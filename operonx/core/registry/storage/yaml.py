@@ -237,9 +237,12 @@ class YamlConfigStorage(ConfigStorage):
         Any required ``${VAR}`` references whose env var is unset raise.
         """
         data = self._load_file()
-        config_data = data.get(key)
-
-        if not config_data or not isinstance(config_data, dict):
+        if key not in data:
+            return None
+        # An entry with every field at its default is written `default: {}`
+        # (or left blank) — present, and empty is its config, not "missing".
+        config_data = data[key] if data[key] is not None else {}
+        if not isinstance(config_data, dict):
             return None
 
         missing: List[Tuple[str, str]] = []
