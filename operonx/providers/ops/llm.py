@@ -245,7 +245,10 @@ class LLMOp(BaseOp):
                 — refusals from the model, provider-side content filtering, or
                 exhausted transport retries (the underlying SDK gave up). NOT
                 triggered by parse/validator failures — those use ``max_retries``.
-            batch_mode: Use OpenAI Batch API (50% cheaper).
+            batch_mode: Use OpenAI Batch API (50% cheaper). ``fields`` /
+                ``validators`` / ``max_retries`` apply to the batch answer as
+                to a live one (a semantic retry is another batch submission).
+                Cannot be combined with ``fallback`` — raises ``ValueError``.
             seed: Optional seed for load balancing RNG.
             fields: Optional list of ``"path.to.value: type"`` extraction schemas
                 (see ``operonx.providers.parsing.ExtractField``). When set, the
@@ -294,6 +297,18 @@ class LLMOp(BaseOp):
             )
         if max_retries < 0:
             raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+        if batch_mode and fallback:
+            # The batch coordinator is bound to the primary resource. A
+            # fallback would have to be a live call at full price, or another
+            # batch round on a resource nobody configured for batching —
+            # neither is what the caller chose, and ignoring the list is how
+            # this used to go wrong.
+            raise ValueError(
+                "LLMOp(batch_mode=True) does not take fallback=[...]: a batch "
+                "request is answered by the primary resource's batch job, and "
+                "falling back would turn it into a live, full-price call. Drop "
+                "fallback=, or run the op live (batch_mode=False)."
+            )
         self.fields = fields
         self.parser = parser
         self.validators = validators
@@ -628,19 +643,34 @@ class LLMOp(BaseOp):
         Transport errors (429 / 5xx / timeout) are the SDK's responsibility;
         anything that surfaces here has already exhausted the SDK's own
         retries, so it counts as a hard failure and routes to ``fallback``.
+
+        ``batch_mode`` changes only how one call is made (see
+        :meth:`_call_once`); the structured layer sits on top either way.
         """
         llm_params = self._build_llm_params(kwargs)
 
+        if self._extract_fields is None:
+            return await self._call_once(llm_params)
+        return await self._structured_generate(llm_params)
+
+    async def _call_once(self, llm_params: Dict[str, Any]):
+        """One model answer: a batch submission, or a live call with fallback.
+
+        The batch path used to return from ``_generate_core`` before the
+        ``fields=`` check, so parsing, validators and semantic retries were
+        skipped and every declared field resolved to ``None`` next to an
+        ``error`` of ``None`` — a clean parse of an answer nobody parsed.
+        Routing both paths through here keeps the structured layer out of
+        the transport question. A semantic retry in batch mode is one more
+        batch submission.
+        """
         if self.batch_mode:
             self._ensure_initialized()
             if not self._batch_coordinator:
                 raise RuntimeError("Batch coordinator not initialized")
             completion = await self._batch_coordinator.submit(**llm_params)
             return self._extract_completion(completion, self.resource)
-
-        if self._extract_fields is None:
-            return await self._llm_call_with_fallback(llm_params)
-        return await self._structured_generate(llm_params)
+        return await self._llm_call_with_fallback(llm_params)
 
     async def _llm_call_with_fallback(self, llm_params: Dict[str, Any]):
         """One LLM call. Refusal or hard exception → try fallback resources."""
@@ -929,7 +959,7 @@ class LLMOp(BaseOp):
                 messages = messages_base
 
             attempt_params = dict(llm_params, messages=messages)
-            last_result = await self._llm_call_with_fallback(attempt_params)
+            last_result = await self._call_once(attempt_params)
 
             parsed = parse_and_extract(
                 text=last_result.get("content", ""),
