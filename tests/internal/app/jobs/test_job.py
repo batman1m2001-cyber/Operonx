@@ -222,6 +222,10 @@ def test_a_bad_policy_is_refused_at_declaration(tmp_path):
         make_job(tmp_path, on_error="ignore")
     with pytest.raises(ValueError, match="retry"):
         make_job(tmp_path, on_error="retry:x")
+    # Words that merely start with "retry" were read as retry:1.
+    for typo in ("retry3", "retryfoo"):
+        with pytest.raises(ValueError, match="on_error"):
+            make_job(tmp_path, on_error=typo)
     with pytest.raises(ValueError, match="session"):
         make_job(tmp_path, session="per_request")
 
