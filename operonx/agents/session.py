@@ -22,6 +22,7 @@ import asyncio
 from typing import Any, Callable, Dict, List, Optional
 
 from operonx.agents.graphs.react import agent_result
+from operonx.agents.ops.compact_ops import unmatched_tool_calls
 from operonx.core.engine import Operon
 
 __all__ = ["AgentSession"]
@@ -131,7 +132,31 @@ class AgentSession:
         # held the *previous* turn's reply. The caller was told the turn
         # succeeded and shown a stale answer.
         messages = result.get("messages") or []
-        answered = bool(messages) and messages[-1].get("role") == "assistant"
+        # A history the provider will reject must never be committed: it
+        # fails the *next* send, one exchange away from its cause.
+        valid = not unmatched_tool_calls(messages)["calls_without_results"]
+        ended = messages[-1].get("role") if messages else None
+        answered = valid and ended == "assistant"
+
+        # The budget ran out while the model was still asking for tools.
+        # The loop answered those calls as "not run", so the history is
+        # valid, and it is kept rather than rolled back: the calls that
+        # *did* run this turn may have had effects, and a rolled-back
+        # history would hide them from the model on the next send.
+        if valid and ended == "tool" and result.get("stopped_early"):
+            self._messages = list(messages)
+            self._turns += int(result.get("turns") or 0)
+            return {
+                **result,
+                "final": None,
+                "error": (
+                    "the turn budget ran out before the agent answered; its last "
+                    "tool calls were not run. The conversation was kept, since "
+                    "earlier tool calls may have had effects. Send a follow-up "
+                    "to let it answer, or raise max_turns."
+                ),
+            }
+
         if not answered:
             # Roll back to before this turn so the caller can retry
             # without the history accumulating consecutive user turns

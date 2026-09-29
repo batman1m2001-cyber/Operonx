@@ -273,3 +273,70 @@ class TestFailedTurns:
         before = session.turns
         await session.send("two")
         assert session.turns == before
+
+
+def strict_model(script):
+    """A model that rejects a history the way a provider does.
+
+    Every provider answers 400 when an assistant ``tool_call`` has no
+    matching tool message, so this raises on exactly that — and like a
+    real adapter, the assistant message carries its ``tool_calls``.
+    """
+    from operonx.agents.ops.compact_ops import unmatched_tool_calls
+
+    state = {"i": 0}
+
+    @op
+    def call_model(messages: list = None) -> dict:
+        broken = unmatched_tool_calls(messages)["calls_without_results"]
+        if broken:
+            raise RuntimeError(f"400 Bad Request: tool_calls without results: {broken}")
+        i = state["i"]
+        state["i"] += 1
+        calls, done = script[i] if i < len(script) else ([], True)
+        message = {"id": f"s{i}", "role": "assistant", "content": "" if calls else f"reply {i}"}
+        if calls:
+            message["tool_calls"] = calls
+        return {"assistant_message": [message], "tool_calls": calls, "done": done}
+
+    return call_model
+
+
+class TestBudgetExhaustion:
+    """The model ignored the budget notice and asked for a tool on its
+    last turn. The session used to commit that turn as a success — the
+    history ended on an assistant message, which was all it checked — and
+    the provider then rejected the *next* ``send()``."""
+
+    @staticmethod
+    def _session():
+        calls = [[{"id": f"t{i}", "name": "echo", "args": {"a": i}}] for i in range(3)]
+        agent = build_react_agent(
+            call_model=strict_model([(c, False) for c in calls]), max_turns=2
+        )(messages=None)
+        return AgentSession(agent)
+
+    @pytest.mark.asyncio
+    async def test_the_exhausted_turn_is_not_reported_as_success(self):
+        session = self._session()
+        result = await session.send("keep going")
+        assert result["stopped_early"] is True
+        assert result["final"] is None
+        assert result["error"], "a turn that never answered must say so"
+
+    @pytest.mark.asyncio
+    async def test_the_next_send_is_accepted(self):
+        session = self._session()
+        await session.send("keep going")
+        result = await session.send("what did you find?")
+        assert result["error"] == "", result["error"]
+        assert result["final"]["content"].startswith("reply")
+
+    @pytest.mark.asyncio
+    async def test_work_already_done_is_kept(self):
+        """The tool calls that did run may have had effects. Rolling the
+        turn back would hide that from the model on the next send."""
+        session = self._session()
+        await session.send("keep going")
+        ran = [m for m in session.messages if m.get("role") == "tool"]
+        assert any(m["tool_call_id"] == "t0" and m["status"] == "success" for m in ran)

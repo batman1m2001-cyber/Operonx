@@ -486,6 +486,9 @@ async def test_the_turn_budget_ends_with_an_answer_not_a_truncation():
         "Use next_page to page through the entire list. Do not stop until has_more is false.",
     )
     assert result["stopped_early"] is True
-    assert result["final"]["role"] == "assistant", (
-        "exhausting the budget must still yield an assistant turn"
-    )
+    # `final` is None when the model ignored the notice and asked for yet
+    # another tool — that call is answered "not run" and the run has no
+    # answer. It used to be that tool request itself, so this passed on
+    # an empty "answer".
+    assert result["final"] is not None, "the model ignored the budget notice and never answered"
+    assert result["final"]["role"] == "assistant"

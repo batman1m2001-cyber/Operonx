@@ -73,8 +73,9 @@ _TIMED_OUT_APPROVAL = (
 )
 
 
-def _tool_message(call_id: str, name: str, content: str, *, is_error: bool = False) -> dict:
-    """The one shape every dispatch path returns."""
+def tool_message(call_id: str, name: str, content: str, *, is_error: bool = False) -> dict:
+    """The one shape every dispatch path returns — and the one the ReAct
+    loop uses to answer a call it ends without dispatching."""
     return {
         "role": "tool",
         "tool_call_id": call_id,
@@ -107,6 +108,14 @@ def _truncate(text: str, limit: int) -> str:
     return text
 
 
+def call_identity(call: dict) -> tuple[str, str]:
+    """``(call_id, tool_name)`` from either tool-call shape — the flat one
+    ``LLMOp`` emits and OpenAI's nested ``function`` form."""
+    call_id = call.get("id") or call.get("tool_call_id") or ""
+    name = call.get("name") or (call.get("function") or {}).get("name") or ""
+    return call_id, name
+
+
 @op
 def each_call(tool_calls: Optional[list] = None):
     """Generator — one frame per tool call.
@@ -131,8 +140,7 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     traceback.
     """
     call = call or {}
-    call_id = call.get("id") or call.get("tool_call_id") or ""
-    name = call.get("name") or (call.get("function") or {}).get("name") or ""
+    call_id, name = call_identity(call)
 
     raw_args = call.get("args")
     if raw_args is None:
@@ -268,7 +276,7 @@ async def execute(
         if redactor is not None:
             text = redactor.scrub(text)
         return {
-            "tool_message": _tool_message(
+            "tool_message": tool_message(
                 call_id, tool_name, _truncate(text, max_result_chars), is_error=is_error
             )
         }

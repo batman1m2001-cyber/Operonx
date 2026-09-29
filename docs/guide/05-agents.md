@@ -65,7 +65,7 @@ lives in the shared cell, and `agent_result` reads it:
 ```python
 answer = agent_result(result, agent)
 answer["messages"]        # the conversation, flat
-answer["final"]           # last assistant message, or None
+answer["final"]           # last assistant message, or None if it never answered
 answer["turns"]
 answer["stopped_early"]   # True if the turn budget ran out
 ```
@@ -87,6 +87,13 @@ model is told, and gets one final turn to answer with what it has:
 agent = build_react_agent(call_model=call_model, max_turns=10)
 # ... roles: user, assistant, tool, assistant, tool, user(notice), assistant
 ```
+
+If the model ignores the notice and asks for another tool anyway, that
+call is not run: it is answered with a "not run" tool message, so the
+history never ends on an unanswered `tool_call` (every provider rejects
+that on the next request). `final` is then `None`, `stopped_early` is
+`True`, and `AgentSession.send` returns an `error` saying so while keeping
+the conversation.
 
 This is deliberately not the synthesized loop's `max_iterations`, which
 is a runaway guard set far above any real workload. That guard cuts

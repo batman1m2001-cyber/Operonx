@@ -234,3 +234,86 @@ class TestAgentResult:
         writes; agent_result must return the merged conversation."""
         result, _ = await run_agent([(CALL, False), (CALL, False)])
         assert all(isinstance(m, dict) for m in result["messages"])
+
+
+def calling_model(script):
+    """Like :func:`scripted_model`, but shaped the way ``adapt_llm_output``
+    shapes a real provider turn: the assistant message **carries** its
+    ``tool_calls``. ``scripted_model`` leaves them off, which is why a
+    history ending on an unanswered call looked valid to every test above.
+    """
+    state = {"i": 0}
+
+    @op
+    def call_model(messages: list = None) -> dict:
+        i = state["i"]
+        state["i"] += 1
+        calls, done = script[i] if i < len(script) else ([], True)
+        message = {"id": f"a{i}", "role": "assistant", "content": "" if calls else "final"}
+        if calls:
+            message["tool_calls"] = calls
+        return {"assistant_message": [message], "tool_calls": calls, "done": done}
+
+    return call_model
+
+
+async def run_calling(script, *, max_turns=25):
+    built = build_react_agent(call_model=calling_model(script), max_turns=max_turns)(messages=None)
+    handle = Operon(built).start(inputs={"messages": USER})
+    await asyncio.wait_for(handle.result(), timeout=60)
+    return agent_result(handle.state, built)
+
+
+def _call(i):
+    return [{"id": f"t{i}", "name": "echo", "args": {"a": i}}]
+
+
+class TestBudgetNeverStrandsACall:
+    """A model that ignores the budget notice asks for a tool on its last
+    turn. ``decide`` ends the loop without dispatching — but the assistant
+    message, ``tool_calls`` and all, was already written to the history.
+    Providers reject a conversation with an unanswered ``tool_call``, so
+    the *next* request failed, one exchange away from the cause.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_exhausted_turn_leaves_every_call_answered(self):
+        from operonx.agents.ops.compact_ops import unmatched_tool_calls
+
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        assert unmatched_tool_calls(result["messages"])["calls_without_results"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_unrun_call_is_answered_as_not_run(self):
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        last = result["messages"][-1]
+        assert last["role"] == "tool" and last["tool_call_id"] == "t1"
+        assert last["status"] == "error"
+        assert "budget" in last["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_the_caller_can_tell_there_was_no_answer(self):
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        assert result["stopped_early"] is True
+        assert result["final"] is None, "a tool request is not an answer"
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_answers_on_the_last_turn_is_untouched(self):
+        result = await run_calling([(_call(0), False), ([], True)], max_turns=2)
+        assert [m["role"] for m in result["messages"]] == [
+            "user",
+            "assistant",
+            "tool",
+            "user",
+            "assistant",
+        ]
+        assert result["final"]["content"] == "final"
+
+    @pytest.mark.asyncio
+    async def test_calls_on_a_turn_marked_done_are_answered_too(self):
+        """``decide`` also ends the loop on ``done`` alone. A call_model
+        that says done *and* asks for a tool strands it the same way."""
+        from operonx.agents.ops.compact_ops import unmatched_tool_calls
+
+        result = await run_calling([(_call(0), True)], max_turns=5)
+        assert unmatched_tool_calls(result["messages"])["calls_without_results"] == []
