@@ -45,6 +45,7 @@ from operonx.agents.tool import (
     clear_registry,
     get_tool_definitions,
     tool,
+    unregister_tool,
 )
 
 
@@ -56,7 +57,14 @@ def __getattr__(name: str):
     ``from operonx.agents import tool`` fail on an install that never
     asked for MCP.
     """
-    if name in ("MCPServer", "MCPClient", "MCPError", "connect_mcp", "register_mcp_tools"):
+    if name in (
+        "MCPServer",
+        "MCPClient",
+        "MCPError",
+        "connect_mcp",
+        "register_mcp_tools",
+        "unregister_mcp_tools",
+    ):
         from operonx.agents import mcp as _mcp
 
         return getattr(_mcp, name)
@@ -70,11 +78,13 @@ __all__ = [
     "MCPError",
     "connect_mcp",
     "register_mcp_tools",
+    "unregister_mcp_tools",
     "tool",
     "ToolMeta",
     "TOOL_REGISTRY",
     "get_tool_definitions",
     "clear_registry",
+    "unregister_tool",
     "ToolPolicy",
     "Redactor",
     "MemoryProvider",

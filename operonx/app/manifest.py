@@ -80,8 +80,6 @@ SESSION_MODES = frozenset({"per_request", "per_connection", "per_message"})
 #: How many runs a job mints: one per item, or one fed every item.
 JOB_SESSION_MODES = frozenset({"per_item", "stream"})
 
-_ON_ERROR_RE = re.compile(r"^(skip|stop|retry(:\d+)?)$")
-
 _ENTRY_RE = re.compile(r"^[\w.]+:[\w.]+$")
 
 
@@ -205,6 +203,10 @@ class JobSpec:
         concurrency = 8
         on_error    = "skip"
         schedule    = "0 2 * * *"
+
+    ``on_error`` takes what ``Job(on_error=...)`` takes, with the same
+    meaning: ``"skip"`` (the default), ``"stop"``, ``"retry:N"`` or
+    ``"record"``.
 
     A block naming ``runbook = "module:attr"`` instead of ``graph`` runs
     a `Runbook` — many jobs, one command — and takes only ``name``,
@@ -660,11 +662,18 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
             f"{where}: {label} has concurrency={concurrency!r}; expected a positive integer"
         )
 
+    # The Job's own parser, not a second pattern here: this block becomes a
+    # `Job`, and the two vocabularies had drifted — `record` was refused
+    # here and accepted by `Job(...)`, while `retry:0` passed here and
+    # failed only when the job was built to run. Imported at call time:
+    # the jobs package imports the serve layer, which reads manifests.
+    from operonx.app.jobs.runner import parse_on_error
+
     on_error = str(block.get("on_error") or "skip").strip().lower()
-    if not _ON_ERROR_RE.match(on_error):
-        raise ManifestError(
-            f"{where}: {label} has on_error {on_error!r}; expected skip, stop or retry:N"
-        )
+    try:
+        parse_on_error(on_error)
+    except ValueError as e:
+        raise ManifestError(f"{where}: {label} has an invalid on_error: {e}") from None
 
     max_inflight = block.get("max_inflight")
     if max_inflight is not None and (not isinstance(max_inflight, int) or max_inflight < 1):

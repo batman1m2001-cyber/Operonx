@@ -19,7 +19,12 @@ from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 from operonx.providers.ops._utils import resolve_hub
-from operonx.providers.parsing import ExtractField, Validators, parse_and_extract
+from operonx.providers.parsing import (
+    ExtractField,
+    Validators,
+    check_output_keys,
+    parse_and_extract,
+)
 
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
@@ -245,20 +250,33 @@ class LLMOp(BaseOp):
                 — refusals from the model, provider-side content filtering, or
                 exhausted transport retries (the underlying SDK gave up). NOT
                 triggered by parse/validator failures — those use ``max_retries``.
-            batch_mode: Use OpenAI Batch API (50% cheaper).
+                With ``stream=True`` only until the first delta is yielded:
+                after that a failure propagates, because a fallback restarts
+                the answer and would contradict the deltas already sent.
+            batch_mode: Use OpenAI Batch API (50% cheaper). ``fields`` /
+                ``validators`` / ``max_retries`` apply to the batch answer as
+                to a live one (a semantic retry is another batch submission).
+                Takes one resource and no ``fallback``: a list of several
+                resources (load balancing) or a fallback list raises
+                ``ValueError``.
             seed: Optional seed for load balancing RNG.
             fields: Optional list of ``"path.to.value: type"`` extraction schemas
                 (see ``operonx.providers.parsing.ExtractField``). When set, the
                 LLM response is parsed inline; each field becomes a top-level
-                output of this op.
+                output of this op, named after the path's last segment or an
+                ``as`` alias (``"user.id as user_id: str"``). Two fields with
+                one output name, or one named like an output of this op
+                (``content``, ``error``, ...), raise ``ValueError``.
             parser: Parser format when ``fields`` is set: ``"xml"``, ``"json"``,
                 or ``"yaml"``. Defaults to ``"xml"`` when ``fields`` is provided.
             validators: Optional validation applied after extraction.
                 Either a per-field allow-list — ``{"field": [allowed, ...]}``,
                 where an ``"@default"`` entry stands in for an unrecognised
-                value — or a ``Callable[[dict], bool]`` over the whole parsed
-                dict, for structural checks an allow-list cannot state. A
-                callable that raises counts as a rejection, not a crash.
+                value (``"@@x"`` is the literal ``"@x"``; an absent ``?``
+                field is not checked) — or a ``Callable[[dict], bool]`` over
+                the whole parsed dict, for structural checks an allow-list
+                cannot state. A callable that raises counts as a rejection,
+                not a crash.
             max_retries: Max **semantic** retries when the parser or validators
                 report an error. Default 0 (no retry — first parse failure
                 surfaces as ``error`` in the output). Transport failures are
@@ -280,6 +298,7 @@ class LLMOp(BaseOp):
         self._rng = random.Random(seed)
 
         # Structured-output config (merged from ParserOp).
+        _check_validators(validators)
         if fields and not parser:
             parser = "xml"
         if parser and not fields:
@@ -294,6 +313,32 @@ class LLMOp(BaseOp):
             )
         if max_retries < 0:
             raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+        if batch_mode and fallback:
+            # The batch coordinator is bound to the primary resource. A
+            # fallback would have to be a live call at full price, or another
+            # batch round on a resource nobody configured for batching —
+            # neither is what the caller chose, and ignoring the list is how
+            # this used to go wrong.
+            raise ValueError(
+                "LLMOp(batch_mode=True) does not take fallback=[...]: a batch "
+                "request is answered by the primary resource's batch job, and "
+                "falling back would turn it into a live, full-price call. Drop "
+                "fallback=, or run the op live (batch_mode=False)."
+            )
+        if batch_mode and isinstance(resource, list) and len(resource) > 1:
+            # A list is load balancing, but the batch path builds one
+            # coordinator for resource[0] and sends every request there:
+            # the rest of the list and ``ratios`` did nothing. Balancing
+            # batch traffic would take a coordinator and batch job per
+            # resource, and only some backends can batch at all (the
+            # OpenAI one implements generate_batch; a mixed list would fail
+            # one flush interval later). Refusing costs nothing that worked.
+            raise ValueError(
+                f"LLMOp(batch_mode=True) takes one resource, got {resource!r}: "
+                f"a batch job belongs to one resource, so every request would go "
+                f"to {resource[0]!r} and the rest of the list and ratios= would be "
+                f"ignored. Pass resource={resource[0]!r}, or one batch op per resource."
+            )
         self.fields = fields
         self.parser = parser
         self.validators = validators
@@ -359,6 +404,12 @@ class LLMOp(BaseOp):
         # string, or None on success). Callers wire the individual fields
         # through refs the same way they used to wire ParserOp outputs.
         if self._extract_fields:
+            # Each field is one output key. Two sharing a key, or one
+            # shadowing the op's own outputs, would lose a value at merge
+            # time with nothing reported — so it is refused here.
+            collision = check_output_keys(self._extract_fields, reserved=(*output_schema, "error"))
+            if collision is not None:
+                raise ValueError(collision)
             for f in self._extract_fields:
                 output_schema[f.output_key] = Param(default=None)
             output_schema["error"] = Param(type=str, default=None)
@@ -628,19 +679,36 @@ class LLMOp(BaseOp):
         Transport errors (429 / 5xx / timeout) are the SDK's responsibility;
         anything that surfaces here has already exhausted the SDK's own
         retries, so it counts as a hard failure and routes to ``fallback``.
+
+        ``batch_mode`` changes only how one call is made (see
+        :meth:`_call_once`); the structured layer sits on top either way.
         """
         llm_params = self._build_llm_params(kwargs)
 
+        if self._extract_fields is None:
+            return await self._call_once(llm_params)
+        return await self._structured_generate(llm_params)
+
+    async def _call_once(self, llm_params: Dict[str, Any]):
+        """One model answer: a batch submission, or a live call with fallback.
+
+        The batch path used to return from ``_generate_core`` before the
+        ``fields=`` check, so parsing, validators and semantic retries were
+        skipped and every declared field resolved to ``None`` next to an
+        ``error`` of ``None`` — a clean parse of an answer nobody parsed.
+        Routing both paths through here keeps the structured layer out of
+        the transport question. A semantic retry in batch mode is one more
+        batch submission.
+        """
         if self.batch_mode:
             self._ensure_initialized()
             if not self._batch_coordinator:
                 raise RuntimeError("Batch coordinator not initialized")
             completion = await self._batch_coordinator.submit(**llm_params)
-            return self._extract_completion(completion, self.resource)
-
-        if self._extract_fields is None:
-            return await self._llm_call_with_fallback(llm_params)
-        return await self._structured_generate(llm_params)
+            # The key, not ``self.resource``: a one-element list reported the
+            # list itself as ``model_used`` and could not be priced.
+            return self._extract_completion(completion, self._get_resource_key(self._llms[0]))
+        return await self._llm_call_with_fallback(llm_params)
 
     async def _llm_call_with_fallback(self, llm_params: Dict[str, Any]):
         """One LLM call. Refusal or hard exception → try fallback resources."""
@@ -929,7 +997,7 @@ class LLMOp(BaseOp):
                 messages = messages_base
 
             attempt_params = dict(llm_params, messages=messages)
-            last_result = await self._llm_call_with_fallback(attempt_params)
+            last_result = await self._call_once(attempt_params)
 
             parsed = parse_and_extract(
                 text=last_result.get("content", ""),
@@ -958,45 +1026,73 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     async def _stream_core(self, **kwargs):
-        """Format prompt → select LLM → stream → fallback on error."""
+        """Format prompt → select LLM → stream → fallback on error.
+
+        The fallback is taken only while nothing has been yielded. Once a
+        delta is out, the consumer has acted on it — rendered it, or (a
+        voice app) spoken it — and a fallback starts its answer from the
+        beginning, so the joined deltas would read
+        ``primary_partial + fallback_full`` while the final frame read
+        ``fallback_full``. After the first delta a failure propagates
+        instead, which keeps "join the deltas" and "read the final frame"
+        the same answer. Tool-call and reasoning chunks are accumulated,
+        not yielded, so they do not count.
+        """
         llm_params = self._build_llm_params(kwargs)
         selected = self._select_llm()
         resource = self._get_resource_key(selected)
         acc = self._new_stream_acc()
+        emitted = False
 
         try:
             async for chunk in selected.stream(**llm_params):
                 yield_dict = self._process_chunk(chunk, acc)
                 if yield_dict:
+                    emitted = True
                     yield yield_dict
         except Exception as e:
             if not self._fallback_llms:
                 raise
+            if emitted:
+                LOGGER.error(
+                    "Streaming from %s failed after deltas were emitted (%d chars); "
+                    "not falling back — a replay would contradict them: %s",
+                    resource,
+                    len(acc["response"]),
+                    e,
+                )
+                raise
             LOGGER.error(f"Streaming from {resource} failed: {e}")
             async for result in self._fallback_stream(llm_params):
-                if isinstance(result, dict) and "finish_reason" in result:
-                    yield result
-                    return
                 yield result
             return
 
         yield self._stream_final(acc, resource)
 
     async def _fallback_stream(self, llm_params):
-        """Try fallback LLMs for streaming. Yields chunks, final yield has metadata."""
+        """Try fallback LLMs for streaming. Yields chunks, final yield has metadata.
+
+        Same rule as the primary (see :meth:`_stream_core`): a fallback that
+        fails after yielding a delta ends the stream with its error rather
+        than handing over to the next one.
+        """
         for idx, fallback_llm in enumerate(self._fallback_llms):
             fallback_key = self.fallback[idx]
             LOGGER.info(f"Trying streaming fallback {fallback_key}...")
+            emitted = False
             try:
                 acc = self._new_stream_acc()
                 async for chunk in fallback_llm.stream(**llm_params):
                     yield_dict = self._process_chunk(chunk, acc)
                     if yield_dict:
+                        emitted = True
                         yield yield_dict
                 LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
                 yield self._stream_final(acc, fallback_key)
                 return
             except Exception as fallback_error:
+                if emitted:
+                    raise
                 LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
         raise RuntimeError("All streaming fallback models failed")
 
@@ -1509,16 +1605,92 @@ def _extract_template_variables(template: Any) -> set:
     return set()
 
 
+def _check_validators(validators: Any) -> None:
+    """Refuse ``validators=`` values that can never work, at construction.
+
+    Validators are build-time values: nothing resolves a Ref inside them.
+    A Ref there never errored, it misbehaved by position — a Ref is
+    callable, so ``validators=ref`` became a predicate returning a truthy
+    Ref and passed every answer; as an allow-list, iterating it walked
+    ``ref[0], ref[1], …`` forever and hung the event loop; as one entry,
+    ``value == ref`` is a truthy Ref, so every value counted as allowed.
+    """
+    if validators is None:
+        return
+    from operonx.core.states.ref import Ref
+
+    def has_ref(value: Any) -> bool:
+        if isinstance(value, Ref):
+            return True
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return any(isinstance(v, Ref) for v in value)
+        return False
+
+    if has_ref(validators) or (
+        isinstance(validators, dict) and any(has_ref(v) for v in validators.values())
+    ):
+        raise TypeError(
+            "LLMOp(validators=...) holds a Ref (PARENT[...], a graph parameter, "
+            "op[...]). Validators are read when the graph is built, so a Ref "
+            "there is never resolved. Pass literal values, or check the parsed "
+            "field in an @op after the LLM when the allowed values arrive at "
+            "run time."
+        )
+    if not (isinstance(validators, dict) or callable(validators)):
+        raise TypeError(
+            f"LLMOp(validators=...) must be a dict or a callable, got "
+            f"{type(validators).__name__}: {validators!r}"
+        )
+
+
+def _shadowed_message(names: List[str]) -> str:
+    """Explain placeholders that a reserved keyword can never fill.
+
+    ``user``, ``temperature`` and the rest are split off as model settings
+    before the template is formatted, and each has a default — so
+    ``{user}`` is missing whether or not ``user=`` was passed, and
+    ``user=q`` goes to the provider as OpenAI's end-user id. The bare
+    "Missing template variable(s)" this used to produce, one model call
+    late, pointed at the template rather than at the name.
+    """
+    placeholders = ", ".join(f"{{{n}}}" for n in names)
+    settings = [n for n in names if n not in ("prompt", "messages")]
+    why = []
+    if settings:
+        why.append(
+            f"{', '.join(f'{n}=' for n in settings)} "
+            f"{'is a model setting' if len(settings) == 1 else 'are model settings'}"
+            f" — sent to the provider, never substituted"
+        )
+    if len(settings) < len(names):
+        why.append("prompt= / messages= are the template itself")
+    return (
+        f"Template placeholder(s) {placeholders} name keys LLMOp reserves: "
+        f"{'; '.join(why)}. The placeholder can never be filled. Rename it after "
+        f"what it holds, e.g. {{{names[0]}_prompt}} with {names[0]}_prompt=..."
+    )
+
+
 def _check_prompt_inputs(inputs: Dict[str, Any]) -> None:
     """Reject prompt/messages mistakes that are knowable at construction.
 
     A ``Ref`` resolves at run time and can only be checked there — banning
     it here would outlaw the legitimate ``prompt=PARENT["template"]``
-    wiring. A **literal** list, or both inputs at once, is knowable now,
-    and one model call later is a much worse place to find out.
+    wiring. A **literal** list, both inputs at once, or a placeholder named
+    like a model setting (``{user}``) is knowable now, and one model call
+    later is a much worse place to find out.
     """
     prompt = inputs.get("prompt")
     messages = inputs.get("messages")
+    if isinstance(prompt, (str, dict)):
+        shadowed = sorted(_extract_template_variables(prompt) & RESERVED_KEYS)
+        if shadowed:
+            raise PromptError(
+                message=_shadowed_message(shadowed),
+                prompt=prompt,
+                missing_vars=shadowed,
+                original_error=ValueError(f"placeholders name reserved keys: {shadowed}"),
+            )
     if prompt is not None and messages is not None:
         raise PromptError(
             message=(
@@ -1556,8 +1728,11 @@ def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any
         except KeyError as e:
             required = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))
             missing = [v for v in required if v not in vars]
+            # A template that arrived through a Ref skipped the construction
+            # check; say why a reserved name is missing rather than just that.
+            shadowed = sorted(set(missing) & RESERVED_KEYS)
             raise PromptError(
-                message="Missing template variable(s)",
+                message=_shadowed_message(shadowed) if shadowed else "Missing template variable(s)",
                 prompt=template if template is not None else value,
                 missing_vars=missing,
                 original_error=e,

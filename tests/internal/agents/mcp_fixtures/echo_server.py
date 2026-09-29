@@ -61,6 +61,14 @@ def braces() -> str:
     return '{"city": "Hanoi", "temp": 30}'
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def pid() -> str:
+    """This server's process id, so a test can check the process is gone."""
+    import os
+
+    return str(os.getpid())
+
+
 @mcp.tool()
 def unannotated(x: str) -> str:
     """No annotations at all — a server that says nothing about what this

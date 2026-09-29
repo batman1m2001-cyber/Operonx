@@ -382,7 +382,7 @@ class TestClone:
         ref_clone = ref._clone()
 
         assert ref_clone.source == ref.source
-        assert ref_clone.ops == ref.ops
+        assert ref_clone.transforms == ref.transforms
 
     def test_clone_executes_same(self):
         """Test clone produces same result."""
@@ -720,3 +720,260 @@ class TestBackwardCompatibility:
         ref = Ref("n", "data")
         result = (ref["users"][0]["score"] * 2).execute({"users": [{"score": 15}]})
         assert result == 30
+
+
+# ============================================================
+# Test 20: Ref operands (S7) — a Ref on the other side is read, not captured
+# ============================================================
+
+
+class TestRefOperands:
+    """``a >= b`` with two Refs compares two values, not a value and a Ref.
+
+    Only ``&``/``|`` used to resolve a Ref operand; every other operator
+    captured it as a literal, so ``a >= b`` built one more Ref — truthy,
+    so a branch on it took the first case every time.
+    """
+
+    CTX = {("n", "a"): 7, ("n", "b"): 2}
+
+    @pytest.mark.parametrize(
+        "build,want",
+        [
+            pytest.param(lambda a, b: a < b, False, id="lt"),
+            pytest.param(lambda a, b: a <= b, False, id="le"),
+            pytest.param(lambda a, b: a > b, True, id="gt"),
+            pytest.param(lambda a, b: a >= b, True, id="ge"),
+            pytest.param(lambda a, b: a == b, False, id="eq"),
+            pytest.param(lambda a, b: a != b, True, id="ne"),
+            pytest.param(lambda a, b: a + b, 9, id="add"),
+            pytest.param(lambda a, b: a - b, 5, id="sub"),
+            pytest.param(lambda a, b: b - a, -5, id="sub-other-way"),
+            pytest.param(lambda a, b: a * b, 14, id="mul"),
+            pytest.param(lambda a, b: a / b, 3.5, id="truediv"),
+            pytest.param(lambda a, b: a // b, 3, id="floordiv"),
+            pytest.param(lambda a, b: a % b, 1, id="mod"),
+            pytest.param(lambda a, b: a**b, 49, id="pow"),
+        ],
+    )
+    def test_the_other_ref_is_resolved(self, build, want):
+        a, b = Ref("n", "a"), Ref("n", "b")
+        expr = build(a, b)
+        got = expr.execute(self.CTX[("n", expr.var)], self.CTX)
+        assert not isinstance(got, Ref), "the other side was captured as a Ref"
+        assert got == want
+
+    def test_contains_a_ref(self):
+        items, item = Ref("n", "items"), Ref("n", "item")
+        expr = items.__contains__(item)
+        ctx = {("n", "items"): [1, 2], ("n", "item"): 2}
+        assert expr.execute([1, 2], ctx) is True
+        ctx[("n", "item")] = 3
+        assert expr.execute([1, 2], ctx) is False
+
+    def test_getitem_with_a_ref_key(self):
+        data, key = Ref("n", "data"), Ref("n", "key")
+        expr = data[key]
+        ctx = {("n", "data"): {"x": 1, "y": 2}, ("n", "key"): "y"}
+        assert expr.execute({"x": 1, "y": 2}, ctx) == 2
+
+    def test_a_chain_on_both_sides(self):
+        a, b = Ref("n", "a"), Ref("n", "b")
+        expr = (a + 1) > (b * 10)
+        assert expr.execute(7, self.CTX) is False
+        assert expr.execute(30, {**self.CTX, ("n", "a"): 30}) is True
+
+    def test_get_all_vars_includes_every_operand(self):
+        a, b, c = Ref("n", "a"), Ref("n", "b"), Ref("n", "c")
+        assert (a >= b).get_all_vars() == {"a", "b"}
+        assert ((a + b) > c).get_all_vars() == {"a", "b", "c"}
+        assert (a[b] == c).get_all_vars() == {"a", "b", "c"}
+
+    def test_describe_names_the_other_ref(self):
+        a, b = Ref("n", "a"), Ref("n", "b")
+        assert (a >= b).describe() == "a >= b"
+
+
+# ============================================================
+# Test 21: Resolution keyed by source (S8)
+# ============================================================
+
+
+class TestResolveBySource:
+    """Two Refs with one variable name but different sources stay apart."""
+
+    def test_same_var_from_two_sources(self):
+        x, y = Ref("x", "n"), Ref("y", "n")
+        cond = (x > 5) & (y < 3)
+        assert cond.execute(10, {("x", "n"): 10, ("y", "n"): 1}) is True
+        assert cond.execute(10, {("x", "n"): 10, ("y", "n"): 10}) is False
+
+    def test_same_var_compared_across_sources(self):
+        x, y = Ref("x", "n"), Ref("y", "n")
+        assert (x > y).execute(10, {("x", "n"): 10, ("y", "n"): 1}) is True
+        assert (x > y).execute(1, {("x", "n"): 1, ("y", "n"): 10}) is False
+
+    def test_op_sources_are_told_apart_by_identity(self):
+        """Two ops may share a display name across graphs; the op is the key."""
+        op_a, op_b = MockOp("g.p"), MockOp("g.p")
+        cond = (Ref(op_a, "n") > 5) & (Ref(op_b, "n") < 3)
+        assert cond.execute(10, {(op_a, "n"): 10, (op_b, "n"): 1}) is True
+
+    def test_get_all_refs_keeps_one_per_source(self):
+        x, y = Ref("x", "n"), Ref("y", "n")
+        cond = (x > 5) & (y < 3) & (x < 100)
+        assert [(r.raw_source, r.var) for r in cond.get_all_refs()] == [("x", "n"), ("y", "n")]
+        assert all(not r.has_transforms for r in cond.get_all_refs())
+
+
+# ============================================================
+# Test 22: Introspection (S9) — probing a private name builds nothing
+# ============================================================
+
+
+class TestIntrospection:
+    """``hasattr`` on a Ref must answer, not fabricate.
+
+    ``ref.field`` is DSL and builds a ``getattr`` transform, but a
+    ``_``-prefixed or dunder name is never a field: debuggers, copy,
+    pickle, pydantic and numpy probe those, and each probe used to be
+    at risk of building a Ref.
+    """
+
+    PROBES = [
+        "_private",
+        "__len__",
+        "__copy__",
+        "__deepcopy__",
+        "__getstate__",
+        "__setstate__",
+        "__fspath__",
+        "__array__",
+        "__html__",
+        "_repr_html_",
+        "__dataclass_fields__",
+        "__get_pydantic_core_schema__",
+    ]
+
+    @pytest.mark.parametrize("name", PROBES)
+    def test_a_private_name_is_absent(self, name):
+        assert hasattr(Ref("n", "x"), name) is False
+
+    def test_probing_builds_no_ref(self, monkeypatch):
+        built = []
+        monkeypatch.setattr(Ref, "_with_transform", lambda self, *a: built.append(a))
+        for name in self.PROBES:
+            hasattr(Ref("n", "x"), name)
+        assert built == []
+
+    def test_a_public_name_is_still_a_field(self):
+        from types import SimpleNamespace
+
+        field = Ref("n", "obj").some_field
+        assert isinstance(field, Ref)
+        assert field.transforms == [("getattr", ("some_field",))]
+        assert field.execute(SimpleNamespace(some_field=3)) == 3
+
+    def test_copy_and_deepcopy(self):
+        import copy
+
+        ref = Ref("n", "x")["k"] > 3
+        for dup in (copy.copy(ref), copy.deepcopy(ref)):
+            assert isinstance(dup, Ref)
+            assert dup.transforms == ref.transforms
+            assert dup.execute({"k": 5}) is True
+
+
+class TestNotIterable:
+    """``Ref.__getitem__`` made a Ref iterable by Python's legacy protocol:
+    ``ref[0]``, ``ref[1]``, … each a new Ref, never an ``IndexError``. So
+    ``list(ref)`` — or any tool that iterates what it is handed — never
+    returned."""
+
+    def test_iter_refuses(self):
+        with pytest.raises(TypeError, match="not iterable"):
+            iter(Ref("n", "x"))
+
+    def test_unpacking_refuses(self):
+        with pytest.raises(TypeError, match="not iterable"):
+            first, second = Ref("n", "pair")
+
+    def test_it_is_not_an_iterable(self):
+        from collections.abc import Iterable
+
+        assert not isinstance(Ref("n", "x"), Iterable)
+
+    def test_indexing_is_still_dsl(self):
+        assert Ref("n", "items")[0].execute(["a", "b"]) == "a"
+
+
+# ============================================================
+# Test 23: No truthiness (E9) — `and` / `or` / `not` cannot see a Ref
+# ============================================================
+
+
+class TestNoTruthiness:
+    """``x == 1 and y == 2`` asks Python for ``bool(x == 1)``, which a Ref
+    cannot answer at build time. It used to say True, so the expression
+    silently became ``y == 2``. Now it refuses and names the operators
+    that do work."""
+
+    def _refs(self):
+        return Ref("n", "x"), Ref("n", "y")
+
+    def test_bool_refuses(self):
+        x, _ = self._refs()
+        with pytest.raises(TypeError, match=r"&.*\|.*~"):
+            bool(x == 1)
+
+    def test_and_refuses(self):
+        x, y = self._refs()
+        with pytest.raises(TypeError, match="&"):
+            _ = x == 1 and y == 2
+
+    def test_or_refuses(self):
+        x, y = self._refs()
+        with pytest.raises(TypeError, match=r"\|"):
+            _ = x == 1 or y == 2
+
+    def test_not_refuses(self):
+        x, _ = self._refs()
+        with pytest.raises(TypeError, match="~"):
+            _ = not x
+
+    def test_in_refuses(self):
+        """``v in ref`` coerces to bool too; it used to be always True."""
+        x, _ = self._refs()
+        with pytest.raises(TypeError):
+            _ = 1 in x
+
+    def test_the_operators_still_combine(self):
+        x, y = self._refs()
+        cond = ((x == 1) & (y == 2)) | ~(x == 0)
+        assert cond.execute(1, {("n", "x"): 1, ("n", "y"): 2}) is True
+        assert cond.execute(0, {("n", "x"): 0, ("n", "y"): 3}) is False
+
+
+class TestGetattrOnADict:
+    """``src["obj"].name`` on a dict value reads the ``"name"`` key.
+
+    Op outputs are dicts far more often than objects, and the getattr
+    transform used to raise AttributeError there — recorded as an op
+    error, so the consumer's output was just missing. A real attribute
+    still wins, so ``ref.get("k")`` and ``ref.items()`` stay method calls.
+    """
+
+    def test_a_missing_attribute_reads_the_key(self):
+        assert Ref("n", "obj").name.execute({"name": "Alice"}) == "Alice"
+
+    def test_a_real_attribute_wins(self):
+        assert Ref("n", "obj").get("k").execute({"k": 1}) == 1
+
+    def test_a_missing_key_still_raises_attribute_error(self):
+        with pytest.raises(AttributeError):
+            Ref("n", "obj").name.execute({"other": 1})
+
+    def test_an_object_still_uses_its_attribute(self):
+        from types import SimpleNamespace
+
+        assert Ref("n", "obj").name.execute(SimpleNamespace(name="Bob")) == "Bob"

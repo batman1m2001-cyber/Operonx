@@ -51,6 +51,14 @@ retry in 1.0.0 — pass `fields=`, `parser=`, `validators=`, `max_retries=`
 directly to `LLMOp.of()` (see class docs above). The old standalone
 `ask()` helper was removed.
 
+The structured layer applies to `batch_mode=True` too: the batch answer is
+parsed and validated like a live one, and a semantic retry is one more
+batch submission. `batch_mode=True` takes one resource: with `fallback=`
+or a list of several resources it raises `ValueError` at construction —
+the batch job belongs to one resource, a fallback would be a live,
+full-price call, and a load-balanced list used to send everything to its
+first entry.
+
 For pure text parsing without an LLM call, use the pure functions in
 `operonx.providers.parsing`:
 

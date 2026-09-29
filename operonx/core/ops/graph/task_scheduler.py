@@ -472,12 +472,11 @@ class Scheduler:
                     # sweep already accounted for queued frames + cleared
                     # the consumer bookkeeping).
                     raise
-                except Exception as e:
-                    state[op_name, "error", ctx] = str(e)
-                    queue.put_nowait(EOF(op_name, ctx))
-                    _note_event(ctx, 1)
-                    inflight += 1  # account for the EOF we just put on queue
                 except BaseException as e:
+                    # An op's own exception never gets here: `BaseOp.run`
+                    # records it and ends normally. What does is the
+                    # framework failing around the op, and that is fatal.
+                    #
                     # ObserveBudgetExceeded is a BaseException on purpose —
                     # a circuit breaker is not an op result. But letting it
                     # escape here enqueued nothing, so the main loop stayed
@@ -636,13 +635,16 @@ class Scheduler:
                     stream_minter.setdefault(ctx[:-1], src)
 
             # Check for branch target — only route to the selected branch.
+            # A branch that matched nothing (no `.else_()`) reports None:
+            # that routes nowhere. Only an absent key means "not a branch".
+            is_branch = "__branch_target__" in result
             branch_target = result.get("__branch_target__")
 
             if loop_watch:
                 watched = loop_watch.get(src)
                 if watched is not None:
-                    back, exits, is_branch = watched
-                    if not is_branch:
+                    back, exits, watched_is_branch = watched
+                    if not watched_is_branch:
                         loop_fired = loop_fired or bool(back)
                         loop_taken.update(exits)
                     elif branch_target in back:
@@ -653,7 +655,7 @@ class Scheduler:
             # Propagate through adjacency list.
             for edge in g._adj.get(src, ()):
                 dst = edge.dst
-                if branch_target and dst != branch_target:
+                if is_branch and dst != branch_target:
                     continue
                 if only is not None and dst not in only:
                     continue

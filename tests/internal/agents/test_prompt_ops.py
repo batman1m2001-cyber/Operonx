@@ -186,3 +186,147 @@ class TestPrefixStability:
 
     def test_empty_previous_is_trivially_stable(self):
         assert prefix_is_stable(None, [{"role": "system"}])["stable"] is True
+
+
+# ── The marker must reach a provider in a form it reads ─────────────────
+
+
+def _marked(breakpoints=1, systems=("stable instructions",)):
+    messages = [{"role": "system", "content": s} for s in systems]
+    messages.append({"role": "user", "content": "q"})
+    return cache(messages=messages, breakpoints=breakpoints)
+
+
+class _Capture:
+    """Stands in for the OpenAI SDK client: records the request params and
+    answers with an empty completion, so a backend's whole ``generate``
+    path runs with no network."""
+
+    def __init__(self):
+        self.params = None
+        self.chat = self
+        self.completions = self
+
+    async def create(self, **params):
+        from openai.types.chat.chat_completion import ChatCompletion
+
+        self.params = params
+        return ChatCompletion.model_validate(
+            {
+                "id": "x",
+                "created": 0,
+                "model": "m",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "ok"},
+                    }
+                ],
+            }
+        )
+
+
+def _openai_compatible():
+    from operonx.providers.llms.azure import AzureSDKModel
+    from operonx.providers.llms.config import AzureConfig, OpenAIConfig
+    from operonx.providers.llms.databricks import DatabricksAnthropic, DatabricksGemini
+    from operonx.providers.llms.openai import OpenAISDKModel
+
+    config = OpenAIConfig(api_key="k", base_url="http://localhost/v1", model="m")
+    return {
+        "openai": OpenAISDKModel(config),
+        "azure": AzureSDKModel(
+            AzureConfig(api_key="k", api_version="v", azure_endpoint="http://localhost", model="m")
+        ),
+        "db-gemini": DatabricksGemini(config),
+        "db-anthropic": DatabricksAnthropic(config),
+    }
+
+
+async def _sent(backend, messages):
+    backend.client = _Capture()
+    await backend.generate(messages)
+    return backend.client.params["messages"]
+
+
+class TestTheMarkerReachesTheProvider:
+    """``apply_cache_control`` wrote ``cache_control`` as a top-level
+    message key, which no provider reads: the Anthropic backend rebuilt
+    each message as ``{role, content}`` and dropped it, and the
+    OpenAI-compatible backends passed it through as an unknown property,
+    which strict gateways reject. ``marked: 1`` came back either way."""
+
+    def test_anthropic_gets_a_content_block_breakpoint(self):
+        from operonx.providers.llms.anthropic import AnthropicModel
+        from operonx.providers.llms.config import AnthropicConfig
+
+        backend = AnthropicModel(AnthropicConfig(api_key="k"))
+        body = backend._build_request(_marked()["messages"])
+        assert body["system"] == [
+            {
+                "type": "text",
+                "text": "stable instructions",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        assert body["messages"] == [{"role": "user", "content": "q"}]
+
+    def test_anthropic_honours_every_marked_system_message(self):
+        """``marked`` counts breakpoints. With two system messages the
+        backend kept only the last one, so ``marked: 2`` reached the API
+        as one breakpoint — and the other system prompt was lost."""
+        from operonx.providers.llms.anthropic import AnthropicModel
+        from operonx.providers.llms.config import AnthropicConfig
+
+        out = _marked(breakpoints=2, systems=("agent rules", "session rules"))
+        body = AnthropicModel(AnthropicConfig(api_key="k"))._build_request(out["messages"])
+        assert [b["text"] for b in body["system"]] == ["agent rules", "session rules"]
+        assert sum(1 for b in body["system"] if b.get("cache_control")) == out["marked"] == 2
+
+    def test_anthropic_marks_a_non_system_message_on_its_block(self):
+        from operonx.providers.llms.anthropic import AnthropicModel
+
+        _, messages = AnthropicModel._convert_messages(
+            [{"role": "user", "content": "long doc", "cache_control": {"type": "ephemeral"}}]
+        )
+        assert messages == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "long doc", "cache_control": {"type": "ephemeral"}}
+                ],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", ["openai", "azure", "db-gemini"])
+    async def test_openai_compatible_backends_do_not_send_it(self, name):
+        sent = await _sent(_openai_compatible()[name], _marked()["messages"])
+        assert all("cache_control" not in m for m in sent), sent
+        assert sent[0] == {"role": "system", "content": "stable instructions"}
+
+    @pytest.mark.asyncio
+    async def test_databricks_anthropic_gets_the_form_its_proxy_forwards(self):
+        """This proxy forwards content-part ``cache_control`` to Anthropic,
+        so the marker is moved there rather than dropped."""
+        sent = await _sent(_openai_compatible()["db-anthropic"], _marked()["messages"])
+        assert "cache_control" not in sent[0]
+        assert sent[0]["content"] == [
+            {"type": "text", "text": "stable instructions", "cache_control": {"type": "ephemeral"}}
+        ]
+
+    def test_marked_never_exceeds_what_anthropic_accepts(self):
+        """Anthropic rejects a request with more than four breakpoints, so
+        a fifth marker is not "ignored" — it fails the call."""
+        out = _marked(breakpoints=10, systems=tuple(f"s{i}" for i in range(6)))
+        assert out["marked"] == 4
+        assert sum(1 for m in out["messages"] if "cache_control" in m) == 4
+
+    def test_an_empty_message_is_not_counted_as_marked(self):
+        """There is no block to put a breakpoint on — Anthropic rejects
+        an empty text block outright."""
+        out = cache(messages=[{"role": "system", "content": ""}, {"role": "user", "content": "q"}])
+        assert out["marked"] == 0
+        assert "cache_control" not in out["messages"][0]

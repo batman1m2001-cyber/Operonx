@@ -149,12 +149,27 @@ class DummyOp(BaseOp):
             if current_graph and hasattr(current_graph, "add_edge"):
                 if isinstance(other, list):
                     for item in other:
-                        current_graph.add_edge(self.name, item.name)
+                        for name in self._start_targets(item):
+                            current_graph.add_edge(self.name, name)
                     return other
                 elif hasattr(other, "name"):
-                    current_graph.add_edge(self.name, other.name)
+                    for name in self._start_targets(other):
+                        current_graph.add_edge(self.name, name)
                     return other
         return super().__rshift__(other)
+
+    def _start_targets(self, other) -> list:
+        """The ops ``START >> other`` makes entries.
+
+        Normally *other* itself. But ``START >> if_(is_big(n=x), a)`` is a
+        branch on an inline predicate: the predicate has to run first, and
+        with START wired to the branch it had no incoming edge, never ran,
+        and the branch read an unset cell — every call took the else arm.
+        Start the predicate instead; it already has its edge onward to the
+        branch. Same rule as ``BaseOp.__rshift__``.
+        """
+        entries = self._condition_entries(other)
+        return [p.name for p in entries] if entries else [other.name]
 
     def __rrshift__(self, other):
         current_graph = get_current()
@@ -200,10 +215,12 @@ class DummyOp(BaseOp):
             if current_graph and hasattr(current_graph, "add_edge"):
                 if isinstance(other, list):
                     for item in other:
-                        current_graph.add_edge(self.name, item.name, soft=True)
+                        for name in self._start_targets(item):
+                            current_graph.add_edge(self.name, name, soft=True)
                     return other
                 elif hasattr(other, "name"):
-                    current_graph.add_edge(self.name, other.name, soft=True)
+                    for name in self._start_targets(other):
+                        current_graph.add_edge(self.name, name, soft=True)
                     return other
         return super().__gt__(other)
 

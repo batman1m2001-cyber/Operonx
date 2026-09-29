@@ -4,10 +4,11 @@ Each of these fails **without an exception**: the run finishes and a value
 is missing or wrong. The rule comes first, then a script that shows the
 failure and the fix.
 
-## An op that raises does not raise
+## An op that raises is reported in `$errors`, not raised
 
-A failing op's outputs are simply missing, and so are those of every op
-after it. Check for the key, and read the error from the state.
+The run finishes; the failed op's outputs are missing, and so are those
+of every op after it. `run()` adds `"$errors"` — `{"<graph>.<op>":
+error_text}` — only when an op failed, so check for that key.
 
 ```python
 import asyncio
@@ -30,14 +31,17 @@ async def main():
     engine = Operon(flow)
     out = await engine.run(inputs={"x": "not a number"})
     assert "n" not in out  # no exception: the output is just missing
-    error = out["$state"][f"{engine.name}.p", "error"]  # "<graph>.<op>", "error"
+    error = out["$errors"][f"{engine.name}.p"]  # same text as the op's "error" cell
     assert "ValueError" in error
+    assert "$errors" not in await engine.run(inputs={"x": "3"})  # absent when clean
 
 
 asyncio.run(main())
 ```
 
-Over HTTP the same thing is a `500 {"error": "the graph produced no output"}`.
+`handle.errors` is the same dict on a started run. Over HTTP a failed run
+is a `500 {"error": "the graph produced no output"}`; the traceback stays
+in the log.
 
 ## Return a dict literal; name dynamic keys where the op is used
 
@@ -136,64 +140,10 @@ async def main():
 asyncio.run(main())
 ```
 
-## Never compare two Refs inside `if_()`
-
-`if_(p["a"] >= p["b"], ...)` treats the right-hand Ref as a plain value, so
-the first branch always wins. Compute the comparison in an op.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-
-@op
-def pair(a: int, b: int) -> dict:
-    return {"a": a, "b": b, "a_wins": a >= b}
-
-
-@op
-def first() -> dict:
-    return {"winner": "a"}
-
-
-@op
-def second() -> dict:
-    return {"winner": "b"}
-
-
-@graph
-def wrong():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a"] >= p["b"], f).else_(s)  # Ref vs Ref: never do this
-    f >> END
-    s >> END
-
-
-@graph
-def right():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a_wins"] == True, f).else_(s)  # noqa: E712 — Ref vs literal
-    f >> END
-    s >> END
-
-
-async def main():
-    inputs = {"a": 1, "b": 100}
-    assert (await Operon(wrong).run(inputs=inputs))["winner"] == "a"  # wrong
-    assert (await Operon(right).run(inputs=inputs))["winner"] == "b"
-
-
-asyncio.run(main())
-```
-
 ## Combine conditions with `&` `|` `~`, never `and` `or` `not`
 
-Python's `and` does not see inside a Ref: `x == 1 and y == 2` becomes just
-`y == 2`.
+Python's `and`, `or`, `not`, `if` and `in` cannot see inside a Ref, so
+they raise a `TypeError` when the graph is built. Use `&`, `|`, `~`.
 
 ```python
 import asyncio
@@ -218,15 +168,6 @@ def no() -> dict:
 
 
 @graph
-def with_and():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    y, n = yes(), no()
-    START >> p >> if_(p["a"] == 1 and p["b"] == 2, y).else_(n)
-    y >> END
-    n >> END
-
-
-@graph
 def with_amp():
     p = pair(a=PARENT["a"], b=PARENT["b"])
     y, n = yes(), no()
@@ -236,63 +177,18 @@ def with_amp():
 
 
 async def main():
-    inputs = {"a": 5, "b": 2}
-    assert (await Operon(with_and).run(inputs=inputs))["r"] == "yes"  # wrong
-    assert (await Operon(with_amp).run(inputs=inputs))["r"] == "no"
+    p = pair(a=1, b=2)
+    try:
+        _ = p["a"] == 1 and p["b"] == 2  # never do this
+        raise AssertionError("expected a TypeError")
+    except TypeError as e:
+        assert "&" in str(e)  # the message names the operators to use
+    assert (await Operon(with_amp).run(inputs={"a": 5, "b": 2}))["r"] == "no"
+    assert (await Operon(with_amp).run(inputs={"a": 1, "b": 2}))["r"] == "yes"
 
 
 asyncio.run(main())
 ```
-
-## Always end a branch with `.else_()`
-
-A branch finished with `.build()` instead of `.else_()` has no default.
-When no case matches, it runs **every** target.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-RAN = []
-
-
-@op
-def read(n: int) -> dict:
-    return {"n": n}
-
-
-@op
-def high() -> dict:
-    RAN.append("high")
-    return {"r": "high"}
-
-
-@op
-def mid() -> dict:
-    RAN.append("mid")
-    return {"r": "mid"}
-
-
-@graph
-def no_else():
-    r = read(n=PARENT["n"])
-    h, m = high(), mid()
-    START >> r >> if_(r["n"] > 100, h).if_(r["n"] > 50, m).build()
-    h >> END
-    m >> END
-
-
-async def main():
-    await Operon(no_else).run(inputs={"n": 1})
-    assert sorted(RAN) == ["high", "mid"]  # nothing matched, yet both ran
-
-
-asyncio.run(main())
-```
-
-Write `if_(a_cond, a).if_(b_cond, b).else_(c)`: exactly one arm then runs.
 
 ## `None` does not bind to an input
 
@@ -332,12 +228,14 @@ asyncio.run(main())
 
 ## `LLMOp`: never `user=`, never a Ref in `validators=`
 
-- `user` is a model setting (OpenAI's end-user id), not a template
-  variable, so `prompt={"user": "{user}"}` with `user=...` fails.
-  Use `user_prompt=` / `question=`.
-- `validators=` is read when the graph is built. A Ref there is never
-  resolved, every answer fails validation, and the op falls back. Check
-  allowed values in an op after the LLM instead.
+- `user`, `temperature`, `seed` and the other model settings are sent to
+  the provider, never into the template. A `{user}` placeholder can never
+  be filled, so building the op raises `PromptError`. Name template
+  variables after what they hold: `{user_prompt}`, `{question}`.
+- `validators=` is read when the graph is built. A Ref there (a graph
+  parameter, `PARENT[...]`) is never resolved, so building the op raises
+  `TypeError`. When the allowed values arrive at run time, check them in
+  an op after the LLM (second example).
 
 ```yaml file=resources.yaml
 llm:assistant:
@@ -352,6 +250,7 @@ import asyncio
 
 import operonx
 from operonx import END, START, Operon, graph
+from operonx.core.exceptions import PromptError
 from operonx.providers.ops import LLMOp
 
 
@@ -371,8 +270,63 @@ def right(q):
 
 async def main():
     operonx.bootstrap(resources="resources.yaml")
-    assert "content" not in await Operon(wrong, params={"q": None}).run(inputs={"q": "hi"})
+    try:
+        Operon(wrong, params={"q": None})
+        raise AssertionError("expected PromptError")
+    except PromptError as e:
+        assert "{user}" in str(e)  # names the placeholder and suggests {user_prompt}
     assert (await Operon(right, params={"q": None}).run(inputs={"q": "hi"}))["content"]
+
+
+asyncio.run(main())
+```
+
+```python
+import asyncio
+
+import operonx
+from operonx import END, START, Operon, graph, op
+from operonx.providers.ops import LLMOp
+
+PROMPT = "Give the intent of: {message}. Reply as <intent>...</intent>"
+
+
+@graph
+def wrong(message, allowed):
+    llm = LLMOp.of(
+        resource="assistant",
+        prompt=PROMPT,
+        fields=["intent: str"],
+        validators={"intent": allowed},  # a Ref: refused when the graph is built
+        message=message,
+    )
+    START >> llm >> END
+
+
+@op
+def check(intent: str, allowed: list) -> dict:
+    return {"intent": intent if intent in allowed else "other"}
+
+
+@graph
+def right(message, allowed):
+    llm = LLMOp.of(resource="assistant", prompt=PROMPT, fields=["intent: str"], message=message)
+    c = check(intent=llm["intent"], allowed=allowed)
+    START >> llm >> c >> END
+
+
+async def main():
+    operonx.bootstrap(resources="resources.yaml")
+    params = {"message": None, "allowed": None}
+    try:
+        Operon(wrong, params=params)
+        raise AssertionError("expected TypeError")
+    except TypeError as e:
+        assert "validators" in str(e)
+    out = await Operon(right, params=params).run(
+        inputs={"message": "I want my money back", "allowed": ["refund", "cancel"]}
+    )
+    assert out["intent"] == "refund"
 
 
 asyncio.run(main())
@@ -422,6 +376,4 @@ asyncio.run(main())
   mutable object.
 - **Inputs and outputs are traced as JSON.** A dict with tuple keys breaks
   the trace; use string keys.
-- **`operonx.toml` rejects `on_error = "record"`**; set it on a Python
-  `Job(...)` instead.
 - **HTTP doors reply after the run ends**; stream with a websocket door.

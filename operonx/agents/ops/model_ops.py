@@ -18,7 +18,10 @@ messages answering nothing, and the provider rejects the conversation.
 
 ``finish_reason`` is still reported so a caller can tell a clean stop
 from a truncated one — a response cut at ``length`` is not a finished
-answer, even though the loop treats both as done.
+answer, even though the loop treats both as done. The loop records the
+last turn's, and :func:`~operonx.agents.graphs.react.agent_result`
+returns it as ``finish_reason`` and ``truncated`` (and counts a cut
+answer as ``stopped_early``).
 """
 
 from __future__ import annotations
@@ -91,6 +94,10 @@ def make_llm_caller(
 
     Returns:
         A callable taking ``messages=`` and returning the adapter node.
+        It carries ``.tools`` (the definitions it sends) and
+        ``.with_tools(names)``, which returns the same caller showing the
+        model only ``names`` — how a sub-agent's model is kept from being
+        told about tools its policy will refuse.
 
     Note:
         The provider must actually support tool calling. Several
@@ -144,4 +151,31 @@ def make_llm_caller(
 
         return model_call(messages=messages)
 
+    def with_tools(names: List[str]) -> Callable:
+        """This caller, showing the model only ``names``, in that order.
+
+        Definitions this caller already holds are reused, so a hand-edited
+        description survives; a name it does not hold is read from the
+        registry, because a sub-agent's toolset is resolved per call and a
+        tool registered after this caller was built is still its to use.
+        """
+        from operonx.agents.tool import TOOL_REGISTRY, get_tool_definitions
+
+        held = {_definition_name(d): d for d in tools or [] if isinstance(d, dict)}
+        chosen: List[dict] = []
+        for name in names:
+            if name in held:
+                chosen.append(held[name])
+            elif name in TOOL_REGISTRY:
+                chosen.extend(get_tool_definitions([name]))
+        # An empty `tools=[]` is a request error on OpenAI; absent is "no tools".
+        return make_llm_caller(resource, tools=chosen or None, **llm_kwargs)
+
+    call_model.tools = list(tools or [])
+    call_model.with_tools = with_tools
     return call_model
+
+
+def _definition_name(definition: dict) -> str:
+    """A tool definition's name, in the OpenAI nested or the flat shape."""
+    return (definition.get("function") or {}).get("name") or definition.get("name") or ""

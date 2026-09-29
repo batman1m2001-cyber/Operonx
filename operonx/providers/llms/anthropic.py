@@ -27,6 +27,7 @@ from operonx.providers.llms.base import (
     anthropic_cache_min_tokens,
     create_http_client,
     estimate_tokens,
+    lift_cache_control,
 )
 from operonx.providers.llms.config import LLMConfig
 
@@ -60,12 +61,24 @@ class AnthropicModel(BaseLLM):
         Anthropic requires system as a separate top-level field,
         not inside the messages array.
 
+        A message-level ``cache_control`` (how ``operonx.agents`` marks a
+        breakpoint) becomes a content-block one — the only place Anthropic
+        reads it. Rebuilding each message as ``{role, content}`` used to
+        drop it, so the marker never reached the API.
+
+        Several system messages are all kept, as one text block each: the
+        last one used to overwrite the rest, which lost instructions and
+        every breakpoint but the last.
+
         Returns:
-            (system_text or None, anthropic_messages list)
+            (system or None, anthropic_messages list). ``system`` is the
+            plain content for a single unmarked system message, else a
+            list of text blocks.
         """
-        system = None
+        systems: list = []
         messages = []
         for msg in openai_messages:
+            msg = lift_cache_control(msg)
             role = (
                 msg.get("role", "user") if isinstance(msg, dict) else getattr(msg, "role", "user")
             )
@@ -73,10 +86,21 @@ class AnthropicModel(BaseLLM):
                 msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
             )
             if role == "system":
-                system = content
+                systems.append(content)
             else:
                 messages.append({"role": role, "content": content})
-        return system, messages
+
+        if not systems:
+            return None, messages
+        if len(systems) == 1:
+            return systems[0], messages
+        blocks: list = []
+        for content in systems:
+            if isinstance(content, list):
+                blocks.extend(content)
+            elif content:
+                blocks.append({"type": "text", "text": str(content)})
+        return blocks, messages
 
     @staticmethod
     def _map_stop_reason(reason: str) -> str:

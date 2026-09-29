@@ -222,6 +222,10 @@ def test_a_bad_policy_is_refused_at_declaration(tmp_path):
         make_job(tmp_path, on_error="ignore")
     with pytest.raises(ValueError, match="retry"):
         make_job(tmp_path, on_error="retry:x")
+    # Words that merely start with "retry" were read as retry:1.
+    for typo in ("retry3", "retryfoo"):
+        with pytest.raises(ValueError, match="on_error"):
+            make_job(tmp_path, on_error=typo)
     with pytest.raises(ValueError, match="session"):
         make_job(tmp_path, session="per_request")
 
@@ -296,6 +300,42 @@ async def test_a_graph_without_doors_takes_the_item_as_an_input(tmp_path):
     run = await job.run()
     assert run.status == RUN_OK and run.counts[ITEM_OK] == 3
     assert [g["result"] for g in got] == [2, 4, 6]
+
+
+async def test_a_doorless_failure_no_trace_node_carries_fails_the_item(tmp_path, monkeypatch):
+    """A subgraph that fails around its children leaves no errored trace
+    node — only the run's own record (`handle.errors`, `"$errors"`) knows.
+    The item is failed, and `"$errors"` never reaches the sink as if it
+    were the item's result."""
+    from operonx.core import GraphOp
+
+    real = GraphOp.get_inputs
+
+    def failing(self, state, context_id=None):
+        if self.name == "inner":
+            raise LookupError("subgraph inputs unreadable")
+        return real(self, state, context_id)
+
+    with GraphOp(name="outer") as g:
+        with GraphOp(name="inner") as sub:
+            d = double(x=PARENT["val"])
+            START >> d >> END
+        START >> sub >> END
+
+    monkeypatch.setattr(GraphOp, "get_inputs", failing)
+    got: list = []
+    job = Job(
+        "nested",
+        graph=g,
+        source=[1],
+        sink=got,
+        item_input="val",
+        record_dir=tmp_path / "jobs",
+    )
+    run = await job.run()
+    assert got == []
+    assert run.counts[ITEM_FAILED] == 1
+    assert run.items[0].error == "inner: LookupError: subgraph inputs unreadable"
 
 
 async def test_the_sink_is_closed_once_after_the_last_item(tmp_path):
