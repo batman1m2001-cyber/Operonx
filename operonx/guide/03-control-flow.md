@@ -73,8 +73,10 @@ asyncio.run(main())
 
 - Sequential is the default. It keeps per-item state safe (a counter, a
   buffer), so reach for `.parallel()` only for independent items.
-- `.collect()` only batches when the consumer reads **straight from the
-  generator**. Behind another per-item op it hands over one-item lists.
+- `.collect()` waits for the whole stream wherever it sits. Behind a
+  per-item op (`join(words=s["loud"].collect())` after
+  `s = shout(word=w["word"])`) the consumer still runs once, with every
+  item in yield order; an item that failed on the way is left out.
 - `.parallel(max=N)` runs at most N items through that consumer at once
   (`w["word"].parallel(max=4)`). The graph's `concurrency=N` (default 64)
   still caps all async ops together.

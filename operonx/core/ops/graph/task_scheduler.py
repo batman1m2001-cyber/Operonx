@@ -38,6 +38,26 @@ def _ctx_within(child: tuple, parent: tuple) -> bool:
 _SEQUENTIAL = (False, 1)
 
 
+def _is_item_segment(seg) -> bool:
+    """``"[3]"`` — the segment a generator's yield adds to its context."""
+    return isinstance(seg, str) and len(seg) > 2 and seg[0] == "[" and seg[-1] == "]"
+
+
+def _last_item_segment(ctx: tuple) -> int:
+    """Index of the last ``"[i]"`` segment in ``ctx``, or -1."""
+    for i in range(len(ctx) - 1, -1, -1):
+        if _is_item_segment(ctx[i]):
+            return i
+    return -1
+
+
+def _item_index(seg) -> int:
+    try:
+        return int(seg[1:-1])
+    except (TypeError, ValueError):
+        return 0
+
+
 class InterruptTargetError(ValueError):
     """``Interrupt.SELF`` was emitted where it cannot mean anything."""
 
@@ -125,7 +145,7 @@ class Scheduler:
             └─ EOF   → _on_eof()    flush collect, advance seq queue, check loop
     """
 
-    __slots__ = ("graph", "_route_policy", "_loop_ops", "_loop_watch")
+    __slots__ = ("graph", "_route_policy", "_loop_ops", "_loop_watch", "_collect_gens")
 
     def __init__(self, graph):
         self.graph = graph  # static compiled data — never mutated after build()
@@ -150,6 +170,33 @@ class Scheduler:
                 exits = {dst for _u, dst in child._exit_edges}
                 succ = {link.dst for link in graph._adj.get(name, ())}
                 self._loop_ops[name] = frozenset(succ - exits)
+
+        # Generators whose stream reaches a `.collect()` edge through at
+        # least one per-item op. Such a collect cannot flush on its source's
+        # EOF (that is the end of one item), so the scheduler records which
+        # generator minted each stream and flushes when that stream is done.
+        # Empty for almost every graph, which then pays nothing for it.
+        deferred_srcs = {
+            src
+            for (src, _dst), (collect, _limit) in self._route_policy.items()
+            if collect and not getattr(graph._ops.get(src), "is_gen", False)
+        }
+        self._collect_gens: frozenset = frozenset()
+        if deferred_srcs:
+            gens = set()
+            for name, child in graph._ops.items():
+                if not getattr(child, "is_gen", False):
+                    continue
+                seen, stack = set(), [name]
+                while stack:
+                    node = stack.pop()
+                    for link in graph._adj.get(node, ()):
+                        if link.dst not in seen:
+                            seen.add(link.dst)
+                            stack.append(link.dst)
+                if seen & deferred_srcs:
+                    gens.add(name)
+            self._collect_gens = frozenset(gens)
 
         # When THIS graph is a synthetic loop: the ops whose frames decide
         # how an iteration ended. op -> (back-edge targets, exit targets,
@@ -327,10 +374,25 @@ class Scheduler:
         # downstream ops from the same generator don't overwrite each other.
         seq_origins: Dict[Tuple[str, tuple], tuple] = {}
 
-        # collect_bufs[gen_ctx][dst_op] = list of (item_ctx, result) pairs.
-        # When downstream op has collect=True, frames buffer here instead of
-        # dispatching immediately. Flushed all at once when generator sends EOF.
-        collect_bufs: Dict[tuple, Dict[str, List]] = {}
+        # collect_bufs[(stream_ctx, src, dst)] = list of (item_ctx, result).
+        # Frames on a `.collect()` edge buffer here instead of dispatching,
+        # and dst runs once with the lists at stream_ctx + ("__collect__",).
+        # Keyed per stream, not per edge: with one buffer per edge, two runs
+        # of the same generator in flight at once (a nested stream under
+        # `.parallel()`) shared it, and the first to end took both's items.
+        #  - src is the generator: stream_ctx is its dispatch ctx; flushed on
+        #    its EOF there, which is the end of the stream.
+        #  - src runs per item (behind the generator): stream_ctx is the item
+        #    ctx minus its last "[i]"; src's EOF is only the end of one item,
+        #    so the group is listed in `deferred` and flushed by
+        #    `_flush_ended_streams` once the stream has ended.
+        #  - otherwise (no stream at all): flushed on src's EOF.
+        collect_bufs: Dict[tuple, List] = {}
+        deferred: set = set()
+        # stream_ctx -> the generator that minted its items, for the streams
+        # of `collect_gens` only.
+        collect_gens = self._collect_gens
+        stream_minter: Dict[tuple, str] = {}
 
         # Ordered list of item contexts produced by generators.
         # e.g. [("main","[0]"), ("main","[1]"), ...]
@@ -576,6 +638,8 @@ class Scheduler:
                 # Seed ready counts for a new item context (first frame from a generator).
                 item_ctxs.append(ctx)
                 rc = ready[ctx] = dict(g._stream_initial_ready.get(src, g._initial_ready))
+                if collect_gens and src in collect_gens:
+                    stream_minter.setdefault(ctx[:-1], src)
 
             # Check for branch target — only route to the selected branch.
             branch_target = result.get("__branch_target__")
@@ -625,8 +689,17 @@ class Scheduler:
             collect, limit = route_policy.get((src, dst), _SEQUENTIAL)
 
             if collect:
-                # Buffer — flush all at once when generator EOF arrives.
-                collect_bufs.setdefault((src, dst), []).append((ctx, result))
+                # Buffer — see `collect_bufs` for when each group flushes.
+                if getattr(g._ops.get(src), "is_gen", False):
+                    key = (ctx[:-1], src, dst)
+                else:
+                    cut = _last_item_segment(ctx)
+                    if cut < 0:
+                        key = (ctx, src, dst)
+                    else:
+                        key = (ctx[:cut], src, dst)
+                        deferred.add(key)
+                collect_bufs.setdefault(key, []).append((ctx, result))
 
             elif limit is None:
                 # Unbounded `.parallel()` — dispatch immediately.
@@ -644,22 +717,79 @@ class Scheduler:
                 else:
                     seq_queues.setdefault(key, deque()).append(ctx)
 
+        def _flush_collect(key: tuple) -> None:
+            """Hand one collect group to its consumer as lists, in yield order."""
+            stream_ctx, src, dst = key
+            buf = collect_bufs.pop(key)
+            if key in deferred:
+                deferred.discard(key)
+                # Items finish in any order under `.parallel()`; give the
+                # consumer the order the generator yielded them in.
+                n = len(stream_ctx)
+                buf.sort(key=lambda entry: _item_index(entry[0][n]))
+                if not any(k[0] == stream_ctx for k in collect_bufs):
+                    stream_minter.pop(stream_ctx, None)
+            merged = {}
+            for _, r in buf:
+                for k, v in r.items():
+                    merged.setdefault(k, []).append(v)
+            collect_ctx = stream_ctx + ("__collect__",)
+            item_ctxs.append(collect_ctx)
+            g._ops[src].store_result(state, merged, collect_ctx)
+            dispatch(dst, collect_ctx)
+
+        def _busy_below(stream_ctx: tuple) -> bool:
+            """Is anything still running, queued or buffered strictly below stream_ctx?"""
+            n = len(stream_ctx)
+
+            def below(c):
+                return len(c) > n and c[:n] == stream_ctx
+
+            return (
+                any(below(c) for c in tasks_by_ctx)
+                or any(below(c) for _, c in inline_pending)
+                or any(below(c) for c in pending_events)
+                or any(below(c) for q in seq_queues.values() for c in q)
+                or any(below(k[0]) for k in collect_bufs)
+            )
+
+        def _flush_ended_streams() -> bool:
+            """Flush deferred collect groups whose stream has ended.
+
+            A stream has ended when the generator that minted it is no
+            longer running and nothing is left below its context — every
+            item has either reached the collect or stopped short of it (a
+            branch not taken, an op that failed). Returns True if anything
+            was dispatched.
+            """
+            flushed = False
+            for key in list(deferred):
+                stream_ctx = key[0]
+                minter = stream_minter.get(stream_ctx)
+                if minter is not None and (
+                    minter in tasks_by_ctx.get(stream_ctx, ())
+                    or (minter, stream_ctx) in inline_pending
+                ):
+                    continue
+                if _busy_below(stream_ctx):
+                    continue
+                _flush_collect(key)
+                flushed = True
+            return flushed
+
+        async def _settle() -> None:
+            """Drain inline ops, then flush any collect whose stream just ended."""
+            await _drain_inline()
+            while deferred and not fatal and _flush_ended_streams():
+                await _drain_inline()
+
         def _on_eof(event: EOF) -> None:
             """Handle op completion: flush collect, advance seq queue, check loop."""
-            # 1. Flush collect buffers sourced from this op.
-            for key in list(collect_bufs):
-                src, dst = key
-                if src != event.op:
-                    continue
-                buf = collect_bufs.pop(key)
-                merged = {}
-                for _, r in buf:
-                    for k, v in r.items():
-                        merged.setdefault(k, []).append(v)
-                collect_ctx = event.ctx + ("__collect__",)
-                item_ctxs.append(collect_ctx)
-                g._ops[src].store_result(state, merged, collect_ctx)
-                dispatch(dst, collect_ctx)
+            # 1. Flush collect buffers whose stream ended with this EOF.
+            if collect_bufs:
+                for key in list(collect_bufs):
+                    if key[1] == event.op and key[0] == event.ctx and key not in deferred:
+                        _flush_collect(key)
 
             # 2. Advance sequential queue — unblock next waiting item.
             key = seq_origins.pop((event.op, event.ctx), None)
@@ -876,10 +1006,24 @@ class Scheduler:
                     seq_queues.pop(seq_key, None)
                     seq_running[seq_key] -= 1
 
+            # A group whose stream is swept goes; a group that only lost some
+            # items keeps the rest — dropping it whole meant one cancelled
+            # item silently cancelled the collect for all of them.
             for key in list(collect_bufs):
-                buf = collect_bufs[key]
-                if any(_is_descendant_or_equal(ictx, ctx_prefix) for ictx, _ in buf):
+                if _is_descendant_or_equal(key[0], ctx_prefix):
                     collect_bufs.pop(key, None)
+                    deferred.discard(key)
+                    continue
+                buf = collect_bufs[key]
+                kept = [e for e in buf if not _is_descendant_or_equal(e[0], ctx_prefix)]
+                if len(kept) != len(buf):
+                    if kept:
+                        collect_bufs[key] = kept
+                    else:
+                        collect_bufs.pop(key, None)
+                        deferred.discard(key)
+            for sctx in [c for c in stream_minter if _is_descendant_or_equal(c, ctx_prefix)]:
+                stream_minter.pop(sctx, None)
 
             # Inline ops are queued here, not spawned as tasks, so cancelling
             # `tasks_by_ctx` never touched them. `@op` on a plain `def`
@@ -901,7 +1045,7 @@ class Scheduler:
                 dispatch(entry, context_id)
 
             # Drain inline ops seeded above.
-            await _drain_inline()
+            await _settle()
             if fatal:
                 raise fatal[0]
 
@@ -920,7 +1064,7 @@ class Scheduler:
                 else:
                     _on_eof(event)
                 # Drain any inline ops triggered by the queue event.
-                await _drain_inline()
+                await _settle()
                 # Checked here too, not only after `queue.get()`: when this
                 # event brought `inflight` to 0, an error the drain appended
                 # (an inline op's misdirected Interrupt.SELF) would otherwise

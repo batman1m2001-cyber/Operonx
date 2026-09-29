@@ -105,14 +105,10 @@ class TestLoopWithGeneratorInside:
         assert result["$state"][built.full_name, "count"] == 3, (
             "loop must iterate to its exit condition, not stop after one pass"
         )
-        # Measured, not assumed: inside a loop, `collect()` behind
-        # `parallel()` invokes the consumer once per item with a
-        # single-element list rather than once with the whole batch —
-        # 2 items x 2 dispatching iterations. Consumers must therefore
-        # tolerate a partial batch; operonx.agents.graphs.react's
-        # `gather_tool_messages` does, and its results still merge
-        # correctly because the reducer accumulates per write.
-        assert seen == [[0], [2], [0], [2]]
+        # `collect()` behind a per-item op waits for the whole stream: the
+        # consumer runs once per dispatching iteration with both items.
+        # (It used to run once per item with a one-element list.)
+        assert seen == [[0, 2], [0, 2]]
 
     @pytest.mark.asyncio
     async def test_parallel_consumer_as_backedge_source_iterates(self):
