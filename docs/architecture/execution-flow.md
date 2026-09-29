@@ -203,6 +203,11 @@ are pluggable; see [`operonx.telemetry`](../api/telemetry.md).
 | Run | Misdirected `Interrupt` — `InterruptTargetError` | Raised to the caller |
 | Run | The framework failing around an op, not the op body | Raised to the caller |
 
+"Raised to the caller" means the same exception from `run()`,
+`collect()`, `result()`, async iteration of the handle, and every
+`stream()` mode — `"updates"`, `"values"` and `"custom"` after the chunks
+that landed before it.
+
 ### An op that raises
 
 The run does not raise. One failing op must not end a run that is serving

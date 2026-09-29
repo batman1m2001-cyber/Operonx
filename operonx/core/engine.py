@@ -808,6 +808,12 @@ class Operon:
 
         Yields:
             mode-specific chunks (see above).
+
+        Raises:
+            Whatever ``run()`` raises — a fatal error such as
+            ``ObserveBudgetExceeded`` — in every mode, after the chunks
+            that landed before it. An op that raises is not fatal: the
+            stream ends normally, as ``run()`` returns normally.
         """
         import asyncio
 
@@ -856,6 +862,11 @@ class Operon:
                         while not queue.empty():
                             yield queue.get_nowait()
                         break
+                # The drainer ends when the run does, including when it dies:
+                # `done()` alone reads a fatal error as a clean finish, and
+                # the exception was never retrieved. Raise it, as `run()`
+                # and `mode="frames"` do.
+                drainer.result()
             finally:
                 _unbind()
                 # Phase 2b3 B3: cancel the scheduler on caller break/error so
@@ -954,6 +965,10 @@ class Operon:
                 batches, last_yielded = _flush(state._current_step, last_yielded)
                 for batch in batches:
                     yield batch
+                # Over, or dead: the updates that landed are delivered first,
+                # then a fatal error is raised as `run()` raises it. Reading
+                # only `done()` ended the stream cleanly instead.
+                drainer.result()
             finally:
                 state.unsubscribe_writes(_record)
                 # Phase 2b3 B3: cancel scheduler on caller break so a partial
