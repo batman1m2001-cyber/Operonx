@@ -36,7 +36,12 @@ __all__ = [
     "assemble_api_messages",
     "apply_cache_control",
     "prefix_is_stable",
+    "MAX_BREAKPOINTS",
 ]
+
+#: Anthropic's limit on cache breakpoints per request — the only provider
+#: that takes explicit ones. A request over it is rejected, not trimmed.
+MAX_BREAKPOINTS = 4
 
 
 @op
@@ -131,19 +136,29 @@ def apply_cache_control(
     The stable prefix here is the leading system messages. Everything
     after grows or changes, so nothing later is worth a breakpoint.
 
+    The marker is written as a top-level ``cache_control`` message key —
+    a backend-neutral form that each backend translates: Anthropic's
+    moves it onto the message's last content block (the only place that
+    API reads it), and OpenAI-compatible ones drop it, since that API
+    caches prefixes on its own and strict gateways reject the unknown
+    field. See ``operonx.providers.llms.base.lift_cache_control``.
+
     Args:
         breakpoints: How many to place, newest-first within the prefix.
-            Providers cap this (four for Anthropic); more are ignored, so
-            asking for more is silently wasted rather than an error.
+            Capped at :data:`MAX_BREAKPOINTS`: Anthropic *rejects* a
+            request with more, so a fifth is a failed call, not a wasted
+            marker.
         marker: What to attach. Defaults to Anthropic's ephemeral form.
 
     Returns:
         A new list — inputs are not mutated, because the caller's
         conversation cell is shared and a marker written into it would
-        persist into next turn's history.
+        persist into next turn's history. ``marked`` counts breakpoints
+        a provider will actually receive.
     """
     marker = marker or {"type": "ephemeral"}
     out = [dict(m) for m in (messages or []) if isinstance(m, dict)]
+    breakpoints = min(breakpoints, MAX_BREAKPOINTS)
 
     prefix_end = 0
     for message in out:
@@ -158,6 +173,11 @@ def apply_cache_control(
     for index in range(prefix_end - 1, -1, -1):
         if marked >= breakpoints:
             break
+        if not out[index].get("content"):
+            # Nothing to hang a breakpoint on: Anthropic rejects an empty
+            # text block, so the backend drops the marker — counting it
+            # would make `marked` claim a breakpoint that never exists.
+            continue
         out[index] = {**out[index], "cache_control": marker}
         marked += 1
 

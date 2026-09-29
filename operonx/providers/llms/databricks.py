@@ -31,6 +31,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
+from operonx.providers.llms.base import lift_cache_control
 from operonx.providers.llms.openai import OpenAISDKModel
 
 #: Anthropic's hard cap on cache breakpoints per request.
@@ -61,6 +62,18 @@ class DatabricksAnthropic(OpenAISDKModel):
                     n += 1
         return n
 
+    @staticmethod
+    def _normalize_messages(
+        messages: List[ChatCompletionMessageParam],
+    ) -> List[ChatCompletionMessageParam]:
+        """Move message-level ``cache_control`` into the content part.
+
+        The base request builder drops a top-level marker as an unknown
+        field; this proxy honours it only on a content part, so moving it
+        there is what makes an agent's breakpoint reach Anthropic.
+        """
+        return [lift_cache_control(m) for m in messages]
+
     def _validate_cache_control(self, messages: List[ChatCompletionMessageParam]) -> None:
         n = self._count_cache_breakpoints(messages)
         if n > ANTHROPIC_CACHE_CONTROL_LIMIT:
@@ -83,6 +96,7 @@ class DatabricksAnthropic(OpenAISDKModel):
         tools: Optional[dict] = None,
         **kwargs: Any,
     ) -> ChatCompletion:
+        messages = self._normalize_messages(messages)
         self._validate_cache_control(messages)
         return await super().generate(
             messages,
@@ -112,6 +126,7 @@ class DatabricksAnthropic(OpenAISDKModel):
         tools: Optional[dict] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
+        messages = self._normalize_messages(messages)
         self._validate_cache_control(messages)
         async for chunk in super().stream(
             messages,

@@ -186,7 +186,10 @@ def build_react_agent(
         keep_recent: Exchanges kept verbatim by compaction. Recency is
             what the model is reasoning about; summarising it is how a
             compactor makes an agent forget what it just did.
-        cache_breakpoints: Cache markers placed on the stable prefix.
+        cache_breakpoints: Cache markers placed on the stable prefix, at
+            most four (Anthropic rejects more). The Anthropic backend
+            sends them as content-block ``cache_control``; OpenAI-shaped
+            backends drop them, since that API caches prefixes itself.
         budget_notice: Message appended when the turn budget runs out.
             Must tell the model to answer now — an empty or vague notice
             produces another tool call it is not allowed to make.
