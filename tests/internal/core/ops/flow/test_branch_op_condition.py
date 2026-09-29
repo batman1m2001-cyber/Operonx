@@ -81,15 +81,15 @@ class TestAutoWiring:
         """source → predicate → branch, not source → branch."""
         g = _graph(3)
         assert ("fmt", "is_short") in _edges(g)
-        assert ("is_short", "route_1") in _edges(g)
-        assert ("fmt", "route_1") not in _edges(g), (
+        assert ("is_short", "if_is_short") in _edges(g)
+        assert ("fmt", "if_is_short") not in _edges(g), (
             "the branch must wait on the predicate, not race it"
         )
 
     def test_the_branch_still_wires_its_own_arms(self):
         g = _graph(3)
-        assert ("route_1", "kid") in _edges(g)
-        assert ("route_1", "scan") in _edges(g)
+        assert ("if_is_short", "kid") in _edges(g)
+        assert ("if_is_short", "scan") in _edges(g)
 
     def test_a_hand_wired_predicate_is_left_alone(self):
         """Only the inline form needs adopting; an explicit chain is intact."""
@@ -105,7 +105,7 @@ class TestAutoWiring:
         # assigned to `pred`, so auto_name has a real LHS to read
         assert ("fmt", "pred") in _edges(g)
         # already had a predecessor, so no second edge was invented for it
-        assert ("pred", "route_1") in _edges(g)
+        assert ("pred", "if_pred") in _edges(g)
         assert len([e for e in _edges(g) if e[1] == "pred"]) == 1
 
 
@@ -238,7 +238,7 @@ class TestRefFormStillWorks:
             START >> fmt >> if_(fmt["n_turns"] <= CAP, a).else_(b)
             a >> END
             b >> END
-        assert ("fmt", "route_1") in _edges(g), "no predicate, no redirect"
+        assert ("fmt", "if_n_turns") in _edges(g), "no predicate, no redirect"
 
     @pytest.mark.parametrize("n,want", [(3, "kid"), (99, "scanner")])
     async def test_a_ref_condition_still_routes(self, n, want):
@@ -287,7 +287,7 @@ class TestBranchTargetingBranch:
 
     def test_the_predicate_is_fed_by_the_outer_branch(self):
         g = self._graph(1)
-        assert ("route_2", "is_small") in _edges(g), (
+        assert ("if_n_turns", "is_small") in _edges(g), (
             "an unwired predicate cannot run, and the branch reads an unset cell"
         )
 
@@ -342,7 +342,7 @@ class TestPredicateIsTheSource:
 
     def test_the_predicate_still_reaches_the_branch(self):
         g = self._graph(1)
-        assert any(u == "check" and v.startswith("route") for u, v in _edges(g))
+        assert ("check", "if_check") in _edges(g)
 
     @pytest.mark.parametrize("n,want", [(1, "kid"), (9, "scanner")])
     async def test_it_routes(self, n, want):

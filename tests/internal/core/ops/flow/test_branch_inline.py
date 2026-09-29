@@ -4,7 +4,7 @@ The inline form:
 - accepts op instances (not just string names) as case/default targets
 - auto-wires ``branch >> target`` for every op-instance target
 - resolves the branch's own name via auto_name (LHS) then falls back to
-  ``route_N`` per-graph counter
+  ``if_<field>`` — what its first case tests
 
 Backward compat: string targets skip auto-wiring — user still writes
 ``branch >> target`` manually for forward-referenced targets.
@@ -75,8 +75,8 @@ def test_inline_lhs_assignment_uses_variable_name():
     assert "route" in g._ops
 
 
-def test_inline_no_lhs_falls_back_to_route_counter():
-    """Inline with no LHS → ``route_1`` (per-graph counter)."""
+def test_inline_no_lhs_is_named_after_its_condition():
+    """Inline with no LHS → ``if_<field>``: the trace says what was decided."""
     with GraphOp(name="g") as g:
         seed = _seed()
         a = _passthrough("a", in_key="score", score=seed["score"])
@@ -91,11 +91,29 @@ def test_inline_no_lhs_falls_back_to_route_counter():
     g.build()
 
     branch_names = [op.name for op in g._ops.values() if op.type == "branch"]
-    assert branch_names == ["route_1"], f"expected ['route_1'], got {branch_names}"
+    assert branch_names == ["if_score"], f"expected ['if_score'], got {branch_names}"
 
 
-def test_inline_multiple_branches_get_route_1_route_2():
-    """Multiple inline branches in one graph get sequential counters."""
+def test_inline_branch_does_not_borrow_a_kwarg_above_it():
+    """``role="agent",`` inside a call above parses as an assignment; it
+    once named the branch ``role``."""
+    with GraphOp(name="g") as g:
+        seed = _seed()
+        a = _passthrough("a", in_key="score", score=seed["score"])
+        b = _passthrough(
+            "b",
+            in_key="score",
+            role="agent",
+        )
+        START >> seed >> if_(seed["score"] >= 5, a).else_(b)
+        [a, b] >> END
+
+    names = [op.name for op in g._ops.values() if op.type == "branch"]
+    assert names == ["if_score"], names
+
+
+def test_inline_multiple_branches_are_numbered_when_they_test_the_same_field():
+    """Two inline branches on one field: ``if_score``, ``if_score_2``."""
     with GraphOp(name="g") as g:
         seed = _seed()
         a = _passthrough("a", in_key="score", score=seed["score"])
@@ -115,7 +133,7 @@ def test_inline_multiple_branches_get_route_1_route_2():
     g.build()
 
     branch_names = sorted(op.name for op in g._ops.values() if op.type == "branch")
-    assert branch_names == ["route_1", "route_2"], f"got {branch_names}"
+    assert branch_names == ["if_score", "if_score_2"], f"got {branch_names}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

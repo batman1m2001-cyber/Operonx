@@ -62,6 +62,10 @@ class TestParseAssignment:
         """Incomplete line like 'x = (' triggers SyntaxError, falls back to regex."""
         assert _parse_assignment("x = (") == "x"
 
+    def test_keyword_argument_line_rejected(self):
+        """`role="agent",` parses as `role = ("agent",)`; it is an argument."""
+        assert _parse_assignment('role="agent",') is None
+
     def test_empty_line(self):
         assert _parse_assignment("") is None
 
