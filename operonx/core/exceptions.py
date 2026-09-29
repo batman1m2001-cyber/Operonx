@@ -174,6 +174,11 @@ class ValidatorError(OpError):
 class CodeError(OpError):
     """Exception khi user function trong FuncOp thất bại.
 
+    Nothing in operonx raises it: an op's exception is recorded on the run
+    (``"$errors"``, ``handle.errors``) as it was raised, not wrapped. The
+    ``FuncOp.run`` wrapper that claimed to raise this never could — the
+    exception had been consumed by ``BaseOp.run`` first — and was removed.
+
     Context tự động bao gồm:
     - function_name: Tên function
     - source: Source code (truncated)

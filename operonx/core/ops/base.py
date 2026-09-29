@@ -170,18 +170,6 @@ def should_emit_for_channel(op, var: str, channel: str) -> bool:
     return True
 
 
-def _unwrap_media_in_place(inputs: Dict[str, Any]) -> None:
-    """Strip top-level ``Media`` wrappers so consumer ops receive raw values.
-
-    The collector's raw state read preserves ``Media``; only input binding for
-    op execution drops the wrapper. Nested ``Media`` (inside dicts / lists) is
-    left alone — those are rare and usually intentional.
-    """
-    for k, v in inputs.items():
-        if isinstance(v, Media):
-            inputs[k] = v.data
-
-
 def _summarise_transient(value: Any) -> Any:
     """Describe a transient value without keeping a reference to it.
 
@@ -667,67 +655,89 @@ class BaseOp(ABC):
     def get_inputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Retrieve input values from state based on connection mappings.
 
-        Uses cached cell indices to avoid per-call schema.get_index() lookups.
-        Falls back to standard path on first call to build the cache.
+        Each input's cell index is resolved once per schema (see
+        ``_build_input_cache``); every call, the first included, then reads
+        each input the same way:
+
+        1. a shared cell — its one value;
+        2. the op's own cell at exactly this context;
+        3. with a pull ref, the source cell (nearest enclosing context
+           with a value), cached into the op's cell;
+        4. without one, the op's own cell at the nearest enclosing
+           context — a value pushed at a parent context;
+
+        then the literal or declared default in place of ``None``,
+        ``SCRATCH[...]`` resolved, and a top-level ``Media`` unwrapped so
+        the op body receives the raw value.
+
+        The first call used to go through ``state[...]`` instead, and the
+        two disagreed: only the first unwrapped ``Media``, and only later
+        calls did step 4's walk. The cache is keyed by the schema, which
+        every run of an engine and every item of a fan-out share — so an
+        op's body got a different type, or ``None`` instead of a value,
+        depending on whether it had run before.
         """
-        # Fast path: use cached indices to skip schema.get_index() dict lookup.
-        # Cache is keyed by schema id since indices differ per schema.
         cached = self._input_cache
-        if cached is not None and cached[0] is state.schema:
-            result = {}
-            cells = state._cells
-            pull_refs = state.schema._pull_refs
-            for var_name, idx, fallback in cached[1]:
-                # Inline the hot path of state.__getitem__ without _unpack_key + get_index
+        if cached is None or cached[0] is not state.schema:
+            cached = self._build_input_cache(state.schema)
+        # Normalised once so every read below is a plain dict lookup;
+        # a cell treats None as the default context anyway.
+        ctx = DEFAULT_CONTEXT if context_id is None else context_id
+        cells = state._cells
+        pull_refs = state.schema._pull_refs
+        result = {}
+        for var_name, idx, fallback in cached[1]:
+            if idx < 0:
+                # Not in this schema: nothing to read, only the literal.
+                value = None
+            else:
+                # The hot path of a Cell read, inlined: this runs per input
+                # per invocation, 25 times a second per live audio stream.
                 cell = cells[idx]
-                if cell.is_shared or context_id in cell:
-                    value = cell[context_id]
+                contexts = cell.contexts
+                if cell.is_shared:
+                    value = cell[ctx]
+                elif ctx in contexts:
+                    value = contexts[ctx]
                 else:
                     pull_ref = pull_refs[idx]
-                    if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
-                        source_val = cells[pull_ref.idx][context_id]
-                        if source_val is not None or cells[pull_ref.idx].default_value is not None:
+                    if pull_ref is not None and not pull_ref.is_output and pull_ref.idx >= 0:
+                        source = cells[pull_ref.idx]
+                        source_val = source[ctx]
+                        if source_val is not None or source.default_value is not None:
                             value = pull_ref._fn(source_val)
-                            cell[context_id] = value
+                            contexts[ctx] = value
                         else:
                             value = cell.default_value
                     else:
-                        value = cell[context_id]  # hierarchy walk
-                if value is not None:
-                    result[var_name] = value
-                elif fallback is not None:
-                    result[var_name] = fallback
-            for var_name in list(result):
-                val = result[var_name]
-                if isinstance(val, ScratchRef):
-                    result[var_name] = state._scratch.get(val.key)
-            return result
+                        value = cell[ctx]  # hierarchy walk
+            if value is None:
+                if fallback is None:
+                    continue
+                value = fallback
+            if isinstance(value, ScratchRef):
+                value = state._scratch.get(value.key)
+            if isinstance(value, Media):
+                # The collector's raw state read keeps the wrapper; only the
+                # op body gets the raw value. Nested Media (inside a dict or
+                # list) is left alone — rare, and usually intentional.
+                value = value.data
+            result[var_name] = value
+        return result
 
-        # First call (or schema changed): build index cache
-        entries = []
-        result = {}
+    def _build_input_cache(self, schema: Any) -> tuple:
+        """Resolve each input's cell index and literal fallback for *schema*."""
         full_name = self.full_name
+        entries = []
         for var_name, param in self.inputs.items():
-            idx = state.schema.get_index(full_name, var_name)
             fallback = None
             if param.value is not None and not isinstance(param.value, Ref):
                 fallback = param.value
             elif param.default is not None:
                 fallback = param.default
-            entries.append((var_name, idx, fallback))
-
-            value = state[full_name, var_name, context_id]
-            if value is not None:
-                result[var_name] = value
-            elif fallback is not None:
-                result[var_name] = fallback
-        self._input_cache = (state.schema, entries)
-        for var_name in list(result):
-            val = result[var_name]
-            if isinstance(val, ScratchRef):
-                result[var_name] = state._scratch.get(val.key)
-        _unwrap_media_in_place(result)
-        return result
+            entries.append((var_name, schema.get_index(full_name, var_name), fallback))
+        self._input_cache = (schema, tuple(entries))
+        return self._input_cache
 
     def get_outputs(self, state: "MemoryState", context_id: str) -> Dict[str, Any]:
         """Read output values from state.
@@ -1279,6 +1289,12 @@ class BaseOp(ABC):
             op_cancelled = True
             raise
         except Exception:
+            # The one handler for an op's own failure: nothing above this
+            # frame sees the exception. The run carries on — one bad op must
+            # not end a live call — so the failure is recorded where the
+            # caller reads it (`handle.errors`, `"$errors"`), besides the
+            # log, the `error` cell and the trace node.
+            #
             # ObserveBudgetExceeded is a BaseException subclass and skips
             # this handler by design — the circuit-breaker propagates up
             # to the scheduler and halts the run.
@@ -1298,6 +1314,7 @@ class BaseOp(ABC):
                     error=error_msg.rstrip(),
                 ),
             )
+            state.record_op_error(self.full_name, error_msg)
 
         finally:
             if self.is_gen or not _tracing:

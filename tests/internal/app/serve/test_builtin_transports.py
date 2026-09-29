@@ -43,8 +43,22 @@ def silent_pipeline():
     START >> src >> s >> END
 
 
+@op(bound="sync")
+def explode(item=None) -> dict:
+    raise RuntimeError("upstream said: token sk-live-123 rejected")
+
+
+@graph
+def failing_pipeline():
+    src = ingress()
+    x = explode(item=src["item"])
+    out = egress(item=x["never"])
+    START >> src >> x >> out >> END
+
+
 ENGINE = Operon(loud_pipeline)
 SILENT = Operon(silent_pipeline)
+FAILING = Operon(failing_pipeline)
 
 
 def _spec(**kw) -> ServeSpec:
@@ -72,6 +86,18 @@ def test_a_run_that_produces_nothing_is_a_500_not_an_empty_200():
         response = client.post("/silent", json="hello")
     assert response.status_code == 500
     assert "produced no output" in response.json()["error"]
+
+
+def test_an_op_that_raises_answers_500_without_its_error_text():
+    """The run records the failure (`handle.errors`, `"$errors"`); the
+    door must not hand it to the client. A traceback carries paths,
+    inputs and whatever the exception quoted — here a token."""
+    app = build_app((_spec(name="f", path="/fail"),), engines={"f": FAILING})
+    with TestClient(app) as client:
+        response = client.post("/fail", json="hello")
+    assert response.status_code == 500
+    assert response.json() == {"error": "the graph produced no output", "endpoint": "f"}
+    assert "sk-live-123" not in response.text and "Traceback" not in response.text
 
 
 def test_websocket_connection_is_one_long_lived_run():

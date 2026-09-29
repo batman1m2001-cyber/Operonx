@@ -143,8 +143,9 @@ asyncio.run(main())
 - A `Job` given a `@graph` builds it with every parameter as a runtime
   input (`params={name: None}`), so a default in the signature never
   applies there. Give the value in `Job(inputs=...)`.
-- `run()` returns the outputs of the ops wired `>> END`, plus `"$state"`.
-  A key that got several values (streaming, loops) holds a list.
+- `run()` returns the outputs of the ops wired `>> END`, plus `"$state"`,
+  plus `"$errors"` when an op raised. A key that got several values
+  (streaming, loops) holds a list.
 - The graph takes the name of the variable its engine is assigned to
   (`engine` above). Pin it with `name="..."` when a name matters.
 

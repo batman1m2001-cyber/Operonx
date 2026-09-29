@@ -87,14 +87,26 @@ def parse_on_error(text: str) -> ErrorPolicy:
 _RETRIABLE = (ITEM_FAILED, ITEM_TIMEOUT)
 
 
-def _first_error(trace: Any) -> Optional[str]:
-    """The first op that errored, as ``op: last line of its error``."""
+def _first_error(trace: Any, handle: Any = None) -> Optional[str]:
+    """The first op that errored, as ``op: last line of its error``.
+
+    The trace first, then the run's own record (``handle.errors``): a
+    subgraph failing around its children leaves no errored trace node, and
+    without the second look its item was recorded ``empty`` — or, since a
+    doorless item's result carries ``"$errors"``, written to the sink.
+    """
     for node in getattr(trace, "nodes", None) or ():
         if node.status == STATUS_ERROR:
-            text = (node.error or "").strip()
-            last = text.splitlines()[-1] if text else "error"
-            return f"{node.op_name}: {last}"
+            return _as_item_error(node.op_name, node.error)
+    for op_name, text in (getattr(handle, "errors", None) or {}).items():
+        return _as_item_error(op_name.rsplit(".", 1)[-1], text)
     return None
+
+
+def _as_item_error(op_name: str, error: Optional[str]) -> str:
+    text = (error or "").strip()
+    last = text.splitlines()[-1] if text else "error"
+    return f"{op_name}: {last}"
 
 
 def _trace_metadata(job: "Job", run_id: str, key: Optional[str]) -> dict:
@@ -228,7 +240,7 @@ async def _attempt(
     trace = getattr(handle, "trace", None)
     trace_id = getattr(trace, "trace_id", None)
 
-    error = _first_error(trace)
+    error = _first_error(trace, handle)
     if error:
         return ItemResult(
             key, ITEM_FAILED, error=error, trace_id=trace_id, ms=ms, sent=session.sent
@@ -450,7 +462,7 @@ async def run_stream(job: "Job", *, resume: bool = False) -> JobRun:
         await _settle(handle)
         trace = getattr(handle, "trace", None)
         trace_id = getattr(trace, "trace_id", None)
-        error = _first_error(trace)
+        error = _first_error(trace, handle)
     except Exception as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
     finally:
