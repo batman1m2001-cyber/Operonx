@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-29
+
+Every open finding in `docs/design/OPEN_FINDINGS.md` is fixed, and so are
+the silent failures the guide used to document as "never do X". Most of
+the changes turn a plausible wrong value into the right one or a clear
+error, so check the **Changed** list when upgrading.
+
+### Changed — behaviour you may notice
+
+- **An op that raises is reported.** `run()`, `collect()` and `result()`
+  return `"$errors"` (`{op_name: error_text}`) when an op failed, and
+  `handle.errors` holds the same dict. The run still does not raise. The
+  key is absent when nothing failed.
+- **Loops:** an op on a loop's exit arm, and an op after a loop (or after
+  a sub-graph holding one), runs **once**, with the final values. Before,
+  it ran every iteration and its outputs were lists. An exit arm the loop
+  did not take no longer runs. A back-edge source that raises stops the
+  loop instead of spinning to the 1000-iteration cap.
+- **`.collect()` behind a per-item op** hands over one list per stream,
+  in yield order (it handed over one-item lists).
+- **`.parallel(max=N)`** caps the items in flight (it capped nothing).
+- **Hard and `~` soft edges into one op:** the op waits for every hard
+  edge and the first soft one (two soft arrivals could fire it early).
+- **Branches:** comparing two Refs in `if_()` works (it always took the
+  first case); two ops with the same output name no longer collide in a
+  condition; `.build()` with no match runs no target (it ran every one);
+  `START >> if_(predicate_op(...))` and `[a, b] >> if_(predicate_op(...))`
+  run the predicate.
+- **Refs:** `and` / `or` / `not` / `if` / `in` on a Ref raise `TypeError`
+  naming `&`, `|`, `~` (they silently used one side). Iterating a Ref
+  raises (it never returned). `ref.field` on a dict value reads the key.
+  An op input combining two Refs (`op(x=a["n"] + b["n"])`) is a
+  `TypeError` at build time.
+- **Streams:** every `stream()` mode raises the fatal error `run()`
+  raises (`updates` and `custom` ended cleanly). `__interrupt__` is no
+  longer in `run()` / `collect()` / `result()` payloads.
+- **Inputs:** an op's first call resolves inputs like every later call
+  (Media unwrapped, ancestor contexts walked).
+- **`LLMOp`:**
+  - A template placeholder named like a model setting (`{user}`) fails
+    at build time.
+  - A Ref in `validators=` is a `TypeError` at build time (it hung the
+    loop or passed everything).
+  - `batch_mode=True` keeps `fields=` / validators / retries; it refuses
+    `fallback=` and more than one resource.
+  - Colliding field output keys are refused; `"user.id as user_id: str"`
+    names an output.
+  - An absent `?` field skips its validators; `"@@x"` is the literal
+    `"@x"`.
+  - A structure where a scalar field was declared is an `error`, not a
+    Python repr.
+  - A streaming fallback is taken only before the first delta.
+- **Agents:**
+  - A budget-exhausted turn answers its pending tool calls ("Not run: …"),
+    so the history stays valid.
+  - `AgentSession.send` leaves the history unchanged on any failure and
+    cancels the timed-out run.
+  - Tool arguments are redacted in the approval payload.
+  - Cache breakpoints reach Anthropic as content-block `cache_control`
+    and are stripped for OpenAI-compatible backends (at most 4).
+  - A sub-agent sees only the tools its policy allows, and an `ask` in a
+    child is refused at once.
+  - `agent_result` gains `truncated` and `finish_reason`; `stopped_early`
+    is also true for a cut answer.
+  - Compaction keeps tool results with their calls and counts the tool
+    definitions against the budget.
+- **MCP:**
+  - A client can be closed from any task (the connection is owned by its
+    own task).
+  - Registration is all-or-nothing, `close()` withdraws the client's
+    tools, and a second `connect()` is refused.
+- **Heartbeat:**
+  - `max_beats` is exact under `overlap="queue"`.
+  - `stop()` propagates cancellation, and `start()` during a stop is
+    refused.
+- **Jobs:** `operonx.toml` accepts every `on_error` value `Job` accepts,
+  `record` included. `on_error="retry3"` is refused.
+
+### Added
+
+- `ExecutionHandle.errors`, `Ref.get_all_refs()`,
+  `operonx.agents.unregister_tool` / `unregister_mcp_tools`,
+  `Redactor.scrub_data`, `ToolPolicy.refusal`,
+  `make_llm_caller(...).tools` / `.with_tools()`, `estimate_tool_tokens`,
+  `plan_compaction(reserved_tokens=)`.
+
+### Removed
+
+- The dead classic loop re-dispatch path, `LoopConfig.until`,
+  `loop_iters`, and the op-exception handlers that never ran.
+
+### Docs
+
+- The guide drops the rules the fixes made unnecessary.
+- `CLAUDE.md` and `HANDOFF.md` describe the current API.
+- `docs/design/OPEN_FINDINGS.md` records each finding as fixed.
+
 ## [1.10.2] - 2026-09-29
 
 ### Fixed
@@ -2093,7 +2190,9 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.2...v1.11.0
+[1.10.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.8.1...v1.9.0

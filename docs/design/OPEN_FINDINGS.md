@@ -1,4 +1,32 @@
-# Open findings — 12 Aug 2026
+# Findings — 12 Aug 2026, all closed in 1.11.0
+
+**Every finding on this page is fixed in 1.11.0** (29 Sep 2026), except P1
+and P2, which were withdrawn: `packages/operonx-code`, the package they
+were in, was removed from the repository in 2e927f9. The entries below
+are kept as the record of what was wrong and how it was reproduced; each
+fix has a regression test that failed before it. The fixes are listed in
+the [CHANGELOG](https://github.com/batman1m2001-cyber/operonx/blob/main/CHANGELOG.md)
+under 1.11.0.
+
+| Group | Findings | Where the tests are |
+|---|---|---|
+| Core | C1–C4, S1–S9 | `tests/internal/core/engine/`, `tests/internal/core/ops/`, `tests/internal/core/states/` |
+| Agent layer | A1–A8 | `tests/internal/agents/` |
+| Providers | P3–P7 (P1, P2 withdrawn) | `tests/internal/providers/` |
+| MCP and heartbeat | M1–M5 | `tests/internal/agents/` |
+
+Found while fixing them, and also fixed in 1.11.0: the guide's silent
+failures (a mixed hard + soft edge fired early, `.parallel(max=N)` did not
+cap, an exit-arm op ran every iteration, a raising back-edge source spun
+to the cap, `.collect()` behind a per-item op, `START >> if_(...)` with a
+predicate op, `.build()` with no match ran every target, `and`/`or` on a
+Ref, `LLMOp` `user=` and a Ref in `validators=`, `operonx.toml` rejecting
+`on_error = "record"`), iterating a Ref never returning, getattr on a dict
+value, and `batch_mode` with several resources.
+
+---
+
+*The original handoff text follows.*
 
 Four adversarial reviews ran against this branch. They produced **31
 findings**; every one below was **reproduced with a runnable script**, not
