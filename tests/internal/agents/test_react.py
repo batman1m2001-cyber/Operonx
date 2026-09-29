@@ -234,3 +234,206 @@ class TestAgentResult:
         writes; agent_result must return the merged conversation."""
         result, _ = await run_agent([(CALL, False), (CALL, False)])
         assert all(isinstance(m, dict) for m in result["messages"])
+
+
+def calling_model(script):
+    """Like :func:`scripted_model`, but shaped the way ``adapt_llm_output``
+    shapes a real provider turn: the assistant message **carries** its
+    ``tool_calls``. ``scripted_model`` leaves them off, which is why a
+    history ending on an unanswered call looked valid to every test above.
+    """
+    state = {"i": 0}
+
+    @op
+    def call_model(messages: list = None) -> dict:
+        i = state["i"]
+        state["i"] += 1
+        calls, done = script[i] if i < len(script) else ([], True)
+        message = {"id": f"a{i}", "role": "assistant", "content": "" if calls else "final"}
+        if calls:
+            message["tool_calls"] = calls
+        return {"assistant_message": [message], "tool_calls": calls, "done": done}
+
+    return call_model
+
+
+async def run_calling(script, *, max_turns=25):
+    built = build_react_agent(call_model=calling_model(script), max_turns=max_turns)(messages=None)
+    handle = Operon(built).start(inputs={"messages": USER})
+    await asyncio.wait_for(handle.result(), timeout=60)
+    return agent_result(handle.state, built)
+
+
+def _call(i):
+    return [{"id": f"t{i}", "name": "echo", "args": {"a": i}}]
+
+
+class TestBudgetNeverStrandsACall:
+    """A model that ignores the budget notice asks for a tool on its last
+    turn. ``decide`` ends the loop without dispatching — but the assistant
+    message, ``tool_calls`` and all, was already written to the history.
+    Providers reject a conversation with an unanswered ``tool_call``, so
+    the *next* request failed, one exchange away from the cause.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_exhausted_turn_leaves_every_call_answered(self):
+        from operonx.agents.ops.compact_ops import unmatched_tool_calls
+
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        assert unmatched_tool_calls(result["messages"])["calls_without_results"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_unrun_call_is_answered_as_not_run(self):
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        last = result["messages"][-1]
+        assert last["role"] == "tool" and last["tool_call_id"] == "t1"
+        assert last["status"] == "error"
+        assert "budget" in last["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_the_caller_can_tell_there_was_no_answer(self):
+        result = await run_calling([(_call(i), False) for i in range(10)], max_turns=2)
+        assert result["stopped_early"] is True
+        assert result["final"] is None, "a tool request is not an answer"
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_answers_on_the_last_turn_is_untouched(self):
+        result = await run_calling([(_call(0), False), ([], True)], max_turns=2)
+        assert [m["role"] for m in result["messages"]] == [
+            "user",
+            "assistant",
+            "tool",
+            "user",
+            "assistant",
+        ]
+        assert result["final"]["content"] == "final"
+
+    @pytest.mark.asyncio
+    async def test_calls_on_a_turn_marked_done_are_answered_too(self):
+        """``decide`` also ends the loop on ``done`` alone. A call_model
+        that says done *and* asks for a tool strands it the same way."""
+        from operonx.agents.ops.compact_ops import unmatched_tool_calls
+
+        result = await run_calling([(_call(0), True)], max_turns=5)
+        assert unmatched_tool_calls(result["messages"])["calls_without_results"] == []
+
+
+def ending_model(finish_reason, **extra):
+    """Answers at once, reporting ``finish_reason`` the way the
+    ``make_llm_caller`` adapter does."""
+
+    @op
+    def call_model(messages: list = None) -> dict:
+        return {
+            "assistant_message": [{"id": "a0", "role": "assistant", "content": "The answer is"}],
+            "tool_calls": [],
+            "done": True,
+            "finish_reason": finish_reason,
+            **extra,
+        }
+
+    return call_model
+
+
+async def run_model(call_model, *, max_turns=5):
+    built = build_react_agent(call_model=call_model, max_turns=max_turns)(messages=None)
+    handle = Operon(built).start(inputs={"messages": USER})
+    await asyncio.wait_for(handle.result(), timeout=60)
+    return agent_result(handle.state, built)
+
+
+class TestATruncatedAnswerIsReported:
+    """``finish_reason`` and ``truncated`` were declared on the adapter and
+    read by nothing: an answer cut at ``finish_reason="length"`` ended the
+    loop as a clean finish, and the caller had no way to tell — though
+    the module docstring promised one."""
+
+    @pytest.mark.asyncio
+    async def test_a_length_cut_is_flagged(self):
+        result = await run_model(ending_model("length", truncated=True))
+        assert result["truncated"] is True
+        assert result["finish_reason"] == "length"
+        assert result["stopped_early"] is True, "a cut answer is not a finished one"
+
+    @pytest.mark.asyncio
+    async def test_the_reason_alone_is_enough(self):
+        """A hand-written call_model may report the reason and not the flag."""
+        result = await run_model(ending_model("max_tokens"))
+        assert result["truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_clean_stop_is_not_flagged(self):
+        result = await run_model(ending_model("stop"))
+        assert result["truncated"] is False
+        assert result["finish_reason"] == "stop"
+        assert result["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_call_model_that_reports_nothing_reads_as_clean(self):
+        result = await run_calling([([], True)])
+        assert result["truncated"] is False
+        assert result["finish_reason"] == ""
+
+    @pytest.mark.asyncio
+    async def test_it_is_the_last_turn_that_counts(self):
+        """A cut mid-run that the model recovered from is not the answer."""
+        state = {"i": 0}
+
+        @op
+        def call_model(messages: list = None) -> dict:
+            i = state["i"]
+            state["i"] += 1
+            calls = _call(0) if i == 0 else []
+            message = {"id": f"a{i}", "role": "assistant", "content": "" if calls else "done"}
+            if calls:
+                message["tool_calls"] = calls
+            return {
+                "assistant_message": [message],
+                "tool_calls": calls,
+                "done": not calls,
+                "finish_reason": "length" if i == 0 else "stop",
+            }
+
+        result = await run_model(call_model)
+        assert result["turns"] == 2
+        assert result["truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_llm_adapter_is_wired_through(self):
+        """End to end through ``make_llm_caller`` and a provider that stops
+        at ``length`` — the path a real deployment takes."""
+        from unittest.mock import Mock, patch
+
+        from openai.types.chat.chat_completion import ChatCompletion
+
+        from operonx.agents.ops.model_ops import make_llm_caller
+
+        async def generate(messages, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "x",
+                    "created": 0,
+                    "model": "m",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "length",
+                            "message": {"role": "assistant", "content": "The answer is"},
+                        }
+                    ],
+                }
+            )
+
+        llm = Mock()
+        llm.generate = generate
+        hub = Mock()
+        hub.get.return_value = llm
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = hub
+            result = await run_model(make_llm_caller("mock"))
+
+        assert result["final"]["content"] == "The answer is"
+        assert result["truncated"] is True
+        assert result["finish_reason"] == "length"

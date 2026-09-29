@@ -65,10 +65,17 @@ lives in the shared cell, and `agent_result` reads it:
 ```python
 answer = agent_result(result, agent)
 answer["messages"]        # the conversation, flat
-answer["final"]           # last assistant message, or None
+answer["final"]           # last assistant message, or None if it never answered
 answer["turns"]
-answer["stopped_early"]   # True if the turn budget ran out
+answer["stopped_early"]   # True if the run ended before the model finished
+answer["truncated"]       # the last response was cut off (length, max_tokens, ...)
+answer["finish_reason"]   # that response's stop reason, "" if call_model reports none
 ```
+
+`stopped_early` covers both ways a run can end without a finished
+answer: the turn budget ran out, or the last response was cut off —
+which the loop cannot tell from a clean stop by its tool calls alone,
+since a cut answer asks for none.
 
 It needs the built graph because that is where the cells live. If you
 drive the agent with `engine.start()` instead, pass `handle.state` —
@@ -87,6 +94,13 @@ model is told, and gets one final turn to answer with what it has:
 agent = build_react_agent(call_model=call_model, max_turns=10)
 # ... roles: user, assistant, tool, assistant, tool, user(notice), assistant
 ```
+
+If the model ignores the notice and asks for another tool anyway, that
+call is not run: it is answered with a "not run" tool message, so the
+history never ends on an unanswered `tool_call` (every provider rejects
+that on the next request). `final` is then `None`, `stopped_early` is
+`True`, and `AgentSession.send` returns an `error` saying so while keeping
+the conversation.
 
 This is deliberately not the synthesized loop's `max_iterations`, which
 is a runaway guard set far above any real workload. That guard cuts
@@ -140,8 +154,11 @@ answer = agent_result(handle.state, agent)
 ```
 
 The payload carries the real tool name and arguments, so the human sees
-what they are approving. Approvals arrive one at a time even when tool
-calls fan out.
+what they are approving. With `redactor=Redactor()`, credential-shaped
+strings in those arguments are scrubbed from the payload — and so from
+the interrupt bus, the tracer and the checkpointer — while the tool
+itself still runs with the real values. Approvals arrive one at a time
+even when tool calls fan out.
 
 On denial or timeout the tool does not run and the model gets a message
 saying so — those two cases read differently, because "a human declined"
@@ -220,6 +237,12 @@ agent = build_react_agent(
 Compaction shapes the **prompt**, not the stored conversation, so nothing
 is lost irrecoverably and `agent_result` still returns everything that
 happened.
+
+The tool definitions count against `token_budget` too — they are re-sent
+with every request, and a 20-tool registry is easily a few thousand
+tokens. They are read from `call_model.tools`, which a
+`make_llm_caller(...)` caller carries; a hand-written `call_model`
+factory can set that attribute itself.
 
 Retrieved memory and matched skills are placed *after* the conversation,
 not in the system prompt: they change per query, and leading with them
