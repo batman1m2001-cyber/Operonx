@@ -73,6 +73,15 @@ error, so check the **Changed** list when upgrading.
     is also true for a cut answer.
   - Compaction keeps tool results with their calls and counts the tool
     definitions against the budget.
+  - On the last turn of the budget, `make_llm_caller` sends
+    `tool_choice="none"`, so the model answers in text; a hand-written
+    `call_model` gets `last_turn=True` when it declares that parameter.
+- **Anthropic backend:** sends `tools=` / `tool_choice`, and translates
+  `tool_calls` and tool results both ways (streaming too), so it can
+  drive an agent.
+- **OpenAI-shaped backends** (and the batch path) send only the message
+  keys Chat Completions defines, so an agent's `id` / `status` no longer
+  trip strict gateways.
 - **MCP:**
   - A client can be closed from any task (the connection is owned by its
     own task).
