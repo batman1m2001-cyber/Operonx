@@ -143,12 +143,18 @@ Rules worth knowing before you rely on it:
   Without it every call reports missing fields and burns its retries.
 - **A `@`-prefixed validator value is a default.** When the model answers
   outside the allow-list, that value is substituted instead of erroring.
+- **An output is named after the path's last segment — or `as`.**
+  `"user.id: str"` and `"order.id: str"` would both be `id`, so that is
+  refused when the op is built; name them `"user.id as user_id: str"`,
+  `"order.id as order_id: str"`. A field named like one of the op's own
+  outputs (`content`, `error`, `usage`, ...) is refused the same way.
 
 ```python
 fields=[
-    "intent: str",          # always present
-    "chosen_date?: str",    # only on booking turns
-    "reason?: str",         # only on cancellations
+    "intent: str",                   # always present
+    "chosen_date?: str",             # only on booking turns
+    "reason?: str",                  # only on cancellations
+    "user.id as user_id?: str",      # aliased and optional
 ]
 ```
 

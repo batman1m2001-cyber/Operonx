@@ -44,9 +44,10 @@ Rules that are easy to get backwards:
 """
 
 import json
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
 
 import yaml
 
@@ -54,6 +55,7 @@ __all__ = [
     "ParserFormat",
     "Validators",
     "ExtractField",
+    "check_output_keys",
     "parse_json",
     "parse_xml",
     "parse_yaml",
@@ -113,6 +115,17 @@ class ExtractField:
         covers several response shapes and most entries are expected to be
         absent on any given call. Without the marker every such call would
         report missing fields and burn its retries.
+
+        The output key is the path's last segment. ``as`` names it instead,
+        as ``import a.b as c`` does — needed when two paths end in the same
+        leaf, which would otherwise write one key::
+
+            "user.id as user_id: str"
+            "order.id as order_id?: str"   # optional, aliased
+
+        Raises:
+            ValueError: an ``as`` with no name, or a name that is not an
+                identifier.
         """
         if ":" not in schema_str:
             schema_str += ": Any"
@@ -121,13 +134,58 @@ class ExtractField:
         optional = chain_text.endswith("?")
         if optional:
             chain_text = chain_text[:-1].strip()
+        alias = None
+        aliased = _ALIAS.fullmatch(chain_text)
+        if aliased:
+            chain_text, alias = aliased.group(1), (aliased.group(2) or "").strip()
+            if not alias.isidentifier():
+                raise ValueError(
+                    f"Field {schema_str!r}: 'as' must be followed by an output "
+                    f"name (an identifier), got {alias!r}."
+                )
+            # "user.id? as uid" reads as naturally as "user.id as uid?".
+            if chain_text.endswith("?"):
+                optional = True
+                chain_text = chain_text[:-1].strip()
         chain_path = chain_text.split(".")
         return cls(
-            output_key=chain_path[-1],
+            output_key=alias or chain_path[-1],
             chain_path=chain_path,
             type_hint=type_hint.strip(),
             optional=optional,
         )
+
+
+#: ``<path> as <name>``. Whitespace on both sides of ``as`` is required, so
+#: a key that merely contains the letters (``meta.as``) is still a path.
+_ALIAS = re.compile(r"(.*\S)\s+as(?:\s+(.*))?")
+
+
+def check_output_keys(fields: List[ExtractField], reserved: Iterable[str] = ()) -> Optional[str]:
+    """Name every output key two fields share, or that ``reserved`` holds.
+
+    Returns None when the keys are distinct, else a message naming each
+    collision and the paths behind it. Two paths ending in the same leaf
+    used to write one key — last writer wins, ``error: None``.
+    """
+    reserved = set(reserved)
+    by_key: Dict[str, List[str]] = {}
+    for f in fields:
+        by_key.setdefault(f.output_key, []).append(".".join(f.chain_path))
+    problems = [
+        f"'{key}' ← {' and '.join(paths)}" for key, paths in by_key.items() if len(paths) > 1
+    ]
+    problems += [
+        f"'{key}' ← {paths[0]} is already an output of the op"
+        for key, paths in by_key.items()
+        if key in reserved
+    ]
+    if not problems:
+        return None
+    return (
+        f"Field output keys collide: {'; '.join(problems)}. Name each one with "
+        f"'as', e.g. 'user.id as user_id: str'."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +464,9 @@ def parse_and_extract(
                 f"{type(validators).__name__}: {validators!r}"
             )
         }
+    collision = check_output_keys(fields, reserved=("error",))
+    if collision is not None:
+        return {"error": collision}
     if not text:
         return {"error": "Empty input text"}
 
@@ -419,14 +480,14 @@ def parse_and_extract(
         return {"error": f"Parse error ({parser}): {e}"}
 
     result: Dict[str, Any] = {}
-    missing: List[str] = []
+    missing: List[ExtractField] = []
     # output_key -> the structure found where a single value was declared.
     misshapen: Dict[str, Any] = {}
     for field in fields:
         raw = _resolve_field(parsed_data, field.chain_path, parser, field.type_hint)
         if raw is MISSING:
             if not field.optional:
-                missing.append(".".join(field.chain_path))
+                missing.append(field)
             raw = None
         elif _wants_scalar(field.type_hint) and _is_subtree(raw):
             # Not coerced: ``str()`` of a dict is a Python repr, ``int()``
@@ -444,8 +505,9 @@ def parse_and_extract(
         if err is not None:
             return {"error": err}
         # A validator's ``@default`` counts as an answer, so a field it
-        # filled is no longer missing.
-        missing = [p for p in missing if result.get(p.split(".")[-1]) is None]
+        # filled is no longer missing. Looked up by output key: the path's
+        # last segment is not the key once a field is aliased.
+        missing = [f for f in missing if result.get(f.output_key) is None]
 
     # Identity, not equality: a default that replaced the structure is an
     # answer; the structure itself still sitting there is not.
@@ -478,7 +540,8 @@ def parse_and_extract(
         return {
             **result,
             "error": (
-                f"Missing field(s) in {parser} output: {', '.join(missing)}. "
+                f"Missing field(s) in {parser} output: "
+                f"{', '.join('.'.join(f.chain_path) for f in missing)}. "
                 f"Parsed keys: {sorted(parsed_data) if isinstance(parsed_data, dict) else '—'}"
             ),
         }

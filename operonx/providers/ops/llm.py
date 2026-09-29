@@ -19,7 +19,12 @@ from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 from operonx.providers.ops._utils import resolve_hub
-from operonx.providers.parsing import ExtractField, Validators, parse_and_extract
+from operonx.providers.parsing import (
+    ExtractField,
+    Validators,
+    check_output_keys,
+    parse_and_extract,
+)
 
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
@@ -253,7 +258,10 @@ class LLMOp(BaseOp):
             fields: Optional list of ``"path.to.value: type"`` extraction schemas
                 (see ``operonx.providers.parsing.ExtractField``). When set, the
                 LLM response is parsed inline; each field becomes a top-level
-                output of this op.
+                output of this op, named after the path's last segment or an
+                ``as`` alias (``"user.id as user_id: str"``). Two fields with
+                one output name, or one named like an output of this op
+                (``content``, ``error``, ...), raise ``ValueError``.
             parser: Parser format when ``fields`` is set: ``"xml"``, ``"json"``,
                 or ``"yaml"``. Defaults to ``"xml"`` when ``fields`` is provided.
             validators: Optional validation applied after extraction.
@@ -374,6 +382,12 @@ class LLMOp(BaseOp):
         # string, or None on success). Callers wire the individual fields
         # through refs the same way they used to wire ParserOp outputs.
         if self._extract_fields:
+            # Each field is one output key. Two sharing a key, or one
+            # shadowing the op's own outputs, would lose a value at merge
+            # time with nothing reported — so it is refused here.
+            collision = check_output_keys(self._extract_fields, reserved=(*output_schema, "error"))
+            if collision is not None:
+                raise ValueError(collision)
             for f in self._extract_fields:
                 output_schema[f.output_key] = Param(default=None)
             output_schema["error"] = Param(type=str, default=None)

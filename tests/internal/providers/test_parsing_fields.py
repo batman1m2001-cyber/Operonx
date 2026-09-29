@@ -100,3 +100,89 @@ class TestStructureWhereAScalarWasDeclared:
     def test_repeated_scalar_leaves_still_build_a_list(self):
         out = parse_and_extract("<r><item>a</item><item>b</item></r>", "xml", F("item: str"))
         assert out == {"item": ["a", "b"], "error": None}
+
+
+class TestOutputKeyCollisions:
+    """P5 — the output key is the path's last segment, so two paths ending
+    in the same leaf wrote one key: ``["user.id: str", "order.id: str"]``
+    returned ``{"id": <order's>}``, last writer wins, ``error: None``."""
+
+    def test_two_paths_with_one_leaf_are_reported(self):
+        out = parse_and_extract(
+            '{"user": {"id": "u1"}, "order": {"id": "o1"}}',
+            "json",
+            F("user.id: str", "order.id: str"),
+        )
+        assert out["error"] is not None
+        assert "'id'" in out["error"]
+        assert "user.id" in out["error"] and "order.id" in out["error"]
+
+    def test_the_collision_is_a_build_time_error_on_the_op(self):
+        from operonx.providers.ops import LLMOp
+
+        with pytest.raises(ValueError, match=r"'id'.*user\.id.*order\.id"):
+            LLMOp(name="x", resource="r", fields=["user.id: str", "order.id: str"])
+
+    @pytest.mark.parametrize("name", ["error", "content", "usage", "final"])
+    def test_a_field_cannot_shadow_an_output_of_the_op(self, name):
+        """``error`` is overwritten by the parse result, ``content`` by the
+        parsed field — either way one of the two values is lost."""
+        from operonx.providers.ops import LLMOp
+
+        with pytest.raises(ValueError, match=f"'{name}'"):
+            LLMOp(name="x", resource="r", fields=[f"{name}: str"])
+
+    def test_an_alias_names_the_output(self):
+        f = ExtractField.from_string("user.id as user_id: str")
+        assert (f.output_key, f.chain_path, f.type_hint, f.optional) == (
+            "user_id",
+            ["user", "id"],
+            "str",
+            False,
+        )
+
+    @pytest.mark.parametrize("spec", ["user.id as uid?: str", "user.id? as uid: str"])
+    def test_an_aliased_field_can_be_optional(self, spec):
+        f = ExtractField.from_string(spec)
+        assert (f.output_key, f.chain_path, f.optional) == ("uid", ["user", "id"], True)
+
+    def test_aliases_resolve_the_collision(self):
+        out = parse_and_extract(
+            '{"user": {"id": "u1"}, "order": {"id": "o1"}}',
+            "json",
+            F("user.id as user_id: str", "order.id as order_id: str"),
+        )
+        assert out == {"user_id": "u1", "order_id": "o1", "error": None}
+
+    def test_the_op_declares_the_aliased_outputs(self):
+        from operonx.providers.ops import LLMOp
+
+        op = LLMOp(name="x", resource="r", fields=["user.id as user_id: str", "order.id as oid"])
+        assert {"user_id", "oid"} <= set(op.outputs)
+        assert "id" not in op.outputs
+
+    def test_a_missing_aliased_field_is_named_by_its_path(self):
+        out = parse_and_extract('{"user": {}}', "json", F("user.id as uid: str"))
+        assert out["error"] is not None and "user.id" in out["error"]
+
+    def test_a_default_fills_a_missing_aliased_field(self):
+        """The strike-off from ``missing`` used the path's last segment as
+        the key, which an alias makes wrong."""
+        out = parse_and_extract(
+            '{"user": {}}',
+            "json",
+            F("user.id as uid: str"),
+            validators={"uid": ["a", "@anon"]},
+        )
+        assert out == {"uid": "anon", "error": None}
+
+    @pytest.mark.parametrize(
+        "spec", ["user.id as : str", "user.id as a.b: str", "user.id as uid extra: str"]
+    )
+    def test_a_malformed_alias_is_rejected(self, spec):
+        with pytest.raises(ValueError):
+            ExtractField.from_string(spec)
+
+    def test_a_key_named_as_is_still_a_path(self):
+        f = ExtractField.from_string("meta.as: str")
+        assert (f.output_key, f.chain_path) == ("as", ["meta", "as"])
