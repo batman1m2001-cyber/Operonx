@@ -516,10 +516,18 @@ class Scheduler:
                             _on_frame(Frame(op_name, item_ctx, result))
                     _on_eof(EOF(op_name, ctx))
                     _release_if_done(ctx)
-                except Exception as e:
-                    state[op_name, "error", ctx] = str(e)
-                    _on_eof(EOF(op_name, ctx))
-                    _release_if_done(ctx)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as e:
+                    # BaseOp.run records an op's own failure and emits
+                    # nothing, so what arrives here is run() itself failing
+                    # (or ObserveBudgetExceeded). Same answer as `_pump`:
+                    # hand it to the main loop, which raises it once this
+                    # drain returns. The old handler wrote
+                    # state[op_name, "error"] with the op's local name — not
+                    # a schema key — so the caller got a KeyError instead.
+                    fatal.append(e)
+                    return
 
         def _report_interrupt(event: Interrupt, ctx: tuple) -> None:
             """Forward the ``__interrupt__`` record to whoever is listening.
