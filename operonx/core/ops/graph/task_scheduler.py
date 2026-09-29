@@ -913,6 +913,12 @@ class Scheduler:
                     _on_eof(event)
                 # Drain any inline ops triggered by the queue event.
                 await _drain_inline()
+                # Checked here too, not only after `queue.get()`: when this
+                # event brought `inflight` to 0, an error the drain appended
+                # (an inline op's misdirected Interrupt.SELF) would otherwise
+                # end the loop unseen and the run would return normally.
+                if fatal:
+                    raise fatal[0]
                 # The event is handled and anything it dispatched is now
                 # registered, so this is the first moment its context can
                 # honestly be called finished.
