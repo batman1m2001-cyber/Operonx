@@ -217,6 +217,7 @@ class LLMOp(BaseOp):
         "validators",
         "max_retries",
         "retry_hint",
+        "on_failure",
         "_extract_fields",
     ]
 
@@ -235,6 +236,7 @@ class LLMOp(BaseOp):
         validators: Optional["Validators"] = None,
         max_retries: int = 0,
         retry_hint: bool = True,
+        on_failure: str = "raise",
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs: Any,
@@ -285,6 +287,12 @@ class LLMOp(BaseOp):
             retry_hint: When True (default) and retrying, append the previous
                 LLM response and a "that failed — <error>, try again" user turn
                 so the model sees what went wrong.
+            on_failure: What a **hard** failure does once retries and
+                ``fallback`` are spent — a timeout, a transport error, a
+                refusal. ``"raise"`` (default) fails the op. ``"error"``
+                returns what a parse failure returns: every field ``None``
+                and ``error`` set — for a step whose output is optional, so
+                a downstream op can carry on without it. Requires ``fields``.
             inputs: Input variable mappings.
             outputs: Output variable mappings.
             **kwargs: Additional keyword arguments for BaseOp.
@@ -339,6 +347,14 @@ class LLMOp(BaseOp):
                 f"to {resource[0]!r} and the rest of the list and ratios= would be "
                 f"ignored. Pass resource={resource[0]!r}, or one batch op per resource."
             )
+        if on_failure not in ("raise", "error"):
+            raise ValueError(f"on_failure is 'raise' or 'error', got {on_failure!r}")
+        if on_failure == "error" and not fields:
+            raise TypeError(
+                "LLMOp(on_failure='error') requires fields=[...] — the failure is "
+                "reported in the `error` output, which only structured mode has."
+            )
+        self.on_failure = on_failure
         self.fields = fields
         self.parser = parser
         self.validators = validators
@@ -997,7 +1013,14 @@ class LLMOp(BaseOp):
                 messages = messages_base
 
             attempt_params = dict(llm_params, messages=messages)
-            last_result = await self._call_once(attempt_params)
+            try:
+                last_result = await self._call_once(attempt_params)
+            except Exception as e:
+                if self.on_failure != "error":
+                    raise
+                LOGGER.warning("LLMOp hard failure, reported as error: %s", e)
+                field_nones = {f.output_key: None for f in self._extract_fields}
+                return {**field_nones, "error": f"{type(e).__name__}: {e}"}
 
             parsed = parse_and_extract(
                 text=last_result.get("content", ""),
@@ -1484,6 +1507,7 @@ class LLMOp(BaseOp):
         validators: Optional["Validators"] = None,
         max_retries=0,
         retry_hint=True,
+        on_failure="raise",
         **kwargs,
     ) -> "LLMOp":
         """Create an LLMOp with flat kwargs.
@@ -1524,6 +1548,7 @@ class LLMOp(BaseOp):
             validators=validators,
             max_retries=max_retries,
             retry_hint=retry_hint,
+            on_failure=on_failure,
             inputs=input_mappings or None,
             **init_kwargs,
         )

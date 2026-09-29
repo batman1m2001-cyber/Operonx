@@ -112,6 +112,16 @@ error, so check the **Changed** list when upgrading.
 - The guide drops the rules the fixes made unnecessary.
 - `CLAUDE.md` and `HANDOFF.md` describe the current API.
 - `docs/design/OPEN_FINDINGS.md` records each finding as fixed.
+## [1.10.3] - 2026-09-29
+
+### Added
+
+- **`LLMOp(on_failure="error")`** — for a step whose output is optional.
+  A hard failure (a timeout, a transport error, a refusal), once retries and
+  `fallback` are spent, returns what a parse failure already returns: every
+  field `None` and `error` set, so a downstream op can carry on without it.
+  The default, `"raise"`, is unchanged. Requires `fields` — the failure is
+  reported in the `error` output, which only structured mode has.
 
 ## [1.10.2] - 2026-09-29
 
@@ -2200,7 +2210,8 @@ Unreleased — folded into 0.7.0 above.
   before constructing the engine.
 
 [Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.0...HEAD
-[1.11.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.2...v1.11.0
+[1.11.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.3...v1.11.0
+[1.10.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.9.0...v1.10.0
