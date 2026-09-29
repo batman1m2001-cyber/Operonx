@@ -150,6 +150,10 @@ Rules worth knowing before you rely on it:
   outside the allow-list, that value is substituted instead of erroring.
   Write `@@` for an allowed value that really starts with `@`
   (`"@@me"` is `@me`).
+- **Validators are build-time values.** A Ref in `validators=` (a graph
+  parameter, `PARENT[...]`) is never resolved, so it raises `TypeError`
+  when the op is built. Check allowed values that arrive at run time in
+  an `@op` after the LLM.
 - **An absent optional field skips its validator.** It stays `None` — no
   error, no default — so `None` still means "not in the answer". A value
   the model did give is checked as usual.

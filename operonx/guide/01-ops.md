@@ -209,6 +209,8 @@ asyncio.run(main())
 - Name template variables after what they hold (`question`, `message`).
   Never `{user}`, `{temperature}` and the like: those are model settings,
   and such a placeholder raises `PromptError` when the op is built.
+- `validators=` takes literal values. A Ref there raises `TypeError`;
+  check values that arrive at run time in an op after the LLM.
 - `cost_usd` is `None` unless the resource sets `cost_per_input_token`
   and `cost_per_output_token`.
 

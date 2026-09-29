@@ -296,6 +296,7 @@ class LLMOp(BaseOp):
         self._rng = random.Random(seed)
 
         # Structured-output config (merged from ParserOp).
+        _check_validators(validators)
         if fields and not parser:
             parser = "xml"
         if parser and not fields:
@@ -1584,6 +1585,44 @@ def _extract_template_variables(template: Any) -> set:
             result |= _extract_template_variables(item)
         return result
     return set()
+
+
+def _check_validators(validators: Any) -> None:
+    """Refuse ``validators=`` values that can never work, at construction.
+
+    Validators are build-time values: nothing resolves a Ref inside them.
+    A Ref there never errored, it misbehaved by position — a Ref is
+    callable, so ``validators=ref`` became a predicate returning a truthy
+    Ref and passed every answer; as an allow-list, iterating it walked
+    ``ref[0], ref[1], …`` forever and hung the event loop; as one entry,
+    ``value == ref`` is a truthy Ref, so every value counted as allowed.
+    """
+    if validators is None:
+        return
+    from operonx.core.states.ref import Ref
+
+    def has_ref(value: Any) -> bool:
+        if isinstance(value, Ref):
+            return True
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return any(isinstance(v, Ref) for v in value)
+        return False
+
+    if has_ref(validators) or (
+        isinstance(validators, dict) and any(has_ref(v) for v in validators.values())
+    ):
+        raise TypeError(
+            "LLMOp(validators=...) holds a Ref (PARENT[...], a graph parameter, "
+            "op[...]). Validators are read when the graph is built, so a Ref "
+            "there is never resolved. Pass literal values, or check the parsed "
+            "field in an @op after the LLM when the allowed values arrive at "
+            "run time."
+        )
+    if not (isinstance(validators, dict) or callable(validators)):
+        raise TypeError(
+            f"LLMOp(validators=...) must be a dict or a callable, got "
+            f"{type(validators).__name__}: {validators!r}"
+        )
 
 
 def _shadowed_message(names: List[str]) -> str:
