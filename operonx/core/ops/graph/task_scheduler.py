@@ -557,11 +557,14 @@ class Scheduler:
                         output_queue.put_nowait((event.op, event.ctx, filtered))
 
             # Check for branch target — only route to the selected branch.
+            # A branch that matched nothing (no `.else_()`) reports None:
+            # that routes nowhere. Only an absent key means "not a branch".
+            is_branch = "__branch_target__" in event.result
             branch_target = event.result.get("__branch_target__")
 
             # Propagate through adjacency list.
             for edge in g._adj.get(event.op, []):
-                if branch_target and edge.dst != branch_target:
+                if is_branch and edge.dst != branch_target:
                     continue
                 rc = ready[event.ctx]
                 if edge.dst not in rc:

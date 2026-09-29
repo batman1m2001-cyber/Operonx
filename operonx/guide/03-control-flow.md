@@ -218,8 +218,9 @@ asyncio.run(main())
 ```
 
 - **Put a real op before the branch.** `START >> if_(...)` is a `TypeError`.
-- **Always finish with `.else_()`.** A branch closed with `.build()` runs
-  every target when nothing matches.
+- **Finish with `.else_(op)`, or `.build()` for no default.** With
+  `.build()`, when nothing matches no arm runs, and neither does an op fed
+  only by the arms.
 - **Give merge inputs a default** (`= None`): the arm that did not run
   sends nothing.
 - A condition is a Ref compared to a literal or to another Ref

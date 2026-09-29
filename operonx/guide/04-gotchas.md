@@ -190,56 +190,6 @@ async def main():
 asyncio.run(main())
 ```
 
-## Always end a branch with `.else_()`
-
-A branch finished with `.build()` instead of `.else_()` has no default.
-When no case matches, it runs **every** target.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-RAN = []
-
-
-@op
-def read(n: int) -> dict:
-    return {"n": n}
-
-
-@op
-def high() -> dict:
-    RAN.append("high")
-    return {"r": "high"}
-
-
-@op
-def mid() -> dict:
-    RAN.append("mid")
-    return {"r": "mid"}
-
-
-@graph
-def no_else():
-    r = read(n=PARENT["n"])
-    h, m = high(), mid()
-    START >> r >> if_(r["n"] > 100, h).if_(r["n"] > 50, m).build()
-    h >> END
-    m >> END
-
-
-async def main():
-    await Operon(no_else).run(inputs={"n": 1})
-    assert sorted(RAN) == ["high", "mid"]  # nothing matched, yet both ran
-
-
-asyncio.run(main())
-```
-
-Write `if_(a_cond, a).if_(b_cond, b).else_(c)`: exactly one arm then runs.
-
 ## `None` does not bind to an input
 
 An op that receives `None` gets its parameter default instead, and with no
