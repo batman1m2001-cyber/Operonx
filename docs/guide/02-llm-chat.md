@@ -128,11 +128,15 @@ Each field becomes a top-level output. `error` is `None` on success and a
 human-readable string otherwise — that is what `max_retries` reads to
 decide whether to ask again.
 
-Three rules worth knowing before you rely on it:
+Rules worth knowing before you rely on it:
 
 - **A missing field is an error, not a `None`.** That is what lets
   `max_retries` fire. A field the model explicitly set to `null` *is* an
   answer and is not an error.
+- **A structure where you declared a single value is an error.** With
+  `"action: str"`, an answer of `<action><type>greet</type></action>` is
+  reported, not turned into the string `"{'type': 'greet'}"`. Ask for the
+  path inside it (`"action.type: str"`) or declare `"action: dict"`.
 - **Mark optional fields `"name?: type"`.** A *union schema* — one field
   list covering several response shapes, where most entries are absent on
   any given call — needs this on every entry that is not always present.

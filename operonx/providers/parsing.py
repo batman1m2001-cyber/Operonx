@@ -22,7 +22,7 @@ The function ALWAYS returns a dict with the requested field keys plus an
 (failure). It never raises — LLMOp uses the ``error`` value to decide
 whether to trigger a semantic-retry.
 
-Two rules that are easy to get backwards:
+Rules that are easy to get backwards:
 
 - **A field the payload does not contain is an error**, so ``max_retries``
   can fire. A field the payload sets to ``null`` is an answer, and is not.
@@ -31,9 +31,16 @@ Two rules that are easy to get backwards:
   this on every entry that is not always present.
 - **An XML document element is stripped when it gets in the way.** XML must
   have exactly one root, so a path written against the payload
-  (``"result"``) is matched inside a lone root as well as at the top. JSON
-  and YAML get no such treatment — there a single top-level key is a key
-  the author meant.
+  (``"result"``) is matched inside a lone root as well as at the top — and
+  when the root shares the field's name, a scalar field reads the value
+  inside it. JSON and YAML get no such treatment — there a single
+  top-level key is a key the author meant.
+- **A structure where a single value was declared is an error.** A
+  ``str`` / ``int`` / ``float`` / ``bool`` field that lands on a subtree
+  reports it rather than coercing it (``str()`` of a dict is a Python
+  repr). Ask for a path inside it, or declare the field ``: dict``. A
+  validator ``@default`` still stands in for it, as for any unrecognised
+  value.
 """
 
 import json
@@ -218,7 +225,31 @@ def extract_value_by_path(data: Dict[str, Any], chain_path: List[str]) -> Any:
     return None if value is MISSING else value
 
 
-def _resolve_field(parsed: Any, chain_path: List[str], parser: ParserFormat) -> Any:
+#: Hints that name a single value. A dict (a parsed subtree) is never one,
+#: and coercing it to one is how ``"{'type': 'greet'}"`` reached callers.
+_SCALAR_HINTS = frozenset({"str", "string", "int", "float", "number", "bool", "boolean"})
+
+
+def _wants_scalar(type_hint: Optional[str]) -> bool:
+    return (type_hint or "").lower().strip() in _SCALAR_HINTS
+
+
+def _is_subtree(value: Any) -> bool:
+    """A parsed structure: a dict, or repeated siblings holding one."""
+    if isinstance(value, dict):
+        return True
+    return isinstance(value, list) and any(isinstance(v, dict) for v in value)
+
+
+def _describe_structure(value: Any) -> str:
+    if isinstance(value, dict):
+        return f"a structure (keys: {', '.join(map(str, value)) or '—'})"
+    return f"{len(value)} repeated elements, some of them structures"
+
+
+def _resolve_field(
+    parsed: Any, chain_path: List[str], parser: ParserFormat, type_hint: Optional[str] = None
+) -> Any:
     """Resolve one field, tolerating XML's mandatory document element.
 
     XML has to have exactly one root, so ``<r><result>X</result></r>``
@@ -227,18 +258,31 @@ def _resolve_field(parsed: Any, chain_path: List[str], parser: ParserFormat) -> 
     makes that work — including for this module's own docstring example,
     which was wrong for exactly this reason.
 
+    The root can also share the field's name. ``<action>…</action>`` read
+    at the top is then the whole document, and the root was only tried as
+    a wrapper when the top-level walk *missed* — so a scalar field got the
+    root's child dict. When the declared type is a scalar and the top-level
+    reading is a structure, the reading inside the root wins if it is a
+    value; otherwise the structure is returned and the caller reports the
+    mismatch (see :func:`parse_and_extract`).
+
     Not applied to JSON or YAML: there a single top-level key is a real
     key the author chose, not a syntactic requirement, so descending into
     it would be a guess.
     """
     value = _walk(parsed, chain_path)
-    if value is not MISSING or parser != "xml":
+    if parser != "xml" or not (isinstance(parsed, dict) and len(parsed) == 1):
         return value
-    if isinstance(parsed, dict) and len(parsed) == 1:
-        (only,) = parsed.values()
-        if isinstance(only, dict):
-            return _walk(only, chain_path)
-    return MISSING
+    (only,) = parsed.values()
+    if not isinstance(only, dict):
+        return value
+    if value is MISSING:
+        return _walk(only, chain_path)
+    if _wants_scalar(type_hint) and _is_subtree(value):
+        inner = _walk(only, chain_path)
+        if inner is not MISSING and not _is_subtree(inner):
+            return inner
+    return value
 
 
 def convert_type(value: Any, type_hint: str) -> Any:
@@ -376,12 +420,23 @@ def parse_and_extract(
 
     result: Dict[str, Any] = {}
     missing: List[str] = []
+    # output_key -> the structure found where a single value was declared.
+    misshapen: Dict[str, Any] = {}
     for field in fields:
-        raw = _resolve_field(parsed_data, field.chain_path, parser)
+        raw = _resolve_field(parsed_data, field.chain_path, parser, field.type_hint)
         if raw is MISSING:
             if not field.optional:
                 missing.append(".".join(field.chain_path))
             raw = None
+        elif _wants_scalar(field.type_hint) and _is_subtree(raw):
+            # Not coerced: ``str()`` of a dict is a Python repr, ``int()``
+            # leaves it a dict and ``bool()`` makes it True — each a
+            # plausible answer with ``error: None``. It stays raw so a
+            # validator's ``@default`` can stand in for it like for any
+            # unrecognised value, and is an error below if nothing did.
+            misshapen[field.output_key] = raw
+            result[field.output_key] = raw
+            continue
         result[field.output_key] = convert_type(raw, field.type_hint)
 
     if validators:
@@ -391,6 +446,28 @@ def parse_and_extract(
         # A validator's ``@default`` counts as an answer, so a field it
         # filled is no longer missing.
         missing = [p for p in missing if result.get(p.split(".")[-1]) is None]
+
+    # Identity, not equality: a default that replaced the structure is an
+    # answer; the structure itself still sitting there is not.
+    wrong_shape = [key for key, raw in misshapen.items() if result.get(key) is raw]
+    if wrong_shape:
+        for key in wrong_shape:
+            result[key] = None
+        hints = {f.output_key: f for f in fields}
+        described = ", ".join(
+            f"'{key}' is declared {hints[key].type_hint} but holds "
+            f"{_describe_structure(misshapen[key])}"
+            for key in wrong_shape
+        )
+        return {
+            **result,
+            "error": (
+                f"Structure where a single value was expected in {parser} output: "
+                f"{described}. Ask for a path inside it (e.g. "
+                f"'{'.'.join(hints[wrong_shape[0]].chain_path)}.<child>: str') "
+                f"or declare it ': dict'."
+            ),
+        }
 
     if missing:
         # Well-formed output with the wrong keys is a semantic failure, and
