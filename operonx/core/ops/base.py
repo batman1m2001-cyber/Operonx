@@ -1279,6 +1279,12 @@ class BaseOp(ABC):
             op_cancelled = True
             raise
         except Exception:
+            # The one handler for an op's own failure: nothing above this
+            # frame sees the exception. The run carries on — one bad op must
+            # not end a live call — so the failure is recorded where the
+            # caller reads it (`handle.errors`, `"$errors"`), besides the
+            # log, the `error` cell and the trace node.
+            #
             # ObserveBudgetExceeded is a BaseException subclass and skips
             # this handler by design — the circuit-breaker propagates up
             # to the scheduler and halts the run.
@@ -1298,6 +1304,7 @@ class BaseOp(ABC):
                     error=error_msg.rstrip(),
                 ),
             )
+            state.record_op_error(self.full_name, error_msg)
 
         finally:
             if self.is_gen or not _tracing:

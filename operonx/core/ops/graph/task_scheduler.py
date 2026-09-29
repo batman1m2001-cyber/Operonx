@@ -406,12 +406,11 @@ class Scheduler:
                     # sweep already accounted for queued frames + cleared
                     # the consumer bookkeeping).
                     raise
-                except Exception as e:
-                    state[op_name, "error", ctx] = str(e)
-                    queue.put_nowait(EOF(op_name, ctx))
-                    _note_event(ctx, 1)
-                    inflight += 1  # account for the EOF we just put on queue
                 except BaseException as e:
+                    # An op's own exception never gets here: `BaseOp.run`
+                    # records it and ends normally. What does is the
+                    # framework failing around the op, and that is fatal.
+                    #
                     # ObserveBudgetExceeded is a BaseException on purpose —
                     # a circuit breaker is not an op result. But letting it
                     # escape here enqueued nothing, so the main loop stayed

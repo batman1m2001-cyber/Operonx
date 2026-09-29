@@ -760,6 +760,9 @@ class GraphOp(BaseOp):
                 self.name,
                 error_msg.rstrip(),
             )
+            # A child's failure is caught in the child's own `BaseOp.run`;
+            # this is the subgraph failing around its children. Same record.
+            state.record_op_error(self.full_name, error_msg)
 
         finally:
             end_time = datetime.now(timezone.utc)

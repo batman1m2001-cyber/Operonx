@@ -4,10 +4,11 @@ Each of these fails **without an exception**: the run finishes and a value
 is missing or wrong. The rule comes first, then a script that shows the
 failure and the fix.
 
-## An op that raises does not raise
+## An op that raises is reported in `$errors`, not raised
 
-A failing op's outputs are simply missing, and so are those of every op
-after it. Check for the key, and read the error from the state.
+The run finishes; the failed op's outputs are missing, and so are those
+of every op after it. `run()` adds `"$errors"` — `{"<graph>.<op>":
+error_text}` — only when an op failed, so check for that key.
 
 ```python
 import asyncio
@@ -30,14 +31,17 @@ async def main():
     engine = Operon(flow)
     out = await engine.run(inputs={"x": "not a number"})
     assert "n" not in out  # no exception: the output is just missing
-    error = out["$state"][f"{engine.name}.p", "error"]  # "<graph>.<op>", "error"
+    error = out["$errors"][f"{engine.name}.p"]  # same text as the op's "error" cell
     assert "ValueError" in error
+    assert "$errors" not in await engine.run(inputs={"x": "3"})  # absent when clean
 
 
 asyncio.run(main())
 ```
 
-Over HTTP the same thing is a `500 {"error": "the graph produced no output"}`.
+`handle.errors` is the same dict on a started run. Over HTTP a failed run
+is a `500 {"error": "the graph produced no output"}`; the traceback stays
+in the log.
 
 ## Return a dict literal; name dynamic keys where the op is used
 

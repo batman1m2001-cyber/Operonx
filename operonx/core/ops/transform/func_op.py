@@ -6,19 +6,15 @@ import textwrap
 import warnings
 from functools import wraps
 from typing import (
-    TYPE_CHECKING,
     Any,
-    AsyncGenerator,
     Callable,
     Dict,
     List,
     Optional,
-    Tuple,
     get_origin,
 )
 
 from operonx.core.configs.op_config import OpType
-from operonx.core.exceptions import CodeError
 from operonx.core.loggings import LOGGER
 from operonx.core.ops.base import (
     _BASE_INIT_KEYS,
@@ -28,9 +24,6 @@ from operonx.core.ops.base import (
 )
 from operonx.core.utils.auto_name import register_skip
 from operonx.core.utils.common import Param
-
-if TYPE_CHECKING:
-    from operonx.core.states import MemoryState
 
 
 def op(
@@ -516,32 +509,6 @@ class FuncOp(BaseOp):
             outputs = {SCALAR_OUTPUT: Param(type=None if ann is inspect.Signature.empty else ann)}
 
         return inputs, outputs
-
-    async def run(
-        self,
-        state: "MemoryState",
-        context_id: Optional[str] = None,
-    ) -> AsyncGenerator[Tuple[Optional[str], Dict[str, Any]], None]:
-        """Execute FuncOp with CodeError wrapping.
-
-        Delegates to ``BaseOp.run()`` (async generator) and re-raises any
-        exception as a ``CodeError`` with full op context attached.
-        """
-        try:
-            async for ctx, result in super().run(state, context_id):
-                yield ctx, result
-        except CodeError:
-            raise  # Đã wrapped, không wrap lại
-        except Exception as e:
-            # Lấy inputs để có context cho error
-            _inputs = self.get_inputs(state, context_id)
-            raise CodeError(
-                message=f"Function '{self.code_fn.__name__ if self.code_fn else 'unknown'}' raised an exception",
-                function_name=self.code_fn.__name__ if self.code_fn else "unknown",
-                source=self.source,
-                inputs=_inputs,
-                original_error=e,
-            ) from e
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:

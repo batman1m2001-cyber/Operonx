@@ -115,8 +115,9 @@ Per-item statuses:
 reports OK: ninety items processed, nothing written, runner says done.
 
 An op that raises does not raise out of the run. The engine records the
-error on the run's trace and the run drains, so the runner reads item
-failure from the trace, and `items.jsonl` carries each item's
+error on the run's trace and on the run itself (`handle.errors`) and the
+run drains, so the runner reads item failure from those — never from a
+result — and `items.jsonl` carries each item's
 `trace_id`. Every trace a job mints is tagged `job`, `job_run` and
 `key` — as fields and as tags — so Langfuse filters one job, one run or
 one item. A job itself is never a span.

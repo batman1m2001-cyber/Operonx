@@ -18,6 +18,7 @@ Example:
     result = await engine.run(inputs={"query": "hello"})
     print(result["answer"])  # workflow output
     print(result["$state"])  # access state for debugging/tracing
+    print(result.get("$errors"))  # {"my-workflow.processor": "..."} if it raised
     ```
 """
 
@@ -63,6 +64,9 @@ class ExecutionHandle:
 
         # Collect as flat list of frame dicts
         frames = await handle.collect("flat")
+
+        # Ops that raised: {op_full_name: error_text}, {} when none
+        failed = handle.errors
     """
 
     def __init__(
@@ -239,6 +243,36 @@ class ExecutionHandle:
             if op == "__interrupt__" and isinstance(data, dict) and "__interrupt__" in data
         ]
 
+    @property
+    def errors(self) -> Dict[str, str]:
+        """The ops that raised in this run: ``{op_full_name: error_text}``.
+
+        An op that raises does not raise out of the run; it is reported
+        here instead. The key is the op's name in state
+        (``"<graph>.<op>"``, a nested op by its full path) and the value
+        the same text as its ``error`` cell — the first failure of each op.
+        Empty when nothing failed. Readable while the run is going, which
+        is how a long-lived run (a call) sees a failure before it ends.
+
+        ``collect()`` and ``result()`` carry the same dict under
+        ``"$errors"``, and ``Operon.run()`` does too — only when it is
+        not empty.
+        """
+        if self.state is None:
+            return {}
+        return dict(self.state._op_errors)
+
+    def _with_errors(self, out: Dict[str, Any]) -> Dict[str, Any]:
+        """Add ``"$errors"`` to a result payload when an op failed.
+
+        Absent otherwise, so a caller comparing a clean run's keys against
+        its declared outputs sees no change.
+        """
+        errors = self.errors
+        if errors:
+            out["$errors"] = errors
+        return out
+
     async def collect(
         self, mode: str = "group", unwrap: bool = False
     ) -> dict[str, Any] | list[dict[str, Any]]:
@@ -248,6 +282,10 @@ class ExecutionHandle:
             mode: ``"group"`` merges values by key into lists (default).
                   ``"flat"`` returns an ordered list of frame dicts.
             unwrap: When *True*, single-item lists become scalars.
+
+        In ``"group"`` mode the dict also has ``"$errors"`` when an op
+        raised (see :attr:`errors`). A ``"flat"`` list has nowhere to put
+        it; read ``handle.errors``.
         """
         if mode == "flat":
             frames: list[dict[str, Any]] = []
@@ -264,8 +302,8 @@ class ExecutionHandle:
 
         await self._await_scheduler_completion()
         if unwrap:
-            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
-        return out
+            return self._with_errors({k: v[0] if len(v) == 1 else v for k, v in out.items()})
+        return self._with_errors(out)
 
     async def _await_scheduler_completion(self) -> None:
         """Wait for the scheduler task's finally to complete before returning.
@@ -288,7 +326,8 @@ class ExecutionHandle:
         """Build result from all buffered frames (does not consume).
 
         Safe to call after ``async for`` iteration — reads from the
-        internal buffer rather than re-iterating.
+        internal buffer rather than re-iterating. Has ``"$errors"`` when an
+        op raised (see :attr:`errors`).
         """
         # Wait for execution to complete if still running
         if not self._done:
@@ -302,8 +341,8 @@ class ExecutionHandle:
             for k, v in data.items():
                 out.setdefault(k, []).append(v)
         if unwrap:
-            return {k: v[0] if len(v) == 1 else v for k, v in out.items()}
-        return out
+            return self._with_errors({k: v[0] if len(v) == 1 else v for k, v in out.items()})
+        return self._with_errors(out)
 
     def cancel(self) -> None:
         """Cancel the workflow execution."""
@@ -695,7 +734,12 @@ class Operon:
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
-            with the MemoryState for debugging/tracing access.
+            with the MemoryState for debugging/tracing access, plus
+            "$errors" — ``{op_full_name: error_text}`` — when at least one
+            op raised. An op that raises does not raise out of the run;
+            its outputs, and those of every op after it, are missing.
+            A ``BaseException`` (``ObserveBudgetExceeded``, a misdirected
+            ``Interrupt``) does raise.
         """
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())

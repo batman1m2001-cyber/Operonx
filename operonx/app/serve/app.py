@@ -306,11 +306,13 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
 
         if not session.replies:
             # The plan's requirement, and the reason this branch exists: a
-            # run that fails must not answer 200 with an empty body. Op
-            # exceptions are caught by the scheduler and logged rather than
-            # raised, so "produced nothing" is what a failure looks like
-            # from out here — and for one caller waiting on one request,
-            # nothing is a failure.
+            # run that fails must not answer 200 with an empty body. An op
+            # exception is recorded on the run (`handle.errors`) and logged
+            # rather than raised, so "produced nothing" is what a failure
+            # looks like from out here — and for one caller waiting on one
+            # request, nothing is a failure. The error text stays in the
+            # log and the trace: it is a traceback, and it goes nowhere
+            # near a client.
             LOGGER.error(f"[serve:{spec.name}] run produced no output; answering 500")
             return JSONResponse(
                 {"error": "the graph produced no output", "endpoint": spec.name},

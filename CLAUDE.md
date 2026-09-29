@@ -417,6 +417,11 @@ All op errors inherit from `OpError` in [operonx/core/exceptions.py](operonx/cor
 - `ParserError`, `CodeError`, `BranchError`, `ConditionError`, `IterationError`
 - `PromptError`, `EmbeddingError`, `RerankError`
 
+None of them propagates out of a run: an op that raises is reported in
+the result's `"$errors"` (`{op_full_name: error_text}`) and `handle.errors`.
+Only `BaseException`s (`ObserveBudgetExceeded`) and `InterruptTargetError`
+raise to the caller.
+
 Resource-hub errors live in [operonx/core/registry/](operonx/core/registry/):
 - `EnvVarUnsetError` (subclass of `KeyError`) — `${VAR}` interpolation failure at resolve time
 - `ResourceHubWarning` — `warnings` category for missing `resources.yaml` and unset `${VAR}` at bootstrap
