@@ -41,6 +41,12 @@ if TYPE_CHECKING:
 
 _MISSING = object()
 
+#: The op tag of the scheduler's synthetic interrupt record. It travels on
+#: the frame queue so `handle.interrupts` and raw iteration see it, but it
+#: is not an output: merged into a result it became a key no graph
+#: declares, holding an object `json.dumps` rejects.
+_INTERRUPT_TAG = "__interrupt__"
+
 
 class ExecutionHandle:
     """Async-iterable handle for a running workflow execution.
@@ -289,14 +295,17 @@ class ExecutionHandle:
         """
         if mode == "flat":
             frames: list[dict[str, Any]] = []
-            async for _, _, data in self:
-                frames.append(data)
+            async for op, _, data in self:
+                if op != _INTERRUPT_TAG:
+                    frames.append(data)
             await self._await_scheduler_completion()
             return frames
 
         # mode == "group"
         out: dict[str, list[Any]] = {}
-        async for _, _, data in self:
+        async for op, _, data in self:
+            if op == _INTERRUPT_TAG:
+                continue
             for k, v in data.items():
                 out.setdefault(k, []).append(v)
 
@@ -337,7 +346,9 @@ class ExecutionHandle:
         if self._error:
             raise self._error
         out: dict[str, list[Any]] = {}
-        for _, _, data in self._frames:
+        for op, _, data in self._frames:
+            if op == _INTERRUPT_TAG:
+                continue
             for k, v in data.items():
                 out.setdefault(k, []).append(v)
         if unwrap:

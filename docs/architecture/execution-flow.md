@@ -180,6 +180,8 @@ Three things worth knowing:
 - **The cancellation is reported.** A `("__interrupt__", ctx, …)` record
   reaches `handle.interrupts` even when the sweep happened inside a nested
   subgraph.
+  It is a record, not an output: raw iteration of the handle yields it,
+  but `run()`, `collect()` and `result()` leave it out.
 
 `Interrupt.SELF` is a sentinel, not a tuple. If a code path ever fails to
 resolve it, the containment test raises `TypeError` rather than silently
