@@ -33,11 +33,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import warnings
+import weakref
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from operonx.agents.tool import TOOL_REGISTRY, tool
+from operonx.core.loggings import LOGGER
 
 __all__ = [
     "MCPServer",
@@ -140,27 +143,132 @@ def _flatten(content: Any) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _describe(error: Optional[BaseException]) -> str:
+    """``Type: message`` for an error, looking through exception groups.
+
+    Anything raised inside the transport surfaces wrapped in anyio's task
+    group, whose own text is only ``unhandled errors in a TaskGroup (1
+    sub-exception)`` — true, and useless to whoever reads it.
+    """
+    if error is None:
+        return "the connection ended before the handshake finished"
+    nested = getattr(error, "exceptions", None)
+    if isinstance(nested, (list, tuple)) and nested:
+        return "; ".join(_describe(e) for e in nested)
+    return f"{type(error).__name__}: {error}"
+
+
+#: Owner tasks of live connections. asyncio keeps only a weak reference to
+#: a task, and an owner deliberately holds no reference to its client (see
+#: `_hold_connection`), so without this set nothing would keep it alive.
+_OWNERS: Set["asyncio.Task[None]"] = set()
+
+
+@dataclass
+class _Connection:
+    """What a connected client holds: its owner task, the event that tells
+    the owner to shut down, and the finaliser for a client never closed."""
+
+    owner: "asyncio.Task[None]"
+    closing: asyncio.Event
+    finalizer: Any
+
+
+async def _hold_connection(
+    params: Any, ready: "asyncio.Future[Any]", closing: asyncio.Event
+) -> None:
+    """Enter the transport and session, hold them, exit them — in one task.
+
+    ``stdio_client`` and ``ClientSession`` both enter anyio cancel scopes,
+    and a cancel scope must be exited by the task that entered it. Entering
+    them in the caller's task tied the connection to whichever task
+    happened to call ``connect()``. Closing from another task — a FastAPI
+    lifespan connects, a shutdown handler closes — raised ``Attempted to
+    exit cancel scope in a different task`` and, worse, the task group's
+    own ``cancel()`` on the way out cancelled the task that had connected,
+    while it was still running. So the scopes live here, in a task that
+    exists for nothing else, and ``close()`` asks it to leave them.
+
+    Takes the ready future and the event, never the client: a client
+    dropped without ``close()`` must stay collectable so its finaliser can
+    set ``closing``.
+    """
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        tools = await MCPClient._list_all_tools(session)
+        if not ready.done():
+            ready.set_result((session, tools))
+        await closing.wait()
+
+
+def _abandoned(loop: asyncio.AbstractEventLoop, closing: asyncio.Event, name: str) -> None:
+    """Finaliser for a client collected while still connected.
+
+    Runs wherever the garbage collector does, so it only hands the loop a
+    signal: the owner task then shuts the server down from its own task.
+    Before, the garbage collector's finalisation exited the scopes itself,
+    from foreign context, and cancelled whichever task had connected.
+    """
+
+    def shut_down() -> None:
+        warnings.warn(
+            f"MCPClient for {name!r} was garbage-collected without close(); "
+            f"shutting its server down",
+            ResourceWarning,
+            stacklevel=1,
+        )
+        closing.set()
+
+    if loop.is_closed():
+        return  # asyncio.run() already cancelled the owner on the way out
+    try:
+        loop.call_soon_threadsafe(shut_down)
+    except RuntimeError:  # the loop closed between the check and the call
+        pass
+
+
 class MCPClient:
     """A live connection to one MCP server.
 
     Holds the transport and session open for its lifetime, so it must be
     closed. Use :func:`connect_mcp` unless you need to manage that
     yourself.
+
+    The connection is owned by a task of its own, not by the task that
+    calls ``connect()``, so connecting in one task and closing in another
+    is safe. A client dropped without ``close()`` has its server shut down
+    when it is garbage-collected, with a ``ResourceWarning`` — a backstop,
+    not a lifecycle: until collection the server keeps running.
     """
 
     def __init__(self, server: MCPServer) -> None:
         self.server = server
-        self._stack: Optional[AsyncExitStack] = None
+        self._conn: Optional[_Connection] = None
         self._session: Any = None
         self._tools: List[Any] = []
 
     # ------------------------------------------------------------ lifecycle
 
     async def connect(self) -> "MCPClient":
-        """Start the server, handshake, and read its tool list."""
+        """Start the server, handshake, and read its tool list.
+
+        Raises:
+            MCPError: the server could not be started or did not complete
+                the handshake, or this client is already connected — a
+                second connection would orphan the first one's server.
+        """
+        if self._conn is not None:
+            raise MCPError(
+                f"MCP server {self.server.name!r} is already connected — "
+                f"close() it before connecting again"
+            )
         try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
+            from mcp import StdioServerParameters
         except ImportError as e:  # pragma: no cover - declared as an extra
             raise MCPError("MCP support needs the SDK: pip install 'operonx[mcp]'") from e
 
@@ -170,22 +278,36 @@ class MCPClient:
             env=self.server.env,
             cwd=self.server.cwd,
         )
-        stack = AsyncExitStack()
+        loop = asyncio.get_running_loop()
+        ready: "asyncio.Future[Any]" = loop.create_future()
+        closing = asyncio.Event()
+        owner = loop.create_task(
+            _hold_connection(params, ready, closing), name=f"mcp:{self.server.name}"
+        )
+        _OWNERS.add(owner)
+        owner.add_done_callback(_OWNERS.discard)
         try:
-            read, write = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-            tools = await self._list_all_tools(session)
-        except Exception as e:
-            await stack.aclose()
+            await asyncio.wait({ready, owner}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            # Abandoning a half-open connection. The owner unwinds its own
+            # scopes; waiting for it means no server outlives this call.
+            owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
+            raise
+        if not ready.done():
+            # The owner ended before the handshake did: that is the failure.
+            error = None if owner.cancelled() else owner.exception()
             raise MCPError(
                 f"could not connect to MCP server {self.server.name!r} "
-                f"({self.server.command}): {type(e).__name__}: {e}"
-            ) from e
+                f"({self.server.command}): {_describe(error)}"
+            ) from error
 
-        self._stack = stack
-        self._session = session
-        self._tools = tools
+        self._session, self._tools = ready.result()
+        self._conn = _Connection(
+            owner=owner,
+            closing=closing,
+            finalizer=weakref.finalize(self, _abandoned, loop, closing, self.server.name),
+        )
         return self
 
     @staticmethod
@@ -215,20 +337,52 @@ class MCPClient:
         return collected
 
     async def close(self) -> None:
-        """Shut the server down. Idempotent."""
-        stack, self._stack = self._stack, None
+        """Shut the server down. Idempotent, and safe from any task.
+
+        Raises:
+            MCPError: the shutdown itself failed. It used to be swallowed,
+                which is how a cross-task close that raised ``Attempted to
+                exit cancel scope in a different task`` went unnoticed.
+                ``async with`` still logs rather than raises when an error
+                is already on its way out, so the real one is not replaced.
+        """
+        conn, self._conn = self._conn, None
         self._session = None
-        if stack is not None:
-            try:
-                await stack.aclose()
-            except Exception:  # noqa: BLE001 — teardown must not mask the real error
-                pass
+        if conn is None:
+            return
+        conn.finalizer.detach()
+        conn.closing.set()
+        owner = conn.owner
+        if not owner.done():
+            # `wait`, not `await owner`: a caller that stops waiting (its
+            # own cancellation) must not cancel the shutdown half-way. The
+            # owner finishes it either way.
+            await asyncio.wait({owner})
+        if owner.cancelled():
+            return  # torn down by the loop shutting down, in its own task
+        error = owner.exception()
+        if error is not None:
+            raise MCPError(
+                f"closing MCP server {self.server.name!r} failed: {_describe(error)}"
+            ) from error
 
     async def __aenter__(self) -> "MCPClient":
         return await self.connect()
 
-    async def __aexit__(self, *_exc: object) -> None:
-        await self.close()
+    async def __aexit__(self, exc_type: Any, exc: Optional[BaseException], _tb: Any) -> None:
+        try:
+            await self.close()
+        except MCPError:
+            if exc is None:
+                raise
+            # An error is already on its way out. Raising here would replace
+            # it, and the caller would debug the teardown instead.
+            LOGGER.warning(
+                "MCP server %r: teardown failed while a %s was propagating",
+                self.server.name,
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     # ----------------------------------------------------------------- use
 
@@ -483,6 +637,15 @@ async def connect_mcp(
     try:
         names = await register_mcp_tools(client, allow=allow, prefix=prefix)
     except Exception:
-        await client.close()
+        try:
+            await client.close()
+        except MCPError:
+            # The registration error is the one the caller needs; a
+            # teardown failure raised here would replace it.
+            LOGGER.warning(
+                "MCP server %r: teardown failed after a registration error",
+                server.name,
+                exc_info=True,
+            )
         raise
     return client, names

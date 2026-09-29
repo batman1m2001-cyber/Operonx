@@ -10,6 +10,8 @@ never reaching the trace, `Interrupt()` cancelling the run. The fixture in
 from __future__ import annotations
 
 import asyncio
+import gc
+import os
 import sys
 from pathlib import Path
 
@@ -52,6 +54,24 @@ def _mcp_version() -> tuple[int, ...]:
 def _server(**kw) -> MCPServer:
     kw.setdefault("name", "echo")
     return MCPServer(command=sys.executable, args=[str(SERVER)], **kw)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def _until(predicate, timeout: float = 15.0) -> None:
+    """Poll for a condition. The condition is what the test asserts on, not
+    how long it slept — a slow machine makes this wait longer, never flake."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"condition not met within {timeout}s")
+        await asyncio.sleep(0.02)
 
 
 @pytest.fixture(autouse=True)
@@ -110,6 +130,126 @@ class TestConnection:
     async def test_it_works_as_a_context_manager(self):
         async with MCPClient(_server()) as c:
             assert c.tools
+
+
+class TestTaskOwnership:
+    """The transport and session enter anyio cancel scopes, which must be
+    exited by the task that entered them. A client is routinely opened in
+    one task and closed in another — a FastAPI lifespan connects, a
+    shutdown handler closes — so the client cannot let the caller's task
+    be the one that enters them."""
+
+    @pytest.mark.asyncio
+    async def test_closing_from_another_task_leaves_the_connecting_task_alone(self):
+        shutdown = asyncio.Event()
+        connected = asyncio.Event()
+        box: dict = {}
+
+        async def lifespan() -> str:
+            box["client"] = await MCPClient(_server()).connect()
+            box["pid"] = int(await box["client"].call("pid", {}))
+            connected.set()
+            await shutdown.wait()
+            return "finished"
+
+        life = asyncio.create_task(lifespan())
+        await asyncio.wait_for(connected.wait(), timeout=30)
+
+        async def shutdown_handler() -> None:
+            await box["client"].close()
+
+        await asyncio.wait_for(asyncio.create_task(shutdown_handler()), timeout=30)
+        assert not _alive(box["pid"]), "close() must still stop the server"
+
+        shutdown.set()
+        outcome = await asyncio.gather(life, return_exceptions=True)
+        assert outcome == ["finished"], f"the connecting task was hit by close(): {outcome}"
+
+    @pytest.mark.asyncio
+    async def test_a_client_connected_in_a_finished_task_closes_cleanly(self):
+        """The task that connected is gone by the time anyone closes. The
+        scopes must still be exited properly — before, close() raised
+        `Attempted to exit cancel scope in a different task` and hid it."""
+        box: dict = {}
+
+        async def opener() -> None:
+            box["client"] = await MCPClient(_server()).connect()
+            box["pid"] = int(await box["client"].call("pid", {}))
+
+        await asyncio.create_task(opener())
+        await box["client"].close()
+        assert not _alive(box["pid"])
+
+    @pytest.mark.asyncio
+    async def test_an_abandoned_client_collected_by_gc_cancels_nothing(self):
+        """A client dropped without close() used to be finalised on a GC
+        task that exited its task group from foreign context — which
+        cancelled the task that had connected it, still running."""
+        shutdown = asyncio.Event()
+        dropped = asyncio.Event()
+        box: dict = {}
+
+        async def lifespan() -> str:
+            client = await MCPClient(_server()).connect()
+            box["pid"] = int(await client.call("pid", {}))
+            del client  # a leak, but one that must not bite anyone else
+            dropped.set()
+            await shutdown.wait()
+            return "finished"
+
+        life = asyncio.create_task(lifespan())
+        await asyncio.wait_for(dropped.wait(), timeout=30)
+        gc.collect()
+        # The abandoned client's server is shut down by its own task.
+        await _until(lambda: not _alive(box["pid"]))
+
+        shutdown.set()
+        outcome = await asyncio.gather(life, return_exceptions=True)
+        assert outcome == ["finished"], f"GC of an abandoned client hit a live task: {outcome}"
+
+    @pytest.mark.asyncio
+    async def test_a_teardown_failure_is_raised_not_swallowed(self, monkeypatch):
+        from mcp import ClientSession
+
+        original = ClientSession.__aexit__
+
+        async def broken_exit(self, *exc):
+            await original(self, *exc)
+            raise RuntimeError("teardown broke")
+
+        monkeypatch.setattr(ClientSession, "__aexit__", broken_exit)
+        c = await MCPClient(_server()).connect()
+        with pytest.raises(MCPError, match="teardown broke"):
+            await c.close()
+        await c.close()  # and it is still idempotent afterwards
+
+    @pytest.mark.asyncio
+    async def test_a_teardown_failure_does_not_mask_the_error_in_flight(self, monkeypatch):
+        """`async with` exiting on an exception reports that exception; a
+        teardown failure on the way out is logged, not substituted."""
+        from mcp import ClientSession
+
+        original = ClientSession.__aexit__
+
+        async def broken_exit(self, *exc):
+            await original(self, *exc)
+            raise RuntimeError("teardown broke")
+
+        monkeypatch.setattr(ClientSession, "__aexit__", broken_exit)
+        with pytest.raises(ValueError, match="the real error"):
+            async with MCPClient(_server()):
+                raise ValueError("the real error")
+
+    @pytest.mark.asyncio
+    async def test_connecting_twice_is_refused(self):
+        """A second connect() used to spawn a second server and orphan the
+        first — close() only knew about the latest."""
+        c = await MCPClient(_server()).connect()
+        try:
+            with pytest.raises(MCPError, match="already connected"):
+                await c.connect()
+        finally:
+            await c.close()
 
 
 class TestCalling:
