@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from operonx.app.jobs import RUN_OK, Job
+from operonx.app.jobs import RUN_OK, Job, parse_on_error
 from operonx.app.manifest import Manifest, ManifestError, _toml
 from operonx.app.serve import MemoryTransport, serve_session
 
@@ -99,6 +99,36 @@ def test_job_blocks_parse_with_their_defaults():
 def test_a_bad_job_block_is_a_manifest_error(block, message):
     with pytest.raises(ManifestError, match=message):
         Manifest.from_dict({"job": [block]})
+
+
+@pytest.mark.parametrize("value", ["skip", "stop", "record", "retry", "retry:3", " Record "])
+def test_the_manifest_accepts_every_on_error_a_job_accepts(value, tmp_path):
+    """`Job(on_error="record")` worked and `on_error = "record"` in
+    operonx.toml was refused: two validators for one vocabulary. The value
+    must also mean the same thing once the spec becomes a Job."""
+    m = Manifest.from_dict(
+        {"job": [{"name": "j", "graph": "m:g", "on_error": value}]},
+        source=tmp_path / "operonx.toml",
+    )
+    job = Job.from_spec(m.job("j"), m.root)
+    assert parse_on_error(job.on_error) == parse_on_error(value)
+
+
+@pytest.mark.parametrize("value", ["ignore", "retry:0", "retry:x", "retry3", "retryfoo"])
+def test_the_manifest_refuses_at_load_what_a_job_refuses(value):
+    """`retry:0` passed the manifest's own pattern and failed only in
+    `Job.from_spec`, when the job was about to run."""
+    with pytest.raises(ManifestError, match="on_error"):
+        Manifest.from_dict({"job": [{"name": "j", "graph": "m:g", "on_error": value}]})
+    with pytest.raises(ValueError):
+        parse_on_error(value)
+
+
+def test_the_on_error_message_lists_every_accepted_value():
+    with pytest.raises(ManifestError) as caught:
+        Manifest.from_dict({"job": [{"name": "j", "graph": "m:g", "on_error": "ignore"}]})
+    for word in ("skip", "stop", "record", "retry:N"):
+        assert word in str(caught.value)
 
 
 def test_two_jobs_with_one_name_are_refused():

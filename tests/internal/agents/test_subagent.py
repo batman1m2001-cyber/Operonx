@@ -213,3 +213,181 @@ class TestRegistration:
         from operonx.agents.graphs.subagent import DELEGATE_SCHEMA
 
         assert "no conversation history" in DELEGATE_SCHEMA["properties"]["task"]["description"]
+
+
+def recording_hub(seen_tools):
+    """A ResourceHub whose model records the ``tools=`` it is sent and
+    answers at once, so a real ``make_llm_caller`` runs with no network."""
+    from unittest.mock import Mock
+
+    from openai.types.chat.chat_completion import ChatCompletion
+
+    async def generate(messages, tools=None, **kwargs):
+        seen_tools.append(sorted(t["function"]["name"] for t in tools or []))
+        return ChatCompletion.model_validate(
+            {
+                "id": "x",
+                "created": 0,
+                "model": "m",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "child done"},
+                    }
+                ],
+            }
+        )
+
+    llm = Mock()
+    llm.generate = generate
+    hub = Mock()
+    hub.get.return_value = llm
+    return hub
+
+
+class TestChildSeesOnlyWhatItMayCall:
+    """``_child_policy`` restricted *dispatch*, but the child reused the
+    parent's ``call_model``, whose ``tools=`` list ``make_llm_caller``
+    baked in. The child was shown tools it could never call, called them,
+    and spent its own turn budget on refusals."""
+
+    @pytest.fixture(autouse=True)
+    def _shell(self, _registry):
+        @tool(name="shell", description="Run a command.", schema=EMPTY)
+        async def shell() -> dict:
+            return {}
+
+    @pytest.mark.asyncio
+    async def test_the_childs_model_is_shown_only_its_allowed_tools(self):
+        from unittest.mock import patch
+
+        from operonx.agents.ops.model_ops import make_llm_caller
+        from operonx.agents.tool import get_tool_definitions
+
+        seen: list = []
+        parent_caller = make_llm_caller("mock", tools=get_tool_definitions())
+        delegate = make_delegate_tool(call_model=parent_caller, allow_tools=["read", "wipe"])
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = recording_hub(seen)
+            out = await asyncio.wait_for(delegate.__wrapped__(task="go"), timeout=30)
+
+        assert out.get("answer") == "child done", out
+        # `shell` is outside allow_tools; `wipe` would ask a human, and a
+        # child has no one to ask — see TestApprovalInAChild.
+        assert seen == [["read"]]
+
+    def test_the_parent_caller_is_left_as_it_was(self):
+        from operonx.agents.ops.model_ops import make_llm_caller
+        from operonx.agents.tool import get_tool_definitions
+
+        caller = make_llm_caller("mock", tools=get_tool_definitions())
+        narrowed = caller.with_tools(["read"])
+        assert [t["function"]["name"] for t in narrowed.tools] == ["read"]
+        assert sorted(t["function"]["name"] for t in caller.tools) == ["read", "shell", "wipe"]
+
+    def test_a_tool_registered_after_the_parent_caller_is_still_shown(self):
+        """The child's toolset is resolved per call; a definitions list
+        frozen when the parent caller was built must not undo that."""
+        from operonx.agents.ops.model_ops import make_llm_caller
+        from operonx.agents.tool import get_tool_definitions
+
+        caller = make_llm_caller("mock", tools=get_tool_definitions(["read"]))
+
+        @tool(name="grep", description="Search.", schema=EMPTY, readonly=True)
+        async def grep() -> dict:
+            return {}
+
+        assert [t["function"]["name"] for t in caller.with_tools(["read", "grep"]).tools] == [
+            "read",
+            "grep",
+        ]
+
+    def test_describe_reports_what_the_child_is_shown(self):
+        out = describe_delegation(allow_tools=["read", "wipe"])
+        assert out["shown"] == ["read"]
+
+
+class TestApprovalInAChild:
+    """An inherited ``ask`` verdict could never be answered in a child:
+    nothing binds an interrupt bus to the child's run. The call waited out
+    ``approval_timeout`` (300s by default — as long as the delegation's own
+    timeout) and the parent was told the sub-agent timed out."""
+
+    @staticmethod
+    def _asks_for_wipe_then_answers(seen):
+        state = {"i": 0}
+
+        @op
+        def call_model(messages: list = None) -> dict:
+            i = state["i"]
+            state["i"] += 1
+            seen.append(list(messages or []))
+            calls = [{"id": "w0", "name": "wipe", "args": {}}] if i == 0 else []
+            return {
+                "assistant_message": [
+                    {"id": f"c{i}", "role": "assistant", "content": "tried" if i else ""}
+                ],
+                "tool_calls": calls,
+                "done": not calls,
+            }
+
+        return call_model
+
+    @pytest.mark.asyncio
+    async def test_a_gated_call_is_refused_at_once(self, _registry):
+        import time
+
+        seen: list = []
+        delegate = make_delegate_tool(
+            call_model=self._asks_for_wipe_then_answers(seen),
+            allow_tools=["read", "wipe"],
+            timeout=5.0,
+        )
+        started = time.monotonic()
+        out = await asyncio.wait_for(delegate.__wrapped__(task="clean up"), timeout=30)
+        elapsed = time.monotonic() - started
+
+        assert "error" not in out, out
+        assert elapsed < 2.0, f"waited {elapsed:.1f}s for an approval nobody can give"
+        assert _registry == [], "the gated tool must not run"
+
+    @pytest.mark.asyncio
+    async def test_the_child_is_told_why(self, _registry):
+        seen: list = []
+        delegate = make_delegate_tool(
+            call_model=self._asks_for_wipe_then_answers(seen),
+            allow_tools=["read", "wipe"],
+            timeout=5.0,
+        )
+        await asyncio.wait_for(delegate.__wrapped__(task="clean up"), timeout=30)
+        refusal = next(m for m in seen[-1] if m.get("role") == "tool")
+        assert "approval" in refusal["content"].lower()
+        assert "sub-agent" in refusal["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_a_child_left_with_only_gated_tools_is_not_spawned(self, _registry):
+        delegate = make_delegate_tool(call_model=answering_model(), allow_tools=["wipe"])
+        out = await asyncio.wait_for(delegate.__wrapped__(task="go"), timeout=30)
+        assert out["error"] == NO_TOOLS_MESSAGE
+
+
+class TestTruncatedChild:
+    @pytest.mark.asyncio
+    async def test_a_child_cut_at_length_is_flagged(self, _registry):
+        """The parent must not treat half an answer as a finished one."""
+
+        @op
+        def cut_model(messages: list = None) -> dict:
+            return {
+                "assistant_message": [{"id": "c", "role": "assistant", "content": "Half of"}],
+                "tool_calls": [],
+                "done": True,
+                "finish_reason": "length",
+            }
+
+        delegate = make_delegate_tool(call_model=cut_model, allow_tools=["read"])
+        out = await asyncio.wait_for(delegate.__wrapped__(task="go"), timeout=30)
+        assert out["answer"] == "Half of"
+        assert out["truncated"] is True

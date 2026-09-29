@@ -1,5 +1,7 @@
 """Ref type for zero-copy variable references with chainable transforms."""
 
+import operator
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -7,6 +9,53 @@ if TYPE_CHECKING:
     from operonx.core.ops.base import BaseOp
 
 __all__ = ["Ref"]
+
+# Transforms of the form ``value <op> operand``. ``contains`` is
+# ``operand in value``, which is ``operator.contains(value, operand)``.
+_BINARY_OPS: Dict[str, Callable[[Any, Any], Any]] = {
+    "add": operator.add,
+    "sub": operator.sub,
+    "mul": operator.mul,
+    "truediv": operator.truediv,
+    "floordiv": operator.floordiv,
+    "mod": operator.mod,
+    "pow": operator.pow,
+    "matmul": operator.matmul,
+    "eq": operator.eq,
+    "ne": operator.ne,
+    "lt": operator.lt,
+    "le": operator.le,
+    "gt": operator.gt,
+    "ge": operator.ge,
+    "contains": operator.contains,
+}
+
+# Reflected transforms: ``operand <op> value`` (``1 - ref``).
+_REFLECTED_OPS: Dict[str, Callable[[Any, Any], Any]] = {
+    "radd": operator.add,
+    "rsub": operator.sub,
+    "rmul": operator.mul,
+    "rtruediv": operator.truediv,
+    "rfloordiv": operator.floordiv,
+    "rmod": operator.mod,
+    "rpow": operator.pow,
+    "rmatmul": operator.matmul,
+}
+
+
+def _getattr_or_key(value: Any, name: str) -> Any:
+    """``ref.name`` at run time: the attribute, else the key of a mapping.
+
+    Op outputs are usually dicts, so ``src["obj"].name`` reads the
+    ``"name"`` key rather than raising. A real attribute wins, so
+    ``ref.get("k")`` and ``ref.items()`` stay method calls.
+    """
+    try:
+        return getattr(value, name)
+    except AttributeError:
+        if isinstance(value, Mapping) and name in value:
+            return value[name]
+        raise
 
 
 @dataclass
@@ -80,6 +129,7 @@ class Ref:
             "_clone",
             "_resolve",
             "get_all_vars",
+            "get_all_refs",
             "parallel",
             "collect",
             "_stream_parallel",
@@ -205,54 +255,41 @@ class Ref:
         """Wrap function với thêm một transform.
 
         All lambdas have signature: fn(value, context={}) -> result
-        Context is a dict containing all available variable values,
-        used for resolving compound boolean operations.
-        Context defaults to {} for backward compatibility.
+        Context maps ``(source, var)`` to the value of every Ref the
+        expression reads (see ``_resolve``). A Ref among a transform's
+        arguments (``a >= b``, ``a + b``, ``d[k]``, ``a & b``) is read from
+        it when the transform runs — captured as-is, ``a >= b`` would build
+        another Ref, which is truthy, and a branch on it would always take
+        its first case. Context defaults to {} for backward compatibility.
         """
         a = args[0] if args else None
+
+        if op in _BINARY_OPS:
+            g = _BINARY_OPS[op]
+            if isinstance(a, Ref):
+                return lambda x, ctx={}, f=fn, g=g, r=a: g(f(x, ctx), r._resolve(ctx))
+            return lambda x, ctx={}, f=fn, g=g, v=a: g(f(x, ctx), v)
+        if op in _REFLECTED_OPS:
+            g = _REFLECTED_OPS[op]
+            if isinstance(a, Ref):
+                return lambda x, ctx={}, f=fn, g=g, r=a: g(r._resolve(ctx), f(x, ctx))
+            return lambda x, ctx={}, f=fn, g=g, v=a: g(v, f(x, ctx))
 
         match op:
             # Truy cập
             case "getitem":
+                if isinstance(a, Ref):
+                    return lambda x, ctx={}, f=fn, r=a: f(x, ctx)[r._resolve(ctx)]
                 return lambda x, ctx={}, f=fn, k=a: f(x, ctx)[k]
             case "getattr":
-                return lambda x, ctx={}, f=fn, k=a: getattr(f(x, ctx), k)
+                return lambda x, ctx={}, f=fn, k=a: _getattr_or_key(f(x, ctx), k)
             case "call":
                 ca, kw = args
+                if Ref._any_ref(ca, kw):
+                    return lambda x, ctx={}, f=fn, a=ca, k=kw: f(x, ctx)(
+                        *Ref._read_args(a, ctx), **Ref._read_kwargs(k, ctx)
+                    )
                 return lambda x, ctx={}, f=fn, a=ca, k=kw: f(x, ctx)(*a, **k)
-            # Số học
-            case "add":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) + v
-            case "radd":
-                return lambda x, ctx={}, f=fn, v=a: v + f(x, ctx)
-            case "sub":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) - v
-            case "rsub":
-                return lambda x, ctx={}, f=fn, v=a: v - f(x, ctx)
-            case "mul":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) * v
-            case "rmul":
-                return lambda x, ctx={}, f=fn, v=a: v * f(x, ctx)
-            case "truediv":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) / v
-            case "rtruediv":
-                return lambda x, ctx={}, f=fn, v=a: v / f(x, ctx)
-            case "floordiv":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) // v
-            case "rfloordiv":
-                return lambda x, ctx={}, f=fn, v=a: v // f(x, ctx)
-            case "mod":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) % v
-            case "rmod":
-                return lambda x, ctx={}, f=fn, v=a: v % f(x, ctx)
-            case "pow":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) ** v
-            case "rpow":
-                return lambda x, ctx={}, f=fn, v=a: v ** f(x, ctx)
-            case "matmul":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) @ v
-            case "rmatmul":
-                return lambda x, ctx={}, f=fn, v=a: v @ f(x, ctx)
             # Một ngôi
             case "neg":
                 return lambda x, ctx={}, f=fn: -f(x, ctx)
@@ -260,24 +297,13 @@ class Ref:
                 return lambda x, ctx={}, f=fn: +f(x, ctx)
             case "abs":
                 return lambda x, ctx={}, f=fn: abs(f(x, ctx))
-            # So sánh
-            case "eq":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) == v
-            case "ne":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) != v
-            case "lt":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) < v
-            case "le":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) <= v
-            case "gt":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) > v
-            case "ge":
-                return lambda x, ctx={}, f=fn, v=a: f(x, ctx) >= v
-            case "contains":
-                return lambda x, ctx={}, f=fn, v=a: v in f(x, ctx)
             # Áp dụng function
             case "apply":
                 func, fa, kw = args
+                if Ref._any_ref(fa, kw):
+                    return lambda x, ctx={}, f=fn, func=func, a=fa, k=kw: func(
+                        f(x, ctx), *Ref._read_args(a, ctx), **Ref._read_kwargs(k, ctx)
+                    )
                 return lambda x, ctx={}, f=fn, func=func, a=fa, k=kw: func(f(x, ctx), *a, **k)
             # Boolean operations - resolve Ref operands from context
             case "and_":
@@ -301,6 +327,30 @@ class Ref:
             case _:
                 raise ValueError(f"Transform không xác định: {op}")
 
+    @staticmethod
+    def _any_ref(args: Tuple, kwargs: Dict[str, Any]) -> bool:
+        return any(isinstance(v, Ref) for v in (*args, *kwargs.values()))
+
+    @staticmethod
+    def _read_args(args: Tuple, ctx: Dict[Any, Any]) -> List[Any]:
+        return [v._resolve(ctx) if isinstance(v, Ref) else v for v in args]
+
+    @staticmethod
+    def _read_kwargs(kwargs: Dict[str, Any], ctx: Dict[Any, Any]) -> Dict[str, Any]:
+        return {k: v._resolve(ctx) if isinstance(v, Ref) else v for k, v in kwargs.items()}
+
+    @staticmethod
+    def _arg_values(op: str, args: Tuple) -> Tuple[Any, ...]:
+        """A transform's arguments, flattened: ``call`` and ``apply`` carry
+        theirs in a tuple and a dict rather than as ``args`` itself."""
+        if op == "call":
+            ca, kw = args
+            return (*ca, *kw.values())
+        if op == "apply":
+            _func, fa, kw = args
+            return (*fa, *kw.values())
+        return args
+
     def execute(self, value: Any, context: Dict[str, Any] = None) -> Any:
         """Thực thi tất cả transform trên giá trị đầu vào.
 
@@ -315,11 +365,21 @@ class Ref:
         """
         return self._fn(value, context or {})
 
-    def _resolve(self, ctx: Dict[str, Any]) -> Any:
-        """Resolve giá trị của Ref này từ context dict.
+    def _ctx_key(self) -> Tuple[Any, str]:
+        """The key this Ref's value has in a condition context.
 
-        Dùng cho compound boolean operations khi cần resolve
-        Ref operand từ context.
+        The source op itself, not its name: two ops that both output ``n``
+        must not share a slot, and an op's full name changes when its graph
+        is nested, while the object does not.
+        """
+        return (self._source, self.var)
+
+    def _resolve(self, ctx: Dict[Any, Any]) -> Any:
+        """Read this Ref's value from a condition context and run its transforms.
+
+        The context is keyed by ``(source, var)`` — see ``_ctx_key``. A
+        context keyed by bare variable name, as a caller of ``execute``
+        may build by hand, is still read when the key is absent.
 
         Args:
             ctx: Dict chứa tất cả giá trị biến có sẵn
@@ -327,14 +387,41 @@ class Ref:
         Returns:
             Giá trị sau khi resolve và execute transforms
         """
-        value = ctx.get(self.var)
+        key = self._ctx_key()
+        value = ctx[key] if key in ctx else ctx.get(self.var)
         return self.execute(value, ctx)
+
+    def get_all_refs(self) -> List["Ref"]:
+        """Every value this Ref reads: its own and each Ref among its
+        transforms' arguments, recursively.
+
+        Returns:
+            One plain ``Ref(source, var)`` per ``(source, var)``, in the
+            order first met.
+
+        Example:
+            ref = (a["n"] > 10) & (b["n"] >= a["limit"])
+            ref.get_all_refs()  # [Ref(a, "n"), Ref(b, "n"), Ref(a, "limit")]
+        """
+        found: Dict[Tuple[Any, str], Ref] = {}
+
+        def visit(ref: "Ref") -> None:
+            key = ref._ctx_key()
+            if key not in found:
+                found[key] = Ref(ref._source, ref.var)
+            for op, args in ref._transforms:
+                for v in Ref._arg_values(op, args):
+                    if isinstance(v, Ref):
+                        visit(v)
+
+        visit(self)
+        return list(found.values())
 
     def get_all_vars(self) -> Set[str]:
         """Lấy tất cả tên biến mà Ref này phụ thuộc vào.
 
-        Bao gồm cả biến chính (self.var) và các biến từ compound
-        boolean operations (& và |).
+        Names only — two sources with the same variable name give one
+        entry; ``get_all_refs`` keeps them apart.
 
         Returns:
             Set các tên biến
@@ -343,13 +430,7 @@ class Ref:
             ref = (PARENT["a"] > 10) & (PARENT["b"] == "x") | (PARENT["c"])
             ref.get_all_vars()  # Returns {"a", "b", "c"}
         """
-        vars_set = {self.var}
-        for op, args in self._transforms:
-            if op in ("and_", "or_", "rand_", "ror_") and args:
-                other = args[0]
-                if isinstance(other, Ref):
-                    vars_set.update(other.get_all_vars())
-        return vars_set
+        return {ref.var for ref in self.get_all_refs()}
 
     def apply(self, func: Callable, *args: Any, **kwargs: Any) -> "Ref":
         """Áp dụng một function tùy chỉnh lên giá trị.
@@ -369,6 +450,11 @@ class Ref:
     # =========================================================================
     def __getitem__(self, key: Any) -> "Ref":
         return self._with_transform("getitem", key)
+
+    # Without this, `__getitem__` makes a Ref iterable by the legacy
+    # protocol — `ref[0]`, `ref[1]`, … never an IndexError — so `list(ref)`
+    # never returns. None makes `iter()` raise "not iterable" at once.
+    __iter__ = None
 
     def __getattr__(self, name: str) -> "Ref":
         if name.startswith("_"):
@@ -537,6 +623,22 @@ class Ref:
     def __invert__(self):
         return self._with_transform("not_")
 
+    def __bool__(self):
+        """A Ref has no truth value while the graph is being built.
+
+        ``and``, ``or``, ``not``, ``if`` and ``in`` all ask for one, and an
+        object without ``__bool__`` is always truthy — so
+        ``x == 1 and y == 2`` silently became ``y == 2``, and a bare
+        ``if ref:`` always passed. Refuse, and say what to write instead.
+        Code that means "is there a Ref" writes ``ref is not None``.
+        """
+        raise TypeError(
+            f"{self!r} has no truth value while the graph is being built, so "
+            f"`and`, `or`, `not`, `if` and `in` cannot see inside it. Combine "
+            f"conditions with `&`, `|` and `~` — `(x == 1) & (y == 2)` — and "
+            f"compute anything else in an op."
+        )
+
     # =========================================================================
     # Tiện ích
     # =========================================================================
@@ -574,7 +676,8 @@ class Ref:
             symbol = self._TRANSFORM_SYMBOLS.get(op)
             if symbol and args:
                 arg = args[0]
-                result = f"{result} {symbol} {arg!r}"
+                shown = arg.describe() if isinstance(arg, Ref) else repr(arg)
+                result = f"{result} {symbol} {shown}"
             elif symbol and not args:
                 result = f"{symbol} {result}"
             elif op == "getitem":

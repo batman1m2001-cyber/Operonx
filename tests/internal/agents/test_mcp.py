@@ -10,6 +10,8 @@ never reaching the trace, `Interrupt()` cancelling the run. The fixture in
 from __future__ import annotations
 
 import asyncio
+import gc
+import os
 import sys
 from pathlib import Path
 
@@ -27,9 +29,11 @@ from operonx.agents.mcp import (  # noqa: E402
     MCPServer,
     connect_mcp,
     register_mcp_tools,
+    unregister_mcp_tools,
 )
 
 SERVER = Path(__file__).parent / "mcp_fixtures" / "echo_server.py"
+CLASH_SERVER = Path(__file__).parent / "mcp_fixtures" / "clash_server.py"
 
 
 def _mcp_version() -> tuple[int, ...]:
@@ -52,6 +56,24 @@ def _mcp_version() -> tuple[int, ...]:
 def _server(**kw) -> MCPServer:
     kw.setdefault("name", "echo")
     return MCPServer(command=sys.executable, args=[str(SERVER)], **kw)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def _until(predicate, timeout: float = 15.0) -> None:
+    """Poll for a condition. The condition is what the test asserts on, not
+    how long it slept — a slow machine makes this wait longer, never flake."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"condition not met within {timeout}s")
+        await asyncio.sleep(0.02)
 
 
 @pytest.fixture(autouse=True)
@@ -110,6 +132,126 @@ class TestConnection:
     async def test_it_works_as_a_context_manager(self):
         async with MCPClient(_server()) as c:
             assert c.tools
+
+
+class TestTaskOwnership:
+    """The transport and session enter anyio cancel scopes, which must be
+    exited by the task that entered them. A client is routinely opened in
+    one task and closed in another — a FastAPI lifespan connects, a
+    shutdown handler closes — so the client cannot let the caller's task
+    be the one that enters them."""
+
+    @pytest.mark.asyncio
+    async def test_closing_from_another_task_leaves_the_connecting_task_alone(self):
+        shutdown = asyncio.Event()
+        connected = asyncio.Event()
+        box: dict = {}
+
+        async def lifespan() -> str:
+            box["client"] = await MCPClient(_server()).connect()
+            box["pid"] = int(await box["client"].call("pid", {}))
+            connected.set()
+            await shutdown.wait()
+            return "finished"
+
+        life = asyncio.create_task(lifespan())
+        await asyncio.wait_for(connected.wait(), timeout=30)
+
+        async def shutdown_handler() -> None:
+            await box["client"].close()
+
+        await asyncio.wait_for(asyncio.create_task(shutdown_handler()), timeout=30)
+        assert not _alive(box["pid"]), "close() must still stop the server"
+
+        shutdown.set()
+        outcome = await asyncio.gather(life, return_exceptions=True)
+        assert outcome == ["finished"], f"the connecting task was hit by close(): {outcome}"
+
+    @pytest.mark.asyncio
+    async def test_a_client_connected_in_a_finished_task_closes_cleanly(self):
+        """The task that connected is gone by the time anyone closes. The
+        scopes must still be exited properly — before, close() raised
+        `Attempted to exit cancel scope in a different task` and hid it."""
+        box: dict = {}
+
+        async def opener() -> None:
+            box["client"] = await MCPClient(_server()).connect()
+            box["pid"] = int(await box["client"].call("pid", {}))
+
+        await asyncio.create_task(opener())
+        await box["client"].close()
+        assert not _alive(box["pid"])
+
+    @pytest.mark.asyncio
+    async def test_an_abandoned_client_collected_by_gc_cancels_nothing(self):
+        """A client dropped without close() used to be finalised on a GC
+        task that exited its task group from foreign context — which
+        cancelled the task that had connected it, still running."""
+        shutdown = asyncio.Event()
+        dropped = asyncio.Event()
+        box: dict = {}
+
+        async def lifespan() -> str:
+            client = await MCPClient(_server()).connect()
+            box["pid"] = int(await client.call("pid", {}))
+            del client  # a leak, but one that must not bite anyone else
+            dropped.set()
+            await shutdown.wait()
+            return "finished"
+
+        life = asyncio.create_task(lifespan())
+        await asyncio.wait_for(dropped.wait(), timeout=30)
+        gc.collect()
+        # The abandoned client's server is shut down by its own task.
+        await _until(lambda: not _alive(box["pid"]))
+
+        shutdown.set()
+        outcome = await asyncio.gather(life, return_exceptions=True)
+        assert outcome == ["finished"], f"GC of an abandoned client hit a live task: {outcome}"
+
+    @pytest.mark.asyncio
+    async def test_a_teardown_failure_is_raised_not_swallowed(self, monkeypatch):
+        from mcp import ClientSession
+
+        original = ClientSession.__aexit__
+
+        async def broken_exit(self, *exc):
+            await original(self, *exc)
+            raise RuntimeError("teardown broke")
+
+        monkeypatch.setattr(ClientSession, "__aexit__", broken_exit)
+        c = await MCPClient(_server()).connect()
+        with pytest.raises(MCPError, match="teardown broke"):
+            await c.close()
+        await c.close()  # and it is still idempotent afterwards
+
+    @pytest.mark.asyncio
+    async def test_a_teardown_failure_does_not_mask_the_error_in_flight(self, monkeypatch):
+        """`async with` exiting on an exception reports that exception; a
+        teardown failure on the way out is logged, not substituted."""
+        from mcp import ClientSession
+
+        original = ClientSession.__aexit__
+
+        async def broken_exit(self, *exc):
+            await original(self, *exc)
+            raise RuntimeError("teardown broke")
+
+        monkeypatch.setattr(ClientSession, "__aexit__", broken_exit)
+        with pytest.raises(ValueError, match="the real error"):
+            async with MCPClient(_server()):
+                raise ValueError("the real error")
+
+    @pytest.mark.asyncio
+    async def test_connecting_twice_is_refused(self):
+        """A second connect() used to spawn a second server and orphan the
+        first — close() only knew about the latest."""
+        c = await MCPClient(_server()).connect()
+        try:
+            with pytest.raises(MCPError, match="already connected"):
+                await c.connect()
+        finally:
+            await c.close()
 
 
 class TestCalling:
@@ -238,6 +380,88 @@ class TestRegistration:
         await register_mcp_tools(client)
         assert TOOL_REGISTRY["echo"] is local_echo
         assert "echo__echo" in TOOL_REGISTRY
+
+
+def _local_tool(name: str):
+    from operonx.agents.tool import tool
+
+    @tool(name=name, description="a local tool", schema={"type": "object", "properties": {}})
+    async def local() -> dict:
+        return {"local": True}
+
+    return local
+
+
+class TestRegistrationIsAllOrNothing:
+    """A registration that failed part-way left the tools it had already
+    registered in place — advertised by `get_tool_definitions()`, and, once
+    `connect_mcp` had closed the client, raising "not connected" on every
+    call the model made."""
+
+    @pytest.mark.asyncio
+    async def test_a_collision_part_way_through_registers_nothing(self, client):
+        # `explode` is the server's third tool: `echo` and `add` come first.
+        squatter = _local_tool("echo__explode")
+        with pytest.raises(MCPError, match="already registered"):
+            await register_mcp_tools(client)
+        assert set(TOOL_REGISTRY) == {"echo__explode"}
+        assert TOOL_REGISTRY["echo__explode"] is squatter
+
+    @pytest.mark.asyncio
+    async def test_a_failed_connect_mcp_advertises_no_dead_proxies(self):
+        _local_tool("echo__explode")
+        with pytest.raises(MCPError):
+            await connect_mcp(_server())
+        advertised = [d["function"]["name"] for d in get_tool_definitions()]
+        assert advertised == ["echo__explode"]
+
+    @pytest.mark.asyncio
+    async def test_two_tools_sanitised_to_one_name_register_nothing(self):
+        clash = MCPServer(name="clash", command=sys.executable, args=[str(CLASH_SERVER)])
+        async with MCPClient(clash) as c:
+            with pytest.raises(MCPError, match="clash__read_file"):
+                await register_mcp_tools(c)
+        assert not TOOL_REGISTRY
+
+
+class TestUnregistering:
+    """`clear_registry()` was the only way out, and it deletes local tools
+    too."""
+
+    @pytest.mark.asyncio
+    async def test_close_removes_the_clients_tools_and_nothing_else(self):
+        local = _local_tool("local_tool")
+        client, names = await connect_mcp(_server())
+        assert "echo__echo" in names
+        await client.close()
+        assert set(TOOL_REGISTRY) == {"local_tool"}
+        assert TOOL_REGISTRY["local_tool"] is local
+
+    @pytest.mark.asyncio
+    async def test_unregistering_keeps_the_connection(self, client):
+        names = await register_mcp_tools(client)
+        assert sorted(unregister_mcp_tools(client)) == sorted(names)
+        assert not TOOL_REGISTRY
+        assert "echo: still here" in await client.call("echo", {"text": "still here"})
+        assert await register_mcp_tools(client) == names  # and it can register again
+
+    @pytest.mark.asyncio
+    async def test_every_registration_of_the_client_is_removed(self, client):
+        await register_mcp_tools(client, allow=["echo"])
+        await register_mcp_tools(client, allow=["echo"], prefix="again")
+        assert sorted(unregister_mcp_tools(client)) == ["again__echo", "echo__echo"]
+        assert not TOOL_REGISTRY
+
+    @pytest.mark.asyncio
+    async def test_a_name_someone_else_now_holds_is_spared(self, client):
+        """The registry can be cleared and a name reused behind the
+        client's back; unregistering removes this client's proxies, not
+        whatever now answers to their names."""
+        await register_mcp_tools(client, allow=["echo"])
+        clear_registry()
+        newcomer = _local_tool("echo__echo")
+        assert unregister_mcp_tools(client) == []
+        assert TOOL_REGISTRY["echo__echo"] is newcomer
 
 
 class TestPermissionDefaults:

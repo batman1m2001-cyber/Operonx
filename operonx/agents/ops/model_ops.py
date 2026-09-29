@@ -18,7 +18,10 @@ messages answering nothing, and the provider rejects the conversation.
 
 ``finish_reason`` is still reported so a caller can tell a clean stop
 from a truncated one — a response cut at ``length`` is not a finished
-answer, even though the loop treats both as done.
+answer, even though the loop treats both as done. The loop records the
+last turn's, and :func:`~operonx.agents.graphs.react.agent_result`
+returns it as ``finish_reason`` and ``truncated`` (and counts a cut
+answer as ``stopped_early``).
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from uuid import uuid4
 
 from operonx.core.ops.transform.func_op import op
 
-__all__ = ["adapt_llm_output", "make_llm_caller"]
+__all__ = ["adapt_llm_output", "make_llm_caller", "turn_tool_choice"]
 
 #: Stop reasons that mean the answer is incomplete rather than finished.
 TRUNCATED_REASONS = frozenset({"length", "max_tokens", "content_filter"})
@@ -70,6 +73,18 @@ def adapt_llm_output(
     }
 
 
+@op
+def turn_tool_choice(last_turn: bool = False, default: Any = None) -> dict:
+    """``tool_choice`` for this turn: ``"none"`` on the budget's last one.
+
+    The budget notice asks the model to answer; ``"none"`` makes it. The
+    tools are still sent — a history holding tool calls needs their
+    definitions (Anthropic rejects it without them) — and the choice
+    forbids using them. Other turns keep the caller's own choice.
+    """
+    return {"tool_choice": "none" if last_turn else default}
+
+
 def make_llm_caller(
     resource: str,
     *,
@@ -90,7 +105,16 @@ def make_llm_caller(
             ``max_tokens``, ``fallback``, and so on.
 
     Returns:
-        A callable taking ``messages=`` and returning the adapter node.
+        A callable taking ``messages=`` (and ``last_turn=``, which
+        :func:`~operonx.agents.graphs.build_react_agent` sets on the
+        budget's final turn: the request then carries
+        ``tool_choice="none"`` when there are tools, so a model that
+        ignores the budget notice still answers in text) and returning
+        the adapter node.
+        It carries ``.tools`` (the definitions it sends) and
+        ``.with_tools(names)``, which returns the same caller showing the
+        model only ``names`` — how a sub-agent's model is kept from being
+        told about tools its policy will refuse.
 
     Note:
         The provider must actually support tool calling. Several
@@ -102,7 +126,9 @@ def make_llm_caller(
         before trusting it.
     """
 
-    def call_model(messages: Any = None):
+    default_choice = llm_kwargs.pop("tool_choice", None)
+
+    def call_model(messages: Any = None, last_turn: Any = False):
         from operonx.core.ops.base import END, PARENT, START
         from operonx.core.ops.graph._decorators import graph
         from operonx.providers.ops import LLMOp
@@ -116,7 +142,7 @@ def make_llm_caller(
         # this graph's scope". Nesting them makes the pair a single node
         # that moves together.
         @graph
-        def model_call(messages=None):
+        def model_call(messages=None, last_turn=False):
             # `messages=`, never `prompt=`. A conversation is data, and
             # `prompt=` formats what it is given — which used to mean every
             # brace in the history (a JSON tool result, pasted code, the
@@ -124,10 +150,16 @@ def make_llm_caller(
             # that did not exist, killing the *next* model call. This layer
             # carried an `_escape_braces` walk to survive that; `messages=`
             # made it unnecessary.
+            # With no tools there is nothing to forbid, and `tool_choice`
+            # without `tools` is a request error on OpenAI.
+            choice = (
+                turn_tool_choice(last_turn=last_turn, default=default_choice) if tools else None
+            )
             llm = LLMOp.of(
                 resource=resource,
                 messages=messages,
                 tools=tools,
+                tool_choice=choice["tool_choice"] if choice is not None else default_choice,
                 **llm_kwargs,
             )
             adapted = adapt_llm_output(
@@ -140,8 +172,40 @@ def make_llm_caller(
             adapted["done"] >> PARENT["done"]
             adapted["finish_reason"] >> PARENT["finish_reason"]
             adapted["truncated"] >> PARENT["truncated"]
-            START >> llm >> adapted >> END
+            if choice is not None:
+                START >> choice >> llm >> adapted >> END
+            else:
+                START >> llm >> adapted >> END
 
-        return model_call(messages=messages)
+        return model_call(messages=messages, last_turn=last_turn)
 
+    def with_tools(names: List[str]) -> Callable:
+        """This caller, showing the model only ``names``, in that order.
+
+        Definitions this caller already holds are reused, so a hand-edited
+        description survives; a name it does not hold is read from the
+        registry, because a sub-agent's toolset is resolved per call and a
+        tool registered after this caller was built is still its to use.
+        """
+        from operonx.agents.tool import TOOL_REGISTRY, get_tool_definitions
+
+        held = {_definition_name(d): d for d in tools or [] if isinstance(d, dict)}
+        chosen: List[dict] = []
+        for name in names:
+            if name in held:
+                chosen.append(held[name])
+            elif name in TOOL_REGISTRY:
+                chosen.extend(get_tool_definitions([name]))
+        # An empty `tools=[]` is a request error on OpenAI; absent is "no tools".
+        return make_llm_caller(
+            resource, tools=chosen or None, tool_choice=default_choice, **llm_kwargs
+        )
+
+    call_model.tools = list(tools or [])
+    call_model.with_tools = with_tools
     return call_model
+
+
+def _definition_name(definition: dict) -> str:
+    """A tool definition's name, in the OpenAI nested or the flat shape."""
+    return (definition.get("function") or {}).get("name") or definition.get("name") or ""

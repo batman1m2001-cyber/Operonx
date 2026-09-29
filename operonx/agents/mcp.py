@@ -33,17 +33,21 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import warnings
+import weakref
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
-from operonx.agents.tool import TOOL_REGISTRY, tool
+from operonx.agents.tool import TOOL_REGISTRY, tool, unregister_tool
+from operonx.core.loggings import LOGGER
 
 __all__ = [
     "MCPServer",
     "MCPClient",
     "MCPError",
     "register_mcp_tools",
+    "unregister_mcp_tools",
     "connect_mcp",
 ]
 
@@ -140,27 +144,136 @@ def _flatten(content: Any) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _describe(error: Optional[BaseException]) -> str:
+    """``Type: message`` for an error, looking through exception groups.
+
+    Anything raised inside the transport surfaces wrapped in anyio's task
+    group, whose own text is only ``unhandled errors in a TaskGroup (1
+    sub-exception)`` — true, and useless to whoever reads it.
+    """
+    if error is None:
+        return "the connection ended before the handshake finished"
+    nested = getattr(error, "exceptions", None)
+    if isinstance(nested, (list, tuple)) and nested:
+        return "; ".join(_describe(e) for e in nested)
+    return f"{type(error).__name__}: {error}"
+
+
+#: Owner tasks of live connections. asyncio keeps only a weak reference to
+#: a task, and an owner deliberately holds no reference to its client (see
+#: `_hold_connection`), so without this set nothing would keep it alive.
+_OWNERS: Set["asyncio.Task[None]"] = set()
+
+
+@dataclass
+class _Connection:
+    """What a connected client holds: its owner task, the event that tells
+    the owner to shut down, and the finaliser for a client never closed."""
+
+    owner: "asyncio.Task[None]"
+    closing: asyncio.Event
+    finalizer: Any
+
+
+async def _hold_connection(
+    params: Any, ready: "asyncio.Future[Any]", closing: asyncio.Event
+) -> None:
+    """Enter the transport and session, hold them, exit them — in one task.
+
+    ``stdio_client`` and ``ClientSession`` both enter anyio cancel scopes,
+    and a cancel scope must be exited by the task that entered it. Entering
+    them in the caller's task tied the connection to whichever task
+    happened to call ``connect()``. Closing from another task — a FastAPI
+    lifespan connects, a shutdown handler closes — raised ``Attempted to
+    exit cancel scope in a different task`` and, worse, the task group's
+    own ``cancel()`` on the way out cancelled the task that had connected,
+    while it was still running. So the scopes live here, in a task that
+    exists for nothing else, and ``close()`` asks it to leave them.
+
+    Takes the ready future and the event, never the client: a client
+    dropped without ``close()`` must stay collectable so its finaliser can
+    set ``closing``.
+    """
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        tools = await MCPClient._list_all_tools(session)
+        if not ready.done():
+            ready.set_result((session, tools))
+        await closing.wait()
+
+
+def _abandoned(loop: asyncio.AbstractEventLoop, closing: asyncio.Event, name: str) -> None:
+    """Finaliser for a client collected while still connected.
+
+    Runs wherever the garbage collector does, so it only hands the loop a
+    signal: the owner task then shuts the server down from its own task.
+    Before, the garbage collector's finalisation exited the scopes itself,
+    from foreign context, and cancelled whichever task had connected.
+    """
+
+    def shut_down() -> None:
+        warnings.warn(
+            f"MCPClient for {name!r} was garbage-collected without close(); "
+            f"shutting its server down",
+            ResourceWarning,
+            stacklevel=1,
+        )
+        closing.set()
+
+    if loop.is_closed():
+        return  # asyncio.run() already cancelled the owner on the way out
+    try:
+        loop.call_soon_threadsafe(shut_down)
+    except RuntimeError:  # the loop closed between the check and the call
+        pass
+
+
 class MCPClient:
     """A live connection to one MCP server.
 
     Holds the transport and session open for its lifetime, so it must be
     closed. Use :func:`connect_mcp` unless you need to manage that
     yourself.
+
+    The connection is owned by a task of its own, not by the task that
+    calls ``connect()``, so connecting in one task and closing in another
+    is safe. A client dropped without ``close()`` has its server shut down
+    when it is garbage-collected, with a ``ResourceWarning`` — a backstop,
+    not a lifecycle: until collection the server keeps running.
     """
 
     def __init__(self, server: MCPServer) -> None:
         self.server = server
-        self._stack: Optional[AsyncExitStack] = None
+        self._conn: Optional[_Connection] = None
         self._session: Any = None
         self._tools: List[Any] = []
+        #: Operonx name → the proxy factory this client registered under it,
+        #: kept so its proxies can be withdrawn without touching anything
+        #: else in the registry.
+        self._registered: Dict[str, Any] = {}
 
     # ------------------------------------------------------------ lifecycle
 
     async def connect(self) -> "MCPClient":
-        """Start the server, handshake, and read its tool list."""
+        """Start the server, handshake, and read its tool list.
+
+        Raises:
+            MCPError: the server could not be started or did not complete
+                the handshake, or this client is already connected — a
+                second connection would orphan the first one's server.
+        """
+        if self._conn is not None:
+            raise MCPError(
+                f"MCP server {self.server.name!r} is already connected — "
+                f"close() it before connecting again"
+            )
         try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
+            from mcp import StdioServerParameters
         except ImportError as e:  # pragma: no cover - declared as an extra
             raise MCPError("MCP support needs the SDK: pip install 'operonx[mcp]'") from e
 
@@ -170,22 +283,36 @@ class MCPClient:
             env=self.server.env,
             cwd=self.server.cwd,
         )
-        stack = AsyncExitStack()
+        loop = asyncio.get_running_loop()
+        ready: "asyncio.Future[Any]" = loop.create_future()
+        closing = asyncio.Event()
+        owner = loop.create_task(
+            _hold_connection(params, ready, closing), name=f"mcp:{self.server.name}"
+        )
+        _OWNERS.add(owner)
+        owner.add_done_callback(_OWNERS.discard)
         try:
-            read, write = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-            tools = await self._list_all_tools(session)
-        except Exception as e:
-            await stack.aclose()
+            await asyncio.wait({ready, owner}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            # Abandoning a half-open connection. The owner unwinds its own
+            # scopes; waiting for it means no server outlives this call.
+            owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
+            raise
+        if not ready.done():
+            # The owner ended before the handshake did: that is the failure.
+            error = None if owner.cancelled() else owner.exception()
             raise MCPError(
                 f"could not connect to MCP server {self.server.name!r} "
-                f"({self.server.command}): {type(e).__name__}: {e}"
-            ) from e
+                f"({self.server.command}): {_describe(error)}"
+            ) from error
 
-        self._stack = stack
-        self._session = session
-        self._tools = tools
+        self._session, self._tools = ready.result()
+        self._conn = _Connection(
+            owner=owner,
+            closing=closing,
+            finalizer=weakref.finalize(self, _abandoned, loop, closing, self.server.name),
+        )
         return self
 
     @staticmethod
@@ -215,20 +342,57 @@ class MCPClient:
         return collected
 
     async def close(self) -> None:
-        """Shut the server down. Idempotent."""
-        stack, self._stack = self._stack, None
+        """Unregister this client's tools and shut the server down.
+
+        Idempotent, and safe from any task. Local tools are not touched.
+
+        Raises:
+            MCPError: the shutdown itself failed. It used to be swallowed,
+                which is how a cross-task close that raised ``Attempted to
+                exit cancel scope in a different task`` went unnoticed.
+                ``async with`` still logs rather than raises when an error
+                is already on its way out, so the real one is not replaced.
+        """
+        # First, and whatever the shutdown does: a proxy left registered
+        # after this point is advertised to the model and fails every call.
+        unregister_mcp_tools(self)
+        conn, self._conn = self._conn, None
         self._session = None
-        if stack is not None:
-            try:
-                await stack.aclose()
-            except Exception:  # noqa: BLE001 — teardown must not mask the real error
-                pass
+        if conn is None:
+            return
+        conn.finalizer.detach()
+        conn.closing.set()
+        owner = conn.owner
+        if not owner.done():
+            # `wait`, not `await owner`: a caller that stops waiting (its
+            # own cancellation) must not cancel the shutdown half-way. The
+            # owner finishes it either way.
+            await asyncio.wait({owner})
+        if owner.cancelled():
+            return  # torn down by the loop shutting down, in its own task
+        error = owner.exception()
+        if error is not None:
+            raise MCPError(
+                f"closing MCP server {self.server.name!r} failed: {_describe(error)}"
+            ) from error
 
     async def __aenter__(self) -> "MCPClient":
         return await self.connect()
 
-    async def __aexit__(self, *_exc: object) -> None:
-        await self.close()
+    async def __aexit__(self, exc_type: Any, exc: Optional[BaseException], _tb: Any) -> None:
+        try:
+            await self.close()
+        except MCPError:
+            if exc is None:
+                raise
+            # An error is already on its way out. Raising here would replace
+            # it, and the caller would debug the teardown instead.
+            LOGGER.warning(
+                "MCP server %r: teardown failed while a %s was propagating",
+                self.server.name,
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     # ----------------------------------------------------------------- use
 
@@ -386,7 +550,12 @@ async def register_mcp_tools(
                 f"It offers: {sorted(available)}"
             )
 
-    registered: List[str] = []
+    # Everything that can fail is checked before anything is registered.
+    # Registering tool by tool meant a failure part-way — a name collision,
+    # a bad schema — left the earlier tools registered: advertised by
+    # `get_tool_definitions()`, and raising "not connected" on every call
+    # once `connect_mcp` had closed the client.
+    planned: Dict[str, tuple] = {}
     for descriptor in client.tools:
         server_name = _attr(descriptor, "name", default="")
         if not server_name or (allow is not None and server_name not in allow):
@@ -397,6 +566,13 @@ async def register_mcp_tools(
         # reject the *whole request* when one name violates it — so a single
         # `github.create_issue` stopped every tool working, local ones too.
         full_name = f"{namespace}__{_UNSAFE.sub('_', server_name)}"[:64]
+        if full_name in planned:
+            raise MCPError(
+                f"MCP server {client.server.name!r} has two tools that both become "
+                f"{full_name!r} once made safe for a provider: "
+                f"{planned[full_name][0]!r} and {server_name!r}. Pass allow= to "
+                f"pick one."
+            )
         if full_name in TOOL_REGISTRY:
             raise MCPError(
                 f"{full_name!r} is already registered. Two servers sharing a "
@@ -422,10 +598,50 @@ async def register_mcp_tools(
                 f"inputSchema that is not a JSON Schema object: {schema!r}"
             )
 
-        _make_proxy(client, server_name, full_name, description, schema)
-        registered.append(full_name)
+        planned[full_name] = (
+            server_name,
+            description,
+            schema,
+            _signature_from_schema(schema),
+            _tool_flags(descriptor),
+        )
+
+    registered: List[str] = []
+    try:
+        for full_name, (server_name, description, schema, signature, flags) in planned.items():
+            factory = _make_proxy(
+                client, server_name, full_name, description, schema, signature, flags
+            )
+            client._registered[full_name] = factory
+            registered.append(full_name)
+    except BaseException:
+        # Nothing above should fail after the checks; if something does,
+        # the registry goes back to exactly what it was.
+        for full_name in registered:
+            if TOOL_REGISTRY.get(full_name) is client._registered.pop(full_name, None):
+                unregister_tool(full_name)
+        raise
 
     return registered
+
+
+def unregister_mcp_tools(client: MCPClient) -> List[str]:
+    """Withdraw every tool ``client`` registered, returning their names.
+
+    :meth:`MCPClient.close` does this itself; call it directly to stop
+    offering a server's tools while keeping the connection. Local tools,
+    and other clients' tools, are not touched — nor is a name that has
+    since been taken by a different tool (after a ``clear_registry()``,
+    say). Rebuild the agent graph afterwards: it reads the registry at
+    build time.
+    """
+    removed: List[str] = []
+    for full_name, factory in list(client._registered.items()):
+        if TOOL_REGISTRY.get(full_name) is factory:
+            unregister_tool(full_name)
+            removed.append(full_name)
+    client._registered.clear()
+    return removed
 
 
 def _make_proxy(
@@ -434,13 +650,14 @@ def _make_proxy(
     full_name: str,
     description: str,
     schema: Dict[str, Any],
-) -> None:
-    """Register one `@tool` that forwards to the server.
+    signature: inspect.Signature,
+    flags: Dict[str, bool],
+) -> Any:
+    """Register one `@tool` that forwards to the server; return its factory.
 
     A closure per tool, because the registry maps a name to one callable
     and the server-side name has to travel with it.
     """
-    flags = _tool_flags(next(t for t in client.tools if _attr(t, "name") == server_name))
 
     async def proxy(**kwargs: Any) -> dict:
         text = await client.call(server_name, kwargs)
@@ -448,12 +665,12 @@ def _make_proxy(
 
     # What operonx inspects to decide the op's inputs. Without it the op
     # declares one input named `kwargs` and rejects every real argument.
-    proxy.__signature__ = _signature_from_schema(schema)
+    proxy.__signature__ = signature
     proxy.__name__ = full_name
     proxy.__qualname__ = f"mcp:{full_name}"
     proxy.__doc__ = description
 
-    tool(
+    return tool(
         name=full_name,
         description=description,
         schema=schema,
@@ -483,6 +700,15 @@ async def connect_mcp(
     try:
         names = await register_mcp_tools(client, allow=allow, prefix=prefix)
     except Exception:
-        await client.close()
+        try:
+            await client.close()
+        except MCPError:
+            # The registration error is the one the caller needs; a
+            # teardown failure raised here would replace it.
+            LOGGER.warning(
+                "MCP server %r: teardown failed after a registration error",
+                server.name,
+                exc_info=True,
+            )
         raise
     return client, names

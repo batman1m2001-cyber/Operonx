@@ -20,16 +20,24 @@ set far above any real workload. That guard is the wrong tool for a
 budget anyway: it cuts mid-flight, the model is never told, and you keep
 whatever partial state existed. ``count_turn`` injects a notice at the
 limit instead and lets the model take one final turn, so exhaustion
-exits the way success does.
+exits the way success does. That turn is called with tools disabled
+(``last_turn=True``), because a notice is only prose and a model can
+ignore it.
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Optional
 
-from operonx.agents.graphs.dispatch import build_dispatch
-from operonx.agents.ops.compact_ops import apply_compaction, plan_compaction
+from operonx.agents.graphs.dispatch import build_dispatch, call_identity, tool_message
+from operonx.agents.ops.compact_ops import (
+    apply_compaction,
+    estimate_tool_tokens,
+    plan_compaction,
+)
 from operonx.agents.ops.memory_ops import gather_memory
+from operonx.agents.ops.model_ops import TRUNCATED_REASONS
 from operonx.agents.ops.prompt_ops import apply_cache_control, assemble_api_messages
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
@@ -40,13 +48,25 @@ from operonx.core.ops.graph._decorators import graph
 from operonx.core.ops.transform.func_op import op
 from operonx.reducers import add_messages
 
-__all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED"]
+__all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED", "NOT_RUN"]
 
 BUDGET_EXHAUSTED = (
     "You have used your entire turn budget ({max_turns} turns) and cannot "
     "call any more tools. Answer now with what you already have, and say "
     "plainly what you could not finish."
 )
+
+#: The tool result given to a call the loop ends without dispatching.
+NOT_RUN = {
+    "budget": (
+        "Not run: the turn budget ({max_turns} turns) ran out before this "
+        "call could be dispatched. Do not assume it happened."
+    ),
+    "done": (
+        "Not run: the turn was marked finished before this call could be "
+        "dispatched. Do not assume it happened."
+    ),
+}
 
 
 # The graph input is named `messages`, the same as the shared cell, so
@@ -141,21 +161,29 @@ def build_react_agent(
     Args:
         call_model: An op factory taking ``messages: list`` and returning
             ``assistant_message`` (a list of message dicts), ``tool_calls``
-            (a list, empty when finished) and ``done`` (bool). Injected
+            (a list, empty when finished) and ``done`` (bool), and
+            optionally ``finish_reason``/``truncated``, which
+            :func:`agent_result` reports. A ``call_model`` that declares a
+            ``last_turn`` parameter is passed ``last_turn=True`` on the
+            budget's final turn and must not let the model call a tool
+            then — ``make_llm_caller`` sends ``tool_choice="none"``. One
+            without the parameter is called as before. Injected
             rather than constructed here so the loop is testable without a
             provider, and so callers choose their own ``LLMOp.of(...)``
             configuration.
         max_turns: Turn budget. One turn is one model call plus the
             dispatch of whatever tools it asked for. Reaching it is a
             normal exit, not a cut: the model is given ``budget_notice``
-            and one final turn to answer.
+            and one final turn to answer, called with tools disabled when
+            ``call_model`` takes ``last_turn`` (see above).
         approval_timeout: Seconds a gated tool call waits for a human
             before being denied. See :mod:`operonx.agents.graphs.dispatch`.
         policy: Which tools may run, ask, or are refused outright. See
             :class:`~operonx.agents.policy.ToolPolicy`. Defaults to
             destructive-asks, everything-else-runs.
         redactor: Strips credential-shaped strings from tool output
-            before the model or the tracer sees it. See
+            before the model or the tracer sees it, and from the
+            arguments in an approval request. See
             :class:`~operonx.agents.redact.Redactor`.
         system: System prompt. Sent first and never changed, which is
             what lets a provider cache the prefix.
@@ -169,11 +197,17 @@ def build_react_agent(
             placement and same reason as memory.
         token_budget: Prompt budget. Compaction triggers at 75% of it,
             not at 100% — the turn that discovers the budget is exceeded
-            has already failed.
+            has already failed. The tool definitions ``call_model`` sends
+            count against it: they are read from ``call_model.tools``,
+            which a ``make_llm_caller`` caller carries and a hand-written
+            factory can set.
         keep_recent: Exchanges kept verbatim by compaction. Recency is
             what the model is reasoning about; summarising it is how a
             compactor makes an agent forget what it just did.
-        cache_breakpoints: Cache markers placed on the stable prefix.
+        cache_breakpoints: Cache markers placed on the stable prefix, at
+            most four (Anthropic rejects more). The Anthropic backend
+            sends them as content-block ``cache_control``; OpenAI-shaped
+            backends drop them, since that API caches prefixes itself.
         budget_notice: Message appended when the turn budget runs out.
             Must tell the model to answer now — an empty or vague notice
             produces another tool call it is not allowed to make.
@@ -187,6 +221,13 @@ def build_react_agent(
     dispatch_one = build_dispatch(
         approval_timeout=approval_timeout, policy=policy, redactor=redactor
     )
+
+    # The tool definitions ride on every request but are not messages, so
+    # they are counted here, once, rather than passed to the planner each
+    # turn. Leaving them out meant compacting against a budget the
+    # request was already 2–4k tokens over with a typical registry.
+    tool_tokens = estimate_tool_tokens(getattr(call_model, "tools", None))
+    takes_last_turn = _takes_last_turn(call_model)
 
     @op
     def count_turn(turns: int = 0) -> dict:
@@ -220,12 +261,76 @@ def build_react_agent(
         finished = bool(done) or bool(exhausted) or not (tool_calls or [])
         return {"finished": finished}
 
+    @op
+    def close_unrun_calls(
+        finished: bool = False, exhausted: bool = False, messages: Optional[list] = None
+    ) -> dict:
+        """Answer every tool call the loop is about to abandon.
+
+        The assistant message is written to the history *before* the
+        branch decides whether to dispatch, so when the loop ends with
+        calls still pending — the model ignored the budget notice, or a
+        ``call_model`` said ``done`` while asking for a tool — the history
+        ends on an unanswered ``tool_call``. Every provider rejects that,
+        but only on the *next* request, one exchange after the cause.
+
+        Answering each call with a "not run" result, rather than dropping
+        the ``tool_calls`` from the stored message, is what keeps the
+        history valid everywhere: the model's own turn is kept as it was
+        sent, an assistant message is never left with empty content
+        (Anthropic rejects that), and the model is told plainly that the
+        calls did not happen instead of finding them silently gone.
+        """
+        if not finished:
+            return {"messages": []}
+        # The calls answered are the ones in the *stored* message, not the
+        # model's `tool_calls` output: what the provider will see is the
+        # history, and a result for a call the history does not hold is
+        # an orphan it rejects just the same.
+        pending = [
+            call
+            for message in messages or []
+            if isinstance(message, dict)
+            for call in message.get("tool_calls") or []
+            if isinstance(call, dict)
+        ]
+        text = (NOT_RUN["budget"] if exhausted else NOT_RUN["done"]).format(max_turns=max_turns)
+        return {
+            "messages": [
+                tool_message(*call_identity(call), text, is_error=True) for call in pending
+            ]
+        }
+
+    @op
+    def how_it_ended(
+        exhausted: bool = False, finish_reason: str = "", truncated: bool = False
+    ) -> dict:
+        """Record how this turn ended; the last turn's write is the answer's.
+
+        A response cut at ``length`` has no tool calls, so the loop treats
+        it as done — correctly, since there is nothing to dispatch — but it
+        is not a finished answer, and nothing downstream read the adapter's
+        ``finish_reason``/``truncated``, so it was reported as a clean one.
+        The flag is recomputed from the reason as well, for a hand-written
+        ``call_model`` that reports only the reason. A ``call_model`` that
+        reports neither reads as a clean stop.
+        """
+        reason = finish_reason or ""
+        cut = bool(truncated) or reason in TRUNCATED_REASONS
+        return {
+            "stopped_early": bool(exhausted) or cut,
+            "truncated": cut,
+            "finish_reason": reason,
+        }
+
     @graph
     def react(messages=None):
         PARENT.declare(
             messages=[],
             turns=0,
             stopped_early=False,
+            truncated=False,
+            finish_reason="",
             reducers={"messages": add_messages},
         )
 
@@ -241,6 +346,7 @@ def build_react_agent(
             messages=PARENT["messages"],
             budget=token_budget,
             keep_recent=keep_recent,
+            reserved_tokens=tool_tokens,
         )
         compacted = apply_compaction(
             pinned=planned["pinned"],
@@ -260,14 +366,29 @@ def build_react_agent(
             breakpoints=cache_breakpoints,
         )
 
-        model = call_model(messages=cached["messages"])
+        if takes_last_turn:
+            model = call_model(messages=cached["messages"], last_turn=counter["exhausted"])
+        else:
+            model = call_model(messages=cached["messages"])
         router = decide(
             done=model["done"],
             exhausted=counter["exhausted"],
             tool_calls=model["tool_calls"],
         )
-
         assistant = normalize_messages(messages=model["assistant_message"])
+        closed = close_unrun_calls(
+            finished=router["finished"],
+            exhausted=counter["exhausted"],
+            messages=assistant["messages"],
+        )
+        # `finish_reason`/`truncated` are optional outputs of `call_model`:
+        # one that does not produce them leaves these inputs at their
+        # defaults.
+        ended = how_it_ended(
+            exhausted=counter["exhausted"],
+            finish_reason=model["finish_reason"],
+            truncated=model["truncated"],
+        )
         calls = each_call_of(tool_calls=model["tool_calls"])
         disp = dispatch_one(call=calls["call"].parallel(max=8))
         gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
@@ -276,16 +397,40 @@ def build_react_agent(
         # re-emitted message updates rather than duplicating.
         counter["turns"] >> PARENT["turns"]
         counter["notice"] >> PARENT["messages"]
-        counter["exhausted"] >> PARENT["stopped_early"]
+        ended["stopped_early"] >> PARENT["stopped_early"]
+        ended["truncated"] >> PARENT["truncated"]
+        ended["finish_reason"] >> PARENT["finish_reason"]
         assistant["messages"] >> PARENT["messages"]
+        closed["messages"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
 
         START >> counter >> asked >> planned >> compacted >> recalled >> matched
         matched >> assembled >> cached >> model >> assistant >> router
-        router >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
+        # `closed` runs after `assistant`, so its answers land after the
+        # message holding the calls they answer.
+        router >> closed >> ended
+        ended >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 
     return react
+
+
+def _takes_last_turn(call_model: Callable) -> bool:
+    """Whether ``call_model`` declares a ``last_turn`` parameter.
+
+    Named explicitly, not caught by ``**kwargs``: a factory that forwards
+    its keywords to ``LLMOp.of`` would otherwise hand the flag to the
+    model as a template variable.
+    """
+    try:
+        parameters = inspect.signature(call_model).parameters
+    except (TypeError, ValueError):
+        return False
+    param = parameters.get("last_turn")
+    return param is not None and param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
 
 
 @op
@@ -303,6 +448,8 @@ EMPTY_RESULT: dict[str, Any] = {
     "messages": [],
     "turns": 0,
     "stopped_early": False,
+    "truncated": False,
+    "finish_reason": "",
     "final": None,
 }
 
@@ -325,6 +472,14 @@ def agent_result(source: Any, agent) -> dict:
     ``result["messages"]`` is a list of per-turn lists rather than the
     conversation. The reducer-merged value is in the cell.
 
+    ``final`` is the last assistant message, or ``None`` when that message
+    asked for tools — the loop ended (budget spent) before the model
+    answered. ``stopped_early`` is True when the run ended before the
+    model finished: the turn budget ran out, or the last response was cut
+    off. ``truncated`` says which — the last response stopped at
+    ``length``/``max_tokens``/``content_filter`` — and ``finish_reason``
+    is that response's stop reason (``""`` if ``call_model`` reports none).
+
     Returns :data:`EMPTY_RESULT`'s shape when nothing was produced, so
     callers can read ``["messages"]`` unconditionally. An empty answer
     means an op raised — operonx records errors into state and returns a
@@ -345,12 +500,19 @@ def agent_result(source: Any, agent) -> dict:
     messages = cell("messages", [])
     if not isinstance(messages, list):
         messages = []
+    last = next(
+        (m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"),
+        None,
+    )
     return {
         "messages": messages,
         "turns": cell("turns", 0),
         "stopped_early": bool(cell("stopped_early", False)),
-        "final": next(
-            (m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"),
-            None,
-        ),
+        "truncated": bool(cell("truncated", False)),
+        "finish_reason": cell("finish_reason", "") or "",
+        # A turn that asked for tools is not an answer, even when it is the
+        # last one: the budget can end the loop on it. Reporting it as
+        # `final` handed callers an empty "answer" and told them the run
+        # succeeded.
+        "final": None if last is not None and last.get("tool_calls") else last,
     }

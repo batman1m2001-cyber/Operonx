@@ -50,15 +50,13 @@ from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
    `Operon(g, params={"x": None})`** — and inside the body it already is
    `PARENT["x"]`: use it by name, never `PARENT["x"]` beside it.
 4. **An op that raises does not raise.** Its outputs are just missing;
-   check for the key.
+   the run's result has `"$errors"` naming it.
 5. **Streaming is sequential per item by default.** `.parallel()` to fan
    out, `.collect()` to gather.
 6. **Loop state lives in `PARENT.declare(...)` cells**, and loops exit to
    `END`.
-7. **Branch arms merge by themselves.** End every branch with `.else_()`,
-   put a real op before it, and give merge inputs defaults.
-8. **Compare a Ref with a literal**, never with another Ref; combine
-   conditions with `&`, `|`, `~`.
+7. **Branch arms merge by themselves.** Give merge inputs defaults.
+8. **Combine conditions with `&`, `|`, `~`**, never `and`, `or`, `not`.
 9. **`~` is only for races:** fire on whichever of two unrelated ops lands
    first.
 10. **Models and stores are `resources.yaml` keys**; call

@@ -32,9 +32,26 @@ SPEC_ROOT = Path(__file__).parent
 TIMING_KEYS = {"$start_time", "$end_time", "$duration_ms", "start_time", "end_time", "duration_ms"}
 
 
+#: Fixtures whose golden output is what it is only because an op raised.
+#: `engine.run()` reports a raising op in `"$errors"` instead of raising,
+#: so until it did, these goldens asserted a silent failure. Each entry is
+#: a bug to fix, not an expectation — listed, it shows as an xfail naming
+#: the error rather than as a pass.
+KNOWN_OP_FAILURES: dict = {}
+
+
+def _fixture_id(fx: Path) -> str:
+    return str(fx.relative_to(SPEC_ROOT)).replace("\\", "/")
+
+
 def _iter_fixtures():
     for graph_path in SPEC_ROOT.rglob("graph.json"):
-        yield graph_path.parent
+        fx = graph_path.parent
+        reason = KNOWN_OP_FAILURES.get(_fixture_id(fx))
+        if reason is None:
+            yield fx
+        else:
+            yield pytest.param(fx, marks=pytest.mark.xfail(strict=True, reason=reason))
 
 
 def _strip_timing(obj: Any) -> Any:
@@ -55,11 +72,7 @@ def _load_builder(fx: Path):
     return module
 
 
-@pytest.mark.parametrize(
-    "fx",
-    list(_iter_fixtures()),
-    ids=lambda p: str(p.relative_to(SPEC_ROOT)).replace("\\", "/"),
-)
+@pytest.mark.parametrize("fx", list(_iter_fixtures()), ids=_fixture_id)
 async def test_fixture(fx: Path):
     builder = _load_builder(fx)
     if builder is None:
@@ -76,9 +89,18 @@ async def test_fixture(fx: Path):
     engine = Operon(graph)
     result = await engine.run(inputs=inputs, scratch=scratch)
 
-    # Python's engine.run() returns `{**outputs, "$state": MemoryState}`;
-    # the fixture only describes the user-facing outputs.
-    result_public = {k: v for k, v in result.items() if k != "$state"}
+    # A golden that matches a run in which an op raised describes the
+    # failure, not the graph. The goldens are shared with the Rust runtime
+    # and hold outputs only, so the check is here rather than in them.
+    errors = result.get("$errors") or {}
+    assert not errors, f"fixture '{_fixture_id(fx)}': an op raised:\n" + "\n".join(
+        f"  {op_name}: {text.strip().splitlines()[-1]}" for op_name, text in errors.items()
+    )
+
+    # Python's engine.run() returns `{**outputs, "$state": MemoryState}`
+    # (plus `"$errors"`, checked above); the fixture only describes the
+    # user-facing outputs.
+    result_public = {k: v for k, v in result.items() if k not in ("$state", "$errors")}
 
     got = _strip_timing(result_public)
     exp = _strip_timing(expected)

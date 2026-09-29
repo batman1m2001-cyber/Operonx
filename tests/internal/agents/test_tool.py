@@ -15,6 +15,7 @@ from operonx.agents.tool import (
     clear_registry,
     get_tool_definitions,
     tool,
+    unregister_tool,
 )
 
 pytestmark = pytest.mark.unit
@@ -148,3 +149,26 @@ class TestDefinitions:
 
     def test_empty_registry_yields_no_definitions(self):
         assert get_tool_definitions() == []
+
+
+class TestUnregister:
+    """`clear_registry()` withdraws every tool at once, local ones too.
+    Withdrawing one — an MCP server's proxies when it closes — needs its
+    own call."""
+
+    def test_removes_that_tool_and_no_other(self):
+        keep = _make("keep")
+        gone = _make("gone")
+        assert unregister_tool("gone") is gone
+        assert TOOL_REGISTRY == {"keep": keep}
+
+    def test_an_unknown_name_raises_rather_than_passing_silently(self):
+        _make("a")
+        with pytest.raises(KeyError, match="'nope'"):
+            unregister_tool("nope")
+
+    def test_the_name_is_free_again(self):
+        _make("a")
+        unregister_tool("a")
+        again = _make("a")
+        assert TOOL_REGISTRY["a"] is again

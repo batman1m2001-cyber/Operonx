@@ -5,6 +5,7 @@ Converts between OpenAI message format (used by Operon internally)
 and Anthropic's format (system separated, different SSE events).
 """
 
+import json
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence, Union
@@ -14,11 +15,17 @@ from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_chunk import (
     ChatCompletionChunk,
     ChoiceDelta,
+    ChoiceDeltaToolCall,
+    ChoiceDeltaToolCallFunction,
 )
 from openai.types.chat.chat_completion_chunk import (
     Choice as ChunkChoice,
 )
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+    Function,
+)
 from openai.types.completion_usage import CompletionUsage
 
 from operonx.core import LOGGER
@@ -27,8 +34,52 @@ from operonx.providers.llms.base import (
     anthropic_cache_min_tokens,
     create_http_client,
     estimate_tokens,
+    lift_cache_control,
 )
 from operonx.providers.llms.config import LLMConfig
+
+
+def _text_blocks(content: Any) -> list:
+    """Content as a list of blocks, with no empty text block (Anthropic rejects one)."""
+    if isinstance(content, list):
+        return [dict(b) if isinstance(b, dict) else b for b in content]
+    if content:
+        return [{"type": "text", "text": str(content)}]
+    return []
+
+
+def _tool_use_block(call: Dict[str, Any]) -> Dict[str, Any]:
+    """An OpenAI tool call (nested ``function`` or flat) → a ``tool_use`` block."""
+    fn = call.get("function") or {}
+    arguments = fn.get("arguments", call.get("arguments"))
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            # Anthropic wants an object; keep what the model wrote rather
+            # than lose it, so the history still says what was asked.
+            arguments = {"_raw": arguments}
+    return {
+        "type": "tool_use",
+        "id": call.get("id") or call.get("tool_call_id") or "",
+        "name": fn.get("name") or call.get("name") or "",
+        "input": arguments if isinstance(arguments, dict) else {},
+    }
+
+
+def _tool_result_block(message: Dict[str, Any]) -> Dict[str, Any]:
+    """A ``role: "tool"`` message → a ``tool_result`` block."""
+    content = message.get("content", "")
+    if not isinstance(content, (str, list)):
+        content = "" if content is None else str(content)
+    block: Dict[str, Any] = {
+        "type": "tool_result",
+        "tool_use_id": message.get("tool_call_id", ""),
+        "content": content,
+    }
+    if message.get("status") == "error" or message.get("is_error"):
+        block["is_error"] = True
+    return block
 
 
 class AnthropicModel(BaseLLM):
@@ -60,23 +111,109 @@ class AnthropicModel(BaseLLM):
         Anthropic requires system as a separate top-level field,
         not inside the messages array.
 
+        A message-level ``cache_control`` (how ``operonx.agents`` marks a
+        breakpoint) becomes a content-block one — the only place Anthropic
+        reads it. Rebuilding each message as ``{role, content}`` used to
+        drop it, so the marker never reached the API.
+
+        Several system messages are all kept, as one text block each: the
+        last one used to overwrite the rest, which lost instructions and
+        every breakpoint but the last.
+
+        Tool calling is translated both ways of the conversation: an
+        assistant's ``tool_calls`` become ``tool_use`` blocks after its
+        text, and ``role: "tool"`` messages become ``tool_result`` blocks
+        in a user message — consecutive ones in the *same* message, since
+        Anthropic wants every result for a turn in the one that follows
+        it. Keys Anthropic has no field for (``id``, ``name``, ``status``
+        on an agent's messages) are dropped by the rebuild; a ``status``
+        of ``"error"`` is kept as ``is_error``.
+
         Returns:
-            (system_text or None, anthropic_messages list)
+            (system or None, anthropic_messages list). ``system`` is the
+            plain content for a single unmarked system message, else a
+            list of text blocks.
         """
-        system = None
-        messages = []
+        systems: list = []
+        messages: list = []
         for msg in openai_messages:
-            role = (
-                msg.get("role", "user") if isinstance(msg, dict) else getattr(msg, "role", "user")
-            )
-            content = (
-                msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
-            )
+            msg = lift_cache_control(msg)
+            if not isinstance(msg, dict):
+                msg = {"role": getattr(msg, "role", "user"), "content": getattr(msg, "content", "")}
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
             if role == "system":
-                system = content
+                systems.append(content)
+            elif role == "tool":
+                block = _tool_result_block(msg)
+                previous = messages[-1] if messages else None
+                if previous and previous.get("_tool_results"):
+                    previous["content"].append(block)
+                else:
+                    messages.append({"role": "user", "content": [block], "_tool_results": True})
+            elif role == "assistant" and msg.get("tool_calls"):
+                blocks = _text_blocks(content)
+                blocks.extend(_tool_use_block(call) for call in msg["tool_calls"])
+                messages.append({"role": "assistant", "content": blocks})
             else:
                 messages.append({"role": role, "content": content})
-        return system, messages
+        for message in messages:
+            message.pop("_tool_results", None)
+
+        if not systems:
+            return None, messages
+        if len(systems) == 1:
+            return systems[0], messages
+        blocks: list = []
+        for content in systems:
+            if isinstance(content, list):
+                blocks.extend(content)
+            elif content:
+                blocks.append({"type": "text", "text": str(content)})
+        return blocks, messages
+
+    @staticmethod
+    def _convert_tools(tools: Optional[List[dict]]) -> List[dict]:
+        """OpenAI tool definitions → Anthropic's ``{name, description, input_schema}``.
+
+        Both the nested ``{"type": "function", "function": {...}}`` form and
+        a flat ``{name, description, parameters}`` one are read. A
+        definition already in Anthropic's shape passes through.
+        """
+        converted = []
+        for tool in tools or []:
+            if not isinstance(tool, dict):
+                continue
+            if "input_schema" in tool:
+                converted.append(tool)
+                continue
+            fn = tool.get("function") or tool
+            entry: Dict[str, Any] = {
+                "name": fn.get("name", ""),
+                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+            if fn.get("description"):
+                entry["description"] = fn["description"]
+            converted.append(entry)
+        return converted
+
+    @staticmethod
+    def _convert_tool_choice(choice: Any) -> Optional[Dict[str, Any]]:
+        """OpenAI ``tool_choice`` → Anthropic's.
+
+        ``"required"`` is Anthropic's ``any``; a named function is its
+        ``tool``. A dict already in Anthropic's shape passes through.
+        """
+        if choice is None:
+            return None
+        if isinstance(choice, str):
+            return {"type": {"required": "any"}.get(choice, choice)}
+        if isinstance(choice, dict):
+            if choice.get("type") == "function":
+                name = (choice.get("function") or {}).get("name") or choice.get("name")
+                return {"type": "tool", "name": name}
+            return choice
+        return None
 
     @staticmethod
     def _map_stop_reason(reason: str) -> str:
@@ -96,6 +233,18 @@ class AnthropicModel(BaseLLM):
         text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
+        tool_calls = [
+            ChatCompletionMessageToolCall(
+                id=block.get("id", ""),
+                type="function",
+                function=Function(
+                    name=block.get("name", ""),
+                    arguments=json.dumps(block.get("input") or {}, ensure_ascii=False),
+                ),
+            )
+            for block in content_blocks
+            if block.get("type") == "tool_use"
+        ]
         usage = resp.get("usage", {})
 
         # Anthropic reports input_tokens for NON-cached tokens only. The true
@@ -119,6 +268,7 @@ class AnthropicModel(BaseLLM):
                     message=ChatCompletionMessage(
                         role="assistant",
                         content=text,
+                        tool_calls=tool_calls or None,
                     ),
                     finish_reason=self._map_stop_reason(resp.get("stop_reason", "end_turn")),
                 )
@@ -140,10 +290,47 @@ class AnthropicModel(BaseLLM):
         event_data: Dict[str, Any],
         chunk_model: str,
         chunk_id: str,
+        tool_index: Optional[Dict[int, int]] = None,
     ) -> Optional[ChatCompletionChunk]:
-        """Anthropic SSE event → OpenAI ChatCompletionChunk."""
+        """Anthropic SSE event → OpenAI ChatCompletionChunk.
+
+        ``tool_index`` maps an Anthropic content-block index to the
+        OpenAI tool-call index it streams as — the text block before a
+        ``tool_use`` takes a block index, so the two do not line up. The
+        caller keeps it across one stream; without it tool blocks are
+        ignored.
+        """
+        if event_type == "content_block_start" and tool_index is not None:
+            block = event_data.get("content_block") or {}
+            if block.get("type") != "tool_use":
+                return None
+            index = tool_index.setdefault(event_data.get("index", 0), len(tool_index))
+            return self._tool_call_chunk(
+                chunk_id,
+                chunk_model,
+                ChoiceDeltaToolCall(
+                    index=index,
+                    id=block.get("id"),
+                    type="function",
+                    function=ChoiceDeltaToolCallFunction(name=block.get("name"), arguments=""),
+                ),
+            )
         if event_type == "content_block_delta":
             delta = event_data.get("delta", {})
+            if delta.get("type") == "input_json_delta" and tool_index is not None:
+                index = tool_index.get(event_data.get("index", 0))
+                if index is None:
+                    return None
+                return self._tool_call_chunk(
+                    chunk_id,
+                    chunk_model,
+                    ChoiceDeltaToolCall(
+                        index=index,
+                        function=ChoiceDeltaToolCallFunction(
+                            arguments=delta.get("partial_json", "")
+                        ),
+                    ),
+                )
             if delta.get("type") == "text_delta":
                 return ChatCompletionChunk(
                     id=chunk_id,
@@ -182,6 +369,20 @@ class AnthropicModel(BaseLLM):
                 else None,
             )
         return None
+
+    @staticmethod
+    def _tool_call_chunk(
+        chunk_id: str, chunk_model: str, call: ChoiceDeltaToolCall
+    ) -> ChatCompletionChunk:
+        return ChatCompletionChunk(
+            id=chunk_id,
+            created=int(time.time()),
+            model=chunk_model,
+            object="chat.completion.chunk",
+            choices=[
+                ChunkChoice(index=0, delta=ChoiceDelta(tool_calls=[call]), finish_reason=None)
+            ],
+        )
 
     # ── Build request body ──────────────────────────────────────────────
 
@@ -268,6 +469,12 @@ class AnthropicModel(BaseLLM):
         if kwargs.get("stop") is not None:
             stop = kwargs["stop"]
             body["stop_sequences"] = [stop] if isinstance(stop, str) else list(stop)
+        tools = self._convert_tools(kwargs.get("tools"))
+        if tools:
+            body["tools"] = tools
+        tool_choice = self._convert_tool_choice(kwargs.get("tool_choice"))
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
         return body
 
     # ── Warmup (prompt caching) ───────────────────────────────────────
@@ -334,6 +541,8 @@ class AnthropicModel(BaseLLM):
             top_p=top_p,
             max_tokens=max_tokens,
             stop=stop,
+            tools=tools,
+            tool_choice=kwargs.get("tool_choice"),
         )
         url = f"{self.base_url}/v1/messages"
         resp = await self.client.post(url, headers=self._headers(), json=body)
@@ -371,10 +580,13 @@ class AnthropicModel(BaseLLM):
             top_p=top_p,
             max_tokens=max_tokens,
             stop=stop,
+            tools=tools,
+            tool_choice=kwargs.get("tool_choice"),
         )
         url = f"{self.base_url}/v1/messages"
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         chunk_model = self.model
+        tool_index: Dict[int, int] = {}
 
         async with self.client.stream("POST", url, headers=self._headers(), json=body) as resp:
             if resp.status_code != 200:
@@ -393,8 +605,6 @@ class AnthropicModel(BaseLLM):
                     continue
 
                 if line.startswith("data: ") and event_type:
-                    import json
-
                     try:
                         event_data = json.loads(line[6:])
                     except json.JSONDecodeError:
@@ -407,6 +617,8 @@ class AnthropicModel(BaseLLM):
                         chunk_id = msg.get("id", chunk_id)
                         continue
 
-                    chunk = self._to_chunk(event_type, event_data, chunk_model, chunk_id)
+                    chunk = self._to_chunk(
+                        event_type, event_data, chunk_model, chunk_id, tool_index
+                    )
                     if chunk:
                         yield chunk

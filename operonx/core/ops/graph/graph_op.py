@@ -96,6 +96,7 @@ class GraphOp(BaseOp):
         "_loop_mode",
         "_back_edge_sources",
         "_back_edges",
+        "_exit_edges",
         "_rewritten_from",
     ]
 
@@ -141,6 +142,10 @@ class GraphOp(BaseOp):
         self._loop_mode = None  # None (classic), "synthetic" (rewritten hidden loop)
         self._back_edge_sources: set = set()  # audit only; termination consults _back_edges
         self._back_edges: list = []  # List[(u_name, v_name)] for termination per back-edge
+        # List[(u_name, dst)]: an edge from loop-body op u to dst outside the
+        # loop. The scheduler routes the loop op to dst, once, when the loop
+        # exits — and only if u took that edge in the final iteration.
+        self._exit_edges: list = []
         self._rewritten_from = None  # audit dict populated by rewrite_cycles_to_loops
 
     def __enter__(self):
@@ -760,6 +765,9 @@ class GraphOp(BaseOp):
                 self.name,
                 error_msg.rstrip(),
             )
+            # A child's failure is caught in the child's own `BaseOp.run`;
+            # this is the subgraph failing around its children. Same record.
+            state.record_op_error(self.full_name, error_msg)
 
         finally:
             end_time = datetime.now(timezone.utc)
@@ -833,12 +841,9 @@ class GraphOp(BaseOp):
                     op: [[link.dst, link.soft] for link in links] for op, links in self._adj.items()
                 },
                 "stream_initial_ready": self._stream_initial_ready,
-                "loop_config": {
-                    "until": self._loop_config.until
-                    if isinstance(self._loop_config.until, str)
-                    else None,
-                    "max_iterations": self._loop_config.max_iterations,
-                }
+                # Only synthetic loops carry a loop config, and they refuse
+                # to serialize above, so this is always None today.
+                "loop_config": {"max_iterations": self._loop_config.max_iterations}
                 if self._loop_config
                 else None,
                 "max_stream_concurrent": self.concurrency,

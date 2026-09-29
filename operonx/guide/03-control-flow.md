@@ -73,10 +73,13 @@ asyncio.run(main())
 
 - Sequential is the default. It keeps per-item state safe (a counter, a
   buffer), so reach for `.parallel()` only for independent items.
-- `.collect()` only batches when the consumer reads **straight from the
-  generator**. Behind another per-item op it hands over one-item lists.
-- `.parallel(max=N)` does not limit anything yet; bound concurrency with
-  the graph's `concurrency=N` (default 64).
+- `.collect()` waits for the whole stream wherever it sits. Behind a
+  per-item op (`join(words=s["loud"].collect())` after
+  `s = shout(word=w["word"])`) the consumer still runs once, with every
+  item in yield order; an item that failed on the way is left out.
+- `.parallel(max=N)` runs at most N items through that consumer at once
+  (`w["word"].parallel(max=4)`). The graph's `concurrency=N` (default 64)
+  still caps all async ops together.
 - A stream has no "end" signal besides `.collect()`.
 
 ## Loops
@@ -116,13 +119,15 @@ asyncio.run(main())
 ```
 
 - **Termination:** after each iteration the loop continues only if the
-  back-edge fired. It stops at 1000 iterations whatever happens.
+  back-edge fired. A back-edge source that raises does not fire, so the
+  loop stops there. It stops at 1000 iterations whatever happens.
 - **Always `PARENT.declare` loop state.** An undeclared value is re-read
   from the first iteration every time, so the loop never ends.
 - **Compute the stop condition in an op** (`"done": n >= limit`) and branch
-  on `op["done"] == True`. Never compare two Refs in `if_()`.
-- **Exit to `END`.** An op wired on the exit arm runs on every iteration;
-  do follow-up work in the graph that calls the loop.
+  on `op["done"] == True`.
+- **An exit arm runs once.** In `if_(s["done"] == True, finish).else_(s)`,
+  `finish` runs once, after the last iteration, and reads that iteration's
+  values; ops after it (or after a subgraph holding the loop) run once too.
 
 ### For loop
 
@@ -217,14 +222,17 @@ async def main():
 asyncio.run(main())
 ```
 
-- **Put a real op before the branch.** `START >> if_(...)` is a `TypeError`.
-- **Always finish with `.else_()`.** A branch closed with `.build()` runs
-  every target when nothing matches.
+- A branch can come first: `START >> if_(n > 10, b).else_(s)` branches on
+  the graph's inputs.
+- **Finish with `.else_(op)`, or `.build()` for no default.** With
+  `.build()`, when nothing matches no arm runs, and neither does an op fed
+  only by the arms.
 - **Give merge inputs a default** (`= None`): the arm that did not run
   sends nothing.
-- A condition is a Ref compared to a literal (`c["big"] == True`,
-  `c["n"] > 10`), combined with `&`, `|`, `~` (never `and`, `or`, `not`),
-  or an op that returns a single `bool`.
+- A condition is a Ref compared to a literal or to another Ref
+  (`c["big"] == True`, `c["n"] > 10`, `p["a"] >= p["b"]`), combined with
+  `&`, `|`, `~` (never `and`, `or`, `not`), or an op that returns a single
+  `bool`.
 - Write a branch inline (it is named `route_1`, `route_2`, … in its
   graph); assign it (`size = if_(...)`) only when another op refers to it.
 
@@ -282,8 +290,8 @@ asyncio.run(main())
 
 - `a >> ~b` softens only the edge into `b`.
 - Later arrivals are ignored once the op has fired.
-- **Never mix one hard edge with two or more soft edges into the same op**:
-  two soft arrivals can fire it before the hard one lands.
+- Hard and soft edges mix: the op waits for every hard edge **and** the
+  first soft edge; the other soft arrivals are ignored.
 - `~` on a Ref (`~ref`) is logical NOT, not a soft edge.
 
 ## Cells and SCRATCH

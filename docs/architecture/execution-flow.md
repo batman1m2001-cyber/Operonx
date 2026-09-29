@@ -180,6 +180,8 @@ Three things worth knowing:
 - **The cancellation is reported.** A `("__interrupt__", ctx, …)` record
   reaches `handle.interrupts` even when the sweep happened inside a nested
   subgraph.
+  It is a record, not an output: raw iteration of the handle yields it,
+  but `run()`, `collect()` and `result()` leave it out.
 
 `Interrupt.SELF` is a sentinel, not a tuple. If a code path ever fails to
 resolve it, the containment test raises `TypeError` rather than silently
@@ -198,5 +200,45 @@ are pluggable; see [`operonx.telemetry`](../api/telemetry.md).
 |---|---|---|
 | Construction | Bad PARENT/op ref | `BuildError` at `with` exit |
 | Engine init | Missing resource | Branch-(1)…(5) error from [`ResourceHub.get`](resource-hub.md#errors-five-disambiguated-branches) |
-| Run | Op raises | `OpError` subclass with the op name and span context |
-| Run | Schema mismatch | `ParserError` when an op's output doesn't match its declared shape |
+| Run | Op raises — any `Exception`, `OpError` subclasses such as `ParserError` included | **Not raised.** Reported in the result as `"$errors"` and on the handle as `handle.errors` — see below |
+| Run | Circuit breaker — `ObserveBudgetExceeded` (a `BaseException`) | Raised to the caller |
+| Run | Misdirected `Interrupt` — `InterruptTargetError` | Raised to the caller |
+| Run | The framework failing around an op, not the op body | Raised to the caller |
+
+"Raised to the caller" means the same exception from `run()`,
+`collect()`, `result()`, async iteration of the handle, and every
+`stream()` mode — `"updates"`, `"values"` and `"custom"` after the chunks
+that landed before it.
+
+### An op that raises
+
+The run does not raise. One failing op must not end a run that is serving
+someone — a live call keeps going when one turn's op fails — so the
+failure is reported instead of propagated.
+
+The op's own `BaseOp.run` catches the exception; it is the only handler
+that does. It logs it with the traceback, writes the text to the op's
+`error` cell, records a failed trace node, and records it on the run.
+No frame is emitted, so the op's outputs are missing and every op waiting
+on them never runs; the rest of the graph carries on.
+
+What the caller sees:
+
+```python
+out = await engine.run(inputs={"x": "not a number"})
+out["$errors"]   # {"engine.parse": "Traceback ... ValueError: invalid literal ..."}
+"n" in out       # False: the failed op's outputs are simply missing
+```
+
+- `"$errors"` is `{op_name_in_state: error_text}`: the key is
+  `"<graph>.<op>"` (a nested op by its full path), the value the same text
+  as its `error` cell. An op that fails more than once — on several stream
+  items — keeps its first error; the per-item texts stay in the cell.
+- It is present **only when an op failed**, so a clean run's keys are
+  unchanged. `collect()` and `result()` carry it the same way;
+  `handle.errors` is the same dict (`{}` when none), readable while the
+  run is still going.
+- Tracebacks stay server-side. The serve layer answers a failed HTTP run
+  with `500 {"error": "the graph produced no output"}` and never sends
+  `"$errors"`; a job marks the item `failed` and writes nothing to its
+  sink.

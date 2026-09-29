@@ -249,3 +249,97 @@ async def _dispatch_content(tool_name, *, redactor=None):
         timeout=30,
     )
     return result["tool_message"]["content"]
+
+
+SECRET = "sk-live0123456789abcdefXYZ"
+OPAQUE = "tok_9f8e7d6c5b4a3210"  # no vendor prefix — only the label gives it away
+
+
+class TestApprovalPayloadIsRedacted:
+    """The redactor reached only ``execute``, so a tool's **arguments**
+    shipped verbatim in the approval payload — to the human's prompt, the
+    interrupt bus, the tracer and the checkpointer — while the identical
+    string in a tool *result* was scrubbed."""
+
+    @pytest.fixture(autouse=True)
+    def _tools(self, ran):
+        self.received: list[dict] = []
+
+        @tool(
+            name="http_post",
+            description="POST somewhere.",
+            schema={"type": "object", "properties": {}},
+            destructive=True,
+        )
+        async def http_post(url: str = "", headers: dict = None, token: str = "") -> dict:
+            self.received.append({"headers": headers, "token": token})
+            return {"status": 200}
+
+    async def _run(self, args):
+        from operonx.checkpoint import InMemoryCheckpointer
+
+        built = build_dispatch(approval_timeout=5.0, redactor=Redactor())(call=None)
+        checkpointer = InMemoryCheckpointer()
+        handle = Operon(built).start(
+            inputs={"call": {"id": "1", "name": "http_post", "args": args}},
+            checkpointer=checkpointer,
+        )
+        prompts = []
+
+        def sink(evt):
+            prompts.append(evt.payload)
+            handle.state.resume_interrupt(evt.interrupt_id, {"approved": True})
+
+        bind_interrupt_bus(handle.state, sink=sink)
+        await asyncio.wait_for(handle.result(), timeout=30)
+        last = checkpointer.list_steps()[-1]
+        return prompts, checkpointer.get_state(last)
+
+    ARGS = {
+        "url": "https://api.example.com/v1",
+        "headers": {"Authorization": f"Bearer {SECRET}"},
+        "token": OPAQUE,
+    }
+
+    @pytest.mark.asyncio
+    async def test_the_human_is_not_shown_the_credential(self):
+        prompts, _ = await self._run(self.ARGS)
+        assert len(prompts) == 1
+        assert SECRET not in str(prompts[0])
+        assert OPAQUE not in str(prompts[0]), "a labelled value must be caught by its key"
+
+    @pytest.mark.asyncio
+    async def test_the_payload_still_says_what_is_being_approved(self):
+        prompts, _ = await self._run(self.ARGS)
+        payload = prompts[0]
+        assert payload["tool"] == "http_post"
+        assert payload["args"]["url"] == "https://api.example.com/v1"
+        assert "Bearer" in payload["args"]["headers"]["Authorization"]
+        assert "redacted" in payload["args"]["headers"]["Authorization"]
+
+    @pytest.mark.asyncio
+    async def test_the_tool_receives_the_real_arguments(self):
+        await self._run(self.ARGS)
+        assert self.received == [
+            {"headers": {"Authorization": f"Bearer {SECRET}"}, "token": OPAQUE}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_checkpointer_records_no_credential_in_the_payload(self):
+        """Everything downstream of the payload — the interrupt op's own
+        input included — carries the scrubbed copy."""
+        _, cells = await self._run(self.ARGS)
+        payload_cells = {
+            key: value for key, value in cells.items() if key[1] in ("approval_payload", "payload")
+        }
+        assert payload_cells, "the payload cells were not found; the test is looking elsewhere"
+        for key, value in payload_cells.items():
+            assert SECRET not in str(value), key
+            assert OPAQUE not in str(value), key
+
+    @pytest.mark.asyncio
+    async def test_the_args_are_not_mutated_in_place(self):
+        """Scrubbing the caller's dict would redact what the tool runs with."""
+        args = {"headers": {"Authorization": f"Bearer {SECRET}"}}
+        await self._run(args)
+        assert args == {"headers": {"Authorization": f"Bearer {SECRET}"}}

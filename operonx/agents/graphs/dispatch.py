@@ -73,8 +73,9 @@ _TIMED_OUT_APPROVAL = (
 )
 
 
-def _tool_message(call_id: str, name: str, content: str, *, is_error: bool = False) -> dict:
-    """The one shape every dispatch path returns."""
+def tool_message(call_id: str, name: str, content: str, *, is_error: bool = False) -> dict:
+    """The one shape every dispatch path returns — and the one the ReAct
+    loop uses to answer a call it ends without dispatching."""
     return {
         "role": "tool",
         "tool_call_id": call_id,
@@ -107,6 +108,14 @@ def _truncate(text: str, limit: int) -> str:
     return text
 
 
+def call_identity(call: dict) -> tuple[str, str]:
+    """``(call_id, tool_name)`` from either tool-call shape — the flat one
+    ``LLMOp`` emits and OpenAI's nested ``function`` form."""
+    call_id = call.get("id") or call.get("tool_call_id") or ""
+    name = call.get("name") or (call.get("function") or {}).get("name") or ""
+    return call_id, name
+
+
 @op
 def each_call(tool_calls: Optional[list] = None):
     """Generator — one frame per tool call.
@@ -121,7 +130,7 @@ def each_call(tool_calls: Optional[list] = None):
 
 
 @op
-def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
+def parse_call(call: Optional[dict] = None, policy: Any = None, redactor: Any = None) -> dict:
     """Validate a tool call against the registry and policy, and shape
     the payloads.
 
@@ -129,10 +138,15 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     refusal all become ``error``, which ``execute`` turns into a tool
     message — the model can correct itself from that, but not from a
     traceback.
+
+    ``redactor`` scrubs the arguments shown in ``approval_payload`` only.
+    The payload is what reaches the human, the interrupt bus, the tracer
+    and the checkpointer; ``args``, which ``execute`` runs the tool with,
+    stay real — a tool handed ``[redacted:bearer]`` as its credential
+    would fail in a way nobody could diagnose.
     """
     call = call or {}
-    call_id = call.get("id") or call.get("tool_call_id") or ""
-    name = call.get("name") or (call.get("function") or {}).get("name") or ""
+    call_id, name = call_identity(call)
 
     raw_args = call.get("args")
     if raw_args is None:
@@ -161,7 +175,8 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     # refusal is folded into `error` rather than routed through the gate:
     # asking a human to approve something policy already forbids trains
     # them to click through, and their answer would be ignored.
-    decision = (policy or DEFAULT_POLICY).decide(name, meta)
+    policy = policy or DEFAULT_POLICY
+    decision = policy.decide(name, meta)
 
     # Policy is evaluated **before** the unknown-tool check, so a rule
     # like ``rules={"shell": "deny"}`` still refuses when that tool is
@@ -169,7 +184,9 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     # the model the capability is merely absent and invite it to look
     # for another route to the same thing.
     if decision == "deny" and not error:
-        error = DENY_MESSAGE.format(name=name)
+        # A duck-typed policy need only implement `decide`.
+        refusal = getattr(policy, "refusal", None)
+        error = refusal(name) if callable(refusal) else DENY_MESSAGE.format(name=name)
     elif factory is None and not error:
         error = _UNKNOWN_TOOL.format(
             name=name, available=", ".join(sorted(TOOL_REGISTRY)) or "(none registered)"
@@ -183,7 +200,7 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     # construction, so the InterruptOp downstream takes one bare ref.
     approval_payload = {
         "tool": name,
-        "args": args,
+        "args": redactor.scrub_data(args) if redactor is not None else args,
         "call_id": call_id,
         "description": meta.get("description", ""),
     }
@@ -268,7 +285,7 @@ async def execute(
         if redactor is not None:
             text = redactor.scrub(text)
         return {
-            "tool_message": _tool_message(
+            "tool_message": tool_message(
                 call_id, tool_name, _truncate(text, max_result_chars), is_error=is_error
             )
         }
@@ -336,10 +353,11 @@ def build_dispatch(
             Defaults to :data:`~operonx.agents.policy.DEFAULT_POLICY` —
             destructive tools ask, everything else runs.
         redactor: Strips credential-shaped strings from tool output
-            before it reaches the model or the tracer. ``None`` disables
-            it — opt-in, because over-redaction produces an agent that
-            cannot read its own project and is harder to diagnose than a
-            leak.
+            before it reaches the model or the tracer, and from the
+            arguments shown in an approval request (the tool itself still
+            runs with the real ones). ``None`` disables it — opt-in,
+            because over-redaction produces an agent that cannot read its
+            own project and is harder to diagnose than a leak.
     """
 
     @graph
@@ -350,7 +368,7 @@ def build_dispatch(
         # overwrote every sibling — denying one destructive call and
         # approving another ran both. Only one arm fires per call, so the
         # other input is simply absent at read time.
-        parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY)
+        parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY, redactor=redactor)
 
         approve = InterruptOp(
             payload=parsed["approval_payload"],  # bare ref — see module docstring

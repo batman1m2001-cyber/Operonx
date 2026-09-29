@@ -143,8 +143,9 @@ asyncio.run(main())
 - A `Job` given a `@graph` builds it with every parameter as a runtime
   input (`params={name: None}`), so a default in the signature never
   applies there. Give the value in `Job(inputs=...)`.
-- `run()` returns the outputs of the ops wired `>> END`, plus `"$state"`.
-  A key that got several values (streaming, loops) holds a list.
+- `run()` returns the outputs of the ops wired `>> END`, plus `"$state"`,
+  plus `"$errors"` when an op raised. A key that got several values
+  (streaming, loops) holds a list.
 - The graph takes the name of the variable its engine is assigned to
   (`engine` above). Pin it with `name="..."` when a name matters.
 
@@ -207,7 +208,10 @@ asyncio.run(main())
   with `{placeholders}`; `messages=[...]` passes a ready message list.
 - `stream=True` makes it a streaming op that yields `content` deltas.
 - Name template variables after what they hold (`question`, `message`).
-  Never `user=` or `temperature=` and the like: those are model settings.
+  Never `{user}`, `{temperature}` and the like: those are model settings,
+  and such a placeholder raises `PromptError` when the op is built.
+- `validators=` takes literal values. A Ref there raises `TypeError`;
+  check values that arrive at run time in an op after the LLM.
 - `cost_usd` is `None` unless the resource sets `cost_per_input_token`
   and `cost_per_output_token`.
 
@@ -256,7 +260,7 @@ async def main():
     out = await Operon(agent).run(
         inputs={"messages": [{"role": "user", "content": "What is 2 + 3?"}]}
     )
-    result = agent_result(out, agent)  # {"messages", "turns", "stopped_early", "final"}
+    result = agent_result(out, agent)  # messages, turns, final, stopped_early, truncated, ...
     assert result["final"]
 
 
@@ -264,7 +268,12 @@ asyncio.run(main())
 ```
 
 - Read the answer with `agent_result(out, agent)`; never index
-  `out["messages"]` (it holds one list per turn).
+  `out["messages"]` (it holds one list per turn). `stopped_early` is True
+  when the budget ran out or the last response was cut off (`truncated`,
+  with `finish_reason`); `final` is `None` if the model never answered.
+- On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
+  so the model must answer in text. A hand-written `call_model` gets the
+  same signal by declaring `last_turn: bool = False`.
 - `destructive=True` tools pause for approval through an `InterruptOp`;
   `AgentSession(agent).send(text, on_approval=...)` handles the loop.
 - In tests, pass a scripted `call_model` op instead of a real model.

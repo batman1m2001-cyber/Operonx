@@ -15,6 +15,11 @@ Iteration contexts are *siblings* tagged ``#N`` rather than nested, which
 is what makes matching descendants safe: iteration 1's ctx
 ``("main", "g.__loop_0__#1")`` does not contain iteration 0's
 ``("main", "[0]")``.
+
+Termination is now decided from the frames the loop's own scheduler
+routes (a back-edge fires when its source emits a frame along it), which
+sees a source at any depth below the iteration without matching contexts.
+These tests keep the end-to-end shapes that broke the old rule.
 """
 
 from __future__ import annotations
@@ -23,66 +28,8 @@ import pytest
 
 from operonx.core import END, PARENT, START, Operon, graph, op
 from operonx.core.ops.flow.branch_op import if_
-from operonx.core.ops.graph.task_scheduler import _ctx_within, _ctxs_within
 
 pytestmark = pytest.mark.unit
-
-
-class _FakeCell:
-    """Minimal stand-in for Cell — only what `_ctxs_within` touches."""
-
-    def __init__(self, contexts):
-        self.contexts = {c: object() for c in contexts}
-
-    def __contains__(self, ctx):
-        return ctx in self.contexts
-
-
-class TestCtxWithin:
-    def test_equal_context_is_within(self):
-        assert _ctx_within(("main",), ("main",)) is True
-
-    def test_deeper_context_is_within(self):
-        assert _ctx_within(("main", "[0]", "__collect__"), ("main",)) is True
-
-    def test_sibling_iteration_is_not_within(self):
-        """The property the whole fix rests on: iteration ctxs are
-        siblings, so a stale iteration cannot satisfy the next one."""
-        assert _ctx_within(("main", "[0]"), ("main", "g.__loop_0__#1")) is False
-
-    def test_shallower_context_is_not_within(self):
-        assert _ctx_within(("main",), ("main", "g.__loop_0__#1")) is False
-
-    def test_prefix_match_is_by_segment_not_string(self):
-        assert _ctx_within(("mainline",), ("main",)) is False
-
-
-class TestCtxsWithin:
-    def test_exact_match_short_circuits(self):
-        """The pre-existing fast path must stay free: an exact hit returns
-        without scanning, so loops that work today pay nothing."""
-        cell = _FakeCell([("main",), ("main", "[0]"), ("main", "[1]")])
-        assert _ctxs_within(cell, ("main",)) == [("main",)]
-
-    def test_finds_descendants_when_no_exact_match(self):
-        cell = _FakeCell([("main", "[0]", "__collect__")])
-        assert _ctxs_within(cell, ("main",)) == [("main", "[0]", "__collect__")]
-
-    def test_newest_first(self):
-        """Reverse order keeps the scan O(1) in practice — the current
-        iteration's contexts were inserted last."""
-        cell = _FakeCell([("main", "a", "[0]"), ("main", "a", "[1]")])
-        assert _ctxs_within(cell, ("main", "a")) == [
-            ("main", "a", "[1]"),
-            ("main", "a", "[0]"),
-        ]
-
-    def test_ignores_stale_iterations(self):
-        cell = _FakeCell([("main", "[0]"), ("main", "g.__loop_0__#1", "[0]")])
-        assert _ctxs_within(cell, ("main", "g.__loop_0__#1")) == [("main", "g.__loop_0__#1", "[0]")]
-
-    def test_empty_when_op_did_not_run(self):
-        assert _ctxs_within(_FakeCell([]), ("main",)) == []
 
 
 # ── end-to-end: the shape that was capped at one iteration ──────────────
@@ -138,14 +85,10 @@ class TestLoopWithGeneratorInside:
         assert result["$state"][built.full_name, "count"] == 3, (
             "loop must iterate to its exit condition, not stop after one pass"
         )
-        # Measured, not assumed: inside a loop, `collect()` behind
-        # `parallel()` invokes the consumer once per item with a
-        # single-element list rather than once with the whole batch —
-        # 2 items x 2 dispatching iterations. Consumers must therefore
-        # tolerate a partial batch; operonx.agents.graphs.react's
-        # `gather_tool_messages` does, and its results still merge
-        # correctly because the reducer accumulates per write.
-        assert seen == [[0], [2], [0], [2]]
+        # `collect()` behind a per-item op waits for the whole stream: the
+        # consumer runs once per dispatching iteration with both items.
+        # (It used to run once per item with a one-element list.)
+        assert seen == [[0, 2], [0, 2]]
 
     @pytest.mark.asyncio
     async def test_parallel_consumer_as_backedge_source_iterates(self):

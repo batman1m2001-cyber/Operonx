@@ -90,6 +90,80 @@ def estimate_tokens(text: Union[str, List, Dict, None]) -> int:
     return 0
 
 
+def lift_cache_control(message: Any) -> Any:
+    """Move a message-level ``cache_control`` onto its last content block.
+
+    ``operonx.agents``' ``apply_cache_control`` marks a breakpoint as a
+    top-level message key, the one form that is backend-neutral. Anthropic
+    reads ``cache_control`` only on a content block, so a backend that
+    speaks to it converts here. A message with no text to hang the marker
+    on loses it: Anthropic rejects an empty text block outright.
+    """
+    if not isinstance(message, dict) or "cache_control" not in message:
+        return message
+    marker = message["cache_control"]
+    out = {k: v for k, v in message.items() if k != "cache_control"}
+    content = out.get("content")
+    if not marker:
+        return out
+    if isinstance(content, str) and content:
+        out["content"] = [{"type": "text", "text": content, "cache_control": marker}]
+    elif isinstance(content, list) and content and isinstance(content[-1], dict):
+        blocks = [dict(b) if isinstance(b, dict) else b for b in content]
+        blocks[-1].setdefault("cache_control", marker)
+        out["content"] = blocks
+    return out
+
+
+def strip_cache_control(message: Any) -> Any:
+    """Drop a message-level ``cache_control`` before an OpenAI-shaped request.
+
+    The Chat Completions message schema has no such field: OpenAI caches
+    prefixes on its own, and a strict gateway rejects the unknown property
+    (Databricks' AI Gateway answers 401, naming credentials). Content-part
+    markers are left alone — the Databricks Anthropic proxy forwards those.
+    """
+    if isinstance(message, dict) and "cache_control" in message:
+        return {k: v for k, v in message.items() if k != "cache_control"}
+    return message
+
+
+#: The keys the Chat Completions schema defines, per message role.
+OPENAI_MESSAGE_KEYS: Dict[str, frozenset] = {
+    "system": frozenset({"role", "content", "name"}),
+    "developer": frozenset({"role", "content", "name"}),
+    "user": frozenset({"role", "content", "name"}),
+    "assistant": frozenset(
+        {"role", "content", "name", "tool_calls", "refusal", "audio", "function_call"}
+    ),
+    "tool": frozenset({"role", "content", "tool_call_id"}),
+    "function": frozenset({"role", "content", "name"}),
+}
+
+
+def openai_message(message: Any) -> Any:
+    """Keep only the keys Chat Completions defines for the message's role.
+
+    ``operonx.agents`` keeps bookkeeping on its messages — an ``id`` on
+    every one (``add_messages`` upserts on it), ``name`` and ``status`` on
+    a tool result, a message-level ``cache_control`` breakpoint — and the
+    schema has no such fields there. OpenAI tolerates some of them; a
+    strict gateway rejects the unknown property outright, so the first
+    request carrying a tool result failed. A backend sending an
+    OpenAI-shaped request passes each message through here. This
+    subsumes :func:`strip_cache_control`; content-part markers are left
+    alone, as there. A role the schema does not define passes through
+    untouched: it is provider-specific, and so are its keys. The caller's
+    message is not mutated.
+    """
+    if not isinstance(message, dict):
+        return message
+    allowed = OPENAI_MESSAGE_KEYS.get(message.get("role"))
+    if allowed is None or message.keys() <= allowed:
+        return message
+    return {k: v for k, v in message.items() if k in allowed}
+
+
 def cache_metrics(completion: ChatCompletion) -> Dict[str, int]:
     """Extract normalized cache metrics from a ChatCompletion.
 
@@ -474,7 +548,7 @@ class BaseLLM(ABC):
         """
         params: Dict[str, Any] = {
             "model": model,
-            "messages": [self.resolve_image_paths(msg) for msg in messages],
+            "messages": [self.resolve_image_paths(openai_message(msg)) for msg in messages],
             "stream": stream,
             **{k: v for k, v in kwargs.items() if v is not None},
         }

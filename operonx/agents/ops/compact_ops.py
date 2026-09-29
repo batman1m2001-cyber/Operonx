@@ -29,12 +29,14 @@ turn too late.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from operonx.core.ops.transform.func_op import op
 
 __all__ = [
     "estimate_tokens",
+    "estimate_tool_tokens",
     "count_tokens",
     "plan_compaction",
     "apply_compaction",
@@ -74,6 +76,23 @@ def estimate_tokens(messages: Optional[List[dict]]) -> int:
     return total
 
 
+def estimate_tool_tokens(tools: Optional[List[dict]]) -> int:
+    """Approximate token cost of a ``tools=`` payload. Never raises.
+
+    Tool definitions travel with **every** request and are easy to leave
+    out of a budget because they are not messages — yet a 20-tool
+    registry is easily 2–4k tokens, re-sent each turn. Counted from the
+    serialized JSON, the same way the provider receives it.
+    """
+    if not tools:
+        return 0
+    try:
+        text = json.dumps(tools, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = str(tools)
+    return int(len(text) / _CHARS_PER_TOKEN) + 1
+
+
 @op
 def count_tokens(messages: Optional[list] = None, budget: int = 100_000) -> dict:
     """Estimate usage and report whether compaction should run."""
@@ -92,43 +111,42 @@ def _exchanges(messages: List[dict]) -> List[List[dict]]:
     An assistant turn requesting tools owns the tool messages answering
     it. Splitting them orphans a ``tool_call``, which the provider
     rejects — so grouping is what makes the rest of this file safe.
+
+    A result joins the group of the assistant that made its call, looked
+    up by call id, wherever it arrives. This used to be tracked as a set
+    of ids still pending, which was not cleared when a non-tool message
+    closed the group: a result arriving after that went into an empty
+    group of its own, which the keep window could then hold while its
+    assistant was summarised away. Looking the owner up has no state to
+    go stale. A result whose call is nowhere in the history is a group of
+    its own — there is nothing to attach it to.
     """
     groups: List[List[dict]] = []
-    pending_ids: set = set()
-    current: List[dict] = []
+    owner: Dict[str, int] = {}
 
     for message in messages:
-        role = message.get("role")
-        if role == "tool" and pending_ids:
-            current.append(message)
-            pending_ids.discard(message.get("tool_call_id"))
-            if not pending_ids:
-                groups.append(current)
-                current = []
-            continue
-
-        if current:
-            groups.append(current)
-            current = []
-
-        calls = message.get("tool_calls") or []
-        if role == "assistant" and calls:
-            pending_ids = {c.get("id") for c in calls if isinstance(c, dict)}
-            pending_ids.discard(None)
-            current = [message]
-            if not pending_ids:
-                # Malformed: tool_calls with no usable ids. Keep it whole
-                # rather than waiting for answers that cannot arrive.
-                groups.append(current)
-                current = []
+        if message.get("role") == "tool":
+            index = owner.get(message.get("tool_call_id"))
+            if index is not None:
+                groups[index].append(message)
+            else:
+                groups.append([message])
             continue
 
         groups.append([message])
-
-    if current:
-        # Unanswered tool calls — the conversation was cut mid-exchange.
-        groups.append(current)
+        if message.get("role") == "assistant":
+            for call in message.get("tool_calls") or []:
+                if isinstance(call, dict) and call.get("id"):
+                    owner[call["id"]] = len(groups) - 1
     return groups
+
+
+def _paired(group: List[dict]) -> bool:
+    """Whether every call in the group has its result and vice versa."""
+    calls, results = _pairs(group)
+    calls.discard(None)
+    results.discard(None)
+    return calls == results
 
 
 @op
@@ -137,6 +155,7 @@ def plan_compaction(
     budget: int = 100_000,
     keep_recent: int = 6,
     trigger_ratio: float = 0.75,
+    reserved_tokens: int = 0,
 ) -> dict:
     """Decide what survives, what is summarised, and what is dropped.
 
@@ -149,13 +168,17 @@ def plan_compaction(
         trigger_ratio: Fraction of budget at which compaction starts.
             Below 1.0 on purpose — waiting until the budget is exceeded
             means the turn that discovers it has already failed.
+        reserved_tokens: What the request spends outside ``messages`` —
+            the tool definitions, above all (:func:`estimate_tool_tokens`)
+            — counted against the same budget. Leaving it out compacted
+            against a budget the request was already partly over.
 
     Returns:
         ``needed``, plus ``keep`` (verbatim tail), ``summarize`` (the
         middle) and ``pinned`` (system messages, always kept).
     """
     messages = [m for m in (messages or []) if isinstance(m, dict)]
-    tokens = estimate_tokens(messages)
+    tokens = estimate_tokens(messages) + max(0, int(reserved_tokens or 0))
     if budget <= 0 or tokens <= budget * trigger_ratio:
         return {
             "needed": False,
@@ -184,6 +207,23 @@ def plan_compaction(
     # what it just did is worse than being over budget.
     while not older and len(keep_groups) > 1:
         older, keep_groups = keep_groups[:1], keep_groups[1:]
+
+    # A group whose calls and results do not pair up cannot be sent as it
+    # is. The one exception is the latest exchange, whose calls may simply
+    # not be answered *yet*; an earlier unanswered call never will be (the
+    # conversation moved on past it), and a result with no call anywhere
+    # never had one. Those go to the summarised span, where they become
+    # prose, so compaction always hands back a history a provider accepts
+    # — even from one that already held an unanswered call.
+    broken = [
+        group
+        for position, group in enumerate(keep_groups)
+        if not _paired(group)
+        and not (position == len(keep_groups) - 1 and group[0].get("role") == "assistant")
+    ]
+    if broken:
+        keep_groups = [group for group in keep_groups if all(group is not b for b in broken)]
+        older = older + broken
 
     # A previous summary is re-summarised rather than kept, or the
     # conversation accumulates one marker per compaction forever.
@@ -259,7 +299,7 @@ def compaction_summary_prompt(messages: List[dict]) -> str:
     )
 
 
-def _pairs(messages: List[dict]) -> Tuple[set, set]:  # pragma: no cover - helper for tests
+def _pairs(messages: List[dict]) -> Tuple[set, set]:
     calls = {
         c.get("id") for m in messages for c in (m.get("tool_calls") or []) if isinstance(c, dict)
     }

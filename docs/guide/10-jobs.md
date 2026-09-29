@@ -115,8 +115,9 @@ Per-item statuses:
 reports OK: ninety items processed, nothing written, runner says done.
 
 An op that raises does not raise out of the run. The engine records the
-error on the run's trace and the run drains, so the runner reads item
-failure from the trace, and `items.jsonl` carries each item's
+error on the run's trace and on the run itself (`handle.errors`) and the
+run drains, so the runner reads item failure from those — never from a
+result — and `items.jsonl` carries each item's
 `trace_id`. Every trace a job mints is tagged `job`, `job_run` and
 `key` — as fields and as tags — so Langfuse filters one job, one run or
 one item. A job itself is never a span.
@@ -137,6 +138,7 @@ cannot resume.
 Job(..., on_error="skip")        # carry on; the run is `failed` if any item failed
 Job(..., on_error="stop")        # start nothing new after a failure; the run is `stopped`
 Job(..., on_error="retry:3")     # try an item up to three more times, then carry on
+Job(..., on_error="record")      # carry on; a failed item is recorded and sunk, the run is `ok`
 Job(..., item_timeout=30)        # seconds; past it the run is cancelled → `timeout`
 ```
 

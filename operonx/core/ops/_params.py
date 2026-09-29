@@ -92,6 +92,31 @@ def _reject_nested_ref(key: str, value: Any) -> None:
     )
 
 
+def _reject_ref_operands(key: str, ref: Ref) -> None:
+    """Raise if ``ref`` combines itself with another Ref (``a["n"] + b["n"]``).
+
+    One param is one cell with one pull-ref, so only ``a["n"]`` is ever
+    read; ``b["n"]`` resolved to None and the op failed at run time on
+    ``1 + None`` — recorded as an op error, not raised. A branch condition
+    reads every Ref it holds (see ``BranchOp._parse_cases``); an op input
+    does not, so refuse the form here, where the param name is known.
+    """
+    refs = ref.get_all_refs()
+    if len(refs) < 2:
+        return
+
+    names = ", ".join(f"{r.source}.{r.var}" for r in refs)
+    raise TypeError(
+        f"Input '{key}' reads {len(refs)} values ({names}) through one param. "
+        f"An op input holds one Ref, so the others would never be read.\n"
+        f"\n"
+        f"Pass each as its own param and compute it in an op:\n"
+        f"    my_op({key}_a=<a>['n'], {key}_b=<b>['n'], ...)\n"
+        f"Only an if_() condition may combine two Refs "
+        f"(if_(a['n'] > b['n'], ...))."
+    )
+
+
 def is_op_like(value: Any) -> bool:
     """An op, a graph, or the PARENT marker — the things a param may
     reference. Anything else with a ``name`` attribute is a literal: a
@@ -126,6 +151,7 @@ def resolve_value(key: str, value: Any, parent) -> Any:
 
     # Handle Ref directly — keep transforms + streaming attrs intact
     if isinstance(value, Ref):
+        _reject_ref_operands(key, value)
         resolved = resolve_parent(value.raw_source)
         new_ref = Ref(resolved, value.var, value.transforms)
         # Preserve streaming modifiers (.parallel(), .collect())

@@ -112,6 +112,14 @@ class MemoryState:
         # output_queue. Set by the top-level scheduler at run start; None
         # otherwise. Not persisted, not serialized.
         "_stream_output_queue",
+        # How each synthetic-loop iteration ended, keyed by
+        # (loop full_name, iteration ctx). Written by the loop's own
+        # scheduler when the iteration's run finishes, popped by the
+        # scheduler that owns the loop op on its EOF. Not persisted.
+        "_loop_signals",
+        # {op_full_name: error_text} for every op that raised in this run.
+        # Filled by `record_op_error`; read as `handle.errors` / "$errors".
+        "_op_errors",
     )
 
     def __init__(
@@ -188,6 +196,10 @@ class MemoryState:
         # engine.stream() output_queue. Left None when the run wasn't started
         # via engine.stream(); nested schedulers then behave as before.
         self._stream_output_queue = None
+        self._loop_signals: Dict[tuple, tuple] = {}
+
+        # Ops that raised, first failure of each. See `record_op_error`.
+        self._op_errors: Dict[str, str] = {}
 
         # Apply initial inputs
         if inputs:
@@ -347,6 +359,22 @@ class MemoryState:
         self._current_step += 1
         return self._current_step
 
+    def record_op_error(self, op: str, error: str) -> None:
+        """Note that *op* (its full name) raised, with *error* as its text.
+
+        An op that raises does not raise out of the run — one failing op
+        must not end a live call — so this is how the failure is still
+        seen: ``handle.errors`` and the run's ``"$errors"`` read it back.
+        The op's ``error`` cell holds the same text, but a cell is per
+        context and a transient context's cells are released when it ends;
+        the record has to outlive the item that failed.
+
+        The first failure of each op is kept: it is usually the cause, and
+        a streaming op failing on every item must not grow this per item.
+        """
+        if op not in self._op_errors:
+            self._op_errors[op] = error
+
     def resume_interrupt(self, interrupt_id: str, value: Any) -> bool:
         """Resolve a pending InterruptOp with ``value``.
 
@@ -442,7 +470,7 @@ class MemoryState:
         # its own reducer; identical to the pre-fix behaviour when it
         # doesn't (which is the canonical local→shared case).
         push_ref = self.schema._push_refs[idx]
-        if push_ref and push_ref.idx >= 0:
+        if push_ref is not None and push_ref.idx >= 0:
             stored = self._cells[idx][ctx_key]
             self._write_cell(push_ref.idx, ctx_key, push_ref._fn(stored))
 
@@ -474,7 +502,7 @@ class MemoryState:
         # Cell.__getitem__ walks up the context hierarchy automatically,
         # so source_cell[("main", "[0]")] finds batch values at ("main",).
         pull_ref = self.schema._pull_refs[idx]
-        if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
+        if pull_ref is not None and not pull_ref.is_output and pull_ref.idx >= 0:
             source_cell = self._cells[pull_ref.idx]
             source_val = source_cell[ctx_key]
             if source_val is not None or source_cell.default_value is not None:

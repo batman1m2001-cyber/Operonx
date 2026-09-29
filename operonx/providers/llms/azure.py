@@ -5,7 +5,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from operonx.providers.llms.config import AzureConfig
 
-from .base import create_http_client
+from .base import create_http_client, openai_message
 from .openai import OpenAISDKModel
 
 
@@ -54,7 +54,7 @@ class AzureSDKModel(OpenAISDKModel):
         # Start with base parameters
         params = {
             "model": model,
-            "messages": [self.resolve_image_paths(msg) for msg in messages],
+            "messages": [self.resolve_image_paths(openai_message(msg)) for msg in messages],
             "stream": stream,
         }
         if temperature is not None:

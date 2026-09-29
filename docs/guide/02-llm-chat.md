@@ -69,7 +69,12 @@ asyncio.run(main())
 * **dict** with `system` / `user` keys — the standard two-message call.
 
 Every non-reserved kwarg is a template variable substituted into any
-`{var}` placeholder inside `prompt`. The output key is `content` by default.
+`{var}` placeholder inside `prompt`. The reserved ones — `temperature`,
+`max_tokens`, `user`, `seed` and the other model settings — go to the
+provider instead, so a `{user}` placeholder could never be filled and
+raises `PromptError` when the op is built. Name placeholders after what
+they hold (`{question}`, `{user_prompt}`). The output key is `content` by
+default.
 
 ## Passing a pre-built messages list
 
@@ -128,23 +133,42 @@ Each field becomes a top-level output. `error` is `None` on success and a
 human-readable string otherwise — that is what `max_retries` reads to
 decide whether to ask again.
 
-Three rules worth knowing before you rely on it:
+Rules worth knowing before you rely on it:
 
 - **A missing field is an error, not a `None`.** That is what lets
   `max_retries` fire. A field the model explicitly set to `null` *is* an
   answer and is not an error.
+- **A structure where you declared a single value is an error.** With
+  `"action: str"`, an answer of `<action><type>greet</type></action>` is
+  reported, not turned into the string `"{'type': 'greet'}"`. Ask for the
+  path inside it (`"action.type: str"`) or declare `"action: dict"`.
 - **Mark optional fields `"name?: type"`.** A *union schema* — one field
   list covering several response shapes, where most entries are absent on
   any given call — needs this on every entry that is not always present.
   Without it every call reports missing fields and burns its retries.
 - **A `@`-prefixed validator value is a default.** When the model answers
   outside the allow-list, that value is substituted instead of erroring.
+  Write `@@` for an allowed value that really starts with `@`
+  (`"@@me"` is `@me`).
+- **Validators are build-time values.** A Ref in `validators=` (a graph
+  parameter, `PARENT[...]`) is never resolved, so it raises `TypeError`
+  when the op is built. Check allowed values that arrive at run time in
+  an `@op` after the LLM.
+- **An absent optional field skips its validator.** It stays `None` — no
+  error, no default — so `None` still means "not in the answer". A value
+  the model did give is checked as usual.
+- **An output is named after the path's last segment — or `as`.**
+  `"user.id: str"` and `"order.id: str"` would both be `id`, so that is
+  refused when the op is built; name them `"user.id as user_id: str"`,
+  `"order.id as order_id: str"`. A field named like one of the op's own
+  outputs (`content`, `error`, `usage`, ...) is refused the same way.
 
 ```python
 fields=[
-    "intent: str",          # always present
-    "chosen_date?: str",    # only on booking turns
-    "reason?: str",         # only on cancellations
+    "intent: str",                   # always present
+    "chosen_date?: str",             # only on booking turns
+    "reason?: str",                  # only on cancellations
+    "user.id as user_id?: str",      # aliased and optional
 ]
 ```
 
@@ -162,7 +186,10 @@ c = LLMOp.of(
 )
 ```
 
-See [Streaming](06-streaming.md) for the consumption side.
+See [Streaming](06-streaming.md) for the consumption side. A `fallback=`
+list covers a stream only until its first delta; after that a failure is
+the op's error, never a replay the consumer has partly seen
+([details](06-streaming.md#fallback-while-streaming)).
 
 ## Where to go next
 

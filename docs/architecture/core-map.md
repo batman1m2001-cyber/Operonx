@@ -74,7 +74,7 @@ different clocks**, and most confusion comes from mixing them.
 | How often | once per graph | once per call |
 | Owns | `GraphOp`, `cycle_rewrite`, `validation`, `StateSchema` | `Scheduler`, `MemoryState`, `Cell` |
 | Produces | frozen adjacency + ready counts | frames, cells, outputs |
-| Fails with | `BuildError`, `GraphValidationError` | `OpError`, `ParserError` |
+| Fails with | `BuildError`, `GraphValidationError` | an op's exception: `"$errors"` in the result, not raised; `ObserveBudgetExceeded`: raised |
 
 A `Ref` straddles both: it is *created* at build time as a promise, and
 *resolved* at run time against `MemoryState`.
