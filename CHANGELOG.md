@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-09-29
+
+### Added
+
+- **`LLMOp(on_failure="error")`** — for a step whose output is optional.
+  A hard failure (a timeout, a transport error, a refusal), once retries and
+  `fallback` are spent, returns what a parse failure already returns: every
+  field `None` and `error` set, so a downstream op can carry on without it.
+  The default, `"raise"`, is unchanged. Requires `fields` — the failure is
+  reported in the `error` output, which only structured mode has.
+
 ## [1.10.2] - 2026-09-29
 
 ### Fixed
