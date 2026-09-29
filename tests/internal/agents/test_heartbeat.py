@@ -308,6 +308,79 @@ class TestLifecycle:
             await hb.stop()
 
 
+class TestStopping:
+    """`stop()` lets an in-flight beat finish. That grace window is where
+    it went wrong: the caller's own deadline was swallowed, and the
+    heartbeat claimed to be stopped while a turn was still running."""
+
+    @pytest.mark.asyncio
+    async def test_an_outer_deadline_on_stop_is_raised_not_swallowed(self):
+        """A shutdown that gives up on `stop()` must be told it gave up —
+        returning normally reads as "stopped" to the caller."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)  # a beat is in flight
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(hb.stop(timeout=30), timeout=TICK)
+        assert hb.running, "the loop is still finishing the beat stop() let run"
+
+        session.gates[0].set()
+        await asyncio.wait_for(hb.stop(), timeout=5)
+        assert not hb.running
+        assert len(session.sent) == 1, "no beat may start once stop() was asked"
+
+    @pytest.mark.asyncio
+    async def test_running_holds_through_the_grace_window_and_start_is_refused(self):
+        """`running` read False while the in-flight turn was still going,
+        so `start()` was accepted and two loops shared one heartbeat."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        stopper = asyncio.create_task(hb.stop())
+        await asyncio.sleep(0)  # stop() has begun, and is waiting on the beat
+        assert not stopper.done()
+        assert hb.running
+        with pytest.raises(RuntimeError, match="stopping"):
+            await hb.start()
+
+        session.gates[0].set()
+        await asyncio.wait_for(stopper, timeout=5)
+        assert not hb.running
+        await hb.start()  # once the stop has finished, a restart is fine
+        await hb.stop()
+
+    @pytest.mark.asyncio
+    async def test_a_second_stop_waits_as_long_as_the_first(self):
+        """The second call found nothing to wait for and returned while the
+        first was still waiting for the beat."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        first = asyncio.create_task(hb.stop())
+        second = asyncio.create_task(hb.stop())
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not second.done(), "the beat is still in flight"
+
+        session.gates[0].set()
+        await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        assert not hb.running
+
+    @pytest.mark.asyncio
+    async def test_a_stop_that_runs_out_of_grace_cancels_the_beat(self):
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        with pytest.raises(asyncio.TimeoutError):
+            await hb.stop(timeout=TICK)
+        assert not hb.running
+        await hb.stop()  # and stopping again is a no-op, not a CancelledError
+
+
 class TestJitter:
     @pytest.mark.asyncio
     async def test_jitter_still_beats(self):

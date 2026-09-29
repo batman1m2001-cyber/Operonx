@@ -134,11 +134,25 @@ class Heartbeat:
 
     @property
     def running(self) -> bool:
+        """True from :meth:`start` until the loop has actually finished —
+        including the grace window in which :meth:`stop` lets a beat end."""
         return self._task is not None and not self._task.done()
 
     async def start(self) -> "Heartbeat":
-        """Begin beating. Returns immediately; beats run in the background."""
+        """Begin beating. Returns immediately; beats run in the background.
+
+        Raises:
+            RuntimeError: the heartbeat is running, or still stopping. A
+                start during a stop is refused rather than waited for: the
+                wait is the in-flight turn, which can take minutes, and a
+                start that races a stop is a sequencing bug in the caller
+                that waiting would hide. Await :meth:`stop` first.
+        """
         if self.running:
+            if self._stopping.is_set():
+                raise RuntimeError(
+                    "this heartbeat is still stopping — await stop() before starting it again"
+                )
             raise RuntimeError("this heartbeat is already running")
         self._stopping.clear()
         self._pending = False
@@ -151,12 +165,31 @@ class Heartbeat:
 
         Cancelling mid-``send()`` would leave the conversation ending on
         an unanswered user turn, which the next beat would then build on.
+
+        Every caller waits for the same thing — the loop to finish — so a
+        second concurrent ``stop()`` returns no sooner than the first.
+
+        Raises:
+            asyncio.TimeoutError: the beat outran ``timeout`` and was
+                cancelled.
+            asyncio.CancelledError: the caller was cancelled while waiting
+                (an outer deadline). The heartbeat still stops — no new
+                beat starts — and ``running`` stays True until the
+                in-flight one has finished.
         """
         self._stopping.set()
-        task, self._task = self._task, None
-        if task is None:
+        # `_task` is left in place: `running` must stay True until the loop
+        # has finished. Clearing it here made the heartbeat read as stopped
+        # for the whole grace window, so `start()` was accepted and a second
+        # loop shared this one's state while the first was still in a turn.
+        task = self._task
+        if task is None or task.done():
             return
         try:
+            # Shielded, so a caller that gives up waiting does not cancel
+            # the loop mid-beat; with `_stopping` set it winds down alone.
+            # No `except CancelledError`: that deadline is the caller's, and
+            # swallowing it made `wait_for(hb.stop(), 0.2)` return normally.
             await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         except asyncio.TimeoutError:
             # The beat outran the grace period. Now cancelling is the
@@ -164,8 +197,6 @@ class Heartbeat:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise
-        except asyncio.CancelledError:  # pragma: no cover - defensive
-            pass
 
     async def __aenter__(self) -> "Heartbeat":
         return await self.start()
