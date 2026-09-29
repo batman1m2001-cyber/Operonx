@@ -108,30 +108,6 @@ def _edge_policy(graph, src: str, dst: str) -> tuple:
     return False, 1
 
 
-def _ctxs_within(cell, iter_ctx: tuple) -> list:
-    """Contexts in ``cell`` belonging to the iteration rooted at ``iter_ctx``.
-
-    An op inside a synthetic loop does not always run at the loop's own
-    context. Downstream of a generator fan-out it runs at ``(…, "[i]")``,
-    and behind ``Ref.collect()`` at ``(…, "[i]", "__collect__")``. Loop
-    termination asks "did this op run this iteration", so the answer has
-    to include those deeper contexts.
-
-    Safe against stale iterations because iteration contexts are
-    *siblings* tagged ``#N`` rather than nested: at iteration 1
-    (``("main", "g.__loop_0__#1")``) an iteration-0 context such as
-    ``("main", "[0]")`` is not below it.
-
-    Ordering: contexts are returned newest-first. The exact-match fast
-    path keeps existing loops at their current cost, and the scan below
-    hits the current iteration's entries immediately rather than walking
-    every context accumulated so far.
-    """
-    if iter_ctx in cell:
-        return [iter_ctx]
-    return [c for c in reversed(cell.contexts) if _ctx_within(c, iter_ctx)]
-
-
 class Scheduler:
     """Created once at graph.build(). Shared across all executions.
     All per-execution mutable state lives as locals inside run().
@@ -149,7 +125,7 @@ class Scheduler:
             └─ EOF   → _on_eof()    flush collect, advance seq queue, check loop
     """
 
-    __slots__ = ("graph", "_route_policy")
+    __slots__ = ("graph", "_route_policy", "_loop_ops", "_loop_watch")
 
     def __init__(self, graph):
         self.graph = graph  # static compiled data — never mutated after build()
@@ -162,6 +138,35 @@ class Scheduler:
         for src, links in graph._adj.items():
             for link in links:
                 self._route_policy[(src, link.dst)] = _edge_policy(graph, src, link.dst)
+
+        # Child ops that are synthetic loops -> the successors their exit
+        # routing may reach. A loop op's frames are per iteration, so they
+        # are not routed; `_on_eof` routes the op once, when it exits, along
+        # the exit edges its body took (plus any outgoing edge no exit
+        # accounts for, e.g. a moved lookback edge, which is unconditional).
+        self._loop_ops: Dict[str, frozenset] = {}
+        for name, child in graph._ops.items():
+            if getattr(child, "_loop_mode", None) == "synthetic":
+                exits = {dst for _u, dst in child._exit_edges}
+                succ = {link.dst for link in graph._adj.get(name, ())}
+                self._loop_ops[name] = frozenset(succ - exits)
+
+        # When THIS graph is a synthetic loop: the ops whose frames decide
+        # how an iteration ended. op -> (back-edge targets, exit targets,
+        # is_branch). A frame from a plain op takes all its edges; a
+        # branch's frame takes only the edge to the target it chose. An op
+        # that raises emits no frame, so it takes none — exactly like a DAG.
+        self._loop_watch: Dict[str, tuple] = {}
+        if getattr(graph, "_loop_mode", None) == "synthetic":
+            watch: Dict[str, tuple] = {}
+            for u, v in graph._back_edges:
+                watch.setdefault(u, (set(), set()))[0].add(v)
+            for u, dst in graph._exit_edges:
+                watch.setdefault(u, (set(), set()))[1].add(dst)
+            for u, (back, exits) in watch.items():
+                if u in graph._ops:
+                    is_branch = getattr(graph._ops[u], "type", None) == "branch"
+                    self._loop_watch[u] = (frozenset(back), frozenset(exits), is_branch)
 
     async def run(
         self,
@@ -237,6 +242,12 @@ class Scheduler:
         """
         g = self.graph
         route_policy = self._route_policy
+        loop_ops = self._loop_ops
+        loop_watch = self._loop_watch
+        # This run's outcome when g is a synthetic loop (one run = one
+        # iteration): did a back-edge fire, and which exit targets were taken.
+        loop_fired = False
+        loop_taken: set = set()
         _start_time = datetime.now(timezone.utc)
         _perf_start = perf_counter()
 
@@ -529,13 +540,7 @@ class Scheduler:
                 queue_.put_nowait(("__interrupt__", ctx, {"__interrupt__": event}))
 
         def _on_frame(event: Frame) -> None:
-            """Handle one Frame: seed item ctx, decrement ready, route when ready."""
-            # Seed ready counts for a new item context (first frame from a generator).
-            if event.ctx not in ready:
-                item_ctxs.append(event.ctx)
-                ri = g._stream_initial_ready.get(event.op, g._initial_ready)
-                ready[event.ctx] = dict(ri)
-
+            """Handle one Frame: forward PARENT-bound vars, then advance successors."""
             # Forward PARENT-bound vars to output_queue (root graph only).
             if output_queue is not None:
                 out_vars = g._out_vars.get(event.op)
@@ -544,15 +549,49 @@ class Scheduler:
                     if filtered:
                         output_queue.put_nowait((event.op, event.ctx, filtered))
 
+            if event.op in loop_ops:
+                # One frame per iteration, each at its own context. Routing
+                # them ran the loop's successors on every iteration, whichever
+                # way the loop went, each in a fresh context of its own.
+                # `_on_eof` routes the loop op once, when it exits.
+                return
+            _advance(event.op, event.ctx, event.result)
+
+        def _advance(src: str, ctx: tuple, result: dict, only=None) -> None:
+            """Count src's arrival at ctx on each successor; route those now ready.
+
+            ``only`` restricts the edges followed (a loop's exit routing).
+            """
+            nonlocal loop_fired
+            rc = ready.get(ctx)
+            if rc is None:
+                # Seed ready counts for a new item context (first frame from a generator).
+                item_ctxs.append(ctx)
+                rc = ready[ctx] = dict(g._stream_initial_ready.get(src, g._initial_ready))
+
             # Check for branch target — only route to the selected branch.
-            branch_target = event.result.get("__branch_target__")
+            branch_target = result.get("__branch_target__")
+
+            if loop_watch:
+                watched = loop_watch.get(src)
+                if watched is not None:
+                    back, exits, is_branch = watched
+                    if not is_branch:
+                        loop_fired = loop_fired or bool(back)
+                        loop_taken.update(exits)
+                    elif branch_target in back:
+                        loop_fired = True
+                    elif branch_target in exits:
+                        loop_taken.add(branch_target)
 
             # Propagate through adjacency list.
-            for edge in g._adj.get(event.op, []):
-                if branch_target and edge.dst != branch_target:
+            for edge in g._adj.get(src, ()):
+                dst = edge.dst
+                if branch_target and dst != branch_target:
                     continue
-                rc = ready[event.ctx]
-                if edge.dst not in rc:
+                if only is not None and dst not in only:
+                    continue
+                if dst not in rc:
                     continue
                 if edge.soft:
                     # The soft edges into an op count as ONE arrival between
@@ -561,14 +600,14 @@ class Scheduler:
                     # let two soft arrivals stand in for a hard edge that
                     # had not landed yet, and the op ran with its input
                     # missing.
-                    soft_mark = (edge.dst,)
+                    soft_mark = (dst,)
                     if soft_mark in rc:
                         continue
                     rc[soft_mark] = 1
                 # All predecessors satisfied — dispatch downstream op.
-                rc[edge.dst] -= 1
-                if rc[edge.dst] == 0:
-                    _route(event.op, edge.dst, event.ctx, event.result)
+                rc[dst] -= 1
+                if rc[dst] == 0:
+                    _route(src, dst, ctx, result)
 
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
@@ -627,83 +666,80 @@ class Scheduler:
                     seq_running[key] -= 1
 
             # 3. Loop check — a synthetic loop op (the cycle rewrite's hidden
-            #    loop; `_loop_config` is set on nothing else) just finished an
-            #    iteration.
-            op = g._ops.get(event.op)
-            if op is not None and getattr(op, "_loop_config", None):
-                cfg = op._loop_config
+            #    loop) just finished an iteration.
+            if event.op in loop_ops:
+                _end_iteration(event.op, event.ctx)
 
-                # Derive iteration index from the ctx tail so nested loops
-                # don't get confused. First iter's ctx has no per-loop
-                # suffix → n=0; later ones end in ``{op.full_name}#{n}``.
-                # The full name keeps nested loops from colliding on the
-                # namespace (HAZARD from Phase 3 review: outer and inner
-                # ``__loop_0__`` both bumping to "loop_1" wrote to the same
-                # ctx cell, corrupting per-iter checkpoint snapshots). ``#``
-                # is not permitted in op names, so parsing is unambiguous.
-                iter_prefix = f"{op.full_name}#"
-                tail = event.ctx[-1] if event.ctx else None
-                if isinstance(tail, str) and tail.startswith(iter_prefix):
-                    try:
-                        n = int(tail[len(iter_prefix) :])
-                    except ValueError:
-                        n = 0
-                else:
+        def _end_iteration(name: str, ctx: tuple) -> None:
+            """Start the loop's next iteration, or route its successors once."""
+            op = g._ops[name]
+
+            # Derive iteration index from the ctx tail so nested loops don't
+            # get confused. First iter's ctx has no per-loop suffix → n=0;
+            # later ones end in ``{op.full_name}#{n}``. The full name keeps
+            # nested loops from colliding on the namespace (HAZARD from
+            # Phase 3 review: outer and inner ``__loop_0__`` both bumping to
+            # "loop_1" wrote to the same ctx cell, corrupting per-iter
+            # checkpoint snapshots). ``#`` is not permitted in op names, so
+            # parsing is unambiguous.
+            iter_prefix = f"{op.full_name}#"
+            tail = ctx[-1] if ctx else None
+            n = 0
+            if isinstance(tail, str) and tail.startswith(iter_prefix):
+                try:
+                    n = int(tail[len(iter_prefix) :])
+                except ValueError:
                     n = 0
+            base = ctx[:-1] if n else ctx
 
-                # Iterate iff any of the removed back-edges (u→v) would have
-                # fired this iter. "Would have fired" depends on the source's
-                # type:
-                #  - If u is a BranchOp, it wrote end_time regardless of
-                #    which candidate it picked, so end_time-alone would
-                #    always report True even when the branch chose END.
-                #    Consult u's __branch_target__ output: the back-edge
-                #    fires only if the chosen target equals v.
-                #  - Otherwise, having run this iter is enough.
-                #
-                # "This iter" is the iteration ctx *or any ctx below it*.
-                # The original rule required an exact match, which silently
-                # capped any loop whose back-edge source sits downstream of
-                # a generator fan-out at one iteration: such an op records
-                # end_time at ("main","[0]","__collect__"), never at
-                # ("main",). Iterations are siblings tagged ``#N``, not
-                # nested, so a previous iteration's contexts are never
-                # descendants of the current one and cannot leak in.
-                fired = False
-                for u_name, v_name in op._back_edges:
-                    u_op = op._ops.get(u_name)
-                    if u_op is None:
-                        continue
-                    # Cheap presence check first — no branch consult if
-                    # the op didn't run at all this iter.
-                    et_idx = state.schema.get_index(u_op.full_name, "end_time")
-                    if et_idx < 0:
-                        continue
-                    ran_ctxs = _ctxs_within(state._cells[et_idx], event.ctx)
-                    if not ran_ctxs:
-                        continue
-                    if getattr(u_op, "type", None) == "branch":
-                        bt_idx = state.schema.get_index(u_op.full_name, "__branch_target__")
-                        if bt_idx < 0:
-                            # No branch-target output — treat as fired
-                            # (defensive; this shouldn't happen for a
-                            # real BranchOp).
-                            fired = True
-                            break
-                        # A branch inside a fan-out runs once per item, so
-                        # the edge fires if *any* instance chose v.
-                        bt_cell = state._cells[bt_idx]
-                        if any((bt_cell[c] if c in bt_cell else None) == v_name for c in ran_ctxs):
-                            fired = True
-                            break
-                    else:
-                        fired = True
-                        break
+            # How the iteration ended, as seen by the loop's own scheduler
+            # (see `_advance`): a back-edge fired iff its source emitted a
+            # frame routed along it. That is also what stops the loop when
+            # the source raises — a failing op emits nothing. The old test,
+            # "the source has an end_time", counted the failed run as a
+            # fired edge and spun to the cap. No signal means the iteration
+            # never finished its run (it raised before scheduling).
+            signal = state._loop_signals.pop((op.full_name, ctx), None)
+            fired, taken = signal if signal is not None else (False, frozenset())
 
-                if fired and n < cfg.max_iterations - 1:
-                    next_seg = f"{iter_prefix}{n + 1}"
-                    next_ctx = event.ctx + (next_seg,) if n == 0 else event.ctx[:-1] + (next_seg,)
-                    dispatch(event.op, next_ctx)
+            if fired and n < op._loop_config.max_iterations - 1:
+                dispatch(name, base + (f"{iter_prefix}{n + 1}",))
+                return
+
+            if signal is None:
+                return
+            if n:
+                _promote_final_values(op, ctx, base)
+            # Successors run at the loop's own context — where the ops that
+            # joined it before the loop ran, and where a branch finishing
+            # after the loop will arrive — not at the last iteration's.
+            only = taken | loop_ops[name]
+            if only:
+                _advance(name, base, {}, only=only)
+
+        def _promote_final_values(op, final_ctx: tuple, base: tuple) -> None:
+            """Make the last iteration's outputs the values at the loop's context.
+
+            The loop's successors run at ``base``, which holds iteration 0's
+            values; reading there gave an exit-arm op the first iteration's
+            result. Copies each body op's outputs, and the PARENT cells they
+            push to, from the final iteration's ctx. Shared (declared) cells
+            are one value for every ctx already and are left alone; so are
+            outputs the body did not write in the final iteration.
+            """
+            cells = state._cells
+            schema = state.schema
+            for child in op._ops.values():
+                for var in child.outputs or ():
+                    idx = schema.get_index(child.full_name, var)
+                    if idx < 0:
+                        continue
+                    for i in (idx, getattr(schema._push_refs[idx], "idx", -1)):
+                        if i < 0:
+                            continue
+                        cell = cells[i]
+                        if not cell.is_shared and final_ctx in cell.contexts:
+                            state._write_cell(i, base, cell.contexts[final_ctx])
 
         def _is_descendant_or_equal(child: tuple, parent: tuple) -> bool:
             """True if `child` is `parent` itself or a deeper context."""
@@ -910,6 +946,9 @@ class Scheduler:
                     # one does not suppress the original, which resumes
                     # propagating once this ``finally`` completes.
                     pass
+
+        if getattr(g, "_loop_mode", None) == "synthetic":
+            state._loop_signals[(g.full_name, context_id)] = (loop_fired, frozenset(loop_taken))
 
         # Store graph-level metrics so TraceCollector can find this graph node.
         _end_time = datetime.now(timezone.utc)

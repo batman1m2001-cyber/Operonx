@@ -112,6 +112,11 @@ class MemoryState:
         # output_queue. Set by the top-level scheduler at run start; None
         # otherwise. Not persisted, not serialized.
         "_stream_output_queue",
+        # How each synthetic-loop iteration ended, keyed by
+        # (loop full_name, iteration ctx). Written by the loop's own
+        # scheduler when the iteration's run finishes, popped by the
+        # scheduler that owns the loop op on its EOF. Not persisted.
+        "_loop_signals",
     )
 
     def __init__(
@@ -188,6 +193,7 @@ class MemoryState:
         # engine.stream() output_queue. Left None when the run wasn't started
         # via engine.stream(); nested schedulers then behave as before.
         self._stream_output_queue = None
+        self._loop_signals: Dict[tuple, tuple] = {}
 
         # Apply initial inputs
         if inputs:

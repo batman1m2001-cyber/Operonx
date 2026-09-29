@@ -117,13 +117,15 @@ asyncio.run(main())
 ```
 
 - **Termination:** after each iteration the loop continues only if the
-  back-edge fired. It stops at 1000 iterations whatever happens.
+  back-edge fired. A back-edge source that raises does not fire, so the
+  loop stops there. It stops at 1000 iterations whatever happens.
 - **Always `PARENT.declare` loop state.** An undeclared value is re-read
   from the first iteration every time, so the loop never ends.
 - **Compute the stop condition in an op** (`"done": n >= limit`) and branch
   on `op["done"] == True`. Never compare two Refs in `if_()`.
-- **Exit to `END`.** An op wired on the exit arm runs on every iteration;
-  do follow-up work in the graph that calls the loop.
+- **An exit arm runs once.** In `if_(s["done"] == True, finish).else_(s)`,
+  `finish` runs once, after the last iteration, and reads that iteration's
+  values; ops after it (or after a subgraph holding the loop) run once too.
 
 ### For loop
 

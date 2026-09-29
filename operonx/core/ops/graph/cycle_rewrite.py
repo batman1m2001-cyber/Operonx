@@ -397,6 +397,11 @@ def _synthesize_loop(
     # __branch_target__ output when the source is a branch op.
     hidden._back_edges = list(scc_back_edges)
     hidden._back_edge_sources = {u for (u, _v) in scc_back_edges}  # kept for audit
+    # Edges out of the loop body to ops outside it. The outer graph wires
+    # them as (loop -> dst) edges below; the scheduler follows one only when
+    # its body source took it in the iteration the loop exits on, so an op
+    # on an exit arm runs once, not once per iteration.
+    hidden._exit_edges = [(u, dst) for (u, dst) in exits if dst != "__END__"]
     from operonx.core.ops.graph.task_scheduler import LoopConfig
 
     hidden._loop_config = LoopConfig(max_iterations=1000)

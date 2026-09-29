@@ -96,6 +96,7 @@ class GraphOp(BaseOp):
         "_loop_mode",
         "_back_edge_sources",
         "_back_edges",
+        "_exit_edges",
         "_rewritten_from",
     ]
 
@@ -141,6 +142,10 @@ class GraphOp(BaseOp):
         self._loop_mode = None  # None (classic), "synthetic" (rewritten hidden loop)
         self._back_edge_sources: set = set()  # audit only; termination consults _back_edges
         self._back_edges: list = []  # List[(u_name, v_name)] for termination per back-edge
+        # List[(u_name, dst)]: an edge from loop-body op u to dst outside the
+        # loop. The scheduler routes the loop op to dst, once, when the loop
+        # exits — and only if u took that edge in the final iteration.
+        self._exit_edges: list = []
         self._rewritten_from = None  # audit dict populated by rewrite_cycles_to_loops
 
     def __enter__(self):
