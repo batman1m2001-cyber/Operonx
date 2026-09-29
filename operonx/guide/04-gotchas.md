@@ -136,60 +136,6 @@ async def main():
 asyncio.run(main())
 ```
 
-## Never compare two Refs inside `if_()`
-
-`if_(p["a"] >= p["b"], ...)` treats the right-hand Ref as a plain value, so
-the first branch always wins. Compute the comparison in an op.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-
-@op
-def pair(a: int, b: int) -> dict:
-    return {"a": a, "b": b, "a_wins": a >= b}
-
-
-@op
-def first() -> dict:
-    return {"winner": "a"}
-
-
-@op
-def second() -> dict:
-    return {"winner": "b"}
-
-
-@graph
-def wrong():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a"] >= p["b"], f).else_(s)  # Ref vs Ref: never do this
-    f >> END
-    s >> END
-
-
-@graph
-def right():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a_wins"] == True, f).else_(s)  # noqa: E712 — Ref vs literal
-    f >> END
-    s >> END
-
-
-async def main():
-    inputs = {"a": 1, "b": 100}
-    assert (await Operon(wrong).run(inputs=inputs))["winner"] == "a"  # wrong
-    assert (await Operon(right).run(inputs=inputs))["winner"] == "b"
-
-
-asyncio.run(main())
-```
-
 ## Combine conditions with `&` `|` `~`, never `and` `or` `not`
 
 Python's `and` does not see inside a Ref: `x == 1 and y == 2` becomes just

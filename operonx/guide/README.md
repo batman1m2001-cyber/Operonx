@@ -57,8 +57,7 @@ from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
    `END`.
 7. **Branch arms merge by themselves.** End every branch with `.else_()`,
    put a real op before it, and give merge inputs defaults.
-8. **Compare a Ref with a literal**, never with another Ref; combine
-   conditions with `&`, `|`, `~`.
+8. **Combine conditions with `&`, `|`, `~`**, never `and`, `or`, `not`.
 9. **`~` is only for races:** fire on whichever of two unrelated ops lands
    first.
 10. **Models and stores are `resources.yaml` keys**; call

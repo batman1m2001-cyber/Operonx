@@ -46,6 +46,7 @@ class BranchOp(BaseOp):
         "default",
         "cases",
         "_case_descriptions",
+        "_input_keys",
         "condition_ops",
     ]
 
@@ -59,7 +60,7 @@ class BranchOp(BaseOp):
         **kwargs,
     ):
         # Parse inputs/outputs from cases
-        parsed_inputs, parsed_outputs = self._parse_cases(cases or [])
+        parsed_inputs, parsed_outputs, input_keys = self._parse_cases(cases or [])
 
         # Call super().__init__ without inputs/outputs
         super().__init__(**kwargs)
@@ -71,6 +72,9 @@ class BranchOp(BaseOp):
         self.given_candidates = candidates
         self.cases = cases or []
         self._case_descriptions = [ref.describe() for ref, _ in self.cases]
+        #: input name -> the ``(source, var)`` key its value has when a
+        #: condition runs. See `_evaluate_conditions`.
+        self._input_keys: Dict[str, Tuple[Any, str]] = input_keys
         #: Predicate ops this branch tests — populated by `Branch._build()`
         #: when a condition is an op rather than a Ref. Empty for the
         #: classic `if_(op["field"], ...)` form.
@@ -81,23 +85,43 @@ class BranchOp(BaseOp):
     def _parse_cases(self, cases: List[Tuple[Ref, str]]) -> tuple:
         """Parse inputs/outputs from cases.
 
+        Every Ref a condition reads becomes an input: the one it starts
+        from and each one among its operands (``a >= b``, ``a & b``). They
+        are told apart by ``(source, var)``, not by var alone, so
+        ``(a["n"] > 5) & (b["n"] < 3)`` reads two values. The first keeps
+        the plain var name (``branch(n=...)``); a later one from another
+        source gets the source's name appended.
+
         Args:
             cases: List of (condition_ref, target) tuples
 
         Returns:
-            Tuple[Dict[str, Param], Dict[str, Param]]: (inputs, outputs)
+            Tuple[Dict[str, Param], Dict[str, Param], Dict[str, tuple]]:
+            (inputs, outputs, input name -> ``(source, var)``)
         """
         # Inputs: anchor + variables from conditions
         inputs = {"anchor": Param(type=str, default=None)}
+        input_keys: Dict[str, Tuple[Any, str]] = {}
+        named: Dict[Tuple[Any, str], str] = {}
 
         for ref, target in cases:
-            # Use get_all_vars() to extract all variables from compound refs
-            # e.g., (PARENT["a"] > 10) & (PARENT["b"] == "x") -> {"a", "b"}
-            for var_name in ref.get_all_vars():
-                if var_name not in inputs:
-                    # Create base Ref without ops for input resolution
-                    base_ref = Ref(ref.raw_source, var_name)
-                    inputs[var_name] = Param(required=True, value=base_ref)
+            for base_ref in ref.get_all_refs():
+                key = base_ref._ctx_key()
+                if key in named:
+                    continue
+                name = base_ref.var
+                if name in inputs:
+                    source = base_ref.raw_source
+                    label = getattr(source, "name", source)
+                    label = "parent" if label == "__PARENT__" else str(label).rsplit(".", 1)[-1]
+                    name = f"{base_ref.var}_{label}"
+                    n = 2
+                    while name in inputs:
+                        name = f"{base_ref.var}_{label}_{n}"
+                        n += 1
+                named[key] = name
+                input_keys[name] = key
+                inputs[name] = Param(required=True, value=base_ref)
 
         # Outputs
         outputs = {
@@ -106,7 +130,7 @@ class BranchOp(BaseOp):
             "__branch_target__": Param(type=str),
         }
 
-        return inputs, outputs
+        return inputs, outputs, input_keys
 
     @property
     def candidates(self) -> List[str]:
@@ -137,12 +161,13 @@ class BranchOp(BaseOp):
     def _evaluate_conditions(self, inputs: Dict[str, Any]) -> tuple:
         """Evaluate all conditions and return the first match."""
         safe_inputs = dict(inputs)
+        # A Ref reads its value by (source, var) — see `Ref._resolve` —
+        # so re-key the inputs from their names to those keys.
+        context = {key: safe_inputs.get(name) for name, key in self._input_keys.items()}
 
         for i, (ref, target) in enumerate(self.cases):
             try:
-                value = safe_inputs.get(ref.var)
-                # Pass context for compound boolean operations (& and |)
-                result = ref.execute(value, context=safe_inputs)
+                result = ref._resolve(context)
 
                 if result:
                     condition_desc = self._case_descriptions[i]
@@ -434,18 +459,11 @@ class Branch:
             else:
                 name = f"route_{1 + sum(1 for op in taken.values() if op.type == 'branch')}"
 
-        all_inputs = {}
-        for condition_ref, _ in self._cases:
-            var_name = condition_ref.var
-            if var_name not in all_inputs:
-                base_ref = Ref(condition_ref.raw_source, var_name)
-                all_inputs[var_name] = base_ref
-
+        # Inputs come from the conditions — `BranchOp._parse_cases`.
         branch = BranchOp(
             name=name,
             cases=case_names,
             default=default_name,
-            inputs=all_inputs,
             **self._kwargs,
         )
         # Ops whose output this branch tests. `__rshift__` reads these to

@@ -120,7 +120,7 @@ asyncio.run(main())
 - **Always `PARENT.declare` loop state.** An undeclared value is re-read
   from the first iteration every time, so the loop never ends.
 - **Compute the stop condition in an op** (`"done": n >= limit`) and branch
-  on `op["done"] == True`. Never compare two Refs in `if_()`.
+  on `op["done"] == True`.
 - **Exit to `END`.** An op wired on the exit arm runs on every iteration;
   do follow-up work in the graph that calls the loop.
 
@@ -222,9 +222,10 @@ asyncio.run(main())
   every target when nothing matches.
 - **Give merge inputs a default** (`= None`): the arm that did not run
   sends nothing.
-- A condition is a Ref compared to a literal (`c["big"] == True`,
-  `c["n"] > 10`), combined with `&`, `|`, `~` (never `and`, `or`, `not`),
-  or an op that returns a single `bool`.
+- A condition is a Ref compared to a literal or to another Ref
+  (`c["big"] == True`, `c["n"] > 10`, `p["a"] >= p["b"]`), combined with
+  `&`, `|`, `~` (never `and`, `or`, `not`), or an op that returns a single
+  `bool`.
 - Write a branch inline (it is named `route_1`, `route_2`, … in its
   graph); assign it (`size = if_(...)`) only when another op refers to it.
 
