@@ -250,8 +250,12 @@ class Scheduler:
         # main loop can re-raise them instead of hanging.
         fatal: List[BaseException] = []
 
-        # ready[ctx][op_name] = number of hard-edge predecessors still outstanding.
-        # When it reaches 0, the op is dispatched.
+        # ready[ctx][op_name] = number of predecessors still outstanding: one
+        # per hard edge plus one for the whole group of soft edges. When it
+        # reaches 0, the op is dispatched. ready[ctx][(op_name,)] is set once
+        # one of op_name's soft edges has arrived at ctx — later soft arrivals
+        # are ignored. It lives in the same dict so a sweep that drops the
+        # context drops it too.
         # Root context seeded from _initial_ready; item contexts seeded in _route().
         ready: Dict[tuple, Dict[str, int]] = {context_id: dict(g._initial_ready)}
 
@@ -512,8 +516,17 @@ class Scheduler:
                 rc = ready[event.ctx]
                 if edge.dst not in rc:
                     continue
-                if edge.soft and rc[edge.dst] <= 0:
-                    continue
+                if edge.soft:
+                    # The soft edges into an op count as ONE arrival between
+                    # them (`_build` gave the whole group a single slot), so
+                    # only the first one decrements. Decrementing on each
+                    # let two soft arrivals stand in for a hard edge that
+                    # had not landed yet, and the op ran with its input
+                    # missing.
+                    soft_mark = (edge.dst,)
+                    if soft_mark in rc:
+                        continue
+                    rc[soft_mark] = 1
                 # All predecessors satisfied — dispatch downstream op.
                 rc[edge.dst] -= 1
                 if rc[edge.dst] == 0:

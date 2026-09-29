@@ -282,8 +282,8 @@ asyncio.run(main())
 
 - `a >> ~b` softens only the edge into `b`.
 - Later arrivals are ignored once the op has fired.
-- **Never mix one hard edge with two or more soft edges into the same op**:
-  two soft arrivals can fire it before the hard one lands.
+- Hard and soft edges mix: the op waits for every hard edge **and** the
+  first soft edge; the other soft arrivals are ignored.
 - `~` on a Ref (`~ref`) is logical NOT, not a soft edge.
 
 ## Cells and SCRATCH
