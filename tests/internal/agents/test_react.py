@@ -437,3 +437,114 @@ class TestATruncatedAnswerIsReported:
         assert result["final"]["content"] == "The answer is"
         assert result["truncated"] is True
         assert result["finish_reason"] == "length"
+
+
+def _stubborn_llm(seen):
+    """A provider whose model ignores the budget notice: it asks for a tool
+    on every turn, unless the request itself forbids tools."""
+    from unittest.mock import Mock
+
+    from openai.types.chat.chat_completion import ChatCompletion
+
+    async def generate(messages, **kwargs):
+        seen.append(kwargs)
+        if kwargs.get("tools") and kwargs.get("tool_choice") != "none":
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"call_{len(seen)}",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": '{"a": 1}'},
+                    }
+                ],
+            }
+            reason = "tool_calls"
+        else:
+            message = {"role": "assistant", "content": "Here is what I have."}
+            reason = "stop"
+        return ChatCompletion.model_validate(
+            {
+                "id": "x",
+                "created": 0,
+                "model": "m",
+                "object": "chat.completion",
+                "choices": [{"index": 0, "finish_reason": reason, "message": message}],
+            }
+        )
+
+    llm = Mock()
+    llm.generate = generate
+    return llm
+
+
+class TestTheLastTurnCannotCallTools:
+    """The budget notice asks the model to answer; a model can ignore it.
+    It used to be sent the tools on the final turn all the same, so a
+    stubborn model asked for another one, the call was answered "not
+    run", and the caller got no answer at all. On the last turn the model
+    is now called with ``tool_choice="none"`` — the API, not the prose,
+    says it must answer in text."""
+
+    @pytest.mark.asyncio
+    async def test_a_stubborn_model_still_answers(self):
+        from unittest.mock import Mock, patch
+
+        from operonx.agents.ops.model_ops import make_llm_caller
+        from operonx.agents.tool import get_tool_definitions
+
+        seen = []
+        hub = Mock()
+        hub.get.return_value = _stubborn_llm(seen)
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = hub
+            caller = make_llm_caller("mock", tools=get_tool_definitions(["echo"]))
+            result = await run_model(caller, max_turns=3)
+
+        assert result["final"] is not None, "the budget ran out with no answer"
+        assert result["final"]["content"] == "Here is what I have."
+        assert result["turns"] == 3
+        assert result["stopped_early"] is True, "the budget did run out"
+        assert [kw.get("tool_choice") for kw in seen] == [None, None, "none"]
+        assert all(kw.get("tools") for kw in seen), "tool history needs its definitions"
+
+    @pytest.mark.asyncio
+    async def test_a_caller_given_tool_choice_keeps_it_until_the_last_turn(self):
+        from unittest.mock import Mock, patch
+
+        from operonx.agents.ops.model_ops import make_llm_caller
+        from operonx.agents.tool import get_tool_definitions
+
+        seen = []
+        hub = Mock()
+        hub.get.return_value = _stubborn_llm(seen)
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = hub
+            caller = make_llm_caller(
+                "mock", tools=get_tool_definitions(["echo"]), tool_choice="required"
+            )
+            await run_model(caller, max_turns=2)
+
+        assert [kw.get("tool_choice") for kw in seen] == ["required", "none"]
+
+    @pytest.mark.asyncio
+    async def test_a_hand_written_call_model_is_told_which_turn_is_last(self):
+        flags = []
+
+        @op
+        def call_model(messages: list = None, last_turn: bool = False) -> dict:
+            flags.append(last_turn)
+            calls = [] if last_turn else _call(len(flags))
+            message = {
+                "id": f"a{len(flags)}",
+                "role": "assistant",
+                "content": "" if calls else "ok",
+            }
+            if calls:
+                message["tool_calls"] = calls
+            return {"assistant_message": [message], "tool_calls": calls, "done": not calls}
+
+        result = await run_model(call_model, max_turns=3)
+        assert flags == [False, False, True]
+        assert result["final"]["content"] == "ok"

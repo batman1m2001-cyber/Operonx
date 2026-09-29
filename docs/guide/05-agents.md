@@ -99,12 +99,26 @@ agent = build_react_agent(call_model=call_model, max_turns=10)
 # ... roles: user, assistant, tool, assistant, tool, user(notice), assistant
 ```
 
-If the model ignores the notice and asks for another tool anyway, that
-call is not run: it is answered with a "not run" tool message, so the
-history never ends on an unanswered `tool_call` (every provider rejects
-that on the next request). `final` is then `None`, `stopped_early` is
-`True`, and `AgentSession.send` returns an `error` saying so while keeping
-the conversation.
+The notice is only prose, so the final turn is also called with tools
+disabled: a `make_llm_caller` caller sends `tool_choice="none"` then, and
+the model has to answer in text. The tools themselves are still sent — a
+history holding tool calls needs their definitions. A hand-written
+`call_model` opts in by declaring a `last_turn` parameter; the loop
+passes `last_turn=True` on the final turn:
+
+```python
+@op
+def call_model(messages: list = None, last_turn: bool = False) -> dict:
+    ...  # on last_turn, do not let the model call a tool
+```
+
+One without the parameter is called as before. If its model ignores the
+notice and asks for another tool anyway, that call is not run: it is
+answered with a "not run" tool message, so the history never ends on an
+unanswered `tool_call` (every provider rejects that on the next request).
+`final` is then `None`, `stopped_early` is `True`, and
+`AgentSession.send` returns an `error` saying so while keeping the
+conversation.
 
 This is deliberately not the synthesized loop's `max_iterations`, which
 is a runaway guard set far above any real workload. That guard cuts

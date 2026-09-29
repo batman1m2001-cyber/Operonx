@@ -271,6 +271,9 @@ asyncio.run(main())
   `out["messages"]` (it holds one list per turn). `stopped_early` is True
   when the budget ran out or the last response was cut off (`truncated`,
   with `finish_reason`); `final` is `None` if the model never answered.
+- On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
+  so the model must answer in text. A hand-written `call_model` gets the
+  same signal by declaring `last_turn: bool = False`.
 - `destructive=True` tools pause for approval through an `InterruptOp`;
   `AgentSession(agent).send(text, on_approval=...)` handles the loop.
 - In tests, pass a scripted `call_model` op instead of a real model.
