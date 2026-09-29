@@ -109,3 +109,31 @@ class TestFallbackIsRefused:
     def test_the_shorthand_raises_too(self):
         with pytest.raises(ValueError, match="batch_mode"):
             LLMOp.of(resource="r", batch_mode=True, fallback=["other"], prompt="hi")
+
+
+class TestResourceList:
+    """A list of resources is load balancing; batch mode built one
+    coordinator for ``resource[0]`` and sent every request there. The rest
+    of the list — and ``ratios`` — did nothing, and ``model_used`` came back
+    as the whole list rather than the resource that answered."""
+
+    def test_several_resources_raise_at_construction(self):
+        with pytest.raises(ValueError, match=r"batch_mode.*\['a', 'b'\]"):
+            LLMOp(name="b", resource=["a", "b"], batch_mode=True)
+
+    def test_the_shorthand_raises_too(self):
+        with pytest.raises(ValueError, match="one resource"):
+            LLMOp.of(resource=["a", "b"], ratios=[0.5, 0.5], batch_mode=True, prompt="hi")
+
+    @pytest.mark.asyncio
+    async def test_a_one_element_list_reports_the_key_it_used(self):
+        op = LLMOp(name="b", resource=["a"], batch_mode=True)
+        op._batch_coordinator = _Coordinator("hello")
+        op._llms = [object()]
+        op._initialized = True
+        out = await op._generate_core(prompt="hi")
+        assert out["model_used"] == "a"
+
+    def test_load_balancing_without_batch_mode_is_unchanged(self):
+        op = LLMOp(name="lb", resource=["a", "b"], ratios=[0.3, 0.7])
+        assert op.ratios == [0.3, 0.7]

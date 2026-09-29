@@ -256,7 +256,9 @@ class LLMOp(BaseOp):
             batch_mode: Use OpenAI Batch API (50% cheaper). ``fields`` /
                 ``validators`` / ``max_retries`` apply to the batch answer as
                 to a live one (a semantic retry is another batch submission).
-                Cannot be combined with ``fallback`` — raises ``ValueError``.
+                Takes one resource and no ``fallback``: a list of several
+                resources (load balancing) or a fallback list raises
+                ``ValueError``.
             seed: Optional seed for load balancing RNG.
             fields: Optional list of ``"path.to.value: type"`` extraction schemas
                 (see ``operonx.providers.parsing.ExtractField``). When set, the
@@ -322,6 +324,20 @@ class LLMOp(BaseOp):
                 "request is answered by the primary resource's batch job, and "
                 "falling back would turn it into a live, full-price call. Drop "
                 "fallback=, or run the op live (batch_mode=False)."
+            )
+        if batch_mode and isinstance(resource, list) and len(resource) > 1:
+            # A list is load balancing, but the batch path builds one
+            # coordinator for resource[0] and sends every request there:
+            # the rest of the list and ``ratios`` did nothing. Balancing
+            # batch traffic would take a coordinator and batch job per
+            # resource, and only some backends can batch at all (the
+            # OpenAI one implements generate_batch; a mixed list would fail
+            # one flush interval later). Refusing costs nothing that worked.
+            raise ValueError(
+                f"LLMOp(batch_mode=True) takes one resource, got {resource!r}: "
+                f"a batch job belongs to one resource, so every request would go "
+                f"to {resource[0]!r} and the rest of the list and ratios= would be "
+                f"ignored. Pass resource={resource[0]!r}, or one batch op per resource."
             )
         self.fields = fields
         self.parser = parser
@@ -689,7 +705,9 @@ class LLMOp(BaseOp):
             if not self._batch_coordinator:
                 raise RuntimeError("Batch coordinator not initialized")
             completion = await self._batch_coordinator.submit(**llm_params)
-            return self._extract_completion(completion, self.resource)
+            # The key, not ``self.resource``: a one-element list reported the
+            # list itself as ``model_used`` and could not be priced.
+            return self._extract_completion(completion, self._get_resource_key(self._llms[0]))
         return await self._llm_call_with_fallback(llm_params)
 
     async def _llm_call_with_fallback(self, llm_params: Dict[str, Any]):
