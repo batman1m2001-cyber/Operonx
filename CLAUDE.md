@@ -3,8 +3,7 @@
 > **How to use operonx** (its API, as it is now) is in
 > [`operonx/guide/`](operonx/guide/README.md), whose examples run in CI
 > (`tests/guide/`). Where this file disagrees with the guide, the guide is
-> right — some examples below (`ask()`, `chat()`, `GraphOp.loop`) predate
-> the current API.
+> right.
 
 Operonx is a high-performance workflow engine that runs anything as a workflow — from IO-bound AI tasks like LLMs and agents to CPU-bound workloads needing native performance. Inspired by Airflow operators, it enforces clear, consistent conventions for building scalable async workflows.
 
@@ -32,9 +31,12 @@ Operonx/
 │   │   ├── rerankers/             # vLLM, TEI, HuggingFace, ONNX, Pinecone
 │   │   ├── auth/                  # Keycloak token provider
 │   │   └── registry/              # Plugin registrations to core ResourceHub
+│   ├── agents/                    # Tools, ReAct graph, sessions, MCP, heartbeat
+│   ├── app/                       # Job / Service / Runbook / Application, operonx.toml, serving, playground, evals
+│   ├── guide/                     # Usage guide for coding assistants (ships in the wheel)
 │   └── telemetry/                 # V3 Consumers — local, Langfuse, OTEL
 │       └── consumers/             # LocalConsumer, LangfuseConsumer
-├── examples/python/               # Runnable examples (ex01..ex15)
+├── examples/python/               # Runnable examples (ex01..ex18)
 ├── tests/
 │   ├── internal/                  # Backend-specific unit tests
 │   └── spec/                      # JSON-fixture tests (mirrored in operonx-rs)
@@ -57,7 +59,8 @@ Operonx/
 | docs/guide/ | mkdocs site | User-facing tutorial — installation through deployment |
 | docs/api/ | Auto-generated | API reference from docstrings (mkdocstrings) |
 | docs/design/ | mkdocs site | Design records and archives — history, not current behaviour |
-| examples/python/ | Runnable Python | Learning by example (ex01..ex15) |
+| operonx/guide/ | In the package | How to use operonx today; every snippet runs in `tests/guide/` |
+| examples/python/ | Runnable Python | Learning by example (ex01..ex18) |
 | .claude/skills/ | On-demand | Repeatable workflows: /publish, /bench, /example |
 
 ### Start here
@@ -79,7 +82,7 @@ measured to be wrong.
 | What reaches the trace? `exclude=`, `observe_max`? | `docs/architecture/observability.md` |
 | **What mistakes does this codebase keep making?** | `docs/architecture/failure-modes.md` |
 | Is this plausible claim about operonx actually true? | `docs/design/AGENT_PLAN_ARCHIVE.md` |
-| **What is known-broken right now?** | `docs/design/OPEN_FINDINGS.md` — 22 open, each with a runnable repro in `docs/design/repros/` |
+| **What is known-broken right now?** | `docs/design/OPEN_FINDINGS.md` — each finding with a runnable repro in `docs/design/repros/`, and what was fixed |
 | What changed, and what breaks on upgrade? | `CHANGELOG.md` |
 | What is the agent layer for, and what is left? | `AGENT_EXTENSION_PLAN.md` §0 |
 | Should this belong in `operonx/agents/`? | `operonx/agents/CONTRIBUTING.md` |
@@ -111,10 +114,12 @@ touched from this repo.
 | New op type | [operonx/core/ops/](operonx/core/ops/) |
 | New LLM/embedding/reranker provider | [operonx/providers/](operonx/providers/) |
 | New tracing consumer | [operonx/telemetry/consumers/](operonx/telemetry/consumers/) |
-| HTTP API server | `operonx[serve]` — FastAPI module under [operonx/serve/](operonx/serve/) |
+| Agents, tools, MCP | [operonx/agents/](operonx/agents/) — read its `CONTRIBUTING.md` first |
+| Jobs, services, `operonx.toml`, serving | [operonx/app/](operonx/app/) (`operonx[serve]` for HTTP/websocket doors) |
 | Rust runtime work | [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) (separate repo) |
 | Documentation | [docs/](docs/) — guide + architecture + api |
 | Examples | [examples/python/](examples/python/) |
+| Usage guide (every snippet runs in `tests/guide/`) | [operonx/guide/](operonx/guide/) |
 
 ## Coding Conventions
 
@@ -322,22 +327,22 @@ with GraphOp(name="main") as g:
 
 ### Shorthand Style Rule
 
-**Always use `Op.of()` classmethods** for concise op creation, and `chat()` (or `ask()`) for prompt+LLM combos. Use explicit keyword arguments — never positional args:
+**Always use `Op.of()` classmethods** for provider ops. Use explicit keyword arguments — never positional args. Template variables are named after what they hold:
 
 ```python
 # CORRECT
-c = chat(resource="gpt-4o", template={"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = LLMOp.of(resource="gpt-4o", prompt={"system": "...", "user": "{q}"}, q=PARENT["q"])
 llm = LLMOp.of(resource="gpt-4o", messages=PARENT["msgs"])
 embed = EmbeddingOp.of(resource="bge-m3", texts=PARENT["texts"])
 
 # WRONG — no positional args
-c = chat("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
+llm = LLMOp.of("gpt-4o", {"system": "...", "user": "{q}"}, q=PARENT["q"])
 ```
 
 ### Edge Types
 
-- `>>` : Hard edge (sequential, counts toward ready_count)
-- `>>~` : Soft edge (conditional, for branch outputs)
+- `a >> b` : hard edge — `b` waits for `a` (and every other hard edge into it)
+- `a >> ~b` : soft edge — `b` fires on the first soft edge that lands (a race); branch arms merge without it
 
 ### State References — PARENT vs op["key"]
 
@@ -381,9 +386,9 @@ step = process(x=PARENT["x"], outputs={"*": PARENT})
 
 ### Iteration Patterns
 
-The classic `ForOp` / `MapOp` / `WhileOp` classes were replaced by two patterns:
+There are no `ForOp` / `MapOp` / `WhileOp` classes. Two patterns replace them:
 
-**1. Generator ops (replaces ForOp/MapOp)** — use `yield` to iterate:
+**1. Generator ops (for-each)** — `yield` once per item:
 
 ```python
 @op
@@ -395,26 +400,32 @@ def each_item(items: list):
 def double(value: int):
     return {"result": value * 2}
 
-with GraphOp(name="iterate") as graph:
-    gen = each_item(items=PARENT["numbers"])
-    step = double(value=gen["value"])
+@graph
+def iterate(numbers):
+    gen = each_item(items=numbers)
+    step = double(value=gen["value"])  # gen["value"].parallel() to run items at once
     START >> gen >> step >> END
-# Downstream ops run in parallel per yield (streaming scheduler default)
+# Downstream ops run once per yield, sequentially in yield order by default
 ```
 
-**2. `GraphOp.loop()` / `@graph.loop()` (replaces WhileOp)** — feedback loops:
+**2. Back-edges (while)** — loop state in a declared cell, loop through `.else_()`:
 
 ```python
-with GraphOp.loop(until="count >= 5", count=0) as loop:
-    inc = increment(counter=PARENT["count"])
-    inc["counter"] >> PARENT["count"]
-    START >> inc >> END
+@graph
+def count_to_3():
+    PARENT.declare(n=0)
+    s = step(n=PARENT["n"])           # step returns {"n": n + 1, "done": n + 1 >= 3}
+    s["n"] >> PARENT["n"]
+    START >> s >> if_(s["done"] == True, END).else_(s)
 ```
+
+The loop continues only while the back-edge fires, capped at 1000 iterations.
+Details and the rest of the control-flow rules: [operonx/guide/03-control-flow.md](operonx/guide/03-control-flow.md).
 
 ## Exception Hierarchy
 
 All op errors inherit from `OpError` in [operonx/core/exceptions.py](operonx/core/exceptions.py):
-- `ParserError`, `CodeError`, `BranchError`, `ConditionError`, `IterationError`
+- `ParserError`, `LLMRefusalError`, `ValidatorError`, `CodeError`, `BranchError`
 - `PromptError`, `EmbeddingError`, `RerankError`
 
 Resource-hub errors live in [operonx/core/registry/](operonx/core/registry/):
