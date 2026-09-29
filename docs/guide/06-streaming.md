@@ -33,7 +33,29 @@ than a single string. Downstream ops see one frame per chunk.
 The **last** frame repeats the whole accumulated `content` rather than a
 tail, so joining every frame emits the answer twice. `final` separates
 them — join the `final=False` deltas, or read the one `final=True` frame,
-never both.
+never both. The two always agree.
+
+### Fallback while streaming
+
+`fallback=[...]` covers a stream only **until its first delta**. A
+failure before any text arrives (connection refused, 429, 5xx) switches
+to the next resource and the consumer never notices. A failure after it
+propagates as the op's error: the fallback would start its answer from
+the beginning, and the deltas already out — already on screen, already
+spoken by a voice app — would be followed by the whole answer again.
+
+```python
+llm = LLMOp.of(resource="gpt-4o", fallback=["claude-haiku"], stream=True,
+               messages=PARENT["messages"])
+# primary drops after "Sure, your appointment is"
+#   before: deltas "Sure, your appointment isSure, your appointment is Monday."
+#           final  "Sure, your appointment is Monday."
+#   now:    deltas "Sure, your appointment is", then the op fails
+```
+
+A consumer that must always finish its turn handles that error itself —
+for a voice app, typically a short "sorry, one moment" and a retry.
+Without `stream=True` the fallback covers the whole call.
 
 ## Consuming frames
 

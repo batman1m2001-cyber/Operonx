@@ -332,12 +332,14 @@ asyncio.run(main())
 
 ## `LLMOp`: never `user=`, never a Ref in `validators=`
 
-- `user` is a model setting (OpenAI's end-user id), not a template
-  variable, so `prompt={"user": "{user}"}` with `user=...` fails.
-  Use `user_prompt=` / `question=`.
-- `validators=` is read when the graph is built. A Ref there is never
-  resolved, every answer fails validation, and the op falls back. Check
-  allowed values in an op after the LLM instead.
+- `user`, `temperature`, `seed` and the other model settings are sent to
+  the provider, never into the template. A `{user}` placeholder can never
+  be filled, so building the op raises `PromptError`. Name template
+  variables after what they hold: `{user_prompt}`, `{question}`.
+- `validators=` is read when the graph is built. A Ref there (a graph
+  parameter, `PARENT[...]`) is never resolved, so building the op raises
+  `TypeError`. When the allowed values arrive at run time, check them in
+  an op after the LLM (second example).
 
 ```yaml file=resources.yaml
 llm:assistant:
@@ -352,6 +354,7 @@ import asyncio
 
 import operonx
 from operonx import END, START, Operon, graph
+from operonx.core.exceptions import PromptError
 from operonx.providers.ops import LLMOp
 
 
@@ -371,8 +374,63 @@ def right(q):
 
 async def main():
     operonx.bootstrap(resources="resources.yaml")
-    assert "content" not in await Operon(wrong, params={"q": None}).run(inputs={"q": "hi"})
+    try:
+        Operon(wrong, params={"q": None})
+        raise AssertionError("expected PromptError")
+    except PromptError as e:
+        assert "{user}" in str(e)  # names the placeholder and suggests {user_prompt}
     assert (await Operon(right, params={"q": None}).run(inputs={"q": "hi"}))["content"]
+
+
+asyncio.run(main())
+```
+
+```python
+import asyncio
+
+import operonx
+from operonx import END, START, Operon, graph, op
+from operonx.providers.ops import LLMOp
+
+PROMPT = "Give the intent of: {message}. Reply as <intent>...</intent>"
+
+
+@graph
+def wrong(message, allowed):
+    llm = LLMOp.of(
+        resource="assistant",
+        prompt=PROMPT,
+        fields=["intent: str"],
+        validators={"intent": allowed},  # a Ref: refused when the graph is built
+        message=message,
+    )
+    START >> llm >> END
+
+
+@op
+def check(intent: str, allowed: list) -> dict:
+    return {"intent": intent if intent in allowed else "other"}
+
+
+@graph
+def right(message, allowed):
+    llm = LLMOp.of(resource="assistant", prompt=PROMPT, fields=["intent: str"], message=message)
+    c = check(intent=llm["intent"], allowed=allowed)
+    START >> llm >> c >> END
+
+
+async def main():
+    operonx.bootstrap(resources="resources.yaml")
+    params = {"message": None, "allowed": None}
+    try:
+        Operon(wrong, params=params)
+        raise AssertionError("expected TypeError")
+    except TypeError as e:
+        assert "validators" in str(e)
+    out = await Operon(right, params=params).run(
+        inputs={"message": "I want my money back", "allowed": ["refund", "cancel"]}
+    )
+    assert out["intent"] == "refund"
 
 
 asyncio.run(main())
