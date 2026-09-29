@@ -28,28 +28,8 @@ import pytest
 
 from operonx.core import END, PARENT, START, Operon, graph, op
 from operonx.core.ops.flow.branch_op import if_
-from operonx.core.ops.graph.task_scheduler import _ctx_within
 
 pytestmark = pytest.mark.unit
-
-
-class TestCtxWithin:
-    def test_equal_context_is_within(self):
-        assert _ctx_within(("main",), ("main",)) is True
-
-    def test_deeper_context_is_within(self):
-        assert _ctx_within(("main", "[0]", "__collect__"), ("main",)) is True
-
-    def test_sibling_iteration_is_not_within(self):
-        """The property the whole fix rests on: iteration ctxs are
-        siblings, so a stale iteration cannot satisfy the next one."""
-        assert _ctx_within(("main", "[0]"), ("main", "g.__loop_0__#1")) is False
-
-    def test_shallower_context_is_not_within(self):
-        assert _ctx_within(("main",), ("main", "g.__loop_0__#1")) is False
-
-    def test_prefix_match_is_by_segment_not_string(self):
-        assert _ctx_within(("mainline",), ("main",)) is False
 
 
 # ── end-to-end: the shape that was capped at one iteration ──────────────

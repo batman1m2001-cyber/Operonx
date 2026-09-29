@@ -28,12 +28,6 @@ class LoopConfig:
     max_iterations: int = 1000
 
 
-def _ctx_within(child: tuple, parent: tuple) -> bool:
-    """True if ``child`` is ``parent`` itself or a context below it."""
-    n = len(parent)
-    return len(child) >= n and child[:n] == parent
-
-
 # Route policy of an edge nothing was declared on: sequential.
 _SEQUENTIAL = (False, 1)
 
@@ -346,7 +340,7 @@ class Scheduler:
         # one of op_name's soft edges has arrived at ctx — later soft arrivals
         # are ignored. It lives in the same dict so a sweep that drops the
         # context drops it too.
-        # Root context seeded from _initial_ready; item contexts seeded in _route().
+        # Root context seeded from _initial_ready; item contexts seeded in _advance().
         ready: Dict[tuple, Dict[str, int]] = {context_id: dict(g._initial_ready)}
 
         # The stream gate. Keyed by the edge (src, dst) alone, not by the
