@@ -20,11 +20,14 @@ set far above any real workload. That guard is the wrong tool for a
 budget anyway: it cuts mid-flight, the model is never told, and you keep
 whatever partial state existed. ``count_turn`` injects a notice at the
 limit instead and lets the model take one final turn, so exhaustion
-exits the way success does.
+exits the way success does. That turn is called with tools disabled
+(``last_turn=True``), because a notice is only prose and a model can
+ignore it.
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Optional
 
 from operonx.agents.graphs.dispatch import build_dispatch, call_identity, tool_message
@@ -160,14 +163,19 @@ def build_react_agent(
             ``assistant_message`` (a list of message dicts), ``tool_calls``
             (a list, empty when finished) and ``done`` (bool), and
             optionally ``finish_reason``/``truncated``, which
-            :func:`agent_result` reports. Injected
+            :func:`agent_result` reports. A ``call_model`` that declares a
+            ``last_turn`` parameter is passed ``last_turn=True`` on the
+            budget's final turn and must not let the model call a tool
+            then — ``make_llm_caller`` sends ``tool_choice="none"``. One
+            without the parameter is called as before. Injected
             rather than constructed here so the loop is testable without a
             provider, and so callers choose their own ``LLMOp.of(...)``
             configuration.
         max_turns: Turn budget. One turn is one model call plus the
             dispatch of whatever tools it asked for. Reaching it is a
             normal exit, not a cut: the model is given ``budget_notice``
-            and one final turn to answer.
+            and one final turn to answer, called with tools disabled when
+            ``call_model`` takes ``last_turn`` (see above).
         approval_timeout: Seconds a gated tool call waits for a human
             before being denied. See :mod:`operonx.agents.graphs.dispatch`.
         policy: Which tools may run, ask, or are refused outright. See
@@ -219,6 +227,7 @@ def build_react_agent(
     # turn. Leaving them out meant compacting against a budget the
     # request was already 2–4k tokens over with a typical registry.
     tool_tokens = estimate_tool_tokens(getattr(call_model, "tools", None))
+    takes_last_turn = _takes_last_turn(call_model)
 
     @op
     def count_turn(turns: int = 0) -> dict:
@@ -357,7 +366,10 @@ def build_react_agent(
             breakpoints=cache_breakpoints,
         )
 
-        model = call_model(messages=cached["messages"])
+        if takes_last_turn:
+            model = call_model(messages=cached["messages"], last_turn=counter["exhausted"])
+        else:
+            model = call_model(messages=cached["messages"])
         router = decide(
             done=model["done"],
             exhausted=counter["exhausted"],
@@ -401,6 +413,24 @@ def build_react_agent(
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 
     return react
+
+
+def _takes_last_turn(call_model: Callable) -> bool:
+    """Whether ``call_model`` declares a ``last_turn`` parameter.
+
+    Named explicitly, not caught by ``**kwargs``: a factory that forwards
+    its keywords to ``LLMOp.of`` would otherwise hand the flag to the
+    model as a template variable.
+    """
+    try:
+        parameters = inspect.signature(call_model).parameters
+    except (TypeError, ValueError):
+        return False
+    param = parameters.get("last_turn")
+    return param is not None and param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
 
 
 @op
