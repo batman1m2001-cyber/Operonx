@@ -306,8 +306,8 @@ class Branch:
         asr >> denoise >> picker
         skip_stt >> picker
 
-    Auto-name resolves to the LHS if there is one (``stt_route = if_(...)``)
-    or falls back to a semantic ``"branch_<target>_or_<default>"`` name.
+    Auto-name resolves to the LHS if there is one (``stt_route = if_(...)``);
+    inline, to a per-graph counter, ``route_1``, ``route_2``.
 
     **Named form (for forward refs or a shared branch node)** — pass op
     *names* as strings. No auto-wiring; you wire ``branch >> target``
@@ -409,38 +409,30 @@ class Branch:
                 self._default.name if isinstance(self._default, BaseOp) else self._default
             )
 
-        # Name resolution: explicit > LHS auto-name > semantic fallback.
-        # auto_name() walks the stack past register_skip'd frames — catches
-        # ``stt_route = if_(...).else_(...)`` (returns "stt_route"). If we're
-        # inline (``source >> if_(...).else_(...)`` with no LHS), the source
-        # parser may fall back onto a *nearby* line's assignment (e.g. picking
-        # up ``m = _mk(...)`` from 3 lines above). Guard against that by
-        # rejecting a detected name that already exists as an op in the
-        # current graph — that's a source-parser false positive, not our LHS.
-        # Then fall through to a stable per-graph counter like ``route_1``.
+        # Name resolution: explicit > the variable it is assigned to > a
+        # per-graph counter, ``route_1``. The variable is read from the
+        # bytecode only: inline (``source >> if_(...).else_(...)``) there is
+        # none, and guessing from nearby source lines named branches after a
+        # kwarg above them (``role="agent",``).
+        lhs = auto_name(source_fallback=False)
         # A predicate built inline as an argument runs BEFORE the branch, so
         # on `inner = if_(is_small(...), a).else_(b)` it is the predicate that
-        # auto_name hands `inner` to — and the branch, finding the name taken,
-        # settles for `route_N`. The reader's `inner` then means the branch
-        # while the *op* called `inner` is the predicate. Give the name back.
+        # auto_name hands `inner` to. The reader's `inner` means the branch;
+        # give the predicate its function's name back.
         for predicate in predicates:
             if self._name or predicate._name_hint in (None, predicate.name):
                 continue
-            detected_for_branch = auto_name()
-            if detected_for_branch and detected_for_branch == predicate.name:
+            if lhs == predicate.name:
                 _rename_op(predicate, predicate._name_hint)
 
         name = self._name
         if not name:
             g = get_current()
-            detected = auto_name()
-            if detected and (g is None or detected not in g._ops):
-                name = detected
+            taken = g._ops if g is not None else {}
+            if lhs and lhs not in taken:
+                name = lhs
             else:
-                n = 1
-                if g is not None:
-                    n += sum(1 for op in g._ops.values() if op.type == "branch")
-                name = f"route_{n}"
+                name = f"route_{1 + sum(1 for op in taken.values() if op.type == 'branch')}"
 
         all_inputs = {}
         for condition_ref, _ in self._cases:

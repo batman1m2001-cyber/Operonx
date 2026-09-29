@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-09-29
+
+### Fixed
+
+- **An inline branch no longer borrows a name from the lines above it.**
+  `x >> if_(x["is_bot"], a).else_(b)` has no variable, so its name was
+  guessed from nearby source lines — and a keyword argument there
+  (`role="agent",` parses as an assignment) named it: real graphs had
+  several branches called `role`, one called `filter_meta`. The variable a
+  branch is assigned to is now read from the bytecode only; inline, it is
+  `route_N`, as it already was when no guess matched.
+- `auto_name()`'s source fallback no longer reads a line ending in a comma
+  as an assignment — it is an argument in a call that spans lines.
+  `auto_name(source_fallback=False)` skips the guess altogether.
+
+### Docs
+
+- The guide: write a branch inline; assign it only when something else
+  refers to it.
+
 ## [1.10.1] - 2026-09-28
 
 ### Fixed

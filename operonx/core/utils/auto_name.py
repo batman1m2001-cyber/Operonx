@@ -60,7 +60,7 @@ def unique_name() -> str:
     return uuid.uuid4().hex[:8]
 
 
-def auto_name() -> Optional[str]:
+def auto_name(source_fallback: bool = True) -> Optional[str]:
     """Extract variable name from the calling assignment statement.
 
     Walks up the call stack, skipping frames that belong to:
@@ -70,6 +70,11 @@ def auto_name() -> Optional[str]:
 
     Then tries bytecode analysis first (no source needed, handles multi-line),
     falling back to AST source parsing.
+
+    Args:
+        source_fallback: Also guess from nearby source lines when the
+            bytecode shows no assignment. The guess can land on a line
+            above the call; pass False when "not assigned" is an answer.
 
     Returns:
         The variable name if found, or ``None``.
@@ -83,7 +88,7 @@ def auto_name() -> Optional[str]:
             return None
         # Primary: bytecode analysis
         name = _name_from_bytecode(frame)
-        if name is not None:
+        if name is not None or not source_fallback:
             return name
         # Fallback: source code parsing
         return _name_from_source(frame.f_code.co_filename, frame.f_lineno)
@@ -171,7 +176,11 @@ def _parse_assignment(line: str) -> Optional[str]:
     Rejects:
         - Comparisons: ``==``, ``>=``, ``!=``
         - Tuple unpack, augmented assignments, attribute/subscript targets
+        - A line ending in a comma: ``role="agent",`` parses as an assignment
+          but is a keyword argument inside a call that spans lines
     """
+    if line.endswith(","):
+        return None
     try:
         tree = ast.parse(line)
         if not tree.body:

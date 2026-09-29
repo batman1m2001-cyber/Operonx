@@ -94,6 +94,24 @@ def test_inline_no_lhs_falls_back_to_route_counter():
     assert branch_names == ["route_1"], f"expected ['route_1'], got {branch_names}"
 
 
+def test_inline_branch_does_not_borrow_a_kwarg_above_it():
+    """``role="agent",`` inside a call above parses as an assignment; it
+    once named the branch ``role``."""
+    with GraphOp(name="g") as g:
+        seed = _seed()
+        a = _passthrough("a", in_key="score", score=seed["score"])
+        b = _passthrough(
+            "b",
+            in_key="score",
+            role="agent",
+        )
+        START >> seed >> if_(seed["score"] >= 5, a).else_(b)
+        [a, b] >> END
+
+    names = [op.name for op in g._ops.values() if op.type == "branch"]
+    assert names == ["route_1"], names
+
+
 def test_inline_multiple_branches_get_route_1_route_2():
     """Multiple inline branches in one graph get sequential counters."""
     with GraphOp(name="g") as g:

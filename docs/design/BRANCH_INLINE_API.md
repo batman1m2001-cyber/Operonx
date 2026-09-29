@@ -89,6 +89,12 @@ Precedence in `Branch._build()`:
 
 Step 3 is the fix for a real bug: `auto_name()`'s source parser walks back 6 lines looking for the first `name = ...`, so `source >> if_(...).else_(...)` with a nearby `m = _mk(...)` line would incorrectly grab `m` as the branch name — colliding with the actual op `m` and corrupting the graph.
 
+**1.10.2.** The guard only caught names that were already ops. A keyword
+argument above the branch (`role="agent",` parses as an assignment) is not
+one, so real graphs had branches named `role` and `filter_meta`. Step 2 now
+reads the bytecode only (`auto_name(source_fallback=False)`): no
+assignment means inline, and inline is `route_N`.
+
 ## Backward compatibility
 
 **Zero breaking changes.**
