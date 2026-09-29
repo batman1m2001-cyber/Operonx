@@ -332,9 +332,10 @@ asyncio.run(main())
 
 ## `LLMOp`: never `user=`, never a Ref in `validators=`
 
-- `user` is a model setting (OpenAI's end-user id), not a template
-  variable, so `prompt={"user": "{user}"}` with `user=...` fails.
-  Use `user_prompt=` / `question=`.
+- `user`, `temperature`, `seed` and the other model settings are sent to
+  the provider, never into the template. A `{user}` placeholder can never
+  be filled, so building the op raises `PromptError`. Name template
+  variables after what they hold: `{user_prompt}`, `{question}`.
 - `validators=` is read when the graph is built. A Ref there is never
   resolved, every answer fails validation, and the op falls back. Check
   allowed values in an op after the LLM instead.
@@ -352,6 +353,7 @@ import asyncio
 
 import operonx
 from operonx import END, START, Operon, graph
+from operonx.core.exceptions import PromptError
 from operonx.providers.ops import LLMOp
 
 
@@ -371,7 +373,11 @@ def right(q):
 
 async def main():
     operonx.bootstrap(resources="resources.yaml")
-    assert "content" not in await Operon(wrong, params={"q": None}).run(inputs={"q": "hi"})
+    try:
+        Operon(wrong, params={"q": None})
+        raise AssertionError("expected PromptError")
+    except PromptError as e:
+        assert "{user}" in str(e)  # names the placeholder and suggests {user_prompt}
     assert (await Operon(right, params={"q": None}).run(inputs={"q": "hi"}))["content"]
 
 

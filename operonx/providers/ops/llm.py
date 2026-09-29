@@ -1586,16 +1586,54 @@ def _extract_template_variables(template: Any) -> set:
     return set()
 
 
+def _shadowed_message(names: List[str]) -> str:
+    """Explain placeholders that a reserved keyword can never fill.
+
+    ``user``, ``temperature`` and the rest are split off as model settings
+    before the template is formatted, and each has a default — so
+    ``{user}`` is missing whether or not ``user=`` was passed, and
+    ``user=q`` goes to the provider as OpenAI's end-user id. The bare
+    "Missing template variable(s)" this used to produce, one model call
+    late, pointed at the template rather than at the name.
+    """
+    placeholders = ", ".join(f"{{{n}}}" for n in names)
+    settings = [n for n in names if n not in ("prompt", "messages")]
+    why = []
+    if settings:
+        why.append(
+            f"{', '.join(f'{n}=' for n in settings)} "
+            f"{'is a model setting' if len(settings) == 1 else 'are model settings'}"
+            f" — sent to the provider, never substituted"
+        )
+    if len(settings) < len(names):
+        why.append("prompt= / messages= are the template itself")
+    return (
+        f"Template placeholder(s) {placeholders} name keys LLMOp reserves: "
+        f"{'; '.join(why)}. The placeholder can never be filled. Rename it after "
+        f"what it holds, e.g. {{{names[0]}_prompt}} with {names[0]}_prompt=..."
+    )
+
+
 def _check_prompt_inputs(inputs: Dict[str, Any]) -> None:
     """Reject prompt/messages mistakes that are knowable at construction.
 
     A ``Ref`` resolves at run time and can only be checked there — banning
     it here would outlaw the legitimate ``prompt=PARENT["template"]``
-    wiring. A **literal** list, or both inputs at once, is knowable now,
-    and one model call later is a much worse place to find out.
+    wiring. A **literal** list, both inputs at once, or a placeholder named
+    like a model setting (``{user}``) is knowable now, and one model call
+    later is a much worse place to find out.
     """
     prompt = inputs.get("prompt")
     messages = inputs.get("messages")
+    if isinstance(prompt, (str, dict)):
+        shadowed = sorted(_extract_template_variables(prompt) & RESERVED_KEYS)
+        if shadowed:
+            raise PromptError(
+                message=_shadowed_message(shadowed),
+                prompt=prompt,
+                missing_vars=shadowed,
+                original_error=ValueError(f"placeholders name reserved keys: {shadowed}"),
+            )
     if prompt is not None and messages is not None:
         raise PromptError(
             message=(
@@ -1633,8 +1671,11 @@ def _format_value(value: Any, vars: Dict[str, Any], template: Any = None) -> Any
         except KeyError as e:
             required = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))
             missing = [v for v in required if v not in vars]
+            # A template that arrived through a Ref skipped the construction
+            # check; say why a reserved name is missing rather than just that.
+            shadowed = sorted(set(missing) & RESERVED_KEYS)
             raise PromptError(
-                message="Missing template variable(s)",
+                message=_shadowed_message(shadowed) if shadowed else "Missing template variable(s)",
                 prompt=template if template is not None else value,
                 missing_vars=missing,
                 original_error=e,

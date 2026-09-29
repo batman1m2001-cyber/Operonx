@@ -69,7 +69,12 @@ asyncio.run(main())
 * **dict** with `system` / `user` keys — the standard two-message call.
 
 Every non-reserved kwarg is a template variable substituted into any
-`{var}` placeholder inside `prompt`. The output key is `content` by default.
+`{var}` placeholder inside `prompt`. The reserved ones — `temperature`,
+`max_tokens`, `user`, `seed` and the other model settings — go to the
+provider instead, so a `{user}` placeholder could never be filled and
+raises `PromptError` when the op is built. Name placeholders after what
+they hold (`{question}`, `{user_prompt}`). The output key is `content` by
+default.
 
 ## Passing a pre-built messages list
 
