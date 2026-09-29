@@ -824,3 +824,62 @@ class TestResolveBySource:
         cond = (x > 5) & (y < 3) & (x < 100)
         assert [(r.raw_source, r.var) for r in cond.get_all_refs()] == [("x", "n"), ("y", "n")]
         assert all(not r.has_transforms for r in cond.get_all_refs())
+
+
+# ============================================================
+# Test 22: Introspection (S9) — probing a private name builds nothing
+# ============================================================
+
+
+class TestIntrospection:
+    """``hasattr`` on a Ref must answer, not fabricate.
+
+    ``ref.field`` is DSL and builds a ``getattr`` transform, but a
+    ``_``-prefixed or dunder name is never a field: debuggers, copy,
+    pickle, pydantic and numpy probe those, and each probe used to be
+    at risk of building a Ref.
+    """
+
+    PROBES = [
+        "_private",
+        "__len__",
+        "__iter__",
+        "__copy__",
+        "__deepcopy__",
+        "__getstate__",
+        "__setstate__",
+        "__fspath__",
+        "__array__",
+        "__html__",
+        "_repr_html_",
+        "__dataclass_fields__",
+        "__get_pydantic_core_schema__",
+    ]
+
+    @pytest.mark.parametrize("name", PROBES)
+    def test_a_private_name_is_absent(self, name):
+        assert hasattr(Ref("n", "x"), name) is False
+
+    def test_probing_builds_no_ref(self, monkeypatch):
+        built = []
+        monkeypatch.setattr(Ref, "_with_transform", lambda self, *a: built.append(a))
+        for name in self.PROBES:
+            hasattr(Ref("n", "x"), name)
+        assert built == []
+
+    def test_a_public_name_is_still_a_field(self):
+        from types import SimpleNamespace
+
+        field = Ref("n", "obj").some_field
+        assert isinstance(field, Ref)
+        assert field.transforms == [("getattr", ("some_field",))]
+        assert field.execute(SimpleNamespace(some_field=3)) == 3
+
+    def test_copy_and_deepcopy(self):
+        import copy
+
+        ref = Ref("n", "x")["k"] > 3
+        for dup in (copy.copy(ref), copy.deepcopy(ref)):
+            assert isinstance(dup, Ref)
+            assert dup.transforms == ref.transforms
+            assert dup.execute({"k": 5}) is True
