@@ -39,6 +39,31 @@ class FakeSession:
         return {"final": {"role": "assistant", "content": f"ok:{text}"}}
 
 
+class GatedSession:
+    """``send()`` blocks until the test opens that call's gate — a turn in
+    flight for exactly as long as the test wants, with no timing guesses.
+    Calls past the scripted gates return at once."""
+
+    def __init__(self, gates: int = 1):
+        self.sent: list[str] = []
+        self.gates = [asyncio.Event() for _ in range(gates)]
+
+    async def send(self, text: str, *, on_approval=None):
+        index = len(self.sent)
+        self.sent.append(text)
+        if index < len(self.gates):
+            await self.gates[index].wait()
+        return {"final": {"role": "assistant", "content": "ok"}}
+
+
+async def _until(predicate, timeout: float = 5.0) -> None:
+    started = asyncio.get_running_loop().time()
+    while not predicate():
+        if asyncio.get_running_loop().time() - started > timeout:
+            raise AssertionError(f"condition not met within {timeout}s")
+        await asyncio.sleep(0.005)
+
+
 async def _beat_until(hb: Heartbeat, count: int, timeout: float = 5.0) -> None:
     started = asyncio.get_running_loop().time()
     while hb.beats < count:
@@ -155,6 +180,29 @@ class TestOverlap:
         async with Heartbeat(Tracking(), "x", interval=TICK) as hb:
             await _beat_until(hb, 3)
         assert concurrent["max"] == 1
+
+    @pytest.mark.asyncio
+    async def test_max_beats_is_exact_when_the_last_beat_was_queued(self):
+        """Under "queue" the beat chain starts the queued beat itself. The
+        ticker only checked the limit *after* dispatching, so once the
+        chain had used the last slot the ticker started one more:
+        max_beats=2 ran 3 beats."""
+        session = GatedSession(gates=2)
+        hb = Heartbeat(session, "x", interval=TICK, overlap="queue", max_beats=2)
+        await hb.start()
+        try:
+            await _until(lambda: len(session.sent) == 1)
+            # Two ticks inside beat 1: the first queues a beat, the second
+            # overflows the single slot and is counted as skipped.
+            await _until(lambda: hb.skipped >= 1)
+            session.gates[0].set()
+            await _until(lambda: len(session.sent) == 2)  # the queued beat
+            session.gates[1].set()
+            await _until(lambda: not hb.running)
+        finally:
+            await hb.stop()
+        assert len(session.sent) == 2
+        assert hb.beats == 2
 
 
 class TestFailure:

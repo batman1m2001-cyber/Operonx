@@ -205,6 +205,15 @@ class Heartbeat:
             if self._stopping.is_set():
                 break
 
+            if self._quota_reached():
+                # Checked *before* dispatching too, because the ticker is
+                # not the only one that starts beats: under "queue" the
+                # beat chain starts the queued one itself. Checking only
+                # after its own dispatch let the ticker start one more
+                # once the chain had used the last slot — max_beats=2 ran
+                # 3 beats.
+                break
+
             if self._beat_task is not None and not self._beat_task.done():
                 if self.overlap == "queue" and not self._pending:
                     self._pending = True
@@ -223,16 +232,21 @@ class Heartbeat:
             self._started += 1
             self._beat_task = asyncio.create_task(self._beat_chain())
 
-            if self.max_beats is not None and self._started >= self.max_beats:
+            if self._quota_reached():
                 break
 
         await self._drain()
+
+    def _quota_reached(self) -> bool:
+        """Every beat ``max_beats`` allows has been started, by either the
+        ticker or the beat chain — both count into ``_started``."""
+        return self.max_beats is not None and self._started >= self.max_beats
 
     async def _beat_chain(self) -> None:
         """One beat, plus any single queued follow-up."""
         await self._beat_once()
         while self._pending and not self._stopping.is_set():
-            if self.max_beats is not None and self._started >= self.max_beats:
+            if self._quota_reached():
                 break
             self._pending = False
             self._started += 1
