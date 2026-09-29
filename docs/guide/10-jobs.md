@@ -138,6 +138,7 @@ cannot resume.
 Job(..., on_error="skip")        # carry on; the run is `failed` if any item failed
 Job(..., on_error="stop")        # start nothing new after a failure; the run is `stopped`
 Job(..., on_error="retry:3")     # try an item up to three more times, then carry on
+Job(..., on_error="record")      # carry on; a failed item is recorded and sunk, the run is `ok`
 Job(..., item_timeout=30)        # seconds; past it the run is cancelled → `timeout`
 ```
 

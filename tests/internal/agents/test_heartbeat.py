@@ -9,6 +9,7 @@ counters are part of the contract, not diagnostics.
 from __future__ import annotations
 
 import asyncio
+import gc
 
 import pytest
 
@@ -37,6 +38,31 @@ class FakeSession:
         if self.fail:
             raise RuntimeError("model unavailable")
         return {"final": {"role": "assistant", "content": f"ok:{text}"}}
+
+
+class GatedSession:
+    """``send()`` blocks until the test opens that call's gate — a turn in
+    flight for exactly as long as the test wants, with no timing guesses.
+    Calls past the scripted gates return at once."""
+
+    def __init__(self, gates: int = 1):
+        self.sent: list[str] = []
+        self.gates = [asyncio.Event() for _ in range(gates)]
+
+    async def send(self, text: str, *, on_approval=None):
+        index = len(self.sent)
+        self.sent.append(text)
+        if index < len(self.gates):
+            await self.gates[index].wait()
+        return {"final": {"role": "assistant", "content": "ok"}}
+
+
+async def _until(predicate, timeout: float = 5.0) -> None:
+    started = asyncio.get_running_loop().time()
+    while not predicate():
+        if asyncio.get_running_loop().time() - started > timeout:
+            raise AssertionError(f"condition not met within {timeout}s")
+        await asyncio.sleep(0.005)
 
 
 async def _beat_until(hb: Heartbeat, count: int, timeout: float = 5.0) -> None:
@@ -156,6 +182,29 @@ class TestOverlap:
             await _beat_until(hb, 3)
         assert concurrent["max"] == 1
 
+    @pytest.mark.asyncio
+    async def test_max_beats_is_exact_when_the_last_beat_was_queued(self):
+        """Under "queue" the beat chain starts the queued beat itself. The
+        ticker only checked the limit *after* dispatching, so once the
+        chain had used the last slot the ticker started one more:
+        max_beats=2 ran 3 beats."""
+        session = GatedSession(gates=2)
+        hb = Heartbeat(session, "x", interval=TICK, overlap="queue", max_beats=2)
+        await hb.start()
+        try:
+            await _until(lambda: len(session.sent) == 1)
+            # Two ticks inside beat 1: the first queues a beat, the second
+            # overflows the single slot and is counted as skipped.
+            await _until(lambda: hb.skipped >= 1)
+            session.gates[0].set()
+            await _until(lambda: len(session.sent) == 2)  # the queued beat
+            session.gates[1].set()
+            await _until(lambda: not hb.running)
+        finally:
+            await hb.stop()
+        assert len(session.sent) == 2
+        assert hb.beats == 2
+
 
 class TestFailure:
     @pytest.mark.asyncio
@@ -204,6 +253,92 @@ class TestFailure:
         ) as hb:
             await _beat_until(hb, 3)
             assert hb.running
+
+
+class ReporterDown(BaseException):
+    """Not an ``Exception`` — the kind an ``except Exception`` guard lets by.
+    Operonx raises several of these on purpose (interrupts, budgets)."""
+
+
+def _unretrieved(contexts: list) -> list:
+    return [c for c in contexts if "never retrieved" in c.get("message", "")]
+
+
+class TestGuards:
+    """`send`/`on_result` were guarded against any ``BaseException``, the
+    `on_error` reporter only against ``Exception``. What got past it ended
+    the beat task, whose exception nobody read: the next dispatch replaced
+    `_beat_task`, and asyncio reported it only when the task was collected."""
+
+    @pytest.fixture
+    async def loop_reports(self):
+        loop = asyncio.get_running_loop()
+        contexts: list = []
+        previous = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: contexts.append(context))
+        yield contexts
+        loop.set_exception_handler(previous)
+
+    @pytest.mark.asyncio
+    async def test_a_base_exception_from_the_error_handler_is_contained(self, loop_reports):
+        def bad_handler(_e):
+            raise ReporterDown("the reporter is down")
+
+        hb = Heartbeat(FakeSession(fail=True), "x", interval=TICK, on_error=bad_handler)
+        await hb.start()
+        await _beat_until(hb, 3)
+        assert hb.running
+        await hb.stop()
+        assert hb.errors >= 3
+        del hb
+        gc.collect()
+        assert _unretrieved(loop_reports) == []
+
+    @pytest.mark.asyncio
+    async def test_a_beat_that_escapes_its_guard_is_still_retrieved(self, loop_reports):
+        """The guards are the first line; the beat task's exception is read
+        regardless, so a future gap in them is reported, not lost."""
+        hb = Heartbeat(FakeSession(), "x", interval=TICK)
+
+        async def escaped() -> None:
+            raise ReporterDown("past the guard")
+
+        hb._beat_once = escaped
+        await hb.start()
+        await _until(lambda h=hb: h.errors >= 2)
+        await hb.stop()
+        assert isinstance(hb.last_error, ReporterDown)
+        del hb, escaped
+        gc.collect()
+        assert _unretrieved(loop_reports) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+    @pytest.mark.parametrize("where", ["send", "on_error"])
+    async def test_process_exits_are_not_swallowed(self, signal, where):
+        """KeyboardInterrupt and SystemExit mean "end the process", and
+        asyncio lets them through from any task for that reason. Counting
+        a Ctrl-C that lands inside a turn as a failed beat kept the
+        schedule going through it. Both guards now let them pass."""
+
+        class Session(FakeSession):
+            async def send(self, text, *, on_approval=None):
+                if where == "send":
+                    raise signal()
+                raise RuntimeError("model unavailable")
+
+        reported: list = []
+
+        def handler(e):
+            reported.append(e)
+            if where == "on_error":
+                raise signal()
+
+        hb = Heartbeat(Session(), "x", on_error=handler)
+        with pytest.raises(signal):
+            await hb._beat_once()
+        if where == "send":
+            assert reported == [], "a process exit is not a beat error to report"
 
 
 class TestLifecycle:
@@ -258,6 +393,79 @@ class TestLifecycle:
             await _beat_until(hb, 2)
         finally:
             await hb.stop()
+
+
+class TestStopping:
+    """`stop()` lets an in-flight beat finish. That grace window is where
+    it went wrong: the caller's own deadline was swallowed, and the
+    heartbeat claimed to be stopped while a turn was still running."""
+
+    @pytest.mark.asyncio
+    async def test_an_outer_deadline_on_stop_is_raised_not_swallowed(self):
+        """A shutdown that gives up on `stop()` must be told it gave up —
+        returning normally reads as "stopped" to the caller."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)  # a beat is in flight
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(hb.stop(timeout=30), timeout=TICK)
+        assert hb.running, "the loop is still finishing the beat stop() let run"
+
+        session.gates[0].set()
+        await asyncio.wait_for(hb.stop(), timeout=5)
+        assert not hb.running
+        assert len(session.sent) == 1, "no beat may start once stop() was asked"
+
+    @pytest.mark.asyncio
+    async def test_running_holds_through_the_grace_window_and_start_is_refused(self):
+        """`running` read False while the in-flight turn was still going,
+        so `start()` was accepted and two loops shared one heartbeat."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        stopper = asyncio.create_task(hb.stop())
+        await asyncio.sleep(0)  # stop() has begun, and is waiting on the beat
+        assert not stopper.done()
+        assert hb.running
+        with pytest.raises(RuntimeError, match="stopping"):
+            await hb.start()
+
+        session.gates[0].set()
+        await asyncio.wait_for(stopper, timeout=5)
+        assert not hb.running
+        await hb.start()  # once the stop has finished, a restart is fine
+        await hb.stop()
+
+    @pytest.mark.asyncio
+    async def test_a_second_stop_waits_as_long_as_the_first(self):
+        """The second call found nothing to wait for and returned while the
+        first was still waiting for the beat."""
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        first = asyncio.create_task(hb.stop())
+        second = asyncio.create_task(hb.stop())
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not second.done(), "the beat is still in flight"
+
+        session.gates[0].set()
+        await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        assert not hb.running
+
+    @pytest.mark.asyncio
+    async def test_a_stop_that_runs_out_of_grace_cancels_the_beat(self):
+        session = GatedSession()
+        hb = Heartbeat(session, "x", interval=TICK)
+        await hb.start()
+        await _until(lambda: session.sent)
+        with pytest.raises(asyncio.TimeoutError):
+            await hb.stop(timeout=TICK)
+        assert not hb.running
+        await hb.stop()  # and stopping again is a no-op, not a CancelledError
 
 
 class TestJitter:

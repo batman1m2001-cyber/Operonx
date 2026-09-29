@@ -71,8 +71,10 @@ def parse_on_error(text: str) -> ErrorPolicy:
     text = (text or "").strip().lower()
     if text in ("skip", "stop", "record"):
         return ErrorPolicy(text)
-    if text.startswith("retry"):
-        _, _, n = text.partition(":")
+    head, _, n = text.partition(":")
+    # The word before any colon must be exactly `retry`. Matching on the
+    # prefix read a typo like `retry3` (meant: retry:3) as retry:1.
+    if head.strip() == "retry":
         try:
             retries = int(n) if n else 1
         except ValueError:

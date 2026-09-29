@@ -32,7 +32,16 @@ import asyncio
 import random
 from typing import Any, Awaitable, Callable, Optional, Union
 
+from operonx.core.loggings import LOGGER
+
 __all__ = ["Heartbeat", "OverlapPolicy"]
+
+#: Let through by both guards in a beat. Cancellation is how `stop()` ends
+#: a beat that outran its grace. KeyboardInterrupt and SystemExit mean "end
+#: the process" — asyncio re-raises them out of any task into the event
+#: loop for that reason — and a heartbeat that counted a Ctrl-C landing
+#: inside a turn as a failed beat would keep beating through it.
+_PASS_THROUGH = (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 #: What to do when a beat comes due while the previous one is still running.
 #:
@@ -67,7 +76,10 @@ class Heartbeat:
         on_result: Called with each turn's result dict. Exceptions from it
             are counted as beat errors — a sink that throws must not be
             able to stop the schedule.
-        on_error: Called with any exception raised by a beat.
+        on_error: Called with any exception raised by a beat. What it
+            raises is ignored, like the sink's. KeyboardInterrupt and
+            SystemExit are not beat errors: they propagate, from a beat or
+            from this handler, and end the process as asyncio intends.
         on_approval: Forwarded to ``session.send`` for gated tools. Without
             one, a heartbeat that trips a destructive tool waits out the
             approval timeout with nobody watching, so this is worth
@@ -134,11 +146,25 @@ class Heartbeat:
 
     @property
     def running(self) -> bool:
+        """True from :meth:`start` until the loop has actually finished —
+        including the grace window in which :meth:`stop` lets a beat end."""
         return self._task is not None and not self._task.done()
 
     async def start(self) -> "Heartbeat":
-        """Begin beating. Returns immediately; beats run in the background."""
+        """Begin beating. Returns immediately; beats run in the background.
+
+        Raises:
+            RuntimeError: the heartbeat is running, or still stopping. A
+                start during a stop is refused rather than waited for: the
+                wait is the in-flight turn, which can take minutes, and a
+                start that races a stop is a sequencing bug in the caller
+                that waiting would hide. Await :meth:`stop` first.
+        """
         if self.running:
+            if self._stopping.is_set():
+                raise RuntimeError(
+                    "this heartbeat is still stopping — await stop() before starting it again"
+                )
             raise RuntimeError("this heartbeat is already running")
         self._stopping.clear()
         self._pending = False
@@ -151,12 +177,31 @@ class Heartbeat:
 
         Cancelling mid-``send()`` would leave the conversation ending on
         an unanswered user turn, which the next beat would then build on.
+
+        Every caller waits for the same thing — the loop to finish — so a
+        second concurrent ``stop()`` returns no sooner than the first.
+
+        Raises:
+            asyncio.TimeoutError: the beat outran ``timeout`` and was
+                cancelled.
+            asyncio.CancelledError: the caller was cancelled while waiting
+                (an outer deadline). The heartbeat still stops — no new
+                beat starts — and ``running`` stays True until the
+                in-flight one has finished.
         """
         self._stopping.set()
-        task, self._task = self._task, None
-        if task is None:
+        # `_task` is left in place: `running` must stay True until the loop
+        # has finished. Clearing it here made the heartbeat read as stopped
+        # for the whole grace window, so `start()` was accepted and a second
+        # loop shared this one's state while the first was still in a turn.
+        task = self._task
+        if task is None or task.done():
             return
         try:
+            # Shielded, so a caller that gives up waiting does not cancel
+            # the loop mid-beat; with `_stopping` set it winds down alone.
+            # No `except CancelledError`: that deadline is the caller's, and
+            # swallowing it made `wait_for(hb.stop(), 0.2)` return normally.
             await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         except asyncio.TimeoutError:
             # The beat outran the grace period. Now cancelling is the
@@ -164,8 +209,6 @@ class Heartbeat:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise
-        except asyncio.CancelledError:  # pragma: no cover - defensive
-            pass
 
     async def __aenter__(self) -> "Heartbeat":
         return await self.start()
@@ -205,6 +248,15 @@ class Heartbeat:
             if self._stopping.is_set():
                 break
 
+            if self._quota_reached():
+                # Checked *before* dispatching too, because the ticker is
+                # not the only one that starts beats: under "queue" the
+                # beat chain starts the queued one itself. Checking only
+                # after its own dispatch let the ticker start one more
+                # once the chain had used the last slot — max_beats=2 ran
+                # 3 beats.
+                break
+
             if self._beat_task is not None and not self._beat_task.done():
                 if self.overlap == "queue" and not self._pending:
                     self._pending = True
@@ -222,17 +274,23 @@ class Heartbeat:
             # asked for whenever a turn outlasts the interval.
             self._started += 1
             self._beat_task = asyncio.create_task(self._beat_chain())
+            self._beat_task.add_done_callback(self._reap)
 
-            if self.max_beats is not None and self._started >= self.max_beats:
+            if self._quota_reached():
                 break
 
         await self._drain()
+
+    def _quota_reached(self) -> bool:
+        """Every beat ``max_beats`` allows has been started, by either the
+        ticker or the beat chain — both count into ``_started``."""
+        return self.max_beats is not None and self._started >= self.max_beats
 
     async def _beat_chain(self) -> None:
         """One beat, plus any single queued follow-up."""
         await self._beat_once()
         while self._pending and not self._stopping.is_set():
-            if self.max_beats is not None and self._started >= self.max_beats:
+            if self._quota_reached():
                 break
             self._pending = False
             self._started += 1
@@ -260,7 +318,7 @@ class Heartbeat:
                 maybe = self.on_result(result)
                 if asyncio.iscoroutine(maybe):
                     await maybe
-        except asyncio.CancelledError:
+        except _PASS_THROUGH:
             raise
         except BaseException as e:  # noqa: BLE001 — a scheduler outlives its beats
             self.errors += 1
@@ -270,7 +328,33 @@ class Heartbeat:
                     maybe = self.on_error(e)
                     if asyncio.iscoroutine(maybe):
                         await maybe
-                except Exception:  # noqa: BLE001 — the reporter is not the schedule
+                except _PASS_THROUGH:
+                    raise
+                # The same breadth as the guard above. This one caught only
+                # `Exception`, so a reporter raising any other
+                # `BaseException` ended the beat task, with nobody to read it.
+                except BaseException:  # noqa: BLE001 — the reporter is not the schedule
                     pass
         finally:
             self.beats += 1
+
+    def _reap(self, task: "asyncio.Task[None]") -> None:
+        """Read a finished beat task's exception, so none goes unretrieved.
+
+        Nothing else ever looks at a finished beat task: `_beat_task` is
+        replaced on the next dispatch, and asyncio reported what was left
+        on it only when the task was garbage-collected — "Task exception
+        was never retrieved", far from the cause. The guards in
+        `_beat_once` let only `_PASS_THROUGH` out, and KeyboardInterrupt /
+        SystemExit have reached the event loop by the time this runs; any
+        other exception here means a guard has a gap, so it is recorded as
+        a beat error and logged rather than lost.
+        """
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None or isinstance(error, (KeyboardInterrupt, SystemExit)):
+            return
+        self.errors += 1
+        self.last_error = error
+        LOGGER.error("heartbeat: a beat raised past its guard: %s: %s", type(error).__name__, error)
