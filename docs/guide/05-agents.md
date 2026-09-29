@@ -238,6 +238,12 @@ Compaction shapes the **prompt**, not the stored conversation, so nothing
 is lost irrecoverably and `agent_result` still returns everything that
 happened.
 
+The tool definitions count against `token_budget` too — they are re-sent
+with every request, and a 20-tool registry is easily a few thousand
+tokens. They are read from `call_model.tools`, which a
+`make_llm_caller(...)` caller carries; a hand-written `call_model`
+factory can set that attribute itself.
+
 Retrieved memory and matched skills are placed *after* the conversation,
 not in the system prompt: they change per query, and leading with them
 would push the whole history out of the provider's cached prefix.

@@ -11,6 +11,7 @@ from operonx.agents.ops.compact_ops import (
     apply_compaction,
     count_tokens,
     estimate_tokens,
+    estimate_tool_tokens,
     plan_compaction,
     unmatched_tool_calls,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "memory_write",
     "count_tokens",
     "estimate_tokens",
+    "estimate_tool_tokens",
     "plan_compaction",
     "apply_compaction",
     "unmatched_tool_calls",

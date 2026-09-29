@@ -213,3 +213,111 @@ class TestCompaction:
         assert any("the original question" in str(m.get("content")) for m in answer["messages"]), (
             "the stored history must survive prompt-time compaction"
         )
+
+
+class TestToolDefinitionsCountAgainstTheBudget:
+    """The budget counted messages only. A 20-tool registry is easily
+    2–4k tokens re-sent on every request, so an agent compacted against a
+    budget it was already over — a constant error, not a proportional one."""
+
+    @staticmethod
+    def _big_registry(n=20):
+        from operonx.agents.tool import get_tool_definitions, tool
+
+        for i in range(n):
+            schema = {
+                "type": "object",
+                "properties": {
+                    f"field_{k}": {"type": "string", "description": "a parameter " * 12}
+                    for k in range(6)
+                },
+            }
+
+            @tool(name=f"tool_{i}", description="Does a thing. " * 20, schema=schema)
+            async def _t(**kwargs) -> dict:
+                return {}
+
+        return get_tool_definitions()
+
+    @staticmethod
+    def _history():
+        # ~1.2k tokens of conversation: under 75% of a 4k budget on its own.
+        return [
+            {"role": "user", "content": "first " * 400},
+            {"role": "assistant", "content": "answer " * 400},
+            {"role": "user", "content": "and now?"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_large_toolset_triggers_compaction(self):
+        from unittest.mock import Mock, patch
+
+        from openai.types.chat.chat_completion import ChatCompletion
+
+        from operonx.agents.ops.compact_ops import estimate_tokens
+        from operonx.agents.ops.model_ops import make_llm_caller
+
+        definitions = self._big_registry()
+        history = self._history()
+        assert estimate_tokens(history) < 0.75 * 4_000, "the history alone must fit"
+
+        sent: list = []
+
+        async def generate(messages, **kwargs):
+            sent.append(list(messages))
+            return ChatCompletion.model_validate(
+                {
+                    "id": "x",
+                    "created": 0,
+                    "model": "m",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": "ok"},
+                        }
+                    ],
+                }
+            )
+
+        llm = Mock()
+        llm.generate = generate
+        hub = Mock()
+        hub.get.return_value = llm
+        agent = build_react_agent(
+            call_model=make_llm_caller("mock", tools=definitions),
+            max_turns=2,
+            token_budget=4_000,
+            keep_recent=1,
+        )(messages=None)
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = hub
+            await Operon(agent).run(inputs={"messages": history})
+
+        assert sent, "the model was never called"
+        assert any(SUMMARY_MARKER in str(m.get("content")) for m in sent[0]), (
+            "messages + tool definitions are over the trigger; the prompt must be compacted"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_hand_written_call_model_can_declare_its_tools(self):
+        """The same protocol ``make_llm_caller`` follows: a ``tools``
+        attribute on the factory."""
+        definitions = self._big_registry()
+        model, seen = capturing_model()
+        model.tools = definitions
+        agent = build_react_agent(call_model=model, max_turns=2, token_budget=4_000, keep_recent=1)(
+            messages=None
+        )
+        await Operon(agent).run(inputs={"messages": self._history()})
+        assert any(SUMMARY_MARKER in str(m.get("content")) for m in seen[0])
+
+    @pytest.mark.asyncio
+    async def test_without_tools_the_same_history_is_left_alone(self):
+        model, seen = capturing_model()
+        agent = build_react_agent(call_model=model, max_turns=2, token_budget=4_000, keep_recent=1)(
+            messages=None
+        )
+        await Operon(agent).run(inputs={"messages": self._history()})
+        assert all(SUMMARY_MARKER not in str(m.get("content")) for m in seen[0])

@@ -309,3 +309,22 @@ class TestAStaleCallDoesNotSplitAnExchange:
         msgs = conversation(3)
         out = plan(messages=msgs, budget=1, keep_recent=2)
         assert out["pinned"] + out["summarize"] + out["keep"] == msgs
+
+
+class TestReservedTokens:
+    def test_reserved_tokens_count_against_the_budget(self):
+        msgs = conversation(6, size=400)
+        tokens = estimate_tokens(msgs)
+        budget = int(tokens / 0.7)  # under the 0.75 trigger on messages alone
+        assert plan(messages=msgs, budget=budget, keep_recent=1)["needed"] is False
+        out = plan(messages=msgs, budget=budget, keep_recent=1, reserved_tokens=tokens // 2)
+        assert out["needed"] is True
+        assert out["tokens"] == tokens + tokens // 2
+
+    def test_tool_definitions_have_a_size(self):
+        from operonx.agents.ops.compact_ops import estimate_tool_tokens
+
+        one = [{"type": "function", "function": {"name": "t", "description": "d" * 700}}]
+        assert estimate_tool_tokens(one) >= 200
+        assert estimate_tool_tokens(None) == 0
+        assert estimate_tool_tokens([]) == 0

@@ -28,7 +28,11 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from operonx.agents.graphs.dispatch import build_dispatch, call_identity, tool_message
-from operonx.agents.ops.compact_ops import apply_compaction, plan_compaction
+from operonx.agents.ops.compact_ops import (
+    apply_compaction,
+    estimate_tool_tokens,
+    plan_compaction,
+)
 from operonx.agents.ops.memory_ops import gather_memory
 from operonx.agents.ops.model_ops import TRUNCATED_REASONS
 from operonx.agents.ops.prompt_ops import apply_cache_control, assemble_api_messages
@@ -185,7 +189,10 @@ def build_react_agent(
             placement and same reason as memory.
         token_budget: Prompt budget. Compaction triggers at 75% of it,
             not at 100% — the turn that discovers the budget is exceeded
-            has already failed.
+            has already failed. The tool definitions ``call_model`` sends
+            count against it: they are read from ``call_model.tools``,
+            which a ``make_llm_caller`` caller carries and a hand-written
+            factory can set.
         keep_recent: Exchanges kept verbatim by compaction. Recency is
             what the model is reasoning about; summarising it is how a
             compactor makes an agent forget what it just did.
@@ -206,6 +213,12 @@ def build_react_agent(
     dispatch_one = build_dispatch(
         approval_timeout=approval_timeout, policy=policy, redactor=redactor
     )
+
+    # The tool definitions ride on every request but are not messages, so
+    # they are counted here, once, rather than passed to the planner each
+    # turn. Leaving them out meant compacting against a budget the
+    # request was already 2–4k tokens over with a typical registry.
+    tool_tokens = estimate_tool_tokens(getattr(call_model, "tools", None))
 
     @op
     def count_turn(turns: int = 0) -> dict:
@@ -324,6 +337,7 @@ def build_react_agent(
             messages=PARENT["messages"],
             budget=token_budget,
             keep_recent=keep_recent,
+            reserved_tokens=tool_tokens,
         )
         compacted = apply_compaction(
             pinned=planned["pinned"],

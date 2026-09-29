@@ -29,12 +29,14 @@ turn too late.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from operonx.core.ops.transform.func_op import op
 
 __all__ = [
     "estimate_tokens",
+    "estimate_tool_tokens",
     "count_tokens",
     "plan_compaction",
     "apply_compaction",
@@ -72,6 +74,23 @@ def estimate_tokens(messages: Optional[List[dict]]) -> int:
         for call in message.get("tool_calls") or []:
             total += int(len(str(call)) / _CHARS_PER_TOKEN) + 1
     return total
+
+
+def estimate_tool_tokens(tools: Optional[List[dict]]) -> int:
+    """Approximate token cost of a ``tools=`` payload. Never raises.
+
+    Tool definitions travel with **every** request and are easy to leave
+    out of a budget because they are not messages — yet a 20-tool
+    registry is easily 2–4k tokens, re-sent each turn. Counted from the
+    serialized JSON, the same way the provider receives it.
+    """
+    if not tools:
+        return 0
+    try:
+        text = json.dumps(tools, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = str(tools)
+    return int(len(text) / _CHARS_PER_TOKEN) + 1
 
 
 @op
@@ -136,6 +155,7 @@ def plan_compaction(
     budget: int = 100_000,
     keep_recent: int = 6,
     trigger_ratio: float = 0.75,
+    reserved_tokens: int = 0,
 ) -> dict:
     """Decide what survives, what is summarised, and what is dropped.
 
@@ -148,13 +168,17 @@ def plan_compaction(
         trigger_ratio: Fraction of budget at which compaction starts.
             Below 1.0 on purpose — waiting until the budget is exceeded
             means the turn that discovers it has already failed.
+        reserved_tokens: What the request spends outside ``messages`` —
+            the tool definitions, above all (:func:`estimate_tool_tokens`)
+            — counted against the same budget. Leaving it out compacted
+            against a budget the request was already partly over.
 
     Returns:
         ``needed``, plus ``keep`` (verbatim tail), ``summarize`` (the
         middle) and ``pinned`` (system messages, always kept).
     """
     messages = [m for m in (messages or []) if isinstance(m, dict)]
-    tokens = estimate_tokens(messages)
+    tokens = estimate_tokens(messages) + max(0, int(reserved_tokens or 0))
     if budget <= 0 or tokens <= budget * trigger_ratio:
         return {
             "needed": False,
