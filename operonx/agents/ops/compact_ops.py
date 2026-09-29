@@ -92,43 +92,42 @@ def _exchanges(messages: List[dict]) -> List[List[dict]]:
     An assistant turn requesting tools owns the tool messages answering
     it. Splitting them orphans a ``tool_call``, which the provider
     rejects — so grouping is what makes the rest of this file safe.
+
+    A result joins the group of the assistant that made its call, looked
+    up by call id, wherever it arrives. This used to be tracked as a set
+    of ids still pending, which was not cleared when a non-tool message
+    closed the group: a result arriving after that went into an empty
+    group of its own, which the keep window could then hold while its
+    assistant was summarised away. Looking the owner up has no state to
+    go stale. A result whose call is nowhere in the history is a group of
+    its own — there is nothing to attach it to.
     """
     groups: List[List[dict]] = []
-    pending_ids: set = set()
-    current: List[dict] = []
+    owner: Dict[str, int] = {}
 
     for message in messages:
-        role = message.get("role")
-        if role == "tool" and pending_ids:
-            current.append(message)
-            pending_ids.discard(message.get("tool_call_id"))
-            if not pending_ids:
-                groups.append(current)
-                current = []
-            continue
-
-        if current:
-            groups.append(current)
-            current = []
-
-        calls = message.get("tool_calls") or []
-        if role == "assistant" and calls:
-            pending_ids = {c.get("id") for c in calls if isinstance(c, dict)}
-            pending_ids.discard(None)
-            current = [message]
-            if not pending_ids:
-                # Malformed: tool_calls with no usable ids. Keep it whole
-                # rather than waiting for answers that cannot arrive.
-                groups.append(current)
-                current = []
+        if message.get("role") == "tool":
+            index = owner.get(message.get("tool_call_id"))
+            if index is not None:
+                groups[index].append(message)
+            else:
+                groups.append([message])
             continue
 
         groups.append([message])
-
-    if current:
-        # Unanswered tool calls — the conversation was cut mid-exchange.
-        groups.append(current)
+        if message.get("role") == "assistant":
+            for call in message.get("tool_calls") or []:
+                if isinstance(call, dict) and call.get("id"):
+                    owner[call["id"]] = len(groups) - 1
     return groups
+
+
+def _paired(group: List[dict]) -> bool:
+    """Whether every call in the group has its result and vice versa."""
+    calls, results = _pairs(group)
+    calls.discard(None)
+    results.discard(None)
+    return calls == results
 
 
 @op
@@ -184,6 +183,23 @@ def plan_compaction(
     # what it just did is worse than being over budget.
     while not older and len(keep_groups) > 1:
         older, keep_groups = keep_groups[:1], keep_groups[1:]
+
+    # A group whose calls and results do not pair up cannot be sent as it
+    # is. The one exception is the latest exchange, whose calls may simply
+    # not be answered *yet*; an earlier unanswered call never will be (the
+    # conversation moved on past it), and a result with no call anywhere
+    # never had one. Those go to the summarised span, where they become
+    # prose, so compaction always hands back a history a provider accepts
+    # — even from one that already held an unanswered call.
+    broken = [
+        group
+        for position, group in enumerate(keep_groups)
+        if not _paired(group)
+        and not (position == len(keep_groups) - 1 and group[0].get("role") == "assistant")
+    ]
+    if broken:
+        keep_groups = [group for group in keep_groups if all(group is not b for b in broken)]
+        older = older + broken
 
     # A previous summary is re-summarised rather than kept, or the
     # conversation accumulates one marker per compaction forever.
@@ -259,7 +275,7 @@ def compaction_summary_prompt(messages: List[dict]) -> str:
     )
 
 
-def _pairs(messages: List[dict]) -> Tuple[set, set]:  # pragma: no cover - helper for tests
+def _pairs(messages: List[dict]) -> Tuple[set, set]:
     calls = {
         c.get("id") for m in messages for c in (m.get("tool_calls") or []) if isinstance(c, dict)
     }

@@ -237,3 +237,75 @@ class TestUnmatchedHelper:
             "calls_without_results": [],
             "results_without_calls": [],
         }
+
+
+def _asst(name, *call_ids, size=400):
+    message = {"role": "assistant", "content": name * size}
+    if call_ids:
+        message["tool_calls"] = [{"id": c, "name": "tool", "args": {}} for c in call_ids]
+    return message
+
+
+def _result(call_id, size=400):
+    return {"role": "tool", "tool_call_id": call_id, "content": "r" * size}
+
+
+def _user(text, size=400):
+    return {"role": "user", "content": text * size}
+
+
+CLEAN = {"calls_without_results": [], "results_without_calls": []}
+
+
+class TestAStaleCallDoesNotSplitAnExchange:
+    """``_exchanges`` kept ``pending_ids`` across a flush. A tool message
+    arriving while a stale set was held went into an *empty* group of its
+    own, which ``groups[-keep_recent:]`` could keep while its assistant was
+    summarised away — a result whose call is gone, which the provider
+    rejects on the very request compaction was preparing."""
+
+    def test_a_late_result_stays_with_its_call(self):
+        msgs = [
+            _user("a"),
+            _asst("b", "a1", "a2"),
+            _result("a1"),
+            _user("c"),
+            _result("a2"),  # answered late, after the flush
+            _user("d"),
+            _asst("e", "b1"),
+            _result("b1"),
+            _asst("f"),
+        ]
+        out = plan(messages=msgs, budget=100, keep_recent=4)
+        assert out["needed"] is True
+        assert unmatched_tool_calls(out["keep"]) == CLEAN
+        assert unmatched_tool_calls(out["summarize"])["results_without_calls"] == []
+
+    def test_an_earlier_unanswered_call_compacts_into_a_valid_history(self):
+        """The shape the budget used to leave behind: a call never
+        answered, and the conversation carrying on after it. It can no
+        longer be answered, so it must not be sent verbatim."""
+        msgs = [
+            _user("a"),
+            _asst("b", "never"),  # unanswered
+            _user("c"),
+            _asst("d", "b1"),
+            _result("b1"),
+            _asst("e"),
+            _user("f"),
+            _asst("g"),
+        ]
+        out = plan(messages=msgs, budget=100, keep_recent=10)
+        assert out["needed"] is True
+        applied = apply_(**{k: out[k] for k in ("pinned", "summarize", "keep")}, summary="notes")
+        assert unmatched_tool_calls(applied["messages"]) == CLEAN
+
+    def test_a_result_for_a_call_that_never_existed_is_not_kept(self):
+        msgs = [_user("a"), _result("ghost"), _user("b"), _asst("c"), _user("d"), _asst("e")]
+        out = plan(messages=msgs, budget=100, keep_recent=10)
+        assert unmatched_tool_calls(out["keep"]) == CLEAN
+
+    def test_grouping_keeps_the_order_otherwise(self):
+        msgs = conversation(3)
+        out = plan(messages=msgs, budget=1, keep_recent=2)
+        assert out["pinned"] + out["summarize"] + out["keep"] == msgs
