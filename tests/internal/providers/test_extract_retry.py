@@ -417,7 +417,13 @@ def _failing_hub(exc):
 async def test_a_hard_failure_raises_by_default():
     with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = _failing_hub(TimeoutError("exceeded 90s"))
-        g = _wf(resource="mock", prompt="Soften: {text}", fields=["reason: str"], parser="json", text="x")
+        g = _wf(
+            resource="mock",
+            prompt="Soften: {text}",
+            fields=["reason: str"],
+            parser="json",
+            text="x",
+        )
         out = await Operon(g).run(inputs={})
     assert out.get("reason") is None and "error" not in out or out.get("error") is None
     state = out["$state"]
@@ -430,8 +436,14 @@ async def test_on_failure_error_reports_a_hard_failure_as_the_error_output():
     """For an optional step: the graph carries on, and `error` says why."""
     with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
         mock_cls.instance.return_value = _failing_hub(TimeoutError("exceeded 90s"))
-        g = _wf(resource="mock", prompt="Soften: {text}", fields=["reason: str"], parser="json",
-                on_failure="error", text="x")
+        g = _wf(
+            resource="mock",
+            prompt="Soften: {text}",
+            fields=["reason: str"],
+            parser="json",
+            on_failure="error",
+            text="x",
+        )
         out = await Operon(g).run(inputs={})
     assert out["reason"] is None
     assert out["error"] == "TimeoutError: exceeded 90s"
