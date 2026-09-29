@@ -175,6 +175,14 @@ unknown tool, unparseable arguments, an exception inside the tool, a
 timeout, a policy refusal, a human denial. The model reads the error and
 corrects itself rather than the run ending.
 
+The stored messages carry bookkeeping the providers do not define: an
+`id` on every message (`add_messages` upserts on it) and `name`/`status`
+on a tool result. They stay in `agent_result(...)["messages"]`; the
+backends drop them on the way out — an OpenAI-shaped backend sends only
+the keys Chat Completions defines for each role, since a strict gateway
+rejects anything else, and the Anthropic backend rebuilds each message in
+its own shape, keeping `status: "error"` as the result's `is_error`.
+
 Tool output is truncated to `max_result_chars` (default 100,000) and the
 truncation is announced — a model shown half a file with no marker will
 reason about it as if it were whole.

@@ -12,7 +12,7 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from operonx.core import LOGGER
 from operonx.providers.llms.config import OpenAIConfig
 
-from .base import BaseLLM, create_http_client
+from .base import BaseLLM, create_http_client, openai_message
 
 openai._base_client.get_platform = lambda: "Windows"
 
@@ -388,7 +388,7 @@ class OpenAISDKModel(BaseLLM):
             custom_id = f"request-{idx}-{uuid.uuid4().hex[:8]}"
             body = {
                 "model": self.config.model,
-                "messages": [self.resolve_image_paths(msg) for msg in messages],
+                "messages": [self.resolve_image_paths(openai_message(msg)) for msg in messages],
                 "temperature": temperature,
                 "top_p": top_p,
             }

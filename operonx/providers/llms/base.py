@@ -128,6 +128,42 @@ def strip_cache_control(message: Any) -> Any:
     return message
 
 
+#: The keys the Chat Completions schema defines, per message role.
+OPENAI_MESSAGE_KEYS: Dict[str, frozenset] = {
+    "system": frozenset({"role", "content", "name"}),
+    "developer": frozenset({"role", "content", "name"}),
+    "user": frozenset({"role", "content", "name"}),
+    "assistant": frozenset(
+        {"role", "content", "name", "tool_calls", "refusal", "audio", "function_call"}
+    ),
+    "tool": frozenset({"role", "content", "tool_call_id"}),
+    "function": frozenset({"role", "content", "name"}),
+}
+
+
+def openai_message(message: Any) -> Any:
+    """Keep only the keys Chat Completions defines for the message's role.
+
+    ``operonx.agents`` keeps bookkeeping on its messages — an ``id`` on
+    every one (``add_messages`` upserts on it), ``name`` and ``status`` on
+    a tool result, a message-level ``cache_control`` breakpoint — and the
+    schema has no such fields there. OpenAI tolerates some of them; a
+    strict gateway rejects the unknown property outright, so the first
+    request carrying a tool result failed. A backend sending an
+    OpenAI-shaped request passes each message through here. This
+    subsumes :func:`strip_cache_control`; content-part markers are left
+    alone, as there. A role the schema does not define passes through
+    untouched: it is provider-specific, and so are its keys. The caller's
+    message is not mutated.
+    """
+    if not isinstance(message, dict):
+        return message
+    allowed = OPENAI_MESSAGE_KEYS.get(message.get("role"))
+    if allowed is None or message.keys() <= allowed:
+        return message
+    return {k: v for k, v in message.items() if k in allowed}
+
+
 def cache_metrics(completion: ChatCompletion) -> Dict[str, int]:
     """Extract normalized cache metrics from a ChatCompletion.
 
@@ -512,7 +548,7 @@ class BaseLLM(ABC):
         """
         params: Dict[str, Any] = {
             "model": model,
-            "messages": [self.resolve_image_paths(strip_cache_control(msg)) for msg in messages],
+            "messages": [self.resolve_image_paths(openai_message(msg)) for msg in messages],
             "stream": stream,
             **{k: v for k, v in kwargs.items() if v is not None},
         }
