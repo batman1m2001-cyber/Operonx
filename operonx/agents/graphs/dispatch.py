@@ -175,7 +175,8 @@ def parse_call(call: Optional[dict] = None, policy: Any = None, redactor: Any = 
     # refusal is folded into `error` rather than routed through the gate:
     # asking a human to approve something policy already forbids trains
     # them to click through, and their answer would be ignored.
-    decision = (policy or DEFAULT_POLICY).decide(name, meta)
+    policy = policy or DEFAULT_POLICY
+    decision = policy.decide(name, meta)
 
     # Policy is evaluated **before** the unknown-tool check, so a rule
     # like ``rules={"shell": "deny"}`` still refuses when that tool is
@@ -183,7 +184,9 @@ def parse_call(call: Optional[dict] = None, policy: Any = None, redactor: Any = 
     # the model the capability is merely absent and invite it to look
     # for another route to the same thing.
     if decision == "deny" and not error:
-        error = DENY_MESSAGE.format(name=name)
+        # A duck-typed policy need only implement `decide`.
+        refusal = getattr(policy, "refusal", None)
+        error = refusal(name) if callable(refusal) else DENY_MESSAGE.format(name=name)
     elif factory is None and not error:
         error = _UNKNOWN_TOOL.format(
             name=name, available=", ".join(sorted(TOOL_REGISTRY)) or "(none registered)"

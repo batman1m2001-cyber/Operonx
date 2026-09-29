@@ -107,6 +107,15 @@ class ToolPolicy:
             return self.readonly
         return self.default
 
+    def refusal(self, name: str) -> str:
+        """The tool message a ``deny`` verdict produces.
+
+        A method rather than a constant so a policy that denies for a
+        reason the model should act on — a sub-agent refusing what needs
+        a human — can say so instead of "policy forbids".
+        """
+        return DENY_MESSAGE.format(name=name)
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (
             f"ToolPolicy(default={self.default!r}, destructive={self.destructive!r}, "
